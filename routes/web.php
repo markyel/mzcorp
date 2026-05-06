@@ -18,11 +18,25 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
     // Yandex 360 OAuth flow для подключения почтовых ящиков (XOAUTH2).
-    // Доступ должен быть только у admin/РОП — gates добавим в Phase 1.5.
     Route::get('/oauth/yandex/authorize', [OAuthYandexController::class, 'authorize'])
         ->name('oauth.yandex.authorize');
     Route::get('/oauth/yandex/callback', [OAuthYandexController::class, 'callback'])
         ->name('oauth.yandex.callback');
+
+    // Mail routing rules — управление правилами для РОП и директора.
+    Route::middleware('role:head_of_sales,director')->group(function () {
+        Route::get('/dashboard/mail-rules', function () {
+            return view('admin.mail-rules.index');
+        })->name('mail-rules.index');
+
+        Route::get('/dashboard/mail-rules/create', function () {
+            return view('admin.mail-rules.edit', ['rule' => new \App\Models\MailRoutingRule()]);
+        })->name('mail-rules.create');
+
+        Route::get('/dashboard/mail-rules/{rule}/edit', function (\App\Models\MailRoutingRule $rule) {
+            return view('admin.mail-rules.edit', ['rule' => $rule]);
+        })->name('mail-rules.edit');
+    });
 });
 
 require __DIR__.'/auth.php';

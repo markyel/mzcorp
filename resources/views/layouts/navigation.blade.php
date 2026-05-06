@@ -15,6 +15,12 @@
                     <x-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
                         {{ __('Dashboard') }}
                     </x-nav-link>
+
+                    @if(auth()->user()?->hasAnyRole(['head_of_sales', 'director']))
+                        <x-nav-link :href="route('mail-rules.index')" :active="request()->routeIs('mail-rules.*')">
+                            Правила почты
+                        </x-nav-link>
+                    @endif
                 </div>
             </div>
 
