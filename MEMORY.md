@@ -14,8 +14,8 @@
 |---|---|---|---|
 | 1.1 | Документация: `CLAUDE.md`, `MEMORY.md`, `README.md` | новое | done |
 | 1.2 | Auth + 4 роли через `spatie/laravel-permission` (Breeze blade) | новое | done |
-| 1.3 | Модели email-инфры: `Mailbox`, `EmailMessage`, `EmailAttachment` + миграции | новое | в работе |
-| 1.4 | `webklex/laravel-imap`, `MailboxConnector`, первый `SyncMailboxJob` (без AI) | новое | pending |
+| 1.3 | Модели email-инфры: `Mailbox`, `EmailMessage`, `EmailAttachment` + миграции | новое | done |
+| 1.4 | `webklex/laravel-imap` + OAuth XOAUTH2 (Yandex 360), `MailboxConnector`, `SyncMailboxJob`, `mail:sync`, `mail:add`, `mail:test`, `mail:oauth` | новое | done |
 | 1.5 | `MailRoutingRule` + `RoutedMail` + UI `/dashboard/mail-rules` | новое | pending |
 | 1.6 | AI-классификация писем (`gpt-4o-mini`): `request \| reclamation \| accounting \| general \| spam \| other` | `OpenAIChatService` из LazyLift + новый промпт | pending |
 | 1.7 | `MailLabelService` (IMAP custom labels) + `MailForwarder` | новое | pending |
@@ -108,9 +108,48 @@ sudo supervisorctl restart mzcorp-worker:*
 - Настроили supervisor для queue worker и cron для scheduler.
 - Beget включил pgvector в whitelist по запросу — sanity-test пройден.
 - Импортировали MyLift Design System в `design/`.
-- Стартовали Фазу 1 с задачи 1.1 (документация).
+
+### Сессия 2026-05-06 (день) — Phase 1.1–1.4
+- 1.1 — `CLAUDE.md`, `MEMORY.md`, `README.md` написаны.
+- 1.2 — `laravel/breeze` (blade) + `spatie/laravel-permission`, 4 роли (`manager`/`head_of_sales`/`secretary`/`director`), 4 тестовых юзера, локализация `lang/ru.json`, register/email-verify убраны. На VPS поставлен Node.js 20 + npm, ассеты собраны. Login работает.
+- 1.3 — `Mailbox`, `MailboxFolderState`, `EmailMessage`, `EmailAttachment` + миграции + enum'ы (`MailboxType`, `MailDirection`).
+- 1.4 — `webklex/laravel-imap` + **OAuth 2.0 / XOAUTH2** для Yandex 360. Изначально планировались App passwords, но они отключены в корп. аккаунтах Yandex 360 — пришлось сразу делать OAuth (Phase 1.12 ушёл в 1.4):
+  - `YandexOAuthService` (authorization URL, exchange, refresh, ensureFreshToken).
+  - `OAuthYandexController` + routes для HTTP-callback flow.
+  - `mail:oauth` CLI как fallback для verification_code flow (когда HTTP redirect не разрешён в OAuth-приложении Yandex).
+  - В нашем приложении `MyZiP_AI` (client_id 94c0247…) Yandex прописал `https://oauth.yandex.ru/verification_code` как Redirect URI — пользуемся out-of-band flow через `mail:oauth code`.
+  - `MailboxConnector` поддерживает оба пути аутентификации.
+  - `SyncMailboxFolderJob` — per-folder UID-incremental sync с FT_PEEK (не ставим `\Seen`), UIDVALIDITY tracking, идемпотентность по `(mailbox, folder, message_id)`.
+  - `MessagePersister` — маппинг webklex Message → EmailMessage + сохранение вложений в storage. MIME-decoder имён файлов.
+  - `mail:add`, `mail:test`, `mail:sync` команды + scheduler `*/2 * * * *`.
+
+#### Подключённые ящики на 2026-05-06
+- `mail@myzip.ru` (mailbox id=1, type=shared, auth=oauth) — синкается, в БД 178+ писем, 197+ вложений.
+
+#### Настройки OAuth-приложения Yandex (зафиксировать на будущее)
+- Имя: `MyZiP_AI`
+- ClientID: `94c0247012fc46e1be2f8aea77a95ef9`
+- Redirect URI: `https://oauth.yandex.ru/verification_code` (Yandex не дал прописать кастомный)
+- Scopes: `mail:imap_full`, `mail:smtp`
+- Email админа OAuth: `rodenkov.al@yandex.ru`
+- Из-за verification_code — каждый ящик подключаем через `mail:oauth url N` → ввод code в `mail:oauth code N`.
 
 ## Следующие шаги
 
-1. Закоммитить `CLAUDE.md` + `MEMORY.md` + переписанный `README.md` — задача 1.1 закрыта.
-2. Перейти к 1.2: установить `spatie/laravel-permission`, миграции ролей, сидер 4 ролей, базовый login.
+1. Phase 1.5 — `MailRoutingRule` + `RoutedMail` + UI `/dashboard/mail-rules`.
+2. После 1.5 — Phase 1.6 (AI-классификация писем), 1.7 (IMAP custom labels + forwarder), и т.д.
+
+## Известные грабли (накопленные за Phase 1.4)
+
+- **App passwords в Yandex 360 для бизнеса часто отключены** — путь сразу через OAuth.
+- **OAuth-приложение `MyZiP_AI` использует verification_code** (Yandex не разрешил кастомный redirect_uri). Подключение нового ящика — только через `mail:oauth url N` + ручной ввод кода через `mail:oauth code N`.
+- **dotenv не любит пробел без кавычек** — `YANDEX_OAUTH_SCOPE` всегда в `"..."`.
+- **webklex 6.x особенности:**
+  - `whereUid('1:*')` оборачивает значение в кавычки → `UID "1:*"` → IMAP BAD. Серверный UID-фильтр не используем; UID-фильтрация на стороне приложения.
+  - Без `whereAll()` пустой SEARCH тоже даёт BAD — обязательный critirion.
+  - `setFetchAttachment` не существует в 6.x (только `setFetchBody`, `setFetchFlags`).
+  - `getTo()`, `getCc()`, `getFrom()`, `getSubject()`, etc. возвращают `Webklex\PHPIMAP\Attribute`, а **не** Laravel Collection. У него нет `->values()` — используем `->all()`.
+  - `getDate()` возвращает Attribute с Carbon внутри (через `->all()[0]`).
+- **IMAP в Yandex** должен быть включён в настройках почты + на уровне организации Yandex 360 admin.
+- **Yandex MIME-encoded имена файлов** часто разбиваются на 10+ кусков `=?utf-8?Q?...?=` и легко превышают varchar(255). Декодируем `iconv_mime_decode` → `mb_decode_mimeheader` → fallback оригинал, потом `mb_substr(0, 255)`.
+- **PostgreSQL не примет 0x00 байты в text-полях** — `cleanString()` чистит.
