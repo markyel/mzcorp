@@ -8,6 +8,8 @@ use Webklex\PHPIMAP\Config;
 use Webklex\PHPIMAP\Folder;
 use Webklex\PHPIMAP\Exceptions\ConnectionFailedException;
 
+use function app;
+
 /**
  * Открывает IMAP-соединения для Mailbox-моделей.
  *
@@ -20,12 +22,31 @@ class MailboxConnector
     /**
      * Соединиться с IMAP-сервером.
      *
+     * Поддерживает оба пути аутентификации:
+     *   - app-password (auth_type=password) — стандартный LOGIN
+     *   - OAuth 2.0 / XOAUTH2 (auth_type=oauth) — через access_token Yandex
+     *
+     * Перед открытием соединения для OAuth-ящиков рефрешим токен,
+     * если он близок к истечению (см. YandexOAuthService::ensureFreshToken).
+     *
      * Соединение возвращается уже открытым (connect() вызван).
      *
      * @throws ConnectionFailedException
      */
     public function imapClient(Mailbox $mailbox): Client
     {
+        if ($mailbox->isOAuth()) {
+            // Гарантируем актуальность токена. ensureFreshToken сохранит
+            // обновлённые токены в БД, если был выполнен refresh.
+            app(YandexOAuthService::class)->ensureFreshToken($mailbox);
+
+            $authPassword = $mailbox->accessToken() ?? '';
+            $authentication = 'oauth';
+        } else {
+            $authPassword = $mailbox->password() ?? '';
+            $authentication = null;
+        }
+
         $accountKey = 'mb_' . $mailbox->id;
 
         $config = Config::make([
@@ -37,8 +58,8 @@ class MailboxConnector
                     'encryption' => $this->normalizeEncryption($mailbox->imap_encryption),
                     'validate_cert' => true,
                     'username' => $mailbox->imap_username,
-                    'password' => $mailbox->password() ?? '',
-                    'authentication' => null,
+                    'password' => $authPassword,
+                    'authentication' => $authentication,
                     'timeout' => 30,
                 ],
             ],

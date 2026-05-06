@@ -2,20 +2,25 @@
 
 namespace App\Models;
 
+use App\Enums\MailboxAuthType;
 use App\Enums\MailboxType;
-use Illuminate\Database\Eloquent\Casts\AsArrayObject;
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
 
 /**
  * Почтовый ящик (общий или личный менеджера).
  *
  * Foundation §1: подключаем общие (sales@..., info@...) и личные ящики.
- * Креды хранятся в encrypted_credentials как зашифрованный JSON
- * { password, oauth_token? }. Доступ через credentials() / setPassword().
+ * Креды хранятся в encrypted_credentials как зашифрованный JSON.
+ *
+ * При auth_type=password:
+ *   { "password": "..." }
+ * При auth_type=oauth:
+ *   { "access_token": "...", "refresh_token": "...",
+ *     "expires_at": "ISO-8601", "scope": "...", "token_type": "bearer" }
  */
 class Mailbox extends Model
 {
@@ -33,6 +38,7 @@ class Mailbox extends Model
         'smtp_encryption',
         'smtp_username',
         'encrypted_credentials',
+        'auth_type',
         'is_active',
         'last_synced_at',
         'last_error_at',
@@ -47,6 +53,7 @@ class Mailbox extends Model
     {
         return [
             'type' => MailboxType::class,
+            'auth_type' => MailboxAuthType::class,
             'is_active' => 'bool',
             'last_synced_at' => 'datetime',
             'last_error_at' => 'datetime',
@@ -71,7 +78,7 @@ class Mailbox extends Model
     /**
      * Расшифрованный credentials как массив.
      *
-     * @return array{password?: string, oauth_token?: string}
+     * @return array<string, mixed>
      */
     public function credentials(): array
     {
@@ -89,19 +96,85 @@ class Mailbox extends Model
         }
     }
 
-    /**
-     * Сохранить пароль (app-password) в encrypted_credentials.
-     * Сохраняет существующие поля кредов (oauth_token и т.п.).
-     */
+    /** Перезаписать весь набор кредов целиком. */
+    public function writeCredentials(array $creds): void
+    {
+        $this->encrypted_credentials = Crypt::encryptString(
+            json_encode($creds, JSON_UNESCAPED_UNICODE)
+        );
+    }
+
+    /* ----------------------- App-password ----------------------- */
+
     public function setPassword(string $password): void
     {
-        $creds = $this->credentials();
-        $creds['password'] = $password;
-        $this->encrypted_credentials = Crypt::encryptString(json_encode($creds, JSON_UNESCAPED_UNICODE));
+        $this->writeCredentials(['password' => $password]);
     }
 
     public function password(): ?string
     {
         return $this->credentials()['password'] ?? null;
+    }
+
+    /* ----------------------- OAuth tokens ----------------------- */
+
+    public function setOAuthTokens(
+        string $accessToken,
+        ?string $refreshToken,
+        ?Carbon $expiresAt,
+        ?string $scope = null,
+        string $tokenType = 'bearer',
+    ): void {
+        $creds = [
+            'access_token' => $accessToken,
+            'token_type' => $tokenType,
+        ];
+        if ($refreshToken !== null) {
+            $creds['refresh_token'] = $refreshToken;
+        }
+        if ($expiresAt !== null) {
+            $creds['expires_at'] = $expiresAt->toIso8601String();
+        }
+        if ($scope !== null) {
+            $creds['scope'] = $scope;
+        }
+
+        $this->writeCredentials($creds);
+    }
+
+    public function accessToken(): ?string
+    {
+        return $this->credentials()['access_token'] ?? null;
+    }
+
+    public function refreshToken(): ?string
+    {
+        return $this->credentials()['refresh_token'] ?? null;
+    }
+
+    public function oauthExpiresAt(): ?Carbon
+    {
+        $iso = $this->credentials()['expires_at'] ?? null;
+
+        return $iso ? Carbon::parse($iso) : null;
+    }
+
+    /**
+     * Считаем токен «протухшим» с запасом 5 минут до фактического истечения,
+     * чтобы успеть рефрешнуться.
+     */
+    public function isOAuthTokenExpired(): bool
+    {
+        $exp = $this->oauthExpiresAt();
+        if ($exp === null) {
+            return true; // нет даты — считаем устаревшим, чтобы рефрешнуть
+        }
+
+        return $exp->subMinutes(5)->isPast();
+    }
+
+    public function isOAuth(): bool
+    {
+        return $this->auth_type === MailboxAuthType::OAuth;
     }
 }

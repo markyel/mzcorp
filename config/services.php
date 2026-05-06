@@ -35,4 +35,19 @@ return [
         ],
     ],
 
+    /*
+    | Yandex 360 OAuth (XOAUTH2 для IMAP/SMTP).
+    | Регистрируем приложение на https://oauth.yandex.ru.
+    | Скоупы для MyLift: mail:imap_full + mail:smtp.
+    */
+    'yandex' => [
+        'client_id' => env('YANDEX_OAUTH_CLIENT_ID'),
+        'client_secret' => env('YANDEX_OAUTH_CLIENT_SECRET'),
+        'redirect_uri' => env(
+            'YANDEX_OAUTH_REDIRECT_URI',
+            rtrim((string) env('APP_URL', 'http://localhost'), '/') . '/oauth/yandex/callback'
+        ),
+        'scope' => env('YANDEX_OAUTH_SCOPE', 'mail:imap_full mail:smtp'),
+    ],
+
 ];
