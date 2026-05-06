@@ -158,19 +158,23 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
 
         // FT_PEEK — не ставим \Seen. Foundation §1: «\Seen явно НЕ ставим».
         // Вложения webklex подгрузит автоматически при getAttachments() в persister'е.
+        //
+        // ВАЖНО: webklex 6.x в whereUid('N:*') оборачивает значение в кавычки
+        // (UID "N:*"), что невалидно для IMAP SEARCH (Yandex отвечает BAD).
+        // Поэтому тянем без серверного UID-фильтра и отсеиваем уже виденные
+        // письма по last_uid_seen на стороне приложения. Для инкрементальных
+        // syncs это слегка избыточно по трафику, но безопасно и работает.
         $messages = $folder->query()
             ->setFetchOptions(IMAP::FT_PEEK)
             ->setFetchBody(true)
             ->setFetchFlags(true)
-            ->whereUid($sinceUid . ':*')
             ->limit(self::MAX_MESSAGES_PER_RUN)
             ->get();
 
         foreach ($messages as $msg) {
             $uid = $msg->getUid();
 
-            // Подстраховка: webklex иногда возвращает письма с UID < sinceUid
-            // при некоторых форматах диапазона.
+            // Сообщения с UID меньше уже виденного пропускаем.
             if ($uid < $sinceUid) {
                 continue;
             }
