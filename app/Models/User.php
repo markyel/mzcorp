@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
@@ -12,6 +13,15 @@ class User extends Authenticatable
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasFactory, HasRoles, Notifiable;
+
+    /**
+     * Личные ящики менеджера (mailboxes.type = personal).
+     * У РОПа/секретаря/директора может быть пусто.
+     */
+    public function ownedMailboxes(): HasMany
+    {
+        return $this->hasMany(Mailbox::class, 'owner_user_id');
+    }
 
     /**
      * The attributes that are mass assignable.
