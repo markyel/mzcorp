@@ -1,0 +1,36 @@
+{
+    "Email": "Email",
+    "Password": "Пароль",
+    "Confirm Password": "Подтверждение пароля",
+    "Current Password": "Текущий пароль",
+    "New Password": "Новый пароль",
+    "Remember me": "Запомнить меня",
+    "Log in": "Войти",
+    "Log Out": "Выйти",
+    "Forgot your password?": "Забыли пароль?",
+    "Forgot your password? No problem. Just let us know your email address and we will email you a password reset link that will allow you to choose a new one.": "Забыли пароль? Не страшно. Укажите ваш email и мы вышлем ссылку для смены пароля.",
+    "Email Password Reset Link": "Отправить ссылку",
+    "Reset Password": "Сменить пароль",
+    "A new verification link has been sent to your email address.": "Новая ссылка для подтверждения отправлена на ваш email.",
+
+    "Dashboard": "Дашборд",
+    "Profile": "Профиль",
+    "Profile Information": "Профиль",
+    "Update your account's profile information and email address.": "Обновите имя и email вашей учётной записи.",
+    "Save": "Сохранить",
+    "Saved.": "Сохранено.",
+    "Cancel": "Отмена",
+    "Name": "Имя",
+    "You're logged in!": "Вход выполнен.",
+
+    "Update Password": "Смена пароля",
+    "Ensure your account is using a long, random password to stay secure.": "Используйте длинный случайный пароль для безопасности учётной записи.",
+
+    "Delete Account": "Удалить учётную запись",
+    "Are you sure you want to delete your account?": "Удалить учётную запись?",
+    "Once your account is deleted, all of its resources and data will be permanently deleted. Before deleting your account, please download any data or information that you wish to retain.": "После удаления все данные учётной записи будут безвозвратно удалены. Перед удалением сохраните всё, что хотите оставить.",
+    "Once your account is deleted, all of its resources and data will be permanently deleted. Please enter your password to confirm you would like to permanently delete your account.": "После удаления все данные учётной записи будут безвозвратно удалены. Введите пароль для подтверждения.",
+
+    "Your email address is unverified.": "Ваш email не подтверждён.",
+    "Click here to re-send the verification email.": "Отправить ссылку подтверждения повторно."
+}
