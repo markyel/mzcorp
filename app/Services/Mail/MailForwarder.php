@@ -121,6 +121,9 @@ class MailForwarder
         $email
             ->from($mailbox->email)
             ->to($toEmail)
+            // Маркер для антициклической защиты в MailRouter (см. isLoopMessage()).
+            ->getHeaders()->addTextHeader('X-MyLift-Forwarded', '1');
+        $email
             ->subject($subject)
             ->text($bodyPlain);
 

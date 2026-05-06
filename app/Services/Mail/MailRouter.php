@@ -33,6 +33,15 @@ class MailRouter
             return;
         }
 
+        // Антициклическая защита: письма, уже когда-то пересланные нашим
+        // MailForwarder'ом, имеют заголовок X-MyLift-Forwarded или префикс
+        // [MyLift forward] в subject. Не маршрутизируем их повторно.
+        if ($this->isLoopMessage($message)) {
+            $this->recordLoopSkipped($message);
+
+            return;
+        }
+
         $matches = $this->engine->match($message);
 
         // Foundation §2.3-2.4: если ни одно rule-based правило не сработало —
@@ -133,5 +142,47 @@ class MailRouter
             'success' => true,
             'processed_at' => now(),
         ]);
+    }
+
+    private function recordLoopSkipped(EmailMessage $message): void
+    {
+        RoutedMail::create([
+            'email_message_id' => $message->id,
+            'rule_id' => null,
+            'ai_classified_as' => $message->ai_classification,
+            'action_taken' => 'loop_skipped',
+            'success' => true,
+            'processed_at' => now(),
+        ]);
+        Log::info('MailRouter: loop guard triggered, skipping rules', [
+            'email_message_id' => $message->id,
+            'subject' => mb_substr((string) $message->subject, 0, 80),
+            'from' => $message->from_email,
+        ]);
+    }
+
+    /**
+     * Письмо — это вернувшийся к нам наш собственный forward?
+     * Проверяем по X-MyLift-Forwarded заголовку и subject-префиксу.
+     */
+    private function isLoopMessage(EmailMessage $message): bool
+    {
+        $headers = (array) ($message->headers ?? []);
+        // headers — jsonb; ключи могут быть в любом регистре.
+        foreach ($headers as $name => $value) {
+            if (strcasecmp((string) $name, 'X-MyLift-Forwarded') === 0) {
+                return true;
+            }
+            if (strcasecmp((string) $name, 'x_mylift_forwarded') === 0) {
+                return true;
+            }
+        }
+
+        $subject = (string) $message->subject;
+        if (str_starts_with($subject, '[MyLift forward]')) {
+            return true;
+        }
+
+        return false;
     }
 }
