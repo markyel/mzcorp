@@ -16,6 +16,12 @@
                         {{ __('Dashboard') }}
                     </x-nav-link>
 
+                    @if(auth()->user()?->hasAnyRole(['manager', 'head_of_sales', 'director', 'secretary']))
+                        <x-nav-link :href="route('requests.index')" :active="request()->routeIs('requests.*')">
+                            Заявки
+                        </x-nav-link>
+                    @endif
+
                     @if(auth()->user()?->hasAnyRole(['head_of_sales', 'director']))
                         <x-nav-link :href="route('mail-rules.index')" :active="request()->routeIs('mail-rules.*')">
                             Правила почты

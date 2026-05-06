@@ -23,6 +23,18 @@ Route::middleware('auth')->group(function () {
     Route::get('/oauth/yandex/callback', [OAuthYandexController::class, 'callback'])
         ->name('oauth.yandex.callback');
 
+    // Заявки — пул менеджера и карточка. Все 4 роли;
+    // фильтрация «своё/всё» — внутри Pool component.
+    Route::middleware('role:manager,head_of_sales,director,secretary')->group(function () {
+        Route::get('/dashboard/requests', function () {
+            return view('requests.index');
+        })->name('requests.index');
+
+        Route::get('/dashboard/requests/{request}', function (\App\Models\Request $request) {
+            return view('requests.show', ['request' => $request]);
+        })->name('requests.show');
+    });
+
     // Mail routing rules — управление правилами для РОП и директора.
     Route::middleware('role:head_of_sales,director')->group(function () {
         Route::get('/dashboard/mail-rules', function () {
