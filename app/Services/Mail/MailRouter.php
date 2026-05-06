@@ -23,6 +23,7 @@ class MailRouter
         private readonly MailLabelService $labels,
         private readonly MailForwarder $forwarder,
         private readonly MailClassifierService $classifier,
+        private readonly IncomingMailProcessor $incoming,
     ) {
     }
 
@@ -40,10 +41,15 @@ class MailRouter
         if (empty($matches)) {
             $classified = $this->classifier->classify($message);
             if ($classified !== null) {
-                // Перезагружаем модель из БД, т.к. classifier обновил её.
                 $message->refresh();
                 $matches = $this->engine->match($message);
             }
+        }
+
+        // Phase 1.8: для писем-заявок создаём Request (даже если правил
+        // не было — Foundation §2.5, request → создать Request).
+        if ($message->ai_classification === \App\Enums\EmailClassification::Request->value) {
+            $this->incoming->processIfRequest($message);
         }
 
         if (empty($matches)) {
