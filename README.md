@@ -1,66 +1,92 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# MyLift
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Внутренняя CRM-прослойка между входящей email-почтой клиентов (Yandex 360) и корпоративной базой (1С) для отдела продаж лифтовых запчастей **MyZip / MyLift** (mylift.ru, myzip.ru).
 
-## About Laravel
+> Это **не** публичный каталог-сайт — это инструмент, которым отдел продаж пользуется ежедневно для приёмки, распределения и трекинга клиентских заявок на запчасти.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Что MyLift делает
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+- Собирает входящие заявки из общих и личных корпоративных ящиков (`sales@…`, `info@…`, личные).
+- Распределяет заявки между менеджерами по правилам справедливости и стикинеса (sticky по `catalog_item_id`).
+- Помогает менеджеру: показывает каталог (read-only из корп. базы), запрашивает актуализацию цен у поставщиков.
+- Мониторит исходящую переписку (в т.ч. отправленную напрямую из Yandex веб-клиента), детектирует ключевые события (КП отправлено, счёт отправлен).
+- Контролирует SLA, шлёт напоминания, ведёт follow-up.
+- Экспортирует summary заявки в корп. базу при закрытии.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Что MyLift НЕ делает
 
-## Learning Laravel
+- Не генерирует КП (создаются менеджером в корп. базе или внешнем инструменте).
+- Не выставляет счета (создаются в корп. базе).
+- Не управляет каталогом / ценами / ассортиментом — всё в корп. базе, MyLift только читает.
+- Не является «системой правды» по бизнес-документам.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## Стек
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+| Слой | Технология |
+|---|---|
+| Backend | Laravel 12, PHP 8.3 |
+| БД | PostgreSQL 16 + pgvector 0.7.4 |
+| UI | Livewire 4 + кастомные Blade-страницы (без Filament) |
+| Tailwind | v4 (токены — `design/colors_and_type.css`) |
+| Email | `webklex/laravel-imap` (IMAP) + Symfony Mailer (SMTP) — напрямую с Yandex 360, без n8n |
+| AI | OpenAI API (`gpt-4o`, `gpt-4o-mini`), pgvector для эмбеддингов |
+| Auth | `spatie/laravel-permission` + Laravel Gates/Policies |
+| Очереди | database driver, supervisor для воркеров |
+| Деплой | Ubuntu 24.04 VPS (Beget), Nginx, Let's Encrypt |
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## Роли пользователей
 
-## Laravel Sponsors
+- **Менеджер** (5-6) — работает со своим пулом заявок.
+- **РОП** — управление распределением, настройки, дашборды.
+- **Секретарь** — контроль маршрутизации.
+- **Директорат** — аналитика + куратор Knowledge Base.
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## Структура репозитория
 
-### Premium Partners
+```
+app/                    Laravel application code
+config/
+database/
+  migrations/           Schema migrations (pgvector enabled in production)
+  seeders/
+deploy/
+  nginx/mzcorp.conf     Production vhost
+design/                 Design system: tokens, voice, HTML mockups
+  colors_and_type.css   All design tokens
+  ui_kits/crm/          High-fidelity screen mockups (pool, dashboard, ...)
+  uploads/MyLift_Foundation.md  Product specification (source of truth)
+public/
+resources/
+routes/
+storage/
+tests/
+CLAUDE.md               AI-assistant instructions
+MEMORY.md               Project state between sessions
+```
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+## Документация
 
-## Contributing
+- **`CLAUDE.md`** — правила и стиль для AI-агентов (стек, нейминг, архитектура, типичные ошибки).
+- **`MEMORY.md`** — текущая фаза разработки, открытые вопросы, журнал сессий, известные грабли.
+- **`design/README.md`** — voice, copywriting, visual foundations.
+- **`design/uploads/MyLift_Foundation.md`** — полная спецификация продукта (источник истины).
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Окружение
 
-## Code of Conduct
+### Локальная разработка
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```bash
+cp .env.example .env
+composer install
+php artisan key:generate
+php artisan migrate
+php artisan serve
+```
 
-## Security Vulnerabilities
+### Production
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Развёрнут на `https://mzcorp.ru` (VPS Beget). Деплой — `git pull` + `composer install --no-dev` + `migrate` + кеши + `supervisorctl restart`. Подробнее — `MEMORY.md` § «Деплой-процесс».
 
-## License
+## Лицензия
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Внутренний проект MyLift / MyZip. Не для публичного распространения.
