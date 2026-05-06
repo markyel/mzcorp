@@ -261,31 +261,72 @@ sudo supervisorctl restart mzcorp-worker:*
 1. Phase 1.9 — `OutgoingMailObserver`: при синке Sent папки matchить письма к Request через `In-Reply-To`/`References` и обновлять `last_outbound_at` на Request.
 2. Подключить Man2/Man3 ящики через OAuth (mail:oauth url 2 → mail:oauth code 2; то же для 3).
 
-## Параллельная задача — Phase 1.8a (умная фильтрация Request)
+## ⭐ ПРИОРИТЕТ 1 на 2026-05-07: пересмотр анализа почты (Phase 1.8b)
 
-**Проблема (выявлено 2026-05-06):** Сейчас Request создаётся для **любого** письма с `ai_classification=request`, без других фильтров. Из-за этого в пуле много мусора:
-- авто-уведомления от партнёрских систем (`order@liftway.store` 26 шт., `[ENKA-EGPS-NOTIFICATION]`, `robot@dellin.ru`);
-- внутренние письма от `@myzip.ru` (свои коллеги форвардят/обсуждают);
-- `Re:`/`Fwd:` на существующие заявки идут как **новые** Request, а должны привязываться как thread items;
-- loop-копии (исторические, до hotfix `21f5354`).
+**Решение клиента (2026-05-06 поздно вечером):** текущий pipeline (rules → AI-классификатор по 6 классам → Request если "request") даёт слишком много мусора в пуле. Перейти на подход LazyLift — **анализируем по содержимому, а не по тональности письма**.
 
-**Что добавить:**
+**Новый порядок pipeline:**
+```
+письмо
+  → ГЛУБОКИЙ АНАЛИЗ: заявка ли это?
+       • парсинг тела (извлечение позиций — партномера, бренды, кол-во)
+       • извлечение текста из вложений (PDF/XLSX/JPG/PNG/WEBP/архивы)
+       • Vision/OCR на шильдиках, сканах
+       • если есть items → это заявка
+       • если items пустые → не заявка
+  → если ЗАЯВКА: создаём Request + RequestItems (с распарсенными позициями)
+  → если НЕ ЗАЯВКА: routing rules (рекламация/бухгалтерия/спам/forward)
+```
 
-1. **Confidence threshold** в `IncomingMailProcessor::processIfRequest()`:
-   - если `ai_classification_confidence < 0.7` — не создаём Request, ставим label `MyLift/На проверку РОПа`. РОП конвертит вручную в UI.
+**Что меняется в текущем коде:**
+- **Удалить (или сильно урезать)** `MailClassifierService` как primary-классификатор. AI-класс остаётся справочной меткой, но **не** определяет создание Request.
+- **`IncomingMailProcessor`** перестаёт триггериться по `ai_classification=request`. Триггер — наличие распарсенных items.
+- **`MailRouter`** теперь:
+  1. Loop guard.
+  2. **Сначала** прогнать письмо через RequestExtractionPipeline (новое).
+  3. Если items.count > 0 → IncomingMailProcessor создаёт Request с items.
+  4. Если items.count = 0 → routing rules + (опционально) AI-классификация для меток.
 
-2. **Sender filter** (хардкод-конфиг → потом в таблицу `client_filters`):
-   - `from_domain ∈ {myzip.ru}` — internal, не Request (label `MyLift/Внутреннее`).
-   - `from_email matches /^(noreply|no-reply|robot|mailer-daemon|bounce|notification|notifications)@/` — авто, не Request (label `MyLift/Авто-уведомление`).
-   - `from_email ∈ {order@liftway.store, ...}` — отдельный список (label `MyLift/Авто-заявка`).
+**Что переносим из LazyLift (drop-in или с адаптацией):**
 
-3. **Thread-аттач через `In-Reply-To`/`References`:** перед созданием Request пройти по `[in_reply_to, references_header]`, найти `EmailMessage where message_id IN refs AND related_request_id IS NOT NULL` — привязать новое письмо к **существующему** Request, не создавать новый.
+| Компонент LazyLift | Назначение в MyLift |
+|---|---|
+| `app/Services/RequestItemParsingService.php` | Главный парсер — берёт тело письма + вложения, возвращает items |
+| `app/Services/ArchiveExtractionService.php` | Распаковка ZIP/RAR во вложениях |
+| `app/Services/EmailTextCleanerService.php` | Чистка цитирования / подписей / служебки в теле |
+| `app/Services/SubjectNormalizerService.php` | Нормализация `Re:`/`Fwd:` для дедупа thread'ов |
+| `app/Services/Kb/*` (минимум: `RequestContextAnalysisService`, `BrandResolutionService`, `EquipmentUnitMatchingService`, `ParameterExtractionService`) | L1/L2 квалификация — определяет, что распарсенный набор позиций «достаточен», иначе items нет / неполные |
+| `app/Prompts/Kb/RequestContextAnalysisPrompt.php` | Промпт для L1 KB |
+| `app/Models/Kb/*` (`EquipmentCategory`, `ManufacturerBrand`, `IdentificationParameter`, `ParameterExtractor`, и т.д.) | KB-модели + миграции |
+| `database/seeders/Kb/KbInitialSeeder.php` + `data/` | Стартовая база (27 брендов, 15 категорий, 52 параметра) |
+| Vision-процессоры (если есть в LazyLift) | Распознавание шильдиков на фото |
 
-4. **SubjectNormalizerService** из LazyLift (drop-in) — для нормализации `Re:`/`Fwd:` префиксов в subject; пригодится и для thread tracking, и для дедупа похожих subjects.
+Это уже **не «фильтрация Request» (Phase 1.8a)**, а **полноценный Phase 2.0 KB-парсинг**, перенесённый в Phase 1 как фундамент. Foundation предполагал KB на Phase 2, но без него фильтр мусора нерабочий — поэтому подтягиваем сюда.
 
-5. **Команда `requests:cleanup`:** dry-run + `--apply`, чтобы убрать существующие 165 Request, попадающих под новые фильтры (soft-delete или label «mailtrash»).
+**Прагматичный план на следующую сессию:**
 
-Этот блок — **после** redesign или параллельно. Очищает пул менеджера от шума и делает дальнейшие фазы (sticky-роутинг Phase 2) чище.
+1. **Изучить LazyLift `RequestItemParsingService` + зависимости** — карта классов, минимальный набор для drop-in.
+2. **Скопировать KB-модели + миграции** (модели, ParameterExtractor, IdentificationRule, ManufacturerBrand, EquipmentCategory, jsonb-поля для items).
+3. **Скопировать `app/Services/Kb/`** — критическую часть (RequestContextAnalysis, BrandResolution, ParameterExtraction).
+4. **Скопировать промпты** `app/Prompts/Kb/*`.
+5. **Скопировать `KbInitialSeeder` + data/** — выполнить seed.
+6. **Скопировать `RequestItemParsingService`** + цепочку зависимостей.
+7. **Адаптировать `IncomingMailProcessor`** под новую логику: вызвать parsing → если items есть → Request + RequestItems с jsonb-полями + L1/L2 KB → AssignRequestJob.
+8. **Изменить `MailRouter`** — порядок: parsing first, classifier как метка (не trigger).
+9. **CLI `requests:reanalyze --all`** — запустить новый pipeline на 245 имеющихся писем, очистить пул.
+
+**Ожидаемый результат:**
+- Пул менеджера содержит только письма с реально распарсенными позициями.
+- Внутренние, авто-уведомления, рекламации, спам — отрезаются на этапе «items пустые».
+- Re:/Fwd на старые заявки → thread item на существующий Request.
+- AI остаётся вспомогательной меткой для UI, не основным критерием.
+
+**Связанные мелочи (после миграции):**
+- `requests:cleanup` для очистки 165 текущих Request, не прошедших новый фильтр.
+- Phase 1.12 redesign UI — отложить до тех пор, пока pipeline не стабилизируется (нет смысла полировать UI на грязных данных).
+- Phase 1.9 Sent-tracking — после стабилизации.
+
+Это **большой объём** — несколько коммитов, может растянуться на 2 сессии. Но это правильный путь: без качественного парсинга MVP бесполезен для продакшна.
 
 ## Известные грабли (накопленные за Phase 1.4)
 
