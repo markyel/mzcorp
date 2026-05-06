@@ -191,6 +191,17 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
                     $skippedDup++;
                 } else {
                     $saved++;
+
+                    // Phase 1.5: применить правила маршрутизации к свежесохранённому
+                    // inbound-письму. Outbound (Sent) пропускаются внутри MailRouter.
+                    try {
+                        app(\App\Services\Mail\MailRouter::class)->route($email);
+                    } catch (\Throwable $routeError) {
+                        \Illuminate\Support\Facades\Log::error('MailRouter failed', [
+                            'email_message_id' => $email->id,
+                            'error' => $routeError->getMessage(),
+                        ]);
+                    }
                 }
             } catch (\Throwable $e) {
                 Log::error('Failed to persist message', [

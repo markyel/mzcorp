@@ -70,4 +70,9 @@ class EmailMessage extends Model
     {
         return $this->hasMany(EmailAttachment::class);
     }
+
+    public function routedMails(): HasMany
+    {
+        return $this->hasMany(RoutedMail::class);
+    }
 }
