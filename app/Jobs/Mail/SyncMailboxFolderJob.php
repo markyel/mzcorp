@@ -164,10 +164,13 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
         // Поэтому тянем без серверного UID-фильтра и отсеиваем уже виденные
         // письма по last_uid_seen на стороне приложения. Для инкрементальных
         // syncs это слегка избыточно по трафику, но безопасно и работает.
+        // whereAll() обязательно: webklex без критериев генерирует пустой
+        // SEARCH, который IMAP-сервер (Yandex) отклоняет с BAD syntax error.
         $messages = $folder->query()
             ->setFetchOptions(IMAP::FT_PEEK)
             ->setFetchBody(true)
             ->setFetchFlags(true)
+            ->whereAll()
             ->limit(self::MAX_MESSAGES_PER_RUN)
             ->get();
 
