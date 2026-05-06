@@ -29,8 +29,14 @@
                 <h3 class="text-sm font-medium text-gray-500 mb-3">Исходное письмо</h3>
                 @if($request->emailMessage)
                     <div class="text-sm space-y-1 mb-4">
-                        <div><span class="text-gray-500">От:</span>
-                            {{ $request->emailMessage->from_name ? $request->emailMessage->from_name . ' &lt;' . $request->emailMessage->from_email . '&gt;' : $request->emailMessage->from_email }}
+                        <div>
+                            <span class="text-gray-500">От:</span>
+                            @if($request->emailMessage->from_name)
+                                {{ $request->emailMessage->from_name }}
+                                <span class="text-gray-500">&lt;{{ $request->emailMessage->from_email }}&gt;</span>
+                            @else
+                                {{ $request->emailMessage->from_email }}
+                            @endif
                         </div>
                         <div><span class="text-gray-500">Ящик:</span>
                             {{ $request->emailMessage->mailbox?->email }}
@@ -41,9 +47,9 @@
                     </div>
 
                     <div class="border-t border-gray-100 dark:border-gray-700 pt-4">
-                        @if($request->emailMessage->body_html)
+                        @if($this->bodyHtml())
                             <div class="prose prose-sm dark:prose-invert max-w-none">
-                                {!! $request->emailMessage->body_html !!}
+                                {!! $this->bodyHtml() !!}
                             </div>
                         @elseif($request->emailMessage->body_plain)
                             <pre class="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-sans">{{ $request->emailMessage->body_plain }}</pre>
@@ -58,7 +64,8 @@
                             <ul class="space-y-1 text-sm">
                                 @foreach($request->emailMessage->attachments as $att)
                                     <li class="flex items-center justify-between gap-3">
-                                        <span class="truncate">{{ $att->filename }}</span>
+                                        <a href="{{ route('attachments.download', $att) }}"
+                                           class="truncate text-[#D32027] hover:underline">{{ $att->filename }}</a>
                                         <span class="text-xs text-gray-500 whitespace-nowrap">
                                             {{ $att->mime_type ?: '—' }}
                                             @if($att->size_bytes)

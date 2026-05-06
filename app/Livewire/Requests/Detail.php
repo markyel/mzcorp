@@ -33,11 +33,39 @@ class Detail extends Component
 
         $this->request = $request->load([
             'assignedUser:id,name,email',
-            'emailMessage.attachments:id,email_message_id,filename,size_bytes,mime_type',
+            'emailMessage.attachments:id,email_message_id,filename,size_bytes,mime_type,content_id',
             'emailMessage.mailbox:id,email,name',
             'assignments.user:id,name',
             'assignments.assignedBy:id,name',
         ]);
+    }
+
+    /**
+     * Заменить cid:NNN в src/href HTML body на наш inline-роут.
+     */
+    public function bodyHtml(): ?string
+    {
+        $email = $this->request->emailMessage;
+        if (! $email || ! $email->body_html) {
+            return null;
+        }
+
+        $html = $email->body_html;
+        $messageId = $email->id;
+
+        // src="cid:..."  и  src='cid:...'
+        return preg_replace_callback(
+            '/(src|href)\s*=\s*(["\'])cid:([^"\']+)\2/i',
+            function ($m) use ($messageId) {
+                $url = route('attachments.inline', [
+                    'emailMessage' => $messageId,
+                    'contentId' => rawurlencode($m[3]),
+                ]);
+
+                return $m[1] . '=' . $m[2] . $url . $m[2];
+            },
+            $html
+        );
     }
 
     public function render()
