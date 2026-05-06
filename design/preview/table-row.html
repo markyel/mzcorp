@@ -1,0 +1,51 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;padding:20px;background:var(--bg-app);font-family:var(--font-sans);font-size:12.5px;color:var(--fg-1)}
+.tbl{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden}
+.h,.r{display:grid;grid-template-columns:120px 1fr 130px 120px 110px 90px;align-items:center;padding:0 14px;height:36px;border-bottom:1px solid var(--border-subtle);font-size:12.5px}
+.h{background:var(--bg-surface-2);color:var(--fg-3);font:600 11px/1 var(--font-sans);text-transform:uppercase;letter-spacing:.04em;height:28px}
+.r:hover{background:var(--bg-hover)}
+.r.sel{background:var(--bg-selected);box-shadow:inset 2px 0 0 0 var(--sky-500)}
+.code{font-family:var(--font-mono);font-weight:500;color:var(--fg-2)}
+.title{color:var(--fg-1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:12px}
+.title small{display:block;font-weight:400;color:var(--fg-3);font-size:11px;margin-top:2px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font:500 11px/1.4 var(--font-sans)}
+.chip.info{background:var(--sky-50);color:var(--sky-700)}
+.chip.attn{background:var(--amber-50);color:var(--amber-700)}
+.chip.over{background:var(--red-50);color:var(--red-700)}
+.chip.ok{background:var(--emerald-50);color:var(--emerald-700)}
+.chip.paused{background:var(--violet-50);color:var(--violet-700)}
+.chip .dot{width:5px;height:5px;border-radius:999px;background:currentColor}
+.num{font-feature-settings:'tnum';color:var(--fg-2)}
+.av{display:inline-flex;align-items:center;gap:6px}
+.av .b{width:22px;height:22px;border-radius:999px;background:var(--neutral-200);color:var(--fg-2);font:600 10px/22px var(--font-sans);text-align:center}
+.r:last-child{border-bottom:none}
+</style></head><body>
+<div class="tbl">
+  <div class="h"><span>код</span><span>заявка</span><span>статус</span><span>менеджер</span><span>сумма</span><span>возраст</span></div>
+  <div class="r sel"><span class="code">MZ-21384</span>
+    <span class="title">КВШ D320 + плата LCEFCB <small>Лифтремонт · 4 поз. · KONE</small></span>
+    <span><span class="chip over"><span class="dot"></span>просрочено 2ч</span></span>
+    <span class="av"><span class="b">ИА</span>Иванов А.</span>
+    <span class="num">142 800 ₽</span><span class="num">3 дн</span>
+  </div>
+  <div class="r"><span class="code">MZ-21379</span>
+    <span class="title">Замок ДШ Metron 2PTL-2PC <small>Мега УК · 1 поз.</small></span>
+    <span><span class="chip info"><span class="dot"></span>КП отправлено</span></span>
+    <span class="av"><span class="b">ИА</span>Иванов А.</span>
+    <span class="num">8 400 ₽</span><span class="num">5 дн</span>
+  </div>
+  <div class="r"><span class="code">MZ-21376</span>
+    <span class="title">Кнопка BR36B + Брайль <small>МОСЛИФТ · 12 поз. · XIZI Otis</small></span>
+    <span><span class="chip attn"><span class="dot"></span>refresh цен</span></span>
+    <span class="av"><span class="b">ПС</span>Петров С.</span>
+    <span class="num">—</span><span class="num">1 дн</span>
+  </div>
+  <div class="r"><span class="code">MZ-21370</span>
+    <span class="title">Поручень EHC 25м <small>СитиСервис+ · 1 поз.</small></span>
+    <span><span class="chip paused"><span class="dot"></span>пауза до 15.01</span></span>
+    <span class="av"><span class="b">СН</span>Смирнова Н.</span>
+    <span class="num">94 000 ₽</span><span class="num">11 дн</span>
+  </div>
+</div>
+</body></html>

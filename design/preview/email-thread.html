@@ -1,0 +1,46 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;padding:20px;background:var(--bg-surface);font-family:var(--font-sans);font-size:13px;color:var(--fg-1)}
+.thread{display:flex;flex-direction:column;gap:10px}
+.msg{border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden}
+.msg.in{background:var(--bg-surface)}
+.msg.out{background:var(--bg-surface-2)}
+.head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border-subtle);font-size:12px}
+.av{width:24px;height:24px;border-radius:999px;background:var(--neutral-200);color:var(--fg-2);font:600 10px/24px var(--font-sans);text-align:center;flex-shrink:0}
+.av.out{background:var(--accent);color:#fff}
+.who{font-weight:500;color:var(--fg-1)}
+.who small{display:block;color:var(--fg-3);font-weight:400;font-size:11px;margin-top:1px}
+.spacer{flex:1}
+.lbl{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font:500 11px/1.4 var(--font-sans)}
+.lbl.det{background:var(--emerald-50);color:var(--emerald-700)}
+.time{color:var(--fg-3);font-size:11px;font-family:var(--font-mono)}
+.body{padding:12px 14px;font-size:13px;line-height:1.5;color:var(--fg-1)}
+.body p{margin:0 0 8px}
+.att{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-surface);font-size:12px;margin-top:4px}
+.att .ico{width:14px;height:18px;background:var(--red-50);border:1px solid var(--red-300);border-radius:2px;font:700 7px/18px var(--font-sans);color:var(--red-700);text-align:center;letter-spacing:0}
+</style></head><body>
+<div class="thread">
+  <div class="msg in">
+    <div class="head"><div class="av">КЛ</div>
+      <div class="who">Лифтремонт · prokat-lift@mail.ru<small>Кому: sales@myzip.ru · 14:32, сегодня</small></div>
+      <div class="spacer"></div>
+      <span class="time">&lt;CABV…@yandex&gt;</span>
+    </div>
+    <div class="body">
+      <p>Добрый день. Прошу выставить КП по позициям для KONE MonoSpace:</p>
+      <p>1) КВШ D320×112мм 6 канавок — 2 шт<br>2) Плата LCEFCB G71 — 1 шт<br>3) Замок ДШ Metron 2PTL-2PC левый — 1 шт</p>
+      <span class="att"><span class="ico">PDF</span> ТЗ-Лифтремонт-Куркино.pdf · 240 KB</span>
+    </div>
+  </div>
+  <div class="msg out">
+    <div class="head"><div class="av out">ИА</div>
+      <div class="who">Иванов А. · ivanov@myzip.ru<small>Отправлено через Я.Почта · 16:08, сегодня</small></div>
+      <div class="spacer"></div>
+      <span class="lbl det">обнаружено: КП</span>
+    </div>
+    <div class="body"><p>Высылаю КП №2384 по вашему запросу. Цены актуальны до 30.05. С уважением, Алексей Иванов.</p>
+      <span class="att"><span class="ico">PDF</span> КП-2384-Лифтремонт.pdf · 88 KB</span>
+    </div>
+  </div>
+</div>
+</body></html>

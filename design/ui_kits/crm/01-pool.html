@@ -1,0 +1,383 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<title>MyLift CRM · Пул менеджера</title>
+<link rel="stylesheet" href="../../colors_and_type.css">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg-app);font-family:var(--font-sans);color:var(--fg-1);font-size:var(--fs-base);overflow:hidden}
+.app{display:grid;grid-template-columns:var(--rail-w) var(--list-w) 1fr var(--inspector-w);grid-template-rows:var(--topbar-h) 1fr;height:100vh}
+
+/* Topbar */
+.top{grid-column:1/-1;display:flex;align-items:center;gap:16px;padding:0 16px;background:var(--bg-surface);border-bottom:1px solid var(--border)}
+.top .brand{display:flex;align-items:center;gap:8px;width:calc(var(--rail-w) + var(--list-w) - 16px)}
+.top .brand img{height:24px}
+.top .ws{font-size:12.5px;color:var(--fg-2);display:flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-surface)}
+.top .ws .dot{width:6px;height:6px;border-radius:999px;background:var(--emerald-600)}
+.top .search{flex:1;max-width:480px;position:relative}
+.top .search input{width:100%;height:30px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-app);padding:0 12px 0 32px;font:400 13px/1 var(--font-sans);color:var(--fg-1);outline:none}
+.top .search:before{content:"⌕";position:absolute;left:10px;top:8px;color:var(--fg-3);font-size:14px}
+.top .search kbd{position:absolute;right:8px;top:6px;font:500 10.5px/1 var(--font-mono);color:var(--fg-3);border:1px solid var(--border);padding:3px 5px;border-radius:3px;background:var(--bg-surface)}
+.top .spacer{flex:1}
+.top .btn{height:30px;padding:0 12px;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--bg-surface);font:500 12.5px/1 var(--font-sans);color:var(--fg-1);display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.top .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.top .icon-btn{width:30px;height:30px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-surface);display:inline-flex;align-items:center;justify-content:center;color:var(--fg-2);position:relative;cursor:pointer}
+.top .icon-btn .badge{position:absolute;top:-3px;right:-3px;background:var(--accent);color:#fff;font:700 9px/1 var(--font-sans);padding:2px 4px;border-radius:999px;border:1.5px solid var(--bg-surface)}
+.top .av{width:28px;height:28px;border-radius:999px;background:var(--neutral-300);color:var(--fg-1);font:600 11px/28px var(--font-sans);text-align:center}
+
+/* Nav rail */
+.rail{background:var(--bg-sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:2px}
+.rail .item{width:40px;height:40px;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;color:var(--fg-3);position:relative;cursor:pointer;font-size:14px}
+.rail .item:hover{background:var(--bg-hover);color:var(--fg-1)}
+.rail .item.active{color:var(--accent);background:var(--bg-surface)}
+.rail .item.active::before{content:"";position:absolute;left:-8px;top:8px;bottom:8px;width:2px;background:var(--accent);border-radius:0 2px 2px 0}
+.rail .item .badge{position:absolute;top:4px;right:4px;background:var(--accent);color:#fff;font:700 9px/1 var(--font-sans);padding:2px 4px;border-radius:999px;border:1.5px solid var(--bg-sidebar)}
+.rail .sep{width:24px;height:1px;background:var(--border);margin:6px 0}
+.rail .sym{font-family:var(--font-mono);font-size:13px;font-weight:600}
+
+/* Context list (queues) */
+.list{background:var(--bg-sidebar);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
+.list .lhead{padding:12px 16px 8px;display:flex;align-items:center;justify-content:space-between}
+.list .lhead h2{font:600 13px/1 var(--font-sans);color:var(--fg-1);margin:0}
+.list .lhead a{font:500 11.5px/1 var(--font-sans);color:var(--sky-700);text-decoration:none}
+.list .group{padding:6px 8px}
+.list .group-label{font:600 10.5px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em;padding:8px 8px 6px;display:flex;justify-content:space-between}
+.list .q{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--r-md);font-size:12.5px;color:var(--fg-2);cursor:pointer}
+.list .q:hover{background:var(--bg-hover)}
+.list .q.active{background:var(--bg-surface);color:var(--fg-1);box-shadow:inset 2px 0 0 var(--accent)}
+.list .q .ico{width:14px;text-align:center;color:var(--fg-3)}
+.list .q .lbl{flex:1;font-weight:500}
+.list .q .n{font-family:var(--font-mono);font-size:11.5px;color:var(--fg-3)}
+.list .q.active .n{color:var(--fg-1)}
+.list .q .pill{font:600 10.5px/1.4 var(--font-sans);background:var(--red-50);color:var(--red-700);padding:1px 6px;border-radius:999px}
+
+/* Main canvas */
+.main{overflow:hidden;display:flex;flex-direction:column;background:var(--bg-surface)}
+.pageh{padding:14px 20px 12px;border-bottom:1px solid var(--border);display:flex;align-items:flex-end;gap:16px}
+.pageh .crumbs{font:500 11.5px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.pageh h1{font:600 20px/1.2 var(--font-sans);color:var(--fg-1);margin:0;letter-spacing:-0.005em}
+.pageh .meta{font:400 12.5px/1 var(--font-sans);color:var(--fg-3);margin-top:4px}
+.pageh .spacer{flex:1}
+.pageh .seg{display:flex;background:var(--bg-app);border:1px solid var(--border);border-radius:var(--r-md);padding:2px}
+.pageh .seg button{height:24px;padding:0 10px;border:none;background:transparent;font:500 12px/1 var(--font-sans);color:var(--fg-2);border-radius:4px;cursor:pointer}
+.pageh .seg button.on{background:var(--bg-surface);color:var(--fg-1);box-shadow:var(--shadow-sm)}
+
+/* Filter bar */
+.filters{display:flex;align-items:center;gap:8px;padding:10px 20px;border-bottom:1px solid var(--border);background:var(--bg-surface-2);font-size:12.5px}
+.filters .chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--bg-surface);color:var(--fg-2);cursor:pointer}
+.filters .chip.on{background:var(--sky-50);border-color:var(--sky-500);color:var(--sky-700)}
+.filters .chip .x{color:var(--fg-3);font-size:14px;line-height:1}
+.filters .spacer{flex:1}
+.filters .meta{font:500 11.5px/1 var(--font-sans);color:var(--fg-3)}
+
+/* Table */
+.tbl{flex:1;overflow:auto}
+.thead, .trow{display:grid;grid-template-columns:24px 110px minmax(220px,1fr) 150px 140px 100px 110px 32px;align-items:center;padding:0 16px}
+.thead{position:sticky;top:0;background:var(--bg-surface);border-bottom:1px solid var(--border-strong);height:32px;font:600 11px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em;z-index:1}
+.thead span{display:flex;align-items:center;gap:4px}
+.thead .sort:after{content:"↓";color:var(--fg-2)}
+.trow{height:44px;border-bottom:1px solid var(--border-subtle);font-size:12.5px}
+.trow:hover{background:var(--bg-hover);cursor:pointer}
+.trow.sel{background:var(--bg-selected);box-shadow:inset 2px 0 0 var(--sky-500)}
+.trow .cb{width:14px;height:14px;border:1px solid var(--border-strong);border-radius:3px;background:var(--bg-surface)}
+.trow.sel .cb{background:var(--sky-500);border-color:var(--sky-500);position:relative}
+.trow.sel .cb:after{content:"✓";position:absolute;inset:0;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;line-height:1}
+.trow .code{font:500 12px/1 var(--font-mono);color:var(--fg-2)}
+.trow .title{padding-right:12px;overflow:hidden}
+.trow .title .t1{font-weight:500;color:var(--fg-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow .title .t2{font-size:11.5px;color:var(--fg-3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow .av{display:inline-flex;align-items:center;gap:6px}
+.trow .av .b{width:22px;height:22px;border-radius:999px;background:var(--neutral-200);color:var(--fg-2);font:600 10px/22px var(--font-sans);text-align:center}
+.trow .num{font-feature-settings:'tnum';color:var(--fg-1);font-weight:500}
+.trow .age{font:500 12px/1 var(--font-mono);color:var(--fg-3)}
+.trow .more{color:var(--fg-3);text-align:center;font-weight:700;letter-spacing:1px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font:500 11px/1.4 var(--font-sans);max-width:100%}
+.chip .dot{width:5px;height:5px;border-radius:999px;background:currentColor;flex-shrink:0}
+.chip.info{background:var(--sky-50);color:var(--sky-700)}
+.chip.attn{background:var(--amber-50);color:var(--amber-700)}
+.chip.over{background:var(--red-50);color:var(--red-700)}
+.chip.ok{background:var(--emerald-50);color:var(--emerald-700)}
+.chip.paused{background:var(--violet-50);color:var(--violet-700)}
+.chip.neutral{background:var(--neutral-100);color:var(--neutral-700)}
+
+/* Inspector */
+.insp{border-left:1px solid var(--border);background:var(--bg-surface);overflow-y:auto;display:flex;flex-direction:column}
+.insp .ih{padding:14px 16px 10px;border-bottom:1px solid var(--border)}
+.insp .ih .meta{font:500 11px/1 var(--font-mono);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;display:flex;justify-content:space-between}
+.insp .ih h3{margin:0 0 6px;font:600 15px/1.3 var(--font-sans);color:var(--fg-1)}
+.insp .ih .sub{font-size:12px;color:var(--fg-3)}
+.insp .ih .actions{display:flex;gap:6px;margin-top:10px}
+.insp .ih .actions .btn{height:26px;padding:0 10px;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--bg-surface);font:500 12px/1 var(--font-sans);color:var(--fg-1);display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+.insp .ih .actions .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.insp .sect{padding:12px 16px;border-bottom:1px solid var(--border-subtle)}
+.insp .sect h4{margin:0 0 10px;font:600 10.5px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.05em}
+.insp .kv{display:grid;grid-template-columns:90px 1fr;gap:6px 10px;font-size:12.5px}
+.insp .kv dt{color:var(--fg-3);font-weight:400}
+.insp .kv dd{margin:0;color:var(--fg-1);font-weight:500}
+.insp .pos{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--border-subtle);font-size:12px}
+.insp .pos:first-of-type{border-top:none}
+.insp .pos .img{width:32px;height:32px;border:1px solid var(--border);border-radius:4px;background:var(--bg-app);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--fg-3);font-size:9px}
+.insp .pos .nm{flex:1;min-width:0}
+.insp .pos .nm .t{color:var(--fg-1);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.insp .pos .nm .b{color:var(--fg-3);font-size:11px;margin-top:1px}
+.insp .pos .px{font-family:var(--font-mono);font-weight:500;color:var(--fg-1);font-feature-settings:'tnum';text-align:right;white-space:nowrap}
+.insp .pos .px small{display:block;color:var(--emerald-700);font-weight:400;font-size:10.5px}
+.insp .pos .px small.stale{color:var(--amber-700)}
+.timeline{position:relative;padding-left:16px}
+.timeline:before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:1px;background:var(--border-strong)}
+.timeline .ev{position:relative;padding:6px 0;font-size:12px}
+.timeline .ev:before{content:"";position:absolute;left:-13px;top:9px;width:9px;height:9px;border-radius:999px;background:var(--bg-surface);border:1.5px solid var(--neutral-400)}
+.timeline .ev.now:before{border-color:var(--accent);background:var(--accent)}
+.timeline .ev .t{color:var(--fg-1)}
+.timeline .ev .m{font:500 11px/1 var(--font-mono);color:var(--fg-3);margin-top:2px}
+</style></head><body>
+
+<div class="app">
+  <!-- TOPBAR -->
+  <div class="top">
+    <div class="brand"><img src="../../assets/logos/mylift-wordmark.svg" alt="MyLift CRM"></div>
+    <div class="ws"><span class="dot"></span> sales@myzip.ru · Я.Почта</div>
+    <div class="search"><input placeholder="Поиск по заявкам, клиентам, артикулам…"><kbd>⌘ K</kbd></div>
+    <div class="spacer"></div>
+    <button class="btn">Импорт из 1С</button>
+    <button class="btn primary">+ Заявка вручную</button>
+    <button class="icon-btn" title="Уведомления">🔔<span class="badge">3</span></button>
+    <div class="av">ИА</div>
+  </div>
+
+  <!-- NAV RAIL -->
+  <div class="rail">
+    <div class="item" title="Dashboard"><span class="sym">⌂</span></div>
+    <div class="item active" title="Заявки"><span class="sym">≡</span><span class="badge">8</span></div>
+    <div class="item" title="Почта"><span class="sym">✉</span></div>
+    <div class="item" title="Клиенты"><span class="sym">⌗</span></div>
+    <div class="item" title="Каталог"><span class="sym">▦</span></div>
+    <div class="sep"></div>
+    <div class="item" title="Поставщики"><span class="sym">◇</span></div>
+    <div class="item" title="Аналитика"><span class="sym">◷</span></div>
+    <div class="item" title="База знаний"><span class="sym">⌕</span></div>
+    <div class="sep" style="margin-top:auto"></div>
+    <div class="item" title="Настройки"><span class="sym">⚙</span></div>
+  </div>
+
+  <!-- CONTEXT LIST -->
+  <div class="list">
+    <div class="lhead"><h2>Заявки</h2><a href="#">+ Очередь</a></div>
+    <div class="group">
+      <div class="group-label">Мои · Иванов А.</div>
+      <div class="q active"><span class="ico">●</span><span class="lbl">В работе</span><span class="pill">8</span></div>
+      <div class="q"><span class="ico">⌛</span><span class="lbl">Жду клиента</span><span class="n">12</span></div>
+      <div class="q"><span class="ico">⏸</span><span class="lbl">На паузе</span><span class="n">3</span></div>
+      <div class="q"><span class="ico">✓</span><span class="lbl">КП отправлено</span><span class="n">21</span></div>
+      <div class="q"><span class="ico">₽</span><span class="lbl">Счёт выставлен</span><span class="n">7</span></div>
+    </div>
+    <div class="group">
+      <div class="group-label">Команда</div>
+      <div class="q"><span class="ico">⚑</span><span class="lbl">Просрочено по SLA</span><span class="pill">5</span></div>
+      <div class="q"><span class="ico">⊘</span><span class="lbl">Нераспределённые</span><span class="n">2</span></div>
+      <div class="q"><span class="ico">↻</span><span class="lbl">Refresh цен ждут</span><span class="n">14</span></div>
+      <div class="q"><span class="ico">⊕</span><span class="lbl">Все открытые</span><span class="n">147</span></div>
+    </div>
+    <div class="group">
+      <div class="group-label">Сохранённые виды</div>
+      <div class="q"><span class="ico">★</span><span class="lbl">Крупные клиенты</span><span class="n">9</span></div>
+      <div class="q"><span class="ico">★</span><span class="lbl">KONE / Schindler</span><span class="n">31</span></div>
+      <div class="q"><span class="ico">★</span><span class="lbl">МЛЗ + ЩЛЗ</span><span class="n">18</span></div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="pageh">
+      <div>
+        <div class="crumbs">Заявки · Мои · В работе</div>
+        <h1>Пул менеджера · 8 заявок</h1>
+        <div class="meta">обновлено 14:38 · автообновление 60 с · следующий распред цикл через 22 мин</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="seg">
+        <button class="on">Таблица</button>
+        <button>Канбан</button>
+        <button>Календарь</button>
+      </div>
+    </div>
+
+    <div class="filters">
+      <span class="chip on">Статус: в работе <span class="x">×</span></span>
+      <span class="chip">Назначено: я <span class="x">×</span></span>
+      <span class="chip">Возраст ≤ 14 дн</span>
+      <span class="chip">+ Фильтр</span>
+      <span class="spacer"></span>
+      <span class="meta">8 строк · 2 выделено · ₽ 235 800 в работе</span>
+    </div>
+
+    <div class="tbl">
+      <div class="thead">
+        <span></span>
+        <span>код</span>
+        <span>заявка</span>
+        <span>статус</span>
+        <span>клиент</span>
+        <span class="sort">сумма</span>
+        <span class="sort">возраст</span>
+        <span></span>
+      </div>
+
+      <div class="trow sel">
+        <span class="cb"></span>
+        <span class="code">MZ-21384</span>
+        <span class="title"><div class="t1">КВШ D320 + плата LCEFCB G71</div><div class="t2">KONE MonoSpace · 4 поз. · 2 уточнения у поставщика</div></span>
+        <span><span class="chip over"><span class="dot"></span>просрочено 2ч 14м</span></span>
+        <span class="title"><div class="t1">Лифтремонт</div><div class="t2">prokat-lift@mail.ru</div></span>
+        <span class="num">142 800 ₽</span>
+        <span class="age">3 дн</span>
+        <span class="more">···</span>
+      </div>
+
+      <div class="trow">
+        <span class="cb"></span>
+        <span class="code">MZ-21379</span>
+        <span class="title"><div class="t1">Замок ДШ Metron 2PTL-2PC левый</div><div class="t2">Sticky · KONE доставка через WITTUR</div></span>
+        <span><span class="chip info"><span class="dot"></span>КП отправлено</span></span>
+        <span class="title"><div class="t1">Мега УК</div><div class="t2">zayavki@mega-uk.ru</div></span>
+        <span class="num">8 400 ₽</span>
+        <span class="age">5 дн</span>
+        <span class="more">···</span>
+      </div>
+
+      <div class="trow sel">
+        <span class="cb"></span>
+        <span class="code">MZ-21376</span>
+        <span class="title"><div class="t1">Кнопка BR36B шлифованная с Брайлем</div><div class="t2">XIZI Otis · 12 поз. · цены актуализируются</div></span>
+        <span><span class="chip attn"><span class="dot"></span>refresh цен (3 поз.)</span></span>
+        <span class="title"><div class="t1">МОСЛИФТ</div><div class="t2">snab@moslift.ru</div></span>
+        <span class="num">93 000 ₽</span>
+        <span class="age">1 дн</span>
+        <span class="more">···</span>
+      </div>
+
+      <div class="trow">
+        <span class="cb"></span>
+        <span class="code">MZ-21370</span>
+        <span class="title"><div class="t1">Поручень EHC 25м чёрный, 12 мм</div><div class="t2">Эскалатор · СПК + клипса</div></span>
+        <span><span class="chip paused"><span class="dot"></span>пауза до 15.01</span></span>
+        <span class="title"><div class="t1">СитиСервис+</div><div class="t2">os@cityservice-plus.ru</div></span>
+        <span class="num">94 000 ₽</span>
+        <span class="age">11 дн</span>
+        <span class="more">···</span>
+      </div>
+
+      <div class="trow">
+        <span class="cb"></span>
+        <span class="code">MZ-21366</span>
+        <span class="title"><div class="t1">Резистор 18 Ом 800 Вт (Отис)</div><div class="t2">Уценённый · 1 шт на складе</div></span>
+        <span><span class="chip info"><span class="dot"></span>в работе</span></span>
+        <span class="title"><div class="t1">Лемус-лифт</div><div class="t2">snab@lemus-lift.ru</div></span>
+        <span class="num">14 200 ₽</span>
+        <span class="age">2 дн</span>
+        <span class="more">···</span>
+      </div>
+
+      <div class="trow">
+        <span class="cb"></span>
+        <span class="code">MZ-21358</span>
+        <span class="title"><div class="t1">Микроконтроллер ПЗУ ПУ-3 / УЛ</div><div class="t2">ФАИД.10501-54 · оригинал</div></span>
+        <span><span class="chip ok"><span class="dot"></span>счёт выставлен</span></span>
+        <span class="title"><div class="t1">Практика СП</div><div class="t2">otdel.snab@praktika-sp.ru</div></span>
+        <span class="num">26 800 ₽</span>
+        <span class="age">7 дн</span>
+        <span class="more">···</span>
+      </div>
+
+      <div class="trow">
+        <span class="cb"></span>
+        <span class="code">MZ-21349</span>
+        <span class="title"><div class="t1">Рычаг привода дверей ЩЛЗ цилиндр</div><div class="t2">Проём 800 мм · в наличии</div></span>
+        <span><span class="chip attn"><span class="dot"></span>ждём клиента</span></span>
+        <span class="title"><div class="t1">КомбоЛифт Сервис</div><div class="t2">info@combolift.ru</div></span>
+        <span class="num">—</span>
+        <span class="age">9 дн</span>
+        <span class="more">···</span>
+      </div>
+
+      <div class="trow">
+        <span class="cb"></span>
+        <span class="code">MZ-21341</span>
+        <span class="title"><div class="t1">Модуль реле времени Finder + розетка</div><div class="t2">KONE · совместим с 9003SMA</div></span>
+        <span><span class="chip neutral"><span class="dot"></span>на квалификации</span></span>
+        <span class="title"><div class="t1">Профилифт</div><div class="t2">snab@profilift.ru</div></span>
+        <span class="num">—</span>
+        <span class="age">14 дн</span>
+        <span class="more">···</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- INSPECTOR -->
+  <div class="insp">
+    <div class="ih">
+      <div class="meta"><span>MZ-21384</span><span>создано 14:32 · 3 дн назад</span></div>
+      <h3>КВШ D320 + плата LCEFCB G71</h3>
+      <div class="sub">Лифтремонт · prokat-lift@mail.ru · KONE MonoSpace 700</div>
+      <div class="actions">
+        <button class="btn primary">Сформировать КП</button>
+        <button class="btn">Refresh цен</button>
+      </div>
+    </div>
+
+    <div class="sect">
+      <h4>SLA</h4>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="chip over"><span class="dot"></span>просрочено 2ч 14м</span>
+        <span style="font:500 12px/1 var(--font-sans);color:var(--fg-3)">target → 1 раб. день</span>
+      </div>
+      <div style="height:4px;background:var(--neutral-100);border-radius:999px;margin-top:10px;overflow:hidden">
+        <div style="width:120%;max-width:100%;height:100%;background:var(--accent)"></div>
+      </div>
+    </div>
+
+    <div class="sect">
+      <h4>Сводка</h4>
+      <dl class="kv">
+        <dt>Менеджер</dt><dd>Иванов А.</dd>
+        <dt>Sticky-цепочка</dt><dd>да · 3 заявки</dd>
+        <dt>Канал</dt><dd>почта · &lt;CABV…@yandex.ru&gt;</dd>
+        <dt>Сматчено</dt><dd>4 / 5 позиций</dd>
+        <dt>Сумма</dt><dd>142 800 ₽</dd>
+      </dl>
+    </div>
+
+    <div class="sect">
+      <h4>Позиции запроса</h4>
+      <div class="pos">
+        <div class="img">img</div>
+        <div class="nm"><div class="t">КВШ D320×112мм 6 канавок</div><div class="b">SEC · M27878 · 2 шт</div></div>
+        <div class="px">38 400 ₽<small>акт. 30.05</small></div>
+      </div>
+      <div class="pos">
+        <div class="img">img</div>
+        <div class="nm"><div class="t">Плата Kone PCB LCEFCB</div><div class="b">KONE · M10352 · 1 шт</div></div>
+        <div class="px">86 000 ₽<small>акт. 30.05</small></div>
+      </div>
+      <div class="pos">
+        <div class="img">img</div>
+        <div class="nm"><div class="t">Замок ДШ Metron 2PTL-2PC лев.</div><div class="b">Metron · M31468 · 1 шт</div></div>
+        <div class="px">12 200 ₽<small class="stale">stale 18 дн</small></div>
+      </div>
+      <div class="pos">
+        <div class="img">?</div>
+        <div class="nm"><div class="t">«ролик ДК 90 мм с кронштейном»</div><div class="b" style="color:var(--amber-700)">не сматчено в каталоге</div></div>
+        <div class="px">—</div>
+      </div>
+    </div>
+
+    <div class="sect">
+      <h4>Хронология</h4>
+      <div class="timeline">
+        <div class="ev now"><div class="t">Refresh цен запрошен у KONE-RU</div><div class="m">14:38 · сейчас</div></div>
+        <div class="ev"><div class="t">Назначено: Иванов А. (sticky)</div><div class="m">11.01 · 14:33</div></div>
+        <div class="ev"><div class="t">Получено письмо от prokat-lift@…</div><div class="m">11.01 · 14:32</div></div>
+        <div class="ev"><div class="t">Авто-обнаружено: запрос КП · 4 позиции</div><div class="m">11.01 · 14:32</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>

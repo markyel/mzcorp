@@ -1,0 +1,176 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Section · List view</title>
+<link rel="stylesheet" href="../../colors_and_type.css">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-app);font-family:var(--font-sans);color:var(--fg-1);font-size:13px;padding:24px}
+h1{margin:0 0 4px;font:600 22px/1.2 var(--font-sans);letter-spacing:-0.01em}
+.lead{color:var(--fg-3);margin:0 0 24px;font-size:13px;max-width:780px}
+.block{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-md);margin-bottom:24px;overflow:hidden}
+.bh{display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--border-subtle);background:var(--bg-surface-2)}
+.bh h2{margin:0;font:600 13px/1 var(--font-sans);text-transform:uppercase;letter-spacing:.04em;color:var(--fg-2)}
+.bh .meta{margin-left:auto;font:500 11.5px/1 var(--font-sans);color:var(--fg-3)}
+
+/* filters block */
+.fbar{display:flex;align-items:center;gap:8px;padding:14px 18px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--bg-surface);color:var(--fg-2);font-size:12.5px}
+.chip.on{background:var(--sky-50);border-color:var(--sky-500);color:var(--sky-700)}
+.chip .x{color:var(--fg-3);font-size:14px}
+.chip.add{border-style:dashed;color:var(--fg-3)}
+.fbar .spacer{flex:1}
+.fbar .sort{font:500 11.5px/1 var(--font-sans);color:var(--fg-3)}
+.fbar .sort b{color:var(--fg-1);font-weight:500}
+
+/* bulk */
+.bulk{display:flex;align-items:center;gap:10px;padding:8px 18px;background:var(--sky-50);font-size:12.5px;color:var(--sky-700);border-top:1px solid var(--border)}
+.bulk .info{font-weight:600}
+.bulk .meta{opacity:.7}
+.bulk .spacer{flex:1}
+.bulk .btn{height:24px;padding:0 10px;border:1px solid var(--sky-500);border-radius:var(--r-md);background:var(--bg-surface);font:500 11.5px/1 var(--font-sans);color:var(--sky-700);cursor:pointer}
+.bulk .btn.danger{color:var(--accent);border-color:var(--red-300)}
+.bulk .clear{cursor:pointer;font-weight:500;border-bottom:1px dashed currentColor}
+
+/* density samples */
+.dgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;padding:14px}
+.dcard{border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;background:var(--bg-surface)}
+.dcard .lbl{padding:10px 14px;background:var(--bg-surface-2);border-bottom:1px solid var(--border-subtle);font:600 11px/1 var(--font-sans);text-transform:uppercase;letter-spacing:.04em;color:var(--fg-3);display:flex;justify-content:space-between}
+.dcard .lbl b{color:var(--fg-1);font-weight:600}
+.tbl .row{display:grid;align-items:center;padding:0 12px;column-gap:10px;font-size:12.5px;border-bottom:1px solid var(--border-subtle)}
+.tbl .row:last-child{border-bottom:none}
+.tbl .row.h{height:28px;background:var(--bg-surface);font:600 10.5px/1 var(--font-sans);text-transform:uppercase;letter-spacing:.04em;color:var(--fg-3)}
+.tbl.cmf .row{height:44px}
+.tbl.def .row{height:36px}
+.tbl.cmp .row{height:28px}
+.tbl .row{grid-template-columns:24px 80px 1fr 100px 70px}
+.cb{width:13px;height:13px;border:1px solid var(--border-strong);border-radius:3px;background:var(--bg-surface)}
+.code{font:500 12px/1 var(--font-mono);color:var(--fg-2)}
+.t1{font-weight:500;color:var(--fg-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t2{font-size:11px;color:var(--fg-3);margin-top:1px}
+.tbl.cmf .ttl, .tbl.def .ttl{padding:6px 0}
+.cstatus{display:inline-flex;align-items:center;gap:5px;padding:1px 7px;border-radius:999px;font:500 11px/1.4 var(--font-sans)}
+.cstatus .d{width:5px;height:5px;border-radius:999px;background:currentColor}
+.cstatus.info{background:var(--sky-50);color:var(--sky-700)}
+.cstatus.over{background:var(--red-50);color:var(--red-700)}
+.cstatus.attn{background:var(--amber-50);color:var(--amber-700)}
+.num{font-feature-settings:'tnum';font-weight:500;text-align:right}
+.age{font:500 12px/1 var(--font-mono);color:var(--fg-3)}
+.age.over{color:var(--red-700)}
+
+/* footer */
+.foot{display:flex;align-items:center;gap:14px;padding:8px 18px;background:var(--bg-surface-2);font:500 11.5px/1 var(--font-sans);color:var(--fg-3);font-feature-settings:'tnum';border-top:1px solid var(--border)}
+.foot .spacer{flex:1}
+.foot .pager{display:inline-flex;gap:4px}
+.foot .p{width:22px;height:22px;border:1px solid var(--border);border-radius:4px;background:var(--bg-surface);display:inline-flex;align-items:center;justify-content:center;color:var(--fg-2);cursor:pointer}
+.foot .p.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* dos */
+.dos{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px}
+.dos .col{border:1px solid var(--border);border-radius:var(--r-md);padding:14px 16px;background:var(--bg-surface)}
+.dos .col h3{margin:0 0 8px;font:600 12px/1 var(--font-sans);text-transform:uppercase;letter-spacing:.04em}
+.dos .ok h3{color:var(--emerald-700)}
+.dos .no h3{color:var(--red-700)}
+.dos li{font-size:12.5px;color:var(--fg-2);margin:5px 0;list-style:none;padding-left:18px;position:relative}
+.dos .ok li:before{content:"✓";position:absolute;left:0;color:var(--emerald-700);font-weight:700}
+.dos .no li:before{content:"✗";position:absolute;left:0;color:var(--red-700);font-weight:700}
+</style></head><body>
+<h1>Section · List view</h1>
+<p class="lead">Anatomy and density variants for any list/table page in MyLift CRM. Companion to <code>docs/sections/01-list.md</code>.</p>
+
+<div class="block">
+  <div class="bh"><h2>Filter bar</h2><span class="meta">26px chips · sky-50 при on · dashed для add</span></div>
+  <div class="fbar">
+    <span class="chip on">Статус: открыта <span class="x">×</span></span>
+    <span class="chip on">Назначено: вся команда <span class="x">×</span></span>
+    <span class="chip">Бренд: KONE, OTIS, ЩЛЗ <span class="x">×</span></span>
+    <span class="chip">Возраст ≤ 30 дн</span>
+    <span class="chip add">+ фильтр</span>
+    <span class="spacer"></span>
+    <span class="sort">Сортировка: <b>возраст ↓</b></span>
+  </div>
+</div>
+
+<div class="block">
+  <div class="bh"><h2>Bulk action bar</h2><span class="meta">только когда selected &gt; 0</span></div>
+  <div class="bulk">
+    <span class="info">3 заявки выделено</span>
+    <span class="meta">· общая сумма 244 200 ₽ · средний возраст 4,3 дн</span>
+    <span class="spacer"></span>
+    <button class="btn">Назначить менеджера…</button>
+    <button class="btn">Запросить refresh цен</button>
+    <button class="btn">Поставить на паузу</button>
+    <button class="btn danger">Закрыть как «не наша тема»</button>
+    <span class="clear">Снять выделение</span>
+  </div>
+</div>
+
+<div class="block">
+  <div class="bh"><h2>Density variants</h2><span class="meta">comfortable 44 · default 36 · compact 28</span></div>
+  <div class="dgrid">
+    <div class="dcard">
+      <div class="lbl"><b>comfortable</b><span>44px · t1+t2+avatar</span></div>
+      <div class="tbl cmf">
+        <div class="row h"><span></span><span>код</span><span>заявка</span><span>статус</span><span>возраст</span></div>
+        <div class="row"><span class="cb"></span><span class="code">MZ-21384</span><div class="ttl"><div class="t1">КВШ D320 + плата LCEFCB</div><div class="t2">KONE · 4 поз.</div></div><span><span class="cstatus over"><span class="d"></span>просрочено</span></span><span class="age over">3 дн</span></div>
+        <div class="row"><span class="cb"></span><span class="code">MZ-21379</span><div class="ttl"><div class="t1">Замок ДШ Metron 2PTL</div><div class="t2">KONE / WITTUR</div></div><span><span class="cstatus info"><span class="d"></span>КП отправл.</span></span><span class="age">5 дн</span></div>
+      </div>
+    </div>
+    <div class="dcard">
+      <div class="lbl"><b>default</b><span>36px · t1+t2</span></div>
+      <div class="tbl def">
+        <div class="row h"><span></span><span>код</span><span>заявка</span><span>статус</span><span>возраст</span></div>
+        <div class="row"><span class="cb"></span><span class="code">MZ-21384</span><div class="ttl"><div class="t1">КВШ D320 + плата LCEFCB</div><div class="t2">KONE · 4 поз.</div></div><span><span class="cstatus over"><span class="d"></span>просрочено</span></span><span class="age over">3 дн</span></div>
+        <div class="row"><span class="cb"></span><span class="code">MZ-21379</span><div class="ttl"><div class="t1">Замок ДШ Metron 2PTL</div><div class="t2">KONE / WITTUR</div></div><span><span class="cstatus info"><span class="d"></span>КП отправл.</span></span><span class="age">5 дн</span></div>
+        <div class="row"><span class="cb"></span><span class="code">MZ-21376</span><div class="ttl"><div class="t1">Кнопка BR36B с Брайлем</div><div class="t2">XIZI Otis · 12 поз.</div></div><span><span class="cstatus attn"><span class="d"></span>refresh цен</span></span><span class="age">1 дн</span></div>
+      </div>
+    </div>
+    <div class="dcard">
+      <div class="lbl"><b>compact</b><span>28px · t1 only</span></div>
+      <div class="tbl cmp">
+        <div class="row h"><span></span><span>код</span><span>заявка</span><span>статус</span><span>возраст</span></div>
+        <div class="row"><span class="cb"></span><span class="code">MZ-21384</span><span class="t1">КВШ D320 + плата LCEFCB</span><span><span class="cstatus over"><span class="d"></span>просроч.</span></span><span class="age over">3 дн</span></div>
+        <div class="row"><span class="cb"></span><span class="code">MZ-21379</span><span class="t1">Замок ДШ Metron 2PTL левый</span><span><span class="cstatus info"><span class="d"></span>КП</span></span><span class="age">5 дн</span></div>
+        <div class="row"><span class="cb"></span><span class="code">MZ-21376</span><span class="t1">Кнопка BR36B с Брайлем</span><span><span class="cstatus attn"><span class="d"></span>refresh</span></span><span class="age">1 дн</span></div>
+        <div class="row"><span class="cb"></span><span class="code">MZ-21370</span><span class="t1">Поручень EHC 25м чёрный</span><span><span class="cstatus info"><span class="d"></span>в работе</span></span><span class="age">11 дн</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="block">
+  <div class="bh"><h2>Footer · pagination</h2></div>
+  <div class="foot">
+    <span>17 строк показано из 147</span><span style="color:var(--border-strong)">·</span>
+    <span>3 выделено</span><span style="color:var(--border-strong)">·</span>
+    <span>сумма выделенного 244 200 ₽</span>
+    <span class="spacer"></span>
+    <span>стр. 1 / 9</span>
+    <div class="pager"><span class="p">‹</span><span class="p on">1</span><span class="p">2</span><span class="p">3</span><span class="p">…</span><span class="p">9</span><span class="p">›</span></div>
+  </div>
+</div>
+
+<div class="block">
+  <div class="bh"><h2>Do · Don't</h2></div>
+  <div class="dos">
+    <div class="col ok"><h3>Do</h3>
+      <ul>
+        <li>Один accent (red) — только active CTA</li>
+        <li>Selected = sky-50 + sky-500 left bar</li>
+        <li>Числа в правой колонке, tnum</li>
+        <li>Status — chip lowercase из закрытого набора</li>
+        <li>Hover — bg-hover, не border-color</li>
+        <li>Empty — одно предложение, без эмодзи</li>
+      </ul>
+    </div>
+    <div class="col no"><h3>Don't</h3>
+      <ul>
+        <li>Selected красным (зарезервирован для CTA)</li>
+        <li>Status заглавными как Badge</li>
+        <li>Кнопки действий в каждой строке (только ··· меню)</li>
+        <li>Иллюстрации/эмодзи в empty state</li>
+        <li>Padding ячейки 24+ — это data UI, не landing</li>
+        <li>Вложенные градиенты или цветные тени</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+</body></html>

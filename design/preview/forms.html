@@ -1,0 +1,38 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;padding:20px;background:var(--bg-surface);font-family:var(--font-sans);font-size:13px;color:var(--fg-1)}
+.label{font-size:10px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin:0 0 6px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.f label{display:block;font:500 12px/1.2 var(--font-sans);color:var(--fg-2);margin-bottom:4px}
+.input,.select{width:100%;height:32px;padding:0 10px;border:1px solid var(--border-strong);border-radius:var(--r-md);font:400 13px/1 var(--font-sans);color:var(--fg-1);background:var(--bg-surface);box-sizing:border-box}
+.input:focus,.select:focus{outline:none;border-color:var(--sky-500);box-shadow:0 0 0 3px var(--ring)}
+.input.err{border-color:var(--red-600)}
+.help{font:400 11px/1.4 var(--font-sans);color:var(--fg-3);margin-top:4px}
+.help.err{color:var(--red-700)}
+.search{position:relative}
+.search::before{content:"⌕";position:absolute;left:10px;top:8px;color:var(--fg-3);font-size:14px}
+.search input{padding-left:30px}
+.row{display:flex;gap:12px;align-items:center;margin-bottom:8px}
+.check{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.check input{width:14px;height:14px;accent-color:var(--accent)}
+.toggle{position:relative;width:30px;height:18px;background:var(--neutral-300);border-radius:999px;transition:120ms}
+.toggle.on{background:var(--accent)}
+.toggle::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;background:#fff;border-radius:999px;transition:120ms}
+.toggle.on::after{left:14px}
+</style></head><body>
+<div class="label">Inputs · select · search</div>
+<div class="grid">
+  <div class="f"><label>Email клиента</label><input class="input" value="prokat-lift@mail.ru"></div>
+  <div class="f search"><label>Поиск по позициям</label><input class="input" placeholder="артикул, бренд, описание"></div>
+  <div class="f"><label>Бренд</label><select class="select"><option>KONE</option><option>OTIS</option></select></div>
+  <div class="f"><label>Дата паузы (до)</label><input class="input err" type="date" value="2026-02-30"><div class="help err">Не больше 21 дня по умолчанию</div></div>
+</div>
+<div class="label">Checkbox · radio · toggle</div>
+<div class="row">
+  <label class="check"><input type="checkbox" checked> Только мои заявки</label>
+  <label class="check"><input type="checkbox"> Включая закрытые</label>
+  <label class="check"><input type="radio" name="r" checked> Распределить автоматически</label>
+  <label class="check"><input type="radio" name="r"> Переподчинить вручную</label>
+  <label class="check"><span class="toggle on"></span> Auto-mode AI</label>
+</div>
+</body></html>

@@ -1,0 +1,39 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;padding:20px;background:var(--bg-app);font-family:var(--font-sans);color:var(--fg-1);font-size:12px}
+.row{display:flex;gap:6px;margin-bottom:14px}
+.row + .row{margin-top:0}
+.sw{flex:1;border-radius:var(--r-md);border:1px solid var(--border);overflow:hidden;background:var(--bg-surface)}
+.sw .chip{height:42px;display:block}
+.sw .meta{padding:6px 8px;font-size:10.5px;line-height:1.3}
+.sw .name{font-weight:600;color:var(--fg-1)}
+.sw .hex{font-family:var(--font-mono);color:var(--fg-3);font-size:10px}
+.label{font-size:10px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin:0 0 6px}
+</style></head><body>
+<div class="label">Brand · accent</div>
+<div class="row">
+  <div class="sw"><span class="chip" style="background:var(--red-50)"></span><div class="meta"><div class="name">red-50</div><div class="hex">оттенок фона</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--red-300)"></span><div class="meta"><div class="name">red-300</div><div class="hex">disabled</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--red-600)"></span><div class="meta"><div class="name">red-600</div><div class="hex">#D32027 · primary</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--red-700)"></span><div class="meta"><div class="name">red-700</div><div class="hex">hover</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--red-800)"></span><div class="meta"><div class="name">red-800</div><div class="hex">press</div></div></div>
+</div>
+<div class="label">Neutrals · 9-step warm-cool slate</div>
+<div class="row">
+  <div class="sw"><span class="chip" style="background:var(--neutral-50)"></span><div class="meta"><div class="name">50</div><div class="hex">bg-app</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--neutral-100)"></span><div class="meta"><div class="name">100</div><div class="hex">hover</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--neutral-200)"></span><div class="meta"><div class="name">200</div><div class="hex">border</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--neutral-300)"></span><div class="meta"><div class="name">300</div><div class="hex">strong border</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--neutral-500)"></span><div class="meta"><div class="name">500</div><div class="hex">muted text</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--neutral-700)"></span><div class="meta"><div class="name">700</div><div class="hex">label</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--neutral-900)"></span><div class="meta"><div class="name">900</div><div class="hex">fg-1</div></div></div>
+</div>
+<div class="label">Status hues · chip-pair (50 background / 700 text)</div>
+<div class="row">
+  <div class="sw"><span class="chip" style="background:var(--amber-50);border-bottom:1px solid var(--amber-600)"></span><div class="meta"><div class="name" style="color:var(--amber-700)">attention</div><div class="hex">внимание</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--red-50);border-bottom:1px solid var(--red-700)"></span><div class="meta"><div class="name" style="color:var(--red-700)">overdue</div><div class="hex">просрочено</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--emerald-50);border-bottom:1px solid var(--emerald-700)"></span><div class="meta"><div class="name" style="color:var(--emerald-700)">paid · won</div><div class="hex">оплачено</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--sky-50);border-bottom:1px solid var(--sky-700)"></span><div class="meta"><div class="name" style="color:var(--sky-700)">awaiting</div><div class="hex">ждём ответ</div></div></div>
+  <div class="sw"><span class="chip" style="background:var(--violet-50);border-bottom:1px solid var(--violet-700)"></span><div class="meta"><div class="name" style="color:var(--violet-700)">paused</div><div class="hex">на паузе</div></div></div>
+</div>
+</body></html>

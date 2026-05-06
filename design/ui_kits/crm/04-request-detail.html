@@ -1,0 +1,603 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<title>MyLift CRM · Заявка MZ-21384</title>
+<link rel="stylesheet" href="../../colors_and_type.css">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg-app);font-family:var(--font-sans);color:var(--fg-1);font-size:var(--fs-base);overflow:hidden}
+.app{display:grid;grid-template-columns:var(--rail-w) 1fr;grid-template-rows:var(--topbar-h) 1fr;height:100vh}
+
+/* Topbar (same as elsewhere) */
+.top{grid-column:1/-1;display:flex;align-items:center;gap:16px;padding:0 16px;background:var(--bg-surface);border-bottom:1px solid var(--border)}
+.top .brand{display:flex;align-items:center;gap:8px;width:calc(var(--rail-w) - 16px + 240px)}
+.top .brand img{height:24px}
+.top .ws{font-size:12.5px;color:var(--fg-2);display:flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--border);border-radius:var(--r-md)}
+.top .ws .dot{width:6px;height:6px;border-radius:999px;background:var(--emerald-600)}
+.top .search{flex:1;max-width:480px;position:relative}
+.top .search input{width:100%;height:30px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-app);padding:0 12px 0 32px;font:400 13px/1 var(--font-sans);color:var(--fg-1);outline:none}
+.top .search:before{content:"⌕";position:absolute;left:10px;top:8px;color:var(--fg-3);font-size:14px}
+.top .search kbd{position:absolute;right:8px;top:6px;font:500 10.5px/1 var(--font-mono);color:var(--fg-3);border:1px solid var(--border);padding:3px 5px;border-radius:3px;background:var(--bg-surface)}
+.top .spacer{flex:1}
+.top .icon-btn{width:30px;height:30px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-surface);display:inline-flex;align-items:center;justify-content:center;color:var(--fg-2);position:relative;cursor:pointer}
+.top .icon-btn .badge{position:absolute;top:-3px;right:-3px;background:var(--accent);color:#fff;font:700 9px/1 var(--font-sans);padding:2px 4px;border-radius:999px;border:1.5px solid var(--bg-surface)}
+.top .av{width:28px;height:28px;border-radius:999px;background:var(--neutral-300);color:var(--fg-1);font:600 11px/28px var(--font-sans);text-align:center}
+
+/* Rail */
+.rail{background:var(--bg-sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:2px}
+.rail .item{width:40px;height:40px;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;color:var(--fg-3);position:relative;cursor:pointer;font-family:var(--font-mono);font-size:13px;font-weight:600}
+.rail .item.active{color:var(--accent);background:var(--bg-surface)}
+.rail .item.active::before{content:"";position:absolute;left:-8px;top:8px;bottom:8px;width:2px;background:var(--accent);border-radius:0 2px 2px 0}
+.rail .item .badge{position:absolute;top:4px;right:4px;background:var(--accent);color:#fff;font:700 9px/1 var(--font-sans);padding:2px 4px;border-radius:999px;border:1.5px solid var(--bg-sidebar)}
+.rail .sep{width:24px;height:1px;background:var(--border);margin:6px 0}
+
+/* Page */
+.page{overflow-y:auto;background:var(--bg-app)}
+.page-inner{max-width:1320px;margin:0 auto;padding:16px 24px 32px}
+
+/* Sub-nav (back + breadcrumbs + actions) */
+.subnav{display:flex;align-items:center;gap:14px;padding:10px 0 14px;font-size:12.5px}
+.subnav .back{display:inline-flex;align-items:center;gap:6px;color:var(--sky-700);text-decoration:none;font-weight:500;border:1px solid var(--border);padding:5px 10px;border-radius:var(--r-md);background:var(--bg-surface)}
+.subnav .crumbs{font:500 11.5px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em;display:flex;align-items:center;gap:8px}
+.subnav .crumbs .sep{color:var(--border-strong)}
+.subnav .crumbs b{color:var(--fg-1);font-weight:500}
+.subnav .spacer{flex:1}
+.subnav .nav-arr{display:inline-flex;align-items:center;gap:2px;font-size:11.5px;color:var(--fg-3)}
+.subnav .nav-arr .a{width:24px;height:24px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-surface);display:inline-flex;align-items:center;justify-content:center;color:var(--fg-2);cursor:pointer}
+.subnav .nav-arr code{margin:0 6px;font:500 11px/1 var(--font-mono);color:var(--fg-2)}
+
+/* Hero card */
+.hero{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:18px 22px;margin-bottom:16px;display:grid;grid-template-columns:1fr auto;gap:16px;align-items:flex-start}
+.hero .left .id{display:flex;align-items:center;gap:10px;font:500 12px/1 var(--font-mono);color:var(--fg-3);margin-bottom:6px}
+.hero .left .id .copy{cursor:pointer;color:var(--fg-3);border:1px solid var(--border);padding:2px 6px;border-radius:3px;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase}
+.hero .left h1{margin:0 0 6px;font:600 22px/1.25 var(--font-sans);color:var(--fg-1);letter-spacing:-0.005em;text-wrap:pretty}
+.hero .left .sub{font-size:13px;color:var(--fg-3);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hero .left .sub b{color:var(--fg-1);font-weight:500}
+.hero .left .sub .sep{color:var(--border-strong)}
+.hero .actions{display:flex;flex-direction:column;gap:8px;align-items:stretch;min-width:200px}
+.hero .actions .row{display:flex;gap:6px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--bg-surface);font:500 12.5px/1 var(--font-sans);color:var(--fg-1);cursor:pointer;white-space:nowrap}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.primary:hover{background:var(--accent-600)}
+.btn.flex{flex:1}
+.btn.sm{height:26px;padding:0 10px;font-size:12px}
+.btn.danger{color:var(--accent);border-color:var(--red-300);background:var(--bg-surface)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--fg-2)}
+
+/* Status row */
+.statusrow{display:flex;align-items:center;gap:14px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border-subtle);flex-wrap:wrap;font-size:12.5px}
+.statusrow .item{display:flex;flex-direction:column;gap:3px;padding-right:18px;border-right:1px solid var(--border-subtle)}
+.statusrow .item:last-child{border-right:none}
+.statusrow .lbl{font:600 10.5px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em}
+.statusrow .val{font:500 13px/1.3 var(--font-sans);color:var(--fg-1);display:flex;align-items:center;gap:6px}
+.statusrow .val .av{width:20px;height:20px;border-radius:999px;background:var(--neutral-200);color:var(--fg-2);font:600 9.5px/20px var(--font-sans);text-align:center}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font:500 11.5px/1.4 var(--font-sans)}
+.chip .dot{width:5px;height:5px;border-radius:999px;background:currentColor}
+.chip.info{background:var(--sky-50);color:var(--sky-700)}
+.chip.attn{background:var(--amber-50);color:var(--amber-700)}
+.chip.over{background:var(--red-50);color:var(--red-700)}
+.chip.ok{background:var(--emerald-50);color:var(--emerald-700)}
+.chip.paused{background:var(--violet-50);color:var(--violet-700)}
+.chip.neutral{background:var(--neutral-100);color:var(--neutral-700)}
+
+/* SLA bar */
+.sla-bar{height:5px;background:var(--neutral-100);border-radius:999px;overflow:hidden;margin-top:6px;width:140px;position:relative}
+.sla-bar i{display:block;height:100%;background:var(--accent)}
+.sla-bar .marker{position:absolute;top:-2px;width:1px;height:9px;background:var(--neutral-500)}
+
+/* Two-col content */
+.cols{display:grid;grid-template-columns:1.55fr 1fr;gap:16px}
+.card{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-md);margin-bottom:16px}
+.card .ch{display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--border-subtle)}
+.card .ch h3{margin:0;font:600 13.5px/1.3 var(--font-sans);color:var(--fg-1)}
+.card .ch .badge{font:600 10.5px/1.3 var(--font-sans);background:var(--neutral-100);color:var(--fg-2);padding:2px 7px;border-radius:999px}
+.card .ch .spacer{flex:1}
+.card .ch .small{font:500 11.5px/1 var(--font-sans);color:var(--fg-3)}
+.card .body{padding:14px 18px}
+
+/* Tabs */
+.tabs{display:flex;gap:0;padding:0 18px;border-bottom:1px solid var(--border-subtle);background:var(--bg-surface)}
+.tabs .t{padding:10px 14px 11px;font:500 12.5px/1 var(--font-sans);color:var(--fg-3);cursor:pointer;border-bottom:2px solid transparent;display:inline-flex;align-items:center;gap:6px;margin-bottom:-1px}
+.tabs .t.on{color:var(--fg-1);border-bottom-color:var(--accent);font-weight:600}
+.tabs .t .n{background:var(--neutral-100);color:var(--fg-2);font:600 10.5px/1 var(--font-sans);padding:2px 6px;border-radius:999px}
+.tabs .t.on .n{background:var(--red-50);color:var(--red-700)}
+
+/* Positions table */
+.positions{font-size:12.5px}
+.positions .ph,.positions .pr{display:grid;grid-template-columns:24px 36px 1fr 110px 90px 100px 110px 32px;align-items:center;column-gap:10px;padding:0 18px}
+.positions .ph{height:30px;font:600 11px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border-subtle)}
+.positions .pr{padding-top:10px;padding-bottom:10px;border-bottom:1px solid var(--border-subtle)}
+.positions .pr:last-child{border-bottom:none}
+.positions .pr.un{background:var(--amber-50)}
+.positions .pr .n{font:500 12px/1 var(--font-mono);color:var(--fg-3);text-align:right}
+.positions .pr .img{width:32px;height:32px;border:1px solid var(--border);border-radius:4px;background:var(--bg-app);display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--fg-3)}
+.positions .pr .nm .t{font-weight:500;color:var(--fg-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.positions .pr .nm .b{font-size:11.5px;color:var(--fg-3);margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.positions .pr .nm .b .code{font-family:var(--font-mono);color:var(--fg-2)}
+.positions .pr .nm .b .stock{display:inline-flex;align-items:center;gap:4px;padding:0 6px;border-radius:3px;background:var(--emerald-50);color:var(--emerald-700);font-weight:500;font-size:10.5px}
+.positions .pr .nm .b .stock.warn{background:var(--amber-50);color:var(--amber-700)}
+.positions .pr .nm .b .stock.no{background:var(--red-50);color:var(--red-700)}
+.positions .pr .qty{font:500 12px/1 var(--font-mono);color:var(--fg-1);font-feature-settings:'tnum';text-align:right}
+.positions .pr .px{font:600 13px/1.2 var(--font-sans);color:var(--fg-1);font-feature-settings:'tnum';text-align:right;white-space:nowrap}
+.positions .pr .px small{display:block;font:400 10.5px/1.2 var(--font-sans);color:var(--emerald-700);margin-top:2px}
+.positions .pr .px small.stale{color:var(--amber-700)}
+.positions .pr .total{font:600 13px/1.1 var(--font-sans);color:var(--fg-1);font-feature-settings:'tnum';text-align:right}
+.positions .pr .more{color:var(--fg-3);text-align:center;font-weight:700;letter-spacing:1px;cursor:pointer}
+.positions .footer{padding:12px 18px;display:flex;align-items:center;gap:14px;background:var(--bg-surface-2);border-top:1px solid var(--border-subtle);border-radius:0 0 var(--r-md) var(--r-md);font-size:12.5px}
+.positions .footer .add{color:var(--sky-700);font-weight:500;cursor:pointer}
+.positions .footer .spacer{flex:1}
+.positions .footer .sum{font-feature-settings:'tnum';font-weight:600;color:var(--fg-1)}
+.positions .footer .sum-meta{color:var(--fg-3);margin-right:6px}
+
+/* Email thread */
+.thread{display:flex;flex-direction:column;gap:0}
+.msg{border-bottom:1px solid var(--border-subtle)}
+.msg:last-child{border-bottom:none}
+.mh{display:flex;align-items:center;gap:10px;padding:12px 18px;cursor:pointer}
+.mh .av{width:28px;height:28px;border-radius:999px;background:var(--neutral-200);color:var(--fg-2);font:600 11px/28px var(--font-sans);text-align:center;flex-shrink:0}
+.mh .av.out{background:var(--accent);color:#fff}
+.mh .who{font-weight:500;font-size:13px;color:var(--fg-1)}
+.mh .who small{display:block;font-size:11.5px;color:var(--fg-3);font-weight:400;margin-top:1px;font-family:var(--font-mono)}
+.mh .spacer{flex:1}
+.mh .lbl{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font:500 11px/1.4 var(--font-sans)}
+.mh .lbl.det{background:var(--emerald-50);color:var(--emerald-700)}
+.mh .lbl.kp{background:var(--sky-50);color:var(--sky-700)}
+.mh .time{font:500 11px/1 var(--font-mono);color:var(--fg-3)}
+.mb{padding:0 18px 14px 56px;font-size:13px;line-height:1.55;color:var(--fg-1)}
+.mb p{margin:0 0 8px}
+.mb .att{display:inline-flex;align-items:center;gap:7px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-surface);font-size:12px;margin-top:4px;margin-right:6px}
+.mb .att .ico{width:16px;height:20px;background:var(--red-50);border:1px solid var(--red-300);border-radius:2px;font:700 7px/20px var(--font-sans);color:var(--red-700);text-align:center}
+.mb .quote{margin:6px 0 8px;padding:6px 10px;border-left:3px solid var(--border-strong);color:var(--fg-3);font-size:12px;background:var(--bg-surface-2);border-radius:0 var(--r-sm) var(--r-sm) 0}
+.compose{padding:14px 18px;background:var(--bg-surface-2);border-top:1px solid var(--border)}
+.compose textarea{width:100%;min-height:88px;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--bg-surface);padding:10px 12px;font:400 13px/1.5 var(--font-sans);color:var(--fg-1);resize:vertical;outline:none}
+.compose textarea:focus{border-color:var(--sky-500);box-shadow:0 0 0 3px var(--ring)}
+.compose .row{display:flex;align-items:center;gap:8px;margin-top:10px}
+.compose .row .meta{font-size:12px;color:var(--fg-3)}
+.compose .row .spacer{flex:1}
+
+/* Right column cards */
+.kv{display:grid;grid-template-columns:110px 1fr;gap:8px 10px;font-size:13px}
+.kv dt{color:var(--fg-3);font-weight:400}
+.kv dd{margin:0;color:var(--fg-1);font-weight:500}
+.kv dd .small{font-weight:400;color:var(--fg-3);font-size:11.5px;display:block;margin-top:2px}
+
+/* Sticky chain */
+.chain{display:flex;flex-direction:column;gap:0;font-size:12.5px}
+.chain .l{display:grid;grid-template-columns:50px 1fr auto;gap:10px;padding:8px 0;border-top:1px solid var(--border-subtle);align-items:center}
+.chain .l:first-child{border-top:none}
+.chain .l .code{font:500 11.5px/1 var(--font-mono);color:var(--fg-2)}
+.chain .l .nm{font-weight:500;color:var(--fg-1)}
+.chain .l .nm small{display:block;font-weight:400;color:var(--fg-3);font-size:11px;margin-top:2px}
+.chain .l.this{background:var(--bg-selected);margin:0 -18px;padding:8px 18px;border-color:transparent;box-shadow:inset 2px 0 0 var(--sky-500)}
+
+/* Activity timeline */
+.timeline{position:relative;padding-left:18px;font-size:12.5px}
+.timeline:before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:1px;background:var(--border-strong)}
+.timeline .ev{position:relative;padding:6px 0}
+.timeline .ev:before{content:"";position:absolute;left:-15px;top:9px;width:9px;height:9px;border-radius:999px;background:var(--bg-surface);border:1.5px solid var(--neutral-400)}
+.timeline .ev.now:before{border-color:var(--accent);background:var(--accent)}
+.timeline .ev.ok:before{border-color:var(--emerald-700);background:var(--emerald-700)}
+.timeline .ev .t{color:var(--fg-1);line-height:1.4}
+.timeline .ev .t b{font-weight:600}
+.timeline .ev .m{font:500 11px/1 var(--font-mono);color:var(--fg-3);margin-top:3px;display:flex;gap:8px;align-items:center}
+
+/* Supplier refresh widget */
+.sup{display:flex;flex-direction:column;gap:10px;font-size:12.5px}
+.sup .s{display:grid;grid-template-columns:1fr 80px 80px;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--border-subtle)}
+.sup .s:first-child{border-top:none}
+.sup .s .nm{font-weight:500;color:var(--fg-1)}
+.sup .s .nm small{display:block;font-weight:400;color:var(--fg-3);font-size:11px;margin-top:2px}
+.sup .s .latency{font:500 11.5px/1 var(--font-mono);color:var(--fg-3);text-align:right}
+.sup .footer-row{display:flex;justify-content:space-between;font-size:11.5px;color:var(--fg-3);padding-top:8px;border-top:1px solid var(--border-subtle);margin-top:4px}
+</style></head><body>
+
+<div class="app">
+  <!-- TOPBAR -->
+  <div class="top">
+    <div class="brand"><img src="../../assets/logos/mylift-wordmark.svg" alt="MyLift CRM"></div>
+    <div class="ws"><span class="dot"></span> sales@myzip.ru · Я.Почта</div>
+    <div class="search"><input placeholder="Поиск по заявкам, клиентам, артикулам…"><kbd>⌘ K</kbd></div>
+    <div class="spacer"></div>
+    <button class="icon-btn" title="Уведомления">🔔<span class="badge">3</span></button>
+    <div class="av">ИА</div>
+  </div>
+
+  <!-- RAIL -->
+  <div class="rail">
+    <div class="item">⌂</div>
+    <div class="item active">≡<span class="badge">8</span></div>
+    <div class="item">✉</div>
+    <div class="item">⌗</div>
+    <div class="item">▦</div>
+    <div class="sep"></div>
+    <div class="item">◇</div>
+    <div class="item">◷</div>
+    <div class="item">⌕</div>
+    <div class="sep" style="margin-top:auto"></div>
+    <div class="item">⚙</div>
+  </div>
+
+  <!-- PAGE -->
+  <div class="page">
+    <div class="page-inner">
+
+      <!-- SUBNAV -->
+      <div class="subnav">
+        <a class="back" href="03-requests.html">← К списку</a>
+        <span class="crumbs">Заявки <span class="sep">/</span> Все открытые <span class="sep">/</span> <b>MZ-21384</b></span>
+        <span class="spacer"></span>
+        <span class="nav-arr"><span class="a">‹</span><code>MZ-21381</code><span style="color:var(--border-strong)">·</span><code>MZ-21379</code><span class="a">›</span></span>
+      </div>
+
+      <!-- HERO -->
+      <div class="hero">
+        <div class="left">
+          <div class="id">
+            <span>#MZ-21384</span>
+            <span class="copy">копировать</span>
+            <span style="color:var(--border-strong)">·</span>
+            <span>создано 11.01 14:32</span>
+            <span style="color:var(--border-strong)">·</span>
+            <span>обновлено 14:38 сегодня</span>
+          </div>
+          <h1>КВШ D320 + плата LCEFCB G71 для KONE MonoSpace · 4 позиции</h1>
+          <div class="sub">
+            <b>Лифтремонт</b> <span class="sep">·</span>
+            <a href="mailto:prokat-lift@mail.ru" style="color:var(--sky-700);text-decoration:none">prokat-lift@mail.ru</a>
+            <span class="sep">·</span>
+            <span>+7 (495) 234-86-19</span>
+            <span class="sep">·</span>
+            <span>объект <b style="color:var(--fg-1);font-weight:500">ЖК Куркино, корп. 4</b></span>
+          </div>
+
+          <div class="statusrow">
+            <div class="item">
+              <span class="lbl">Статус</span>
+              <span class="val"><span class="chip info"><span class="dot"></span>в работе</span></span>
+            </div>
+            <div class="item">
+              <span class="lbl">SLA</span>
+              <span class="val"><span class="chip over"><span class="dot"></span>просрочено 2ч 14м</span></span>
+              <div class="sla-bar"><i style="width:100%"></i><span class="marker" style="left:60%"></span></div>
+            </div>
+            <div class="item">
+              <span class="lbl">Менеджер</span>
+              <span class="val"><span class="av">ИА</span>Иванов А.</span>
+            </div>
+            <div class="item">
+              <span class="lbl">Sticky</span>
+              <span class="val"><span class="chip paused"><span class="dot"></span>да · 3 заявки</span></span>
+            </div>
+            <div class="item">
+              <span class="lbl">Возраст</span>
+              <span class="val">3 дн 4 ч</span>
+            </div>
+            <div class="item">
+              <span class="lbl">Сумма</span>
+              <span class="val" style="font-feature-settings:'tnum'">142 800 ₽</span>
+            </div>
+            <div class="item">
+              <span class="lbl">Сматчено</span>
+              <span class="val">4 / 5 позиций</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn primary">Сформировать КП</button>
+          <div class="row">
+            <button class="btn flex">Refresh цен</button>
+            <button class="btn flex">Ответить</button>
+          </div>
+          <div class="row">
+            <button class="btn sm flex">⏸ Пауза</button>
+            <button class="btn sm flex">⊘ Переподчинить</button>
+          </div>
+          <button class="btn sm danger">Закрыть как «не наша тема»</button>
+        </div>
+      </div>
+
+      <!-- TABS -->
+      <div class="tabs" style="border:1px solid var(--border);border-bottom:1px solid var(--border-subtle);border-radius:var(--r-md) var(--r-md) 0 0;background:var(--bg-surface)">
+        <span class="t on">Обзор</span>
+        <span class="t">Переписка <span class="n">7</span></span>
+        <span class="t">Позиции <span class="n">5</span></span>
+        <span class="t">Поставщики <span class="n">3</span></span>
+        <span class="t">Активность <span class="n">14</span></span>
+        <span class="t">Файлы <span class="n">3</span></span>
+        <span class="t">Связанные</span>
+        <span style="flex:1"></span>
+        <span class="t" style="color:var(--fg-3)">⛶</span>
+      </div>
+
+      <!-- CONTENT COLUMNS -->
+      <div class="cols" style="border:1px solid var(--border);border-top:none;border-radius:0 0 var(--r-md) var(--r-md);padding:14px;background:var(--bg-surface-2);margin-bottom:0">
+
+        <!-- LEFT (positions + thread) -->
+        <div>
+          <div class="card">
+            <div class="ch">
+              <h3>Позиции запроса</h3>
+              <span class="badge">5</span>
+              <span class="spacer"></span>
+              <span class="small">4 сматчено · 1 на квалификации · 3 ждут refresh</span>
+              <button class="btn sm">Refresh всех</button>
+            </div>
+            <div class="positions">
+              <div class="ph">
+                <span></span><span></span><span>позиция</span><span>кол-во</span><span>цена</span><span>наличие</span><span style="text-align:right">сумма</span><span></span>
+              </div>
+
+              <div class="pr">
+                <span class="n">1</span>
+                <span class="img">img</span>
+                <div class="nm">
+                  <div class="t">КВШ D320×112мм 6 канавок · подрез V40°</div>
+                  <div class="b"><span class="code">M27878</span> · ZIEHL-ABEGG · SEC SM200.30C · <span class="stock">в наличии · 4 шт</span></div>
+                </div>
+                <div class="qty">2 шт</div>
+                <div class="px">19 200 ₽<small>акт. 30.05</small></div>
+                <div class="qty" style="text-align:left;color:var(--emerald-700);font-weight:500">склад</div>
+                <div class="total">38 400 ₽</div>
+                <div class="more">···</div>
+              </div>
+
+              <div class="pr">
+                <span class="n">2</span>
+                <span class="img">img</span>
+                <div class="nm">
+                  <div class="t">Плата Kone PCB LCEFCB (G71)</div>
+                  <div class="b"><span class="code">M10352</span> · KONE · оригинал · <span class="stock">в наличии · 1 шт</span></div>
+                </div>
+                <div class="qty">1 шт</div>
+                <div class="px">86 000 ₽<small>акт. 30.05</small></div>
+                <div class="qty" style="text-align:left;color:var(--emerald-700);font-weight:500">склад</div>
+                <div class="total">86 000 ₽</div>
+                <div class="more">···</div>
+              </div>
+
+              <div class="pr">
+                <span class="n">3</span>
+                <span class="img">img</span>
+                <div class="nm">
+                  <div class="t">Замок ДШ Metron 2PTL-2PC (FR) A2-V2 левый</div>
+                  <div class="b"><span class="code">M31468</span> · Metron · KONE-совместимый · <span class="stock warn">под заказ · 7 дн</span></div>
+                </div>
+                <div class="qty">1 шт</div>
+                <div class="px">12 200 ₽<small class="stale">stale 18 дн · refresh запрошен</small></div>
+                <div class="qty" style="text-align:left;color:var(--amber-700);font-weight:500">7 дн</div>
+                <div class="total">12 200 ₽</div>
+                <div class="more">···</div>
+              </div>
+
+              <div class="pr">
+                <span class="n">4</span>
+                <span class="img">img</span>
+                <div class="nm">
+                  <div class="t">Кнопка служебная «Открытие дверей» BR36B с Брайлем</div>
+                  <div class="b"><span class="code">M21944</span> · XIZI Otis · голубая подсветка · <span class="stock">в наличии · 12 шт</span></div>
+                </div>
+                <div class="qty">1 шт</div>
+                <div class="px">6 200 ₽<small>акт. 28.05</small></div>
+                <div class="qty" style="text-align:left;color:var(--emerald-700);font-weight:500">склад</div>
+                <div class="total">6 200 ₽</div>
+                <div class="more">···</div>
+              </div>
+
+              <div class="pr un">
+                <span class="n">5</span>
+                <span class="img">?</span>
+                <div class="nm">
+                  <div class="t">«ролик ДК 90 мм с кронштейном» <span style="font-weight:400;color:var(--amber-700);font-size:11.5px">— требует уточнения</span></div>
+                  <div class="b" style="color:var(--amber-700)">не сматчено · цитата клиента: «ролик дверей кабины d=90, с кронштейном (как раньше брали)»</div>
+                </div>
+                <div class="qty muted" style="color:var(--amber-700)">2 шт</div>
+                <div class="px" style="color:var(--amber-700)">—</div>
+                <div class="qty" style="text-align:left;color:var(--amber-700);font-weight:500">?</div>
+                <div class="total" style="color:var(--amber-700)">—</div>
+                <div class="more">···</div>
+              </div>
+
+              <div class="footer">
+                <span class="add">+ добавить позицию</span>
+                <span class="add">⌕ найти в каталоге</span>
+                <span class="spacer"></span>
+                <span class="sum-meta">подытог:</span><span class="sum">142 800 ₽</span>
+                <span class="sum-meta">+ НДС 20%:</span><span class="sum">28 560 ₽</span>
+                <span class="sum-meta">итого:</span><span class="sum" style="font-size:14px">171 360 ₽</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- THREAD -->
+          <div class="card">
+            <div class="ch">
+              <h3>Переписка</h3>
+              <span class="badge">7</span>
+              <span class="spacer"></span>
+              <span class="small">канал: Я.Почта · sales@myzip.ru ↔ prokat-lift@mail.ru</span>
+              <button class="btn sm">Развернуть всё</button>
+            </div>
+            <div class="thread">
+              <div class="msg">
+                <div class="mh">
+                  <div class="av">КЛ</div>
+                  <div class="who">Лифтремонт · Семёнов Д. <small>prokat-lift@mail.ru · 11.01 в 14:32</small></div>
+                  <div class="spacer"></div>
+                  <span class="lbl det">обнаружено: запрос КП</span>
+                  <span class="time">&lt;CABV…@yandex&gt;</span>
+                </div>
+                <div class="mb">
+                  <p>Добрый день. Прошу выставить КП по позициям для KONE MonoSpace на объект Куркино, корп. 4:</p>
+                  <p>1) КВШ D320×112мм 6 канавок — 2 шт<br>2) Плата LCEFCB G71 — 1 шт<br>3) Замок ДШ Metron 2PTL-2PC левый — 1 шт<br>4) Кнопка с Брайлем «открыть» — 1 шт<br>5) ролик ДК 90 мм с кронштейном (как раньше брали) — 2 шт</p>
+                  <span class="att"><span class="ico">PDF</span> ТЗ-Лифтремонт-Куркино.pdf · 240 KB</span>
+                </div>
+              </div>
+
+              <div class="msg">
+                <div class="mh">
+                  <div class="av out">ИА</div>
+                  <div class="who">Иванов А. <small>ivanov@myzip.ru · 11.01 в 16:08</small></div>
+                  <div class="spacer"></div>
+                  <span class="time">отправлено</span>
+                </div>
+                <div class="mb">
+                  <p>Дмитрий, добрый день. Принял в работу. По п. 5 уточните, пожалуйста, артикул прошлого заказа — нашли два варианта с роликом 90 мм. По остальным позициям пришлю КП до конца дня.</p>
+                </div>
+              </div>
+
+              <div class="msg">
+                <div class="mh">
+                  <div class="av">КЛ</div>
+                  <div class="who">Лифтремонт · Семёнов Д. <small>prokat-lift@mail.ru · 12.01 в 09:14</small></div>
+                  <div class="spacer"></div>
+                  <span class="time">12.01 09:14</span>
+                </div>
+                <div class="mb">
+                  <p>Алексей, добавил вложением фото шильдика. Брали в марте 2024 (счёт 1872).</p>
+                  <span class="att"><span class="ico">JPG</span> IMG-9024.jpeg · 1,2 MB</span>
+                  <span class="att"><span class="ico">JPG</span> IMG-9025.jpeg · 980 KB</span>
+                </div>
+              </div>
+
+              <div class="msg">
+                <div class="mh">
+                  <div class="av out">ИА</div>
+                  <div class="who">Иванов А. <small>ivanov@myzip.ru · 14.01 в 11:42</small></div>
+                  <div class="spacer"></div>
+                  <span class="lbl kp">черновик КП</span>
+                  <span class="time">черновик</span>
+                </div>
+                <div class="mb">
+                  <p>Дмитрий, по позициям 1–4 цены актуальны, всё в наличии. По позиции 5 запросил уточнение у поставщика, ответ ожидаю до конца дня. Высылаю предварительное КП.</p>
+                  <span class="att"><span class="ico">PDF</span> КП-2384-Лифтремонт-draft.pdf · 92 KB</span>
+                </div>
+              </div>
+
+              <!-- Compose -->
+              <div class="compose">
+                <textarea placeholder="Ответ клиенту… Шаблоны: /кп  /refresh  /опл"></textarea>
+                <div class="row">
+                  <button class="btn sm">📎 Прикрепить</button>
+                  <button class="btn sm">⌗ Шаблон</button>
+                  <button class="btn sm">⌕ Вставить КП</button>
+                  <span class="spacer"></span>
+                  <span class="meta">→ prokat-lift@mail.ru · CC: <b style="color:var(--fg-1);font-weight:500">snab-mega@…</b></span>
+                  <button class="btn primary">Отправить</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT (sidebar cards) -->
+        <div>
+
+          <div class="card">
+            <div class="ch"><h3>Сводка</h3></div>
+            <div class="body">
+              <dl class="kv">
+                <dt>Канал</dt><dd>Я.Почта · sales@myzip.ru<span class="small">message-id &lt;CABV…@yandex&gt;</span></dd>
+                <dt>Источник</dt><dd>Прямое письмо клиента</dd>
+                <dt>Бренд / семья</dt><dd>KONE MonoSpace 700</dd>
+                <dt>ИНН клиента</dt><dd style="font-family:var(--font-mono)">7728634591</dd>
+                <dt>Договор</dt><dd>№ 0824/Л от 12.08.2024</dd>
+                <dt>Скидка</dt><dd>15 % (накопительная)<span class="small">подтверждена 01.10.2025</span></dd>
+                <dt>Канал доставки</dt><dd>Самовывоз · Бибиревская, 2</dd>
+                <dt>Объект</dt><dd>ЖК Куркино, корп. 4<span class="small">10 лифтов KONE 2014 г.</span></dd>
+              </dl>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="ch"><h3>Refresh цен</h3><span class="badge">3 ждут</span><span class="spacer"></span><button class="btn sm">Запросить ещё</button></div>
+            <div class="body">
+              <div class="sup">
+                <div class="s">
+                  <div class="nm">KONE-RU<small>Москва · plata, kvsh@kone-msk.ru</small></div>
+                  <span class="chip ok"><span class="dot"></span>ответ получен</span>
+                  <span class="latency">2ч 04м</span>
+                </div>
+                <div class="s">
+                  <div class="nm">SEC-Slovenia<small>orders@sec-elevators.si · англ.</small></div>
+                  <span class="chip attn"><span class="dot"></span>ждём 14ч</span>
+                  <span class="latency">отправлено<br>10:14</span>
+                </div>
+                <div class="s">
+                  <div class="nm">Metron Hellas<small>info@metron-hellas.gr</small></div>
+                  <span class="chip over"><span class="dot"></span>не отвечает 26ч</span>
+                  <span class="latency">2-я попытка<br>назначена</span>
+                </div>
+                <div class="footer-row">
+                  <span>batch <span style="font-family:var(--font-mono);color:var(--fg-2)">#R-1142</span></span>
+                  <span>SLA по поставщикам · 24 ч</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="ch"><h3>Sticky-цепочка</h3><span class="badge">3</span><span class="spacer"></span><span class="small">Иванов А. ↔ Лифтремонт · 90 дн</span></div>
+            <div class="body">
+              <div class="chain">
+                <div class="l">
+                  <span class="code">MZ-21255</span>
+                  <div class="nm">Канат GUSTAV WOLF d=10 · 4×120 м<small>Лифтремонт · 14.11.2025</small></div>
+                  <span class="chip ok"><span class="dot"></span>оплачено</span>
+                </div>
+                <div class="l">
+                  <span class="code">MZ-21302</span>
+                  <div class="nm">Башмак направляющей ЩЛЗ · 8 шт<small>Лифтремонт · 02.12.2025</small></div>
+                  <span class="chip ok"><span class="dot"></span>оплачено</span>
+                </div>
+                <div class="l this">
+                  <span class="code" style="color:var(--sky-700);font-weight:600">MZ-21384</span>
+                  <div class="nm">КВШ D320 + плата LCEFCB G71<small>текущая · 11.01.2026</small></div>
+                  <span class="chip info"><span class="dot"></span>в работе</span>
+                </div>
+              </div>
+              <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle);font-size:11.5px;color:var(--fg-3);display:flex;justify-content:space-between">
+                <span>правило продлено до 11.04.2026</span>
+                <a href="#" style="color:var(--sky-700);text-decoration:none">настроить sticky-правило</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="ch"><h3>Активность</h3><span class="badge">14</span><span class="spacer"></span><span class="small">показано 6 последних</span></div>
+            <div class="body">
+              <div class="timeline">
+                <div class="ev now">
+                  <div class="t"><b>Refresh цен</b> запрошен у KONE-RU и SEC-Slovenia · 2 позиции</div>
+                  <div class="m">14:38 · сейчас · авто</div>
+                </div>
+                <div class="ev">
+                  <div class="t">Сохранён черновик <b>КП-2384-Лифтремонт-draft.pdf</b></div>
+                  <div class="m">14.01 11:42 · Иванов А.</div>
+                </div>
+                <div class="ev">
+                  <div class="t">Получено письмо с фото шильдика (2 вложения)</div>
+                  <div class="m">12.01 09:14 · prokat-lift@…</div>
+                </div>
+                <div class="ev ok">
+                  <div class="t">Позиция 4 сматчена в каталоге как <span style="font-family:var(--font-mono);color:var(--fg-2)">M21944</span></div>
+                  <div class="m">11.01 17:22 · авто</div>
+                </div>
+                <div class="ev">
+                  <div class="t">Отправлен ответ клиенту с уточнением по п. 5</div>
+                  <div class="m">11.01 16:08 · Иванов А.</div>
+                </div>
+                <div class="ev ok">
+                  <div class="t">Назначено <b>Иванов А.</b> по sticky-правилу <span style="font-family:var(--font-mono);color:var(--fg-2)">cust=Лифтремонт</span></div>
+                  <div class="m">11.01 14:33 · диспетчер</div>
+                </div>
+              </div>
+              <a href="#" style="display:block;margin-top:10px;font-size:12px;color:var(--sky-700);text-decoration:none">Показать все 14 событий →</a>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</body></html>
