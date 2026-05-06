@@ -157,13 +157,13 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
         $maxUid = 0;
 
         // FT_PEEK — не ставим \Seen. Foundation §1: «\Seen явно НЕ ставим».
+        // Вложения webklex подгрузит автоматически при getAttachments() в persister'е.
         $messages = $folder->query()
             ->setFetchOptions(IMAP::FT_PEEK)
+            ->setFetchBody(true)
+            ->setFetchFlags(true)
             ->whereUid($sinceUid . ':*')
             ->limit(self::MAX_MESSAGES_PER_RUN)
-            ->setFetchBody(true)
-            ->setFetchAttachment(true)
-            ->setFetchFlags(true)
             ->get();
 
         foreach ($messages as $msg) {
