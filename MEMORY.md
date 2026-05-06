@@ -261,6 +261,32 @@ sudo supervisorctl restart mzcorp-worker:*
 1. Phase 1.9 — `OutgoingMailObserver`: при синке Sent папки matchить письма к Request через `In-Reply-To`/`References` и обновлять `last_outbound_at` на Request.
 2. Подключить Man2/Man3 ящики через OAuth (mail:oauth url 2 → mail:oauth code 2; то же для 3).
 
+## Параллельная задача — Phase 1.8a (умная фильтрация Request)
+
+**Проблема (выявлено 2026-05-06):** Сейчас Request создаётся для **любого** письма с `ai_classification=request`, без других фильтров. Из-за этого в пуле много мусора:
+- авто-уведомления от партнёрских систем (`order@liftway.store` 26 шт., `[ENKA-EGPS-NOTIFICATION]`, `robot@dellin.ru`);
+- внутренние письма от `@myzip.ru` (свои коллеги форвардят/обсуждают);
+- `Re:`/`Fwd:` на существующие заявки идут как **новые** Request, а должны привязываться как thread items;
+- loop-копии (исторические, до hotfix `21f5354`).
+
+**Что добавить:**
+
+1. **Confidence threshold** в `IncomingMailProcessor::processIfRequest()`:
+   - если `ai_classification_confidence < 0.7` — не создаём Request, ставим label `MyLift/На проверку РОПа`. РОП конвертит вручную в UI.
+
+2. **Sender filter** (хардкод-конфиг → потом в таблицу `client_filters`):
+   - `from_domain ∈ {myzip.ru}` — internal, не Request (label `MyLift/Внутреннее`).
+   - `from_email matches /^(noreply|no-reply|robot|mailer-daemon|bounce|notification|notifications)@/` — авто, не Request (label `MyLift/Авто-уведомление`).
+   - `from_email ∈ {order@liftway.store, ...}` — отдельный список (label `MyLift/Авто-заявка`).
+
+3. **Thread-аттач через `In-Reply-To`/`References`:** перед созданием Request пройти по `[in_reply_to, references_header]`, найти `EmailMessage where message_id IN refs AND related_request_id IS NOT NULL` — привязать новое письмо к **существующему** Request, не создавать новый.
+
+4. **SubjectNormalizerService** из LazyLift (drop-in) — для нормализации `Re:`/`Fwd:` префиксов в subject; пригодится и для thread tracking, и для дедупа похожих subjects.
+
+5. **Команда `requests:cleanup`:** dry-run + `--apply`, чтобы убрать существующие 165 Request, попадающих под новые фильтры (soft-delete или label «mailtrash»).
+
+Этот блок — **после** redesign или параллельно. Очищает пул менеджера от шума и делает дальнейшие фазы (sticky-роутинг Phase 2) чище.
+
 ## Известные грабли (накопленные за Phase 1.4)
 
 - **App passwords в Yandex 360 для бизнеса часто отключены** — путь сразу через OAuth.
