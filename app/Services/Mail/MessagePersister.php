@@ -62,7 +62,7 @@ class MessagePersister
                 'message_id' => $messageId,
                 'in_reply_to' => $this->extractInReplyTo($msg),
                 'references_header' => $this->extractReferences($msg),
-                'subject' => $this->truncate($this->stringify($msg->getSubject()), 998),
+                'subject' => $this->truncate($this->decodeMimeHeader($this->stringify($msg->getSubject())), 998),
                 'from_email' => $this->extractFromEmail($msg),
                 'from_name' => $this->extractFromName($msg),
                 'to_recipients' => $this->extractAddressList($msg, 'to'),
@@ -211,7 +211,7 @@ class MessagePersister
             }
             $result[] = [
                 'email' => $email,
-                'name' => isset($addr->personal) ? (string) $addr->personal : null,
+                'name' => isset($addr->personal) ? $this->decodeMimeHeader((string) $addr->personal) : null,
             ];
         }
 
@@ -238,7 +238,7 @@ class MessagePersister
 
         return [
             'email' => $email,
-            'name' => isset($first->personal) ? (string) $first->personal : null,
+            'name' => isset($first->personal) ? $this->decodeMimeHeader((string) $first->personal) : null,
         ];
     }
 
