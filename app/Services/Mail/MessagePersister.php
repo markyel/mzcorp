@@ -85,7 +85,12 @@ class MessagePersister
 
     private function persistAttachment(Attachment $att, EmailMessage $email): void
     {
-        $filename = $att->getName() ?? ('attachment-' . Str::random(8));
+        $rawFilename = (string) ($att->getName() ?? ('attachment-' . Str::random(8)));
+        $decodedFilename = $this->decodeMimeHeader($rawFilename);
+        // varchar(255), плюс защита от ультра-длинных имён (Yandex иногда
+        // возвращает MIME-encoded имя из 10+ кусков).
+        $filename = $this->truncate($decodedFilename, 255);
+
         $relativePath = sprintf(
             'mail/%d/%s/%s',
             $email->mailbox_id,
@@ -105,6 +110,28 @@ class MessagePersister
             'disk' => $this->attachmentDisk,
             'is_inline' => $att->getDisposition() === 'inline',
         ]);
+    }
+
+    /**
+     * Декодировать MIME-encoded заголовок (`=?utf-8?Q?...?=`) в обычный UTF-8.
+     */
+    private function decodeMimeHeader(string $value): string
+    {
+        if ($value === '' || ! str_contains($value, '=?')) {
+            return $value;
+        }
+
+        $decoded = @iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
+        if ($decoded !== false && $decoded !== '') {
+            return $decoded;
+        }
+
+        $decoded = @mb_decode_mimeheader($value);
+        if ($decoded !== false && $decoded !== '') {
+            return $decoded;
+        }
+
+        return $value;
     }
 
     private function extractMessageId(Message $msg): ?string
