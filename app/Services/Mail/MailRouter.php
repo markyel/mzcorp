@@ -22,6 +22,7 @@ class MailRouter
         private readonly MailRoutingRuleEngine $engine,
         private readonly MailLabelService $labels,
         private readonly MailForwarder $forwarder,
+        private readonly MailClassifierService $classifier,
     ) {
     }
 
@@ -32,6 +33,18 @@ class MailRouter
         }
 
         $matches = $this->engine->match($message);
+
+        // Foundation §2.3-2.4: если ни одно rule-based правило не сработало —
+        // AI fallback. После AI пробуем правила ещё раз (теперь могут
+        // сработать те, что match_mode=ai_classified).
+        if (empty($matches)) {
+            $classified = $this->classifier->classify($message);
+            if ($classified !== null) {
+                // Перезагружаем модель из БД, т.к. classifier обновил её.
+                $message->refresh();
+                $matches = $this->engine->match($message);
+            }
+        }
 
         if (empty($matches)) {
             $this->recordNoMatch($message);
