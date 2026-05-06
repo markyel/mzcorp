@@ -6,10 +6,12 @@ use App\Enums\MailDirection;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Webklex\PHPIMAP\Attachment;
+use Webklex\PHPIMAP\Attribute;
 use Webklex\PHPIMAP\Message;
 
 /**
@@ -18,6 +20,10 @@ use Webklex\PHPIMAP\Message;
  * Идемпотентность по Foundation §1: уникальный ключ
  * (mailbox_id, folder, message_id). Один и тот же физический Message-ID может
  * лежать в Inbox получателя и в Sent отправителя — это разные записи.
+ *
+ * Внимание: webklex 6.x возвращает заголовки и адреса как объекты
+ * \Webklex\PHPIMAP\Attribute. У него есть first()/all()/toArray()/__toString,
+ * но НЕТ ->values(), как у Laravel Collection. Поэтому работаем через ->all().
  */
 class MessagePersister
 {
@@ -54,19 +60,19 @@ class MessagePersister
                 'direction' => $direction->value,
                 'imap_uid' => $msg->getUid(),
                 'message_id' => $messageId,
-                'in_reply_to' => $this->extractHeader($msg, 'in_reply_to'),
+                'in_reply_to' => $this->extractInReplyTo($msg),
                 'references_header' => $this->extractReferences($msg),
-                'subject' => $this->truncate((string) $msg->getSubject(), 998),
+                'subject' => $this->truncate($this->stringify($msg->getSubject()), 998),
                 'from_email' => $this->extractFromEmail($msg),
                 'from_name' => $this->extractFromName($msg),
                 'to_recipients' => $this->extractAddressList($msg, 'to'),
                 'cc_recipients' => $this->extractAddressList($msg, 'cc'),
-                'sent_at' => $msg->getDate()?->toDate(),
-                'body_plain' => (string) $msg->getTextBody(),
-                'body_html' => (string) $msg->getHTMLBody(),
-                'raw_source' => $msg->getRawBody(),
+                'sent_at' => $this->extractDate($msg),
+                'body_plain' => $this->cleanString((string) $msg->getTextBody()),
+                'body_html' => $this->cleanString((string) $msg->getHTMLBody()),
+                'raw_source' => $this->cleanString((string) $msg->getRawBody()),
                 'headers' => $this->extractAllHeaders($msg),
-                'imap_flags' => $msg->getFlags()->toArray(),
+                'imap_flags' => $this->extractFlags($msg),
             ]);
 
             foreach ($msg->getAttachments() as $att) {
@@ -103,22 +109,16 @@ class MessagePersister
 
     private function extractMessageId(Message $msg): ?string
     {
-        $raw = (string) $msg->getMessageId();
-        $raw = trim($raw, " \t\n\r\0\x0B<>");
+        $raw = trim($this->stringify($msg->getMessageId()), " \t\n\r\0\x0B<>");
 
         return $raw !== '' ? $raw : null;
     }
 
-    private function extractHeader(Message $msg, string $name): ?string
+    private function extractInReplyTo(Message $msg): ?string
     {
-        $value = $msg->getHeader()->get($name);
-        if ($value === null || $value === '') {
-            return null;
-        }
+        $raw = trim($this->stringify($msg->getInReplyTo()), " \t\n\r\0\x0B<>");
 
-        return is_object($value) && method_exists($value, '__toString')
-            ? (string) $value
-            : (is_scalar($value) ? (string) $value : null);
+        return $raw !== '' ? $raw : null;
     }
 
     /**
@@ -126,14 +126,14 @@ class MessagePersister
      */
     private function extractReferences(Message $msg): ?array
     {
-        $raw = $this->extractHeader($msg, 'references');
-        if ($raw === null) {
+        $raw = $this->stringify($msg->getReferences());
+        if ($raw === '') {
             return null;
         }
 
         // References — это разделённый пробелами список <message-ids>.
         $ids = [];
-        foreach (preg_split('/\s+/', $raw) as $id) {
+        foreach (preg_split('/\s+/', $raw) ?: [] as $id) {
             $id = trim($id, "<> \t\r\n");
             if ($id !== '') {
                 $ids[] = $id;
@@ -145,16 +145,16 @@ class MessagePersister
 
     private function extractFromEmail(Message $msg): string
     {
-        $from = $msg->getFrom()->first();
+        $from = $this->firstAddress($msg->getFrom());
 
-        return $from->mail ?? '';
+        return $from['email'] ?? '';
     }
 
     private function extractFromName(Message $msg): ?string
     {
-        $from = $msg->getFrom()->first();
+        $from = $this->firstAddress($msg->getFrom());
 
-        return $from->personal ?? null;
+        return $from['name'] ?? null;
     }
 
     /**
@@ -162,20 +162,94 @@ class MessagePersister
      */
     private function extractAddressList(Message $msg, string $field): array
     {
-        $list = match ($field) {
+        $attribute = match ($field) {
             'to' => $msg->getTo(),
             'cc' => $msg->getCc(),
             default => null,
         };
 
-        if (! $list) {
+        if ($attribute === null) {
             return [];
         }
 
-        return $list->map(fn ($addr) => [
-            'email' => $addr->mail ?? '',
-            'name' => $addr->personal ?? null,
-        ])->values()->all();
+        $items = $this->attributeToArray($attribute);
+        $result = [];
+        foreach ($items as $addr) {
+            if (! is_object($addr)) {
+                continue;
+            }
+            $email = (string) ($addr->mail ?? '');
+            if ($email === '') {
+                continue;
+            }
+            $result[] = [
+                'email' => $email,
+                'name' => isset($addr->personal) ? (string) $addr->personal : null,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * @return array{email: string, name: ?string}|null
+     */
+    private function firstAddress(?Attribute $attr): ?array
+    {
+        if ($attr === null) {
+            return null;
+        }
+        $items = $this->attributeToArray($attr);
+        $first = $items[0] ?? null;
+        if (! is_object($first)) {
+            return null;
+        }
+        $email = (string) ($first->mail ?? '');
+        if ($email === '') {
+            return null;
+        }
+
+        return [
+            'email' => $email,
+            'name' => isset($first->personal) ? (string) $first->personal : null,
+        ];
+    }
+
+    /**
+     * Carbon-дата из Attribute getDate(). Webklex кладёт туда первый элемент Carbon.
+     */
+    private function extractDate(Message $msg): ?CarbonInterface
+    {
+        $attr = $msg->getDate();
+        if ($attr === null) {
+            return null;
+        }
+        $first = $this->attributeToArray($attr)[0] ?? null;
+
+        return $first instanceof CarbonInterface ? $first : null;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractFlags(Message $msg): array
+    {
+        $flags = $msg->getFlags();
+        if (! $flags) {
+            return [];
+        }
+
+        // FlagCollection — Laravel Collection, толерантнее.
+        if (method_exists($flags, 'toArray')) {
+            $arr = $flags->toArray();
+
+            return array_values(array_filter(
+                array_map(fn ($v) => is_scalar($v) ? (string) $v : null, $this->flatten($arr)),
+                fn ($v) => $v !== null && $v !== '',
+            ));
+        }
+
+        return [];
     }
 
     /**
@@ -183,19 +257,112 @@ class MessagePersister
      */
     private function extractAllHeaders(Message $msg): array
     {
-        $attrs = $msg->getHeader()->getAttributes();
+        $header = $msg->getHeader();
+        if ($header === null) {
+            return [];
+        }
+        $attrs = $header->getAttributes();
+        $out = [];
+        foreach ($attrs as $key => $value) {
+            $out[(string) $key] = $this->normalizeHeaderValue($value);
+        }
 
-        // Приводим объекты Carbon/Address к скаляру/массиву для jsonb.
-        return collect($attrs)->map(function ($value) {
-            if (is_object($value) && method_exists($value, '__toString')) {
-                return (string) $value;
+        return $out;
+    }
+
+    private function normalizeHeaderValue(mixed $value): mixed
+    {
+        if ($value === null || is_scalar($value)) {
+            return $value;
+        }
+        if ($value instanceof CarbonInterface) {
+            return $value->toIso8601String();
+        }
+        if ($value instanceof Attribute) {
+            $items = $value->all();
+            if (count($items) === 1) {
+                return $this->normalizeHeaderValue($items[0]);
             }
-            if (is_array($value) || is_scalar($value) || $value === null) {
-                return $value;
+
+            return array_map(fn ($v) => $this->normalizeHeaderValue($v), $items);
+        }
+        if (is_object($value)) {
+            // Address-объекты и тому подобное — приводим к массиву свойств.
+            $vars = get_object_vars($value);
+            if ($vars) {
+                return array_map(fn ($v) => $this->normalizeHeaderValue($v), $vars);
+            }
+            if (method_exists($value, '__toString')) {
+                return (string) $value;
             }
 
             return null;
-        })->all();
+        }
+        if (is_array($value)) {
+            return array_map(fn ($v) => $this->normalizeHeaderValue($v), $value);
+        }
+
+        return null;
+    }
+
+    /**
+     * Webklex Attribute → массив значений. Безопасно к разным версиям API.
+     *
+     * @return array<int, mixed>
+     */
+    private function attributeToArray(mixed $attr): array
+    {
+        if ($attr instanceof Attribute) {
+            return array_values($attr->all());
+        }
+        if (is_array($attr)) {
+            return array_values($attr);
+        }
+        if (is_object($attr) && method_exists($attr, 'all')) {
+            $r = $attr->all();
+
+            return is_array($r) ? array_values($r) : [];
+        }
+
+        return [];
+    }
+
+    /**
+     * Безопасно привести Attribute/object/scalar к строке.
+     */
+    private function stringify(mixed $value): string
+    {
+        if ($value === null) {
+            return '';
+        }
+        if (is_string($value)) {
+            return $value;
+        }
+        if (is_scalar($value)) {
+            return (string) $value;
+        }
+        if (is_object($value) && method_exists($value, '__toString')) {
+            return (string) $value;
+        }
+
+        return '';
+    }
+
+    /**
+     * Удалить недопустимые байты UTF-8 (PostgreSQL не примет invalid UTF-8 в text-полях).
+     */
+    private function cleanString(string $s): string
+    {
+        if ($s === '') {
+            return '';
+        }
+        // 0x00 не разрешён в text у PostgreSQL.
+        $s = str_replace("\0", '', $s);
+        if (! mb_check_encoding($s, 'UTF-8')) {
+            $s = mb_convert_encoding($s, 'UTF-8', 'UTF-8');
+        }
+
+        return $s;
     }
 
     private function truncate(string $value, int $max): string
@@ -208,5 +375,19 @@ class MessagePersister
         $name = preg_replace('/[^A-Za-z0-9._\-]/', '_', $name) ?? 'file';
 
         return mb_substr($name, 0, 80);
+    }
+
+    /**
+     * @param  array<mixed>  $arr
+     * @return array<int, mixed>
+     */
+    private function flatten(array $arr): array
+    {
+        $out = [];
+        array_walk_recursive($arr, function ($v) use (&$out) {
+            $out[] = $v;
+        });
+
+        return $out;
     }
 }
