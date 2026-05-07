@@ -20,6 +20,7 @@
 | 1.6 | AI-классификация писем (`gpt-4o-mini`): `request \| reclamation \| accounting \| general_question \| spam \| other` | `OpenAIChatService` drop-in из LazyLift + новый промпт | done |
 | 1.7 | (объединён в 1.5) | — | done |
 | 1.8 | Минимальный `Request` + `IncomingMailProcessor` + round-robin `AssignmentService` + 165 заявок backfilled | базовая модель из LazyLift в урезанном виде | done |
+| 1.8b | Content-driven парсинг позиций (`RequestItemParsingService` drop-in) + `RequestItem` + `RequestItemPersister` + `MailFolderRouter` (COPY в `MZ\|{Lastname}` подпапку для секретаря) + CLI `requests:parse-items` | drop-in из LazyLift @ 25b59645 + новые сервисы | done (CLI-only, MailRouter-интеграция отложена) |
 | 1.9 | `OutgoingMailObserver` (Sent-tracking, привязка к `Request` через `In-Reply-To`/`References`) | новое | pending |
 | 1.10 | UI `/dashboard/requests` — пул менеджера + карточка заявки + inline attachments | новое (Livewire 4) | done |
 | 1.11 | Дашборд РОПа v0: KPI, AI breakdown, manager load, mailbox health, последние пересылки | новое | done |
@@ -84,7 +85,7 @@ sudo supervisorctl restart mzcorp-worker:*
 ### Технические — для Фазы 1
 
 5. **Аутентификация ящиков** — на MVP App passwords. Менеджер генерирует app-password в настройках Yandex и передаёт админу. OAuth — на потом.
-6. **Формат IMAP-меток в Yandex 360** — какой именно синтаксис custom keywords корректно отображается в Яндекс веб-клиенте. **Тестируем на боевом ящике в начале Фазы 1**, документируем результат тут.
+6. ~~**Формат IMAP-меток в Yandex 360**~~ — **закрыт 2026-05-07.** Эмпирически установлено: IMAP custom keywords (`STORE +FLAGS`) хранятся на сервере, но Yandex web UI их не показывает; вдобавок Yandex IMAP сбрасывает custom-keywords после `CLOSE/SELECT` (известный баг сервера). Yandex 360 REST API endpoints для меток нет. **Workaround:** вместо меток используем подпапки на root-уровне namespace — `MZ\|{Lastname}` (см. `MailFolderRouter`). Подпапки создаются и видны в Yandex web UI штатно. Foundation §1.6 «секретарь видит распределение в Yandex UI» удовлетворён через folder hierarchy.
 7. **Полный набор правил маршрутизации** — какие категории помимо очевидных (рекламации, бухгалтерия) команда хочет различать. **Собираем примеры реальных писем в начале Фазы 1.**
 
 ## Известные грабли
@@ -95,6 +96,12 @@ sudo supervisorctl restart mzcorp-worker:*
 - **Yandex папки по-русски** (`Входящие`, `Отправленные`) — мониторим через IMAP special-use flags (`\Inbox`, `\Sent`), **не по именам**.
 - **`UIDVALIDITY`** — при смене делаем full resync с папки.
 - **Origin SSH-alias на VPS** — на VPS изначально был SSH origin с alias `github.com-mzcorp`. Под `www-data` алиас не резолвится, переключили на HTTPS. Если кто-то снова поставит SSH — напоминать сменить.
+- **Yandex 360 IMAP folder ops (Phase 1.8b находки):**
+  - **Намespace delimiter — `\|`**, не RFC-стандартный `/`. Webklex `Folder->delimiter` корректно репортит. Все пути строятся через detected delimiter.
+  - **CREATE подпапки под INBOX запрещён** — Yandex отвечает `BAD [CLIENTBUG] CREATE cannot apply to INBOX subfolder`. Все «Мои папки» живут на root-уровне параллельно с INBOX (`MZ`, `MZ\|Ivanov`, не `INBOX\|MZ\|Ivanov`).
+  - **Имена папок в MUTF-7 (RFC 3501 §5.1.3)**: webklex auto-encode для `createFolder`, но не для `copy/move`. Двойной encode даёт литерал `&BBgEMgQwBD0EPgQy-`. **Решение:** имена папок только ASCII, через транслитерацию `cyrillicToLatin()` (`Иванов` → `Ivanov`, ICU `transliterator_transliterate` + fallback map).
+  - **MOVE / COPY+EXPUNGE не работают**: Yandex даёт `BAD [CLIENTBUG] EXPUNGE Wrong session state for command` если webklex после COPY пытается EXPUNGE. **Решение:** только `$msg->copy($path, expunge: false)`, без MOVE/DELETE/EXPUNGE — оригинал остаётся в INBOX, копия в `MZ\|{Lastname}`. Чтобы оригинал не торчал «непрочитанным» — ставим `\Seen` на оригинал явно после COPY (отступление от Foundation §1, документировано в CLAUDE.md абс. правило #8).
+  - **createFolder требует существующих парентов**: `MZ\|Ivanov` нельзя создать без предварительного `MZ`. `MailFolderRouter::ensureFolder()` идёт по сегментам (recursive create).
 
 ## Журнал сессий
 
@@ -209,11 +216,68 @@ sudo supervisorctl restart mzcorp-worker:*
 **Phase 1.12 (Design polish) — начато, не завершено:**
 - Прочитаны `design/colors_and_type.css` и `design/ui_kits/crm/02-dashboard.html`.
 - Текущий UI собран на дефолтном Breeze layout с Figtree font и стандартными gray Tailwind classes — это явно отличается от макетов (Inter font, 13px base, oklch neutrals, 9-step palette, top-bar 48px + left rail 56px).
-- Решение: полный redesign, поэтапно. План — в разделе «План на 2026-05-07» ниже.
+- Решение: полный redesign, поэтапно. На 2026-05-07 ушло на Phase 1.8b — отложено.
 
-## План на 2026-05-07
+### Сессия 2026-05-07 — Phase 1.8b (content-driven парсинг + folder routing)
 
-Главная цель сессии — **Phase 1.12 redesign по `design/ui_kits/crm/`**. Объёмная работа на несколько коммитов.
+Большая сессия, ~14 коммитов. Закрыли Phase 1.8b целиком в CLI-режиме (без интеграции в boevoй MailRouter — отложена).
+
+**Что сделано:**
+- **Pkg 1** (`cc1df60`) — composer deps: `smalot/pdfparser ^2.12`, `phpoffice/phpword ^1.2`, `phpoffice/phpspreadsheet ^5.5`. На VPS apt: `poppler-utils + abiword`.
+- **Pkg 2** (`5093d11`) — миграция `request_items` + модель `RequestItem` (минимум: parsed_*, supplier_note, data_source, status, is_active) + `Request->items()` HasMany.
+- **Pkg 3** (`45920a3`) — `RequestItemParsingService` drop-in из LazyLift @ `25b59645`. Адаптации: `OpenAIChatService` namespace, hard-coded models → `config('services.openai.parsing_model'\|'vision_model')`, `parseItemsFromInboundMessage` под `EmailMessage`/`EmailAttachment` (был `RequestMessage`/`RequestAttachment`).
+- **Pkg 4** (`b912df1`) — `RequestItemPersister` (idempotent items → Request) + CLI `requests:parse-items` (single + bulk modes, --apply, --force, --limit, --from-id).
+- **Pkg 5** (`674a916` → `e9b84c7` → `29ce799`) — `MailFolderRouter`: COPY письма в подпапку `MZ\|{Lastname}` (root namespace, не под INBOX), транслитерация имён, FT_PEEK при чтении, явное `\Seen` после COPY.
+
+**Результаты backfill (`requests:parse-items --apply --force --limit=500`):**
+- 360 inbound писем обработано
+- 227 с непустыми items (63% — реальные заявки)
+- 424 позиций распарсено всего (~1.87 на заявку)
+- 38 новых Request созданы (+пропущенных старым AI-classifier)
+- 189 Request обновлены (items добавлены к существующим)
+- **0 failed** — pipeline стабилен на массовом прогоне
+- Распределение по папкам: `MZ\|Ivanov` 137, `MZ\|2` 46, `MZ\|3` 44 — round-robin отработал на трёх менеджерах
+- Стоимость: ~$10-15 (gpt-4.1 + gpt-4o Vision)
+
+**Открытый вопрос #6 закрыт.** Зафиксированы Yandex IMAP folder ops quirks в «Известные грабли».
+
+**Новый открытый вопрос:** **\Seen побочно ставится** — все 369 писем в INBOX `\Seen`, новые приходящие тоже становятся \Seen «через какое-то время». Все наши IMAP-fetch'и используют `FT_PEEK`, но похоже webklex 6.x в комбинации `FT_PEEK + setFetchBody(true) + setFetchFlags(true)` не уважает PEEK для тела (не ставит `BODY.PEEK[]`). Не блокирует, но идёт против Foundation §1. Расследование на следующую сессию.
+
+**Legacy для уборки (вручную в Yandex UI):**
+- Папки `MZ\|2`, `MZ\|3` называются по `shortName('Менеджер 2')='2'` — некрасиво. Если name тестовых юзеров поменяют на нормальные — папки переименуются автоматически (новый MOVE создаст `MZ\|Petrov` и т.п., старые `MZ\|2`/`MZ\|3` останутся как rubbish). Удалить вручную в UI.
+- `MZ\|&-BBgEMgQwBD0EPgQy-` и `MZ\|&BBgEMgQwBD0EPgQy-` — наши early-attempt фейлы с double-encode и manual UI create. Удалить вручную.
+- Зелёный label «MZ Иванов» на email#16 (legacy IMAP keyword до перехода на folder approach) — удалить вручную.
+
+## План на следующую сессию
+
+Главная цель будет одной из (выбор за оператором):
+
+### Вариант A. MailRouter integration в боевой pipeline (предположительно следующий шаг Phase 1.8b)
+
+1. **`MailRouter::route()`** — переключить порядок: сейчас flow `rules → AI classify → IncomingMailProcessor::processIfRequest`. Заменить на `rules → RequestItemParser → если items > 0 → RequestItemPersister`. AI classification оставить как метку, но НЕ как триггер создания Request.
+2. **Удалить или урезать `MailClassifierService`** — он остаётся только как label-помощник в UI, не как primary gate для Request.
+3. **Тест на свежем входящем** — отправить тестовое письмо с PDF-заявкой, проверить что Request создаётся автоматически (без CLI), MOVE отрабатывает.
+
+### Вариант B. Phase 1.12 — UI redesign (отложено с этой сессии)
+
+План был зафиксирован выше (токены + layout + дашборд + requests + mail-rules). Можно вернуться, когда CLI стабилизировался.
+
+### Вариант C. `\Seen` riddle — расследование
+
+1. Контролируемый тест: отправить «чистое» письмо в `mail@myzip.ru`, проверить UNSEEN сразу.
+2. Запустить `mail:sync` — проверить UNSEEN.
+3. Если \Seen появляется после sync → виноват `setFetchBody(true)`. Тогда фикс: либо тянуть body отдельным `BODY.PEEK[]` raw call, либо после fetch явно `removeFlag('Seen')`.
+4. Альтернатива: принять `\Seen = «обработано MyLift»` как новую норму, обновить Foundation §1.
+
+### Вариант D. Phase 1.9 — Sent-tracking (`OutgoingMailObserver`)
+
+Привязка исходящих к Request через `In-Reply-To`/`References`. Минимум для отслеживания «менеджер ответил клиенту».
+
+---
+
+## ⚠️ Старый план на 2026-05-07 (был — отложен)
+
+Главная цель планировалась — **Phase 1.12 redesign по `design/ui_kits/crm/`**. Перенесено: вместо этого сделали Phase 1.8b. План ниже сохранён для следующего раза.
 
 ### Шаг 1. Фундамент — токены + Tailwind config
 1. Создать `resources/css/design-tokens.css` — копия CSS-vars из `design/colors_and_type.css` без `@import url(font)` (шрифт грузим через `<link>` в layout).
