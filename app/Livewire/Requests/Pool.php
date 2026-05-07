@@ -84,7 +84,10 @@ class Pool extends Component
                     ->select(['id', 'from_email', 'from_name'])
                     ->withCount('attachments'),
                 'items:id,request_id,parsed_name,parsed_brand,position',
-                'latestAssignment:id,request_id,reason',
+                // latestAssignment без partial-select — `latestOfMany` делает
+                // self-join, и колонки без префикса (request_id) дают
+                // SQLSTATE[42702] ambiguous column.
+                'latestAssignment',
             ])
             ->withCount('items')
             ->orderByDesc('id');
