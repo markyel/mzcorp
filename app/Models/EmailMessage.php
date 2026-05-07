@@ -42,6 +42,12 @@ class EmailMessage extends Model
         'classified_at',
         'detected_artifacts',
         'related_request_id',
+        // Phase 1.8c — новая категоризация (LazyLift drop-in).
+        'category',
+        'category_confidence',
+        'category_intent',
+        'category_reasoning',
+        'categorized_at',
     ];
 
     protected function casts(): array
@@ -58,6 +64,9 @@ class EmailMessage extends Model
             'sent_at' => 'datetime',
             'classified_at' => 'datetime',
             'ai_classification_confidence' => 'float',
+            // Phase 1.8c
+            'category_confidence' => 'float',
+            'categorized_at' => 'datetime',
         ];
     }
 
@@ -74,5 +83,10 @@ class EmailMessage extends Model
     public function routedMails(): HasMany
     {
         return $this->hasMany(RoutedMail::class);
+    }
+
+    public function relatedRequest(): BelongsTo
+    {
+        return $this->belongsTo(Request::class, 'related_request_id');
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Services\Request;
 
+use App\Enums\EmailCategory;
 use App\Enums\RequestStatus;
 use App\Models\EmailMessage;
 use App\Models\Request;
@@ -44,6 +45,21 @@ class RequestItemPersister
     public function persist(EmailMessage $message, array $items): array
     {
         if (empty($items)) {
+            return ['request' => null, 'new' => 0, 'dup' => 0, 'just_created' => false];
+        }
+
+        // Phase 1.8c: триггер для создания Request — только client_request.
+        // Если письмо категоризовано как thread_reply / irrelevant — не
+        // создаём Request, даже если парсер извлёк позиции (мог увидеть
+        // «items» в supplier offer или newsletter).
+        if ($message->category !== null
+            && $message->category !== EmailCategory::ClientRequest->value) {
+            Log::info('RequestItemPersister: skipped by category', [
+                'email_message_id' => $message->id,
+                'category' => $message->category,
+                'confidence' => $message->category_confidence,
+            ]);
+
             return ['request' => null, 'new' => 0, 'dup' => 0, 'just_created' => false];
         }
 

@@ -65,6 +65,9 @@ return [
         // parsing_model — текстовый чат, vision_model — image_url-чат с detail:high.
         'parsing_model' => env('OPENAI_PARSING_MODEL', 'gpt-4.1'),
         'vision_model' => env('OPENAI_VISION_MODEL', 'gpt-4o'),
+        // Phase 1.8c: расширенный классификатор (LazyLift drop-in). Сложный
+        // промпт с reasoning — gpt-4o, не -mini.
+        'category_model' => env('OPENAI_CATEGORY_MODEL', 'gpt-4o'),
     ],
 
 ];
