@@ -26,7 +26,7 @@
     скроллится естественно.
 --}}
 <div class="grid"
-     style="grid-template-columns: 56px 240px 1fr; min-height: calc(100vh - 56px);">
+     style="grid-template-columns: 56px 240px 1fr; min-height: calc(100vh - var(--topbar-h));">
 
     {{-- ============== RAIL ============== --}}
     <aside class="border-r border-[var(--border)] bg-[var(--bg-sidebar)] flex flex-col items-center py-2 gap-0.5">
@@ -233,13 +233,8 @@
             </div>
             <div class="flex-1"></div>
 
-            {{-- Search (Phase 2) — пока только локальный фильтр по полям --}}
-            <div class="relative w-[280px]">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-3)] select-none">⌕</span>
-                <input type="search" wire:model.live.debounce.300ms="search"
-                       placeholder="Код, тема, клиент, артикул…"
-                       class="w-full h-[30px] pl-8 pr-3 border border-[var(--border)] rounded-md bg-[var(--bg-app)] text-[var(--fg-1)] text-[13px] outline-none focus:border-[var(--sky-500)]">
-            </div>
+            {{-- Search вынесен в topbar (navigation.blade.php). Здесь —
+                 синхронизатор: если URL-param ?q изменился, Livewire подхватит. --}}
 
             <button class="btn" disabled title="{{ $disabledTitle }}">Экспорт CSV</button>
 
@@ -362,12 +357,31 @@
                     @foreach($group['rows'] as $req)
                         @php
                             $href = route('requests.show', $req);
-                            $age = $req->created_at?->diffForHumans(['short' => true, 'parts' => 1]);
-                            $ageDays = $req->created_at ? (int) $req->created_at->diffInDays(now()) : 0;
+
+                            // Короткий формат возраста: «Nм / Nч / Nд» (как в макете),
+                            // вместо ru-локали Carbon «1 ч. назад».
+                            $age = '—';
+                            $ageDays = 0;
+                            if ($req->created_at) {
+                                $secs = (int) abs(now()->diffInSeconds($req->created_at, false));
+                                $ageDays = (int) floor($secs / 86400);
+                                $age = $secs < 60 ? $secs . 'с'
+                                    : ($secs < 3600 ? (int) floor($secs / 60) . 'м'
+                                    : ($secs < 86400 ? (int) floor($secs / 3600) . 'ч'
+                                    : $ageDays . 'д'));
+                            }
                             $ageColor = $ageDays >= 7 ? 'text-[var(--red-700)]' : ($ageDays >= 3 ? 'text-[var(--amber-700)]' : 'text-[var(--fg-3)]');
 
+                            // Title cell: t1 — имя первой позиции (если items распарсены),
+                            // иначе subject. t2 — компактная контекстная строка
+                            // «N поз. · бренд» БЕЗ дублирования subject (он уже в t1
+                            // когда items нет, или сам по себе шумит).
                             $firstItem = $req->items->first();
-                            $titleT1 = $firstItem?->parsed_name ?: ($req->subject ?: '(без темы)');
+                            $titleT1 = \Illuminate\Support\Str::limit(
+                                $firstItem?->parsed_name ?: ($req->subject ?: '(без темы)'),
+                                90,
+                                '…'
+                            );
                             $titleT2parts = [];
                             if ($req->items_count > 0) {
                                 $titleT2parts[] = $req->items_count . ' поз.';
@@ -375,8 +389,9 @@
                             if ($firstItem?->parsed_brand) {
                                 $titleT2parts[] = $firstItem->parsed_brand;
                             }
-                            if ($req->subject && $firstItem) {
-                                $titleT2parts[] = \Illuminate\Support\Str::limit($req->subject, 60, '…');
+                            // Subject в t2 только если items есть (иначе t1 = subject уже).
+                            if ($firstItem && $req->subject) {
+                                $titleT2parts[] = \Illuminate\Support\Str::limit($req->subject, 50, '…');
                             }
                             $titleT2 = implode(' · ', $titleT2parts);
 

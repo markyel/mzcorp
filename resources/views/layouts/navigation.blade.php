@@ -1,8 +1,12 @@
 @php
     /**
-     * Top-bar 48px: brand wordmark + workspace pill + nav links + user menu.
-     * Дизайн-токены тянутся через Tailwind config (см. tailwind.config.js).
-     * Левый rail (56px) добавим в Phase 2, когда появятся вторичные scopes.
+     * Top-bar 48px по макету 03-requests.html:
+     *   [brand] [workspace pill] [nav-links] [search ⌘K] ... [Import 1C] [+ Заявка] [🔔] [avatar]
+     *
+     * Глобальная nav (Дашборд/Заявки/Правила почты) пока остаётся в топбаре —
+     * Phase 2 переедет в левый rail когда rail станет глобальным компонентом.
+     * Search-form GET'ает в requests.index — фильтрует пул через URL-param `q`.
+     * Phase 2 элементы (Import 1C / +Заявка / Bell) — disabled placeholder'ы.
      */
     $user = auth()->user();
 
@@ -12,6 +16,10 @@
         ->whereNotNull('last_error_at')
         ->whereColumn('last_error_at', '>', \Illuminate\Support\Facades\DB::raw('COALESCE(last_synced_at, \'1970-01-01\')'))
         ->count();
+    $primaryMailbox = \App\Models\Mailbox::query()
+        ->where('is_active', true)
+        ->orderBy('id')
+        ->value('email');
     $workspaceDot = $mailboxesError > 0
         ? 'bg-amber-600'
         : ($mailboxesActive > 0 ? 'bg-emerald-600' : 'bg-neutral-400');
@@ -26,6 +34,13 @@
         return 'ящиков';
     })($mailboxesActive);
 
+    $workspaceLabel = $primaryMailbox
+        ? $primaryMailbox . ' · +' . max($mailboxesActive - 1, 0) . ' ' . $boxLabel
+        : $mailboxesActive . ' ' . $boxLabel;
+    if ($primaryMailbox && $mailboxesActive <= 1) {
+        $workspaceLabel = $primaryMailbox;
+    }
+
     $navLinks = [];
     $navLinks[] = ['route' => 'dashboard', 'label' => 'Дашборд', 'pattern' => 'dashboard'];
     if ($user?->hasAnyRole(['manager', 'head_of_sales', 'director', 'secretary'])) {
@@ -34,10 +49,17 @@
     if ($user?->hasAnyRole(['head_of_sales', 'director'])) {
         $navLinks[] = ['route' => 'mail-rules.index', 'label' => 'Правила почты', 'pattern' => 'mail-rules.*'];
     }
+
+    $disabledTitle = 'Доступно в Phase 2';
+    $userInitials = collect(preg_split('/\s+/u', trim((string) ($user?->name ?? '?'))))
+        ->filter()
+        ->map(fn ($p) => mb_strtoupper(mb_substr($p, 0, 1)))
+        ->take(2)
+        ->implode('');
 @endphp
 
 <nav class="bg-surface border-b border-border sticky top-0 z-30" style="height: var(--topbar-h)">
-    <div class="h-full max-w-[1440px] mx-auto px-4 flex items-center gap-3">
+    <div class="h-full px-4 flex items-center gap-3">
 
         {{-- Brand --}}
         <a href="{{ route('dashboard') }}" class="flex items-center gap-2 shrink-0" aria-label="MyLift CRM">
@@ -46,61 +68,83 @@
 
         {{-- Workspace pill --}}
         @auth
-            <div class="hidden sm:flex items-center gap-1.5 px-2.5 py-[5px] border border-border rounded-md text-fg-2"
+            <div class="hidden sm:inline-flex items-center gap-1.5 px-2.5 h-[26px] border border-[var(--border)] rounded-md text-[var(--fg-2)] whitespace-nowrap"
                  style="font-size: 12.5px"
                  title="Активных ящиков: {{ $mailboxesActive }}{{ $mailboxesError ? ', с ошибкой: '.$mailboxesError : '' }}">
                 <span class="inline-block w-1.5 h-1.5 rounded-full {{ $workspaceDot }}"></span>
-                <span>{{ $mailboxesActive }} {{ $boxLabel }}</span>
+                <span>{{ $workspaceLabel }}</span>
             </div>
         @endauth
 
         {{-- Nav links --}}
         @auth
-            <div class="hidden sm:flex items-center gap-0.5 ml-1">
+            <div class="hidden md:flex items-center gap-0.5 ml-1 shrink-0">
                 @foreach($navLinks as $link)
                     @php $active = request()->routeIs($link['pattern']); @endphp
                     <a href="{{ route($link['route']) }}"
-                       class="relative px-3 py-2 text-sm rounded-md transition-colors
-                              {{ $active ? 'text-fg-1 font-semibold' : 'text-fg-2 hover:text-fg-1 hover:bg-hover' }}">
+                       class="relative px-3 py-2 text-[13px] rounded-md transition-colors
+                              {{ $active ? 'text-[var(--fg-1)] font-semibold' : 'text-[var(--fg-2)] hover:text-[var(--fg-1)] hover:bg-[var(--bg-hover)]' }}">
                         {{ $link['label'] }}
                         @if($active)
-                            <span class="absolute left-3 right-3 -bottom-px h-0.5 bg-accent rounded-full"></span>
+                            <span class="absolute left-3 right-3 -bottom-px h-0.5 bg-[var(--accent)] rounded-full"></span>
                         @endif
                     </a>
                 @endforeach
             </div>
         @endauth
 
+        {{-- Search (form GET → /dashboard/requests?q=...) --}}
+        @auth
+            <form method="GET" action="{{ route('requests.index') }}" class="hidden lg:block flex-1 max-w-[480px] relative ml-2">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-3)] text-[14px] pointer-events-none select-none">⌕</span>
+                <input type="search" name="q" value="{{ request()->routeIs('requests.*') ? request()->query('q') : '' }}"
+                       placeholder="Поиск по заявкам, клиентам, артикулам…"
+                       class="w-full h-[30px] pl-8 pr-12 border border-[var(--border)] rounded-md bg-[var(--bg-app)] text-[var(--fg-1)] text-[13px] outline-none focus:border-[var(--sky-500)]">
+                <kbd class="absolute right-2 top-[6px] font-mono text-[10.5px] font-medium text-[var(--fg-3)] border border-[var(--border)] px-1 py-0.5 rounded bg-[var(--bg-surface)]">⌘ K</kbd>
+            </form>
+        @endauth
+
         <div class="flex-1"></div>
 
-        {{-- User menu --}}
+        {{-- Action buttons (Phase 2 placeholders) --}}
         @auth
-            <div class="hidden sm:block">
-                <x-dropdown align="right" width="48">
-                    <x-slot name="trigger">
-                        <button type="button"
-                                class="inline-flex items-center gap-2 px-2 py-1 text-sm text-fg-2 hover:text-fg-1 hover:bg-hover rounded-md transition-colors">
-                            <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-neutral-200 text-fg-1 font-semibold text-xs">
-                                {{ \Illuminate\Support\Str::of($user?->name ?? '?')->substr(0, 1)->upper() }}
-                            </span>
-                            <span class="hidden md:inline">{{ $user?->name }}</span>
-                            <svg class="fill-current w-3 h-3 text-fg-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
-                            </svg>
-                        </button>
-                    </x-slot>
-                    <x-slot name="content">
-                        <x-dropdown-link :href="route('profile.edit')">{{ __('Profile') }}</x-dropdown-link>
-                        <form method="POST" action="{{ route('logout') }}">
-                            @csrf
-                            <x-dropdown-link :href="route('logout')"
-                                onclick="event.preventDefault(); this.closest('form').submit();">
-                                {{ __('Log Out') }}
-                            </x-dropdown-link>
-                        </form>
-                    </x-slot>
-                </x-dropdown>
-            </div>
+            <button type="button" class="hidden md:inline-flex items-center gap-1.5 h-[30px] px-3 border border-[var(--border-strong)] rounded-md bg-[var(--bg-surface)] text-[var(--fg-1)] text-[12.5px] font-medium opacity-55 cursor-not-allowed"
+                    disabled title="{{ $disabledTitle }}">Импорт из 1С</button>
+            <button type="button" class="hidden md:inline-flex items-center gap-1.5 h-[30px] px-3 rounded-md bg-[var(--accent)] text-[var(--fg-on-accent)] border border-[var(--accent)] text-[12.5px] font-medium opacity-55 cursor-not-allowed"
+                    disabled title="{{ $disabledTitle }}">+ Заявка вручную</button>
+
+            {{-- Bell --}}
+            <button type="button" class="relative w-[30px] h-[30px] inline-flex items-center justify-center border border-[var(--border)] rounded-md bg-[var(--bg-surface)] text-[var(--fg-2)] opacity-55 cursor-not-allowed"
+                    disabled title="Уведомления — {{ $disabledTitle }}">
+                🔔
+            </button>
+        @endauth
+
+        {{-- User avatar dropdown --}}
+        @auth
+            <x-dropdown align="right" width="48">
+                <x-slot name="trigger">
+                    <button type="button"
+                            class="inline-flex items-center gap-2 px-1 py-1 text-sm text-[var(--fg-2)] hover:text-[var(--fg-1)] hover:bg-[var(--bg-hover)] rounded-md transition-colors">
+                        <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-[var(--neutral-300)] text-[var(--fg-1)] font-semibold text-[11px]">
+                            {{ $userInitials ?: '?' }}
+                        </span>
+                        <svg class="fill-current w-3 h-3 text-[var(--fg-3)]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                        </svg>
+                    </button>
+                </x-slot>
+                <x-slot name="content">
+                    <x-dropdown-link :href="route('profile.edit')">{{ __('Profile') }}</x-dropdown-link>
+                    <form method="POST" action="{{ route('logout') }}">
+                        @csrf
+                        <x-dropdown-link :href="route('logout')"
+                            onclick="event.preventDefault(); this.closest('form').submit();">
+                            {{ __('Log Out') }}
+                        </x-dropdown-link>
+                    </form>
+                </x-slot>
+            </x-dropdown>
         @endauth
     </div>
 </nav>
