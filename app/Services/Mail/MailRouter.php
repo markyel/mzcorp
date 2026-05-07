@@ -24,6 +24,7 @@ class MailRouter
         private readonly MailForwarder $forwarder,
         private readonly MailClassifierService $classifier,
         private readonly IncomingMailProcessor $incoming,
+        private readonly MailCategoryClassifier $categorizer,
     ) {
     }
 
@@ -40,6 +41,19 @@ class MailRouter
             $this->recordLoopSkipped($message);
 
             return;
+        }
+
+        // Phase 1.8c: расширенная категоризация (LazyLift drop-in).
+        // Заполняет email_messages.category — следим за качеством классификации
+        // в БД. На текущее поведение (rules + IncomingMailProcessor) НЕ влияет;
+        // переключение триггера Request-creation на category — следующий шаг.
+        try {
+            $this->categorizer->categorize($message);
+        } catch (\Throwable $e) {
+            Log::warning('MailRouter: category classifier failed (non-fatal)', [
+                'email_message_id' => $message->id,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         $matches = $this->engine->match($message);
