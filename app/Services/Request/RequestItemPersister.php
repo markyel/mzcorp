@@ -91,12 +91,20 @@ class RequestItemPersister
             ]);
         }
 
-        // Назначение менеджера + MOVE в INBOX/MZ/{Lastname} — только при
-        // первом создании. См. MailFolderRouter docblock о причинах перехода
-        // от IMAP keywords к подпапкам.
-        if ($justCreated) {
-            $manager = $this->assignment->autoAssign($existing);
-            $this->folders->routeToManager($message, $manager);
+        // MOVE в INBOX/MZ/{Lastname} — при первом создании ИЛИ если письмо
+        // ещё не маршрутизировано (backfill: Request создан старым AI-classify
+        // pipeline до того, как добавили folder routing). Идемпотентность —
+        // по проверке наличия «/MZ/» в текущем пути.
+        $needsRouting = $justCreated
+            || ! str_contains((string) $message->folder, '/MZ/');
+
+        if ($needsRouting) {
+            $manager = $existing->assigned_user_id
+                ? $existing->assignedUser
+                : $this->assignment->autoAssign($existing);
+            if ($manager) {
+                $this->folders->routeToManager($message, $manager);
+            }
         }
 
         Log::info('RequestItemPersister: items persisted', [
