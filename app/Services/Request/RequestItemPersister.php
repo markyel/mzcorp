@@ -49,11 +49,19 @@ class RequestItemPersister
         }
 
         // Phase 1.8c: триггер для создания Request — только client_request.
-        // Если письмо категоризовано как thread_reply / irrelevant — не
-        // создаём Request, даже если парсер извлёк позиции (мог увидеть
-        // «items» в supplier offer или newsletter).
+        // Если письмо категоризовано как thread_reply / irrelevant — обычно
+        // НЕ создаём новую Request (мог увидеть «items» в supplier offer
+        // или newsletter).
+        //
+        // Phase 1.9: ИСКЛЮЧЕНИЕ — если письмо уже привязано к существующей
+        // Request через `InboundReplyLinker` (related_request_id !== null),
+        // это reply клиента к открытой заявке. В таком reply могут быть
+        // ДОПОЛНИТЕЛЬНЫЕ позиции («забыл указать ещё M-1234 - 3 шт»).
+        // Тогда category-гейт пропускаем и добавляем items к существующей
+        // Request (filterNewItems в любом случае дедупит уже сохранённые).
         if ($message->category !== null
-            && $message->category !== EmailCategory::ClientRequest->value) {
+            && $message->category !== EmailCategory::ClientRequest->value
+            && ! $message->related_request_id) {
             Log::info('RequestItemPersister: skipped by category', [
                 'email_message_id' => $message->id,
                 'category' => $message->category,

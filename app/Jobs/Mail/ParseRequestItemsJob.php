@@ -104,13 +104,45 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
         }
 
         try {
+            // Снапшот: было ли у Request items до этого прогона.
+            $hadItemsBefore = $message->related_request_id
+                ? \App\Models\RequestItem::query()
+                    ->where('request_id', $message->related_request_id)
+                    ->exists()
+                : false;
+
             $result = $persister->persist($message, $items);
+
             Log::info('ParseRequestItemsJob: items persisted', [
                 'email_message_id' => $message->id,
                 'request_id' => $result['request']?->id,
                 'new' => $result['new'],
                 'dup' => $result['dup'],
+                'force' => $this->force,
+                'had_items_before' => $hadItemsBefore,
             ]);
+
+            // Phase 1.9 safety check: reply прицеплен к существующей Request,
+            // у Request УЖЕ были items, парсер нашёл НОВЫЕ позиции и НИ ОДНОГО
+            // совпадения с существующими. Это сильный сигнал что AI clarifier
+            // (или один из заголовочных уровней linker'а) ошибся, прицепив
+            // reply к чужой Request — на самом деле это новая заявка.
+            // Не отвязываем автоматически (риск ложной тревоги), но шумно
+            // логируем как WARNING — РОП должен проверить вручную.
+            if (
+                $this->force
+                && $hadItemsBefore
+                && $result['new'] > 0
+                && $result['dup'] === 0
+            ) {
+                Log::warning('ParseRequestItemsJob: suspicious thread link — all items new, none match existing Request', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $result['request']?->id,
+                    'internal_code' => $result['request']?->internal_code,
+                    'new_items' => $result['new'],
+                    'hint' => 'Возможно reply ошибочно прицеплен к чужой Request. Проверьте через UI: тред в карточке этой заявки vs subject/body.',
+                ]);
+            }
         } catch (\Throwable $e) {
             Log::error('ParseRequestItemsJob: persist failed', [
                 'email_message_id' => $message->id,

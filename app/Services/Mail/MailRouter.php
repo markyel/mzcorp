@@ -60,19 +60,28 @@ class MailRouter
         }
 
         // Phase 1.9 (inbound-часть): прицепить письмо к существующей Request
-        // через 4 уровня — In-Reply-To / References / subject-code / from_email.
+        // через 5 уровней — In-Reply-To / References / subject-code /
+        // from_email open-requests / AI multi-choice clarifier.
         // Если linked — IncomingMailProcessor::processIfRequest сам пропустит
-        // создание новой Request (idempotency check на related_request_id),
-        // и ParseRequestItemsJob тоже не дёргается. Это закрывает кейсы
-        // «Re: Заявка на ... — напоминание» и reply'ев сотрудников @myzip.ru,
-        // которые без linker'а порождали дубликаты Request с фантомными items.
+        // создание новой Request (idempotency check на related_request_id).
         try {
-            $this->replyLinker->tryLink($message);
+            $linkedRequest = $this->replyLinker->tryLink($message);
         } catch (\Throwable $e) {
+            $linkedRequest = null;
             Log::warning('MailRouter: reply linker failed (non-fatal)', [
                 'email_message_id' => $message->id,
                 'error' => $e->getMessage(),
             ]);
+        }
+
+        // Phase 1.9: если reply прицеплен к существующей Request — запустим
+        // парсер с force=true для извлечения ДОПОЛНИТЕЛЬНЫХ позиций
+        // («забыл указать ещё M-1234 - 3 шт»). RequestItemPersister
+        // идемпотентен: дубликаты по article+name пропускает, новые
+        // добавляет к существующей Request. category-гейт в persister'е
+        // не блокирует thread_reply если related_request_id уже есть.
+        if ($linkedRequest !== null) {
+            \App\Jobs\Mail\ParseRequestItemsJob::dispatch($message->id, true);
         }
 
         $matches = $this->engine->match($message);
