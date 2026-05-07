@@ -121,7 +121,7 @@
             </div>
             @foreach($myQueries as $q)
                 @php $active = $isActive($q); @endphp
-                <a href="#" wire:click.prevent="$set('scope', '{{ $q['scope'] }}'); $set('status', '{{ $q['status'] }}')"
+                <a href="#" wire:click.prevent="applyView('{{ $q['scope'] }}', '{{ $q['status'] }}')"
                    class="{{ $renderQuery($q, $active) }}">
                     <span class="w-3.5 text-center text-[var(--fg-3)]">●</span>
                     <span class="flex-1">{{ $q['label'] }}</span>
@@ -152,7 +152,7 @@
                 </div>
                 @foreach($teamQueries as $q)
                     @php $active = $isActive($q); @endphp
-                    <a href="#" wire:click.prevent="$set('scope', '{{ $q['scope'] }}'); $set('status', '{{ $q['status'] }}')"
+                    <a href="#" wire:click.prevent="applyView('{{ $q['scope'] }}', '{{ $q['status'] }}')"
                        class="{{ $renderQuery($q, $active) }}">
                         <span class="w-3.5 text-center text-[var(--fg-3)]">⊕</span>
                         <span class="flex-1">{{ $q['label'] }}</span>

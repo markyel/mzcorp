@@ -51,6 +51,18 @@ class Pool extends Component
         $this->resetPage();
     }
 
+    /**
+     * Применить query из левой навигации одним движением (scope+status).
+     * Через `wire:click="$set(...);$set(...)"` Livewire 4 не парсит
+     * compound-выражение — нужен явный action.
+     */
+    public function applyView(string $scope, string $status): void
+    {
+        $this->scope = in_array($scope, ['mine', 'all'], true) ? $scope : 'mine';
+        $this->status = $status;
+        $this->resetPage();
+    }
+
     #[Computed]
     public function canSeeAll(): bool
     {
@@ -71,7 +83,7 @@ class Pool extends Component
                 'emailMessage' => fn ($q) => $q
                     ->select(['id', 'from_email', 'from_name'])
                     ->withCount('attachments'),
-                'items' => fn ($q) => $q->orderBy('position')->limit(3),
+                'items:id,request_id,parsed_name,parsed_brand,position',
                 'latestAssignment:id,request_id,reason',
             ])
             ->withCount('items')
