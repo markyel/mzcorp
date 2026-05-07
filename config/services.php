@@ -68,6 +68,9 @@ return [
         // Phase 1.8c: расширенный классификатор (LazyLift drop-in). Сложный
         // промпт с reasoning — gpt-4o, не -mini.
         'category_model' => env('OPENAI_CATEGORY_MODEL', 'gpt-4o'),
+        // Phase 1.9: 5-й уровень thread linking (ThreadClarificationAi).
+        // Простая задача multi-choice над списком из 2-5 заявок — mini хватает.
+        'clarification_model' => env('OPENAI_CLARIFICATION_MODEL', 'gpt-4o-mini'),
     ],
 
 ];

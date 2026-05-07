@@ -21,7 +21,11 @@ use Illuminate\Support\Facades\Log;
  *   4. From_email + open Requests этого клиента — для случаев, когда headers
  *      потеряны вовсе (mobile-клиент, ручной forward, новый thread без citing).
  *      Гейтим по category Phase 1.8c: client_request не линкуем (это новая
- *      заявка, у клиента может быть параллельно несколько).
+ *      заявка). При 1 открытой → она же; при 2+ → передаём в уровень 5.
+ *   5. AI multi-choice (`ThreadClarificationAi`, gpt-4o-mini) — если у клиента
+ *      2+ открытых Request, GPT смотрит на тело письма + список тем и выбирает
+ *      наиболее подходящую (или null = новая тема). На сбое — fallback на самую
+ *      свежую. Source: LazyLift n8n workflow `AI Agent: Process Clarification`.
  *
  * Если совпадение найдено — `related_request_id` нового письма ставится
  * на ту же Request, и MailRouter дальше его обрабатывает идемпотентно
@@ -31,6 +35,11 @@ use Illuminate\Support\Facades\Log;
  */
 class InboundReplyLinker
 {
+    public function __construct(
+        private readonly ThreadClarificationAi $clarifier,
+    ) {
+    }
+
     /**
      * @return Request|null  null = thread не найден, обычный flow.
      */
@@ -146,22 +155,18 @@ class InboundReplyLinker
     }
 
     /**
-     * Уровень 4: пробуем угадать thread по from_email + открытые Request клиента.
+     * Уровень 4 + 5: пробуем угадать thread по from_email + открытые Request клиента.
      *
      * Логика:
-     *   - Если категоризатор Phase 1.8c сказал client_request → точно НЕ линкуем
-     *     (это новая заявка от клиента, возможно у него уже есть открытые,
-     *     но это другая тема).
-     *   - Если категория thread_reply ИЛИ subject начинается с Re:/Fwd:/Fw: —
-     *     это reply, ищем открытые заявки этого клиента и берём самую свежую
-     *     по created_at (последний контакт = последний разговор).
-     *   - Иначе (новый subject, не reply, не thread_reply) — не линкуем.
-     *
-     * Эвристика «самая свежая» неидеальна, если у клиента параллельно идут
-     * 2+ заявки и он отвечает на старую. Но для типичного потока (5-10
-     * клиентов, 1-2 открытые на каждого) даёт правильный matching в 80%+.
-     * Дальнейшее уточнение — AI multi-choice (5-й уровень) — отложено
-     * до момента когда мы получим n8n workflow JSON для эталона.
+     *   - Категоризатор Phase 1.8c сказал client_request → точно НЕ линкуем
+     *     (это новая заявка, возможно параллельная к открытым).
+     *   - Если category=thread_reply ИЛИ subject начинается с Re:/Fwd:/Fw:
+     *     — это reply. Ищем открытые заявки этого клиента:
+     *        · 0 → null (новая заявка с reply-subject, бывает от мобилок);
+     *        · 1 → возвращаем эту;
+     *        · 2+ → 5-й уровень: AI clarifier выбирает наиболее подходящую
+     *          (или возвращает null если AI считает что это новая тема).
+     *   - Иначе — не линкуем.
      */
     private function matchByOpenRequestForFromEmail(EmailMessage $message): ?Request
     {
@@ -187,11 +192,23 @@ class InboundReplyLinker
             RequestStatus::Assigned->value,
         ];
 
-        return Request::query()
+        $candidates = Request::query()
             ->where('client_email', $message->from_email)
             ->whereIn('status', $openStatuses)
             ->orderByDesc('created_at')
-            ->first();
+            ->get();
+
+        if ($candidates->isEmpty()) {
+            return null;
+        }
+
+        if ($candidates->count() === 1) {
+            return $candidates->first();
+        }
+
+        // 5-й уровень: AI multi-choice. На сбое clarifier возвращает либо
+        // самую свежую (fallback), либо null (если AI решил что это новая тема).
+        return $this->clarifier->chooseRequest($message, $candidates);
     }
 
     /**
