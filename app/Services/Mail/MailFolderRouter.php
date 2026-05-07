@@ -41,7 +41,11 @@ class MailFolderRouter
             return null;
         }
 
-        $shortName = $manager ? $this->shortName($manager->name) : 'Нерасп.';
+        // Yandex IMAP / webklex имеют проблемы с не-ASCII именами папок
+        // (createFolder и copy/move работают по-разному с MUTF-7). Решение:
+        // имена папок только в ASCII через транслитерацию.
+        $shortName = $manager ? $this->shortName($manager->name) : 'Unassigned';
+        $shortName = $this->cyrillicToLatin($shortName);
         $shortName = mb_substr($shortName, 0, 40);
 
         $client = null;
@@ -49,17 +53,12 @@ class MailFolderRouter
             $client = $this->connector->imapClient($mailbox);
             $delimiter = $this->detectDelimiter($client, $message->folder);
 
-            // Human-readable путь (для БД). IMAP-команды требуют MUTF-7 для
-            // не-ASCII (RFC 3501 §5.1.3). Yandex 360 хранит «Иванов» как
-            // «&BBgEMgQwBD0EPgQy-», поэтому createFolder/copy/move нужно
-            // звать на encoded path.
-            $targetPathHuman = 'MZ' . $delimiter . $shortName;
-            $targetPathImap = $this->mutf7Encode($targetPathHuman);
+            // ASCII-only path — нет нужды в MUTF-7 encoding.
+            $targetPath = 'MZ' . $delimiter . $shortName;
 
-            $this->ensureFolder($client, $targetPathImap, $delimiter);
+            $this->ensureFolder($client, $targetPath, $delimiter);
 
-            $sourceFolderImap = $this->mutf7Encode($message->folder);
-            $sourceFolder = $client->getFolderByPath($sourceFolderImap, soft_fail: true);
+            $sourceFolder = $client->getFolderByPath($message->folder, soft_fail: true);
             if (! $sourceFolder) {
                 throw new \RuntimeException("Source folder '{$message->folder}' not found");
             }
@@ -86,31 +85,24 @@ class MailFolderRouter
             // Возможно Yandex не объявляет MOVE capability — webklex
             // не делает fallback автоматически.
             try {
-                $msg->move($targetPathImap);
+                $msg->move($targetPath);
             } catch (\Throwable $moveError) {
                 Log::info('MailFolderRouter: MOVE failed, falling back to COPY+DELETE', [
                     'email_message_id' => $message->id,
-                    'target' => $targetPathHuman,
+                    'target' => $targetPath,
                     'error' => $moveError->getMessage(),
                 ]);
 
-                // COPY оригинала в подпапку.
-                $msg->copy($targetPathImap, expunge: false);
-
-                // Удаление: STORE +FLAGS (\Deleted) без EXPUNGE.
-                // Yandex 360: «BAD [CLIENTBUG] EXPUNGE Wrong session state»
-                // если вызвать $msg->delete(true) сразу — сессия после COPY
-                // выходит из read-write состояния для source.
+                // COPY + STORE \Deleted (без EXPUNGE) — Yandex после COPY
+                // не позволяет EXPUNGE в той же сессии. \Deleted флага
+                // достаточно: web UI скрывает, реальный EXPUNGE случится
+                // при следующем SELECT источника.
+                $msg->copy($targetPath, expunge: false);
                 $msg->delete(expunge: false);
 
-                // Отдельный EXPUNGE через явный re-SELECT source-папки в RW.
                 try {
                     $sourceFolder->expunge();
                 } catch (\Throwable $expungeError) {
-                    // Не критично: \Deleted уже выставлен. Yandex web UI
-                    // обычно скрывает помеченные на удаление, EXPUNGE случится
-                    // при следующем SELECT той же сессии (Yandex auto-EXPUNGE
-                    // при switch folder).
                     Log::info('MailFolderRouter: EXPUNGE skipped (will happen on next SELECT)', [
                         'email_message_id' => $message->id,
                         'error' => $expungeError->getMessage(),
@@ -121,12 +113,10 @@ class MailFolderRouter
             // После MOVE старый UID невалиден; новый UID Yandex назначит сам,
             // но webklex move() не возвращает его надёжно. Чистим, чтобы
             // никакой код не пытался дёргать сообщение по старому UID.
-            // В БД храним human-readable, не encoded.
             $message->forceFill([
-                'folder' => $targetPathHuman,
+                'folder' => $targetPath,
                 'imap_uid' => null,
             ])->save();
-            $targetPath = $targetPathHuman;
 
             Log::info('MailFolderRouter: moved', [
                 'email_message_id' => $message->id,
@@ -180,7 +170,7 @@ class MailFolderRouter
      */
     private function detectDelimiter(Client $client, string $sourceFolderPath): string
     {
-        $folder = $client->getFolderByPath($this->mutf7Encode($sourceFolderPath), soft_fail: true);
+        $folder = $client->getFolderByPath($sourceFolderPath, soft_fail: true);
         if ($folder && ! empty($folder->delimiter)) {
             return (string) $folder->delimiter;
         }
@@ -189,20 +179,7 @@ class MailFolderRouter
     }
 
     /**
-     * Кодирование UTF-8 → MUTF-7 (RFC 3501 §5.1.3) для IMAP mailbox names.
-     * Yandex 360 требует MUTF-7 для не-ASCII в имени папки. PHP mbstring
-     * поддерживает это через encoding name 'UTF7-IMAP'.
-     */
-    private function mutf7Encode(string $utf8): string
-    {
-        $encoded = @mb_convert_encoding($utf8, 'UTF7-IMAP', 'UTF-8');
-
-        return $encoded === false ? $utf8 : $encoded;
-    }
-
-    /**
      * «Менеджер Иванов Иван» → «Иванов».
-     * Дублирует IncomingMailProcessor::shortName() / RequestItemPersister::shortName().
      */
     private function shortName(string $fullName): string
     {
@@ -212,5 +189,41 @@ class MailFolderRouter
         }
 
         return $parts[0] ?? 'unknown';
+    }
+
+    /**
+     * Транслитерация кириллицы в латиницу для имён IMAP-папок.
+     * Yandex IMAP / webklex плохо работают с MUTF-7 в copy/move
+     * (createFolder работает, copy «Empty response»). ASCII-only обходит.
+     *
+     * Иванов → Ivanov, Петров → Petrov.
+     */
+    private function cyrillicToLatin(string $str): string
+    {
+        // Primary: ICU transliterator (extension intl).
+        if (function_exists('transliterator_transliterate')) {
+            $result = @transliterator_transliterate('Russian-Latin/BGN; Latin-ASCII', $str);
+            if (is_string($result) && $result !== '') {
+                return preg_replace('/[^A-Za-z0-9._-]+/', '', $result) ?? $result;
+            }
+        }
+
+        // Fallback: ручной мап.
+        $map = [
+            'А' => 'A', 'Б' => 'B', 'В' => 'V', 'Г' => 'G', 'Д' => 'D', 'Е' => 'E',
+            'Ё' => 'Yo', 'Ж' => 'Zh', 'З' => 'Z', 'И' => 'I', 'Й' => 'Y', 'К' => 'K',
+            'Л' => 'L', 'М' => 'M', 'Н' => 'N', 'О' => 'O', 'П' => 'P', 'Р' => 'R',
+            'С' => 'S', 'Т' => 'T', 'У' => 'U', 'Ф' => 'F', 'Х' => 'Kh', 'Ц' => 'Ts',
+            'Ч' => 'Ch', 'Ш' => 'Sh', 'Щ' => 'Shch', 'Ъ' => '', 'Ы' => 'Y', 'Ь' => '',
+            'Э' => 'E', 'Ю' => 'Yu', 'Я' => 'Ya',
+            'а' => 'a', 'б' => 'b', 'в' => 'v', 'г' => 'g', 'д' => 'd', 'е' => 'e',
+            'ё' => 'yo', 'ж' => 'zh', 'з' => 'z', 'и' => 'i', 'й' => 'y', 'к' => 'k',
+            'л' => 'l', 'м' => 'm', 'н' => 'n', 'о' => 'o', 'п' => 'p', 'р' => 'r',
+            'с' => 's', 'т' => 't', 'у' => 'u', 'ф' => 'f', 'х' => 'kh', 'ц' => 'ts',
+            'ч' => 'ch', 'ш' => 'sh', 'щ' => 'shch', 'ъ' => '', 'ы' => 'y', 'ь' => '',
+            'э' => 'e', 'ю' => 'yu', 'я' => 'ya',
+        ];
+
+        return strtr($str, $map);
     }
 }
