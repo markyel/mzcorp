@@ -156,52 +156,86 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
         $skippedDup = 0;
         $maxUid = 0;
 
-        // FT_PEEK — не ставим \Seen. Foundation §1: «\Seen явно НЕ ставим».
-        // Вложения webklex подгрузит автоматически при getAttachments() в persister'е.
+        // ШАГ 1. Лёгкий запрос — забираем только список UIDs всей папки,
+        // без headers/body/flags. Низкоуровневый вызов webklex
+        // `$connection->getUid()` соответствует одной IMAP-команде
+        // `UID FETCH 1:* (UID)` — несколько килобайт трафика для папки на
+        // тысячи писем.
         //
-        // ВАЖНО: webklex 6.x в whereUid('N:*') оборачивает значение в кавычки
-        // (UID "N:*"), что невалидно для IMAP SEARCH (Yandex отвечает BAD).
-        // Поэтому тянем без серверного UID-фильтра и отсеиваем уже виденные
-        // письма по last_uid_seen на стороне приложения. Для инкрементальных
-        // syncs это слегка избыточно по трафику, но безопасно и работает.
-        // whereAll() обязательно: webklex без критериев генерирует пустой
-        // SEARCH, который IMAP-сервер (Yandex) отклоняет с BAD syntax error.
-        $messages = $folder->query()
-            ->setFetchOptions(IMAP::FT_PEEK)
-            ->setFetchBody(true)
-            ->setFetchFlags(true)
-            ->whereAll()
-            ->limit(self::MAX_MESSAGES_PER_RUN)
-            ->get();
+        // Раньше тут было `whereAll()->limit(500)->get()` с setFetchBody(true) —
+        // и оно пыталось вытащить 500 первых писем целиком за один FETCH.
+        // Это:
+        //   а) обрезало результат **по seq-number, а не UID**, поэтому при
+        //      росте папки выше 500 писем новые UIDs (seq>500) переставали
+        //      попадать в выборку и last_uid_seen замораживался;
+        //   б) роняло worker по памяти/таймауту на больших ящиках без записи
+        //      в production log (наблюдалось 2026-05-07 на mail@myzip.ru).
+        $uidMap = (array) $folder->getClient()
+            ->getConnection()
+            ->getUid()
+            ->validatedData();
+        $allUids = array_values(array_map('intval', $uidMap));
 
-        foreach ($messages as $msg) {
-            $uid = $msg->getUid();
+        sort($allUids, SORT_NUMERIC);
 
-            // Сообщения с UID меньше уже виденного пропускаем.
-            if ($uid < $sinceUid) {
-                continue;
-            }
+        // Берём только новые относительно last_uid_seen, и только хвост из
+        // MAX_MESSAGES_PER_RUN свежайших — чтобы не зависнуть при first-time
+        // sync на исторически большой папке.
+        $newUids = array_values(array_filter(
+            $allUids,
+            static fn (int $u): bool => $u >= $sinceUid,
+        ));
+        if (count($newUids) > self::MAX_MESSAGES_PER_RUN) {
+            $newUids = array_slice($newUids, -self::MAX_MESSAGES_PER_RUN);
+        }
 
-            $fetched++;
-            $maxUid = max($maxUid, $uid);
+        if (empty($newUids)) {
+            return [
+                'fetched' => 0,
+                'saved' => 0,
+                'skipped_dup' => 0,
+                'max_uid' => 0,
+            ];
+        }
 
+        // ШАГ 2. Per-UID fetch с body/headers/flags. Single numeric whereUid()
+        // НЕ страдает от webklex-кавычек на ranges (это была проблема для
+        // диапазонов вида '1:*'). Тянем по одному UID за раз — медленнее,
+        // но не упирается в память и не падает целиком при битом письме.
+        foreach ($newUids as $uid) {
             try {
+                $msg = $folder->query()
+                    ->setFetchOptions(IMAP::FT_PEEK)
+                    ->setFetchBody(true)
+                    ->setFetchFlags(true)
+                    ->whereUid($uid)
+                    ->first();
+
+                if (! $msg) {
+                    // UID мог исчезнуть между getUids() и FETCH (EXPUNGE на сервере).
+                    continue;
+                }
+
+                $fetched++;
+                $maxUid = max($maxUid, $uid);
+
                 $email = $persister->persist($msg, $mailbox, $folder->path, $direction);
                 if ($email === null) {
                     $skippedDup++;
-                } else {
-                    $saved++;
+                    continue;
+                }
 
-                    // Phase 1.5: применить правила маршрутизации к свежесохранённому
-                    // inbound-письму. Outbound (Sent) пропускаются внутри MailRouter.
-                    try {
-                        app(\App\Services\Mail\MailRouter::class)->route($email);
-                    } catch (\Throwable $routeError) {
-                        \Illuminate\Support\Facades\Log::error('MailRouter failed', [
-                            'email_message_id' => $email->id,
-                            'error' => $routeError->getMessage(),
-                        ]);
-                    }
+                $saved++;
+
+                // Phase 1.5: применить правила маршрутизации к свежесохранённому
+                // inbound-письму. Outbound (Sent) пропускаются внутри MailRouter.
+                try {
+                    app(\App\Services\Mail\MailRouter::class)->route($email);
+                } catch (\Throwable $routeError) {
+                    Log::error('MailRouter failed', [
+                        'email_message_id' => $email->id,
+                        'error' => $routeError->getMessage(),
+                    ]);
                 }
             } catch (\Throwable $e) {
                 Log::error('Failed to persist message', [
@@ -210,7 +244,9 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
                     'uid' => $uid,
                     'error' => $e->getMessage(),
                 ]);
-                // Не валим весь job — продолжаем со следующим письмом.
+                // Не валим весь job — двигаем maxUid, чтобы битый UID не залип
+                // навсегда, и продолжаем со следующим письмом.
+                $maxUid = max($maxUid, $uid);
             }
         }
 
