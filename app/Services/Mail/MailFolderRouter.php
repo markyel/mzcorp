@@ -83,9 +83,22 @@ class MailFolderRouter
             // даёт «BAD [CLIENTBUG] EXPUNGE Wrong session state» при попытке
             // чистого MOVE или COPY+EXPUNGE. Соглашаемся на дублирование:
             // оригинал остаётся в INBOX, копия появляется в MZ|Ivanov для
-            // секретаря. Удаление из INBOX можно добавить позже, когда
-            // разберёмся с Yandex IMAP session-state.
+            // секретаря.
             $msg->copy($targetPath, expunge: false);
+
+            // Помечаем оригинал в INBOX как прочитанный (\Seen). Это явное
+            // отступление от Foundation §1 / CLAUDE.md «Не ставь \Seen» —
+            // оправдано тем, что оригинал нельзя удалить (Yandex IMAP не
+            // даёт EXPUNGE после COPY в той же сессии), и без \Seen в INBOX
+            // копится «непрочитанный шум» который мешает секретарю.
+            try {
+                $msg->setFlag('Seen');
+            } catch (\Throwable $seenError) {
+                Log::info('MailFolderRouter: setFlag(Seen) skipped', [
+                    'email_message_id' => $message->id,
+                    'error' => $seenError->getMessage(),
+                ]);
+            }
 
             // БД отражает физическое размещение оригинала — он остался в INBOX.
             // Не меняем folder/uid у EmailMessage. Только Request маршрутизирован
