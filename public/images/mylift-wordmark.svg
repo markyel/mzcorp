@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="36" viewBox="0 0 180 36">
+  <g fill="none">
+
+    <rect x="2" y="6" width="24" height="24" rx="4" fill="#D32027"></rect>
+    <path d="M9 12 L14 17 L9 22 M15 12 L20 17 L15 22" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+
+    <text x="34" y="24" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="18" fill="#16181D" letter-spacing="-0.02em">MyLift</text>
+    <text x="106" y="24" font-family="Inter, system-ui, sans-serif" font-weight="500" font-size="13" fill="#5C6470" letter-spacing="0.04em">CRM</text>
+  </g>
+</svg>
