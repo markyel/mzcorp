@@ -65,9 +65,16 @@ sudo -u www-data composer install --no-dev --optimize-autoloader
 sudo -u www-data npm ci
 sudo -u www-data npm run build
 sudo -u www-data php artisan migrate --force
-sudo -u www-data php artisan config:cache route:cache view:cache
+sudo -u www-data php artisan config:cache
+sudo -u www-data php artisan route:cache
+sudo -u www-data php artisan view:cache
 sudo supervisorctl restart mzcorp-worker:*
 ```
+
+> ⚠️ `php artisan config:cache route:cache view:cache` одной командой **не
+> работает** — artisan не принимает доп. аргументы и ругается «No arguments
+> expected for `config:cache` command, got `route:cache`». Запускать тремя
+> отдельными вызовами или через `&&`.
 
 На VPS установлены: PHP 8.3.6 + расширения, Composer 2.x, Node.js 20 LTS (NodeSource), npm. HOME для `www-data` под кеши: `/var/www/.config/psysh`, `/var/www/.cache/composer`, `/var/www/.npm`.
 
