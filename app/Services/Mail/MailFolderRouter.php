@@ -84,30 +84,63 @@ class MailFolderRouter
             // используем явный COPY + STORE \Deleted + EXPUNGE.
             // Возможно Yandex не объявляет MOVE capability — webklex
             // не делает fallback автоматически.
+            // Per-step try/catch: webklex's MOVE/COPY на Yandex 360 неявно
+            // дёргают EXPUNGE → «BAD [CLIENTBUG] EXPUNGE Wrong session state».
+            // Главное — чтобы COPY прошёл (письмо появилось в target). Все
+            // последующие неудачи логируем и продолжаем.
+            $copyOk = false;
             try {
                 $msg->move($targetPath);
+                $copyOk = true;
             } catch (\Throwable $moveError) {
-                Log::info('MailFolderRouter: MOVE failed, falling back to COPY+DELETE', [
+                Log::info('MailFolderRouter: MOVE failed, trying COPY', [
                     'email_message_id' => $message->id,
                     'target' => $targetPath,
                     'error' => $moveError->getMessage(),
                 ]);
 
-                // COPY + STORE \Deleted (без EXPUNGE) — Yandex после COPY
-                // не позволяет EXPUNGE в той же сессии. \Deleted флага
-                // достаточно: web UI скрывает, реальный EXPUNGE случится
-                // при следующем SELECT источника.
-                $msg->copy($targetPath, expunge: false);
-                $msg->delete(expunge: false);
-
                 try {
-                    $sourceFolder->expunge();
-                } catch (\Throwable $expungeError) {
-                    Log::info('MailFolderRouter: EXPUNGE skipped (will happen on next SELECT)', [
-                        'email_message_id' => $message->id,
-                        'error' => $expungeError->getMessage(),
-                    ]);
+                    $msg->copy($targetPath, expunge: false);
+                    $copyOk = true;
+                } catch (\Throwable $copyError) {
+                    // Yandex может бросить вторичную ошибку (например EXPUNGE
+                    // Wrong session state) даже после успешного COPY. Это
+                    // НЕ значит, что COPY провалился. Считаем COPY прошедшим
+                    // если ошибка содержит «EXPUNGE» — иначе настоящий fail.
+                    if (str_contains($copyError->getMessage(), 'EXPUNGE')) {
+                        Log::info('MailFolderRouter: COPY ok, EXPUNGE failed (treating as success)', [
+                            'email_message_id' => $message->id,
+                            'error' => $copyError->getMessage(),
+                        ]);
+                        $copyOk = true;
+                    } else {
+                        throw $copyError;
+                    }
                 }
+            }
+
+            if (! $copyOk) {
+                throw new \RuntimeException('Neither MOVE nor COPY succeeded');
+            }
+
+            // Best-effort удаление из source. Любая ошибка не критична —
+            // \Deleted флаг достаточно, чтобы Yandex web UI скрыл письмо.
+            try {
+                $msg->delete(expunge: false);
+            } catch (\Throwable $deleteError) {
+                Log::info('MailFolderRouter: STORE \\Deleted skipped', [
+                    'email_message_id' => $message->id,
+                    'error' => $deleteError->getMessage(),
+                ]);
+            }
+
+            try {
+                $sourceFolder->expunge();
+            } catch (\Throwable $expungeError) {
+                Log::info('MailFolderRouter: EXPUNGE skipped (will happen on next SELECT)', [
+                    'email_message_id' => $message->id,
+                    'error' => $expungeError->getMessage(),
+                ]);
             }
 
             // После MOVE старый UID невалиден; новый UID Yandex назначит сам,
