@@ -1,112 +1,106 @@
-<nav x-data="{ open: false }" class="bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
-    <!-- Primary Navigation Menu -->
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex justify-between h-16">
-            <div class="flex">
-                <!-- Logo -->
-                <div class="shrink-0 flex items-center">
-                    <a href="{{ route('dashboard') }}">
-                        <x-application-logo class="block h-9 w-auto fill-current text-gray-800 dark:text-gray-200" />
-                    </a>
-                </div>
+@php
+    /**
+     * Top-bar 48px: brand wordmark + workspace pill + nav links + user menu.
+     * Дизайн-токены тянутся через Tailwind config (см. tailwind.config.js).
+     * Левый rail (56px) добавим в Phase 2, когда появятся вторичные scopes.
+     */
+    $user = auth()->user();
 
-                <!-- Navigation Links -->
-                <div class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex">
-                    <x-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
-                        {{ __('Dashboard') }}
-                    </x-nav-link>
+    $mailboxesActive = \App\Models\Mailbox::query()->where('is_active', true)->count();
+    $mailboxesError  = \App\Models\Mailbox::query()
+        ->where('is_active', true)
+        ->whereNotNull('last_error_at')
+        ->whereColumn('last_error_at', '>', \Illuminate\Support\Facades\DB::raw('COALESCE(last_synced_at, \'1970-01-01\')'))
+        ->count();
+    $workspaceDot = $mailboxesError > 0
+        ? 'bg-amber-600'
+        : ($mailboxesActive > 0 ? 'bg-emerald-600' : 'bg-neutral-400');
 
-                    @if(auth()->user()?->hasAnyRole(['manager', 'head_of_sales', 'director', 'secretary']))
-                        <x-nav-link :href="route('requests.index')" :active="request()->routeIs('requests.*')">
-                            Заявки
-                        </x-nav-link>
-                    @endif
+    // Склонение «ящик» — Russian plural rules.
+    $boxLabel = (function (int $n): string {
+        $mod10  = $n % 10;
+        $mod100 = $n % 100;
+        if ($mod100 >= 11 && $mod100 <= 14) return 'ящиков';
+        if ($mod10 === 1) return 'ящик';
+        if ($mod10 >= 2 && $mod10 <= 4) return 'ящика';
+        return 'ящиков';
+    })($mailboxesActive);
 
-                    @if(auth()->user()?->hasAnyRole(['head_of_sales', 'director']))
-                        <x-nav-link :href="route('mail-rules.index')" :active="request()->routeIs('mail-rules.*')">
-                            Правила почты
-                        </x-nav-link>
-                    @endif
-                </div>
+    $navLinks = [];
+    $navLinks[] = ['route' => 'dashboard', 'label' => 'Дашборд', 'pattern' => 'dashboard'];
+    if ($user?->hasAnyRole(['manager', 'head_of_sales', 'director', 'secretary'])) {
+        $navLinks[] = ['route' => 'requests.index', 'label' => 'Заявки', 'pattern' => 'requests.*'];
+    }
+    if ($user?->hasAnyRole(['head_of_sales', 'director'])) {
+        $navLinks[] = ['route' => 'mail-rules.index', 'label' => 'Правила почты', 'pattern' => 'mail-rules.*'];
+    }
+@endphp
+
+<nav class="bg-surface border-b border-border sticky top-0 z-30" style="height: var(--topbar-h)">
+    <div class="h-full max-w-[1440px] mx-auto px-4 flex items-center gap-3">
+
+        {{-- Brand --}}
+        <a href="{{ route('dashboard') }}" class="flex items-center gap-2 shrink-0" aria-label="MyLift CRM">
+            <img src="{{ asset('images/mylift-wordmark.svg') }}" alt="MyLift CRM" class="h-6 w-auto">
+        </a>
+
+        {{-- Workspace pill --}}
+        @auth
+            <div class="hidden sm:flex items-center gap-1.5 px-2.5 py-[5px] border border-border rounded-md text-fg-2"
+                 style="font-size: 12.5px"
+                 title="Активных ящиков: {{ $mailboxesActive }}{{ $mailboxesError ? ', с ошибкой: '.$mailboxesError : '' }}">
+                <span class="inline-block w-1.5 h-1.5 rounded-full {{ $workspaceDot }}"></span>
+                <span>{{ $mailboxesActive }} {{ $boxLabel }}</span>
             </div>
+        @endauth
 
-            <!-- Settings Dropdown -->
-            <div class="hidden sm:flex sm:items-center sm:ms-6">
+        {{-- Nav links --}}
+        @auth
+            <div class="hidden sm:flex items-center gap-0.5 ml-1">
+                @foreach($navLinks as $link)
+                    @php $active = request()->routeIs($link['pattern']); @endphp
+                    <a href="{{ route($link['route']) }}"
+                       class="relative px-3 py-2 text-sm rounded-md transition-colors
+                              {{ $active ? 'text-fg-1 font-semibold' : 'text-fg-2 hover:text-fg-1 hover:bg-hover' }}">
+                        {{ $link['label'] }}
+                        @if($active)
+                            <span class="absolute left-3 right-3 -bottom-px h-0.5 bg-accent rounded-full"></span>
+                        @endif
+                    </a>
+                @endforeach
+            </div>
+        @endauth
+
+        <div class="flex-1"></div>
+
+        {{-- User menu --}}
+        @auth
+            <div class="hidden sm:block">
                 <x-dropdown align="right" width="48">
                     <x-slot name="trigger">
-                        <button class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300 focus:outline-none transition ease-in-out duration-150">
-                            <div>{{ Auth::user()->name }}</div>
-
-                            <div class="ms-1">
-                                <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
-                                </svg>
-                            </div>
+                        <button type="button"
+                                class="inline-flex items-center gap-2 px-2 py-1 text-sm text-fg-2 hover:text-fg-1 hover:bg-hover rounded-md transition-colors">
+                            <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-neutral-200 text-fg-1 font-semibold text-xs">
+                                {{ \Illuminate\Support\Str::of($user?->name ?? '?')->substr(0, 1)->upper() }}
+                            </span>
+                            <span class="hidden md:inline">{{ $user?->name }}</span>
+                            <svg class="fill-current w-3 h-3 text-fg-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                            </svg>
                         </button>
                     </x-slot>
-
                     <x-slot name="content">
-                        <x-dropdown-link :href="route('profile.edit')">
-                            {{ __('Profile') }}
-                        </x-dropdown-link>
-
-                        <!-- Authentication -->
+                        <x-dropdown-link :href="route('profile.edit')">{{ __('Profile') }}</x-dropdown-link>
                         <form method="POST" action="{{ route('logout') }}">
                             @csrf
-
                             <x-dropdown-link :href="route('logout')"
-                                    onclick="event.preventDefault();
-                                                this.closest('form').submit();">
+                                onclick="event.preventDefault(); this.closest('form').submit();">
                                 {{ __('Log Out') }}
                             </x-dropdown-link>
                         </form>
                     </x-slot>
                 </x-dropdown>
             </div>
-
-            <!-- Hamburger -->
-            <div class="-me-2 flex items-center sm:hidden">
-                <button @click="open = ! open" class="inline-flex items-center justify-center p-2 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-900 focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-900 focus:text-gray-500 dark:focus:text-gray-400 transition duration-150 ease-in-out">
-                    <svg class="h-6 w-6" stroke="currentColor" fill="none" viewBox="0 0 24 24">
-                        <path :class="{'hidden': open, 'inline-flex': ! open }" class="inline-flex" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-                        <path :class="{'hidden': ! open, 'inline-flex': open }" class="hidden" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Responsive Navigation Menu -->
-    <div :class="{'block': open, 'hidden': ! open}" class="hidden sm:hidden">
-        <div class="pt-2 pb-3 space-y-1">
-            <x-responsive-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
-                {{ __('Dashboard') }}
-            </x-responsive-nav-link>
-        </div>
-
-        <!-- Responsive Settings Options -->
-        <div class="pt-4 pb-1 border-t border-gray-200 dark:border-gray-600">
-            <div class="px-4">
-                <div class="font-medium text-base text-gray-800 dark:text-gray-200">{{ Auth::user()->name }}</div>
-                <div class="font-medium text-sm text-gray-500">{{ Auth::user()->email }}</div>
-            </div>
-
-            <div class="mt-3 space-y-1">
-                <x-responsive-nav-link :href="route('profile.edit')">
-                    {{ __('Profile') }}
-                </x-responsive-nav-link>
-
-                <!-- Authentication -->
-                <form method="POST" action="{{ route('logout') }}">
-                    @csrf
-
-                    <x-responsive-nav-link :href="route('logout')"
-                            onclick="event.preventDefault();
-                                        this.closest('form').submit();">
-                        {{ __('Log Out') }}
-                    </x-responsive-nav-link>
-                </form>
-            </div>
-        </div>
+        @endauth
     </div>
 </nav>
