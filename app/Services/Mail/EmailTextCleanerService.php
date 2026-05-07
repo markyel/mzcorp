@@ -35,20 +35,32 @@ class EmailTextCleanerService
             return '';
         }
 
-        ['forwarded' => $forwarded, 'original' => $original] = $this->extractForwardedContent($bodyText);
+        // ВАЖНО: dequote ПЕРВЫМ. Yandex 360 оборачивает forward'ы в цитату:
+        //
+        //     07.05.2026 9:53, info@... пишет:
+        //     > -------- Перенаправленное сообщение --------
+        //     > Тема: Заявка на ...
+        //     > ...
+        //
+        // Если применить extractForwardedContent на raw text — regex не сматчится
+        // (строка начинается с `>`, не с `-`). Сначала снимаем `>`-префиксы,
+        // затем ищем маркер. Это противоположно порядку n8n — там полагались
+        // на промпт «игнорируй цитаты», но GPT всё равно парсит позиции из
+        // forward'нутых блоков (см. parser-corpus.txt #349 — 9 позиций из
+        // нашей же исходящей КП), поэтому здесь физически вырезаем.
+        $dequoted = $this->dequoteText($bodyText);
+
+        ['forwarded' => $forwarded, 'original' => $original] = $this->extractForwardedContent($dequoted);
 
         if ($forwarded !== null) {
-            $cleanForwarded = $this->dequoteText($forwarded);
-            $cleanOriginal = $this->removeSignature($this->dequoteText($original));
+            // Forwarded — это, как правило, либо наша же исходящая КП, либо
+            // чужая старая переписка. Для парсера позиций — мусор. Не отдаём AI.
+            $cleanOriginal = $this->removeSignature($original);
 
-            if ($cleanOriginal !== '') {
-                return $cleanOriginal . "\n\n--- Пересланное сообщение ---\n" . $cleanForwarded;
-            }
-
-            return $cleanForwarded;
+            return $cleanOriginal;
         }
 
-        return $this->removeSignature($this->dequoteText($bodyText));
+        return $this->removeSignature($dequoted);
     }
 
     /**
