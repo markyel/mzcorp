@@ -6,7 +6,7 @@ use App\Enums\RequestStatus;
 use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Models\RequestItem;
-use App\Services\Mail\MailLabelService;
+use App\Services\Mail\MailFolderRouter;
 use App\Services\RequestItemParsingService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -32,7 +32,7 @@ class RequestItemPersister
     public function __construct(
         private readonly InternalCodeGenerator $codeGenerator,
         private readonly AssignmentService $assignment,
-        private readonly MailLabelService $labels,
+        private readonly MailFolderRouter $folders,
         private readonly RequestItemParsingService $parser,
     ) {
     }
@@ -91,14 +91,12 @@ class RequestItemPersister
             ]);
         }
 
-        // Назначение менеджера + IMAP-метка — только при первом создании.
-        // Yandex 360 ограничивает имя метки 15 символами → формат «MZ {Lastname}».
+        // Назначение менеджера + MOVE в INBOX/MZ/{Lastname} — только при
+        // первом создании. См. MailFolderRouter docblock о причинах перехода
+        // от IMAP keywords к подпапкам.
         if ($justCreated) {
             $manager = $this->assignment->autoAssign($existing);
-            $label = $manager
-                ? 'MZ ' . mb_substr($this->shortName($manager->name), 0, 12)
-                : 'MZ нерасп.';
-            $this->labels->applyLabel($message, $label);
+            $this->folders->routeToManager($message, $manager);
         }
 
         Log::info('RequestItemPersister: items persisted', [
@@ -117,20 +115,5 @@ class RequestItemPersister
             'dup' => $filtered['duplicates'],
             'just_created' => $justCreated,
         ];
-    }
-
-    /**
-     * «Менеджер Иванов Иван» → «Иванов».
-     * Дублирует IncomingMailProcessor::shortName() — пока копия,
-     * чтобы не вводить общий хелпер ради двух мест.
-     */
-    private function shortName(string $fullName): string
-    {
-        $parts = preg_split('/\s+/', trim($fullName)) ?: [];
-        if (count($parts) > 1 && in_array(mb_strtolower($parts[0]), ['менеджер', 'роп'], true)) {
-            return $parts[1];
-        }
-
-        return $parts[0] ?? 'unknown';
     }
 }

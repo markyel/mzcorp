@@ -28,7 +28,7 @@ class IncomingMailProcessor
     public function __construct(
         private readonly InternalCodeGenerator $codeGenerator,
         private readonly AssignmentService $assignment,
-        private readonly MailLabelService $labels,
+        private readonly MailFolderRouter $folders,
     ) {
     }
 
@@ -62,37 +62,19 @@ class IncomingMailProcessor
         // Round-robin назначение менеджеру.
         $manager = $this->assignment->autoAssign($request);
 
-        // IMAP-метка с именем менеджера. Foundation §1.6: секретарь видит
-        // сразу, кому ушла заявка. Yandex 360 ограничивает имя метки 15 символами,
-        // поэтому формат «MZ {Lastname}» (3 + до 12 = 15). См. MEMORY.md
-        // «Открытые вопросы → 6. Формат IMAP-меток в Yandex 360».
-        $label = $manager
-            ? 'MZ ' . mb_substr($this->shortName($manager->name), 0, 12)
-            : 'MZ нерасп.';
-        $this->labels->applyLabel($message, $label);
+        // MOVE письма в подпапку INBOX/MZ/{Lastname} — заменяет старый
+        // подход с IMAP custom keywords (см. MailFolderRouter docblock и
+        // MEMORY.md «Известные грабли → Yandex IMAP labels CLOSE/SELECT»).
+        $newFolder = $this->folders->routeToManager($message, $manager);
 
         Log::info('Request created from incoming mail', [
             'email_message_id' => $message->id,
             'request_id' => $request->id,
             'internal_code' => $request->internal_code,
             'assigned_to' => $manager?->id,
-            'label' => $label,
+            'moved_to' => $newFolder,
         ]);
 
         return $request->fresh();
-    }
-
-    /**
-     * «Менеджер Иванов Иван» → «Иванов».
-     */
-    private function shortName(string $fullName): string
-    {
-        $parts = preg_split('/\s+/', trim($fullName)) ?: [];
-        // Берём слово после «Менеджер» / «РОП» если оно есть, иначе первое.
-        if (count($parts) > 1 && in_array(mb_strtolower($parts[0]), ['менеджер', 'роп'], true)) {
-            return $parts[1];
-        }
-
-        return $parts[0] ?? 'unknown';
     }
 }
