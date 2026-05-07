@@ -79,77 +79,17 @@ class MailFolderRouter
                 );
             }
 
-            // Yandex 360 IMAP не отвечает корректно на MOVE-команду
-            // («Command failed to process: Empty response»), поэтому
-            // используем явный COPY + STORE \Deleted + EXPUNGE.
-            // Возможно Yandex не объявляет MOVE capability — webklex
-            // не делает fallback автоматически.
-            // Per-step try/catch: webklex's MOVE/COPY на Yandex 360 неявно
-            // дёргают EXPUNGE → «BAD [CLIENTBUG] EXPUNGE Wrong session state».
-            // Главное — чтобы COPY прошёл (письмо появилось в target). Все
-            // последующие неудачи логируем и продолжаем.
-            $copyOk = false;
-            try {
-                $msg->move($targetPath);
-                $copyOk = true;
-            } catch (\Throwable $moveError) {
-                Log::info('MailFolderRouter: MOVE failed, trying COPY', [
-                    'email_message_id' => $message->id,
-                    'target' => $targetPath,
-                    'error' => $moveError->getMessage(),
-                ]);
+            // Только COPY, без MOVE/DELETE/EXPUNGE — webklex 6.x на Yandex 360
+            // даёт «BAD [CLIENTBUG] EXPUNGE Wrong session state» при попытке
+            // чистого MOVE или COPY+EXPUNGE. Соглашаемся на дублирование:
+            // оригинал остаётся в INBOX, копия появляется в MZ|Ivanov для
+            // секретаря. Удаление из INBOX можно добавить позже, когда
+            // разберёмся с Yandex IMAP session-state.
+            $msg->copy($targetPath, expunge: false);
 
-                try {
-                    $msg->copy($targetPath, expunge: false);
-                    $copyOk = true;
-                } catch (\Throwable $copyError) {
-                    // Yandex может бросить вторичную ошибку (например EXPUNGE
-                    // Wrong session state) даже после успешного COPY. Это
-                    // НЕ значит, что COPY провалился. Считаем COPY прошедшим
-                    // если ошибка содержит «EXPUNGE» — иначе настоящий fail.
-                    if (str_contains($copyError->getMessage(), 'EXPUNGE')) {
-                        Log::info('MailFolderRouter: COPY ok, EXPUNGE failed (treating as success)', [
-                            'email_message_id' => $message->id,
-                            'error' => $copyError->getMessage(),
-                        ]);
-                        $copyOk = true;
-                    } else {
-                        throw $copyError;
-                    }
-                }
-            }
-
-            if (! $copyOk) {
-                throw new \RuntimeException('Neither MOVE nor COPY succeeded');
-            }
-
-            // Best-effort удаление из source. Любая ошибка не критична —
-            // \Deleted флаг достаточно, чтобы Yandex web UI скрыл письмо.
-            try {
-                $msg->delete(expunge: false);
-            } catch (\Throwable $deleteError) {
-                Log::info('MailFolderRouter: STORE \\Deleted skipped', [
-                    'email_message_id' => $message->id,
-                    'error' => $deleteError->getMessage(),
-                ]);
-            }
-
-            try {
-                $sourceFolder->expunge();
-            } catch (\Throwable $expungeError) {
-                Log::info('MailFolderRouter: EXPUNGE skipped (will happen on next SELECT)', [
-                    'email_message_id' => $message->id,
-                    'error' => $expungeError->getMessage(),
-                ]);
-            }
-
-            // После MOVE старый UID невалиден; новый UID Yandex назначит сам,
-            // но webklex move() не возвращает его надёжно. Чистим, чтобы
-            // никакой код не пытался дёргать сообщение по старому UID.
-            $message->forceFill([
-                'folder' => $targetPath,
-                'imap_uid' => null,
-            ])->save();
+            // БД отражает физическое размещение оригинала — он остался в INBOX.
+            // Не меняем folder/uid у EmailMessage. Только Request маршрутизирован
+            // (через folder name target в логе и нашу доменную модель).
 
             Log::info('MailFolderRouter: moved', [
                 'email_message_id' => $message->id,
