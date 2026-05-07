@@ -122,11 +122,21 @@ class RequestItemPersister
         $needsRouting = $justCreated
             || ! str_contains((string) $message->folder, '/MZ/');
 
-        if ($needsRouting) {
+        // Phase 1.8d-pending fix: parser-driven activation. Если items
+        // добавлены к существующему Pending-Request у которого письмо уже
+        // лежит в /MZ/ (парсинг прошёл не сразу — retry / force-rebake),
+        // $needsRouting=false → autoAssign не вызывался и Request оставался
+        // Pending навсегда. Запускаем autoAssign явно при появлении новых
+        // позиций у Pending-без-менеджера, независимо от папки.
+        $needsAssign = ! $existing->assigned_user_id
+            && count($filtered['new']) > 0
+            && $existing->status === RequestStatus::Pending;
+
+        if ($needsRouting || $needsAssign) {
             $manager = $existing->assigned_user_id
                 ? $existing->assignedUser
                 : $this->assignment->autoAssign($existing);
-            if ($manager) {
+            if ($manager && $needsRouting) {
                 $this->folders->routeToManager($message, $manager);
             }
         }
