@@ -49,9 +49,12 @@ class MailFolderRouter
             $client = $this->connector->imapClient($mailbox);
             $delimiter = $this->detectDelimiter($client, $message->folder);
 
-            $targetPath = $message->folder . $delimiter . 'MZ' . $delimiter . $shortName;
+            // Yandex 360 не разрешает подпапки под INBOX
+            // (BAD [CLIENTBUG] CREATE cannot apply to INBOX subfolder).
+            // Все «Мои папки» живут на root-уровне параллельно с INBOX.
+            $targetPath = 'MZ' . $delimiter . $shortName;
 
-            $this->ensureFolder($client, $targetPath);
+            $this->ensureFolder($client, $targetPath, $delimiter);
 
             $sourceFolder = $client->getFolderByPath($message->folder, soft_fail: true);
             if (! $sourceFolder) {
@@ -107,14 +110,25 @@ class MailFolderRouter
         }
     }
 
-    private function ensureFolder(Client $client, string $path): void
+    /**
+     * Рекурсивно гарантировать существование пути «A/B/C»: сначала «A»,
+     * потом «A/B», потом «A/B/C». Webklex createFolder на отсутствующего
+     * родителя у Yandex отвечает BAD CLIENTBUG.
+     */
+    private function ensureFolder(Client $client, string $path, string $delimiter): void
     {
-        $existing = $client->getFolderByPath($path, soft_fail: true);
-        if ($existing) {
-            return;
+        $parts = explode($delimiter, $path);
+        $current = '';
+        foreach ($parts as $part) {
+            if ($part === '') {
+                continue;
+            }
+            $current = $current === '' ? $part : $current . $delimiter . $part;
+            $existing = $client->getFolderByPath($current, soft_fail: true);
+            if (! $existing) {
+                $client->createFolder($current);
+            }
         }
-
-        $client->createFolder($path);
     }
 
     /**
