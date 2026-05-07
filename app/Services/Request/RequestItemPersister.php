@@ -92,11 +92,12 @@ class RequestItemPersister
         }
 
         // Назначение менеджера + IMAP-метка — только при первом создании.
+        // Yandex 360 ограничивает имя метки 15 символами → формат «MZ {Lastname}».
         if ($justCreated) {
             $manager = $this->assignment->autoAssign($existing);
             $label = $manager
-                ? 'MyLift/Заявка/' . $this->shortName($manager->name)
-                : 'MyLift/Заявка/Не назначена';
+                ? 'MZ ' . mb_substr($this->shortName($manager->name), 0, 12)
+                : 'MZ нерасп.';
             $this->labels->applyLabel($message, $label);
         }
 

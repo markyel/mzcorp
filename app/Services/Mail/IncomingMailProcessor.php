@@ -62,11 +62,13 @@ class IncomingMailProcessor
         // Round-robin назначение менеджеру.
         $manager = $this->assignment->autoAssign($request);
 
-        // IMAP-метка с именем менеджера. Foundation §1.6:
-        // «MyLift/Заявка/Иванов» — секретарь видит сразу, кому ушла заявка.
+        // IMAP-метка с именем менеджера. Foundation §1.6: секретарь видит
+        // сразу, кому ушла заявка. Yandex 360 ограничивает имя метки 15 символами,
+        // поэтому формат «MZ {Lastname}» (3 + до 12 = 15). См. MEMORY.md
+        // «Открытые вопросы → 6. Формат IMAP-меток в Yandex 360».
         $label = $manager
-            ? 'MyLift/Заявка/' . $this->shortName($manager->name)
-            : 'MyLift/Заявка/Не назначена';
+            ? 'MZ ' . mb_substr($this->shortName($manager->name), 0, 12)
+            : 'MZ нерасп.';
         $this->labels->applyLabel($message, $label);
 
         Log::info('Request created from incoming mail', [
