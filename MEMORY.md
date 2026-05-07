@@ -21,10 +21,15 @@
 | 1.7 | (объединён в 1.5) | — | done |
 | 1.8 | Минимальный `Request` + `IncomingMailProcessor` + round-robin `AssignmentService` + 165 заявок backfilled | базовая модель из LazyLift в урезанном виде | done |
 | 1.8b | Content-driven парсинг позиций (`RequestItemParsingService` drop-in) + `RequestItem` + `RequestItemPersister` + `MailFolderRouter` (COPY в `MZ\|{Lastname}` подпапку для секретаря) + CLI `requests:parse-items` | drop-in из LazyLift @ 25b59645 + новые сервисы | done (CLI-only, MailRouter-интеграция отложена) |
-| 1.9 | `OutgoingMailObserver` (Sent-tracking, привязка к `Request` через `In-Reply-To`/`References`) | новое | pending |
-| 1.10 | UI `/dashboard/requests` — пул менеджера + карточка заявки + inline attachments | новое (Livewire 4) | done |
+| 1.8c | Phase 1.8c email categorizer (`MailCategoryClassifier`, gpt-4o, 3 категории `client_request \| thread_reply \| irrelevant`) + `email_messages.category` + проброшен в `MailRouter::route` | n8n Flow 1 v9.2 → `CategorizeIncomingPrompt` | done |
+| 1.8d | UI redesign: design tokens + 48px topbar + Pool с фильтрами + RequestDetail с 7 табами + Dashboard | `design/ui_kits/crm/` | done (`3604f50`..`0b4f652`) |
+| 1.8d-pending | `RequestStatus::Pending` + `ParseRequestItemsJob` (auto-parse по dispatch) + менеджер не видит pending в пуле | новое | done (`d32c7c2`) |
+| 1.8e | LazyLift v5 промпт парсера (PHP-порт `Code: Prepare Parse Input`) + `EmailTextCleanerService` (dequote→forward→removeSignature) + `htmlToText` для HTML-only писем + few-shot positives + structured user-prompt | n8n Flow 1 v9.2 → `ParseItemsPrompt` | done (`c18279f`..`78ec391`) |
+| 1.9-inbound | `InboundReplyLinker` (5 уровней: In-Reply-To / References / subject `M-2026-NNNN` / from_email + open Requests / AI multi-choice через `ThreadClarificationAi` gpt-4o-mini) + парсинг reply'ев с force=true + suspicious-link warning | n8n `AI Agent: Process Clarification` + новое | done (`9353df7`, `f7aefe9`, `57915de`) |
+| 1.9-outbound | `OutgoingMailObserver` (Sent-tracking, наши исходящие → тред в UI) | новое | pending |
+| 1.10 | UI `/dashboard/requests` — пул менеджера + карточка заявки + inline attachments | новое (Livewire 4) | done (Phase 1.10 → пересобрано в Phase 1.8d с 7 табами) |
 | 1.11 | Дашборд РОПа v0: KPI, AI breakdown, manager load, mailbox health, последние пересылки | новое | done |
-| 1.12 | Полный redesign UI по `design/ui_kits/crm/` + `colors_and_type.css` | дизайн-система | в работе (фундамент) |
+| 1.12 | Полный redesign UI по `design/ui_kits/crm/` + `colors_and_type.css` | дизайн-система | done (закрыто как Phase 1.8d) |
 
 KB, sticky-роутинг, каталог, refresh-цены, DocumentDetector, экспорт в 1С, паузы/state machine — **все за пределами Фазы 1.**
 
@@ -109,6 +114,15 @@ sudo supervisorctl restart mzcorp-worker:*
   - **Имена папок в MUTF-7 (RFC 3501 §5.1.3)**: webklex auto-encode для `createFolder`, но не для `copy/move`. Двойной encode даёт литерал `&BBgEMgQwBD0EPgQy-`. **Решение:** имена папок только ASCII, через транслитерацию `cyrillicToLatin()` (`Иванов` → `Ivanov`, ICU `transliterator_transliterate` + fallback map).
   - **MOVE / COPY+EXPUNGE не работают**: Yandex даёт `BAD [CLIENTBUG] EXPUNGE Wrong session state for command` если webklex после COPY пытается EXPUNGE. **Решение:** только `$msg->copy($path, expunge: false)`, без MOVE/DELETE/EXPUNGE — оригинал остаётся в INBOX, копия в `MZ\|{Lastname}`. Чтобы оригинал не торчал «непрочитанным» — ставим `\Seen` на оригинал явно после COPY (отступление от Foundation §1, документировано в CLAUDE.md абс. правило #8).
   - **createFolder требует существующих парентов**: `MZ\|Ivanov` нельзя создать без предварительного `MZ`. `MailFolderRouter::ensureFolder()` идёт по сегментам (recursive create).
+- **`SyncMailboxFolderJob` body fetch ловушка (Phase 1.8d/1.9 находка)**:
+  - **`whereAll()->limit(500)->get()` берёт первые 500 sequence-numbers** (старейшие письма), не последние UID. Когда папка перерастает 500 — новые UIDs (seq>500) **никогда** не попадают в выборку. last_uid_seen замораживается, sync видимо «работает» но ничего не догоняет. Закрыто через two-step fetch: `$connection->getUid()->validatedData()` для UIDs списком, потом per-UID `whereUid($uid)->get()->first()` для bodies.
+  - **`->whereUid($uid)->first()` ломается**: webklex 6.x `WhereQuery` не имеет `first()` — magic `__call` транслирует имя в `WHEREFIRST` критерий → IMAP server BAD. Нужно `->whereUid($uid)->get()->first()` (first() на `MessageCollection`, не `WhereQuery`).
+- **`AmneziaVPN` блокирует Beget Cloud DB** (Phase 1.8e находка): мой локальный трафик идёт через `AmneziaVPN` → exit-IP не whitelisted в Beget → TCP проходит, server сразу шлёт RST. Все диагностические запросы прогоняются на VPS через tinker, локально подключения нет.
+- **HTML-only письма (LazyLift, маркетинг) → body_plain пуст или CSS** (Phase 1.8e): IMAP-парсер не извлекает текст из `<style>`, либо отдаёт сам CSS-блок. Решение — `EmailTextCleanerService::bodyPlainLooksBroken()` детектит и переключает на `htmlToText(body_html)` где `</td>→ \| ` и `</tr>→ \n` сохраняют табличную структуру.
+- **Yandex 360 forward в quoted-блоке** (Phase 1.8e): Yandex обрамляет forward маркером `> -------- Перенаправленное сообщение --------` (с `>` префиксом цитирования). `extractForwardedContent` на raw тексте не матчится. Решение — `dequoteText()` ПЕРВЫМ, потом `extractForwardedContent`. Forwarded-блок физически выбрасывается (не отдаётся AI), потому что это либо наша же исходящая КП, либо чужая старая переписка.
+- **`scp` на Windows PowerShell** не expand'ит `~/Desktop` (Unix tilde). Нужно `$env:USERPROFILE\Desktop\file.txt` или абсолютный путь.
+- **Beget `php artisan config:cache route:cache view:cache` одной командой** не работает — artisan не принимает доп. аргументы. Только тремя отдельными вызовами или через `&&`.
+- **PSR-4 autoload новых классов на проде** — после `git pull` если новые классы есть в `app/Services/Mail/`, `app/Prompts/Mail/` — обязательно `sudo -u www-data composer dump-autoload --optimize`, иначе Laravel autoload-cache (`bootstrap/cache/`) не подхватит и `class_exists` вернёт false.
 
 ## Журнал сессий
 
@@ -225,7 +239,78 @@ sudo supervisorctl restart mzcorp-worker:*
 - Текущий UI собран на дефолтном Breeze layout с Figtree font и стандартными gray Tailwind classes — это явно отличается от макетов (Inter font, 13px base, oklch neutrals, 9-step palette, top-bar 48px + left rail 56px).
 - Решение: полный redesign, поэтапно. На 2026-05-07 ушло на Phase 1.8b — отложено.
 
-### Сессия 2026-05-07 (вечер) — Phase 1.8c (LazyLift email classifier port) + UI mismatch raised
+### Сессия 2026-05-07 (вечер 2 / марафон) — Phase 1.8d UI + sync bug + Pending status + Phase 1.9 inbound thread + Phase 1.8e parser v5
+
+Большая сессия, **18 коммитов**: `3604f50` → `57915de`. Закрыли почти весь backlog Phase 1, остался только Phase 1.9 outbound (Sent-tracking).
+
+**Phase 1.8d — UI redesign по `design/ui_kits/crm/`** (5 коммитов: `3604f50`, `41ad955`, `fadd901`, `7350cfb`, `0b4f652`):
+- `resources/css/design-tokens.css` (port из `colors_and_type.css`) + tailwind.config.js extend на `var(--token)`.
+- `layouts/app.blade.php` + `navigation.blade.php`: 48px sticky topbar, brand wordmark, workspace pill (live mailbox count + traffic-light dot), Inter + JetBrains Mono.
+- `Livewire\Requests\Pool` + view: 36px-row table, status chips, filter chips, scope `mine/all`.
+- `Livewire\Requests\Detail` + view (главное): 7 табов «Обзор / Переписка / Позиции / Поставщики / Активность / Файлы / Связанные» по `04-request-detail.html`. Hero card с code+copy, status-row, action-buttons (disabled с title=«Phase 2»). Подгрузка thread в Переписку (Phase 1.9 ниже).
+- Dashboard view: 6 KPI tiles + AI breakdown bars + manager load + mailbox health + recent forwards/requests.
+- Frontend bundle: 44 KB CSS / 8.6 KB gzip, 88 KB JS. `npm run build` чистый.
+
+**Sync bug fix** (`dd102f4` + `4ccdcbc` + `ebecba8`):
+- **Симптом**: на 2026-05-07 09:01 INBOX-sync `mail@myzip.ru` замер. last_uid_seen=400, sync_count=672, but no new emails в БД хотя в Yandex поток продолжается.
+- **Корень 1**: `whereAll()->limit(500)->setFetchBody(true)->get()` берёт первые 500 sequence-numbers (старейшие письма) и пытается тянуть body для всех 500 за один FETCH. После того как INBOX перерос 500 — новые UIDs (seq>500) перестали попадать в выборку. Дополнительно — body fetch на 500 писем ронял worker по памяти/таймауту без записи в production log.
+- **Фикс**: two-step fetch. ШАГ 1 — `$folder->getClient()->getConnection()->getUid()->validatedData()` (только UIDs списком, kB трафика). ШАГ 2 — фильтр `>= sinceUid`, обрезка до 500 свежайших, per-UID `whereUid($uid)->get()->first()` с body+flags.
+- **Корень 2**: `->whereUid($uid)->first()` падал с «Method WhereQuery::whereFirst() is not supported». Webklex 6.x `WhereQuery` не имеет first() — magic `__call` транслирует имена в `WHERE<UPPERCASE>` критерий. Нужно `->whereUid($uid)->get()->first()` (first() на `MessageCollection`).
+- Также **`config:cache route:cache view:cache` одной командой не работает** — artisan не принимает доп. аргументы. Зафиксировал в MEMORY и в deploy-сниппете.
+
+**Phase 1.8d-pending — `RequestStatus::Pending` + auto ParseRequestItemsJob** (`d32c7c2`):
+- Новое значение enum `Pending`. Скрыто от менеджеров в пуле (им не с чем работать без позиций).
+- `App\Jobs\Mail\ParseRequestItemsJob` — обёртка над `RequestItemParsingService` + `RequestItemPersister`. ShouldBeUnique на 5 минут, timeout 180s, идемпотентен.
+- `IncomingMailProcessor::processIfRequest` теперь создаёт Request **со статусом Pending**, БЕЗ assignment, БЕЗ folder routing. Dispatch'ит ParseRequestItemsJob.
+- После успешного persist — `RequestItemPersister::persist` сам вызывает `AssignmentService::autoAssign()` который переводит status `Pending → Assigned` + назначает менеджера + копирует письмо в `MZ\|{Lastname}`.
+- `Pool` отфильтровывает Pending для менеджеров; РОПу chip-фильтр «В обработке (N)».
+
+**Phase 1.9 inbound thread linking** (`9353df7` + `f7aefe9` + `57915de`):
+- `App\Services\Mail\InboundReplyLinker` — 5 уровней matching:
+  1. **In-Reply-To** — точное совпадение со сохранённым `EmailMessage.message_id`.
+  2. **References** — любой ID в цепочке (с конца — свежие первыми).
+  3. **Subject `M-2026-NNNN`** — safety net для Fwd / поломанных headers.
+  4. **From_email + open Requests** клиента. Гейт по `category=client_request` → не линкуем (новая заявка). При 1 кандидате → она же. При 2+ → передаётся в уровень 5.
+  5. **AI multi-choice** — `ThreadClarificationAi` (gpt-4o-mini, `services.openai.clarification_model`). Source: n8n `AI Agent: Process Clarification`. На сбое fallback на самую свежую.
+- `MailRouter::route` — порядок поправлен: `categorize()` ДО `tryLink()` (4-й уровень опирается на category).
+- **Парсинг reply'ев**: после успешного link'а dispatch `ParseRequestItemsJob::dispatch($message->id, force: true)`. Извлекает доп. позиции которые клиент мог дописать в follow-up.
+- `RequestItemPersister::persist` — category-гейт обходится если `related_request_id` уже стоит (это reply, можно добавлять items в existing Request).
+- **Suspicious-link safety log**: если на reply (`force=true`, `had_items_before=true`) парсер находит >0 новых items и 0 совпадений с существующими — пишем `WARNING` с hint'ом для РОПа (потенциально ошибочный link от AI clarifier). Не отвязываем автоматически (риск ложной тревоги), но даём видимый сигнал.
+- `Detail` Livewire — eager-load всего треда (`EmailMessage where related_request_id = X`), таб «Переписка» показывает цикл с разными аватарками (accent-красный для outbound) и chip-«исходящее» / category-chip. Таб «Файлы» — вложения **всего треда**.
+
+**Phase 1.8e parser v5** (`c18279f` + `fd44cc9` + `eca7436` + `89b8959` + `81bf0a6` + `78ec391`):
+- **Подключили n8n workflow** (`design/uploads/...email_classification...json` + операторские dump'ы корпуса в `design/uploads/parser-corpus.txt` и `parser-rebake-50.txt`, `regress-bodies.txt`).
+- `App\Prompts\Mail\ParseItemsPrompt` — system message v5 (port n8n `AI Agent: Parse Items`). Несколько итераций:
+  - первая: жёсткое «subject НИКОГДА не источник» → over-conservative, регрессия на 9 кейсах.
+  - финальная (`78ec391`): permissive с **позитивными правилами** + 8 few-shot positive examples из реального корпуса. Subject правило теперь situational: «обычно метка, НО если subject содержит явный артикул+qty (как "DAA20220B17 1 штука") — извлекай». Раздел «КОГДА items: []» — только 4 чётко описанных случая.
+- `App\Services\Mail\EmailTextCleanerService` — PHP-порт трёх JS-функций из n8n `Code: Prepare Parse Input`:
+  - `extractForwardedContent` — изоляция «--- Пересланное сообщение ---» (5 вариантов написания включая «Перенаправленное» от Yandex).
+  - `dequoteText` — снимает `>`-префиксы, режет служебные строки.
+  - `removeSignature` — режет подпись после `--`/«С уважением»/«Best regards», умно (если после `--` идут товаро-подобные строки — это разделитель перед позициями, не подпись).
+  - **Порядок**: `dequoteText` ПЕРВЫМ (Yandex оборачивает forward в цитату), потом `extractForwardedContent` (теперь маркер виден), forwarded физически выбрасывается.
+  - `htmlToText` — **критично для LazyLift / маркетинговых писем**: HTML-only без plain-alternative, IMAP вытаскивает CSS из `<style>`. `</td>→ \| ` и `</tr>→ \n` сохраняют табличный layout позиций.
+  - `bodyPlainLooksBroken` — эвристика: пустой / < 20 символов / ≥3 CSS-маркеров → fallback на `htmlToText(body_html)`.
+- `RequestItemParsingService` — структурированный user-prompt секциями `## ОТПРАВИТЕЛЬ / ## ТЕМА / ## ТЕКСТ` (был склеенный текст, GPT путал subject с описанием товара).
+- **Корпус-валидация на 50 письмах**:
+  - 9/9 false-negative-регрессий восстановлены (#371, #370, #369, #365, #352, #350, #355, #356, #329).
+  - 7/7 контролей-positive без регрессий.
+  - 6/7 контролей-negative корректны (#357 потенциально проблемный — но обрабатывается thread-linker'ом в продакшене).
+- `requests:cleanup-items` CLI — для clean rebake: удалить items в диапазоне id, перевести Request обратно в Pending. Защита: --from-id обязателен, без --apply dry-run.
+- **Backfill корпуса не делаем** — оператор решил, старые заявки уже устарели, наблюдаем только новые.
+
+**ThreadClarificationAi** (5-й уровень, `f7aefe9`):
+- `App\Prompts\Mail\ThreadClarificationPrompt::systemMessage()` + `userMessage($from, $subject, $body, $candidates[])`.
+- `App\Services\Mail\ThreadClarificationAi::chooseRequest($message, Collection $candidates)` — выбирает из 2-5 свежайших, на сбое fallback на самую свежую.
+- gpt-4o-mini, `OPENAI_CLARIFICATION_MODEL`. Стоимость ~$0.001-0.005 на вызов.
+
+**`AmneziaVPN` блок к Beget** (Phase 1.8e находка): мой локальный трафик идёт через AmneziaVPN, exit-IP не в whitelist Beget Cloud DB. Все запросы прогоняются на VPS через tinker, локальный pg_connect не работает. Зафиксировал в «Известных граблях».
+
+**Подключённые ящики** (без изменений):
+- `mail@myzip.ru` (id=1, shared, oauth) — работает, sync 2-min schedule.
+- `man2@myzip.ru` (id=2) — OAuth access-token expired, no refresh — шумит ERROR в лог каждые 2 мин, но не критично.
+- `man3@myzip.ru` (id=3) — то же.
+
+### Сессия 2026-05-07 (вечер 1) — Phase 1.8c (LazyLift email classifier port) + UI mismatch raised
 
 После Phase 1.8b backfill оператор увидел в пуле 6+ ложно-позитивных Request разных категорий (внутренние КП от коллег, supplier offers, out-of-office, newsletter spam). Триггер «items.count > 0» оказался слишком слабым.
 
@@ -301,172 +386,48 @@ sudo supervisorctl restart mzcorp-worker:*
 
 ## План на следующую сессию
 
-Категоризатор работает в фоне на новых письмах (после `85d1c70`). Перед стартом — посмотреть качество категоризации за прошедшие сутки через `mail:export-for-analysis` или прямой SQL по `email_messages`.
+После марафона 2026-05-07 (вечер 2) Phase 1.8d / sync-fix / 1.9-inbound / 1.8e parser v5 закрыты. Backfill корпуса оператор пропустил — наблюдаем новые письма.
 
-### Вариант A — приоритет (Phase 1.8d). UI refactor под design templates
+### Приоритет 1 — Phase 1.9 outbound (Sent-tracking)
 
-Оператор явно: «Заявка = список позиций + переписка с заказчиком, не одно письмо. Привести в соответствие с шаблонами».
+`OutgoingMailObserver` — синк папки Sent у каждого ящика, привязка наших исходящих к существующим Request через `In-Reply-To` / `References` / subject `M-2026-NNNN`. Поля у `EmailMessage` уже есть (`direction = outbound`, `mailbox_id`, headers). Логика похожа на inbound:
+1. Sync Sent папку (тот же `SyncMailboxFolderJob` с folder='Sent', работает).
+2. Для каждого нового outbound message — найти Request через те же 5 уровней что в `InboundReplyLinker` (можно переиспользовать класс, добавив `tryLinkOutbound`).
+3. Если matched — поставить `related_request_id`, обновить `Request.last_outbound_at`. Это даст:
+   - Тред в UI «Переписка» Phase 1.8d покажет outbound сообщения вместе с inbound.
+   - Дашборд РОПа сможет считать KPI «time-to-quote» (от inbound до первого outbound).
+4. Compose-кнопка в UI — Phase 1.9 next iteration. Сначала observer, потом editor.
 
-Шаблоны в `design/ui_kits/crm/`:
-- **`04-request-detail.html`** — детальная заявка. Структура:
-  - Subnav: «← К списку», breadcrumbs, prev/next по соседним заявкам
-  - Hero block: id (M-2026-NNNN) + копировать, title с числом позиций, client (компания), manager, status row (Статус/SLA/Менеджер/Sticky/Возраст/Сумма/Сматчено)
-  - Action buttons: «Сформировать КП», «Refresh цен», «Ответить», «Пауза», «Переподчинить», «Закрыть как не наша тема»
-  - **Tabs: `Обзор / Переписка (N) / Позиции (N) / Поставщики (N) / Активность (N) / Файлы (N) / Связанные`**
-- **`01-pool.html`** — пул менеджера: фильтры, компактный список.
-- **`03-requests.html`** — широкий список РОПа.
-- **`02-dashboard.html`** — KPI + графики.
+### Приоритет 2 — мониторинг новых писем
 
-**Подзадачи Phase 1.8d:**
-1. Tailwind tokens (старый Phase 1.12 Шаг 1: `design-tokens.css` + extend в `tailwind.config.js`).
-2. Layout + navigation (Шаг 2 старого плана).
-3. `/dashboard/requests/{request}` — Livewire `RequestDetail` с табами:
-   - **Обзор** — сводка
-   - **Переписка** — chronological список писем (incoming + outgoing) thread'а заявки. Здесь живёт «оригинальное письмо» — но как ОДИН элемент в треде, не главный контент.
-   - **Позиции** — список `RequestItem` с действиями (добавить вручную, удалить, edit).
-   - **Поставщики** — placeholder Phase 2 (refresh prices), но структуру создать.
-   - **Активность** — audit log (`request_assignments`, `request_state_changes`, `routed_mails`).
-   - **Файлы** — все вложения из всех писем заявки.
-   - **Связанные** — placeholder.
-4. `/dashboard/requests` (pool) — список с правильными колонками (`internal_code`, client, items count, status, manager, age).
-5. `/dashboard` — KPI tiles по `02-dashboard.html`.
+После всех изменений Phase 1.8e + 1.9-inbound нужно следить за качеством на boevом потоке:
 
-### Вариант B (после A или параллельно). Переключить Request-creation на category=client_request
+```bash
+# raw логи suspicious thread links (потенциально неверный AI clarifier choice)
+sudo grep 'suspicious thread link' /var/www/mzcorp/storage/logs/laravel.log | tail -20
 
-1. `IncomingMailProcessor.processIfRequest` — гейт `category === client_request AND confidence >= 0.7` (вместо `ai_classification === request`).
-2. После категоризации в `MailRouter` — если `client_request`, dispatch `ParseRequestItemsJob` (background) для парсинга позиций.
-3. `ParseRequestItemsJob`: вызывает `RequestItemParsingService` + `RequestItemPersister`. Если items > 0 → создаётся Request с позициями.
-4. Cleanup CLI `requests:reject` + `requests:cleanup-by-category` для очистки 227 ложно-позитивных Request из Phase 1.8b.
+# parser empty items за сутки (письма попали как Pending без позиций — РОПу разобрать)
+sudo -u www-data php artisan tinker --execute='
+$pending = App\Models\Request::where("status", "pending")->where("created_at", ">", now()->subDay())->count();
+echo "Pending за сутки: ".$pending.PHP_EOL;
+'
 
-### Вариант C. `\Seen` riddle — расследование
-
-1. Контролируемый тест: отправить «чистое» письмо, проверить UNSEEN сразу.
-2. Запустить `mail:sync` — проверить UNSEEN.
-3. Если \Seen появляется после sync → виноват `setFetchBody(true)` без `BODY.PEEK[]`. Фикс: либо тянуть body отдельным raw call, либо после fetch явно `removeFlag('Seen')`.
-4. Альтернатива: принять `\Seen = «обработано MyLift»` как норму.
-
-### Вариант D. Phase 1.9 — Sent-tracking (`OutgoingMailObserver`)
-
-Привязка исходящих к Request через `In-Reply-To`/`References`. Нужен для табов «Переписка»/«Активность» Phase 1.8d.
-
----
-
-## ⚠️ Старый план на 2026-05-07 (был — отложен)
-
-Главная цель планировалась — **Phase 1.12 redesign по `design/ui_kits/crm/`**. Перенесено: вместо этого сделали Phase 1.8b. План ниже сохранён для следующего раза.
-
-### Шаг 1. Фундамент — токены + Tailwind config
-1. Создать `resources/css/design-tokens.css` — копия CSS-vars из `design/colors_and_type.css` без `@import url(font)` (шрифт грузим через `<link>` в layout).
-2. В `resources/css/app.css`:
-   ```css
-   @import './design-tokens.css';
-   @tailwind base;
-   @tailwind components;
-   @tailwind utilities;
-   @layer base {
-     html { font-family: var(--font-sans); font-size: var(--fs-base); color: var(--fg-1); }
-     body { background: var(--bg-app); }
-   }
-   ```
-3. `tailwind.config.js` — extend.colors / fontSize / fontFamily / borderRadius / boxShadow на `var(--token)` mapping. Сохранить дефолтную spacing scale (4-based уже подходит).
-4. `npm run build` локально → push → VPS pull + npm ci + build.
-
-### Шаг 2. Layout + navigation
-1. В `layouts/app.blade.php` добавить `<link rel="preconnect" href="https://fonts.googleapis.com">` + `<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">`.
-2. Положить `design/assets/logos/mylift-wordmark.svg` → `public/images/mylift-wordmark.svg`.
-3. Переписать `layouts/navigation.blade.php`:
-   - Top-bar 48px высота, фон `--bg-surface`, разделитель `--border`.
-   - Слева: MyZip wordmark.
-   - Центр: top-nav links (Дашборд / Заявки / Правила почты) — text-fg-2, активный = text-fg-1 + 2px-bottom-border accent.
-   - Справа: workspace pill (`mail@myzip.ru · 3 ящика`), avatar dropdown.
-4. Можно опционально добавить left rail 56px с иконками (или скипнуть на этом этапе — single-column main).
-5. main: `max-width: 1440px; margin: 0 auto; padding: 20px 24px`.
-
-### Шаг 3. Дашборд по 02-dashboard.html
-1. KPI-tiles 5-в-ряд (или адаптивно 6→3→2): `.k` (uppercase 10.5px), `.v` (28px semibold tnum), `.d` (тренд если есть данные за прошлый период).
-2. AI-классификация: card с `<h3>` хедером и `.body`, бары на `--sky-500` background.
-3. Mailbox health с цветным dot (emerald/amber/grey).
-4. «Последние пересылки» / «последние заявки» — компактный log-стиль (12.5px, monospace timestamps).
-5. **Не делаем** на этом этапе: heatmap (требует agg по часам), sparklines (history), funnel (нужно много вычислений) — добавим в Phase 2.
-
-### Шаг 4. /dashboard/requests
-1. Pool по 03-requests.html / 01-pool.html: компактная таблица, 36px row-h, status-chips (lowercase «в работе», «новая»), monospace для internal_code.
-2. Detail по 04-request-detail.html: трёхколоночная вёрстка (исходное письмо | client+manager | thread/timeline). Inline body отображается с design-system styling.
-
-### Шаг 5. /dashboard/mail-rules
-1. Список правил по табличному стилю.
-2. Editor — вертикальные карточки секций с design tokens.
-
-### Шаг 6 (опционально, если время останется)
-1. Phase 1.9 — `OutgoingMailObserver`: при синке Sent папки matchить письма к Request через `In-Reply-To`/`References` и обновлять `last_outbound_at` на Request.
-2. Подключить Man2/Man3 ящики через OAuth (mail:oauth url 2 → mail:oauth code 2; то же для 3).
-
-## ⭐ ПРИОРИТЕТ 1 на 2026-05-07: пересмотр анализа почты (Phase 1.8b)
-
-**Решение клиента (2026-05-06 поздно вечером):** текущий pipeline (rules → AI-классификатор по 6 классам → Request если "request") даёт слишком много мусора в пуле. Перейти на подход LazyLift — **анализируем по содержимому, а не по тональности письма**.
-
-**Новый порядок pipeline:**
-```
-письмо
-  → ГЛУБОКИЙ АНАЛИЗ: заявка ли это?
-       • парсинг тела (извлечение позиций — партномера, бренды, кол-во)
-       • извлечение текста из вложений (PDF/XLSX/JPG/PNG/WEBP/архивы)
-       • Vision/OCR на шильдиках, сканах
-       • если есть items → это заявка
-       • если items пустые → не заявка
-  → если ЗАЯВКА: создаём Request + RequestItems (с распарсенными позициями)
-  → если НЕ ЗАЯВКА: routing rules (рекламация/бухгалтерия/спам/forward)
+# AI clarifier reasoning — для оценки точности 5-го уровня
+sudo grep 'ThreadClarificationAi: matched by AI' /var/www/mzcorp/storage/logs/laravel.log | tail -20
 ```
 
-**Что меняется в текущем коде:**
-- **Удалить (или сильно урезать)** `MailClassifierService` как primary-классификатор. AI-класс остаётся справочной меткой, но **не** определяет создание Request.
-- **`IncomingMailProcessor`** перестаёт триггериться по `ai_classification=request`. Триггер — наличие распарсенных items.
-- **`MailRouter`** теперь:
-  1. Loop guard.
-  2. **Сначала** прогнать письмо через RequestExtractionPipeline (новое).
-  3. Если items.count > 0 → IncomingMailProcessor создаёт Request с items.
-  4. Если items.count = 0 → routing rules + (опционально) AI-классификация для меток.
+Если pending'и накапливаются — добавить UI-кнопку «Закрыть как не наша тема» для РОПа (Phase 2 действие, сейчас disabled).
 
-**Что переносим из LazyLift (drop-in или с адаптацией):**
+### Бэклог низкого приоритета
 
-| Компонент LazyLift | Назначение в MyLift |
-|---|---|
-| `app/Services/RequestItemParsingService.php` | Главный парсер — берёт тело письма + вложения, возвращает items |
-| `app/Services/ArchiveExtractionService.php` | Распаковка ZIP/RAR во вложениях |
-| `app/Services/EmailTextCleanerService.php` | Чистка цитирования / подписей / служебки в теле |
-| `app/Services/SubjectNormalizerService.php` | Нормализация `Re:`/`Fwd:` для дедупа thread'ов |
-| `app/Services/Kb/*` (минимум: `RequestContextAnalysisService`, `BrandResolutionService`, `EquipmentUnitMatchingService`, `ParameterExtractionService`) | L1/L2 квалификация — определяет, что распарсенный набор позиций «достаточен», иначе items нет / неполные |
-| `app/Prompts/Kb/RequestContextAnalysisPrompt.php` | Промпт для L1 KB |
-| `app/Models/Kb/*` (`EquipmentCategory`, `ManufacturerBrand`, `IdentificationParameter`, `ParameterExtractor`, и т.д.) | KB-модели + миграции |
-| `database/seeders/Kb/KbInitialSeeder.php` + `data/` | Стартовая база (27 брендов, 15 категорий, 52 параметра) |
-| Vision-процессоры (если есть в LazyLift) | Распознавание шильдиков на фото |
+- **man2/man3 OAuth re-issue**: ящики мёртвые с истёкшим access_token, refresh_token не выдан изначально. Нужен повторный OAuth flow через `mail:oauth url N` + `mail:oauth code N`. Шумят `production.ERROR` каждые 2 мин. Пока не блокирует.
+- **Round-robin догон**: Иванов 165, M2/M3 ~54 (сейчас неравный, естественно догонится). После Phase 1.9 outbound можно подумать про sticky-роутинг (Foundation Phase 2).
+- **Dashboard polish**: heatmap inflow-by-hour, sparklines, funnel — после стабильного boevoго потока 2-4 недели.
+- **Phase 2.0 KB-сервисы**: `BrandResolutionService`, `EquipmentUnitMatchingService`, `ParameterExtractionService` из LazyLift `app/Services/Kb/` — Foundation Phase 2.
+- **Manual edit позиций в UI**: в Detail табе «Позиции» добавить inline-edit (qty, unit, name) и кнопку «удалить». Сейчас всё disabled.
+- **Backfill старого корпуса**: ~$20-40 OpenAI, ~30-60 мин. Оператор отказался — старые заявки уже отработаны или закрыты.
 
-Это уже **не «фильтрация Request» (Phase 1.8a)**, а **полноценный Phase 2.0 KB-парсинг**, перенесённый в Phase 1 как фундамент. Foundation предполагал KB на Phase 2, но без него фильтр мусора нерабочий — поэтому подтягиваем сюда.
-
-**Прагматичный план на следующую сессию:**
-
-1. **Изучить LazyLift `RequestItemParsingService` + зависимости** — карта классов, минимальный набор для drop-in.
-2. **Скопировать KB-модели + миграции** (модели, ParameterExtractor, IdentificationRule, ManufacturerBrand, EquipmentCategory, jsonb-поля для items).
-3. **Скопировать `app/Services/Kb/`** — критическую часть (RequestContextAnalysis, BrandResolution, ParameterExtraction).
-4. **Скопировать промпты** `app/Prompts/Kb/*`.
-5. **Скопировать `KbInitialSeeder` + data/** — выполнить seed.
-6. **Скопировать `RequestItemParsingService`** + цепочку зависимостей.
-7. **Адаптировать `IncomingMailProcessor`** под новую логику: вызвать parsing → если items есть → Request + RequestItems с jsonb-полями + L1/L2 KB → AssignRequestJob.
-8. **Изменить `MailRouter`** — порядок: parsing first, classifier как метка (не trigger).
-9. **CLI `requests:reanalyze --all`** — запустить новый pipeline на 245 имеющихся писем, очистить пул.
-
-**Ожидаемый результат:**
-- Пул менеджера содержит только письма с реально распарсенными позициями.
-- Внутренние, авто-уведомления, рекламации, спам — отрезаются на этапе «items пустые».
-- Re:/Fwd на старые заявки → thread item на существующий Request.
-- AI остаётся вспомогательной меткой для UI, не основным критерием.
-
-**Связанные мелочи (после миграции):**
-- `requests:cleanup` для очистки 165 текущих Request, не прошедших новый фильтр.
-- Phase 1.12 redesign UI — отложить до тех пор, пока pipeline не стабилизируется (нет смысла полировать UI на грязных данных).
-- Phase 1.9 Sent-tracking — после стабилизации.
-
-Это **большой объём** — несколько коммитов, может растянуться на 2 сессии. Но это правильный путь: без качественного парсинга MVP бесполезен для продакшна.
+<!-- legacy планы 2026-05-06/07 (Phase 1.8d/1.8b) — выполнены, удалены 2026-05-07 (вечер 2). -->
 
 ## Известные грабли (накопленные за Phase 1.4)
 
