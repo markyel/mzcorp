@@ -218,6 +218,50 @@ sudo supervisorctl restart mzcorp-worker:*
 - Текущий UI собран на дефолтном Breeze layout с Figtree font и стандартными gray Tailwind classes — это явно отличается от макетов (Inter font, 13px base, oklch neutrals, 9-step palette, top-bar 48px + left rail 56px).
 - Решение: полный redesign, поэтапно. На 2026-05-07 ушло на Phase 1.8b — отложено.
 
+### Сессия 2026-05-07 (вечер) — Phase 1.8c (LazyLift email classifier port) + UI mismatch raised
+
+После Phase 1.8b backfill оператор увидел в пуле 6+ ложно-позитивных Request разных категорий (внутренние КП от коллег, supplier offers, out-of-office, newsletter spam). Триггер «items.count > 0» оказался слишком слабым.
+
+**Что сделано:**
+- **`0dccf8a` Port LazyLift Email Classifier (Phase 1.8c).**
+  - Source: `LazyLift n8n workflow Flow 1: Email Classification v9.2` (предоставлен оператором).
+  - LazyLift'ские 4 типа → 3 типа MyZip: `client_request | thread_reply | irrelevant` (без `invoice`/LW-артикулов).
+  - `App\Enums\EmailCategory` — новый enum.
+  - Migration `add_category_to_email_messages`: `category`, `category_confidence`, `category_intent`, `category_reasoning`, `categorized_at` (независимо от старых `ai_classification`-полей).
+  - `App\Prompts\Mail\CategorizeIncomingPrompt` — полный системный промпт LazyLift, адаптирован под MyZip:
+    - Заменены упоминания Liftway / `support@liftway.ru` на MyZip + список наших mailbox-адресов (динамически из БД).
+    - Сохранены 10 правил: направление переписки (Правило 1), услуги vs ТМЦ (2), пустое тело + вложение (3), множественные получатели (4), жёсткий гейт thread_reply Re:/Fwd: (6), confirm_order intent (8), корпоративный RFQ (9), маркетинг/newsletter (10).
+  - `App\Services\Mail\MailCategoryClassifier` — обёртка над OpenAIChatService (gpt-4o, не -mini). Идемпотентный по `categorized_at`.
+  - `OPENAI_CATEGORY_MODEL=gpt-4o` в `.env.example` и `config/services.php → openai.category_model`.
+  - CLI `mail:categorize {id}` / `--all` / `--force`.
+  - `RequestItemPersister` гейтит создание Request на `category === client_request`.
+- **`85d1c70` Wire MailCategoryClassifier в живой MailRouter.**
+  - Каждое новое inbound-письмо после loop guard и до rules проходит через категоризатор.
+  - Заполняет `email_messages.category` — оператор «следит за новым распределением».
+  - На текущее поведение Request-creation (старый `ai_classification=request` гейт в IncomingMailProcessor) **не влияет** — false-positives продолжатся, пока в следующей сессии не переключим триггер.
+  - Ошибка категоризатора non-fatal (Log::warning, pipeline продолжает).
+
+**Стоимость:** ~$0.005-0.01 на письмо (gpt-4o с длинным промптом). При 50 inbound/day ≈ $0.25-0.50/день.
+
+**`mail:export-for-analysis` CLI** — дамп всех писем в CSV (с признаками: domain match, headers, attachment types, current ai_classification, related Request items). Для ручной разметки и валидации классификатора.
+
+**Старые позиции (227 backfill Request) НЕ перекатываются** — оператор решил отслеживать только новое распределение.
+
+**Старые сервисы оставлены:**
+- `MailClassifierService` (6 категорий, gpt-4o-mini) — продолжает работать для `MailRoutingRule`.
+- `EmailClassification` enum остаётся.
+- `IncomingMailProcessor.processIfRequest` гейт остаётся `ai_classification === request` (не переключен на `category === client_request`).
+
+**Поднятый оператором вопрос UI** (на следующую сессию — Phase 1.8d):
+- Текущий `/dashboard/requests/{request}` показывает «исходное письмо» как главный контент — это **«читалка писем», а не работа с заявками**.
+- Foundation §«работа с заявками»: Заявка = **список позиций + переписка с заказчиком**, не одно письмо.
+- Шаблон `design/ui_kits/crm/04-request-detail.html` определяет правильную структуру: Tabs `Обзор / Переписка (N) / Позиции (N) / Поставщики (N) / Активность (N) / Файлы (N) / Связанные`. Hero с `internal_code`, статусом, SLA, менеджером, sticky, суммой, «сматчено N/M». Action-кнопки: «Сформировать КП», «Refresh цен», «Ответить», «Пауза», «Переподчинить».
+
+**Связанные шаблоны:**
+- `01-pool.html` — пул менеджера с фильтрами (статус/SLA/возраст/manager).
+- `03-requests.html` — список заявок РОПа с расширенными колонками (позиции/сумма/поставщики).
+- `02-dashboard.html` — KPI-плитки + графики.
+
 ### Сессия 2026-05-07 — Phase 1.8b (content-driven парсинг + folder routing)
 
 Большая сессия, ~14 коммитов. Закрыли Phase 1.8b целиком в CLI-режиме (без интеграции в boevoй MailRouter — отложена).
@@ -250,28 +294,53 @@ sudo supervisorctl restart mzcorp-worker:*
 
 ## План на следующую сессию
 
-Главная цель будет одной из (выбор за оператором):
+Категоризатор работает в фоне на новых письмах (после `85d1c70`). Перед стартом — посмотреть качество категоризации за прошедшие сутки через `mail:export-for-analysis` или прямой SQL по `email_messages`.
 
-### Вариант A. MailRouter integration в боевой pipeline (предположительно следующий шаг Phase 1.8b)
+### Вариант A — приоритет (Phase 1.8d). UI refactor под design templates
 
-1. **`MailRouter::route()`** — переключить порядок: сейчас flow `rules → AI classify → IncomingMailProcessor::processIfRequest`. Заменить на `rules → RequestItemParser → если items > 0 → RequestItemPersister`. AI classification оставить как метку, но НЕ как триггер создания Request.
-2. **Удалить или урезать `MailClassifierService`** — он остаётся только как label-помощник в UI, не как primary gate для Request.
-3. **Тест на свежем входящем** — отправить тестовое письмо с PDF-заявкой, проверить что Request создаётся автоматически (без CLI), MOVE отрабатывает.
+Оператор явно: «Заявка = список позиций + переписка с заказчиком, не одно письмо. Привести в соответствие с шаблонами».
 
-### Вариант B. Phase 1.12 — UI redesign (отложено с этой сессии)
+Шаблоны в `design/ui_kits/crm/`:
+- **`04-request-detail.html`** — детальная заявка. Структура:
+  - Subnav: «← К списку», breadcrumbs, prev/next по соседним заявкам
+  - Hero block: id (M-2026-NNNN) + копировать, title с числом позиций, client (компания), manager, status row (Статус/SLA/Менеджер/Sticky/Возраст/Сумма/Сматчено)
+  - Action buttons: «Сформировать КП», «Refresh цен», «Ответить», «Пауза», «Переподчинить», «Закрыть как не наша тема»
+  - **Tabs: `Обзор / Переписка (N) / Позиции (N) / Поставщики (N) / Активность (N) / Файлы (N) / Связанные`**
+- **`01-pool.html`** — пул менеджера: фильтры, компактный список.
+- **`03-requests.html`** — широкий список РОПа.
+- **`02-dashboard.html`** — KPI + графики.
 
-План был зафиксирован выше (токены + layout + дашборд + requests + mail-rules). Можно вернуться, когда CLI стабилизировался.
+**Подзадачи Phase 1.8d:**
+1. Tailwind tokens (старый Phase 1.12 Шаг 1: `design-tokens.css` + extend в `tailwind.config.js`).
+2. Layout + navigation (Шаг 2 старого плана).
+3. `/dashboard/requests/{request}` — Livewire `RequestDetail` с табами:
+   - **Обзор** — сводка
+   - **Переписка** — chronological список писем (incoming + outgoing) thread'а заявки. Здесь живёт «оригинальное письмо» — но как ОДИН элемент в треде, не главный контент.
+   - **Позиции** — список `RequestItem` с действиями (добавить вручную, удалить, edit).
+   - **Поставщики** — placeholder Phase 2 (refresh prices), но структуру создать.
+   - **Активность** — audit log (`request_assignments`, `request_state_changes`, `routed_mails`).
+   - **Файлы** — все вложения из всех писем заявки.
+   - **Связанные** — placeholder.
+4. `/dashboard/requests` (pool) — список с правильными колонками (`internal_code`, client, items count, status, manager, age).
+5. `/dashboard` — KPI tiles по `02-dashboard.html`.
+
+### Вариант B (после A или параллельно). Переключить Request-creation на category=client_request
+
+1. `IncomingMailProcessor.processIfRequest` — гейт `category === client_request AND confidence >= 0.7` (вместо `ai_classification === request`).
+2. После категоризации в `MailRouter` — если `client_request`, dispatch `ParseRequestItemsJob` (background) для парсинга позиций.
+3. `ParseRequestItemsJob`: вызывает `RequestItemParsingService` + `RequestItemPersister`. Если items > 0 → создаётся Request с позициями.
+4. Cleanup CLI `requests:reject` + `requests:cleanup-by-category` для очистки 227 ложно-позитивных Request из Phase 1.8b.
 
 ### Вариант C. `\Seen` riddle — расследование
 
-1. Контролируемый тест: отправить «чистое» письмо в `mail@myzip.ru`, проверить UNSEEN сразу.
+1. Контролируемый тест: отправить «чистое» письмо, проверить UNSEEN сразу.
 2. Запустить `mail:sync` — проверить UNSEEN.
-3. Если \Seen появляется после sync → виноват `setFetchBody(true)`. Тогда фикс: либо тянуть body отдельным `BODY.PEEK[]` raw call, либо после fetch явно `removeFlag('Seen')`.
-4. Альтернатива: принять `\Seen = «обработано MyLift»` как новую норму, обновить Foundation §1.
+3. Если \Seen появляется после sync → виноват `setFetchBody(true)` без `BODY.PEEK[]`. Фикс: либо тянуть body отдельным raw call, либо после fetch явно `removeFlag('Seen')`.
+4. Альтернатива: принять `\Seen = «обработано MyLift»` как норму.
 
 ### Вариант D. Phase 1.9 — Sent-tracking (`OutgoingMailObserver`)
 
-Привязка исходящих к Request через `In-Reply-To`/`References`. Минимум для отслеживания «менеджер ответил клиенту».
+Привязка исходящих к Request через `In-Reply-To`/`References`. Нужен для табов «Переписка»/«Активность» Phase 1.8d.
 
 ---
 
