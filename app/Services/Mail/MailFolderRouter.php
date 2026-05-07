@@ -94,8 +94,28 @@ class MailFolderRouter
                     'error' => $moveError->getMessage(),
                 ]);
 
+                // COPY оригинала в подпапку.
                 $msg->copy($targetPathImap, expunge: false);
-                $msg->delete(expunge: true);
+
+                // Удаление: STORE +FLAGS (\Deleted) без EXPUNGE.
+                // Yandex 360: «BAD [CLIENTBUG] EXPUNGE Wrong session state»
+                // если вызвать $msg->delete(true) сразу — сессия после COPY
+                // выходит из read-write состояния для source.
+                $msg->delete(expunge: false);
+
+                // Отдельный EXPUNGE через явный re-SELECT source-папки в RW.
+                try {
+                    $sourceFolder->expunge();
+                } catch (\Throwable $expungeError) {
+                    // Не критично: \Deleted уже выставлен. Yandex web UI
+                    // обычно скрывает помеченные на удаление, EXPUNGE случится
+                    // при следующем SELECT той же сессии (Yandex auto-EXPUNGE
+                    // при switch folder).
+                    Log::info('MailFolderRouter: EXPUNGE skipped (will happen on next SELECT)', [
+                        'email_message_id' => $message->id,
+                        'error' => $expungeError->getMessage(),
+                    ]);
+                }
             }
 
             // После MOVE старый UID невалиден; новый UID Yandex назначит сам,
