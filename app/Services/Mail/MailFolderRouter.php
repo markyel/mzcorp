@@ -77,7 +77,23 @@ class MailFolderRouter
                 );
             }
 
-            $msg->move($targetPath);
+            // Yandex 360 IMAP не отвечает корректно на MOVE-команду
+            // («Command failed to process: Empty response»), поэтому
+            // используем явный COPY + STORE \Deleted + EXPUNGE.
+            // Возможно Yandex не объявляет MOVE capability — webklex
+            // не делает fallback автоматически.
+            try {
+                $msg->move($targetPath);
+            } catch (\Throwable $moveError) {
+                Log::info('MailFolderRouter: MOVE failed, falling back to COPY+DELETE', [
+                    'email_message_id' => $message->id,
+                    'target' => $targetPath,
+                    'error' => $moveError->getMessage(),
+                ]);
+
+                $msg->copy($targetPath, expunge: false);
+                $msg->delete(expunge: true);
+            }
 
             // После MOVE старый UID невалиден; новый UID Yandex назначит сам,
             // но webklex move() не возвращает его надёжно. Чистим, чтобы
