@@ -25,6 +25,7 @@ class MailRouter
         private readonly MailClassifierService $classifier,
         private readonly IncomingMailProcessor $incoming,
         private readonly MailCategoryClassifier $categorizer,
+        private readonly InboundReplyLinker $replyLinker,
     ) {
     }
 
@@ -43,14 +44,32 @@ class MailRouter
             return;
         }
 
-        // Phase 1.8c: расширенная категоризация (LazyLift drop-in).
-        // Заполняет email_messages.category — следим за качеством классификации
-        // в БД. На текущее поведение (rules + IncomingMailProcessor) НЕ влияет;
-        // переключение триггера Request-creation на category — следующий шаг.
+        // Phase 1.8c: категоризация (LazyLift drop-in). Заполняет
+        // email_messages.category — для дальнейших шагов (linker уровня 4
+        // использует это как сигнал, парсер позиций — как gate).
+        // ВАЖНО: запускается ДО replyLinker, потому что 4-й уровень linker'а
+        // (от from_email) опирается на category=thread_reply / client_request.
         try {
             $this->categorizer->categorize($message);
+            $message->refresh();
         } catch (\Throwable $e) {
             Log::warning('MailRouter: category classifier failed (non-fatal)', [
+                'email_message_id' => $message->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // Phase 1.9 (inbound-часть): прицепить письмо к существующей Request
+        // через 4 уровня — In-Reply-To / References / subject-code / from_email.
+        // Если linked — IncomingMailProcessor::processIfRequest сам пропустит
+        // создание новой Request (idempotency check на related_request_id),
+        // и ParseRequestItemsJob тоже не дёргается. Это закрывает кейсы
+        // «Re: Заявка на ... — напоминание» и reply'ев сотрудников @myzip.ru,
+        // которые без linker'а порождали дубликаты Request с фантомными items.
+        try {
+            $this->replyLinker->tryLink($message);
+        } catch (\Throwable $e) {
+            Log::warning('MailRouter: reply linker failed (non-fatal)', [
                 'email_message_id' => $message->id,
                 'error' => $e->getMessage(),
             ]);

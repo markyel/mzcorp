@@ -3,18 +3,25 @@
 namespace App\Livewire\Requests;
 
 use App\Enums\Role;
+use App\Models\EmailMessage;
 use App\Models\Request;
+use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
 /**
- * Карточка заявки (Phase 1.8d).
+ * Карточка заявки (Phase 1.8d + Phase 1.9 inbound thread).
  *
  * Менеджер видит только свои; РОП/директор/секретарь — все.
  *
  * UI разбит на 7 табов по `design/ui_kits/crm/04-request-detail.html`:
  * Обзор / Переписка / Позиции / Поставщики / Активность / Файлы / Связанные.
+ *
+ * Phase 1.9: таб «Переписка» рендерит весь thread — все EmailMessage с
+ * related_request_id == request->id, отсортированные по sent_at.
+ * Изначально single trigger-email; reply'и присоединяются через
+ * `App\Services\Mail\InboundReplyLinker` в `MailRouter::route`.
  *
  * Поля sticky/SLA/сумма/сматчено и табы Поставщики/Связанные пока
  * рендерят placeholder «Phase 2», т.к. данных в БД ещё нет.
@@ -24,6 +31,9 @@ class Detail extends Component
     public const TABS = ['overview', 'thread', 'items', 'suppliers', 'activity', 'files', 'related'];
 
     public Request $request;
+
+    /** @var Collection<int, EmailMessage> */
+    public Collection $thread;
 
     #[Url(as: 'tab')]
     public string $tab = 'overview';
@@ -51,6 +61,19 @@ class Detail extends Component
             'assignments.assignedBy:id,name',
         ]);
 
+        // Полный тред: все письма прицепленные к заявке (trigger + reply'и),
+        // отсортированы по sent_at для естественной хронологии. NULL sent_at
+        // (редкие письма без Date header) уходят в конец.
+        $this->thread = EmailMessage::query()
+            ->where('related_request_id', $this->request->id)
+            ->with([
+                'attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline',
+                'mailbox:id,email,name',
+            ])
+            ->orderByRaw('sent_at IS NULL, sent_at ASC')
+            ->orderBy('id')
+            ->get();
+
         if (! in_array($this->tab, self::TABS, true)) {
             $this->tab = 'overview';
         }
@@ -71,33 +94,35 @@ class Detail extends Component
     #[Computed]
     public function tabs(): array
     {
-        $thread = $this->request->emailMessage ? 1 : 0;
+        $threadCount = $this->thread->count();
         $items = $this->request->items->count();
-        $files = $this->request->emailMessage?->attachments->count() ?? 0;
+        $files = $this->thread->reduce(
+            fn (int $carry, EmailMessage $msg) => $carry + $msg->attachments->count(),
+            0,
+        );
         $activity = $this->request->assignments->count() + 1; // +1 за событие создания
 
         return [
-            'overview'  => ['label' => 'Обзор',       'count' => null,        'disabled' => false],
-            'thread'    => ['label' => 'Переписка',   'count' => $thread,     'disabled' => false],
-            'items'     => ['label' => 'Позиции',     'count' => $items,      'disabled' => false],
-            'suppliers' => ['label' => 'Поставщики',  'count' => null,        'disabled' => true],
+            'overview'  => ['label' => 'Обзор',      'count' => null,         'disabled' => false],
+            'thread'    => ['label' => 'Переписка',  'count' => $threadCount, 'disabled' => false],
+            'items'     => ['label' => 'Позиции',    'count' => $items,       'disabled' => false],
+            'suppliers' => ['label' => 'Поставщики', 'count' => null,         'disabled' => true],
             'activity'  => ['label' => 'Активность', 'count' => $activity,    'disabled' => false],
-            'files'     => ['label' => 'Файлы',       'count' => $files,      'disabled' => false],
-            'related'   => ['label' => 'Связанные',  'count' => null,        'disabled' => true],
+            'files'     => ['label' => 'Файлы',      'count' => $files,       'disabled' => false],
+            'related'   => ['label' => 'Связанные',  'count' => null,         'disabled' => true],
         ];
     }
 
     /**
      * Заменить cid:NNN в src/href HTML body на наш inline-роут.
+     * Принимает любое EmailMessage из треда (не только trigger-email).
      */
-    public function bodyHtml(): ?string
+    public function bodyHtmlFor(EmailMessage $email): ?string
     {
-        $email = $this->request->emailMessage;
-        if (! $email || ! $email->body_html) {
+        if (! $email->body_html) {
             return null;
         }
 
-        $html = $email->body_html;
         $messageId = $email->id;
 
         return preg_replace_callback(
@@ -110,8 +135,18 @@ class Detail extends Component
 
                 return $m[1] . '=' . $m[2] . $url . $m[2];
             },
-            $html
+            $email->body_html
         );
+    }
+
+    /**
+     * Совместимость: legacy-вызов из blade `$this->bodyHtml()` для trigger-email.
+     */
+    public function bodyHtml(): ?string
+    {
+        $email = $this->request->emailMessage;
+
+        return $email ? $this->bodyHtmlFor($email) : null;
     }
 
     public function render()

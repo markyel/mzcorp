@@ -1,8 +1,10 @@
 @php
+    use App\Enums\MailDirection;
     use App\Enums\RequestStatus;
 
     $req = $this->request;
-    $email = $req->emailMessage;
+    $email = $req->emailMessage;          // trigger-email (для Hero / Сводки)
+    $thread = $this->thread;              // полный тред: trigger + reply'и (Phase 1.9 inbound)
     $items = $req->items;
     $assignments = $req->assignments;
     $tabs = $this->tabs;
@@ -322,66 +324,81 @@
                         @endif
                     </div>
 
-                    @if(! $email)
+                    @if($thread->isEmpty())
                         <div class="ds-card-body text-sm text-fg-3">Заявка создана не из e-mail.</div>
                     @else
                         <div>
-                            <div class="border-b border-border-subtle">
-                                <div class="flex items-center gap-2.5 px-[18px] py-3">
-                                    <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-neutral-200 text-fg-2 text-[11px] font-semibold shrink-0">КЛ</span>
-                                    <div class="min-w-0">
-                                        <div class="font-medium text-[13px] text-fg-1 truncate">
-                                            @if($email->from_name)
-                                                {{ $email->from_name }}
-                                            @else
-                                                {{ $email->from_email }}
-                                            @endif
+                            @foreach($thread as $msg)
+                                @php
+                                    $isOutbound = $msg->direction === MailDirection::Outbound;
+                                    $authorName = $msg->from_name ?: $msg->from_email;
+                                    $authorInitial = \Illuminate\Support\Str::of($authorName)->substr(0, 1)->upper();
+                                    $catLabel = $msg->category
+                                        ? (\App\Enums\EmailCategory::tryFrom($msg->category)?->label() ?? $msg->category)
+                                        : null;
+                                @endphp
+                                <div class="border-b border-border-subtle last:border-b-0">
+                                    <div class="flex items-center gap-2.5 px-[18px] py-3">
+                                        <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[11px] font-semibold shrink-0
+                                                     {{ $isOutbound ? 'bg-accent text-fg-on-accent' : 'bg-neutral-200 text-fg-2' }}">
+                                            {{ $authorInitial }}
+                                        </span>
+                                        <div class="min-w-0">
+                                            <div class="font-medium text-[13px] text-fg-1 truncate">
+                                                {{ $authorName }}
+                                            </div>
+                                            <div class="text-[11.5px] text-fg-3 mono truncate">
+                                                {{ $msg->from_email }} · {{ $msg->sent_at?->format('d.m.Y в H:i') ?? '—' }}
+                                                @if($msg->mailbox)
+                                                    · через {{ $msg->mailbox->email }}
+                                                @endif
+                                            </div>
                                         </div>
-                                        <div class="text-[11.5px] text-fg-3 mono truncate">
-                                            {{ $email->from_email }} · {{ $email->sent_at?->format('d.m.Y в H:i') ?? '—' }}
-                                        </div>
+                                        <span class="flex-1"></span>
+                                        @if($isOutbound)
+                                            <span class="chip chip-info"><span class="dot"></span>исходящее</span>
+                                        @elseif($catLabel)
+                                            <span class="chip chip-ok"><span class="dot"></span>{{ $catLabel }}</span>
+                                        @endif
                                     </div>
-                                    <span class="flex-1"></span>
-                                    @if($email->category)
-                                        <span class="chip chip-ok"><span class="dot"></span>{{ \App\Enums\EmailCategory::tryFrom($email->category)?->label() ?? $email->category }}</span>
-                                    @endif
-                                </div>
-                                <div class="px-[18px] pb-3.5 pl-[56px] text-[13px] leading-[1.55] text-fg-1">
-                                    @if($this->bodyHtml())
-                                        <div class="max-w-none">{!! $this->bodyHtml() !!}</div>
-                                    @elseif($email->body_plain)
-                                        <pre class="whitespace-pre-wrap font-sans text-[13px]">{{ $email->body_plain }}</pre>
-                                    @else
-                                        <div class="text-fg-3">(пустое тело)</div>
-                                    @endif
+                                    <div class="px-[18px] pb-3.5 pl-[56px] text-[13px] leading-[1.55] text-fg-1">
+                                        @php $html = $this->bodyHtmlFor($msg); @endphp
+                                        @if($html)
+                                            <div class="max-w-none">{!! $html !!}</div>
+                                        @elseif($msg->body_plain)
+                                            <pre class="whitespace-pre-wrap font-sans text-[13px]">{{ $msg->body_plain }}</pre>
+                                        @else
+                                            <div class="text-fg-3">(пустое тело)</div>
+                                        @endif
 
-                                    @if($email->attachments->isNotEmpty())
-                                        <div class="mt-3 flex flex-wrap gap-1.5">
-                                            @foreach($email->attachments as $att)
-                                                <a href="{{ route('attachments.download', $att) }}"
-                                                   class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover">
-                                                    <span class="inline-block w-4 h-5 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[7px] font-bold text-center leading-5">
-                                                        {{ \Illuminate\Support\Str::upper(\Illuminate\Support\Str::afterLast($att->filename, '.')) ?: 'BIN' }}
-                                                    </span>
-                                                    <span class="truncate max-w-[280px]">{{ $att->filename }}</span>
-                                                    @if($att->size_bytes)
-                                                        <span class="text-fg-3 text-[11px]">· {{ number_format($att->size_bytes / 1024, 0, '.', ' ') }} KB</span>
-                                                    @endif
-                                                </a>
-                                            @endforeach
-                                        </div>
-                                    @endif
+                                        @if($msg->attachments->isNotEmpty())
+                                            <div class="mt-3 flex flex-wrap gap-1.5">
+                                                @foreach($msg->attachments as $att)
+                                                    <a href="{{ route('attachments.download', $att) }}"
+                                                       class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover">
+                                                        <span class="inline-block w-4 h-5 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[7px] font-bold text-center leading-5">
+                                                            {{ \Illuminate\Support\Str::upper(\Illuminate\Support\Str::afterLast($att->filename, '.')) ?: 'BIN' }}
+                                                        </span>
+                                                        <span class="truncate max-w-[280px]">{{ $att->filename }}</span>
+                                                        @if($att->size_bytes)
+                                                            <span class="text-fg-3 text-[11px]">· {{ number_format($att->size_bytes / 1024, 0, '.', ' ') }} KB</span>
+                                                        @endif
+                                                    </a>
+                                                @endforeach
+                                            </div>
+                                        @endif
+                                    </div>
                                 </div>
-                            </div>
+                            @endforeach
 
-                            {{-- Compose disabled (Phase 1.9) --}}
+                            {{-- Compose disabled (Phase 1.9 outbound) --}}
                             <div class="px-[18px] py-3.5 bg-surface-2 border-t border-border">
-                                <textarea disabled placeholder="Compose будет доступен после Phase 1.9 — OutgoingMailObserver"
+                                <textarea disabled placeholder="Compose будет доступен после Phase 1.9 outbound — OutgoingMailObserver"
                                           class="w-full min-h-[88px] px-3 py-2.5 border border-border-strong rounded-md bg-surface text-fg-3 text-[13px] resize-none cursor-not-allowed"></textarea>
                                 <div class="flex items-center gap-2 mt-2.5">
-                                    <span class="text-[12px] text-fg-3">Phase 1.9 → Sent-tracking + compose клиенту</span>
+                                    <span class="text-[12px] text-fg-3">Phase 1.9 outbound → Sent-tracking + compose клиенту</span>
                                     <span class="flex-1"></span>
-                                    <button class="btn btn-primary" disabled title="Phase 1.9">Отправить</button>
+                                    <button class="btn btn-primary" disabled title="Phase 1.9 outbound">Отправить</button>
                                 </div>
                             </div>
                         </div>
@@ -515,16 +532,20 @@
 
             {{-- ───── ФАЙЛЫ ───── --}}
             @case('files')
+                @php
+                    // Все вложения треда: trigger-email + reply'и.
+                    $allAttachments = $thread->flatMap(fn ($m) => $m->attachments)->values();
+                @endphp
                 <div class="ds-card">
                     <div class="ds-card-header">
                         <h3>Файлы</h3>
-                        <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $tabs['files']['count'] }}</span>
+                        <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $allAttachments->count() }}</span>
                     </div>
-                    @if(! $email || $email->attachments->isEmpty())
+                    @if($allAttachments->isEmpty())
                         <div class="ds-card-body text-fg-3 text-sm">Нет вложений.</div>
                     @else
                         <div class="divide-y divide-[var(--border-subtle)]">
-                            @foreach($email->attachments as $att)
+                            @foreach($allAttachments as $att)
                                 @php
                                     $ext = \Illuminate\Support\Str::upper(\Illuminate\Support\Str::afterLast($att->filename, '.')) ?: 'BIN';
                                 @endphp
