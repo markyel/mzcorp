@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Prompts\Mail\ParseItemsPrompt;
 use App\Services\AI\OpenAIChatService;
+use App\Services\Mail\EmailTextCleanerService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -14,6 +16,7 @@ class RequestItemParsingService
 {
     public function __construct(
         private OpenAIChatService $openai,
+        private EmailTextCleanerService $cleaner = new EmailTextCleanerService(),
     ) {}
 
     /**
@@ -112,19 +115,23 @@ class RequestItemParsingService
     /**
      * GPT-парсинг: извлечь список позиций из текста.
      *
+     * Текст должен быть УЖЕ очищен через `EmailTextCleanerService` (для inbound)
+     * или из структурного файла (для PDF/DOCX/XLSX). System-message содержит
+     * полный набор правил v5 (см. App\Prompts\Mail\ParseItemsPrompt).
+     *
      * @return array<array{name: string, brand: ?string, article: ?string, qty: float, unit: string, note: ?string}>
      */
     public function parseItemsWithGPT(string $text): array
     {
-        $prompt = $this->buildItemsParsingPrompt($text);
+        $userPrompt = "## ТЕКСТ\n" . trim($text) . "\n";
 
         $result = $this->openai->chat(
             [
-                ['role' => 'system', 'content' => 'Ты извлекаешь список товаров из заявок на запчасти для лифтов. Отвечай строго JSON.'],
-                ['role' => 'user', 'content' => $prompt],
+                ['role' => 'system', 'content' => ParseItemsPrompt::systemMessage()],
+                ['role' => 'user', 'content' => $userPrompt],
             ],
             config('services.openai.parsing_model'),
-            ['response_format' => ['type' => 'json_object'], 'temperature' => 0.1],
+            ['response_format' => ['type' => 'json_object'], 'temperature' => 0],
         );
 
         $parsed = json_decode($result['content'], true);
@@ -461,7 +468,15 @@ PROMPT;
     {
         // EmailMessage->attachments() — HasMany, см. App\Models\EmailMessage.
         $attachments = $message->attachments;
-        $referenceText = trim(($message->subject ?? '') . "\n" . ($message->body_plain ?? ''));
+
+        // Чистим body перед AI: режем подпись, снимаем маркеры цитирования,
+        // изолируем блок «--- Пересылаемое сообщение ---». Без этого парсер
+        // вылавливал фантомные позиции из forward'нутых блоков и подписей
+        // (см. parser-corpus.txt, кейсы #349, #357).
+        $cleaned = $this->cleaner->cleanInboundReferenceText((string) ($message->body_plain ?? ''));
+
+        $referenceText = trim(($message->subject ?? '') . "\n" . $cleaned);
+
         return $this->parseItemsFromInboundContent($referenceText, $attachments, "msg#{$message->id}");
     }
 
