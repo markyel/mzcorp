@@ -13,9 +13,10 @@ use Livewire\WithPagination;
 /**
  * Пул заявок (Phase 1.8d).
  *
- * Менеджер видит только свои; РОП/директор/секретарь — все (через `scope=all`).
- * В пределах Phase 1 фильтруем по статусу (`new` / `assigned`) и ищем
- * по коду / теме / e-mail и имени клиента.
+ * Менеджер видит только свои с распарсенными позициями (`new`/`assigned`).
+ * Заявки в статусе `pending` (парсер позиций ещё в очереди) скрыты от
+ * менеджеров — им не с чем работать. РОП/директор/секретарь видят всё,
+ * включая pending — для контроля парсинг-очереди.
  *
  * Колонки таблицы: code · заявка(subject) · клиент · статус · менеджер ·
  * позиций · возраст. Поля sticky/SLA/сумма/сматчено — Phase 2.
@@ -31,7 +32,7 @@ class Pool extends Component
     public string $scope = 'mine'; // mine | all
 
     #[Url(as: 'status')]
-    public string $status = ''; // '' = все, 'new', 'assigned'
+    public string $status = ''; // '' = все доступные роли, либо конкретный enum-value
 
     public function updatingSearch(): void
     {
@@ -73,12 +74,17 @@ class Pool extends Component
             $query->where('assigned_user_id', auth()->id());
         }
 
+        // Менеджеру не показываем pending — у него нет позиций для работы.
+        // РОП/директор/секретарь видят всё (включая pending) для контроля.
+        if (! $this->canSeeAll) {
+            $query->where('status', '!=', RequestStatus::Pending->value);
+        }
+
         // Фильтр по статусу — только если значение валидно.
-        $validStatus = $this->status !== '' && in_array(
-            $this->status,
-            array_map(fn (RequestStatus $s) => $s->value, RequestStatus::cases()),
-            true,
-        );
+        $allowedStatuses = $this->canSeeAll
+            ? array_map(fn (RequestStatus $s) => $s->value, RequestStatus::cases())
+            : [RequestStatus::New->value, RequestStatus::Assigned->value];
+        $validStatus = $this->status !== '' && in_array($this->status, $allowedStatuses, true);
         if ($validStatus) {
             $query->where('status', $this->status);
         }
@@ -93,6 +99,20 @@ class Pool extends Component
             });
         }
 
+        // Счётчики для filter-chips.
+        $countsBase = Request::query()
+            ->when($effectiveScope === 'mine', fn ($q) => $q->where('assigned_user_id', auth()->id()));
+
+        $statusCounts = [
+            'new' => (clone $countsBase)->where('status', RequestStatus::New->value)->count(),
+            'assigned' => (clone $countsBase)->where('status', RequestStatus::Assigned->value)->count(),
+        ];
+        if ($this->canSeeAll) {
+            $statusCounts['pending'] = (clone $countsBase)
+                ->where('status', RequestStatus::Pending->value)
+                ->count();
+        }
+
         return view('livewire.requests.pool', [
             'requests' => $query->paginate(25),
             'effectiveScope' => $effectiveScope,
@@ -100,16 +120,7 @@ class Pool extends Component
                 'mine' => Request::where('assigned_user_id', auth()->id())->count(),
                 'all' => $this->canSeeAll ? Request::count() : null,
             ],
-            'statusCounts' => [
-                'new' => Request::query()
-                    ->when($effectiveScope === 'mine', fn ($q) => $q->where('assigned_user_id', auth()->id()))
-                    ->where('status', RequestStatus::New->value)
-                    ->count(),
-                'assigned' => Request::query()
-                    ->when($effectiveScope === 'mine', fn ($q) => $q->where('assigned_user_id', auth()->id()))
-                    ->where('status', RequestStatus::Assigned->value)
-                    ->count(),
-            ],
+            'statusCounts' => $statusCounts,
         ]);
     }
 }

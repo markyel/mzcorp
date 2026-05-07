@@ -7,7 +7,11 @@
     $assignments = $req->assignments;
     $tabs = $this->tabs;
 
-    $statusChip = $req->status === RequestStatus::New ? 'chip-attn' : 'chip-info';
+    $statusChip = match ($req->status) {
+        RequestStatus::Pending  => 'chip-paused',
+        RequestStatus::New      => 'chip-attn',
+        RequestStatus::Assigned => 'chip-info',
+    };
     $age = $req->created_at?->diffForHumans(['short' => true, 'parts' => 2]) ?? '—';
     $managerInitials = \Illuminate\Support\Str::of($req->assignedUser?->name ?? '?')
         ->substr(0, 1)->upper();
@@ -175,8 +179,8 @@
                             <div class="ds-card-body p-0">
                                 @if($items->isEmpty())
                                     <div class="px-[18px] py-6 text-center text-fg-3 text-sm">
-                                        Позиции ещё не распарсены.
-                                        <div class="text-[11.5px] mt-1 mono">CLI: <code>php artisan requests:parse-items --apply --request-id={{ $req->id }}</code></div>
+                                        Парсер позиций ещё не отработал.
+                                        <div class="text-[11.5px] mt-1 text-fg-4">Задача в очереди — обновите страницу через минуту.</div>
                                     </div>
                                 @else
                                     <div class="divide-y divide-[var(--border-subtle)]">
@@ -398,9 +402,9 @@
 
                     @if($items->isEmpty())
                         <div class="ds-card-body text-center text-fg-3 py-8">
-                            Позиции ещё не распарсены.
-                            <div class="text-[12px] mt-2 mono">
-                                <code>php artisan requests:parse-items --apply --request-id={{ $req->id }}</code>
+                            Парсер позиций ещё не отработал.
+                            <div class="text-[12px] mt-2 text-fg-4">
+                                Задача в очереди — обновите страницу через минуту, либо РОП может перезапустить парсер.
                             </div>
                         </div>
                     @else

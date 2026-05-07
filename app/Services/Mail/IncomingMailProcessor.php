@@ -4,6 +4,7 @@ namespace App\Services\Mail;
 
 use App\Enums\EmailClassification;
 use App\Enums\RequestStatus;
+use App\Jobs\Mail\ParseRequestItemsJob;
 use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Services\Request\AssignmentService;
@@ -14,14 +15,15 @@ use Illuminate\Support\Facades\Log;
 /**
  * Создание Request из inbound email-а с ai_classification=request.
  *
- * Foundation §2.5: «request → создать Request + RequestItem(ы), L1/L2 KB →
- * AssignRequestJob». В Phase 1 урезано:
- *   - RequestItems не создаём (Phase 2);
- *   - L1/L2 KB не используем (Phase 2);
- *   - назначение — round-robin (полный sticky-алгоритм — Phase 2).
+ * Phase 1.8d: создаём Request со статусом `Pending` (БЕЗ assignment, БЕЗ
+ * folder routing) и сразу dispatch'им `ParseRequestItemsJob`. Парсер позиций
+ * после успешного persist'а вызовет `AssignmentService::autoAssign()`,
+ * который сам переведёт статус в `Assigned` + назначит менеджера +
+ * скопирует письмо в `MZ\|{Lastname}`.
  *
- * Идемпотентность: если у EmailMessage уже есть related_request_id —
- * новую заявку не создаём, возвращаем существующую.
+ * Менеджер видит в пуле только заявки со статусами `new` / `assigned`;
+ * `pending` — это заявки, которые ещё парсятся либо парсер вернул пусто
+ * (видны только РОПу/директору для контроля).
  */
 class IncomingMailProcessor
 {
@@ -48,7 +50,9 @@ class IncomingMailProcessor
             $req = Request::create([
                 'internal_code' => $this->codeGenerator->next(),
                 'email_message_id' => $message->id,
-                'status' => RequestStatus::New,
+                // Pending: парсер позиций ещё не отработал. Менеджеру
+                // в пуле такие заявки не показываются.
+                'status' => RequestStatus::Pending,
                 'client_email' => $message->from_email ?: '',
                 'client_name' => $message->from_name,
                 'subject' => $message->subject,
@@ -59,20 +63,16 @@ class IncomingMailProcessor
             return $req;
         });
 
-        // Round-robin назначение менеджеру.
-        $manager = $this->assignment->autoAssign($request);
+        // Phase 1.8d: парсер позиций в очереди. После успешного persist'а
+        // RequestItemPersister сам вызовет AssignmentService::autoAssign(),
+        // который переведёт статус Pending → Assigned + назначит менеджера +
+        // скопирует письмо в подпапку MZ\|{Lastname}.
+        ParseRequestItemsJob::dispatch($message->id);
 
-        // MOVE письма в подпапку INBOX/MZ/{Lastname} — заменяет старый
-        // подход с IMAP custom keywords (см. MailFolderRouter docblock и
-        // MEMORY.md «Известные грабли → Yandex IMAP labels CLOSE/SELECT»).
-        $newFolder = $this->folders->routeToManager($message, $manager);
-
-        Log::info('Request created from incoming mail', [
+        Log::info('Request created from incoming mail (pending parse)', [
             'email_message_id' => $message->id,
             'request_id' => $request->id,
             'internal_code' => $request->internal_code,
-            'assigned_to' => $manager?->id,
-            'moved_to' => $newFolder,
         ]);
 
         return $request->fresh();

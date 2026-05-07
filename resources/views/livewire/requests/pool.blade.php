@@ -2,10 +2,16 @@
     use App\Enums\RequestStatus;
 
     $statusFilters = [
-        ''                                  => ['label' => 'Все',     'count' => null],
-        RequestStatus::New->value           => ['label' => 'Новые',   'count' => $statusCounts['new']],
-        RequestStatus::Assigned->value      => ['label' => 'В работе','count' => $statusCounts['assigned']],
+        ''                             => ['label' => 'Все',      'count' => null],
+        RequestStatus::New->value      => ['label' => 'Новые',    'count' => $statusCounts['new']],
+        RequestStatus::Assigned->value => ['label' => 'В работе', 'count' => $statusCounts['assigned']],
     ];
+    if ($this->canSeeAll && isset($statusCounts['pending'])) {
+        $statusFilters[RequestStatus::Pending->value] = [
+            'label' => 'В обработке',
+            'count' => $statusCounts['pending'],
+        ];
+    }
 @endphp
 
 <div>
@@ -90,8 +96,11 @@
                     @foreach($requests as $req)
                         @php
                             $href = route('requests.show', $req);
-                            $isNew = $req->status === RequestStatus::New;
-                            $chipCls = $isNew ? 'chip-attn' : 'chip-info';
+                            $chipCls = match ($req->status) {
+                                RequestStatus::Pending  => 'chip-paused',
+                                RequestStatus::New      => 'chip-attn',
+                                RequestStatus::Assigned => 'chip-info',
+                            };
                             $age = $req->created_at?->diffForHumans(['short' => true, 'parts' => 1]);
                         @endphp
                         <tr wire:key="req-{{ $req->id }}"
