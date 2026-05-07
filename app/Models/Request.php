@@ -50,4 +50,9 @@ class Request extends Model
     {
         return $this->hasMany(RequestAssignment::class);
     }
+
+    public function items(): HasMany
+    {
+        return $this->hasMany(RequestItem::class)->orderBy('position');
+    }
 }
