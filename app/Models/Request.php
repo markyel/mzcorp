@@ -6,6 +6,7 @@ use App\Enums\RequestStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * Заявка клиента (минимальная Phase 1 версия).
@@ -49,6 +50,15 @@ class Request extends Model
     public function assignments(): HasMany
     {
         return $this->hasMany(RequestAssignment::class);
+    }
+
+    /**
+     * Последнее назначение — для Pool используется для определения
+     * sticky-чипа (`reason='auto_sticky'`) без подгрузки всей коллекции.
+     */
+    public function latestAssignment(): HasOne
+    {
+        return $this->hasOne(RequestAssignment::class)->latestOfMany('id');
     }
 
     public function items(): HasMany

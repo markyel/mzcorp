@@ -5,21 +5,23 @@ namespace App\Livewire\Requests;
 use App\Enums\RequestStatus;
 use App\Enums\Role;
 use App\Models\Request;
+use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
 /**
- * Пул заявок (Phase 1.8d).
+ * Пул заявок (Phase 1.8d-extended → 03-requests.html caркас).
  *
  * Менеджер видит только свои с распарсенными позициями (`new`/`assigned`).
  * Заявки в статусе `pending` (парсер позиций ещё в очереди) скрыты от
  * менеджеров — им не с чем работать. РОП/директор/секретарь видят всё,
  * включая pending — для контроля парсинг-очереди.
  *
- * Колонки таблицы: code · заявка(subject) · клиент · статус · менеджер ·
- * позиций · возраст. Поля sticky/SLA/сумма/сматчено — Phase 2.
+ * Колонки таблицы (9): checkbox · код · заявка(title+badges) · статус ·
+ * менеджер · клиент · сумма · возраст · ⋯. Поля Phase 2 (sum, SLA,
+ * paused-until, refresh-цен) рендерятся как `—` или disabled placeholder'ы.
  */
 class Pool extends Component
 {
@@ -64,7 +66,14 @@ class Pool extends Component
     public function render()
     {
         $query = Request::query()
-            ->with(['assignedUser:id,name', 'emailMessage:id,from_email,from_name'])
+            ->with([
+                'assignedUser:id,name',
+                'emailMessage' => fn ($q) => $q
+                    ->select(['id', 'from_email', 'from_name'])
+                    ->withCount('attachments'),
+                'items' => fn ($q) => $q->orderBy('position')->limit(3),
+                'latestAssignment:id,request_id,reason',
+            ])
             ->withCount('items')
             ->orderByDesc('id');
 
@@ -99,7 +108,33 @@ class Pool extends Component
             });
         }
 
-        // Счётчики для filter-chips.
+        $page = $query->paginate(25);
+
+        // Группировка текущей страницы по статусу — для sticky group-headers
+        // в стиле 03-requests.html. Порядок групп: Assigned → New → Pending.
+        /** @var Collection<string, Collection<int, Request>> $grouped */
+        $grouped = collect($page->items())
+            ->groupBy(fn (Request $r) => $r->status->value);
+
+        $groupOrder = [
+            RequestStatus::Assigned->value,
+            RequestStatus::New->value,
+            RequestStatus::Pending->value,
+        ];
+        $groups = [];
+        foreach ($groupOrder as $statusValue) {
+            if (! $grouped->has($statusValue)) {
+                continue;
+            }
+            $rows = $grouped->get($statusValue);
+            $groups[] = [
+                'status' => RequestStatus::from($statusValue),
+                'rows' => $rows,
+                'count' => $rows->count(),
+            ];
+        }
+
+        // Счётчики для filter-chips и left-list-nav.
         $countsBase = Request::query()
             ->when($effectiveScope === 'mine', fn ($q) => $q->where('assigned_user_id', auth()->id()));
 
@@ -113,12 +148,31 @@ class Pool extends Component
                 ->count();
         }
 
+        // Левая навигация: queries «Все открытые», «Нераспределённые», «Мои».
+        // Phase 2 saved views (KONE / возраст ≥ 7 / крупные клиенты) — disabled.
+        $myAssigned = Request::query()
+            ->where('assigned_user_id', auth()->id())
+            ->whereIn('status', [RequestStatus::New->value, RequestStatus::Assigned->value])
+            ->count();
+        $unassigned = $this->canSeeAll
+            ? Request::query()->whereNull('assigned_user_id')->count()
+            : null;
+        $allOpen = $this->canSeeAll
+            ? Request::query()
+                ->whereIn('status', [RequestStatus::New->value, RequestStatus::Assigned->value])
+                ->count()
+            : null;
+
         return view('livewire.requests.pool', [
-            'requests' => $query->paginate(25),
+            'page' => $page,
+            'groups' => $groups,
             'effectiveScope' => $effectiveScope,
             'totals' => [
                 'mine' => Request::where('assigned_user_id', auth()->id())->count(),
                 'all' => $this->canSeeAll ? Request::count() : null,
+                'mine_open' => $myAssigned,
+                'unassigned' => $unassigned,
+                'all_open' => $allOpen,
             ],
             'statusCounts' => $statusCounts,
         ]);
