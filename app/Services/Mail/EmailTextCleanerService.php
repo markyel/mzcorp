@@ -75,12 +75,16 @@ class EmailTextCleanerService
     public function bodyPlainLooksBroken(string $bodyPlain): bool
     {
         $trimmed = trim($bodyPlain);
-        if ($trimmed === '' || mb_strlen($trimmed) < 30) {
+
+        // Совсем пустой ИЛИ < 20 символов — реальный mail-клиент даже с
+        // одной короткой просьбой пишет 20+ символов («Прошу счёт M03309 -
+        // 3шт» — 22 chars, не считаем битым).
+        if ($trimmed === '' || mb_strlen($trimmed) < 20) {
             return true;
         }
 
         // CSS-маркеры: `body{...}`, `.class{...}`, `@media`, `font-family:`,
-        // `;color:`, `padding:`. Если такого больше 3 фрагментов в первых
+        // `padding:`, `margin:`. Если такого больше 3 фрагментов в первых
         // 1000 символах — это явно CSS, не текст письма.
         $head = mb_substr($trimmed, 0, 1000);
         $cssMarkers = preg_match_all(
