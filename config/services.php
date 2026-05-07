@@ -61,6 +61,10 @@ return [
         'proxy_key' => env('OPENAI_PROXY_KEY', ''),
         'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
         'mail_classifier_model' => env('OPENAI_MAIL_CLASSIFIER_MODEL', 'gpt-4o-mini'),
+        // Парсинг позиций заявки (RequestItemParsingService).
+        // parsing_model — текстовый чат, vision_model — image_url-чат с detail:high.
+        'parsing_model' => env('OPENAI_PARSING_MODEL', 'gpt-4.1'),
+        'vision_model' => env('OPENAI_VISION_MODEL', 'gpt-4o'),
     ],
 
 ];
