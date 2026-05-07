@@ -119,11 +119,14 @@ class RequestItemParsingService
      * или из структурного файла (для PDF/DOCX/XLSX). System-message содержит
      * полный набор правил v5 (см. App\Prompts\Mail\ParseItemsPrompt).
      *
+     * Опциональные subject и fromEmail отдаются OTDЕЛЬНЫМИ секциями user-prompt'а,
+     * чтобы GPT не путал «Тему» с источником позиций (см. правило subject в промпте).
+     *
      * @return array<array{name: string, brand: ?string, article: ?string, qty: float, unit: string, note: ?string}>
      */
-    public function parseItemsWithGPT(string $text): array
+    public function parseItemsWithGPT(string $text, ?string $subject = null, ?string $fromEmail = null, ?string $fromName = null): array
     {
-        $userPrompt = "## ТЕКСТ\n" . trim($text) . "\n";
+        $userPrompt = $this->buildInboundUserPrompt($text, $subject, $fromEmail, $fromName);
 
         $result = $this->openai->chat(
             [
@@ -138,6 +141,33 @@ class RequestItemParsingService
         $items = $parsed['items'] ?? [];
 
         return array_map(fn(array $item) => $this->normalizeParsedItem($item), $items);
+    }
+
+    /**
+     * Собрать user-prompt секциями: ## ОТПРАВИТЕЛЬ / ## ТЕМА / ## ТЕКСТ.
+     */
+    private function buildInboundUserPrompt(string $text, ?string $subject, ?string $fromEmail, ?string $fromName): string
+    {
+        $parts = [];
+
+        if ($fromEmail || $fromName) {
+            $sender = trim(($fromName ?: '') . ' <' . ($fromEmail ?: '') . '>');
+            $parts[] = '## ОТПРАВИТЕЛЬ';
+            $parts[] = $sender;
+            $parts[] = '';
+        }
+
+        if ($subject !== null && trim($subject) !== '') {
+            $parts[] = '## ТЕМА';
+            $parts[] = trim($subject);
+            $parts[] = '';
+        }
+
+        $parts[] = '## ТЕКСТ';
+        $cleanText = trim($text);
+        $parts[] = $cleanText !== '' ? $cleanText : '(тело письма пустое)';
+
+        return implode("\n", $parts);
     }
 
     /**
@@ -470,14 +500,19 @@ PROMPT;
         $attachments = $message->attachments;
 
         // Чистим body перед AI: режем подпись, снимаем маркеры цитирования,
-        // изолируем блок «--- Пересылаемое сообщение ---». Без этого парсер
+        // изолируем блок «--- Пересланное сообщение ---». Без этого парсер
         // вылавливал фантомные позиции из forward'нутых блоков и подписей
         // (см. parser-corpus.txt, кейсы #349, #357).
-        $cleaned = $this->cleaner->cleanInboundReferenceText((string) ($message->body_plain ?? ''));
+        $cleanedBody = $this->cleaner->cleanInboundReferenceText((string) ($message->body_plain ?? ''));
 
-        $referenceText = trim(($message->subject ?? '') . "\n" . $cleaned);
-
-        return $this->parseItemsFromInboundContent($referenceText, $attachments, "msg#{$message->id}");
+        return $this->parseItemsFromInboundContent(
+            $cleanedBody,
+            $attachments,
+            "msg#{$message->id}",
+            (string) ($message->subject ?? ''),
+            (string) ($message->from_email ?? ''),
+            (string) ($message->from_name ?? ''),
+        );
     }
 
     /**
@@ -490,8 +525,14 @@ PROMPT;
      * @param \Illuminate\Support\Collection<\App\Models\EmailAttachment> $attachments
      * @return array<array{name: string, brand: ?string, article: ?string, qty: float, unit: string, note: ?string}>
      */
-    private function parseItemsFromInboundContent(string $rawReferenceText, \Illuminate\Support\Collection $attachments, string $sourceTag): array
-    {
+    private function parseItemsFromInboundContent(
+        string $rawReferenceText,
+        \Illuminate\Support\Collection $attachments,
+        string $sourceTag,
+        string $subject = '',
+        string $fromEmail = '',
+        string $fromName = '',
+    ): array {
         $referenceText = trim($rawReferenceText);
         if (mb_strlen($referenceText) < 10) {
             $referenceText = null;
@@ -571,9 +612,20 @@ PROMPT;
         }
 
         // 3) Если из аттачментов пусто — пробуем тело письма.
-        if (empty($items) && $referenceText !== null) {
+        // Парсер получит body отдельно от subject и отправителя через секции
+        // ## ОТПРАВИТЕЛЬ / ## ТЕМА / ## ТЕКСТ — без этого GPT путал тему
+        // («Лифтовые Решения Ремни 607») с описанием товара и галлюцинировал.
+        // Запускаем text-only парсер даже если cleaned body пустой, но subject
+        // есть — пусть GPT решает (по новому правилу subject-only — items: []).
+        $shouldTryText = empty($items) && ($referenceText !== null || trim($subject) !== '');
+        if ($shouldTryText) {
             try {
-                $items = $this->parseItemsWithGPT($referenceText);
+                $items = $this->parseItemsWithGPT(
+                    $referenceText ?? '',
+                    $subject !== '' ? $subject : null,
+                    $fromEmail !== '' ? $fromEmail : null,
+                    $fromName !== '' ? $fromName : null,
+                );
             } catch (\Throwable $e) {
                 Log::warning('parseItemsFromInboundContent: text-only parse failed', [
                     'source' => $sourceTag,

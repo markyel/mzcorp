@@ -66,7 +66,7 @@ class EmailTextCleanerService
             return ['forwarded' => null, 'original' => $text];
         }
 
-        $startPattern = '/^-{4,}\s*(?:Пересылаемое сообщение|Forwarded message|Перенаправленное сообщение|Original Message)\s*-{0,}\s*$/imu';
+        $startPattern = '/^-{4,}\s*(?:Пересылаемое сообщение|Пересланное сообщение|Forwarded message|Перенаправленное сообщение|Original Message)\s*-{0,}\s*$/imu';
         $endPattern   = '/^-{4,}\s*(?:Конец пересылаемого сообщения|End forwarded message)\s*-{0,}\s*$/imu';
 
         if (! preg_match($startPattern, $text, $startMatch, PREG_OFFSET_CAPTURE)) {
