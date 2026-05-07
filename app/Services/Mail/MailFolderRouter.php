@@ -49,14 +49,17 @@ class MailFolderRouter
             $client = $this->connector->imapClient($mailbox);
             $delimiter = $this->detectDelimiter($client, $message->folder);
 
-            // Yandex 360 не разрешает подпапки под INBOX
-            // (BAD [CLIENTBUG] CREATE cannot apply to INBOX subfolder).
-            // Все «Мои папки» живут на root-уровне параллельно с INBOX.
-            $targetPath = 'MZ' . $delimiter . $shortName;
+            // Human-readable путь (для БД). IMAP-команды требуют MUTF-7 для
+            // не-ASCII (RFC 3501 §5.1.3). Yandex 360 хранит «Иванов» как
+            // «&BBgEMgQwBD0EPgQy-», поэтому createFolder/copy/move нужно
+            // звать на encoded path.
+            $targetPathHuman = 'MZ' . $delimiter . $shortName;
+            $targetPathImap = $this->mutf7Encode($targetPathHuman);
 
-            $this->ensureFolder($client, $targetPath, $delimiter);
+            $this->ensureFolder($client, $targetPathImap, $delimiter);
 
-            $sourceFolder = $client->getFolderByPath($message->folder, soft_fail: true);
+            $sourceFolderImap = $this->mutf7Encode($message->folder);
+            $sourceFolder = $client->getFolderByPath($sourceFolderImap, soft_fail: true);
             if (! $sourceFolder) {
                 throw new \RuntimeException("Source folder '{$message->folder}' not found");
             }
@@ -83,25 +86,27 @@ class MailFolderRouter
             // Возможно Yandex не объявляет MOVE capability — webklex
             // не делает fallback автоматически.
             try {
-                $msg->move($targetPath);
+                $msg->move($targetPathImap);
             } catch (\Throwable $moveError) {
                 Log::info('MailFolderRouter: MOVE failed, falling back to COPY+DELETE', [
                     'email_message_id' => $message->id,
-                    'target' => $targetPath,
+                    'target' => $targetPathHuman,
                     'error' => $moveError->getMessage(),
                 ]);
 
-                $msg->copy($targetPath, expunge: false);
+                $msg->copy($targetPathImap, expunge: false);
                 $msg->delete(expunge: true);
             }
 
             // После MOVE старый UID невалиден; новый UID Yandex назначит сам,
             // но webklex move() не возвращает его надёжно. Чистим, чтобы
             // никакой код не пытался дёргать сообщение по старому UID.
+            // В БД храним human-readable, не encoded.
             $message->forceFill([
-                'folder' => $targetPath,
+                'folder' => $targetPathHuman,
                 'imap_uid' => null,
             ])->save();
+            $targetPath = $targetPathHuman;
 
             Log::info('MailFolderRouter: moved', [
                 'email_message_id' => $message->id,
@@ -130,10 +135,12 @@ class MailFolderRouter
      * Рекурсивно гарантировать существование пути «A/B/C»: сначала «A»,
      * потом «A/B», потом «A/B/C». Webklex createFolder на отсутствующего
      * родителя у Yandex отвечает BAD CLIENTBUG.
+     *
+     * $imapPath — уже MUTF-7 encoded (мы кодируем целиком в caller'е).
      */
-    private function ensureFolder(Client $client, string $path, string $delimiter): void
+    private function ensureFolder(Client $client, string $imapPath, string $delimiter): void
     {
-        $parts = explode($delimiter, $path);
+        $parts = explode($delimiter, $imapPath);
         $current = '';
         foreach ($parts as $part) {
             if ($part === '') {
@@ -149,17 +156,28 @@ class MailFolderRouter
 
     /**
      * Определить разделитель иерархии для текущего сервера/папки.
-     * Yandex 360 использует '/' (RFC), но запрашиваем у самой папки —
-     * безопаснее на случай legacy-серверов с '|'.
+     * Yandex 360 использует '|' для своих ящиков, не RFC-стандартный '/'.
      */
     private function detectDelimiter(Client $client, string $sourceFolderPath): string
     {
-        $folder = $client->getFolderByPath($sourceFolderPath, soft_fail: true);
+        $folder = $client->getFolderByPath($this->mutf7Encode($sourceFolderPath), soft_fail: true);
         if ($folder && ! empty($folder->delimiter)) {
             return (string) $folder->delimiter;
         }
 
         return '/';
+    }
+
+    /**
+     * Кодирование UTF-8 → MUTF-7 (RFC 3501 §5.1.3) для IMAP mailbox names.
+     * Yandex 360 требует MUTF-7 для не-ASCII в имени папки. PHP mbstring
+     * поддерживает это через encoding name 'UTF7-IMAP'.
+     */
+    private function mutf7Encode(string $utf8): string
+    {
+        $encoded = @mb_convert_encoding($utf8, 'UTF7-IMAP', 'UTF-8');
+
+        return $encoded === false ? $utf8 : $encoded;
     }
 
     /**
