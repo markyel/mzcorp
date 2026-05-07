@@ -202,6 +202,13 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
         // НЕ страдает от webklex-кавычек на ranges (это была проблема для
         // диапазонов вида '1:*'). Тянем по одному UID за раз — медленнее,
         // но не упирается в память и не падает целиком при битом письме.
+        //
+        // ВАЖНО: webklex 6.x WhereQuery не имеет метода `first()` — magic
+        // __call трансформирует имена в `where(UPPERCASE, ...)`, и
+        // `->whereUid($uid)->first()` падает с
+        // «Method WhereQuery::whereFirst() is not supported». Поэтому
+        // сначала `->get()` (это вернёт MessageCollection), а уже
+        // на коллекции вызываем `->first()`.
         foreach ($newUids as $uid) {
             try {
                 $msg = $folder->query()
@@ -209,6 +216,7 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
                     ->setFetchBody(true)
                     ->setFetchFlags(true)
                     ->whereUid($uid)
+                    ->get()
                     ->first();
 
                 if (! $msg) {
