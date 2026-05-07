@@ -1,196 +1,211 @@
-<div class="space-y-6">
+@php
+    $counts = $this->requestCounts;
+    $coverage = $this->aiCoverage;
+    $breakdown = $this->aiBreakdown;
+    $maxBreakdown = !empty($breakdown) ? max(array_column($breakdown, 'count')) : 0;
+@endphp
 
-    {{-- KPI блок: счётчики заявок --}}
-    <div class="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4">
-            <div class="text-xs uppercase text-gray-500">{{ $this->isPrivileged ? 'Всего заявок' : 'Моих заявок' }}</div>
-            <div class="text-2xl font-semibold mt-1">{{ $this->requestCounts['total'] }}</div>
+<div class="space-y-4">
+
+    {{-- ───────── KPI strip (6 tiles) ───────── --}}
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+
+        <div class="ds-card p-4">
+            <div class="text-[10.5px] uppercase tracking-wider font-semibold text-fg-3">{{ $this->isPrivileged ? 'Всего заявок' : 'Моих заявок' }}</div>
+            <div class="text-[28px] leading-none font-semibold text-fg-1 mt-2 mono tnum">{{ $counts['total'] }}</div>
         </div>
-        <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4">
-            <div class="text-xs uppercase text-gray-500">Новых</div>
-            <div class="text-2xl font-semibold mt-1 text-amber-600">{{ $this->requestCounts['new'] }}</div>
+
+        <div class="ds-card p-4">
+            <div class="text-[10.5px] uppercase tracking-wider font-semibold text-fg-3">Новые</div>
+            <div class="text-[28px] leading-none font-semibold mt-2 mono tnum {{ $counts['new'] > 0 ? 'text-amber-700' : 'text-fg-1' }}">{{ $counts['new'] }}</div>
         </div>
-        <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4">
-            <div class="text-xs uppercase text-gray-500">В работе</div>
-            <div class="text-2xl font-semibold mt-1 text-emerald-700">{{ $this->requestCounts['assigned'] }}</div>
+
+        <div class="ds-card p-4">
+            <div class="text-[10.5px] uppercase tracking-wider font-semibold text-fg-3">В работе</div>
+            <div class="text-[28px] leading-none font-semibold mt-2 mono tnum text-sky-700">{{ $counts['assigned'] }}</div>
         </div>
+
         @if($this->isPrivileged)
-            <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4">
-                <div class="text-xs uppercase text-gray-500">Не назначено</div>
-                <div class="text-2xl font-semibold mt-1 {{ $this->requestCounts['unassigned'] > 0 ? 'text-[#D32027]' : '' }}">
-                    {{ $this->requestCounts['unassigned'] }}
-                </div>
+            <div class="ds-card p-4 {{ $counts['unassigned'] > 0 ? 'border-red-300' : '' }}">
+                <div class="text-[10.5px] uppercase tracking-wider font-semibold {{ $counts['unassigned'] > 0 ? 'text-red-700' : 'text-fg-3' }}">Не назначено</div>
+                <div class="text-[28px] leading-none font-semibold mt-2 mono tnum {{ $counts['unassigned'] > 0 ? 'text-red-700' : 'text-fg-1' }}">{{ $counts['unassigned'] }}</div>
             </div>
         @endif
-        <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4">
-            <div class="text-xs uppercase text-gray-500">За 24 часа</div>
-            <div class="text-2xl font-semibold mt-1">{{ $this->requestCounts['today'] }}</div>
+
+        <div class="ds-card p-4">
+            <div class="text-[10.5px] uppercase tracking-wider font-semibold text-fg-3">За 24 часа</div>
+            <div class="text-[28px] leading-none font-semibold text-fg-1 mt-2 mono tnum">{{ $counts['today'] }}</div>
         </div>
-        <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4">
-            <div class="text-xs uppercase text-gray-500">За 7 дней</div>
-            <div class="text-2xl font-semibold mt-1">{{ $this->requestCounts['week'] }}</div>
+
+        <div class="ds-card p-4">
+            <div class="text-[10.5px] uppercase tracking-wider font-semibold text-fg-3">За 7 дней</div>
+            <div class="text-[28px] leading-none font-semibold text-fg-1 mt-2 mono tnum">{{ $counts['week'] }}</div>
         </div>
     </div>
 
+    {{-- ───────── Two-col content ───────── --}}
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-        {{-- Левая колонка --}}
+        {{-- Left wide --}}
         <div class="lg:col-span-2 space-y-4">
 
             @if($this->isPrivileged)
-                {{-- AI-классификация --}}
-                <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4">
-                    <div class="flex items-baseline justify-between mb-3">
-                        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                            AI-классификация писем
-                        </h3>
-                        <span class="text-xs text-gray-500">
-                            покрытие 30 дн: {{ $this->aiCoverage['classified'] }} / {{ $this->aiCoverage['total'] }} ({{ $this->aiCoverage['percent'] }}%)
+                {{-- AI-классификация писем --}}
+                <div class="ds-card">
+                    <div class="ds-card-header">
+                        <h3>AI-классификация писем</h3>
+                        <span class="flex-1"></span>
+                        <span class="text-[11.5px] text-fg-3">
+                            покрытие 30 дн: <span class="mono tnum text-fg-2">{{ $coverage['classified'] }} / {{ $coverage['total'] }}</span>
+                            · <span class="mono tnum text-fg-1 font-semibold">{{ $coverage['percent'] }}%</span>
                         </span>
                     </div>
-                    @if(empty($this->aiBreakdown))
-                        <div class="text-sm text-gray-500">Нет данных за 30 дней.</div>
-                    @else
-                        <div class="space-y-1">
-                            @php
-                                $maxCount = max(array_column($this->aiBreakdown, 'count'));
-                            @endphp
-                            @foreach($this->aiBreakdown as $row)
-                                <div class="flex items-center gap-3 text-sm">
-                                    <div class="w-32 shrink-0 text-gray-700 dark:text-gray-300">{{ $row['label'] }}</div>
-                                    <div class="flex-1 h-3 bg-gray-100 dark:bg-gray-700 rounded overflow-hidden">
-                                        <div class="h-full bg-[#D32027]" style="width: {{ $maxCount > 0 ? round($row['count'] * 100 / $maxCount) : 0 }}%"></div>
+                    <div class="ds-card-body">
+                        @if(empty($breakdown))
+                            <div class="text-sm text-fg-3">Нет данных за последние 30 дней.</div>
+                        @else
+                            <div class="space-y-1.5">
+                                @foreach($breakdown as $row)
+                                    <div class="flex items-center gap-3 text-[12.5px]">
+                                        <div class="w-32 shrink-0 text-fg-2">{{ $row['label'] }}</div>
+                                        <div class="flex-1 h-2.5 rounded-full bg-neutral-100 overflow-hidden">
+                                            <div class="h-full bg-sky-500"
+                                                 style="width: {{ $maxBreakdown > 0 ? round($row['count'] * 100 / $maxBreakdown) : 0 }}%"></div>
+                                        </div>
+                                        <div class="w-12 text-right text-fg-1 mono tnum">{{ $row['count'] }}</div>
                                     </div>
-                                    <div class="w-12 text-right text-gray-600 dark:text-gray-400 tabular-nums">{{ $row['count'] }}</div>
-                                </div>
-                            @endforeach
-                        </div>
-                    @endif
+                                @endforeach
+                            </div>
+                        @endif
+                    </div>
                 </div>
 
-                {{-- Менеджеры --}}
-                <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4">
-                    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Менеджеры — нагрузка</h3>
-                    @if(empty($this->managersLoad))
-                        <div class="text-sm text-gray-500">В системе нет пользователей с ролью «менеджер».</div>
-                    @else
-                        <table class="w-full text-sm">
-                            <thead class="text-xs uppercase text-gray-500">
-                                <tr>
-                                    <th class="text-left py-1">Менеджер</th>
-                                    <th class="text-right py-1">Всего</th>
-                                    <th class="text-right py-1">Новых</th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
-                                @foreach($this->managersLoad as $m)
-                                    <tr>
-                                        <td class="py-1.5">
-                                            <div>{{ $m['name'] }}</div>
-                                            <div class="text-xs text-gray-500">{{ $m['email'] }}</div>
-                                        </td>
-                                        <td class="py-1.5 text-right tabular-nums">{{ $m['total'] }}</td>
-                                        <td class="py-1.5 text-right tabular-nums {{ $m['new'] > 0 ? 'text-amber-600 font-medium' : 'text-gray-500' }}">{{ $m['new'] }}</td>
+                {{-- Менеджеры — нагрузка --}}
+                <div class="ds-card">
+                    <div class="ds-card-header"><h3>Нагрузка менеджеров</h3></div>
+                    <div class="ds-card-body p-0">
+                        @if(empty($this->managersLoad))
+                            <div class="px-[18px] py-4 text-sm text-fg-3">В системе нет пользователей с ролью «менеджер».</div>
+                        @else
+                            <table class="w-full text-[12.5px] border-collapse">
+                                <thead>
+                                    <tr class="text-[10.5px] uppercase tracking-wider font-semibold text-fg-3 border-b border-border-subtle">
+                                        <th class="text-left px-[18px] py-2 font-semibold">Менеджер</th>
+                                        <th class="text-right px-[18px] py-2 font-semibold">Всего</th>
+                                        <th class="text-right px-[18px] py-2 font-semibold">Новых</th>
                                     </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    @endif
+                                </thead>
+                                <tbody>
+                                    @foreach($this->managersLoad as $m)
+                                        <tr class="border-b border-border-subtle">
+                                            <td class="px-[18px] py-2.5">
+                                                <div class="text-fg-1">{{ $m['name'] }}</div>
+                                                <div class="text-[11.5px] text-fg-3 mono">{{ $m['email'] }}</div>
+                                            </td>
+                                            <td class="px-[18px] py-2.5 text-right mono tnum text-fg-1">{{ $m['total'] }}</td>
+                                            <td class="px-[18px] py-2.5 text-right mono tnum {{ $m['new'] > 0 ? 'text-amber-700 font-semibold' : 'text-fg-3' }}">{{ $m['new'] }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        @endif
+                    </div>
                 </div>
             @endif
 
             {{-- Последние заявки --}}
-            <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4">
-                <div class="flex items-baseline justify-between mb-3">
-                    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                        {{ $this->isPrivileged ? 'Последние заявки' : 'Мои последние заявки' }}
-                    </h3>
-                    <a href="{{ route('requests.index') }}" class="text-xs text-[#D32027] hover:underline">Все →</a>
+            <div class="ds-card">
+                <div class="ds-card-header">
+                    <h3>{{ $this->isPrivileged ? 'Последние заявки' : 'Мои последние заявки' }}</h3>
+                    <span class="flex-1"></span>
+                    <a href="{{ route('requests.index') }}" class="text-[12px] text-sky-700 hover:underline">все →</a>
                 </div>
-                @if($this->recentRequests->isEmpty())
-                    <div class="text-sm text-gray-500">Заявок ещё нет.</div>
-                @else
-                    <ul class="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
-                        @foreach($this->recentRequests as $r)
-                            <li class="py-2 flex items-center justify-between gap-3">
-                                <div class="min-w-0">
-                                    <a href="{{ route('requests.show', $r) }}" class="font-mono text-xs text-[#D32027] hover:underline">{{ $r->internal_code }}</a>
-                                    <span class="ml-2">{{ \Illuminate\Support\Str::limit((string) $r->subject, 70) }}</span>
-                                </div>
-                                <div class="text-xs text-gray-500 whitespace-nowrap">
-                                    {{ $r->client_email }} · {{ $r->assignedUser?->name ?? '—' }}
-                                </div>
-                            </li>
-                        @endforeach
-                    </ul>
-                @endif
+                <div class="p-0">
+                    @if($this->recentRequests->isEmpty())
+                        <div class="px-[18px] py-4 text-sm text-fg-3">Заявок ещё нет.</div>
+                    @else
+                        <ul class="text-[12.5px]">
+                            @foreach($this->recentRequests as $r)
+                                <li class="flex items-center gap-3 px-[18px] py-2.5 border-b border-border-subtle last:border-b-0 hover:bg-hover transition-colors">
+                                    <a href="{{ route('requests.show', $r) }}" class="mono text-accent hover:underline shrink-0">{{ $r->internal_code }}</a>
+                                    <span class="flex-1 truncate text-fg-1">{{ \Illuminate\Support\Str::limit((string) $r->subject, 70) ?: '(без темы)' }}</span>
+                                    <span class="text-[11.5px] text-fg-3 truncate max-w-[200px] hidden md:inline">{{ $r->client_email }}</span>
+                                    <span class="text-[11.5px] text-fg-2 whitespace-nowrap">{{ $r->assignedUser?->name ?? '—' }}</span>
+                                </li>
+                            @endforeach
+                        </ul>
+                    @endif
+                </div>
             </div>
         </div>
 
-        {{-- Правая колонка --}}
+        {{-- Right column --}}
         <div class="space-y-4">
 
-            {{-- Health ящиков --}}
-            <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4">
-                <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Почтовые ящики</h3>
-                @if($this->mailboxes->isEmpty())
-                    <div class="text-sm text-gray-500">Ни один ящик не подключён.</div>
-                @else
-                    <ul class="space-y-2 text-sm">
-                        @foreach($this->mailboxes as $mb)
-                            <li class="flex items-start gap-2">
-                                <span class="mt-1 w-2 h-2 rounded-full {{ $mb->is_active ? ($mb->last_error_at ? 'bg-amber-500' : 'bg-emerald-500') : 'bg-gray-400' }}"></span>
-                                <div class="min-w-0 flex-1">
-                                    <div class="font-medium truncate">{{ $mb->email }}</div>
-                                    <div class="text-xs text-gray-500">
-                                        {{ $mb->type->label() }} · {{ $mb->auth_type->value }}
-                                    </div>
-                                    @if($mb->last_synced_at)
-                                        <div class="text-xs text-gray-500">
-                                            sync: {{ $mb->last_synced_at->diffForHumans() }}
-                                        </div>
-                                    @endif
-                                    @if($mb->last_error_at)
-                                        <div class="text-xs text-amber-700 truncate" title="{{ $mb->last_error_message }}">
-                                            ошибка {{ $mb->last_error_at->diffForHumans() }}
-                                        </div>
-                                    @endif
-                                </div>
-                            </li>
-                        @endforeach
-                    </ul>
-                @endif
-            </div>
-
-            @if($this->isPrivileged)
-                {{-- Последние пересылки --}}
-                <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4">
-                    <div class="flex items-baseline justify-between mb-3">
-                        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Последние пересылки</h3>
-                        <a href="{{ route('mail-rules.index') }}" class="text-xs text-[#D32027] hover:underline">Правила →</a>
-                    </div>
-                    @if($this->recentForwards->isEmpty())
-                        <div class="text-sm text-gray-500">Пересылок ещё не было.</div>
+            {{-- Mailbox health --}}
+            <div class="ds-card">
+                <div class="ds-card-header"><h3>Почтовые ящики</h3></div>
+                <div class="ds-card-body">
+                    @if($this->mailboxes->isEmpty())
+                        <div class="text-sm text-fg-3">Ни один ящик не подключён.</div>
                     @else
-                        <ul class="space-y-2 text-xs">
-                            @foreach($this->recentForwards as $rm)
+                        <ul class="space-y-2.5 text-[12.5px]">
+                            @foreach($this->mailboxes as $mb)
+                                @php
+                                    $hasError = $mb->last_error_at && (! $mb->last_synced_at || $mb->last_error_at->gt($mb->last_synced_at));
+                                    $dot = ! $mb->is_active
+                                        ? 'bg-neutral-400'
+                                        : ($hasError ? 'bg-amber-600' : 'bg-emerald-600');
+                                @endphp
                                 <li class="flex items-start gap-2">
-                                    <span class="mt-1 w-2 h-2 rounded-full {{ $rm->success ? 'bg-emerald-500' : 'bg-red-500' }}"></span>
+                                    <span class="mt-1.5 w-2 h-2 rounded-full {{ $dot }} shrink-0"></span>
                                     <div class="min-w-0 flex-1">
-                                        <div>
-                                            → <span class="font-mono">{{ $rm->forwarded_to ?: '—' }}</span>
+                                        <div class="text-fg-1 truncate">{{ $mb->email }}</div>
+                                        <div class="text-[11.5px] text-fg-3">
+                                            {{ $mb->type?->label() ?? $mb->type }} · auth: <span class="mono">{{ $mb->auth_type?->value ?? '—' }}</span>
                                         </div>
-                                        <div class="text-gray-500 truncate">
-                                            «{{ \Illuminate\Support\Str::limit((string) $rm->emailMessage?->subject, 50) }}»
-                                        </div>
-                                        <div class="text-gray-500">
-                                            {{ $rm->rule?->name ?? '—' }} · {{ $rm->processed_at?->diffForHumans() }}
-                                        </div>
+                                        @if($mb->last_synced_at)
+                                            <div class="text-[11.5px] text-fg-3">sync: {{ $mb->last_synced_at->diffForHumans() }}</div>
+                                        @endif
+                                        @if($hasError)
+                                            <div class="text-[11.5px] text-amber-700 truncate" title="{{ $mb->last_error_message }}">
+                                                ошибка {{ $mb->last_error_at->diffForHumans() }}
+                                            </div>
+                                        @endif
                                     </div>
                                 </li>
                             @endforeach
                         </ul>
                     @endif
+                </div>
+            </div>
+
+            @if($this->isPrivileged)
+                {{-- Последние пересылки --}}
+                <div class="ds-card">
+                    <div class="ds-card-header">
+                        <h3>Последние пересылки</h3>
+                        <span class="flex-1"></span>
+                        <a href="{{ route('mail-rules.index') }}" class="text-[12px] text-sky-700 hover:underline">правила →</a>
+                    </div>
+                    <div class="ds-card-body">
+                        @if($this->recentForwards->isEmpty())
+                            <div class="text-sm text-fg-3">Пересылок ещё не было.</div>
+                        @else
+                            <ul class="space-y-2 text-[12px]">
+                                @foreach($this->recentForwards as $rm)
+                                    <li class="flex items-start gap-2">
+                                        <span class="mt-1.5 w-2 h-2 rounded-full {{ $rm->success ? 'bg-emerald-600' : 'bg-red-600' }} shrink-0"></span>
+                                        <div class="min-w-0 flex-1">
+                                            <div class="text-fg-1">→ <span class="mono text-fg-2">{{ $rm->forwarded_to ?: '—' }}</span></div>
+                                            <div class="text-fg-3 truncate">«{{ \Illuminate\Support\Str::limit((string) $rm->emailMessage?->subject, 50) }}»</div>
+                                            <div class="text-fg-3 mono">{{ $rm->rule?->name ?? '—' }} · {{ $rm->processed_at?->diffForHumans() }}</div>
+                                        </div>
+                                    </li>
+                                @endforeach
+                            </ul>
+                        @endif
+                    </div>
                 </div>
             @endif
         </div>
