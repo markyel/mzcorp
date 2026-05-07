@@ -499,11 +499,28 @@ PROMPT;
         // EmailMessage->attachments() — HasMany, см. App\Models\EmailMessage.
         $attachments = $message->attachments;
 
+        // Выбор источника тела письма:
+        //   - Обычно body_plain содержит plain-text alternative и его
+        //     достаточно (после dequote / removeSignature).
+        //   - НО HTML-only письма (LazyLift `order@liftway.store`,
+        //     маркетинговые рассылки, корп-уведомления) часто не имеют
+        //     plain-alternative — IMAP-парсер либо отдаёт пустоту, либо
+        //     вытаскивает CSS из `<style>` блока. В этом случае реальные
+        //     позиции лежат в body_html (table > tr > td) и нужен
+        //     htmlToText с сохранением табличной структуры.
+        $plain = (string) ($message->body_plain ?? '');
+        $html  = (string) ($message->body_html ?? '');
+
+        $rawBody = $plain;
+        if ($this->cleaner->bodyPlainLooksBroken($plain) && trim($html) !== '') {
+            $rawBody = $this->cleaner->htmlToText($html);
+        }
+
         // Чистим body перед AI: режем подпись, снимаем маркеры цитирования,
         // изолируем блок «--- Пересланное сообщение ---». Без этого парсер
         // вылавливал фантомные позиции из forward'нутых блоков и подписей
         // (см. parser-corpus.txt, кейсы #349, #357).
-        $cleanedBody = $this->cleaner->cleanInboundReferenceText((string) ($message->body_plain ?? ''));
+        $cleanedBody = $this->cleaner->cleanInboundReferenceText($rawBody);
 
         return $this->parseItemsFromInboundContent(
             $cleanedBody,

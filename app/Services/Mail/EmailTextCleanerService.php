@@ -64,6 +64,78 @@ class EmailTextCleanerService
     }
 
     /**
+     * Эвристика: body_plain «битый» — пустой, очень короткий ИЛИ выглядит
+     * как CSS-мусор (HTML-письма от LazyLift / маркетинговые рассылки часто
+     * не имеют plain-alternative, IMAP-парсер либо отдаёт пустоту, либо
+     * вытаскивает CSS из `<style>` блока).
+     *
+     * В таких случаях `parseItemsFromInboundMessage` должен переключиться
+     * на `htmlToText(body_html)`.
+     */
+    public function bodyPlainLooksBroken(string $bodyPlain): bool
+    {
+        $trimmed = trim($bodyPlain);
+        if ($trimmed === '' || mb_strlen($trimmed) < 30) {
+            return true;
+        }
+
+        // CSS-маркеры: `body{...}`, `.class{...}`, `@media`, `font-family:`,
+        // `;color:`, `padding:`. Если такого больше 3 фрагментов в первых
+        // 1000 символах — это явно CSS, не текст письма.
+        $head = mb_substr($trimmed, 0, 1000);
+        $cssMarkers = preg_match_all(
+            '/(?:\{[^}]{0,80}\}|font-family\s*:|background\s*:|padding\s*:|margin\s*:|@media\b)/i',
+            $head,
+        );
+
+        return $cssMarkers >= 3;
+    }
+
+    /**
+     * Конверсия HTML → plain text с сохранением табличной структуры.
+     * Source: LazyLift n8n workflow `Code: Prepare Parse Input`, функция
+     * htmlToText() — PHP-порт.
+     *
+     * Ключевое: `</td>` → ` | `, `</tr>` → `\n` сохраняют табличный layout
+     * (LazyLift и маркетинговые письма часто содержат таблицу позиций;
+     * без этого преобразования AI получит сплошную строку без структуры).
+     */
+    public function htmlToText(string $html): string
+    {
+        if (trim($html) === '') {
+            return '';
+        }
+
+        $text = $html;
+
+        // Табличные разделители — ДО общего strip_tags.
+        $text = preg_replace('/<\/th>/iu', ' | ', $text) ?? $text;
+        $text = preg_replace('/<\/td>/iu', ' | ', $text) ?? $text;
+        $text = preg_replace('/<\/tr>/iu', "\n", $text) ?? $text;
+        $text = preg_replace('/<br\s*\/?>/iu', "\n", $text) ?? $text;
+        $text = preg_replace('/<\/div>/iu', "\n", $text) ?? $text;
+        $text = preg_replace('/<\/p>/iu', "\n", $text) ?? $text;
+        $text = preg_replace('/<\/li>/iu', "\n", $text) ?? $text;
+
+        // Удалить style/script/head полностью (с содержимым).
+        $text = preg_replace('/<style[^>]*>[\s\S]*?<\/style>/iu', '', $text) ?? $text;
+        $text = preg_replace('/<script[^>]*>[\s\S]*?<\/script>/iu', '', $text) ?? $text;
+        $text = preg_replace('/<head[^>]*>[\s\S]*?<\/head>/iu', '', $text) ?? $text;
+
+        // Все остальные тэги — strip.
+        $text = strip_tags($text);
+
+        // HTML-entities.
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        // Лишние пустые строки и пробелы.
+        $text = preg_replace("/[ \t]+/u", ' ', $text) ?? $text;
+        $text = preg_replace("/\n{3,}/u", "\n\n", $text) ?? $text;
+
+        return trim($text);
+    }
+
+    /**
      * Найти блок «--- Пересылаемое сообщение --- ... --- Конец ---»,
      * вернуть отдельно `forwarded` (тело внутри) и `original` (то что до).
      *
