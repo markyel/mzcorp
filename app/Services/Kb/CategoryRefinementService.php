@@ -115,10 +115,15 @@ class CategoryRefinementService
                 // MyLift fix (Phase 2.0): голый mb_strpos ловит ложные матчи
                 // на коротких аббревиатурах. Пример: synonym «ОС» (Ограничитель
                 // Скорости) → ос → substring найден в «п<ос>т» (слово «пост»),
-                // и «Пост вызывной LOP2 OTIS» резолвится в speed_governor.
-                // Используем word-boundaries (`\b…\b`) с `/u` flag — Unicode-aware,
-                // понимает русские буквы как word characters.
-                $pattern = '/\b' . preg_quote($synLower, '/') . '\b/u';
+                // и «Пост вызывной LOP2 OTIS» уезжал в speed_governor.
+                //
+                // PHP `\b` даже с /u флагом не всегда классифицирует кириллицу
+                // как word-character (зависит от PCRE/UCP режима — у нас в сборке
+                // \b ставится между «п» и «о»). Используем явные Unicode
+                // word-boundaries через [\p{L}\p{N}_] lookahead/lookbehind.
+                $pattern = '/(?<![\p{L}\p{N}_])'
+                    . preg_quote($synLower, '/')
+                    . '(?![\p{L}\p{N}_])/u';
                 if (preg_match($pattern, $itemText) === 1) {
                     return $cat;
                 }
