@@ -109,6 +109,10 @@ class RequestItemPersister
                 'parsed_article' => $item['article'] ?? null,
                 'parsed_qty' => $item['qty'] ?? 1,
                 'parsed_unit' => $item['unit'] ?? 'шт.',
+                // Phase 2.0+ coarse-категория от парсера. CategoryRefinementService
+                // через `whereHas('coarseCategories')` фильтрует fine-кандидатов
+                // и при 2+ кандидатах активирует LLM-pathway (refineWithLlm).
+                'category' => $item['category'] ?? null,
                 'supplier_note' => $item['note'] ?? null,
                 'data_source' => 'inbound_message',
                 'status' => 'parsed',

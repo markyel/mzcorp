@@ -25,6 +25,10 @@ class RequestItem extends Model
         'parsed_article',
         'parsed_qty',
         'parsed_unit',
+        // Phase 2.0+: coarse-категория от парсера (одна из 19 значений
+        // App\Constants\CoarseCategories::ALL). Заполняется ParseItemsPrompt v5,
+        // используется CategoryRefinementService для активации LLM-pathway.
+        'category',
         'supplier_note',
         'data_source',
         'status',

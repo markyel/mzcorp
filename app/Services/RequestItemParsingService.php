@@ -232,12 +232,22 @@ class RequestItemParsingService
      */
     private function normalizeParsedItem(array $item): array
     {
+        // Phase 2.0+ : `category` (coarse, 19 значений) идёт от ParseItemsPrompt.
+        // Валидируем против CoarseCategories::ALL — мусорные / новые значения
+        // ставим в null, чтобы CategoryRefinementService уехал в fallback,
+        // а не упал на whereHas с неизвестным coarse.
+        $category = !empty($item['category']) ? trim($item['category']) : null;
+        if ($category !== null && ! \App\Constants\CoarseCategories::isValid($category)) {
+            $category = null;
+        }
+
         return [
             'name' => mb_substr(trim($item['name'] ?? ''), 0, 250),
             'brand' => !empty($item['brand']) ? trim($item['brand']) : null,
             'article' => !empty($item['article']) ? trim($item['article']) : null,
             'qty' => max(0.01, (float) ($item['qty'] ?? 1)),
             'unit' => trim($item['unit'] ?? 'шт.'),
+            'category' => $category,
             'note' => !empty($item['note']) ? trim($item['note']) : null,
         ];
     }
