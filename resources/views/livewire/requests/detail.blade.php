@@ -671,22 +671,25 @@
 
     {{-- ────────── LIGHTBOX (просмотр картинок) ──────────
          Открывается событием window:open-image с detail {src, name, dl}.
-         Закрытие: Esc, клик по бэкдропу, кнопка «Закрыть». --}}
+         Закрытие: Esc, клик по бэкдропу, кнопка «Закрыть».
+         Inline-стили для критичной геометрии: защита от случая, когда
+         Tailwind-бандл не пересобрали. Изображение центрируется через
+         absolute + transform (а не flex), чтобы Alpine x-show не сбивал
+         display root-элемента. --}}
     <div x-data="{ lbOpen: false, lbSrc: '', lbName: '', lbDl: '' }"
          x-on:open-image.window="lbOpen = true; lbSrc = $event.detail.src; lbName = $event.detail.name; lbDl = $event.detail.dl"
          x-on:keydown.escape.window="lbOpen = false">
         <div x-show="lbOpen"
              x-transition.opacity.duration.150ms
-             style="display: none"
-             class="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-6 cursor-zoom-out"
+             style="display: none; position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.82); cursor: zoom-out;"
              x-on:click.self="lbOpen = false">
-            <div class="absolute top-3 left-4 right-4 flex items-center gap-2 pointer-events-none">
-                <span class="text-white/85 text-[12px] mono truncate flex-1 pointer-events-auto" x-text="lbName"></span>
-                <a :href="lbDl" class="btn btn-sm pointer-events-auto" x-on:click.stop>Скачать</a>
-                <button type="button" class="btn btn-sm pointer-events-auto" x-on:click.stop="lbOpen = false">Закрыть</button>
+            <div style="position: absolute; top: 12px; left: 16px; right: 16px; display: flex; align-items: center; gap: 8px; z-index: 2;">
+                <span style="color: rgba(255,255,255,0.92); font-size: 12px; font-family: var(--font-mono); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" x-text="lbName"></span>
+                <a :href="lbDl" download class="btn btn-sm" x-on:click.stop>Скачать</a>
+                <button type="button" class="btn btn-sm" x-on:click.stop="lbOpen = false">Закрыть</button>
             </div>
             <img :src="lbSrc" :alt="lbName"
-                 class="max-w-full max-h-full object-contain cursor-default"
+                 style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: calc(100vw - 48px); max-height: calc(100vh - 80px); width: auto; height: auto; object-fit: contain; cursor: default; display: block; box-shadow: 0 8px 32px rgba(0,0,0,0.5);"
                  x-on:click.stop>
         </div>
     </div>

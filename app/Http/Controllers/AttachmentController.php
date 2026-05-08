@@ -86,10 +86,12 @@ class AttachmentController extends Controller
             ),
         ];
 
+        // Content-Length из $attachment->size_bytes ставить нельзя: значение
+        // фиксировалось при IMAP-сохранении и может не совпадать с размером
+        // распакованного файла на диске. Несовпадение → браузер обрезает поток
+        // и скачивание «не работает». Пусть Symfony отдаёт chunked.
         if ($disposition === HeaderUtils::DISPOSITION_INLINE) {
             $headers['Cache-Control'] = 'private, max-age=86400';
-        } elseif ($attachment->size_bytes) {
-            $headers['Content-Length'] = (string) $attachment->size_bytes;
         }
 
         return response()->stream(
