@@ -10,11 +10,13 @@ use App\Models\RoutedMail;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Применение правил маршрутизации к одному письму:
- * engine.match → действия (label, forward) → запись в routed_mails.
+ * Pipeline маршрутизации одного письма:
+ *   inbound  → loop-guard → categorize → reply-linker → rules engine
+ *              → AI fallback → IncomingProcessor → apply rules.
+ *   outbound → OutgoingMailLinker (header threading + subject code +
+ *              recipient open-request match). Без правил, без AI-классификатора.
  *
- * Foundation §1.5 pipeline. Не выполняется для outbound (Sent) писем —
- * там у нас только tracking исходящих, а не маршрутизация.
+ * Foundation §1.5 pipeline.
  */
 class MailRouter
 {
@@ -26,11 +28,28 @@ class MailRouter
         private readonly IncomingMailProcessor $incoming,
         private readonly MailCategoryClassifier $categorizer,
         private readonly InboundReplyLinker $replyLinker,
+        private readonly OutgoingMailLinker $outgoingLinker,
     ) {
     }
 
     public function route(EmailMessage $message): void
     {
+        // Phase 1.9 outbound: исходящие из Sent — линкуем к существующей
+        // Request, не пропускаем через categorize/rules/IncomingProcessor
+        // (это наше письмо, не клиентский запрос). Отдельная короткая ветка.
+        if ($message->direction === MailDirection::Outbound) {
+            try {
+                $this->outgoingLinker->tryLink($message);
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: outgoing linker failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            return;
+        }
+
         if ($message->direction !== MailDirection::Inbound) {
             return;
         }
