@@ -5,12 +5,12 @@
     $counters = $this->counters;
 
     $filterChips = [
-        ['key' => 'managers',      'label' => 'Менеджеры',  'count' => $counters['managers']],
-        ['key' => 'head_of_sales', 'label' => 'РОП',        'count' => $counters['head_of_sales']],
-        ['key' => 'secretary',     'label' => 'Секретари',  'count' => $counters['secretary']],
-        ['key' => 'director',      'label' => 'Директорат', 'count' => $counters['director']],
+        ['key' => 'manager',       'label' => 'Менеджеры',    'count' => $counters['manager']],
+        ['key' => 'head_of_sales', 'label' => 'РОП',          'count' => $counters['head_of_sales']],
+        ['key' => 'secretary',     'label' => 'Секретари',    'count' => $counters['secretary']],
+        ['key' => 'director',      'label' => 'Директорат',   'count' => $counters['director']],
         ['key' => 'all',           'label' => 'Все активные', 'count' => null],
-        ['key' => 'archived',      'label' => 'Архив',      'count' => $counters['archived']],
+        ['key' => 'archived',      'label' => 'Архив',        'count' => $counters['archived']],
     ];
 @endphp
 

@@ -21,9 +21,13 @@ class Index extends Component
 {
     use WithPagination;
 
-    /** Фильтр: managers | head_of_sales | secretary | director | archived | all */
+    /**
+     * Фильтр: manager | head_of_sales | secretary | director | archived | all.
+     * Значения для ролей совпадают с `roles.name` в БД (см. Role enum) —
+     * чтобы whereHas('roles', name=$filter) находил записи.
+     */
     #[Url(as: 'filter')]
-    public string $filter = 'managers';
+    public string $filter = 'manager';
 
     #[Url(as: 'q')]
     public string $search = '';
@@ -97,9 +101,9 @@ class Index extends Component
     #[Computed]
     public function counters(): array
     {
-        // Метрики для чипов фильтра.
+        // Ключи совпадают с role enum value + 'archived'.
         return [
-            'managers' => User::role(RoleEnum::Manager->value)->active()->count(),
+            'manager' => User::role(RoleEnum::Manager->value)->active()->count(),
             'head_of_sales' => User::role(RoleEnum::HeadOfSales->value)->active()->count(),
             'secretary' => User::role(RoleEnum::Secretary->value)->active()->count(),
             'director' => User::role(RoleEnum::Director->value)->active()->count(),
