@@ -88,10 +88,14 @@ class MailboxOauth extends Component
             return;
         }
 
-        $mailbox = Mailbox::create([
+        // mailboxes.encrypted_credentials NOT NULL — нужно записать пустой
+        // зашифрованный JSON через writeCredentials([]) до save(). Иначе
+        // INSERT упадёт на NOT NULL constraint. Тот же приём в `mail:add` CLI.
+        $mailbox = new Mailbox();
+        $mailbox->fill([
             'name' => $this->mailboxName,
             'email' => $this->mailboxEmail,
-            'type' => MailboxType::Personal->value,
+            'type' => MailboxType::Personal,
             'owner_user_id' => $this->userId,
             'imap_host' => 'imap.yandex.ru',
             'imap_port' => 993,
@@ -101,10 +105,11 @@ class MailboxOauth extends Component
             'smtp_port' => 465,
             'smtp_encryption' => 'ssl',
             'smtp_username' => $this->mailboxEmail,
-            'auth_type' => MailboxAuthType::OAuth->value,
+            'auth_type' => MailboxAuthType::OAuth,
             'is_active' => true,
-            'encrypted_credentials' => null,
         ]);
+        $mailbox->writeCredentials([]);
+        $mailbox->save();
 
         $this->mailboxId = $mailbox->id;
         session()->flash('status', "Ящик «{$mailbox->email}» создан. Подключите OAuth ниже.");
@@ -156,9 +161,10 @@ class MailboxOauth extends Component
         if (! $mailbox || $mailbox->owner_user_id !== $this->userId) {
             return;
         }
-        // Обнуляем credentials → переходим в NO_TOKENS state, юзер снова
-        // получает auth URL и вставляет новый verification code.
-        $mailbox->encrypted_credentials = null;
+        // Сбрасываем credentials → переходим в NO_TOKENS state, юзер снова
+        // получает auth URL и вставляет новый verification code. Пишем пустой
+        // зашифрованный JSON, потому что колонка NOT NULL.
+        $mailbox->writeCredentials([]);
         $mailbox->save();
         session()->flash('status', 'Токены сброшены. Получите новый verification code и сохраните.');
     }
