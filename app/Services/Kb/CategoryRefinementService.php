@@ -110,7 +110,16 @@ class CategoryRefinementService
                 if (!is_string($syn) || trim($syn) === '') {
                     continue;
                 }
-                if (mb_strpos($itemText, mb_strtolower($syn)) !== false) {
+                $synLower = mb_strtolower(trim($syn));
+
+                // MyLift fix (Phase 2.0): голый mb_strpos ловит ложные матчи
+                // на коротких аббревиатурах. Пример: synonym «ОС» (Ограничитель
+                // Скорости) → ос → substring найден в «п<ос>т» (слово «пост»),
+                // и «Пост вызывной LOP2 OTIS» резолвится в speed_governor.
+                // Используем word-boundaries (`\b…\b`) с `/u` flag — Unicode-aware,
+                // понимает русские буквы как word characters.
+                $pattern = '/\b' . preg_quote($synLower, '/') . '\b/u';
+                if (preg_match($pattern, $itemText) === 1) {
                     return $cat;
                 }
             }
