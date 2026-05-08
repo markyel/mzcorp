@@ -27,6 +27,7 @@ class KbResolveCommand extends Command
         {--from-id=0 : Начать с указанного Request.id}
         {--apply : Реально запустить (без флага — dry-run)}
         {--force : Перезапустить даже если quality_assessment_status уже не not_assessed}
+        {--reset-categories : Перед запуском обнулить identification_category_id и manufacturer_brand_id у целевых items, чтобы preserve-логика не сохранила старый false-positive результат}
         {--sync : Запустить синхронно (без queue) для дебага}';
 
     protected $description = 'KB-резолв заявок: RequestContext + per-item QualityAssessment';
@@ -69,6 +70,15 @@ class KbResolveCommand extends Command
             $this->warn('Dry-run (без --apply). Ничего не запущено.');
 
             return self::SUCCESS;
+        }
+
+        if ($this->option('reset-categories')) {
+            $reset = \App\Models\RequestItem::where('request_id', $id)
+                ->update([
+                    'identification_category_id' => null,
+                    'manufacturer_brand_id' => null,
+                ]);
+            $this->line("  reset {$reset} items (category + brand cleared).");
         }
 
         try {
@@ -139,6 +149,17 @@ class KbResolveCommand extends Command
         }
 
         $sync = (bool) $this->option('sync');
+        $resetCategories = (bool) $this->option('reset-categories');
+
+        if ($resetCategories) {
+            $resetTotal = \App\Models\RequestItem::whereIn('request_id', $requests->pluck('id'))
+                ->update([
+                    'identification_category_id' => null,
+                    'manufacturer_brand_id' => null,
+                ]);
+            $this->line("Reset {$resetTotal} items (category + brand cleared).");
+        }
+
         $bar = $this->output->createProgressBar($count);
         $bar->start();
 
