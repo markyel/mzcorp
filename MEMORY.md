@@ -30,6 +30,7 @@
 | 1.10 | UI `/dashboard/requests` — пул менеджера + карточка заявки + inline attachments | новое (Livewire 4) | done (Phase 1.10 → пересобрано в Phase 1.8d с 7 табами) |
 | 1.11 | Дашборд РОПа v0: KPI, AI breakdown, manager load, mailbox health, последние пересылки | новое | done |
 | 1.12 | Полный redesign UI по `design/ui_kits/crm/` + `colors_and_type.css` | дизайн-система | done (закрыто как Phase 1.8d) |
+| 1.13 | Pool redesign + topbar v2 (`03-requests.html`) + email-style isolation iframe srcdoc + image preview/lightbox + RFC 6266 attachment download + UI управления менеджерами (CRUD + soft-archive + OAuth verification_code attach) + manual reassign в карточке заявки | новое | done (`f2a778e`..`a06fccd`) |
 
 KB, sticky-роутинг, каталог, refresh-цены, DocumentDetector, экспорт в 1С, паузы/state machine — **все за пределами Фазы 1.**
 
@@ -123,6 +124,14 @@ sudo supervisorctl restart mzcorp-worker:*
 - **`scp` на Windows PowerShell** не expand'ит `~/Desktop` (Unix tilde). Нужно `$env:USERPROFILE\Desktop\file.txt` или абсолютный путь.
 - **Beget `php artisan config:cache route:cache view:cache` одной командой** не работает — artisan не принимает доп. аргументы. Только тремя отдельными вызовами или через `&&`.
 - **PSR-4 autoload новых классов на проде** — после `git pull` если новые классы есть в `app/Services/Mail/`, `app/Prompts/Mail/` — обязательно `sudo -u www-data composer dump-autoload --optimize`, иначе Laravel autoload-cache (`bootstrap/cache/`) не подхватит и `class_exists` вернёт false.
+- **HTML письма: `<style>` утекают в страницу** (Phase 1.13 находка): `{!! $body_html !!}` в Blade рендерит `<style>` блоки прямо в DOM приложения, переопределяя `.btn` / шрифты CRM. **Решение:** письма треда выводим в `<iframe sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcdoc="...">` — стили физически изолированы, JS из письма не выполнится (нет `allow-scripts`). Auto-height через Alpine `x-init` + ResizeObserver, ссылки в письме переписываются на `target=_blank rel=noopener`. См. `resources/views/livewire/requests/detail.blade.php` таб «Переписка».
+- **Кириллица в `Content-Disposition`** (Phase 1.13 находка): голый `Content-Disposition: attachment; filename="ролик.JPG"` нарушает RFC 7230 (header ASCII-only). Symfony Response/nginx mojibake'ит или режет header, скачивание «не работает». **Решение:** `Symfony\Component\HttpFoundation\HeaderUtils::makeDisposition($disposition, $filename, $asciiFallback)` — даёт корректный `attachment; filename="..."; filename*=UTF-8''<percent-encoded>`. См. `AttachmentController::streamAttachment()`.
+- **`Content-Length` из БД-метаданных** (Phase 1.13): `email_attachments.size_bytes` — то, что репортнул IMAP при ингесте, может не совпасть с реальным размером файла на storage-диске. Несовпадение объявленной длины и фактических байт → браузер обрезает stream и скачивание прерывается. **Решение:** не ставим `Content-Length` в `response()->stream()` совсем, Symfony отдаёт chunked transfer и stream завершается чисто.
+- **`mailboxes.encrypted_credentials` NOT NULL** (Phase 1.13): колонка text NOT NULL по исходной миграции `2026_05_06_080000_create_mailboxes_table.php`. INSERT с `null` падает на constraint → 500. **Решение:** при создании ящика без credentials писать пустой зашифрованный JSON через `$mailbox->writeCredentials([])` до `save()` — тот же приём в существующем CLI `mail:add` (`MailAddMailboxCommand.php:97-99`). `Mailbox::accessToken()` на пустом credentials вернёт `null`, что корректно обрабатывает state-machine UI.
+- **Livewire `Str::studly` несовместим с camelCase в имени класса** (Phase 1.13): tag `<livewire:admin.managers.mailbox-oauth />` через `Finder::generateClassFromName()` резолвится через `Str::studly('mailbox-oauth')` → `MailboxOauth` (lowercase «auth»). Если PHP-класс назван `MailboxOAuth` (camelCase «OAuth») — на Linux PSR-4 case-sensitive ломается. **Решение:** имя класса/файла должно быть строго результатом studly от kebab-tag. Файл: `app/Livewire/Admin/Managers/MailboxOauth.php`, класс: `class MailboxOauth`.
+- **Livewire public Eloquent property с shadow-named class** (Phase 1.13): `public App\Models\Request $request;` в child Livewire-компоненте `ReassignDialog` ломает дегидратацию snapshot, валит render с inline «500 SERVER ERROR» в DOM. Конфликт через alias-цепочку с `Illuminate\Http\Request`. **Решение:** хранить только `public int $requestId;`, model резолвить через приватный `request()` helper с `findOrFail()`. Тот же паттерн в `MailboxOauth` и оригинальном `RuleEditor`.
+- **Spatie role name vs UI label** (Phase 1.13): role enum value = `'manager'` (singular), UI chip label = «Менеджеры» (plural). Если key чипа фильтра = `'managers'` и оно же подставляется в `whereHas('roles', fn => where 'name' = $filter)` — match'а нет, список пустой при счётчике на чипе > 0. **Решение:** key чипа = role enum value (`manager`), label остаётся читабельным.
+- **На карточке заявки 500 SERVER ERROR в action-panel** — отчётливый признак того, что отвалился child Livewire-компонент. Page-level `Detail` рендерится норм, ошибка локализована в одной плашке.
 
 ## Журнал сессий
 
@@ -310,6 +319,69 @@ sudo supervisorctl restart mzcorp-worker:*
 - `man2@myzip.ru` (id=2) — OAuth access-token expired, no refresh — шумит ERROR в лог каждые 2 мин, но не критично.
 - `man3@myzip.ru` (id=3) — то же.
 
+### Сессия 2026-05-08 — Phase 1.13 admin/managers UI + email rendering fixes + attachments UX
+
+Длинная сессия, **9 коммитов**: `b73d677` → `a06fccd`. Закрыта Phase 1.13 целиком + один пункт бэклога.
+
+**Email rendering — изоляция стилей через iframe srcdoc** (`b73d677`):
+- **Симптом**: на карточке заявки с письмом от Liftway (HTML с `<style>` блоками) ломалось оформление кнопок «Сформировать КП / Refresh цен / Ответить» в action-panel — слетал размер, фон, выравнивание.
+- **Корень**: `bodyHtmlFor()` возвращает сырой HTML тела, в Blade выводится через `{!! $html !!}`. `<style>...</style>` из письма попадает в DOM и применяется глобально к `.btn` / `<button>`.
+- **Фикс**: тело письма рендерится в `<iframe sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcdoc="{{ $html }}">`. Стили физически не могут утечь, скрипты письма не выполнятся (нет `allow-scripts`). Auto-height через Alpine `x-init` (set scrollHeight + ResizeObserver), все ссылки в письме → `target=_blank rel=noopener`, минимальный typography reset инжектится в iframe.
+- См. `resources/views/livewire/requests/detail.blade.php:367` таб «Переписка». Это золотой стандарт Gmail/Yandex.
+
+**Attachments UX — image preview + lightbox + RFC 6266 download** (`2200400`, `11eb624`):
+- **Симптом**: скачивание вложений с кириллицей в имени (`ролик1.JPG`, `реквизиты АЛЬФА-БАНК.pdf`) не работало или сохранялось под мусорным именем.
+- **Корень**: `Content-Disposition: attachment; filename="ролик1.JPG"` — голый UTF-8 в HTTP header нарушает RFC 7230 (ASCII-only). Symfony Response/nginx mojibake'ит или режет.
+- **Фикс**: централизовали stream через `AttachmentController::streamAttachment()`, header строится через `Symfony\Component\HttpFoundation\HeaderUtils::makeDisposition($disposition, $filename, $asciiFallback)`. Корректный output: `attachment; filename="rolik1.JPG"; filename*=UTF-8''%D1%80%D0%BE%D0%BB%D0%B8%D0%BA1.JPG`. ASCII-fallback через `preg_replace('/[^\x20-\x7e]/', '_', $name)`.
+- **Дополнительно**: убрали `Content-Length` header — `email_attachments.size_bytes` фиксируется при IMAP-ингесте и может не совпасть с реальным размером файла на storage-диске (encoding/decoding). Без header'а Symfony отдаёт chunked, stream завершается чисто. См. `app/Http/Controllers/AttachmentController.php`.
+- **Image preview**: добавлен новый роут `GET /attachments/{attachment}/preview` (action `preview()`, Content-Disposition: inline) для использования в `<img>` thumbnail и лайтбоксе.
+- **Image thumbnails в треде**: для вложений с `mime_type=image/*` или расширением `jpg/jpeg/png/gif/webp/bmp/svg/tif/tiff` — миниатюра 140×100 (object-cover) вместо чипа. Клик → `$dispatch('open-image', {src, name, dl})`.
+- **Lightbox** (Alpine): fixed full-screen контейнер слушает `window:open-image`, рисует backdrop `rgba(0,0,0,0.82)`, картинка центрируется через `position:absolute + transform:translate(-50%, -50%)` с `max-width: calc(100vw - 48px)` / `max-height: calc(100vh - 80px)`. Закрытие — `Esc`, клик по бэкдропу, кнопка «Закрыть». Все геометрия — inline-стили (а не Tailwind-классы), потому что новые JIT-классы (`fixed inset-0 bg-black/85 ...`) не были собраны на проде до `npm run build`. См. `resources/views/livewire/requests/detail.blade.php:670+` (lightbox-контейнер).
+
+**Phase 1.13 — UI управления менеджерами + OAuth-привязка ящиков + manual reassign** (5 коммитов: `5796b10`, `47b42f2`, `2e24099`, `a06fccd`):
+
+Триггер: РОП блокировался без админа на каждое добавление/удаление сотрудника. Теперь весь flow в браузере.
+
+- **Архитектурные вилки** (закрыты до старта кода через `AskUserQuestion`):
+  - Оффбординг: soft-archive (`users.archived_at`) + ручное переподчинение (включаем UI-кнопку из дизайна).
+  - Доступ: `role:head_of_sales,director` (как mail-rules).
+  - OAuth flow: verification_code прямо в UI (открыть Yandex auth в новой вкладке, вставить 7-знач код, exchange). Не трогаем настройки OAuth-приложения Yandex.
+  - Пароль: РОП задаёт временный, менеджер потом меняет в `/profile`.
+
+- **Backend foundation:**
+  - Migration `2026_05_08_120000_add_archived_at_to_users_table.php` — `users.archived_at TIMESTAMP NULL INDEX`. Не Eloquent SoftDeletes (global scope слишком агрессивно — ломает `request_assignments` audit-trails).
+  - `User::scopeActive()` / `scopeArchived()` / `isArchived()`.
+  - `LoginRequest::authenticate()` — после `Auth::attempt()` проверяет `isArchived()`, делает `Auth::logout()` + `ValidationException::withMessages(['email' => 'Учётная запись деактивирована. Обратитесь к РОПу.'])`. Проверка ПОСЛЕ attempt чтобы не утекать факт существования учётки.
+  - `AssignmentService::autoAssign()` — теперь `User::role(Manager)->active()->get()` (sticky + round-robin фильтрует архивных).
+  - `App\Services\Request\ReassignService::reassign()` — транзакционный manual reassign. Пишет audit в `request_assignments` (reason `manual_reassign: …`), best-effort `MailFolderRouter::routeToManager()` (IMAP-сбой логируется WARNING, не валит DB tx).
+
+- **UI — раздел `/dashboard/managers`** (3 Livewire-компонента + 5 views + routes + topbar nav):
+  - `App\Livewire\Admin\Managers\Index` — таблица с фильтр-чипами (Менеджеры/РОП/Секретари/Директорат/Все активные/Архив), поиск по name+email (ilike), 25 на страницу, действия `archive($id)` / `restore($id)` через `wire:confirm`. Чипы статуса: «активен» / «в архиве» / mailbox-status (active/error/detached/missing).
+  - `App\Livewire\Admin\Managers\Editor` — create/edit form. На create `password|required|min:8|confirmed`, на edit опционально. После create редирект на `managers.edit/{id}` чтобы РОП в одном flow подключил ящик.
+  - `App\Livewire\Admin\Managers\MailboxOauth` (sub-component на edit-странице) — three-state machine:
+    - **NO_MAILBOX**: форма «email ящика» + «name» → `createMailbox()` создаёт `Mailbox` с `type=Personal`, `auth_type=OAuth`, `is_active=true` + пустой encrypted JSON через `writeCredentials([])` (NOT NULL constraint).
+    - **NO_TOKENS**: блок инструкции + кнопка `<a href="{{ $authorizeUrl }}" target="_blank">` (URL из `YandexOAuthService::authorizationUrl(state: "ui:mb-{$id}", loginHint: $email)`) + поле «Verification code» + `saveCode($oauth)` → `$oauth->exchangeCode($code)` + `$mailbox->setOAuthTokens(...)`.
+    - **HAS_TOKENS**: статус (expires_at, refresh_token наличие, последний sync, последняя ошибка) + кнопки «Переподключить» (`reconnect()` пишет пустой credentials → возврат к NO_TOKENS) и «Отвязать» (`detach()` ставит `is_active=false`, токены не трогаем).
+
+- **Manual reassign в карточке заявки** (`detail.blade.php`):
+  - Disabled-кнопка «⊘ Переподчинить» из дизайна заменена на `<livewire:requests.reassign-dialog :request="$req">` для `head_of_sales|director|secretary`. Менеджеру оставлен disabled-stub.
+  - `App\Livewire\Requests\ReassignDialog` — модалка fixed-position с select active managers + textarea «Причина» + submit → `ReassignService::reassign()` → redirect через Referer (сохраняет таб state).
+
+- **Найденные грабли (зафиксированы выше в «Известные грабли»):**
+  - `mailboxes.encrypted_credentials NOT NULL` → `writeCredentials([])` до save, как в `mail:add` CLI.
+  - Livewire `Str::studly` для tag `mailbox-oauth` → `MailboxOauth` (не `MailboxOAuth`). PSR-4 case-sensitive на Linux.
+  - `public App\Models\Request $request` в child Livewire-компоненте → 500 на дегидратации (shadow от `Illuminate\Http\Request`). **Решение:** хранить только id.
+  - Spatie role name `manager` (singular) vs UI label «Менеджеры» (plural) — chip key должен совпадать с role name, иначе `whereHas('roles', fn => where 'name' = $filter)` пуст.
+
+**man2/man3 OAuth re-issue — закрыто** (бэклог-пункт):
+Через новый `/dashboard/managers/{id}/edit` оператор переподключил оба ящика по verification_code flow. `production.ERROR` про expired access_token прекратились.
+
+**Подключённые ящики** на 2026-05-08:
+- `mail@myzip.ru` (id=1, shared, oauth) — работает.
+- `man2@myzip.ru` (id=2, personal, oauth) — **переподключён через UI**, токены живые.
+- `man3@myzip.ru` (id=3, personal, oauth) — **переподключён через UI**, токены живые.
+- + новый менеджер «Морозов Алексей Игорьевич» — создан через UI, ящик подключён.
+
 ### Сессия 2026-05-07 (вечер 1) — Phase 1.8c (LazyLift email classifier port) + UI mismatch raised
 
 После Phase 1.8b backfill оператор увидел в пуле 6+ ложно-позитивных Request разных категорий (внутренние КП от коллег, supplier offers, out-of-office, newsletter spam). Триггер «items.count > 0» оказался слишком слабым.
@@ -386,7 +458,7 @@ sudo supervisorctl restart mzcorp-worker:*
 
 ## План на следующую сессию
 
-После марафона 2026-05-07 (вечер 2) Phase 1.8d / sync-fix / 1.9-inbound / 1.8e parser v5 закрыты. Backfill корпуса оператор пропустил — наблюдаем новые письма.
+После сессии 2026-05-08 закрыта Phase 1.13 (UI менеджеров + OAuth-привязка ящиков + manual reassign + email-style isolation + attachments UX). Все три ящика на проде с живыми OAuth-токенами, новые менеджеры заводятся через браузер.
 
 ### Приоритет 1 — Phase 1.9 outbound (Sent-tracking)
 
@@ -420,7 +492,7 @@ sudo grep 'ThreadClarificationAi: matched by AI' /var/www/mzcorp/storage/logs/la
 
 ### Бэклог низкого приоритета
 
-- **man2/man3 OAuth re-issue**: ящики мёртвые с истёкшим access_token, refresh_token не выдан изначально. Нужен повторный OAuth flow через `mail:oauth url N` + `mail:oauth code N`. Шумят `production.ERROR` каждые 2 мин. Пока не блокирует.
+- ~~**man2/man3 OAuth re-issue**~~: **закрыто 2026-05-08.** Ящики переподключены через новый UI `/dashboard/managers/{id}/edit` (Phase 1.13). `production.ERROR` про истёкший access_token прекратились.
 - **Round-robin догон**: Иванов 165, M2/M3 ~54 (сейчас неравный, естественно догонится). После Phase 1.9 outbound можно подумать про sticky-роутинг (Foundation Phase 2).
 - **Dashboard polish**: heatmap inflow-by-hour, sparklines, funnel — после стабильного boevoго потока 2-4 недели.
 - **Phase 2.0 KB-сервисы**: `BrandResolutionService`, `EquipmentUnitMatchingService`, `ParameterExtractionService` из LazyLift `app/Services/Kb/` — Foundation Phase 2.
