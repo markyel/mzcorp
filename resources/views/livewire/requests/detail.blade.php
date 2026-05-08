@@ -364,7 +364,42 @@
                                     <div class="px-[18px] pb-3.5 pl-[56px] text-[13px] leading-[1.55] text-fg-1">
                                         @php $html = $this->bodyHtmlFor($msg); @endphp
                                         @if($html)
-                                            <div class="max-w-none">{!! $html !!}</div>
+                                            {{-- Письмо рендерится в sandbox-iframe (srcdoc), чтобы <style>-блоки
+                                                 из тела письма не утекали на страницу и не ломали .btn / шрифты CRM.
+                                                 sandbox без allow-scripts — JS из письма не выполнится. --}}
+                                            <iframe
+                                                sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+                                                srcdoc="{{ $html }}"
+                                                loading="lazy"
+                                                class="w-full block border-0 bg-surface"
+                                                style="height: 0"
+                                                x-data
+                                                x-init="
+                                                    const fit = () => {
+                                                        try {
+                                                            const h = $el.contentDocument && $el.contentDocument.documentElement
+                                                                ? $el.contentDocument.documentElement.scrollHeight
+                                                                : 0;
+                                                            $el.style.height = (h + 4) + 'px';
+                                                        } catch (e) {}
+                                                    };
+                                                    $el.addEventListener('load', () => {
+                                                        try {
+                                                            const doc = $el.contentDocument;
+                                                            if (!doc) return;
+                                                            doc.querySelectorAll('a[href]').forEach(a => {
+                                                                a.target = '_blank';
+                                                                a.rel = 'noopener noreferrer';
+                                                            });
+                                                            const s = doc.createElement('style');
+                                                            s.textContent = 'html,body{margin:0;padding:0}body{padding:8px 12px;font:13px/1.55 system-ui,-apple-system,Segoe UI,Inter,sans-serif;color:#0a0a0a;word-break:break-word}img{max-width:100%;height:auto}';
+                                                            (doc.head || doc.documentElement).appendChild(s);
+                                                            try { new ResizeObserver(fit).observe(doc.documentElement); } catch (e) {}
+                                                            fit();
+                                                        } catch (e) {}
+                                                    });
+                                                "
+                                            ></iframe>
                                         @elseif($msg->body_plain)
                                             <pre class="whitespace-pre-wrap font-sans text-[13px]">{{ $msg->body_plain }}</pre>
                                         @else
