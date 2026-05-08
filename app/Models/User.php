@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -53,7 +54,27 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'archived_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Только активные пользователи (`archived_at IS NULL`).
+     * Используется в AssignmentService и UI-фильтрах.
+     */
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->whereNull('archived_at');
+    }
+
+    public function scopeArchived(Builder $query): Builder
+    {
+        return $query->whereNotNull('archived_at');
+    }
+
+    public function isArchived(): bool
+    {
+        return $this->archived_at !== null;
     }
 }

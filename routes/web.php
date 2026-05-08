@@ -57,6 +57,19 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/mail-rules/{rule}/edit', function (\App\Models\MailRoutingRule $rule) {
             return view('admin.mail-rules.edit', ['rule' => $rule]);
         })->name('mail-rules.edit');
+
+        // Управление менеджерами (Phase 1.13) — список + create/edit + OAuth-привязка ящиков.
+        Route::get('/dashboard/managers', function () {
+            return view('admin.managers.index');
+        })->name('managers.index');
+
+        Route::get('/dashboard/managers/create', function () {
+            return view('admin.managers.edit', ['user' => new \App\Models\User()]);
+        })->name('managers.create');
+
+        Route::get('/dashboard/managers/{user}/edit', function (\App\Models\User $user) {
+            return view('admin.managers.edit', ['user' => $user]);
+        })->name('managers.edit');
     });
 });
 

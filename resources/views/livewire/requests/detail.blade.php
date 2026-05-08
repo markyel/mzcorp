@@ -145,7 +145,14 @@
             </div>
             <div class="flex gap-1.5">
                 <button class="btn btn-sm flex-1" disabled title="Доступно в Phase 2">⏸ Пауза</button>
-                <button class="btn btn-sm flex-1" disabled title="Доступно в Phase 2">⊘ Переподчинить</button>
+                @php
+                    $canReassign = auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'secretary']);
+                @endphp
+                @if($canReassign)
+                    <livewire:requests.reassign-dialog :request="$req" wire:key="reassign-{{ $req->id }}" />
+                @else
+                    <button class="btn btn-sm flex-1" disabled title="Только РОП/директор/секретарь">⊘ Переподчинить</button>
+                @endif
             </div>
             <button class="btn btn-sm btn-danger" disabled title="Доступно в Phase 2">Закрыть как «не наша тема»</button>
         </div>

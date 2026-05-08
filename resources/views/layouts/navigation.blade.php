@@ -48,6 +48,7 @@
     }
     if ($user?->hasAnyRole(['head_of_sales', 'director'])) {
         $navLinks[] = ['route' => 'mail-rules.index', 'label' => 'Правила почты', 'pattern' => 'mail-rules.*'];
+        $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];
     }
 
     $disabledTitle = 'Доступно в Phase 2';

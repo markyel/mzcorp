@@ -50,6 +50,19 @@ class LoginRequest extends FormRequest
             ]);
         }
 
+        // Архивированные пользователи не имеют доступа в систему. Проверка
+        // ПОСЛЕ успешного Auth::attempt(), чтобы не утечь факт существования
+        // учётки через разные сообщения об ошибке для активной/архивной.
+        $user = Auth::user();
+        if ($user && method_exists($user, 'isArchived') && $user->isArchived()) {
+            Auth::logout();
+            RateLimiter::hit($this->throttleKey());
+
+            throw ValidationException::withMessages([
+                'email' => 'Учётная запись деактивирована. Обратитесь к РОПу.',
+            ]);
+        }
+
         RateLimiter::clear($this->throttleKey());
     }
 
