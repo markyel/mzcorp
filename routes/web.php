@@ -37,6 +37,8 @@ Route::middleware('auth')->group(function () {
 
         Route::get('/attachments/{attachment}', [AttachmentController::class, 'download'])
             ->name('attachments.download');
+        Route::get('/attachments/{attachment}/preview', [AttachmentController::class, 'preview'])
+            ->name('attachments.preview');
         Route::get('/attachments/cid/{emailMessage}/{contentId}', [AttachmentController::class, 'inline'])
             ->where('contentId', '.*')
             ->name('attachments.inline');

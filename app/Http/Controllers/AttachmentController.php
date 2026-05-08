@@ -7,6 +7,7 @@ use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use Illuminate\Http\Request as HttpRequest;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\HeaderUtils;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -14,6 +15,10 @@ use Symfony\Component\HttpFoundation\Response;
  *
  *   GET /attachments/{attachment}
  *     — обычная скачка по id (Content-Disposition: attachment).
+ *
+ *   GET /attachments/{attachment}/preview
+ *     — то же содержимое, но Content-Disposition: inline (для <img> в треде
+ *       и лайтбокса).
  *
  *   GET /attachments/cid/{email_message}/{content_id}
  *     — отдаёт inline-вложение по Content-ID для рендера в HTML body
@@ -28,26 +33,17 @@ class AttachmentController extends Controller
     {
         $this->authorizeAccess($request, $attachment);
 
-        $disk = Storage::disk($attachment->disk);
-        if (! $disk->exists($attachment->file_path)) {
-            abort(404);
-        }
+        return $this->streamAttachment($attachment, HeaderUtils::DISPOSITION_ATTACHMENT);
+    }
 
-        return response()->stream(
-            function () use ($disk, $attachment) {
-                $stream = $disk->readStream($attachment->file_path);
-                if ($stream) {
-                    fpassthru($stream);
-                    fclose($stream);
-                }
-            },
-            200,
-            [
-                'Content-Type' => $attachment->mime_type ?: 'application/octet-stream',
-                'Content-Disposition' => 'attachment; filename="' . $this->safeFilename($attachment->filename) . '"',
-                'Content-Length' => (string) ($attachment->size_bytes ?: ''),
-            ],
-        );
+    /**
+     * Inline-просмотр по id вложения (для <img>-thumbnail и лайтбокса).
+     */
+    public function preview(HttpRequest $request, EmailAttachment $attachment): Response
+    {
+        $this->authorizeAccess($request, $attachment);
+
+        return $this->streamAttachment($attachment, HeaderUtils::DISPOSITION_INLINE);
     }
 
     public function inline(HttpRequest $request, EmailMessage $emailMessage, string $contentId): Response
@@ -65,9 +61,35 @@ class AttachmentController extends Controller
 
         $this->authorizeAccess($request, $attachment);
 
+        return $this->streamAttachment($attachment, HeaderUtils::DISPOSITION_INLINE);
+    }
+
+    /**
+     * Стримит вложение со storage-диска. Content-Disposition строится через
+     * HeaderUtils — корректно экранирует не-ASCII имена файлов (RFC 6266
+     * filename* + ASCII fallback). Прежний голый `filename="..."` ломал
+     * скачивание для писем с кириллическими именами.
+     */
+    private function streamAttachment(EmailAttachment $attachment, string $disposition): Response
+    {
         $disk = Storage::disk($attachment->disk);
         if (! $disk->exists($attachment->file_path)) {
             abort(404);
+        }
+
+        $headers = [
+            'Content-Type' => $attachment->mime_type ?: 'application/octet-stream',
+            'Content-Disposition' => HeaderUtils::makeDisposition(
+                $disposition,
+                $attachment->filename,
+                $this->asciiFallback($attachment->filename),
+            ),
+        ];
+
+        if ($disposition === HeaderUtils::DISPOSITION_INLINE) {
+            $headers['Cache-Control'] = 'private, max-age=86400';
+        } elseif ($attachment->size_bytes) {
+            $headers['Content-Length'] = (string) $attachment->size_bytes;
         }
 
         return response()->stream(
@@ -79,12 +101,20 @@ class AttachmentController extends Controller
                 }
             },
             200,
-            [
-                'Content-Type' => $attachment->mime_type ?: 'application/octet-stream',
-                'Content-Disposition' => 'inline; filename="' . $this->safeFilename($attachment->filename) . '"',
-                'Cache-Control' => 'private, max-age=86400',
-            ],
+            $headers,
         );
+    }
+
+    /**
+     * ASCII-fallback для legacy-клиентов, не понимающих RFC 5987 filename*.
+     * Все не-ASCII символы заменяем на «_», пустое имя → «attachment».
+     */
+    private function asciiFallback(string $name): string
+    {
+        $ascii = preg_replace('/[^\x20-\x7e]/', '_', $name) ?? '';
+        $ascii = trim(preg_replace('/_+/', '_', $ascii) ?? '', '_ .');
+
+        return $ascii !== '' ? $ascii : 'attachment';
     }
 
     private function authorizeAccess(HttpRequest $request, EmailAttachment $attachment): void
@@ -116,9 +146,4 @@ class AttachmentController extends Controller
         abort(403, 'Нет доступа к этому вложению.');
     }
 
-    private function safeFilename(string $name): string
-    {
-        // Для Content-Disposition экранируем кавычки.
-        return str_replace(['"', "\r", "\n"], ['\\"', '', ''], $name);
-    }
 }

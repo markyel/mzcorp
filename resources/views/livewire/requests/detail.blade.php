@@ -1,6 +1,7 @@
 @php
     use App\Enums\MailDirection;
     use App\Enums\RequestStatus;
+    use Illuminate\Support\Str;
 
     $req = $this->request;
     $email = $req->emailMessage;          // trigger-email (для Hero / Сводки)
@@ -8,6 +9,17 @@
     $items = $req->items;
     $assignments = $req->assignments;
     $tabs = $this->tabs;
+
+    // Image-attachment detection: по mime_type и по расширению файла (часть писем
+    // приходит без mime, тогда орбитим по расширению).
+    $isImageAttachment = function ($a) {
+        $imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'tif', 'tiff'];
+        if ($a->mime_type && Str::startsWith(strtolower($a->mime_type), 'image/')) {
+            return true;
+        }
+        $ext = strtolower(Str::afterLast($a->filename, '.'));
+        return in_array($ext, $imageExtensions, true);
+    };
 
     $statusChip = match ($req->status) {
         RequestStatus::Pending  => 'chip-paused',
@@ -407,18 +419,42 @@
                                         @endif
 
                                         @if($msg->attachments->isNotEmpty())
-                                            <div class="mt-3 flex flex-wrap gap-1.5">
+                                            <div class="mt-3 flex flex-wrap gap-2">
                                                 @foreach($msg->attachments as $att)
-                                                    <a href="{{ route('attachments.download', $att) }}"
-                                                       class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover">
-                                                        <span class="inline-block w-4 h-5 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[7px] font-bold text-center leading-5">
-                                                            {{ \Illuminate\Support\Str::upper(\Illuminate\Support\Str::afterLast($att->filename, '.')) ?: 'BIN' }}
-                                                        </span>
-                                                        <span class="truncate max-w-[280px]">{{ $att->filename }}</span>
-                                                        @if($att->size_bytes)
-                                                            <span class="text-fg-3 text-[11px]">· {{ number_format($att->size_bytes / 1024, 0, '.', ' ') }} KB</span>
-                                                        @endif
-                                                    </a>
+                                                    @php
+                                                        $isImg = $isImageAttachment($att);
+                                                        $previewUrl = route('attachments.preview', $att);
+                                                        $downloadUrl = route('attachments.download', $att);
+                                                    @endphp
+                                                    @if($isImg)
+                                                        {{-- Image thumbnail → клик открывает лайтбокс. --}}
+                                                        <button type="button"
+                                                                x-on:click="$dispatch('open-image', { src: @js($previewUrl), name: @js($att->filename), dl: @js($downloadUrl) })"
+                                                                class="block border border-border rounded-md overflow-hidden bg-surface hover:border-border-strong transition-colors text-left"
+                                                                title="{{ $att->filename }}">
+                                                            <img src="{{ $previewUrl }}"
+                                                                 alt="{{ $att->filename }}"
+                                                                 loading="lazy"
+                                                                 class="w-[140px] h-[100px] object-cover block bg-app">
+                                                            <div class="px-2 py-1 max-w-[140px] text-[11px] text-fg-3">
+                                                                <span class="block truncate text-fg-1">{{ $att->filename }}</span>
+                                                                @if($att->size_bytes)
+                                                                    <span>{{ number_format($att->size_bytes / 1024, 0, '.', ' ') }} KB</span>
+                                                                @endif
+                                                            </div>
+                                                        </button>
+                                                    @else
+                                                        <a href="{{ $downloadUrl }}"
+                                                           class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover">
+                                                            <span class="inline-block w-4 h-5 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[7px] font-bold text-center leading-5">
+                                                                {{ Str::upper(Str::afterLast($att->filename, '.')) ?: 'BIN' }}
+                                                            </span>
+                                                            <span class="truncate max-w-[280px]">{{ $att->filename }}</span>
+                                                            @if($att->size_bytes)
+                                                                <span class="text-fg-3 text-[11px]">· {{ number_format($att->size_bytes / 1024, 0, '.', ' ') }} KB</span>
+                                                            @endif
+                                                        </a>
+                                                    @endif
                                                 @endforeach
                                             </div>
                                         @endif
@@ -582,11 +618,25 @@
                         <div class="divide-y divide-[var(--border-subtle)]">
                             @foreach($allAttachments as $att)
                                 @php
-                                    $ext = \Illuminate\Support\Str::upper(\Illuminate\Support\Str::afterLast($att->filename, '.')) ?: 'BIN';
+                                    $ext = Str::upper(Str::afterLast($att->filename, '.')) ?: 'BIN';
+                                    $isImg = $isImageAttachment($att);
+                                    $previewUrl = route('attachments.preview', $att);
+                                    $downloadUrl = route('attachments.download', $att);
                                 @endphp
-                                <a href="{{ route('attachments.download', $att) }}"
-                                   class="flex items-center gap-3 px-[18px] py-2.5 hover:bg-hover transition-colors">
-                                    <span class="inline-block w-7 h-9 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[8.5px] font-bold text-center leading-9 shrink-0">{{ $ext }}</span>
+                                <div class="flex items-center gap-3 px-[18px] py-2.5 hover:bg-hover transition-colors">
+                                    @if($isImg)
+                                        <button type="button"
+                                                x-on:click="$dispatch('open-image', { src: @js($previewUrl), name: @js($att->filename), dl: @js($downloadUrl) })"
+                                                class="shrink-0 block border border-border rounded-sm overflow-hidden bg-app"
+                                                title="{{ $att->filename }}">
+                                            <img src="{{ $previewUrl }}"
+                                                 alt="{{ $att->filename }}"
+                                                 loading="lazy"
+                                                 class="w-12 h-12 object-cover block">
+                                        </button>
+                                    @else
+                                        <span class="inline-block w-7 h-9 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[8.5px] font-bold text-center leading-9 shrink-0">{{ $ext }}</span>
+                                    @endif
                                     <div class="flex-1 min-w-0">
                                         <div class="text-fg-1 truncate text-sm">{{ $att->filename }}</div>
                                         <div class="text-[11.5px] text-fg-3 mt-0.5">
@@ -595,8 +645,13 @@
                                             @if($att->is_inline) · <span class="text-sky-700">inline</span> @endif
                                         </div>
                                     </div>
-                                    <span class="text-sky-700 text-xs">скачать →</span>
-                                </a>
+                                    @if($isImg)
+                                        <button type="button"
+                                                x-on:click="$dispatch('open-image', { src: @js($previewUrl), name: @js($att->filename), dl: @js($downloadUrl) })"
+                                                class="text-sky-700 text-xs hover:underline">просмотр →</button>
+                                    @endif
+                                    <a href="{{ $downloadUrl }}" class="text-sky-700 text-xs hover:underline">скачать →</a>
+                                </div>
                             @endforeach
                         </div>
                     @endif
@@ -612,5 +667,27 @@
                 @break
 
         @endswitch
+    </div>
+
+    {{-- ────────── LIGHTBOX (просмотр картинок) ──────────
+         Открывается событием window:open-image с detail {src, name, dl}.
+         Закрытие: Esc, клик по бэкдропу, кнопка «Закрыть». --}}
+    <div x-data="{ lbOpen: false, lbSrc: '', lbName: '', lbDl: '' }"
+         x-on:open-image.window="lbOpen = true; lbSrc = $event.detail.src; lbName = $event.detail.name; lbDl = $event.detail.dl"
+         x-on:keydown.escape.window="lbOpen = false">
+        <div x-show="lbOpen"
+             x-transition.opacity.duration.150ms
+             style="display: none"
+             class="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-6 cursor-zoom-out"
+             x-on:click.self="lbOpen = false">
+            <div class="absolute top-3 left-4 right-4 flex items-center gap-2 pointer-events-none">
+                <span class="text-white/85 text-[12px] mono truncate flex-1 pointer-events-auto" x-text="lbName"></span>
+                <a :href="lbDl" class="btn btn-sm pointer-events-auto" x-on:click.stop>Скачать</a>
+                <button type="button" class="btn btn-sm pointer-events-auto" x-on:click.stop="lbOpen = false">Закрыть</button>
+            </div>
+            <img :src="lbSrc" :alt="lbName"
+                 class="max-w-full max-h-full object-contain cursor-default"
+                 x-on:click.stop>
+        </div>
     </div>
 </div>
