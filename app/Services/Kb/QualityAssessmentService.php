@@ -68,6 +68,25 @@ class QualityAssessmentService
             'started_at' => now()->toIso8601String(),
         ];
 
+        // MyLift adaptation (Phase 2.0+):
+        // Позиция с внутренним MyLift-SKU (формат «M\d{4,}» в article) —
+        // её категория/бренд должны идти из корпоративной базы, а не из
+        // LLM-цепочки. Помечаем internal_catalog_pending и не запускаем
+        // ни extractor, ни refiner, ни brand resolver. Когда каталог появится
+        // (открытый вопрос #1 в MEMORY) — batch-резолв пройдёт по этим items.
+        $internalSku = $this->detectInternalCatalogSku($item);
+        if ($internalSku !== null) {
+            $payload['phase'] = 'completed';
+            $payload['assessed_at'] = now()->toIso8601String();
+            $payload['reason'] = 'internal_catalog_pending';
+            $payload['internal_catalog_sku'] = $internalSku;
+
+            return [
+                'status' => 'internal_catalog_pending',
+                'payload' => $this->finalizePayload($payload),
+            ];
+        }
+
         try {
             $payload = $this->runEnrichment($item, $context, $payload);
 
@@ -497,5 +516,30 @@ class QualityAssessmentService
         }
 
         return true;
+    }
+
+    /**
+     * MyLift adaptation (Phase 2.0+).
+     *
+     * Возвращает первый внутренний MyLift-SKU из article позиции, либо null.
+     * Формат: «M» + 4+ цифр («M02016», «M02804», «M07232»). Извлекаем regex'ом
+     * с unicode word-boundaries — чтобы поймать SKU как в чистом виде, так и
+     * внутри составных строк типа «LOP2, HBB M02016». Префиксы букв с
+     * не-нашими SKU (например «MAIN5», «ML123», «OEM-M02016») — отбрасываем
+     * за счёт lookbehind на не-letter/digit.
+     */
+    private function detectInternalCatalogSku(RequestItem $item): ?string
+    {
+        $article = (string) ($item->parsed_article ?? '');
+        if ($article === '') {
+            return null;
+        }
+
+        $pattern = '/(?<![\p{L}\p{N}_])(M\d{4,})(?![\p{L}\p{N}_])/u';
+        if (preg_match($pattern, $article, $m) === 1) {
+            return $m[1];
+        }
+
+        return null;
     }
 }

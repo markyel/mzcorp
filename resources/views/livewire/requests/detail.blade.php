@@ -538,6 +538,7 @@
                                         'insufficient' => ['chip-attn', 'данных мало'],
                                         'not_covered' => ['chip-neutral', 'нет правил'],
                                         'assessment_failed' => ['chip-over', 'ошибка KB'],
+                                        'internal_catalog_pending' => ['chip-info', 'внутренний SKU · ждёт каталог'],
                                         default => null, // not_assessed → не показываем чип
                                     };
                                     $extracted = is_array($item->quality_assessment_payload['extracted_parameters'] ?? null)
