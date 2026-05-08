@@ -141,6 +141,14 @@ class RequestItemPersister
             }
         }
 
+        // Phase 2.0 KB: после persist + assign — асинхронный KB-резолв.
+        // Дёргаем только если появились новые items (count('new') > 0). Job
+        // сам разберётся с per-item статусом (idempotent через переписывание
+        // quality_assessment_status). LLM-стоимость ~$0.05-0.10 на Request.
+        if (count($filtered['new']) > 0) {
+            \App\Jobs\Kb\ResolveKbJob::dispatch($existing->id);
+        }
+
         Log::info('RequestItemPersister: items persisted', [
             'email_message_id' => $message->id,
             'request_id' => $existing->id,

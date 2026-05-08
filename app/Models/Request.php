@@ -65,4 +65,14 @@ class Request extends Model
     {
         return $this->hasMany(RequestItem::class)->orderBy('position');
     }
+
+    /**
+     * KB-контекст заявки (Phase 2.0). Заполняется RequestContextAnalysisService
+     * при первом ResolveKbJob — содержит equipment_units[], mentioned_sources[]
+     * и raw LLM-ответ.
+     */
+    public function context(): HasOne
+    {
+        return $this->hasOne(\App\Models\Kb\RequestContext::class, 'request_id');
+    }
 }

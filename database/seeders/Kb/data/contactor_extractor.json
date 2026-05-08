@@ -1,0 +1,121 @@
+{
+  "description": "Извлечение артикулов и параметров контакторов из parsed_name. Покрывает Schneider TeSys (LC1D / LC1F с разделителями LC 1 D 188), катушку (220V), конфигурацию контактов (NO/NC). Артикул нормализуется: пробелы убираются, кириллические М→M (для М7→M7).",
+  "source_field": "name",
+  "priority": 100,
+  "is_active": true,
+  "rules": [
+    {
+      "parameter_slug": "manufacturer_article",
+      "_note": "Универсальные паттерны для всего семейства Schneider LC* и CA* — покрывают LC1D/LC1E/LC1F/LC1G/LC1K/LC2 и CAE/CA2/CA3 без необходимости отдельных правил под каждую серию. (?!\\d) после числа предотвращает жадный захват соседних цифр (например '32A' не должна цепляться к 'LC1D32').",
+      "patterns": [
+        "(LC\\s*[12]\\s*[A-Z]\\s*\\d{2,4}(?!\\d)\\s*[A-ZА-Я]\\d?[A-Z]?)",
+        "(LC\\s*[12]\\s*[A-Z]\\s*\\d{2,4})(?!\\d)",
+        "(CA\\s*[1-3]?\\s*[A-Z]{0,3}\\s*\\d{2,3}(?!\\d)\\s*[A-ZА-Я]\\d?[A-Z]?)",
+        "(CA\\s*[1-3]?\\s*[A-Z]{0,3}\\s*\\d{2,3})(?!\\d)"
+      ]
+    },
+    {
+      "parameter_slug": "rated_current_a",
+      "patterns": [
+        "(?:LC\\s*1\\s*[DF]\\s*)(\\d{2,4})(?=[\\s,]|[A-ZА-Я])",
+        "(\\d{1,4}(?:[.,]\\d+)?)\\s*А\\b(?![а-я])",
+        "(\\d{1,4}(?:[.,]\\d+)?)\\s*A(?![a-zA-Z])"
+      ]
+    },
+    {
+      "parameter_slug": "coil_voltage_v",
+      "patterns": [
+        "катушк[аи]\\s*(?:[A-ZА-Я0-9]+\\s+)?(\\d{2,3})\\s*[VВ]",
+        "(?:^|[^\\d])(\\d{2,3})\\s*[VВ](?:\\s*(?:DC|AC|пост|перем|\\d{2,3}\\s*Hz|50/60Hz))",
+        "(?:^|[^\\d])(\\d{2,3})\\s*[VВ](?![а-яА-Я])"
+      ]
+    },
+    {
+      "parameter_slug": "contact_configuration",
+      "patterns": [
+        "(\\d+\\s*NO\\s*[+и/,\\s]+\\s*\\d+\\s*NC)",
+        "(\\d+NO\\s*\\+\\s*\\d+NC)"
+      ]
+    }
+  ],
+  "pre_normalize_rules": [],
+  "post_extract_rules": {
+    "manufacturer_article": {
+      "type": "chain",
+      "steps": [
+        {"type": "strip_spaces"},
+        {"type": "cyrillic_to_latin"},
+        {"type": "uppercase"}
+      ]
+    },
+    "rated_current_a": {"type": "to_int"},
+    "coil_voltage_v": {"type": "to_int"},
+    "contact_configuration": {"type": "strip_spaces"}
+  },
+  "test_examples": [
+    {
+      "input": "Контактор Schneider Electric LC 1 D 188, катушка М7 220V 50/60Hz, 2 NO и 2 NC",
+      "_note": "M7 отделён от LC1D188 запятой и словом «катушка», regex не связывает их в один артикул. LC1D188 + coil_voltage=220 этого достаточно для альтернативы «По артикулу».",
+      "expected": {
+        "manufacturer_article": "LC1D188",
+        "rated_current_a": 188,
+        "coil_voltage_v": 220,
+        "contact_configuration": "2NOи2NC"
+      }
+    },
+    {
+      "input": "Schneider LC1D09M7 9A 220V",
+      "expected": {
+        "manufacturer_article": "LC1D09M7",
+        "rated_current_a": 9,
+        "coil_voltage_v": 220
+      }
+    },
+    {
+      "input": "Контактор LC1D32 32A катушка 230В",
+      "expected": {
+        "manufacturer_article": "LC1D32",
+        "rated_current_a": 32,
+        "coil_voltage_v": 230
+      }
+    },
+    {
+      "input": "Контактор EasyPact TVS CAE 22, катушка М5 220V 50/60Hz, 2 NO и 2 NC",
+      "_note": "CAE — серия мини-контакторов Schneider EasyPact. В CAE22 цифры 22 — это конфигурация (2NO+2NC), не ток. Извлекаем только артикул + катушку + контакты.",
+      "expected": {
+        "manufacturer_article": "CAE22",
+        "coil_voltage_v": 220,
+        "contact_configuration": "2NOи2NC"
+      }
+    },
+    {
+      "input": "Реле управления Schneider CA2DN22M7",
+      "expected": {
+        "manufacturer_article": "CA2DN22M7"
+      }
+    },
+    {
+      "input": "Контактор CA3DN22BD 24V DC",
+      "expected": {
+        "manufacturer_article": "CA3DN22BD",
+        "coil_voltage_v": 24
+      }
+    },
+    {
+      "input": "Контактор EasyPact TVS LC 1 E 2501, катушка 220V 50/60Hz, 3 NO и 1 NC",
+      "_note": "LC1E — серия EasyPact TVS (Россия). У LC1E2501 цифры 2501 = 25A + 01 (конфигурация). Regex обобщён до LC[1-2][A-Z] чтобы покрывать все серии Schneider без отдельного правила под каждую.",
+      "expected": {
+        "manufacturer_article": "LC1E2501",
+        "coil_voltage_v": 220,
+        "contact_configuration": "3NOи1NC"
+      }
+    },
+    {
+      "input": "Контактор LC1G225 120V",
+      "expected": {
+        "manufacturer_article": "LC1G225",
+        "coil_voltage_v": 120
+      }
+    }
+  ]
+}

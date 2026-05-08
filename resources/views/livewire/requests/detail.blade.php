@@ -530,6 +530,20 @@
                                 <span></span>
                             </div>
                             @foreach($items as $item)
+                                @php
+                                    // Phase 2.0 KB: chip конфигурация по quality_assessment_status.
+                                    $qaStatus = $item->quality_assessment_status;
+                                    $qaConfig = match ($qaStatus) {
+                                        'sufficient' => ['chip-ok',     'данных достаточно'],
+                                        'insufficient' => ['chip-attn', 'данных мало'],
+                                        'not_covered' => ['chip-neutral', 'нет правил'],
+                                        'assessment_failed' => ['chip-over', 'ошибка KB'],
+                                        default => null, // not_assessed → не показываем чип
+                                    };
+                                    $extracted = is_array($item->quality_assessment_payload['extracted_parameters'] ?? null)
+                                        ? $item->quality_assessment_payload['extracted_parameters']
+                                        : [];
+                                @endphp
                                 <div class="grid items-center px-[18px] gap-2.5 py-2.5 border-b border-border-subtle text-[12.5px]"
                                      style="grid-template-columns: 24px 36px 1fr 110px 90px 100px 110px 32px">
                                     <span class="mono text-[12px] text-fg-3 text-right">{{ $item->position }}</span>
@@ -537,7 +551,27 @@
                                     <div class="min-w-0">
                                         <div class="font-medium text-fg-1 truncate">{{ $item->parsed_name ?: '(без названия)' }}</div>
                                         <div class="text-[11.5px] text-fg-3 mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                                            @if($item->parsed_brand)<span>{{ $item->parsed_brand }}</span>@endif
+                                            {{-- Phase 2.0 KB chips: brand + category + qa-status. --}}
+                                            @if($item->brand)
+                                                <span class="inline-flex items-center px-1.5 rounded-sm bg-emerald-50 text-emerald-800 font-semibold text-[10.5px]"
+                                                      title="резолв KB по бренду">
+                                                    {{ $item->brand->name }}
+                                                </span>
+                                            @elseif($item->parsed_brand)
+                                                <span title="бренд не резолвлен">{{ $item->parsed_brand }}</span>
+                                            @endif
+                                            @if($item->category)
+                                                <span class="inline-flex items-center px-1.5 rounded-sm bg-sky-50 text-sky-800 font-medium text-[10.5px]"
+                                                      title="{{ $item->category->slug }}">
+                                                    {{ $item->category->name }}
+                                                </span>
+                                            @endif
+                                            @if($qaConfig)
+                                                <span class="chip {{ $qaConfig[0] }} text-[10.5px]"
+                                                      title="quality_assessment_status: {{ $qaStatus }}">
+                                                    <span class="dot"></span>{{ $qaConfig[1] }}
+                                                </span>
+                                            @endif
                                             @if($item->parsed_article)<span class="mono text-fg-2">{{ $item->parsed_article }}</span>@endif
                                             @if($item->supplier_note)
                                                 <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-50 text-amber-700 font-medium text-[10.5px]">
@@ -545,6 +579,17 @@
                                                 </span>
                                             @endif
                                         </div>
+                                        @if(! empty($extracted))
+                                            {{-- Извлечённые KB-параметры (diameter, current, voltage, ...). --}}
+                                            <div class="text-[11px] text-fg-3 mt-1 flex flex-wrap gap-x-2 gap-y-0.5 mono">
+                                                @foreach(array_slice($extracted, 0, 6, true) as $slug => $value)
+                                                    <span><span class="text-fg-3">{{ $slug }}:</span> <span class="text-fg-2">{{ is_scalar($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE) }}</span></span>
+                                                @endforeach
+                                                @if(count($extracted) > 6)
+                                                    <span class="text-fg-3">… +{{ count($extracted) - 6 }}</span>
+                                                @endif
+                                            </div>
+                                        @endif
                                     </div>
                                     <span class="mono text-[12px] text-fg-1 text-right">{{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') ?: '—' }} {{ $item->parsed_unit }}</span>
                                     <span class="text-fg-3 text-right" title="Phase 2">—</span>

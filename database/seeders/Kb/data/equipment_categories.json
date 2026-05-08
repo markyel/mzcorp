@@ -1,0 +1,290 @@
+[
+  {
+    "slug": "microswitch",
+    "name": "Микропереключатель",
+    "compatible_equipment": ["lift", "escalator"],
+    "is_industry_specific": false,
+    "synonyms": ["микропереключатель", "микрик", "концевик", "limit switch", "microswitch", "micro switch"],
+    "description": "Микропереключатели в системах безопасности и контроля положения дверей, кабины, тормоза. Производители: Schneider, ABB, Crouzet, Omron, Honeywell."
+  },
+  {
+    "slug": "contactor",
+    "name": "Контактор",
+    "compatible_equipment": ["lift", "escalator"],
+    "is_industry_specific": false,
+    "synonyms": ["контактор", "пускатель", "блок доп контактов", "блок дополнительных контактов", "дополнительный контакт", "доп контакт", "magnetic contactor", "contactor", "auxiliary contact block", "TeSys"],
+    "description": "Силовые контакторы для управления двигателями привода и тормозом, включая блоки дополнительных контактов и аксессуары. Производители: Schneider (LC1D/LC1F/CAE/TeSys), ABB, Siemens, Sprecher+Schuh, Fuji Electric (SZ-AS)."
+  },
+  {
+    "slug": "frequency_converter",
+    "name": "Частотный преобразователь",
+    "compatible_equipment": ["lift", "escalator"],
+    "is_industry_specific": false,
+    "synonyms": ["частотник", "частотный преобразователь", "ЧП", "ПЧ", "VFD", "frequency converter", "inverter", "drive"],
+    "description": "Частотные преобразователи для управления приводом главным/дверным. Производители: Vacon, Fuji, Yaskawa, Schneider, Schindler (Variodyn), KEB."
+  },
+  {
+    "slug": "guide_shoe_insert",
+    "name": "Башмак (вкладыш)",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["вкладыш", "башмак", "башмак направляющей", "skate", "guide insert", "guide shoe", "вкладыш башмака", "полиуретан направляющей"],
+    "description": "Вкладыши скользящих башмаков кабины и противовеса. Материалы: полиуретан, графитовый текстолит. Параметры: размер направляющей (5/9/10/16 мм), сторона установки."
+  },
+  {
+    "slug": "door_skate",
+    "name": "Отводка дверная",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["отводка", "отводка дверная", "door skate", "door coupler", "selcom отводка", "wittur отводка"],
+    "description": "Дверная отводка — механический связующий элемент между приводом дверей кабины и створками шахтных дверей. Маркоспецифика: Wittur, Fermator, Selcom, Sematic."
+  },
+  {
+    "slug": "elevator_button",
+    "name": "Кнопка лифтовая",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["кнопка", "кнопка лифтовая", "вызывная кнопка", "приказная кнопка", "сервисная кнопка", "elevator button", "call button", "push button"],
+    "description": "Кнопки приказного и вызывного поста, с подсветкой/без, с символами этажей и сервисными символами (звонок, открытие, закрытие)."
+  },
+  {
+    "slug": "door_drive",
+    "name": "Привод дверей",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["привод дверей", "door drive", "door operator", "door motor", "оператор дверей", "редуктор дверей"],
+    "description": "Электропривод дверей кабины. Маркоспецифика: Wittur, Fermator, Selcom, Sematic, KONE, Schindler."
+  },
+  {
+    "slug": "controller",
+    "name": "Контроллер",
+    "compatible_equipment": ["lift", "escalator"],
+    "is_industry_specific": true,
+    "synonyms": ["контроллер", "станция управления", "controller", "control system", "LCB", "Lift Control Board", "OCSS", "Otis Communication Sub-System", "MCSS", "Motion Control Sub-System", "GCS", "Global Control System"],
+    "description": "Главный контроллер управления лифтом или эскалатором. Включает шкаф/станцию управления и платы."
+  },
+  {
+    "slug": "control_board",
+    "name": "Плата управления",
+    "compatible_equipment": ["lift", "escalator"],
+    "is_industry_specific": true,
+    "synonyms": ["плата управления", "плата индикации", "плата шахты", "плата FDU", "плата RMB", "плата питания", "плата тормоза", "плата привода", "плата ЭУ портала", "модуль Lcore", "плата контроллера", "плата интерфейса", "плата панели приказов", "однокнопочный модуль", "control board", "PCB", "circuit board", "LCB", "OCSS", "MCSS", "DBSS", "Door Board Sub-System"],
+    "description": "Платы внутри станции управления и в шахте: главная плата, плата индикации, плата дверей, плата питания, плата тормоза, плата привода (FDU/RMB/Reveco/Arkel/etc). Часто имеют серийный номер прошивки на наклейке (например, GP130782GAF для OTIS)."
+  },
+  {
+    "slug": "traction_rope",
+    "name": "Канат тяговый",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": false,
+    "synonyms": ["канат", "канат тяговый", "трос", "rope", "traction rope", "wire rope"],
+    "description": "Тяговые канаты лифта. Маркировка: диаметр (∅), конструкция (6×19, 8×19), сердечник (о.с./м.с. — органический/металлический), вид свивки (ТК/ЛК), ГОСТ. Производители: Drako, Brugg, Pfeifer, Casar."
+  },
+  {
+    "slug": "roller",
+    "name": "Ролик",
+    "compatible_equipment": ["lift", "escalator"],
+    "is_industry_specific": false,
+    "synonyms": ["ролик", "ролики", "roller", "wheel"],
+    "description": "Ролики дверей, ловителей, кабины, противовеса, ступеней эскалатора. Параметры: внешний/внутренний диаметр, тип подшипника."
+  },
+  {
+    "slug": "load_sensor",
+    "name": "Датчик загрузки",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": false,
+    "synonyms": ["датчик загрузки", "датчик веса", "грузовзвес", "тензодатчик", "тензо датчик", "Веломат", "load sensor", "weight sensor", "load weighing"],
+    "description": "Датчик загрузки кабины (на пол, на канаты, на раму) — включая тензорезисторные грузовзвесы. Производители: STS, Henning, Веломат."
+  },
+  {
+    "slug": "buffer",
+    "name": "Буфер",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["буфер", "buffer", "oleo buffer", "масляный буфер", "пружинный буфер"],
+    "description": "Буферы кабины и противовеса (масляные/пружинные). Производители: OLEO, Henning."
+  },
+  {
+    "slug": "escalator_traction_chain",
+    "name": "Тяговая цепь эскалатора",
+    "compatible_equipment": ["escalator", "traveler"],
+    "is_industry_specific": true,
+    "synonyms": ["тяговая цепь", "цепь эскалатора", "step chain", "traction chain", "escalator chain"],
+    "description": "Тяговые цепи ступеней эскалатора и траволатора. Производители: KONE, Schindler, SJEC, Mitsubishi."
+  },
+  {
+    "slug": "escalator_step",
+    "name": "Ступень эскалатора",
+    "compatible_equipment": ["escalator"],
+    "is_industry_specific": true,
+    "synonyms": ["ступень", "ступень эскалатора", "escalator step", "step", "ступенька"],
+    "description": "Ступени эскалатора. Параметры: ширина (600/800/1000 мм), модель эскалатора, цвет демаркации. Производители: KONE, Schindler, SJEC, Mitsubishi."
+  },
+  {
+    "slug": "emergency_lighting",
+    "name": "Светильник аварийный",
+    "compatible_equipment": ["lift", "escalator"],
+    "is_industry_specific": true,
+    "synonyms": ["аварийное освещение", "аварийный светильник", "комплект аварийного освещения", "ЛНГС", "emergency light", "БАЭ", "блок аварийного электропитания"],
+    "description": "Аварийное освещение кабины и шахты. Российские артикулы по конструкторской документации (формат: 4 буквы.6 цифр.3 цифры.3 цифры — например ЛНГС.465213.187.660)."
+  },
+  {
+    "slug": "cabin_lighting",
+    "name": "Освещение кабины",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": false,
+    "synonyms": ["освещение кабины", "лампа кабины", "плафон кабины", "светильник кабины", "cabin light"],
+    "description": "Светильники и лампы основного освещения кабины (LED-панели, люминесцентные плафоны, потолочные светильники)."
+  },
+  {
+    "slug": "speed_governor_belt",
+    "name": "Ремень привода ограничителя скорости",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["ремень ограничителя скорости", "ремень привода ограничителя", "ремень governor", "synchrobelt", "synchro belt", "зубчатый ремень", "timing belt", "поликлиновой ремень ограничителя", "ремень на ограничитель"],
+    "description": "Зубчатый или поликлиновой ремень привода ограничителя скорости лифта. Маркировки: Synchrobelt NxN, Continental Synchrobelt, Gates PowerGrip. Основные параметры: артикул (например 160XL = 160 зубцов, шаг XL=5.08мм), длина в мм, ширина в мм. ВАЖНО: это НЕ стальной тяговый канат, не путать с traction_rope."
+  },
+  {
+    "slug": "escalator_gearbox",
+    "name": "Редуктор эскалатора",
+    "compatible_equipment": ["escalator", "traveler"],
+    "is_industry_specific": true,
+    "synonyms": ["редуктор эскалатора", "редуктор траволатора", "мотор-редуктор эскалатора", "редуктор для эскалатора", "редуктор для траволатора", "мотор-редуктор для эскалатора", "редуктор", "мотор-редуктор", "escalator gearbox", "escalator reducer", "main drive gearbox"],
+    "description": "Редуктор главного привода эскалатора/траволатора. Производители: XIZI OTIS, KONE, Schindler, TIANJIN, Sigma."
+  },
+  {
+    "slug": "escalator_balustrade_chain",
+    "name": "Цепь балюстрады/обводная цепь",
+    "compatible_equipment": ["escalator", "traveler"],
+    "is_industry_specific": true,
+    "synonyms": ["обводная цепь", "цепь балюстрады", "компенсирующая цепь", "цепь компенсирующая", "цепь отклоняющая", "роликовая цепь балюстрады", "цепь возвратная", "огибающая цепь", "огибающая балюстрады", "balustrade chain", "return chain", "compensating chain"],
+    "description": "Обводная/компенсирующая/возвратная цепь балюстрады эскалатора (отдельно от тяговой цепи ступеней). Часто описывают через «количество пар роликов». Производители: KONE, Schindler, WHQ, OTIS."
+  },
+  {
+    "slug": "escalator_sprocket",
+    "name": "Звезда эскалатора",
+    "compatible_equipment": ["escalator", "traveler"],
+    "is_industry_specific": true,
+    "synonyms": ["звезда эскалатора", "звезда главного вала", "звезда основная", "звезда отклоняющая", "звёздочка эскалатора", "sprocket", "main sprocket"],
+    "description": "Зубчатая звезда (sprocket) эскалатора — главного вала, отклоняющая, концевая. Производители: KONE, OTIS, Schindler, Sigma."
+  },
+  {
+    "slug": "escalator_brake",
+    "name": "Тормоз эскалатора",
+    "compatible_equipment": ["escalator"],
+    "is_industry_specific": true,
+    "synonyms": ["тормоз эскалатора", "электромагнит тормоза эскалатора", "катушка тормоза эскалатора", "рабочий тормоз эскалатора", "стояночный тормоз эскалатора", "тормозной рычаг эскалатора", "escalator brake", "escalator brake coil"],
+    "description": "Рабочий/стояночный/аварийный тормоз эскалатора (включая катушку тормоза, электромагнит). Производители: BLT, OTIS Sigma, KONE, Schindler."
+  },
+  {
+    "slug": "escalator_comb_plate",
+    "name": "Гребёнка эскалатора",
+    "compatible_equipment": ["escalator", "traveler"],
+    "is_industry_specific": true,
+    "synonyms": ["гребёнка", "гребенка", "гребёнка эскалатора", "гребенка эскалатора", "гребёнка центральная", "гребёнка алюминиевая", "гребёнка эскалаторная", "гребенка эскалаторная", "comb plate", "step demarcation comb"],
+    "description": "Гребёнка верхней/нижней площадки эскалатора (левая/правая/центральная). Артикул часто на тыльной стороне. Производители: CANNY, KONE TravelMaster, OTIS, Schindler, Thyssen Velino."
+  },
+  {
+    "slug": "limit_switch",
+    "name": "Концевой/путевой выключатель",
+    "compatible_equipment": ["lift", "escalator"],
+    "is_industry_specific": false,
+    "synonyms": ["концевой выключатель", "путевой выключатель", "выключатель безопасности", "выключатель путевой", "выключатель натяжного устройства", "выключатель на охрану шахты", "конечный выключатель", "ВП19", "ВП15", "ВП 15", "ВП19М", "limit switch", "safety switch", "путевой выключатель ВП"],
+    "description": "Концевые и путевые выключатели систем безопасности и контроля положения. Производители: Telemecanique (XY2), отечественные ВП19/ВП15, Pizzato Elettrica, Suzuki LX12, Steute, Bernstein."
+  },
+  {
+    "slug": "speed_governor",
+    "name": "Ограничитель скорости",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["ограничитель скорости", "ОС", "speed governor", "overspeed governor", "OSG"],
+    "description": "Ограничитель скорости лифта (механический/электронный, лево-/правосторонний). При идентификации поставщики просят: фото шильдика + фото общего вида + фото маркировок навесок (магнит и др.). Производители: ЩЛЗ, ORONA, Dalian Sigma, OTIS, Dynatech, KLG."
+  },
+  {
+    "slug": "light_curtain",
+    "name": "Фотобарьер дверей",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["фотобарьер", "фото-барьер", "световой барьер", "ФБ", "light curtain", "door light curtain", "door safety edge"],
+    "description": "Фотобарьер защиты дверного проёма кабины (передатчик + приёмник). Идентификация: артикул или маркировка с обеих антенн. Производители: ЕМРЦ ФБ-1.0, SFT, Memco, Pana3D."
+  },
+  {
+    "slug": "intercom_unit",
+    "name": "Переговорное устройство",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["переговорное устройство", "переговорный блок", "БГС", "ПУЭП", "УП", "Максифон", "Пульсар", "лифтовой блок ЛБ", "intercom", "emergency phone", "elevator intercom", "микрофонный усилитель", "GSM-модуль лифта", "терминал экстренной связи", "лифтовое устройство переговорное"],
+    "description": "Переговорные устройства лифта (пост кабины/посадочный этаж/диспетчерская): БГС, ПУЭП-Н, УП7.2, Максифон МХF-IP, Пульсар УСПД, Лифтовой блок ЛБ. Включая микрофонные усилители (МУ3-103)."
+  },
+  {
+    "slug": "power_supply",
+    "name": "Блок питания",
+    "compatible_equipment": ["lift", "escalator"],
+    "is_industry_specific": false,
+    "synonyms": ["блок питания", "источник питания", "БП", "БПС", "БПН", "ИП", "power supply", "PSU", "AC/DC adapter", "преобразователь напряжения"],
+    "description": "Блок питания (сетевой/импульсный) для слаботочных систем, освещения, контроллеров. Параметры идентификации: входное напряжение, выходное напряжение, выходной ток. Производители: Mean Well, ИП, БПН (МЛЗ), HF-D-L."
+  },
+  {
+    "slug": "traction_motor",
+    "name": "Двигатель главного привода",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["двигатель лебёдки", "двигатель помпы", "двигатель насоса", "электродвигатель главного привода", "электродвигатель лебедки", "асинхронный двигатель", "main motor", "hoist motor", "traction motor", "pump motor"],
+    "description": "Электродвигатель главного привода лифта (лебёдка для канатных, насос для гидравлических). НЕ ДЛЯ ДВЕРЕЙ — для дверей см. door_drive. Производители: лебёдка — JIAJIE, Montanari, SICOR, ZIEHL ABEGG; насос — Bosch, Beringer."
+  },
+  {
+    "slug": "traction_belt",
+    "name": "Тяговый ремень",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["тяговый ремень", "плоский тяговый ремень", "Poly-V ремень", "поликлиновой тяговый ремень", "ремень главного привода", "ремень тяговый", "traction belt", "flat traction belt", "Poly-V belt"],
+    "description": "Тяговый ремень главного привода (плоский/поликлиновой/зубчатый со стальным кордом) — отдельно от стального тягового каната (см. traction_rope). Производители: CONTITECH AAA, Sodimas PK21A Poly-V, OTIS GeN2."
+  },
+  {
+    "slug": "door_sill",
+    "name": "Порог дверей кабины/шахты",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["порог дверей", "порог двери кабины", "порог двери шахты", "порог дверной", "door sill", "door threshold", "sill"],
+    "description": "Порог дверного проёма кабины или шахты (с пазом для отводки/башмака). При идентификации требуется фото торца с рулеткой. Параметры: тип дверей (телескоп/центр), длина, размер проёма, фото профиля. Производители: ЩЛЗ, Wittur, Fermator."
+  },
+  {
+    "slug": "encoder",
+    "name": "Энкодер",
+    "compatible_equipment": ["lift", "escalator"],
+    "is_industry_specific": false,
+    "synonyms": ["энкодер", "encoder", "линейный энкодер", "инкрементальный энкодер", "абсолютный энкодер", "тахометр", "tachometer", "датчик положения вала"],
+    "description": "Энкодер (датчик положения/скорости) — для двигателя лебёдки, привода дверей, ограничителя. Идентификация — только по полной маркировке производителя или фото шильдика. Производители: KUBLER, Tamagawa, FENAC, Sanyo Yusoki, Wachendorff, Lika, PRECISE."
+  },
+  {
+    "slug": "traction_sheave",
+    "name": "Канатоведущий шкив (КВШ)",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["канатоведущий шкив", "КВШ", "шкив лебёдки", "шкив противовеса", "отводной блок", "traction sheave", "sheave", "блок отводной"],
+    "description": "Канатоведущий шкив главного привода (КВШ), а также отводной блок и шкив противовеса. Параметры: диаметр, количество ручьёв, диаметр каната, угол подреза. Идентификация — артикул, фото общего вида + шильдик лебёдки. Производители: Montanari, KONE, ZIEHL ABEGG, NEW BOMCO, KLEEMANN."
+  },
+  {
+    "slug": "escalator_handrail",
+    "name": "Поручень эскалатора",
+    "compatible_equipment": ["escalator", "traveler"],
+    "is_industry_specific": true,
+    "synonyms": ["поручень", "поручень эскалатора", "поручень траволатора", "резиновый поручень", "handrail", "escalator handrail", "moving handrail"],
+    "description": "Резиновый поручень движущейся ленты эскалатора/траволатора. Параметры: производитель, диаметр, длина. Производители: Sigma, KONE, OTIS, Schindler, Semperit, Continental."
+  },
+  {
+    "slug": "brake_coil",
+    "name": "Катушка/электромагнит тормоза",
+    "compatible_equipment": ["lift", "escalator"],
+    "is_industry_specific": true,
+    "synonyms": ["электромагнит тормоза", "катушка тормозная", "катушка тормоза", "электромагнитная катушка тормоза", "соленоид тормоза", "brake coil", "brake magnet", "brake solenoid"],
+    "description": "Электромагнит/катушка тормоза главного привода (электрическая часть тормозного узла). Для механических частей (рычаги/колодки) см. traction_brake. Производители: ELEFORСE, Sigma, ELF, МИС."
+  },
+  {
+    "slug": "traction_brake",
+    "name": "Тормоз главного привода",
+    "compatible_equipment": ["lift"],
+    "is_industry_specific": true,
+    "synonyms": ["тормоз колодочный", "тормоз главного привода", "тормоз лебёдки", "тормоз лебедки", "тормозное устройство", "рычаг тормоза", "тормозной рычаг", "колодка тормозная", "тормозная колодка", "накладка тормозная", "тормозная накладка", "диск тормозной", "тормозной диск", "лента тормозная", "тормозная лента", "brake pad", "brake disc", "brake shoe", "brake lever"],
+    "description": "Тормозной узел главного привода лифта (механические части): рычаги, колодки, диски, накладки, лента. Расположение: на лебёдке/гидростанции. Для электромагнита/катушки тормоза см. brake_coil. Производители: ALZOLA, ТК (отечественный)."
+  }
+]

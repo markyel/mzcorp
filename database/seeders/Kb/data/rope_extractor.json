@@ -1,0 +1,263 @@
+{
+  "description": "Маркировка стального каната — российские ГОСТы (2688/3077/3083/7668/7669/7670/3066) и европейский EN 12385 / DIN 3060/3066. Извлекает диаметр, конструкцию, сердечник, тип контакта, стандарт, длину.",
+  "source_field": "name",
+  "priority": 100,
+  "is_active": true,
+  "rules": [
+    {
+      "parameter_slug": "diameter_mm",
+      "patterns": [
+        "(?:[øØ⌀∅]|диам(?:етр)?[\\.: ]?)\\s*(\\d{1,3}(?:[.,]\\d+)?)\\s*(?:мм|mm)\\b",
+        "(?:[øØ⌀∅])\\s*(\\d{1,3}(?:[.,]\\d+)?)\\b",
+        "(?:^|[^\\d.,])(\\d{1,2}(?:[.,]\\d+)?)\\s*(?:мм|mm)\\b(?![²a-zа-я])",
+        "(?:^|\\s)[dD](\\d{1,3}(?:[.,]\\d+)?)(?:мм|mm)?\\b(?![\\wа-яА-Я])"
+      ]
+    },
+    {
+      "parameter_slug": "rope_construction",
+      "patterns": [
+        "(?:^|[^\\w])(\\d{1,2}\\s*×\\s*(?:[KW])?\\d{1,3}(?:WS|Seale|Warrington|Filler|[WSFK])?)(?=[^\\w]|$)"
+      ]
+    },
+    {
+      "parameter_slug": "rope_core",
+      "patterns": [
+        "\\b(EPIWRC|PWRC|IWRC|IWS|WSC)\\b",
+        "\\b(NFC|FC)\\b",
+        "\\bо\\.?\\s*с\\.?\\b",
+        "\\bм\\.?\\s*с\\.?\\b",
+        "органический\\s+сердечник",
+        "металлический\\s+сердечник"
+      ]
+    },
+    {
+      "parameter_slug": "rope_lay_type",
+      "patterns": [
+        "\\b(ТЛК|ЛК[-‐]?(?:РО|Р|О)?|ТК)\\b"
+      ]
+    },
+    {
+      "parameter_slug": "gost_or_standard",
+      "patterns": [
+        "(ГОСТ\\s+\\d{3,5}(?:[-‐]\\d{2,4})?)",
+        "(EN\\s+\\d{4,5}(?:[-‐]\\d{1,2})?)",
+        "(DIN\\s+\\d{4,5}(?:[-‐]\\d{1,2})?)"
+      ]
+    },
+    {
+      "parameter_slug": "length_m",
+      "patterns": [
+        "(?:длин(?:а|ой)|length|L)[: =]?\\s*(\\d+(?:[.,]\\d+)?)\\s*(?:м|метр(?:а|ов)?|m)(?![²\\.\\wа-яА-Я])",
+        "(?<=[\\s,;])(\\d{2,5}(?:[.,]\\d+)?)\\s*(?:м|метр(?:а|ов)?|m)(?![²\\.\\wа-яА-Я])"
+      ]
+    },
+    {
+      "parameter_slug": "wire_strength_n_mm2",
+      "patterns": [
+        "(\\d{4})\\s*(?:N/mm[²2]|Н/мм[²2]|MPa|МПа)",
+        "(?:[-‐]|марк(?:ировочная)?\\.?\\s*групп(?:а)?\\s*)(\\d{4})(?![\\d])"
+      ]
+    },
+    {
+      "parameter_slug": "rope_series_name",
+      "patterns": [
+        "\\b(Powerlift\\s+Plus|Powerlift\\s+HT|Powerlift|Powerline|Powerflex|Powermax|Trustlift|Powerlift[-‐]?2K)\\b",
+        "(?<=PAWO\\s)(F\\d{1,2}[A-Z]?)\\b",
+        "(?<=Drako\\s)(\\d{3}[A-Z]?T?)\\b"
+      ]
+    },
+    {
+      "parameter_slug": "breaking_force_kn",
+      "patterns": [
+        "(\\d{1,4}(?:[.,]\\d+)?)\\s*(?:кН|kN)\\b"
+      ]
+    }
+  ],
+  "pre_normalize_rules": [
+    {"from_regex": "(?<=\\d)\\s*[xXхХⅩ*]\\s*(?=\\d)", "to": "×"}
+  ],
+  "post_extract_rules": {
+    "rope_core": {
+      "type": "literal_map",
+      "values": {
+        "о.с.": "organic",
+        "о.с": "organic",
+        "ос": "organic",
+        "о с": "organic",
+        "органический сердечник": "organic",
+        "FC": "organic",
+        "NFC": "organic",
+        "м.с.": "metallic",
+        "м.с": "metallic",
+        "мс": "metallic",
+        "м с": "metallic",
+        "металлический сердечник": "metallic",
+        "IWRC": "metallic",
+        "EPIWRC": "metallic",
+        "PWRC": "metallic",
+        "IWS": "metallic",
+        "WSC": "metallic"
+      }
+    },
+    "rope_lay_type": {
+      "type": "literal_map",
+      "values": {
+        "ТК": "TK",
+        "ЛК": "LK",
+        "ЛК-Р": "LK",
+        "ЛК-О": "LK",
+        "ЛК-РО": "LK",
+        "ЛКР": "LK",
+        "ЛКО": "LK",
+        "ЛКРО": "LK",
+        "ТЛК": "TLK"
+      }
+    },
+    "diameter_mm": {"type": "to_number"},
+    "length_m": {"type": "to_number"},
+    "wire_strength_n_mm2": {"type": "to_int"},
+    "breaking_force_kn": {"type": "to_number"}
+  },
+  "test_examples": [
+    {
+      "input": "Канат тяговый ∅8мм 6×19 о.с. ГОСТ 2688-80, 113 м",
+      "expected": {
+        "diameter_mm": 8,
+        "rope_construction": "6×19",
+        "rope_core": "organic",
+        "gost_or_standard": "ГОСТ 2688-80",
+        "length_m": 113
+      }
+    },
+    {
+      "input": "Канат стальной 10 мм 8×19 м.с. ГОСТ 3077-80",
+      "expected": {
+        "diameter_mm": 10,
+        "rope_construction": "8×19",
+        "rope_core": "metallic",
+        "gost_or_standard": "ГОСТ 3077-80"
+      }
+    },
+    {
+      "input": "Канат ЛК-Р 6×19 диаметр 12,5 мм органический сердечник, длина 50м",
+      "expected": {
+        "diameter_mm": 12.5,
+        "rope_construction": "6×19",
+        "rope_core": "organic",
+        "rope_lay_type": "LK",
+        "length_m": 50
+      }
+    },
+    {
+      "input": "Канат тяговый ТК 6х19 ∅10мм о.с. ГОСТ 3077",
+      "expected": {
+        "diameter_mm": 10,
+        "rope_construction": "6×19",
+        "rope_core": "organic",
+        "rope_lay_type": "TK",
+        "gost_or_standard": "ГОСТ 3077"
+      }
+    },
+    {
+      "input": "Канат Drako ЛК-РО 8 мм 6×36 ГОСТ 7668-80",
+      "expected": {
+        "diameter_mm": 8,
+        "rope_construction": "6×36",
+        "rope_lay_type": "LK",
+        "gost_or_standard": "ГОСТ 7668-80"
+      }
+    },
+    {
+      "input": "Канат тяговый ТЛК 6×25 ∅16,0 мм м.с. ГОСТ 7669-80, 75 м",
+      "expected": {
+        "diameter_mm": 16,
+        "rope_construction": "6×25",
+        "rope_core": "metallic",
+        "rope_lay_type": "TLK",
+        "gost_or_standard": "ГОСТ 7669-80",
+        "length_m": 75
+      }
+    },
+    {
+      "input": "Rope EN 12385-4 Ø 16,0 mm 8×K26WS-EPIWRC, 100 m",
+      "expected": {
+        "diameter_mm": 16,
+        "rope_construction": "8×K26WS",
+        "rope_core": "metallic",
+        "gost_or_standard": "EN 12385-4",
+        "length_m": 100
+      }
+    },
+    {
+      "input": "Канат Brugg DIN 3066 Ø 13 mm 8×19 Seale FC длина 90 m",
+      "expected": {
+        "diameter_mm": 13,
+        "rope_construction": "8×19",
+        "rope_core": "organic",
+        "gost_or_standard": "DIN 3066",
+        "length_m": 90
+      }
+    },
+    {
+      "input": "Pfeifer EN 12385 ∅10mm 6×36WS IWRC, 50m",
+      "expected": {
+        "diameter_mm": 10,
+        "rope_construction": "6×36WS",
+        "rope_core": "metallic",
+        "gost_or_standard": "EN 12385",
+        "length_m": 50
+      }
+    },
+    {
+      "input": "PAWO F3 d13mm 13х19-1570",
+      "expected": {
+        "diameter_mm": 13,
+        "rope_construction": "13×19",
+        "rope_series_name": "F3",
+        "wire_strength_n_mm2": 1570
+      }
+    },
+    {
+      "input": "Gustav Wolf Powerlift 8×19 Seale FC ∅10mm 1770 N/mm², 100m",
+      "expected": {
+        "diameter_mm": 10,
+        "rope_construction": "8×19",
+        "rope_core": "organic",
+        "rope_series_name": "Powerlift",
+        "wire_strength_n_mm2": 1770,
+        "length_m": 100
+      }
+    },
+    {
+      "input": "GW Powerlift Plus 9×19 W-IWRC d10 1960N/mm² 75m",
+      "expected": {
+        "diameter_mm": 10,
+        "rope_construction": "9×19",
+        "rope_core": "metallic",
+        "rope_series_name": "Powerlift Plus",
+        "wire_strength_n_mm2": 1960,
+        "length_m": 75
+      }
+    },
+    {
+      "input": "Канат Gustav Wolf Powerflex 6×19 FC ∅13мм 1370 МПа",
+      "expected": {
+        "diameter_mm": 13,
+        "rope_construction": "6×19",
+        "rope_core": "organic",
+        "rope_series_name": "Powerflex",
+        "wire_strength_n_mm2": 1370
+      }
+    },
+    {
+      "input": "PAWO F7S 8х19W-IWRC 176,1кН Gustav Wolf\t225метров",
+      "expected": {
+        "rope_construction": "8×19W",
+        "rope_core": "metallic",
+        "rope_series_name": "F7S",
+        "breaking_force_kn": 176.1,
+        "length_m": 225
+      }
+    }
+  ]
+}

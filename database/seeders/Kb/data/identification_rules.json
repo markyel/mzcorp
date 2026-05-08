@@ -1,0 +1,415 @@
+[
+  {
+    "category_slug": "microswitch",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Микропереключатель — общее правило",
+    "alternatives": [
+      {"label": "По артикулу производителя", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По параметрам", "preference_order": 20, "required_parameters": ["rated_voltage_v", "rated_current_a", "contact_configuration", "ip_class"]}
+    ]
+  },
+  {
+    "category_slug": "contactor",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Контактор — общее правило",
+    "alternatives": [
+      {"label": "По артикулу производителя", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика и катушки", "preference_order": 15, "required_parameters": ["photo_nameplate", "photo_coil_label"]},
+      {"label": "По параметрам", "preference_order": 20, "required_parameters": ["rated_current_a", "coil_voltage_v", "contact_configuration"]}
+    ]
+  },
+  {
+    "category_slug": "frequency_converter",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Частотный преобразователь — общее правило",
+    "alternatives": [
+      {"label": "По артикулу производителя", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По параметрам", "preference_order": 20, "required_parameters": ["power_kw", "input_voltage", "rated_current_a"]}
+    ]
+  },
+  {
+    "category_slug": "guide_shoe_insert",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Башмак (вкладыш) — общее правило",
+    "alternatives": [
+      {"label": "По артикулу производителя", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По параметрам", "preference_order": 20, "required_parameters": ["lift_brand", "guide_size", "side_of_installation", "material"]}
+    ]
+  },
+  {
+    "category_slug": "door_skate",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Отводка — общее правило для прочих брендов",
+    "alternatives": [
+      {"label": "Фото этикетки", "preference_order": 10, "required_parameters": ["photo_skate_label"]},
+      {"label": "Артикул", "preference_order": 20, "required_parameters": ["manufacturer_article"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["lift_brand", "door_brand", "door_side", "door_dimensions"]}
+    ]
+  },
+  {
+    "category_slug": "door_skate",
+    "applies_to_brands_names": ["Wittur", "Fermator"],
+    "priority": 50,
+    "description": "Отводка Wittur/Fermator — без артикула или фото идентификация невозможна",
+    "alternatives": [
+      {"label": "Фото этикетки", "preference_order": 10, "required_parameters": ["photo_skate_label"]},
+      {"label": "Артикул", "preference_order": 20, "required_parameters": ["manufacturer_article"]}
+    ]
+  },
+  {
+    "category_slug": "elevator_button",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Кнопка лифтовая — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото", "preference_order": 20, "required_parameters": ["photo_button_front", "photo_button_back"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["lift_brand", "button_type", "illumination_color", "button_symbol", "connection_type"]}
+    ]
+  },
+  {
+    "category_slug": "door_drive",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Привод дверей — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика", "preference_order": 20, "required_parameters": ["photo_nameplate"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["lift_brand", "door_brand", "door_dimensions"]}
+    ]
+  },
+  {
+    "category_slug": "controller",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Контроллер — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика и станции", "preference_order": 20, "required_parameters": ["photo_nameplate", "control_station"]}
+    ]
+  },
+  {
+    "category_slug": "controller",
+    "applies_to_brands_names": ["OTIS"],
+    "priority": 50,
+    "description": "Контроллер OTIS — артикул, серийник прошивки или станция управления",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По серийному номеру прошивки", "preference_order": 20, "required_parameters": ["firmware_serial_number", "control_station"]},
+      {"label": "По фото шильдика и станции", "preference_order": 30, "required_parameters": ["photo_nameplate", "control_station"]}
+    ]
+  },
+  {
+    "category_slug": "control_board",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Плата управления — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика и станции", "preference_order": 20, "required_parameters": ["photo_nameplate", "control_station"]}
+    ]
+  },
+  {
+    "category_slug": "control_board",
+    "applies_to_brands_names": ["OTIS"],
+    "priority": 50,
+    "description": "Платы управления OTIS — артикул, серийник прошивки или станция управления",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По серийному номеру прошивки", "preference_order": 20, "required_parameters": ["firmware_serial_number", "control_station"]},
+      {"label": "По фото шильдика и станции", "preference_order": 30, "required_parameters": ["photo_nameplate", "control_station"]}
+    ]
+  },
+  {
+    "category_slug": "traction_rope",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Канат тяговый — общее правило",
+    "alternatives": [
+      {"label": "По полной маркировке", "preference_order": 10, "required_parameters": ["diameter_mm", "rope_construction", "rope_core", "length_m"]},
+      {"label": "По ГОСТу", "preference_order": 20, "required_parameters": ["gost_or_standard", "diameter_mm", "length_m"]},
+      {"label": "По скану страницы паспорта", "preference_order": 15, "required_parameters": ["photo_passport", "diameter_mm"]}
+    ]
+  },
+  {
+    "category_slug": "roller",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Ролик — общее правило (упрощено: бренд лифта + диаметр + ширина — этого хватает поставщику для подбора по таблице)",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По параметрам", "preference_order": 20, "required_parameters": ["lift_brand", "diameter_mm", "width_mm"]}
+    ]
+  },
+  {
+    "category_slug": "load_sensor",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Датчик загрузки — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По параметрам", "preference_order": 20, "required_parameters": ["lift_brand", "sensor_type", "load_range", "output_signal"]}
+    ]
+  },
+  {
+    "category_slug": "buffer",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Буфер — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По параметрам", "preference_order": 20, "required_parameters": ["lift_brand", "rated_voltage_v"]}
+    ]
+  },
+  {
+    "category_slug": "escalator_traction_chain",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Тяговая цепь эскалатора — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По параметрам", "preference_order": 20, "required_parameters": ["escalator_model", "chain_length", "chain_pitch"]}
+    ]
+  },
+  {
+    "category_slug": "escalator_step",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Ступень эскалатора — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По параметрам", "preference_order": 20, "required_parameters": ["escalator_model", "step_width_mm", "demarcation_color"]}
+    ]
+  },
+  {
+    "category_slug": "emergency_lighting",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Светильник аварийный — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По параметрам", "preference_order": 20, "required_parameters": ["lift_brand", "rated_voltage_v", "mounting_type"]}
+    ]
+  },
+  {
+    "category_slug": "cabin_lighting",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Освещение кабины — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По параметрам", "preference_order": 20, "required_parameters": ["lift_brand", "rated_voltage_v", "mounting_type"]}
+    ]
+  },
+  {
+    "category_slug": "speed_governor_belt",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Ремень привода ограничителя скорости — общее правило (артикул вида Synchrobelt 160XL — этого достаточно для подбора, длину/ширину поставщик уточнит по таблице)",
+    "alternatives": [
+      {"label": "По артикулу производителя", "preference_order": 10, "required_parameters": ["manufacturer_article"]}
+    ]
+  },
+  {
+    "category_slug": "escalator_gearbox",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Редуктор эскалатора — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика и общего вида", "preference_order": 20, "required_parameters": ["photo_nameplate", "photo_general"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["escalator_model", "power_kw"]}
+    ]
+  },
+  {
+    "category_slug": "escalator_balustrade_chain",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Цепь балюстрады/обводная цепь — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото и параметрам", "preference_order": 20, "required_parameters": ["photo_general", "chain_pitch", "chain_link_count"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["escalator_model", "chain_pitch", "chain_length", "chain_link_count"]}
+    ]
+  },
+  {
+    "category_slug": "escalator_sprocket",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Звезда эскалатора — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика", "preference_order": 20, "required_parameters": ["photo_nameplate"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["escalator_model", "tooth_count", "chain_pitch", "inner_diameter_mm"]}
+    ]
+  },
+  {
+    "category_slug": "escalator_brake",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Тормоз эскалатора — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика и катушки", "preference_order": 20, "required_parameters": ["photo_nameplate", "photo_coil_label"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["escalator_model", "coil_voltage_v"]}
+    ]
+  },
+  {
+    "category_slug": "escalator_comb_plate",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Гребёнка эскалатора — общее правило (артикул часто на тыльной стороне)",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото общего вида", "preference_order": 20, "required_parameters": ["photo_general"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["escalator_model", "comb_position", "tooth_count", "width_mm", "length_mm"]}
+    ]
+  },
+  {
+    "category_slug": "limit_switch",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Концевой/путевой выключатель — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото этикетки и общего вида", "preference_order": 20, "required_parameters": ["photo_nameplate", "photo_general"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["contact_configuration", "rated_voltage_v", "rated_current_a"]}
+    ]
+  },
+  {
+    "category_slug": "speed_governor",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Ограничитель скорости — общее правило (поставщики просят фото шильдика + общего вида + всех навесок)",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика и общего вида", "preference_order": 20, "required_parameters": ["photo_nameplate", "photo_general"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["lift_brand", "side_of_installation", "diameter_mm"]}
+    ]
+  },
+  {
+    "category_slug": "light_curtain",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Фотобарьер — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото маркировки приёмника и передатчика", "preference_order": 20, "required_parameters": ["photo_nameplate", "photo_general"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["door_brand", "rated_voltage_v", "height_mm"]}
+    ]
+  },
+  {
+    "category_slug": "intercom_unit",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Переговорное устройство — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика и общего вида", "preference_order": 20, "required_parameters": ["photo_nameplate", "photo_general"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["lift_brand", "rated_voltage_v"]}
+    ]
+  },
+  {
+    "category_slug": "power_supply",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Блок питания — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика", "preference_order": 20, "required_parameters": ["photo_nameplate"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["input_voltage", "output_voltage_v", "output_current_a"]}
+    ]
+  },
+  {
+    "category_slug": "traction_motor",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Двигатель главного привода — общее правило (для лебёдки или насоса гидростанции, НЕ для дверей)",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика и общего вида", "preference_order": 20, "required_parameters": ["photo_nameplate", "photo_general"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["lift_brand", "power_kw", "input_voltage"]}
+    ]
+  },
+  {
+    "category_slug": "traction_belt",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Тяговый ремень — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото маркировки", "preference_order": 20, "required_parameters": ["photo_nameplate"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["belt_type", "width_mm", "length_mm", "cord_count", "breaking_force_kn"]}
+    ]
+  },
+  {
+    "category_slug": "door_sill",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Порог дверей — общее правило",
+    "alternatives": [
+      {"label": "По артикулу производителя", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото профиля и марке лифта", "preference_order": 20, "required_parameters": ["photo_profile", "lift_brand"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["lift_brand", "door_type", "door_dimensions", "length_mm"]}
+    ]
+  },
+  {
+    "category_slug": "encoder",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Энкодер — общее правило (только полная маркировка или фото шильдика)",
+    "alternatives": [
+      {"label": "По полной маркировке", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика и общего вида", "preference_order": 20, "required_parameters": ["photo_nameplate", "photo_general"]}
+    ]
+  },
+  {
+    "category_slug": "traction_sheave",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Канатоведущий шкив (КВШ) — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика лебёдки и общего вида", "preference_order": 20, "required_parameters": ["photo_nameplate", "photo_general"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["lift_brand", "diameter_mm", "width_mm"]}
+    ]
+  },
+  {
+    "category_slug": "escalator_handrail",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Поручень эскалатора — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото маркировки", "preference_order": 20, "required_parameters": ["photo_nameplate"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["escalator_model", "diameter_mm", "length_m"]}
+    ]
+  },
+  {
+    "category_slug": "brake_coil",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Катушка/электромагнит тормоза — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото шильдика и катушки", "preference_order": 20, "required_parameters": ["photo_nameplate", "photo_coil_label"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["lift_brand", "coil_voltage_v"]}
+    ]
+  },
+  {
+    "category_slug": "traction_brake",
+    "applies_to_brands": null,
+    "priority": 100,
+    "description": "Тормоз главного привода — общее правило",
+    "alternatives": [
+      {"label": "По артикулу", "preference_order": 10, "required_parameters": ["manufacturer_article"]},
+      {"label": "По фото и марке лифта", "preference_order": 20, "required_parameters": ["photo_general", "lift_brand"]},
+      {"label": "По параметрам", "preference_order": 30, "required_parameters": ["lift_brand", "width_mm", "length_mm"]}
+    ]
+  }
+]

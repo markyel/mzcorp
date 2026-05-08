@@ -2,18 +2,18 @@
 
 namespace App\Models;
 
+use App\Models\Kb\EquipmentCategory;
+use App\Models\Kb\ManufacturerBrand;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Позиция заявки (Phase 1.8b минимум).
+ * Позиция заявки.
  *
- * Заполняется RequestItemParsingService из вложений/тела/изображений письма.
- * KB-поля (identification_category_id, manufacturer_brand_id,
- * quality_assessment_*, equipment_unit_id) и связь с каталогом — Phase 2.
- *
- * Поля parsed_name / parsed_article / is_active используются методом
- * RequestItemParsingService::filterNewItems для дедупликации.
+ * Phase 1.8b: parsed_*-поля из RequestItemParsingService.
+ * Phase 2.0: KB-поля — identification_category_id, manufacturer_brand_id,
+ *   equipment_unit_id, quality_assessment_status/payload (заполняются
+ *   QualityAssessmentService через ResolveKbJob после persist).
  */
 class RequestItem extends Model
 {
@@ -29,6 +29,12 @@ class RequestItem extends Model
         'data_source',
         'status',
         'is_active',
+        // Phase 2.0 KB resolutions:
+        'identification_category_id',
+        'manufacturer_brand_id',
+        'equipment_unit_id',
+        'quality_assessment_status',
+        'quality_assessment_payload',
     ];
 
     protected function casts(): array
@@ -36,11 +42,29 @@ class RequestItem extends Model
         return [
             'parsed_qty' => 'decimal:3',
             'is_active' => 'boolean',
+            'quality_assessment_payload' => 'array',
         ];
     }
 
     public function request(): BelongsTo
     {
         return $this->belongsTo(Request::class);
+    }
+
+    /**
+     * Резолвленная KB-категория (Phase 2.0). Null если не разобрано или
+     * QualityAssessment вернул `not_covered` / `assessment_failed`.
+     */
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(EquipmentCategory::class, 'identification_category_id');
+    }
+
+    /**
+     * Резолвленный KB-бренд (Phase 2.0).
+     */
+    public function brand(): BelongsTo
+    {
+        return $this->belongsTo(ManufacturerBrand::class, 'manufacturer_brand_id');
     }
 }

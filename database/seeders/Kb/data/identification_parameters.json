@@ -1,0 +1,83 @@
+[
+  {"slug": "lift_brand", "name": "Марка лифта", "value_type": "text", "question_template": "Укажите марку лифта (OTSI, KONE, Schindler, ThyssenKrupp и т.д.) для позиции {position_number}: {item_name}"},
+  {"slug": "lift_model", "name": "Модель лифта", "value_type": "text", "question_template": "Укажите модель лифта (например, GeN2, 2000R, MRL) для позиции {position_number}"},
+  {"slug": "equipment_unit_label", "name": "Какая единица оборудования", "value_type": "text", "question_template": "К какой единице оборудования относится позиция {position_number} ({item_name})?"},
+
+  {"slug": "manufacturer_article", "name": "Артикул производителя", "value_type": "text", "question_template": "Укажите оригинальный артикул производителя для позиции {position_number}: {item_name}"},
+  {"slug": "photo_nameplate", "name": "Фото шильдика/этикетки", "value_type": "photo", "question_template": "Пришлите фото шильдика или этикетки изделия для позиции {position_number}: {item_name}"},
+
+  {"slug": "diameter_mm", "name": "Диаметр", "value_type": "number", "unit": "мм", "aliases": ["диаметр", "diameter", "Ø", "ø", "⌀", "наружный диаметр", "внешний диаметр", "outer diameter", "od", "d наружный"], "question_template": "Укажите диаметр в мм для позиции {position_number}: {item_name}"},
+  {"slug": "width_mm", "name": "Ширина", "value_type": "number", "unit": "мм", "aliases": ["ширина", "width", "b", "толщина"], "question_template": "Укажите ширину в мм для позиции {position_number}"},
+  {"slug": "height_mm", "name": "Высота", "value_type": "number", "unit": "мм", "aliases": ["высота", "height", "h"], "question_template": "Укажите высоту в мм для позиции {position_number}"},
+  {"slug": "length_m", "name": "Длина", "value_type": "number", "unit": "м", "aliases": ["длина в метрах", "length m"], "question_template": "Укажите длину в метрах для позиции {position_number}"},
+  {"slug": "length_mm", "name": "Длина в миллиметрах", "value_type": "number", "unit": "мм", "aliases": ["длина", "length", "l"], "question_template": "Укажите длину в мм для позиции {position_number}"},
+  {"slug": "inner_diameter_mm", "name": "Внутренний диаметр", "value_type": "number", "unit": "мм", "aliases": ["внутренний диаметр", "inner diameter", "id", "d внутренний", "посадочный диаметр"], "question_template": "Укажите внутренний диаметр в мм для позиции {position_number}"},
+  {"slug": "material", "name": "Материал", "value_type": "text", "aliases": ["материал", "material"], "question_template": "Укажите материал (полиуретан/графит/текстолит и т.п.) для позиции {position_number}: {item_name}"},
+  {"slug": "mounting_type", "name": "Тип крепления", "value_type": "text", "aliases": ["тип крепления", "крепление", "mounting"], "question_template": "Укажите тип крепления для позиции {position_number}"},
+
+  {"slug": "rated_voltage_v", "name": "Номинальное напряжение", "value_type": "number", "unit": "В", "aliases": ["напряжение", "voltage", "номинальное напряжение", "u_ном"], "question_template": "Укажите номинальное напряжение в Вольтах для позиции {position_number}"},
+  {"slug": "rated_current_a", "name": "Номинальный ток", "value_type": "number", "unit": "А", "aliases": ["ток", "current", "номинальный ток", "i_ном"], "question_template": "Укажите номинальный ток в Амперах для позиции {position_number}"},
+  {"slug": "coil_voltage_v", "name": "Напряжение катушки", "value_type": "number", "unit": "В", "aliases": ["напряжение катушки", "coil voltage", "u катушки"], "question_template": "Укажите напряжение катушки контактора в Вольтах для позиции {position_number}"},
+  {"slug": "ip_class", "name": "Класс защиты IP", "value_type": "text", "question_template": "Укажите класс защиты IP (например, IP54) для позиции {position_number}"},
+  {"slug": "contact_configuration", "name": "Конфигурация контактов", "value_type": "text", "question_template": "Укажите конфигурацию контактов для позиции {position_number}"},
+  {"slug": "power_kw", "name": "Мощность", "value_type": "number", "unit": "кВт", "question_template": "Укажите мощность в кВт для позиции {position_number}"},
+  {"slug": "input_voltage", "name": "Входное напряжение", "value_type": "text", "question_template": "Укажите входное напряжение для позиции {position_number} (например, 380В 3ф)"},
+  {"slug": "has_brake_chopper", "name": "Тормозной прерыватель", "value_type": "select", "allowed_values": [{"value": "yes", "label": "Есть"}, {"value": "no", "label": "Нет"}, {"value": "unknown", "label": "Неизвестно"}], "question_template": "Нужен ли тормозной прерыватель для позиции {position_number}?"},
+
+  {"slug": "illumination_color", "name": "Цвет подсветки", "value_type": "select", "allowed_values": [{"value": "red", "label": "Красный"}, {"value": "white", "label": "Белый"}, {"value": "amber", "label": "Янтарный"}, {"value": "green", "label": "Зелёный"}, {"value": "blue", "label": "Синий"}, {"value": "none", "label": "Без подсветки"}], "question_template": "Укажите цвет подсветки кнопки на позиции {position_number}: {item_name}"},
+  {"slug": "button_symbol", "name": "Символ кнопки", "value_type": "text", "question_template": "Укажите символ/обозначение кнопки для позиции {position_number} (число этажа, < >, звонок и т.д.)"},
+  {"slug": "has_braille", "name": "Шрифт Брайля", "value_type": "select", "allowed_values": [{"value": "yes", "label": "Есть"}, {"value": "no", "label": "Нет"}], "question_template": "Нужен ли шрифт Брайля на кнопке для позиции {position_number}?"},
+  {"slug": "button_type", "name": "Тип кнопки", "value_type": "select", "allowed_values": [{"value": "call", "label": "Вызывная"}, {"value": "command", "label": "Приказная"}, {"value": "service", "label": "Сервисная"}], "question_template": "Какой тип кнопки нужен для позиции {position_number}?"},
+  {"slug": "connection_type", "name": "Тип подключения", "value_type": "text", "question_template": "Укажите тип подключения (клеммы/разъём) для позиции {position_number}"},
+  {"slug": "photo_button_front", "name": "Фото кнопки спереди", "value_type": "photo", "question_template": "Пришлите фото лицевой части существующей кнопки для позиции {position_number}"},
+  {"slug": "photo_button_back", "name": "Фото кнопки сзади", "value_type": "photo", "question_template": "Пришлите фото обратной стороны кнопки (с клеммами) для позиции {position_number}"},
+
+  {"slug": "rope_construction", "name": "Конструкция каната", "value_type": "text", "question_template": "Укажите конструкцию каната (например, 6×19, 8×19+1о.с.) для позиции {position_number}"},
+  {"slug": "rope_core", "name": "Сердечник каната", "value_type": "select", "allowed_values": [{"value": "organic", "label": "Органический (о.с.)"}, {"value": "metallic", "label": "Металлический (м.с.)"}], "question_template": "Какой сердечник каната нужен (о.с./м.с.) для позиции {position_number}?"},
+  {"slug": "rope_lay_type", "name": "Тип свивки каната", "value_type": "select", "allowed_values": [{"value": "TK", "label": "ТК (точечная)"}, {"value": "LK", "label": "ЛК (линейная)"}, {"value": "TLK", "label": "ТЛК"}], "question_template": "Укажите тип свивки каната (ТК/ЛК) для позиции {position_number}"},
+  {"slug": "gost_or_standard", "name": "ГОСТ/стандарт", "value_type": "text", "question_template": "Укажите ГОСТ или стандарт каната для позиции {position_number}"},
+  {"slug": "wire_strength_n_mm2", "name": "Прочность проволоки", "value_type": "number", "unit": "Н/мм²", "question_template": "Укажите маркировочную группу прочности проволоки каната (1370/1570/1770/1960/2160 Н/мм²) для позиции {position_number}"},
+  {"slug": "rope_series_name", "name": "Серия каната", "value_type": "text", "question_template": "Укажите серию/линейку каната (например, Powerlift, Powerlift Plus, F3) для позиции {position_number}"},
+  {"slug": "breaking_force_kn", "name": "Разрывное усилие", "value_type": "number", "unit": "кН", "question_template": "Укажите разрывное усилие каната в кН (например, 176,1 кН) для позиции {position_number}"},
+
+  {"slug": "guide_size", "name": "Размер направляющей", "value_type": "text", "question_template": "Укажите размер направляющей (5/9/10/16 мм или другой) для позиции {position_number}"},
+  {"slug": "side_of_installation", "name": "Сторона установки", "value_type": "select", "allowed_values": [{"value": "cabin", "label": "Кабина"}, {"value": "counterweight", "label": "Противовес"}, {"value": "both", "label": "Оба"}], "question_template": "Куда устанавливается (кабина/противовес) для позиции {position_number}?"},
+  {"slug": "rail_size", "name": "Размер рельса", "value_type": "text", "question_template": "Укажите размер рельса направляющей для позиции {position_number}"},
+
+  {"slug": "door_brand", "name": "Производитель дверей", "value_type": "text", "question_template": "Укажите производителя дверей (Wittur/Fermator/Selcom/Sematic и т.д.) для позиции {position_number}"},
+  {"slug": "door_side", "name": "Сторона дверей", "value_type": "select", "allowed_values": [{"value": "left", "label": "Левая"}, {"value": "right", "label": "Правая"}, {"value": "central", "label": "Центральная"}], "question_template": "Сторона/тип открытия дверей для позиции {position_number}?"},
+  {"slug": "door_dimensions", "name": "Габариты дверного проёма", "value_type": "text", "question_template": "Укажите габариты дверного проёма (Ш×В) для позиции {position_number}"},
+  {"slug": "photo_skate_label", "name": "Фото этикетки отводки", "value_type": "photo", "question_template": "Пришлите фото этикетки/шильдика отводки для позиции {position_number}"},
+
+  {"slug": "roller_purpose", "name": "Назначение ролика", "value_type": "text", "question_template": "Укажите назначение ролика (двери/кабины/ловителей/ступени) для позиции {position_number}"},
+  {"slug": "outer_diameter_mm", "name": "Внешний диаметр", "value_type": "number", "unit": "мм", "question_template": "Укажите внешний диаметр ролика в мм для позиции {position_number}"},
+  {"slug": "inner_diameter_mm", "name": "Внутренний диаметр", "value_type": "number", "unit": "мм", "question_template": "Укажите внутренний диаметр (под подшипник) в мм для позиции {position_number}"},
+  {"slug": "bearing_type", "name": "Тип подшипника", "value_type": "text", "question_template": "Укажите тип подшипника для позиции {position_number}"},
+
+  {"slug": "sensor_type", "name": "Тип датчика", "value_type": "text", "question_template": "Укажите тип датчика (тензорезисторный/индуктивный/оптический) для позиции {position_number}"},
+  {"slug": "output_signal", "name": "Выходной сигнал", "value_type": "text", "question_template": "Укажите тип выходного сигнала датчика для позиции {position_number}"},
+  {"slug": "load_range", "name": "Диапазон нагрузки", "value_type": "text", "question_template": "Укажите диапазон измеряемой нагрузки для позиции {position_number}"},
+
+  {"slug": "control_station", "name": "Станция управления", "value_type": "text", "question_template": "Укажите модель станции управления (например, GeN2, 2000R, OH-5000) для позиции {position_number}"},
+  {"slug": "firmware_version", "name": "Версия прошивки", "value_type": "text", "question_template": "Укажите версию прошивки контроллера для позиции {position_number}"},
+  {"slug": "firmware_serial_number", "name": "Серийник прошивки", "value_type": "text", "question_template": "Если на плате есть наклейка с серийным номером прошивки (например, в формате GP130782GAF) — укажите её для позиции {position_number}. Это поможет поставщику подобрать совместимую плату."},
+
+  {"slug": "escalator_model", "name": "Модель эскалатора", "value_type": "text", "question_template": "Укажите модель эскалатора для позиции {position_number}"},
+  {"slug": "chain_length", "name": "Длина цепи", "value_type": "text", "question_template": "Укажите длину тяговой цепи для позиции {position_number}"},
+  {"slug": "chain_pitch", "name": "Шаг цепи", "value_type": "text", "question_template": "Укажите шаг тяговой цепи для позиции {position_number}"},
+  {"slug": "step_width_mm", "name": "Ширина ступени", "value_type": "number", "unit": "мм", "question_template": "Укажите ширину ступени эскалатора в мм (600/800/1000) для позиции {position_number}"},
+  {"slug": "demarcation_color", "name": "Цвет демаркации", "value_type": "select", "allowed_values": [{"value": "yellow", "label": "Жёлтая"}, {"value": "green", "label": "Зелёная"}, {"value": "none", "label": "Без демаркации"}], "question_template": "Укажите цвет демаркации ступени для позиции {position_number}"},
+
+  {"slug": "tooth_count", "name": "Количество зубьев", "value_type": "number", "aliases": ["число зубьев", "количество зубьев", "зубьев", "зубцов", "tooth count", "teeth count"], "question_template": "Укажите количество зубьев (звезды/гребёнки) для позиции {position_number}: {item_name}"},
+  {"slug": "comb_position", "name": "Положение гребёнки", "value_type": "select", "allowed_values": [{"value": "left", "label": "Левая"}, {"value": "right", "label": "Правая"}, {"value": "center", "label": "Центральная"}], "question_template": "Укажите положение гребёнки эскалатора (левая/правая/центральная) для позиции {position_number}"},
+  {"slug": "output_voltage_v", "name": "Выходное напряжение", "value_type": "number", "unit": "В", "aliases": ["выходное напряжение", "output voltage", "u вых", "u_вых", "u out"], "question_template": "Укажите выходное напряжение блока питания в Вольтах для позиции {position_number}"},
+  {"slug": "output_current_a", "name": "Выходной ток", "value_type": "number", "unit": "А", "aliases": ["выходной ток", "output current", "i вых", "i_вых", "i out"], "question_template": "Укажите выходной ток блока питания в Амперах для позиции {position_number}"},
+  {"slug": "belt_type", "name": "Тип ремня", "value_type": "select", "allowed_values": [{"value": "poly_v", "label": "Поликлиновой (Poly-V)"}, {"value": "flat", "label": "Плоский"}, {"value": "toothed", "label": "Зубчатый"}], "question_template": "Укажите тип тягового ремня (поликлиновой Poly-V / плоский / зубчатый) для позиции {position_number}"},
+  {"slug": "cord_count", "name": "Количество кордов", "value_type": "number", "aliases": ["кордов", "число кордов", "количество кордов", "cord count"], "question_template": "Укажите количество кордов в тяговом ремне для позиции {position_number}"},
+  {"slug": "door_type", "name": "Тип дверей", "value_type": "select", "allowed_values": [{"value": "telescope", "label": "Телескопические"}, {"value": "central", "label": "Центральные"}, {"value": "horizontal", "label": "Горизонтальные"}], "question_template": "Укажите тип дверей (телескопические/центральные/горизонтальные) для позиции {position_number}"},
+  {"slug": "photo_profile", "name": "Фото профиля в сечении", "value_type": "photo", "question_template": "Пришлите фото профиля изделия в сечении (срез/торец) с приложенной рулеткой для позиции {position_number}: {item_name}"},
+  {"slug": "photo_coil_label", "name": "Фото маркировки катушки", "value_type": "photo", "question_template": "Пришлите фото маркировки катушки (наклейка с напряжением и кодом производителя) для позиции {position_number}: {item_name}"},
+  {"slug": "photo_general", "name": "Фото общего вида", "value_type": "photo", "question_template": "Пришлите фото общего вида изделия (с разных ракурсов) для позиции {position_number}: {item_name}"},
+  {"slug": "chain_link_count", "name": "Количество звеньев / пар роликов", "value_type": "number", "aliases": ["пар роликов", "пары роликов", "количество звеньев", "звеньев"], "question_template": "Укажите количество звеньев цепи или пар роликов (для обводных/балюстрадных цепей) для позиции {position_number}"},
+  {"slug": "photo_passport", "name": "Скан страницы паспорта изделия", "value_type": "photo", "question_template": "Пришлите скан/фото страницы паспорта изделия (лифта/каната/ремня) с характеристиками для позиции {position_number}: {item_name}"}
+]

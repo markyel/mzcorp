@@ -54,6 +54,9 @@ class Detail extends Component
         $this->request = $request->load([
             'assignedUser:id,name,email',
             'items',
+            'items.brand:id,name',
+            'items.category:id,slug,name',
+            'context:id,request_id,analysis_status,equipment_units,llm_model_version,analyzed_at',
             'emailMessage.attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline',
             'emailMessage.mailbox:id,email,name',
             'assignments' => fn ($q) => $q->orderByDesc('assigned_at'),

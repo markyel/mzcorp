@@ -1,0 +1,82 @@
+{
+  "description": "Извлечение артикулов отводок и приводов дверей из parsed_name (Fermator CDL-P, российские ЭМО, упоминания брендов Wittur/Selcom/Sematic). Берёт первый артикул из строки с несколькими — этого хватает для альтернативы «По артикулу».",
+  "source_field": "name",
+  "priority": 100,
+  "is_active": true,
+  "rules": [
+    {
+      "parameter_slug": "manufacturer_article",
+      "patterns": [
+        "\\b(CDL[-‐]?P\\d{3}[A-Z]{2}\\d{3,4})\\b",
+        "\\b(CTL[-‐]?[A-Z0-9]{6,12})\\b",
+        "(ЭМО[-‐]\\d{1,2}[А-Я]?[-‐]\\d{1,3}[-‐][А-Я]{1,3}\\d[-‐]\\d{2,3}\\s*В?)",
+        "(ЭМО[-‐]\\d{1,2}[А-Я]?[-‐]\\d{1,3}[-‐]\\d{2,3}\\s*В)"
+      ]
+    },
+    {
+      "parameter_slug": "door_brand",
+      "patterns": [
+        "\\b(FERMATOR|Fermator|Ферматор)\\b",
+        "\\b(WITTUR|Wittur)\\b",
+        "\\b(SELCOM|Selcom)\\b",
+        "\\b(SEMATIC|Sematic)\\b"
+      ]
+    },
+    {
+      "parameter_slug": "rated_voltage_v",
+      "patterns": [
+        "(?:^|[^\\d])(\\d{2,3})\\s*В(?![а-яА-Я])"
+      ]
+    }
+  ],
+  "pre_normalize_rules": [],
+  "post_extract_rules": {
+    "door_brand": {
+      "type": "literal_map",
+      "values": {
+        "FERMATOR": "Fermator",
+        "Ферматор": "Fermator",
+        "WITTUR": "Wittur",
+        "SELCOM": "Selcom",
+        "SEMATIC": "Sematic"
+      }
+    },
+    "rated_voltage_v": {"type": "to_int"}
+  },
+  "test_examples": [
+    {
+      "input": "Отводка дверей кабины 40/10 РМ левое открывание с замком FERMATOR CDL-P000CI200, CDL-P000CI000",
+      "expected": {
+        "manufacturer_article": "CDL-P000CI200",
+        "door_brand": "Fermator"
+      }
+    },
+    {
+      "input": "Отводка Wittur правая",
+      "expected": {
+        "door_brand": "Wittur"
+      }
+    },
+    {
+      "input": "Door skate Fermator CDLP000AB123",
+      "expected": {
+        "manufacturer_article": "CDLP000AB123",
+        "door_brand": "Fermator"
+      }
+    },
+    {
+      "input": "Электромагнитная отводка ЭМО-1-66-У3-110В ТУ 16-526.038-76",
+      "expected": {
+        "manufacturer_article": "ЭМО-1-66-У3-110В",
+        "rated_voltage_v": 110
+      }
+    },
+    {
+      "input": "Отводка ЭМО-2-34-УХЛ4-220В",
+      "expected": {
+        "manufacturer_article": "ЭМО-2-34-УХЛ4-220В",
+        "rated_voltage_v": 220
+      }
+    }
+  ]
+}
