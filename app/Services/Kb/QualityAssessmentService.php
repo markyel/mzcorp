@@ -79,8 +79,19 @@ class QualityAssessmentService
             unset($payload['__detailed_category_object']);
 
             if ($detailedCategory === null) {
-                $item->quality_assessment_status = 'not_covered';
-                $payload['reason'] = 'detailed_category_not_resolved';
+                // MyLift adaptation (Phase 2.0):
+                // Если KB не подобрал детальную категорию, НО бренд резолвлен
+                // — это сигнал «полезные данные есть, но справочнику не хватает
+                // правил». Оператор видит chip-attn (insufficient) и понимает
+                // что нужно проверить категорию вручную, а не «забейте, нет
+                // правил». Без brand_id остаётся честный not_covered.
+                $brandKnown = ! empty($payload['resolved_brand_id']);
+                $status = $brandKnown ? 'insufficient' : 'not_covered';
+
+                $item->quality_assessment_status = $status;
+                $payload['reason'] = $brandKnown
+                    ? 'detailed_category_not_resolved_but_brand_known'
+                    : 'detailed_category_not_resolved';
 
                 // Если у позиции нет ни одного «лифтового» индикатора — добавим
                 // вопрос-уточнение к клиенту: «эта позиция вообще для лифта?»
@@ -95,7 +106,7 @@ class QualityAssessmentService
                 }
 
                 return [
-                    'status' => 'not_covered',
+                    'status' => $status,
                     'payload' => $this->finalizePayload($payload),
                 ];
             }
