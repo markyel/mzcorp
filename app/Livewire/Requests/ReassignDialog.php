@@ -21,7 +21,12 @@ use Livewire\Component;
  */
 class ReassignDialog extends Component
 {
-    public RequestModel $request;
+    /**
+     * Храним только id заявки, не Eloquent-модель: Livewire-дегидратация
+     * `App\Models\Request` ловила shadow от `Illuminate\Http\Request` и
+     * валила render с 500 на child-компоненте.
+     */
+    public int $requestId;
 
     public bool $open = false;
     public ?int $newAssigneeId = null;
@@ -29,7 +34,12 @@ class ReassignDialog extends Component
 
     public function mount(RequestModel $request): void
     {
-        $this->request = $request;
+        $this->requestId = $request->id;
+    }
+
+    private function request(): RequestModel
+    {
+        return RequestModel::findOrFail($this->requestId);
     }
 
     public function show(): void
@@ -48,7 +58,7 @@ class ReassignDialog extends Component
 
     public function save(ReassignService $service)
     {
-        $this->authorize();
+        $this->ensureAuthorized();
 
         if (! $this->newAssigneeId) {
             $this->addError('newAssigneeId', 'Выберите менеджера.');
@@ -68,14 +78,16 @@ class ReassignDialog extends Component
             return null;
         }
 
-        if ($newAssignee->id === $this->request->assigned_user_id) {
+        $request = $this->request();
+
+        if ($newAssignee->id === $request->assigned_user_id) {
             $this->addError('newAssigneeId', 'Заявка уже назначена на этого менеджера.');
 
             return null;
         }
 
         $service->reassign(
-            request: $this->request,
+            request: $request,
             newAssignee: $newAssignee,
             reason: trim($this->reason) ?: null,
             by: auth()->user(),
@@ -84,11 +96,15 @@ class ReassignDialog extends Component
         $this->open = false;
         session()->flash('status', "Заявка переподчинена: {$newAssignee->name}.");
 
-        // Дёргаем перезагрузку родителя (Detail::mount() заново вытащит assignments).
-        return $this->redirect(request()->header('Referer') ?: route('requests.show', $this->request), navigate: true);
+        // Перезагрузка родителя (Detail::mount() заново вытащит assignments).
+        return $this->redirect(
+            \Illuminate\Support\Facades\Request::header('Referer')
+                ?: route('requests.show', $request),
+            navigate: true,
+        );
     }
 
-    private function authorize(): void
+    private function ensureAuthorized(): void
     {
         $user = auth()->user();
         $allowed = $user && $user->hasAnyRole([
@@ -113,6 +129,8 @@ class ReassignDialog extends Component
 
     public function render()
     {
-        return view('livewire.requests.reassign-dialog');
+        return view('livewire.requests.reassign-dialog', [
+            'request' => $this->request(),
+        ]);
     }
 }
