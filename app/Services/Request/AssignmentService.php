@@ -40,10 +40,19 @@ class AssignmentService
             return null;
         }
 
-        $manager = $this->pickStickyManager($request, $managers);
-        $reason = 'auto_sticky';
-
-        if (! $manager) {
+        $sticky = $this->pickStickyManager($request, $managers);
+        if ($sticky) {
+            $manager = $sticky['user'];
+            // Snapshot тех Request, по которым произошёл match — выводим в
+            // карточке заявки (Phase 2 sticky visibility). Формат:
+            //   auto_sticky:{"linked":[id1,id2,...]}
+            // Старые записи (165 backfill) останутся как plain `auto_sticky`
+            // — UI это обрабатывает, показывая чип без deep-links.
+            $reason = 'auto_sticky:' . json_encode(
+                ['linked' => $sticky['linked']],
+                JSON_UNESCAPED_UNICODE,
+            );
+        } else {
             $manager = $this->pickLeastLoadedManager($managers);
             $reason = 'auto_round_robin';
         }
@@ -75,8 +84,11 @@ class AssignmentService
      * уже есть позиции с тем же артикулом или именем что и в новой заявке.
      *
      * @param  Collection<int, User>  $managers  Активные менеджеры.
+     * @return array{user: User, linked: array<int>}|null
+     *         user — кому отдать заявку, linked — конкретные Request.id, по
+     *         которым сработал match (для UI/audit).
      */
-    private function pickStickyManager(Request $request, Collection $managers): ?User
+    private function pickStickyManager(Request $request, Collection $managers): ?array
     {
         $items = $request->items()->get(['parsed_article', 'parsed_name']);
         if ($items->isEmpty()) {
@@ -101,22 +113,26 @@ class AssignmentService
             return null;
         }
 
+        $openStatuses = [
+            RequestStatus::New->value,
+            RequestStatus::Assigned->value,
+        ];
+
+        $matchClosure = function ($q) use ($articles, $names) {
+            if (! empty($articles)) {
+                $q->orWhereIn(DB::raw('TRIM(request_items.parsed_article)'), $articles);
+            }
+            if (! empty($names)) {
+                $q->orWhereIn(DB::raw('LOWER(TRIM(request_items.parsed_name))'), $names);
+            }
+        };
+
         $row = DB::table('request_items')
             ->join('requests', 'request_items.request_id', '=', 'requests.id')
             ->whereIn('requests.assigned_user_id', $managers->pluck('id')->all())
             ->where('requests.id', '!=', $request->id)
-            ->whereIn('requests.status', [
-                RequestStatus::New->value,
-                RequestStatus::Assigned->value,
-            ])
-            ->where(function ($q) use ($articles, $names) {
-                if (! empty($articles)) {
-                    $q->orWhereIn(DB::raw('TRIM(request_items.parsed_article)'), $articles);
-                }
-                if (! empty($names)) {
-                    $q->orWhereIn(DB::raw('LOWER(TRIM(request_items.parsed_name))'), $names);
-                }
-            })
+            ->whereIn('requests.status', $openStatuses)
+            ->where($matchClosure)
             ->groupBy('requests.assigned_user_id')
             ->selectRaw('requests.assigned_user_id, COUNT(*) AS hits, MAX(requests.created_at) AS latest_created')
             ->orderByDesc('hits')
@@ -127,7 +143,29 @@ class AssignmentService
             return null;
         }
 
-        return $managers->firstWhere('id', (int) $row->assigned_user_id);
+        $manager = $managers->firstWhere('id', (int) $row->assigned_user_id);
+        if (! $manager) {
+            return null;
+        }
+
+        // Snapshot конкретных Request.id, по которым произошёл match. Один
+        // запрос — забираем уникальные id заявок этого менеджера, у которых
+        // хотя бы одна позиция совпала с нашей по article/name.
+        $linkedIds = DB::table('request_items')
+            ->join('requests', 'request_items.request_id', '=', 'requests.id')
+            ->where('requests.assigned_user_id', $manager->id)
+            ->where('requests.id', '!=', $request->id)
+            ->whereIn('requests.status', $openStatuses)
+            ->where($matchClosure)
+            ->distinct()
+            ->pluck('requests.id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        return [
+            'user' => $manager,
+            'linked' => $linkedIds,
+        ];
     }
 
     /**

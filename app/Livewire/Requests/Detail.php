@@ -87,6 +87,51 @@ class Detail extends Component
     }
 
     /**
+     * Snapshot sticky-привязок (Phase 2 sticky visibility).
+     *
+     * Самый свежий `request_assignments` с reason, начинающимся на
+     * `auto_sticky` (свежий — на случай ручного переподчинения через
+     * ReassignService, чтобы исторический sticky-snapshot не терялся).
+     * Парсим payload: `auto_sticky:{"linked":[id1,id2,...]}`.
+     *
+     * Старые backfilled-записи имеют просто `auto_sticky` (без `:`-payload) —
+     * legacy=true, links пустой; UI покажет общий чип без deep-links.
+     *
+     * @return array{links: \Illuminate\Support\Collection, legacy: bool}
+     */
+    #[Computed]
+    public function sticky(): array
+    {
+        $assignment = $this->request->assignments
+            ->first(fn ($a) => str_starts_with((string) $a->reason, 'auto_sticky'));
+
+        if (! $assignment) {
+            return ['links' => collect(), 'legacy' => false];
+        }
+
+        $reason = (string) $assignment->reason;
+        $colonAt = strpos($reason, ':');
+        if ($colonAt === false) {
+            // legacy: 'auto_sticky' без payload (165 backfill).
+            return ['links' => collect(), 'legacy' => true];
+        }
+
+        $payload = substr($reason, $colonAt + 1);
+        $data = json_decode($payload, true);
+        $ids = is_array($data['linked'] ?? null) ? $data['linked'] : [];
+        if (empty($ids)) {
+            return ['links' => collect(), 'legacy' => true];
+        }
+
+        $links = \App\Models\Request::query()
+            ->whereIn('id', $ids)
+            ->orderByDesc('created_at')
+            ->get(['id', 'internal_code', 'subject', 'status', 'client_name']);
+
+        return ['links' => $links, 'legacy' => false];
+    }
+
+    /**
      * Подписи и счётчики для табов. `null` = без счётчика.
      *
      * @return array<string, array{label: string, count: ?int, disabled: bool}>

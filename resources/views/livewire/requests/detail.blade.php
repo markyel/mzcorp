@@ -117,9 +117,24 @@
                         @endif
                     </span>
                 </div>
-                <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle">
+                <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle min-w-0">
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Sticky</span>
-                    <span class="text-fg-3" title="Доступно в Phase 2">—</span>
+                    @php $sticky = $this->sticky; @endphp
+                    @if($sticky['links']->isNotEmpty())
+                        <span class="flex items-center gap-1.5 flex-wrap"
+                              title="Заявки, по которым AssignmentService прицепил эту через совпадение артикула или названия позиции">
+                            @foreach($sticky['links'] as $linked)
+                                <a href="{{ route('requests.show', $linked) }}"
+                                   wire:navigate
+                                   class="mono text-[12px] text-sky-700 hover:underline">{{ $linked->internal_code }}</a>{{ ! $loop->last ? ',' : '' }}
+                            @endforeach
+                        </span>
+                    @elseif($sticky['legacy'])
+                        <span class="text-fg-2 text-[12px]"
+                              title="Старая запись (до Phase 2 sticky visibility) — детали привязки не сохранены">sticky</span>
+                    @else
+                        <span class="text-fg-3">—</span>
+                    @endif
                 </div>
                 <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle">
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Возраст</span>
