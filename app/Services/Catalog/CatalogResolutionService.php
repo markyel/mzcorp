@@ -132,45 +132,91 @@ class CatalogResolutionService
     }
 
     /**
-     * Try A (internal-sku resolve), then B (article-match). Используется
-     * после импорта каталога и при пост-парсе позиций.
+     * Use-case C: семантический матчинг по name через pgvector-эмбеддинги.
+     * Запускается только когда A и B не нашли. Использует общий
+     * embedding-индекс (см. CatalogEmbeddingService).
+     *
+     * Возвращает true если применили апдейт.
+     */
+    public function matchByName(RequestItem $item): bool
+    {
+        if ($item->catalog_item_id !== null) {
+            return false;
+        }
+        if (! config('services.catalog_name_match.enabled', true)) {
+            return false;
+        }
+
+        $svc = app(\App\Services\Catalog\CatalogEmbeddingService::class);
+        $match = $svc->matchByRequestItem($item);
+        if ($match === null) {
+            return false;
+        }
+
+        /** @var CatalogItem $catalog */
+        $catalog = $match['catalog'];
+        $similarity = (float) $match['similarity'];
+
+        $this->applyCatalogToItem($item, $catalog, promoteStatus: false);
+
+        Log::info('CatalogResolutionService: item matched (C:name-vector)', [
+            'request_item_id' => $item->id,
+            'catalog_item_id' => $catalog->id,
+            'catalog_sku' => $catalog->sku,
+            'similarity' => $similarity,
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Try A (internal-sku resolve), then B (article-match), then C
+     * (name-vector match). Используется после импорта каталога и при
+     * пост-парсе позиций.
      */
     public function matchOrResolve(RequestItem $item): bool
     {
         if ($this->resolveItem($item)) {
             return true;
         }
+        if ($this->matchByArticle($item)) {
+            return true;
+        }
 
-        return $this->matchByArticle($item);
+        return $this->matchByName($item);
     }
 
     /**
-     * Bulk: pass over всех несматченных позиций (use-case A + B).
+     * Bulk: pass over всех несматченных позиций (use-case A + B + C).
      *
      * Сканирует:
      *  - items со status=internal_catalog_pending — пытается резолвить через
      *    M-SKU (resolveItem);
      *  - items с catalog_item_id IS NULL и непустым parsed_article — пытается
-     *    сматчить через brand_article / sku (matchByArticle).
+     *    сматчить через brand_article / sku (matchByArticle);
+     *  - если и B не нашёл — пробует C (matchByName) если у item есть
+     *    parsed_name.
      *
      * Используется после успешного импорта каталога (ResolvePendingFromCatalogJob).
      *
-     * @return array{checked: int, resolved_a: int, matched_b: int}
+     * @return array{checked: int, resolved_a: int, matched_b: int, matched_c: int}
      */
     public function resolveAllPending(): array
     {
         $checked = 0;
         $resolvedA = 0;
         $matchedB = 0;
+        $matchedC = 0;
 
         RequestItem::query()
             ->where('is_active', true)
             ->whereNull('catalog_item_id')
             ->where(function ($q) {
                 $q->where('quality_assessment_status', 'internal_catalog_pending')
-                    ->orWhereNotNull('parsed_article');
+                    ->orWhereNotNull('parsed_article')
+                    ->orWhereNotNull('parsed_name');
             })
-            ->chunkById(200, function ($items) use (&$checked, &$resolvedA, &$matchedB) {
+            ->chunkById(200, function ($items) use (&$checked, &$resolvedA, &$matchedB, &$matchedC) {
                 foreach ($items as $item) {
                     $checked++;
                     if ($this->resolveItem($item)) {
@@ -179,6 +225,10 @@ class CatalogResolutionService
                     }
                     if ($this->matchByArticle($item)) {
                         $matchedB++;
+                        continue;
+                    }
+                    if ($this->matchByName($item)) {
+                        $matchedC++;
                     }
                 }
             });
@@ -187,12 +237,14 @@ class CatalogResolutionService
             'checked' => $checked,
             'resolved_a' => $resolvedA,
             'matched_b' => $matchedB,
+            'matched_c' => $matchedC,
         ]);
 
         return [
             'checked' => $checked,
             'resolved_a' => $resolvedA,
             'matched_b' => $matchedB,
+            'matched_c' => $matchedC,
             // Совместимость с прежним именованием:
             'resolved' => $resolvedA,
         ];

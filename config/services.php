@@ -71,6 +71,9 @@ return [
         // Phase 1.9: 5-й уровень thread linking (ThreadClarificationAi).
         // Простая задача multi-choice над списком из 2-5 заявок — mini хватает.
         'clarification_model' => env('OPENAI_CLARIFICATION_MODEL', 'gpt-4o-mini'),
+        // Phase 2 use-case C: размер батча на /v1/embeddings (OpenAI лимит 2048).
+        // 100 — компромисс между latency на запрос и количеством HTTP-вызовов.
+        'embedding_batch_size' => (int) env('OPENAI_EMBEDDING_BATCH_SIZE', 100),
     ],
 
     /*
@@ -107,6 +110,21 @@ return [
         // запрещён). На рабочем каталоге ставь, скажем, 500 — чтобы битая
         // частичная выгрузка не снесла строки в is_active=false soft-delete'ом.
         'min_full_rows' => (int) env('CATALOG_IMPORT_MIN_FULL_ROWS', 1),
+    ],
+
+    /*
+    | Phase 2 use-case C: семантический матчинг позиций заявок по name
+    | через pgvector-эмбеддинги каталога. См.
+    | app/Services/Catalog/CatalogEmbeddingService.php и таблицу
+    | `catalog_item_embeddings`.
+    |
+    | Threshold 0.75 — компромисс «recall vs precision» по cosine similarity.
+    | Меньше → больше ложно-положительных, больше → теряем валидные матчи.
+    | Будет переехать в UI «Настройки» в отдельном коммите.
+    */
+    'catalog_name_match' => [
+        'enabled' => (bool) env('CATALOG_NAME_MATCH_ENABLED', true),
+        'threshold' => (float) env('CATALOG_NAME_MATCH_THRESHOLD', 0.75),
     ],
 
     /*

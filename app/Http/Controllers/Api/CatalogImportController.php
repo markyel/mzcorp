@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\Catalog\EmbedCatalogChangesJob;
 use App\Jobs\Catalog\ResolvePendingFromCatalogJob;
 use App\Services\Catalog\CatalogImportService;
 use Illuminate\Http\JsonResponse;
@@ -89,6 +90,11 @@ class CatalogImportController extends Controller
         // защищает от двойного запуска при retry скрипта.
         $touched = $import->rows_created + $import->rows_updated + $import->rows_soft_deleted;
         if ($touched > 0) {
+            // Phase 2 use-case C: сначала эмбеддинги (для новых/изменённых строк),
+            // потом резолв позиций — чтобы matchByName видел свежий index.
+            // ResolvePending пройдёт по всем несматченным позициям, в том числе
+            // переиндексирует через C-step против обновлённых embeddings.
+            EmbedCatalogChangesJob::dispatch();
             ResolvePendingFromCatalogJob::dispatch();
         }
 
