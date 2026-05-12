@@ -93,4 +93,15 @@ return [
         'user_agent' => env('WEB_FETCH_USER_AGENT', 'MyLift-Bot/1.0 (+https://mzcorp.ru)'),
     ],
 
+    /*
+    | Phase 2: приём snapshot'ов корпоративного каталога (MDB → push API).
+    | См. app/Services/Catalog/CatalogImportService.php и
+    | app/Http/Controllers/Api/CatalogImportController.php.
+    | Пустой токен → endpoint отдаёт 503 (security default).
+    */
+    'catalog_import' => [
+        'token' => env('CATALOG_IMPORT_TOKEN', ''),
+        'max_rows' => (int) env('CATALOG_IMPORT_MAX_ROWS', 50000),
+    ],
+
 ];
