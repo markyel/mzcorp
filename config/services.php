@@ -73,4 +73,24 @@ return [
         'clarification_model' => env('OPENAI_CLARIFICATION_MODEL', 'gpt-4o-mini'),
     ],
 
+    /*
+    | Веб-фетч URL'ов из входящих писем (RequestItemParsingService).
+    | См. app/Services/Web/InboundUrlFetcherService.php и таблицу
+    | `inbound_url_fetches`.
+    */
+    'web_fetch' => [
+        'enabled' => (bool) env('WEB_FETCH_ENABLED', true),
+        'max_urls_per_email' => (int) env('WEB_FETCH_MAX_URLS_PER_EMAIL', 10),
+        'url_timeout' => (int) env('WEB_FETCH_URL_TIMEOUT', 10),
+        'budget_seconds' => (int) env('WEB_FETCH_BUDGET_SECONDS', 60),
+        'max_size_bytes' => (int) env('WEB_FETCH_MAX_SIZE_BYTES', 2 * 1024 * 1024),
+        'max_text_chars' => (int) env('WEB_FETCH_MAX_TEXT_CHARS', 8000),
+        'cache_ttl_days' => (int) env('WEB_FETCH_CACHE_TTL_DAYS', 7),
+        'allowed_content_types' => array_filter(array_map(
+            'trim',
+            explode(',', (string) env('WEB_FETCH_ALLOWED_CONTENT_TYPES', 'text/html,application/xhtml+xml,text/plain')),
+        )),
+        'user_agent' => env('WEB_FETCH_USER_AGENT', 'MyLift-Bot/1.0 (+https://mzcorp.ru)'),
+    ],
+
 ];

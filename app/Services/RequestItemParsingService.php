@@ -2,9 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\InboundUrlFetch;
 use App\Prompts\Mail\ParseItemsPrompt;
 use App\Services\AI\OpenAIChatService;
 use App\Services\Mail\EmailTextCleanerService;
+use App\Services\Web\InboundUrlFetcherService;
+use App\Services\Web\UrlExtractor;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -17,6 +20,8 @@ class RequestItemParsingService
     public function __construct(
         private OpenAIChatService $openai,
         private EmailTextCleanerService $cleaner = new EmailTextCleanerService(),
+        private ?UrlExtractor $urlExtractor = null,
+        private ?InboundUrlFetcherService $urlFetcher = null,
     ) {}
 
     /**
@@ -124,9 +129,14 @@ class RequestItemParsingService
      *
      * @return array<array{name: string, brand: ?string, article: ?string, qty: float, unit: string, note: ?string}>
      */
-    public function parseItemsWithGPT(string $text, ?string $subject = null, ?string $fromEmail = null, ?string $fromName = null): array
-    {
-        $userPrompt = $this->buildInboundUserPrompt($text, $subject, $fromEmail, $fromName);
+    public function parseItemsWithGPT(
+        string $text,
+        ?string $subject = null,
+        ?string $fromEmail = null,
+        ?string $fromName = null,
+        ?string $linkedUrlsText = null,
+    ): array {
+        $userPrompt = $this->buildInboundUserPrompt($text, $subject, $fromEmail, $fromName, $linkedUrlsText);
 
         $result = $this->openai->chat(
             [
@@ -144,10 +154,16 @@ class RequestItemParsingService
     }
 
     /**
-     * Собрать user-prompt секциями: ## ОТПРАВИТЕЛЬ / ## ТЕМА / ## ТЕКСТ.
+     * Собрать user-prompt секциями: ## ОТПРАВИТЕЛЬ / ## ТЕМА / ## ТЕКСТ
+     * / ## ИЗВЛЕЧЁННЫЙ ТЕКСТ ИЗ ССЫЛОК (опционально).
      */
-    private function buildInboundUserPrompt(string $text, ?string $subject, ?string $fromEmail, ?string $fromName): string
-    {
+    private function buildInboundUserPrompt(
+        string $text,
+        ?string $subject,
+        ?string $fromEmail,
+        ?string $fromName,
+        ?string $linkedUrlsText = null,
+    ): string {
         $parts = [];
 
         if ($fromEmail || $fromName) {
@@ -166,6 +182,12 @@ class RequestItemParsingService
         $parts[] = '## ТЕКСТ';
         $cleanText = trim($text);
         $parts[] = $cleanText !== '' ? $cleanText : '(тело письма пустое)';
+
+        if ($linkedUrlsText !== null && trim($linkedUrlsText) !== '') {
+            $parts[] = '';
+            $parts[] = '## ИЗВЛЕЧЁННЫЙ ТЕКСТ ИЗ ССЫЛОК';
+            $parts[] = trim($linkedUrlsText);
+        }
 
         return implode("\n", $parts);
     }
@@ -532,6 +554,11 @@ PROMPT;
         // (см. parser-corpus.txt, кейсы #349, #357).
         $cleanedBody = $this->cleaner->cleanInboundReferenceText($rawBody);
 
+        // Шаг 0: вытащить URL'ы из тела (cleaned plain + raw html) и
+        // синхронно сходить за их выжимками. Cache в `inbound_url_fetches`
+        // делает повторные письма с тем же URL бесплатными.
+        $linkedUrlsText = $this->fetchLinkedUrlsForPrompt($cleanedBody, $html, "msg#{$message->id}");
+
         return $this->parseItemsFromInboundContent(
             $cleanedBody,
             $attachments,
@@ -539,7 +566,70 @@ PROMPT;
             (string) ($message->subject ?? ''),
             (string) ($message->from_email ?? ''),
             (string) ($message->from_name ?? ''),
+            $linkedUrlsText,
         );
+    }
+
+    /**
+     * Извлечь URL'ы из тела письма и сфетчить их выжимки. Результат —
+     * строка-секция для промпта (или null если ничего полезного не нашли).
+     *
+     * Fail-soft: любая ошибка фетчера логируется и возвращает null —
+     * text-only парсер всё равно отработает по основному телу.
+     */
+    private function fetchLinkedUrlsForPrompt(?string $cleanedPlain, ?string $rawHtml, string $sourceTag): ?string
+    {
+        if (! config('services.web_fetch.enabled', true)) {
+            return null;
+        }
+        if ($this->urlExtractor === null || $this->urlFetcher === null) {
+            return null;
+        }
+
+        $maxUrls = (int) config('services.web_fetch.max_urls_per_email', 10);
+        $urls = $this->urlExtractor->extract($cleanedPlain, $rawHtml, $maxUrls);
+        if (empty($urls)) {
+            return null;
+        }
+
+        try {
+            $results = $this->urlFetcher->fetchMany($urls);
+        } catch (\Throwable $e) {
+            Log::warning('parseItemsFromInboundMessage: url fetch failed', [
+                'source' => $sourceTag,
+                'urls' => count($urls),
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        $blocks = [];
+        foreach ($results as $row) {
+            /** @var InboundUrlFetch $row */
+            if (! $row->isSuccessful() || $row->extracted_text === null || trim($row->extracted_text) === '') {
+                continue;
+            }
+            $blocks[] = "### {$row->url}\n" . trim($row->extracted_text);
+        }
+
+        if (empty($blocks)) {
+            Log::info('parseItemsFromInboundMessage: url fetch — no usable content', [
+                'source' => $sourceTag,
+                'urls' => count($urls),
+                'statuses' => array_count_values(array_map(fn ($r) => $r->status, $results)),
+            ]);
+
+            return null;
+        }
+
+        Log::info('parseItemsFromInboundMessage: url fetch — ok', [
+            'source' => $sourceTag,
+            'urls' => count($urls),
+            'usable' => count($blocks),
+        ]);
+
+        return implode("\n\n", $blocks);
     }
 
     /**
@@ -559,6 +649,7 @@ PROMPT;
         string $subject = '',
         string $fromEmail = '',
         string $fromName = '',
+        ?string $linkedUrlsText = null,
     ): array {
         $referenceText = trim($rawReferenceText);
         if (mb_strlen($referenceText) < 10) {
@@ -644,14 +735,23 @@ PROMPT;
         // («Лифтовые Решения Ремни 607») с описанием товара и галлюцинировал.
         // Запускаем text-only парсер даже если cleaned body пустой, но subject
         // есть — пусть GPT решает (по новому правилу subject-only — items: []).
-        $shouldTryText = empty($items) && ($referenceText !== null || trim($subject) !== '');
+        // Text-only путь активируем не только когда $items пуст, но и когда у нас
+        // есть сфетченные ссылки — они могут добавить позиции, не пересекающиеся
+        // с тем, что извлечено из вложений (например, клиент прислал фото одной
+        // запчасти и ссылку на каталог второй).
+        $shouldTryText = ($referenceText !== null || trim($subject) !== '' || $linkedUrlsText !== null)
+            && (empty($items) || $linkedUrlsText !== null);
         if ($shouldTryText) {
             try {
-                $items = $this->parseItemsWithGPT(
-                    $referenceText ?? '',
-                    $subject !== '' ? $subject : null,
-                    $fromEmail !== '' ? $fromEmail : null,
-                    $fromName !== '' ? $fromName : null,
+                $items = array_merge(
+                    $items,
+                    $this->parseItemsWithGPT(
+                        $referenceText ?? '',
+                        $subject !== '' ? $subject : null,
+                        $fromEmail !== '' ? $fromEmail : null,
+                        $fromName !== '' ? $fromName : null,
+                        $linkedUrlsText,
+                    ),
                 );
             } catch (\Throwable $e) {
                 Log::warning('parseItemsFromInboundContent: text-only parse failed', [
