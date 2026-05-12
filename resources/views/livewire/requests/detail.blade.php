@@ -501,6 +501,83 @@
 
             {{-- ───── ПОЗИЦИИ ───── --}}
             @case('items')
+                @php
+                    // Phase 2: очередь LLM-предположений об уточнениях артикулов.
+                    // Заполняется decideClarifications при парсинге reply'я.
+                    $pendingClarifications = is_array($req->pending_clarifications) ? $req->pending_clarifications : [];
+                @endphp
+
+                @if(! empty($pendingClarifications))
+                    <div class="ds-card mb-3 border-amber-300">
+                        <div class="ds-card-header bg-amber-50">
+                            <h3 class="text-amber-900">Предложенные уточнения</h3>
+                            <span class="text-[10.5px] font-semibold text-amber-900 bg-amber-100 px-1.5 py-0.5 rounded-full">{{ count($pendingClarifications) }}</span>
+                            <span class="flex-1"></span>
+                            <span class="text-[11.5px] text-amber-800">LLM нашёл в reply'е уточнения к существующим позициям — проверьте и примите или отклоните</span>
+                        </div>
+                        <div class="divide-y divide-amber-200">
+                            @foreach($pendingClarifications as $clr)
+                                @php
+                                    $clrId = $clr['id'] ?? null;
+                                    $targetPos = $clr['target_position'] ?? null;
+                                    $targetItem = $targetPos ? $items->firstWhere('position', (int) $targetPos) : null;
+                                    $addArticle = $clr['additional_article'] ?? null;
+                                    $addBrand = $clr['additional_brand'] ?? null;
+                                    $reasoning = $clr['reasoning'] ?? '';
+                                @endphp
+                                <div class="px-[18px] py-3 text-[12.5px]" wire:key="clr-{{ $clrId }}">
+                                    <div class="flex items-start gap-3">
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex items-center gap-2 flex-wrap">
+                                                <span class="text-fg-3 text-[11px]">К позиции</span>
+                                                @if($targetItem)
+                                                    <span class="mono text-[11px] text-fg-1">#{{ $targetItem->position }}</span>
+                                                    <span class="font-medium text-fg-1">{{ $targetItem->parsed_name }}</span>
+                                                    @if($targetItem->parsed_article)
+                                                        <span class="mono text-fg-2 text-[11.5px]">{{ $targetItem->parsed_article }}</span>
+                                                    @endif
+                                                @else
+                                                    <span class="text-fg-3">#{{ $targetPos }} (позиция не найдена)</span>
+                                                @endif
+                                            </div>
+                                            <div class="mt-1.5 flex items-center gap-2 flex-wrap">
+                                                <span class="text-fg-3 text-[11px]">Добавить:</span>
+                                                @if($addArticle)
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded-sm bg-amber-100 text-amber-900 font-semibold text-[11.5px] mono">{{ $addArticle }}</span>
+                                                @endif
+                                                @if($addBrand)
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded-sm bg-emerald-100 text-emerald-900 font-medium text-[11.5px]">{{ $addBrand }}</span>
+                                                @endif
+                                                @if(! $addArticle && ! $addBrand)
+                                                    <span class="text-fg-3 italic">пусто (можно только отклонить)</span>
+                                                @endif
+                                            </div>
+                                            @if($reasoning !== '')
+                                                <div class="text-[11px] text-fg-3 mt-1.5 italic">{{ $reasoning }}</div>
+                                            @endif
+                                        </div>
+                                        <div class="flex items-center gap-2 shrink-0">
+                                            <button type="button"
+                                                    wire:click="applyClarification({{ Js::from($clrId) }})"
+                                                    wire:loading.attr="disabled"
+                                                    @disabled(! $targetItem || (! $addArticle && ! $addBrand))
+                                                    class="btn btn-sm bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700 disabled:opacity-50">
+                                                Применить
+                                            </button>
+                                            <button type="button"
+                                                    wire:click="rejectClarification({{ Js::from($clrId) }})"
+                                                    wire:loading.attr="disabled"
+                                                    class="btn btn-sm">
+                                                Отклонить
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                @endif
+
                 <div class="ds-card">
                     <div class="ds-card-header">
                         <h3>Позиции запроса</h3>

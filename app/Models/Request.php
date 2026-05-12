@@ -27,6 +27,10 @@ class Request extends Model
         'client_name',
         'subject',
         'assigned_at',
+        // Phase 2: очередь LLM-предположений «это уточнение существующей
+        // позиции, а не новая». См. миграцию
+        // 2026_05_12_160000_add_pending_clarifications_to_requests_table.
+        'pending_clarifications',
     ];
 
     protected function casts(): array
@@ -34,6 +38,7 @@ class Request extends Model
         return [
             'status' => RequestStatus::class,
             'assigned_at' => 'datetime',
+            'pending_clarifications' => 'array',
         ];
     }
 

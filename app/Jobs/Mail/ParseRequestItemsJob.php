@@ -139,13 +139,49 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                     ->exists()
                 : false;
 
-            $result = $persister->persist($message, $items);
+            // Phase 2: thread-aware split на reply'е.
+            // Если письмо прицеплено к Request, у которой уже есть items
+            // (т.е. это reply, а не trigger), запускаем второй LLM-проход:
+            // отделяем «truly new» позиции от «clarifications» (уточнений
+            // артикулов существующих позиций). Clarifications складываются
+            // в Request->pending_clarifications, новые items идут в persist
+            // как обычно. Reset-режим отключает split — там старые items
+            // только что стёрты, контекста нет.
+            $clarifications = [];
+            if ($hadItemsBefore && ! $this->reset && $message->related_request_id) {
+                $existing = \App\Models\RequestItem::query()
+                    ->where('request_id', $message->related_request_id)
+                    ->orderBy('position')
+                    ->get();
+
+                $replySnippet = (string) ($message->body_plain ?? $message->body_html ?? '');
+                $split = $parser->decideClarifications(
+                    newItems: $items,
+                    existingItems: $existing,
+                    sourceEmailMessageId: $message->id,
+                    replyContextSnippet: $replySnippet,
+                );
+
+                if (! empty($split['clarifications'])) {
+                    $clarifications = $split['clarifications'];
+                    // Оставляем в $items только те, что LLM не пометил как
+                    // clarification. Индексы перенумеровываем, чтобы persister
+                    // получил чистый list.
+                    $items = array_values(array_intersect_key(
+                        $items,
+                        array_flip($split['new_indexes']),
+                    ));
+                }
+            }
+
+            $result = $persister->persist($message, $items, $clarifications);
 
             Log::info('ParseRequestItemsJob: items persisted', [
                 'email_message_id' => $message->id,
                 'request_id' => $result['request']?->id,
                 'new' => $result['new'],
                 'dup' => $result['dup'],
+                'clarifications' => $result['clarifications'] ?? 0,
                 'force' => $this->force,
                 'had_items_before' => $hadItemsBefore,
             ]);

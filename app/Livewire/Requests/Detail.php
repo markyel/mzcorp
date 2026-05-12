@@ -91,6 +91,148 @@ class Detail extends Component
     }
 
     /**
+     * Phase 2: применить LLM-предположение «это уточнение существующей
+     * позиции» — дописать additional_article к parsed_article + (опц.)
+     * brand, удалить запись из pending_clarifications.
+     *
+     * Идемпотентность: если артикул уже присутствует в parsed_article
+     * (по normalizeArticle-эквиваленту), просто чистим очередь.
+     *
+     * Privileged-роли + владелец заявки.
+     */
+    public function applyClarification(string $clarificationId): void
+    {
+        $this->mutateClarification($clarificationId, apply: true);
+    }
+
+    /**
+     * Phase 2: отклонить LLM-предположение — удаление из очереди без
+     * правки позиции.
+     */
+    public function rejectClarification(string $clarificationId): void
+    {
+        $this->mutateClarification($clarificationId, apply: false);
+    }
+
+    private function mutateClarification(string $clarificationId, bool $apply): void
+    {
+        $user = auth()->user();
+        $isPrivileged = $user?->hasAnyRole([
+            Role::HeadOfSales->value,
+            Role::Director->value,
+            Role::Secretary->value,
+        ]);
+        if (! $isPrivileged && $this->request->assigned_user_id !== $user?->id) {
+            abort(403);
+        }
+
+        $req = $this->request->fresh(['items']);
+        if ($req === null) {
+            return;
+        }
+        $queue = is_array($req->pending_clarifications) ? $req->pending_clarifications : [];
+
+        $target = null;
+        $remaining = [];
+        foreach ($queue as $entry) {
+            if (is_array($entry) && ($entry['id'] ?? null) === $clarificationId && $target === null) {
+                $target = $entry;
+                continue;
+            }
+            $remaining[] = $entry;
+        }
+        if ($target === null) {
+            // Запись могла быть удалена параллельно — просто релоудим.
+            $this->reloadRequest();
+
+            return;
+        }
+
+        if ($apply) {
+            $item = $req->items->firstWhere('position', (int) ($target['target_position'] ?? 0));
+            if ($item !== null) {
+                $addArt = $target['additional_article'] ?? null;
+                $addBrand = $target['additional_brand'] ?? null;
+                $dirty = false;
+
+                if (is_string($addArt) && $addArt !== '') {
+                    $existingArt = (string) ($item->parsed_article ?? '');
+                    if (! $this->articleAlreadyPresent($existingArt, $addArt)) {
+                        $item->parsed_article = $existingArt === ''
+                            ? $addArt
+                            : $existingArt . ', ' . $addArt;
+                        $dirty = true;
+                    }
+                }
+                if (is_string($addBrand) && $addBrand !== '' && empty($item->parsed_brand)) {
+                    $item->parsed_brand = $addBrand;
+                    $dirty = true;
+                }
+                if ($dirty) {
+                    $item->save();
+                }
+            }
+        }
+
+        $req->forceFill([
+            'pending_clarifications' => empty($remaining) ? null : array_values($remaining),
+        ])->save();
+
+        \Illuminate\Support\Facades\Log::info('Detail: clarification mutated', [
+            'request_id' => $req->id,
+            'clarification_id' => $clarificationId,
+            'action' => $apply ? 'apply' : 'reject',
+            'target_position' => $target['target_position'] ?? null,
+            'user_id' => $user?->id,
+        ]);
+
+        $this->reloadRequest();
+    }
+
+    private function reloadRequest(): void
+    {
+        $this->request = Request::query()
+            ->whereKey($this->request->id)
+            ->with([
+                'assignedUser:id,name,email',
+                'items',
+                'items.brand:id,name',
+                'items.kbCategory:id,slug,name',
+                'items.imageAttachment:id,email_message_id,filename,mime_type,disk,file_path,size_bytes',
+                'context:id,request_id,analysis_status,equipment_units,llm_model_version,analyzed_at',
+                'emailMessage.attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline',
+                'emailMessage.mailbox:id,email,name',
+                'assignments' => fn ($q) => $q->orderByDesc('assigned_at'),
+                'assignments.user:id,name',
+                'assignments.assignedBy:id,name',
+            ])
+            ->firstOrFail();
+    }
+
+    /**
+     * Проверка наличия артикула в строке существующих артикулов
+     * (`A, B, C` или одиночный). Та же нормализация что и в
+     * `RequestItemParsingService::normalizeArticle` (без пробелов/тире,
+     * upper-case) — чтобы повторное Apply не плодило дубль вида
+     * «M21595, m-21595».
+     */
+    private function articleAlreadyPresent(string $existing, string $candidate): bool
+    {
+        $norm = fn (string $s) => preg_replace('/[\s\-_.\/]/', '', mb_strtoupper(trim($s)));
+        $candidateNorm = $norm($candidate);
+        if ($candidateNorm === '') {
+            return true;
+        }
+        foreach (preg_split('/\s*,\s*/', $existing) as $part) {
+            if ($norm((string) $part) === $candidateNorm) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Snapshot sticky-привязок (Phase 2 sticky visibility).
      *
      * Самый свежий `request_assignments` с reason, начинающимся на

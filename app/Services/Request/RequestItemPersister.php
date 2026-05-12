@@ -40,12 +40,15 @@ class RequestItemPersister
 
     /**
      * @param  array<array{name: string, brand: ?string, article: ?string, qty: float, unit: string, note: ?string}>  $items
-     * @return array{request: ?Request, new: int, dup: int, just_created: bool}
+     * @param  list<array{id: string, source_email_message_id: ?int, target_position: int, additional_article: ?string, additional_brand: ?string, reasoning: string, created_at: string}> $clarifications
+     *        — LLM-предположения «это уточнение существующей позиции», складываются в Request->pending_clarifications.
+     *        Применяет оператор вручную через UI карточки (applyClarification).
+     * @return array{request: ?Request, new: int, dup: int, just_created: bool, clarifications: int}
      */
-    public function persist(EmailMessage $message, array $items): array
+    public function persist(EmailMessage $message, array $items, array $clarifications = []): array
     {
-        if (empty($items)) {
-            return ['request' => null, 'new' => 0, 'dup' => 0, 'just_created' => false];
+        if (empty($items) && empty($clarifications)) {
+            return ['request' => null, 'new' => 0, 'dup' => 0, 'just_created' => false, 'clarifications' => 0];
         }
 
         // Phase 1.8c: триггер для создания Request — только client_request.
@@ -68,7 +71,7 @@ class RequestItemPersister
                 'confidence' => $message->category_confidence,
             ]);
 
-            return ['request' => null, 'new' => 0, 'dup' => 0, 'just_created' => false];
+            return ['request' => null, 'new' => 0, 'dup' => 0, 'just_created' => false, 'clarifications' => 0];
         }
 
         $existing = $message->related_request_id
@@ -156,6 +159,19 @@ class RequestItemPersister
             \App\Jobs\Kb\ResolveKbJob::dispatch($existing->id);
         }
 
+        // Phase 2: складываем LLM-предположения по уточнениям в очередь
+        // pending_clarifications (jsonb на Request). Применяет оператор
+        // вручную через UI (applyClarification/rejectClarification).
+        $clarStoredCount = 0;
+        if (! empty($clarifications)) {
+            $existingClar = is_array($existing->pending_clarifications)
+                ? $existing->pending_clarifications
+                : [];
+            $merged = array_merge($existingClar, $clarifications);
+            $existing->forceFill(['pending_clarifications' => $merged])->save();
+            $clarStoredCount = count($clarifications);
+        }
+
         Log::info('RequestItemPersister: items persisted', [
             'email_message_id' => $message->id,
             'request_id' => $existing->id,
@@ -163,6 +179,7 @@ class RequestItemPersister
             'items_total' => count($items),
             'items_new' => count($filtered['new']),
             'items_dup' => $filtered['duplicates'],
+            'clarifications_added' => $clarStoredCount,
             'just_created' => $justCreated,
         ]);
 
@@ -171,6 +188,7 @@ class RequestItemPersister
             'new' => count($filtered['new']),
             'dup' => $filtered['duplicates'],
             'just_created' => $justCreated,
+            'clarifications' => $clarStoredCount,
         ];
     }
 }

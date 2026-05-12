@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\InboundUrlFetch;
+use App\Models\RequestItem;
+use App\Prompts\Mail\DecideClarificationsPrompt;
 use App\Prompts\Mail\ParseItemsPrompt;
 use App\Services\AI\OpenAIChatService;
 use App\Services\Mail\EmailTextCleanerService;
@@ -931,6 +933,159 @@ PROMPT;
         }
 
         return ['new' => $new, 'duplicates' => $duplicates];
+    }
+
+    /**
+     * Второй проход LLM на reply: разделяем «truly new» позиции и
+     * «clarifications» (уточнение артикулов существующих позиций).
+     *
+     * Возвращает массив той же длины что и $newItems, в котором каждому
+     * исходному item ставится в соответствие либо отметка `null`
+     * (truly new, item идёт в обычный persist через filterNewItems),
+     * либо clarification-запись (для записи в Request->pending_clarifications).
+     *
+     * Fail-soft: если LLM упал или вернул мусор — все items считаются
+     * truly new (поведение как до этого коммита).
+     *
+     * @param array<int, array{name: string, brand: ?string, article: ?string, qty: float, unit: string, note: ?string}> $newItems
+     * @param Collection<int, RequestItem> $existingItems
+     * @param int|null $sourceEmailMessageId — id reply'я, для записи в clarification (источник предложения).
+     * @param string|null $replyContextSnippet — короткий кусок тела reply'я, чтобы LLM мог увидеть фразы вроде «выставите счёт».
+     * @return array{
+     *   new_indexes: list<int>,
+     *   clarifications: list<array{
+     *     id: string,
+     *     source_email_message_id: ?int,
+     *     target_position: int,
+     *     additional_article: ?string,
+     *     additional_brand: ?string,
+     *     reasoning: string,
+     *     created_at: string
+     *   }>
+     * }
+     */
+    public function decideClarifications(
+        array $newItems,
+        Collection $existingItems,
+        ?int $sourceEmailMessageId = null,
+        ?string $replyContextSnippet = null,
+    ): array {
+        $defaultAllNew = [
+            'new_indexes' => array_keys($newItems),
+            'clarifications' => [],
+        ];
+
+        // Глобальный killswitch для дебага.
+        if (! config('services.openai.clarifications_enabled', true)) {
+            return $defaultAllNew;
+        }
+        if (empty($newItems) || $existingItems->isEmpty()) {
+            return $defaultAllNew;
+        }
+
+        // Соберём минимальный payload для LLM.
+        $existingPayload = $existingItems
+            ->filter(fn ($e) => $e->is_active)
+            ->values()
+            ->map(fn ($e) => [
+                'position' => (int) $e->position,
+                'parsed_name' => (string) $e->parsed_name,
+                'parsed_brand' => $e->parsed_brand,
+                'parsed_article' => $e->parsed_article,
+                'parsed_qty' => (string) $e->parsed_qty,
+                'parsed_unit' => (string) $e->parsed_unit,
+            ])
+            ->all();
+
+        $newPayload = array_map(fn (array $i) => [
+            'name' => $i['name'] ?? '',
+            'brand' => $i['brand'] ?? null,
+            'article' => $i['article'] ?? null,
+            'qty' => (float) ($i['qty'] ?? 1),
+            'unit' => $i['unit'] ?? 'шт.',
+        ], $newItems);
+
+        try {
+            $result = $this->openai->chat(
+                [
+                    ['role' => 'system', 'content' => DecideClarificationsPrompt::systemMessage()],
+                    ['role' => 'user', 'content' => DecideClarificationsPrompt::userMessage($existingPayload, $newPayload, $replyContextSnippet)],
+                ],
+                config('services.openai.clarification_model', 'gpt-4o-mini'),
+                ['response_format' => ['type' => 'json_object'], 'temperature' => 0],
+            );
+        } catch (\Throwable $e) {
+            Log::warning('decideClarifications: LLM call failed', [
+                'error' => $e->getMessage(),
+                'new_count' => count($newItems),
+                'existing_count' => $existingItems->count(),
+            ]);
+
+            return $defaultAllNew;
+        }
+
+        $parsed = json_decode($result['content'] ?? '', true);
+        $decisions = is_array($parsed) ? ($parsed['decisions'] ?? null) : null;
+        if (! is_array($decisions)) {
+            Log::warning('decideClarifications: malformed LLM response', [
+                'content' => mb_substr((string) ($result['content'] ?? ''), 0, 500),
+            ]);
+
+            return $defaultAllNew;
+        }
+
+        $validPositions = array_map(fn ($e) => (int) $e->position, $existingItems->all());
+        $newIndexes = array_keys($newItems);
+        $consumedAsClar = [];
+        $clarifications = [];
+
+        foreach ($decisions as $d) {
+            if (! is_array($d)) {
+                continue;
+            }
+            $idx = $d['new_item_index'] ?? null;
+            $verdict = $d['verdict'] ?? null;
+            if (! is_int($idx) || ! array_key_exists($idx, $newItems)) {
+                continue;
+            }
+            if ($verdict !== 'clarification') {
+                continue;
+            }
+            $targetPos = $d['target_position'] ?? null;
+            if (! is_int($targetPos) || ! in_array($targetPos, $validPositions, true)) {
+                continue; // безопасно — пусть item уйдёт как new
+            }
+
+            $consumedAsClar[$idx] = true;
+            $clarifications[] = [
+                'id' => 'clr_' . substr(bin2hex(random_bytes(8)), 0, 12),
+                'source_email_message_id' => $sourceEmailMessageId,
+                'target_position' => $targetPos,
+                'additional_article' => isset($newItems[$idx]['article']) && $newItems[$idx]['article'] !== ''
+                    ? (string) $newItems[$idx]['article']
+                    : null,
+                'additional_brand' => isset($newItems[$idx]['brand']) && $newItems[$idx]['brand'] !== ''
+                    ? (string) $newItems[$idx]['brand']
+                    : null,
+                'reasoning' => isset($d['reasoning']) && is_string($d['reasoning'])
+                    ? mb_substr($d['reasoning'], 0, 500)
+                    : '',
+                'created_at' => now()->toIso8601String(),
+            ];
+        }
+
+        $remainingNew = array_values(array_filter($newIndexes, fn ($i) => ! isset($consumedAsClar[$i])));
+
+        Log::info('decideClarifications: split', [
+            'truly_new' => count($remainingNew),
+            'clarifications' => count($clarifications),
+            'usage' => $result['usage'] ?? null,
+        ]);
+
+        return [
+            'new_indexes' => $remainingNew,
+            'clarifications' => $clarifications,
+        ];
     }
 
     private function isDuplicate(array $parsed, Collection $existingItems): bool
