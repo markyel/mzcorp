@@ -102,6 +102,11 @@ return [
     'catalog_import' => [
         'token' => env('CATALOG_IMPORT_TOKEN', ''),
         'max_rows' => (int) env('CATALOG_IMPORT_MAX_ROWS', 50000),
+        // Серверный гард от обнуления каталога: mode=full snapshot с rows < этого
+        // значения отклоняется до записи в БД. Дефолт 1 (только пустой payload
+        // запрещён). На рабочем каталоге ставь, скажем, 500 — чтобы битая
+        // частичная выгрузка не снесла строки в is_active=false soft-delete'ом.
+        'min_full_rows' => (int) env('CATALOG_IMPORT_MIN_FULL_ROWS', 1),
     ],
 
 ];

@@ -46,6 +46,30 @@ class CatalogImportController extends Controller
             ], 422);
         }
 
+        // Гард от случайного «обнуления каталога»: mode=full с подозрительно
+        // маленьким snapshot'ом (пустой / неполная выгрузка / битый MDB на
+        // офисе) сносит всё в is_active=false soft-delete'ом. Отказываем
+        // на стороне сервера до записи в БД. Порог — config (env), дефолт 1
+        // (просто запрет пустого payload'а).
+        $minRows = (int) config('services.catalog_import.min_full_rows', 1);
+        $mode = (string) ($data['mode'] ?? 'full');
+        $rowCount = count($data['items']);
+        if ($mode === 'full' && $rowCount < $minRows) {
+            Log::warning('CatalogImportController: snapshot rejected as too small', [
+                'rows_received' => $rowCount,
+                'min_required' => $minRows,
+                'source' => $data['source'] ?? null,
+                'client_ip' => $request->ip(),
+            ]);
+
+            return response()->json([
+                'error' => 'snapshot_too_small',
+                'message' => "items={$rowCount} < min_full_rows={$minRows}. Для mode=full порог защищает от случайного обнуления каталога. Поднимай CATALOG_IMPORT_MIN_FULL_ROWS если нужен меньший snapshot.",
+                'rows_received' => $rowCount,
+                'min_required' => $minRows,
+            ], 422);
+        }
+
         try {
             $import = $this->service->import($data, $request->ip());
         } catch (\Throwable $e) {
