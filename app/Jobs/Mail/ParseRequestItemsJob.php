@@ -43,9 +43,22 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
     public int $tries = 2;
     public int $timeout = 180;
 
+    /**
+     * @param int  $emailMessageId
+     * @param bool $force  Снять гейт «у Request уже есть items» (обычный
+     *                    повторный dispatch — no-op). Используется при
+     *                    ручном перепарсинге.
+     * @param bool $reset Перед persist ОЧИСТИТЬ все RequestItem-ы прицепленные
+     *                    к связанной Request. Только с force=true. Нужен
+     *                    когда старые items были «слеплены» прежним парсером
+     *                    и новые версии не дедупятся по строке артикула.
+     *                    KB-резолвы (quality_assessment_*) живут на item,
+     *                    после удаления ResolveKbJob их пересчитает с нуля.
+     */
     public function __construct(
         public readonly int $emailMessageId,
         public readonly bool $force = false,
+        public readonly bool $reset = false,
     ) {
     }
 
@@ -81,6 +94,21 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
             if ($alreadyHasItems) {
                 return;
             }
+        }
+
+        // reset=true → чистый перепарсинг: грохнуть старые items, чтобы
+        // persister добавил новые без дедуп-конфликтов со «склеенными»
+        // артикулами из прежних версий парсера. Только если есть к чему
+        // привязываться (related_request_id).
+        if ($this->reset && $this->force && $message->related_request_id) {
+            $deleted = \App\Models\RequestItem::query()
+                ->where('request_id', $message->related_request_id)
+                ->delete();
+            Log::info('ParseRequestItemsJob: reset — wiped existing items', [
+                'email_message_id' => $message->id,
+                'request_id' => $message->related_request_id,
+                'deleted' => $deleted,
+            ]);
         }
 
         try {

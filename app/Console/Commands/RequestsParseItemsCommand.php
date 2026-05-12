@@ -27,7 +27,8 @@ class RequestsParseItemsCommand extends Command
         {--apply : Сохранить items + создать/обновить Request}
         {--limit=20 : Bulk: максимум писем за прогон}
         {--from-id=0 : Bulk: пропустить письма с id ниже}
-        {--force : Bulk: перепарсить даже письма с уже непустым Request->items}';
+        {--force : Bulk: перепарсить даже письма с уже непустым Request->items}
+        {--reset : При --apply удалить существующие RequestItem-ы перед persist (clean reparse)}';
 
     protected $description = 'Phase 1.8b: распарсить позиции из inbound-писем (Vision/text).';
 
@@ -77,6 +78,17 @@ class RequestsParseItemsCommand extends Command
 
                 return self::SUCCESS;
             }
+
+            // --reset: чистый перепарсинг — удалить старые items перед persist.
+            // Имеет смысл только если письмо уже привязано к Request; для нового
+            // письма удалять нечего.
+            if ($this->option('reset') && $msg->related_request_id) {
+                $deleted = \App\Models\RequestItem::query()
+                    ->where('request_id', $msg->related_request_id)
+                    ->delete();
+                $this->warn("  --reset: удалено старых позиций: {$deleted}");
+            }
+
             $result = $persister->persist($msg, $items);
             $req = $result['request'];
             $this->info(sprintf(
@@ -157,6 +169,11 @@ class RequestsParseItemsCommand extends Command
                     $stats['total_items'] += count($items);
 
                     if ($apply) {
+                        if ($this->option('reset') && $m->related_request_id) {
+                            \App\Models\RequestItem::query()
+                                ->where('request_id', $m->related_request_id)
+                                ->delete();
+                        }
                         $result = $persister->persist($m, $items);
                         if ($result['just_created']) {
                             $stats['requests_created']++;
