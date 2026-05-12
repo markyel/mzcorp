@@ -34,9 +34,22 @@
 | 1.13a | Sticky-snapshot links в карточке заявки: `AssignmentService::pickStickyManager` пишет JSON в `request_assignments.reason` (`auto_sticky:{linked:[id...]}`), Detail::sticky() парсит, Hero status-row показывает chip с `wire:navigate`-якорями | новое | done (`b1db73f`) |
 | 2.0 | KB drop-in из LazyLift @ 7fee1f77: 11 таблиц (manufacturer_brands/equipment_categories/identification_parameters/rules/extractors/request_context/kb_audit_log) + 11 моделей + 10 сервисов (BrandResolution/CategoryRefinement/QualityAssessment/RequestContextAnalysis/...) + 2 промпта + 11 сидеров с JSON-данными + ResolveKbJob + KbResolveCommand + UI chips в табе Позиции + интеграция в RequestItemPersister | LazyLift drop-in + adapt | done (`d5ea03c`..`c16d26a`) |
 | 2.0-fixes | SupplierResolverService stub (DI требует) + insufficient-when-brand-known (вместо not_covered) + synonym word-boundary fix через `\p{L}\p{N}_` lookarounds (LazyLift substring match ловит «ОС» в «пост») + `--reset-categories` флаг для пересчёта preserve'нутых items + internal MyLift SKU detection (`M\d{4,}` → `internal_catalog_pending`, без LLM-цепочки) | новое | done |
+| 2.1 | Bugfix 500 на табе «Позиции»: `RequestItem::category()` relation коллидировал со строковой колонкой → rename в `kbCategory()` | новое | done (`ffa2f9a`) |
+| 2.2 | Web-fetch URL'ов из тела письма: `inbound_url_fetches` + SSRF guard + DOMDocument-based extraction + cache 7д + sync intеграция в parseItemsFromInboundMessage | новое | done (`1d5c703`) |
+| 2.3 | `--reset` флаг для force re-parse — стирает RequestItem'ы перед persist | новое | done (`e63feba`) |
+| 2.4 | Привязка фото-вложений к позициям через Vision `image_index` → `request_items.image_attachment_id` + thumbnail+lightbox в UI | новое | done (`cca3109`) |
+| 2.5 | Thread-aware clarifications queue: 2-й LLM-проход (`DecideClarificationsPrompt`) на reply'е разделяет «new positions» vs «article clarifications»; `requests.pending_clarifications` (jsonb) + UI Apply/Reject | новое | done (`1e5640c`) |
+| 2.6 | Каталог Liftway.ru drop-in: 30649 строк, POST /api/catalog/import (token-auth, hash-aware upsert, soft-delete, min_full_rows guard), CLI `catalog:import file.csv` (cp1251 autodetect) | новое | done (`a3a2d8f`..`94c5ef8`) |
+| 2.6-A | Use-case A: M-SKU resolve через CatalogResolutionService::resolveItem → status=sufficient + payload.catalog | новое | done |
+| 2.6-B | Use-case B: brand_article match через `brand_article_normalized` + normalize-симметричный normalizeArticle | новое | done |
+| 2.6-C | Use-case C: vector match через pgvector(1536) HNSW + 3-stage retrieval (article check + LLM validation gpt-4o-mini + retry+sleep + llm_fail_action=reject) | новое | done |
+| 2.7 | Hero «Сумма» / «Сматчено N/M (%)» + НДС 22% configurable | новое | done (`086c55b`, `6729fc6`) |
+| 2.8 | UI «Настройки» (`/dashboard/settings`): `app_settings` override config + Livewire admin страница (7 параметров в 3 группах, role-gate head_of_sales/director) | новое | done (`44f68b1`..`94c5ef8`) |
+| 2.9 | Vision-промпт: numbered text list authoritative count of positions (фикс M-2026-0512 — клиент пишет «1. Левая, 2. Правая», Vision сливал) | новое | done (`a12e20d`) |
 
-KB drop-in, sticky-snapshot — **в Фазе 2 (закрыты сессией 2026-05-08).**
-Каталог, refresh-цены, DocumentDetector, экспорт в 1С, паузы/state machine, KB curator UI — **за пределами текущей фазы.**
+KB drop-in, sticky-snapshot, catalog (A+B+C), settings UI — **в Фазе 2 (закрыты 2026-05-08 и 2026-05-12).**
+Refresh-цены per-item / Unbind UI, internal_catalog_not_found status, регулярный sync MDB, Phase 1.9 outbound — **в очереди (см. план в конце файла).**
+DocumentDetector, экспорт в 1С, паузы/state machine, KB curator UI — **за пределами текущей фазы.**
 
 ## Что готово (инфраструктура — Фаза 0)
 
@@ -467,48 +480,171 @@ sudo supervisorctl restart mzcorp-worker:*
 - `MZ\|&-BBgEMgQwBD0EPgQy-` и `MZ\|&BBgEMgQwBD0EPgQy-` — наши early-attempt фейлы с double-encode и manual UI create. Удалить вручную.
 - Зелёный label «MZ Иванов» на email#16 (legacy IMAP keyword до перехода на folder approach) — удалить вручную.
 
+### Сессия 2026-05-12 — Phase 2.x: web-fetch + clarifications + catalog + vector match + UI «Настройки»
+
+Большая сессия. Закрыли несколько Phase 2 фич + добили обработку каталога.
+
+**1. Bugfix 500 на табе «Позиции»** (`ffa2f9a`)
+- `RequestItem::category()` relation коллидировал со строковой колонкой `category` (coarse-категория от парсера). Eloquent в `getAttribute()` отдавал строку → `$item->category->slug` валился ErrorException.
+- Переименован relation → `kbCategory()`, обновлены `Detail::mount()` eager-load и блейд.
+
+**2. Web-fetch URL'ов из тела письма** (`1d5c703`)
+- Новая таблица `inbound_url_fetches` (cache по `url_hash`, status, extracted_text).
+- `App\Services\Web\WebSecurity` — SSRF guard (CIDR blocklist, schemes whitelist, DNS resolve before connect, per-redirect re-check).
+- `UrlExtractor` (regex + DOMDocument для `<a href>`), `InboundUrlFetcherService` (Guzzle с timeout/size limits + readability extraction через DOMDocument).
+- Интегрировано в `RequestItemParsingService::parseItemsFromInboundMessage` синхронно — заявка не появляется в пуле пока URL не сфетчены.
+- Cap 10 URL/email, бюджет 60с, кэш 7 дней. Конфиг `services.web_fetch.*` через env.
+- Unit-тесты: `tests/Unit/Services/Web/WebSecurityTest.php` (14 кейсов), `UrlExtractorTest.php` (7).
+
+**3. `--reset` флаг для force re-parse** (`e63feba`)
+- `ParseRequestItemsJob` теперь принимает `reset=true` — стирает `RequestItem`-ы привязанные к Request перед persist. Нужен после смены парсера/промпта, иначе старые «склеенные» позиции дедупа не пройдут.
+- CLI: `php artisan requests:parse-items <id> --apply --reset`.
+
+**4. Привязка фото-вложений к позициям (Vision image_index)** (`cca3109`)
+- Миграция `add_image_attachment_id_to_request_items`.
+- Vision-промпт расширен: возвращает `image_index` (0..N-1).
+- `parseItemsFromPhotoMarkings` мапит index → email_attachment_id.
+- В UI у позиций thumbnail 32×32 с lightbox.
+
+**5. Thread-aware clarifications queue** (`1e5640c`)
+- Phase 2 use-case D: когда reply к существующей Request содержит «уточнение артикула» (Liftway-auto: LW-* в первом письме, M-* в reply), система не плодит дубль.
+- Второй LLM-проход (`DecideClarificationsPrompt` на mini): по контексту existing+new решает «new» vs «clarification».
+- Clarifications кладутся в `requests.pending_clarifications` (jsonb), в UI карточки отдельный amber-блок с Apply/Reject кнопками.
+
+**6. Каталог Liftway.ru — drop-in 30 649 строк** (`a3a2d8f`, `a76b241`, `f655152`, `20d244d`, `086c55b`, `6729fc6`, `9b70548`, `a12e20d`, `e4a2769`, `baebb47`, `7ef3dc6`, `44f68b1`, `d99e851`, `94c5ef8`)
+- **Импорт**: `POST /api/catalog/import` (token-auth, hash-aware upsert, soft-delete, min_full_rows guard), CLI `catalog:import file.csv --apply` (cp1251 + autodetect разделитель).
+- **Use-case A** (M-SKU resolve): items со status=internal_catalog_pending после импорта → `sufficient` + payload.catalog.
+- **Use-case B** (brand_article match): новая колонка `brand_article_normalized` (uppercase + удаление `[\s\-_./]`) + HNSW-free lookup. 220+ позиций сматчено exact.
+- **Use-case C** (vector + LLM validation):
+  - Таблица `catalog_item_embeddings` + pgvector(1536) + HNSW по cosine.
+  - `OpenAIEmbeddingService` симметричен `OpenAIChatService`.
+  - `CatalogEmbeddingService` — embed catalog (30k × ~80 токенов ≈ $0.09 разово), buildQueryText из RequestItem, vector top-1 retrieval.
+  - **Three-stage retrieval**:
+    1. vector cosine ≥ threshold (default 0.75);
+    2. article safety-check (если у обоих brand_article и они normalize-разные → reject);
+    3. LLM validation (gpt-4o-mini, `ValidateCatalogMatchPrompt`) для пар [threshold, hc_threshold=0.90). Внешний retry 2×sleep(5) поверх Http::retry — справляется с прокси-503 серий.
+  - `llm_fail_action=reject` (default): при сбое LLM матч отклоняем (precision приоритет).
+  - Маркер `payload->catalog_match->method = A_internal_sku | B_brand_article | C_name_vector` для точечного rollback'а.
+  - На свежей выборке: B 220, C 11 approved, precision на видимых ~100%.
+- **UI карточки**: chip «в каталоге · M01767» (violet), chip `mylift.ru ↗` (sky external-link, для M-SKU позиций), цена/наличие/сумма в колонках, hero «Сумма» и «Сматчено N/M (P%)», подытог + НДС {VAT_PERCENT}% + итого внизу таба «Позиции».
+- **Защита**: `CATALOG_IMPORT_MIN_FULL_ROWS` отвергает 422 если < N строк (защита от обнуления каталога битой выгрузкой).
+
+**7. UI «Настройки» (`/dashboard/settings`)** (`44f68b1`, `d99e851`, `94c5ef8`)
+- Таблица `app_settings` (key/value/type/description/updated_by) — override поверх `config()`.
+- `SettingsService` (get/set/unset/forget с 5-мин кэшем); helper `app_setting('key', config('default'))`.
+- Livewire-страница admin Settings для head_of_sales/director: 7 настроек в 3 группах (catalog matching, catalog import, taxes).
+- При save: если значение = config-default → unset (override удаляется); иначе upsert.
+- НДС теперь 22% (с 2026 в РФ).
+
+**8. Vision-промпт: numbered text list authoritative** (`a12e20d`)
+- M-2026-0512: клиент пишет «1. Отводка Левая, 2. Отводка Правая, 3. Мотор» + 3 фото, Vision сливал Левую с Правой как «один товар с разных ракурсов».
+- Промпт расширен: если в reference text нумерованный список → COUNT и SOSTAV из текста, фото — enrichment. Перечислены примеры asymmetric-модификаций (Левая/Правая, Верх/Низ, M/F, цвета).
+- `image_index: null` теперь легитимный случай (позиция из текста без подходящего фото).
+
+#### Известные грабли (новые в этой сессии)
+
+- **Livewire wire:model и точки в ключах**: точки трактуются как nested array access (`values.X.Y.Z` → `$values[X][Y][Z]`). Workaround: в `Index::formKey()` конвертим dot-key → underscored form-key (`catalog.name_match.threshold` → `catalog_name_match_threshold`), в save переводим обратно через schema.
+- **HTML5 `<input type=number>` валидация**: `value = min + n × step`. `min=1 step=100` → разрешены `1, 101, 201, ..., 24001` — `24000` мимо. Браузер показывает «Введите допустимое значение». Для счётчиков-integer держим `step=1`.
+- **Прокси openai-proxy серией отдаёт 503** во время bulk LLM-вызовов. Laravel `Http::retry(3, 2000)` укладывается в ~6 сек — мало. Внешний retry в `validateMatchWithLlm` со sleep(5) добивает. + `llm_fail_action=reject` чтобы при остаточных fail'ах не пропускать матч.
+- **Vector retrieval ловит «семантически близкие, но разные товары»**: «звено цепи» vs «звезда главного вала», «поручень» vs «ролик/колесо», «1 м/с» vs «1.6 м/с», разные модели в одной серии. Distribution similarity для правильных vs ложных пересекается (0.77–0.86), threshold-сдвиг не разделит. LLM-валидация это режет.
+- **`git pull` на проде от root** оставляет файлы owner=root, последующий `sudo -u www-data git pull` ломается на permission denied и оставляет workdir в полу-применённом состоянии. Решение: `sudo chown -R www-data:www-data /var/www/mzcorp` + `sudo -u www-data git reset --hard origin/main` + `git clean -fd`. И запомнить: git на проде всегда от `www-data`.
+- **composer.json:autoload.files требует `composer dump-autoload`** на проде после `git pull` — иначе helper `app_setting()` не подцепится.
+
+#### Текущее состояние на проде (2026-05-12 вечер)
+
+- `catalog_items`: 30 649 строк, all active.
+- `catalog_item_embeddings`: 30 649 эмбеддингов (model `text-embedding-3-small`).
+- `request_items.catalog_item_id`: ~250+ позиций (40 A + 220 B + 11 C approved + 5 свежих).
+- `app_settings`: пусто (все на config-defaults).
+- `inbound_url_fetches`: ноль (новых писем с URL пока не было после деплоя).
+- Failed jobs очищены от старых OAuth-ошибок man2/man3.
+
 ## План на следующую сессию
 
-После сессии 2026-05-08 закрыта Phase 1.13 (UI менеджеров + OAuth-привязка ящиков + manual reassign + email-style isolation + attachments UX). Все три ящика на проде с живыми OAuth-токенами, новые менеджеры заводятся через браузер.
+Большая часть Phase 2 caталога закрыта. На очереди мелкие добивания + Phase 1.9 outbound (старый план, всё ещё актуален).
 
-### Приоритет 1 — Phase 1.9 outbound (Sent-tracking)
+### Приоритет 1 — Refresh per-item / Unbind catalog в UI
 
-`OutgoingMailObserver` — синк папки Sent у каждого ящика, привязка наших исходящих к существующим Request через `In-Reply-To` / `References` / subject `M-2026-NNNN`. Поля у `EmailMessage` уже есть (`direction = outbound`, `mailbox_id`, headers). Логика похожа на inbound:
-1. Sync Sent папку (тот же `SyncMailboxFolderJob` с folder='Sent', работает).
-2. Для каждого нового outbound message — найти Request через те же 5 уровней что в `InboundReplyLinker` (можно переиспользовать класс, добавив `tryLinkOutbound`).
-3. Если matched — поставить `related_request_id`, обновить `Request.last_outbound_at`. Это даст:
-   - Тред в UI «Переписка» Phase 1.8d покажет outbound сообщения вместе с inbound.
-   - Дашборд РОПа сможет считать KPI «time-to-quote» (от inbound до первого outbound).
-4. Compose-кнопка в UI — Phase 1.9 next iteration. Сначала observer, потом editor.
+Кнопка в карточке заявки (в строке позиции, либо «···»-меню):
+- «Обновить из каталога» — пересмотреть привязку (повторить matchByName, обновить parsed_name/brand из catalog если поменялись).
+- «Отвязать от каталога» — `catalog_item_id = null`, payload->catalog_match очистить.
+- «Привязать вручную» — поиск по каталогу через autocomplete, оператор выбирает SKU.
 
-### Приоритет 2 — мониторинг новых писем
+Это позволяет оператору вытаскивать систему из false-positive C-matches без редактирования БД.
 
-После всех изменений Phase 1.8e + 1.9-inbound нужно следить за качеством на boevом потоке:
+### Приоритет 2 — `internal_catalog_not_found` status
+
+Сейчас M-SKU позиции, которых нет в каталоге (как M3267 typo), висят в `internal_catalog_pending` навсегда. Добавить отдельный статус:
+- При первом импорте, если M-SKU не нашёлся → `internal_catalog_not_found` (а не `pending`).
+- В UI отдельный chip «SKU не найден в каталоге — нужно уточнить».
+- При следующем импорте: если SKU появился — переходит в `sufficient`. Если несколько импортов подряд нет — статус остаётся `not_found`.
+
+### Приоритет 3 — Phase 1.9 outbound (Sent-tracking)
+
+Из старого плана (актуален): `OutgoingMailObserver` для синка папки Sent, привязка исходящих к Request через 5 уровней In-Reply-To / References / subject / to_recipients. Compose-кнопка — следующая итерация.
+
+### Приоритет 4 — Регулярный sync MDB → прод
+
+Сейчас разовая загрузка через `catalog:import file.csv`. Для автоматизации:
+- Python-скрипт `scripts/catalog_import/export_mdb.py` уже готов (pyodbc + requests).
+- На офисной Windows-машине поставить Python 3.10 + Access Database Engine 2016 + зарегистрировать в Task Scheduler.
+- README в `scripts/catalog_import/README.md` готов с инструкцией.
+
+### Приоритет 5 — Top-K vector + LLM best-of-N
+
+Vector retrieval сейчас top-1 → если top-1 является ложным, теряем шанс на правильный top-2. Опция:
+- Vector выбирает top-5 кандидатов.
+- LLM получает список и выбирает best (или говорит «никто»).
+- Дороже на ~5x для embedding (но это уже сделано) и ~1x для LLM (всё равно 1 вызов на запрос).
+
+Если C-recall будет недостаточен на боевых письмах — это следующий ход.
+
+### Бэклог низкого приоритета
+
+- **M-2026-0512 reparse** — проверить, что новый Vision-промпт даёт 3 позиции вместо 2 (Левая+Правая+Мотор).
+- **Top-K vector + LLM best-of-N** (если C-recall окажется слишком низким на боевых письмах).
+- **Liftway clarifications retroactive apply** — UI кнопка «применить все clarifications от Liftway за период».
+- **Pending clarifications digest для РОПа** — еженедельная сводка clarifications, требующих action.
+- **OAuth man2/man3** — failed_jobs за 2026-05-08 (1000 экземпляров). Сейчас токены живые, accumulate'ы старые. Можно почистить через `\DB::table('failed_jobs')->where('exception','LIKE','%OAuth access-token%')->delete()`.
+- **Phase 1.9 outbound observer** — см. приоритет 3.
+- **Dashboard polish**, **Manual edit позиций в UI**, **Backfill старого корпуса** (из прошлого плана).
+
+<!-- legacy Phase 1.9 outbound план остался актуален и переведён в Приоритет 3. -->
+
+### Мониторинг новых писем
+
+После всех изменений Phase 1.8e + 1.9-inbound + Phase 2 catalog нужно следить за качеством на боевом потоке:
 
 ```bash
-# raw логи suspicious thread links (потенциально неверный AI clarifier choice)
+# Suspicious thread links (потенциально неверный AI clarifier choice)
 sudo grep 'suspicious thread link' /var/www/mzcorp/storage/logs/laravel.log | tail -20
 
-# parser empty items за сутки (письма попали как Pending без позиций — РОПу разобрать)
+# Pending'и за сутки (письма попали как Pending без позиций — РОПу разобрать)
 sudo -u www-data php artisan tinker --execute='
 $pending = App\Models\Request::where("status", "pending")->where("created_at", ">", now()->subDay())->count();
 echo "Pending за сутки: ".$pending.PHP_EOL;
 '
 
-# AI clarifier reasoning — для оценки точности 5-го уровня
-sudo grep 'ThreadClarificationAi: matched by AI' /var/www/mzcorp/storage/logs/laravel.log | tail -20
-```
+# C-step LLM решения (precision vs recall)
+sudo grep 'CatalogEmbeddingService' /var/www/mzcorp/storage/logs/laravel.log | grep -c 'LLM rejected match'
+sudo grep 'CatalogEmbeddingService' /var/www/mzcorp/storage/logs/laravel.log | grep -c 'LLM failed — match rejected'
 
-Если pending'и накапливаются — добавить UI-кнопку «Закрыть как не наша тема» для РОПа (Phase 2 действие, сейчас disabled).
+# Web-fetch URL'ов (счётчики статусов)
+sudo -u www-data php artisan tinker --execute='
+print_r(\App\Models\InboundUrlFetch::query()->selectRaw("status, count(*) as c")->groupBy("status")->pluck("c","status")->all());
+'
+```
 
 ### Бэклог низкого приоритета
 
-- ~~**man2/man3 OAuth re-issue**~~: **закрыто 2026-05-08.** Ящики переподключены через новый UI `/dashboard/managers/{id}/edit` (Phase 1.13). `production.ERROR` про истёкший access_token прекратились.
-- **Round-robin догон**: Иванов 165, M2/M3 ~54 (сейчас неравный, естественно догонится). После Phase 1.9 outbound можно подумать про sticky-роутинг (Foundation Phase 2).
-- **Dashboard polish**: heatmap inflow-by-hour, sparklines, funnel — после стабильного boevoго потока 2-4 недели.
-- **Phase 2.0 KB-сервисы**: `BrandResolutionService`, `EquipmentUnitMatchingService`, `ParameterExtractionService` из LazyLift `app/Services/Kb/` — Foundation Phase 2.
+- **Pending clarifications digest для РОПа** — еженедельная сводка `requests.pending_clarifications`, требующих action.
+- **Round-robin догон**: Иванов 165, M2/M3 ~54 (естественно догонится). После Phase 1.9 outbound можно подумать про sticky-роутинг (Foundation Phase 2).
+- **Dashboard polish**: heatmap inflow-by-hour, sparklines, funnel — после стабильного боевого потока 2-4 недели.
+- **Phase 2.0 KB-сервисы**: `BrandResolutionService`, `EquipmentUnitMatchingService`, `ParameterExtractionService` — частично работают, можно дотюнить когда увидим что фактически нужно.
 - **Manual edit позиций в UI**: в Detail табе «Позиции» добавить inline-edit (qty, unit, name) и кнопку «удалить». Сейчас всё disabled.
 - **Backfill старого корпуса**: ~$20-40 OpenAI, ~30-60 мин. Оператор отказался — старые заявки уже отработаны или закрыты.
+- **OAuth man2/man3 failed_jobs cleanup** — 1000 экземпляров за 2026-05-08. Токены живые, accumulate'ы старые. `\DB::table('failed_jobs')->where('exception','LIKE','%OAuth access-token%')->delete()`.
+- **Backfill brand_article_normalized для старых import'ов** — не нужен, миграция уже делает backfill в `up()`.
 
 <!-- legacy планы 2026-05-06/07 (Phase 1.8d/1.8b) — выполнены, удалены 2026-05-07 (вечер 2). -->
 
