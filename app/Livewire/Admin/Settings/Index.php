@@ -101,7 +101,7 @@ class Index extends Component
                 'help' => 'POST /api/catalog/import с rows < этого значения отвергается 422 без записи в БД. Защита от случайного обнуления каталога.',
                 'type' => AppSetting::TYPE_INT,
                 'default' => 1,
-                'step' => 100,
+                'step' => 1,
                 'min' => 1,
             ],
 
