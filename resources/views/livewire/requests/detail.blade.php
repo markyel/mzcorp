@@ -140,13 +140,44 @@
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Возраст</span>
                     <span class="text-fg-1 mono">{{ $age }}</span>
                 </div>
+                @php
+                    // Phase 2 use-case C: hero «Сумма» и «Сматчено» считаем по items.catalogItem.
+                    // Сумма — сумма (qty × catalog.price) по всем item'ам с привязкой
+                    // (item не сматчен → не в сумме). НДС НЕ добавляем — это «netto»
+                    // подытог по каталожным ценам, ту же сумму видно внизу таба
+                    // «Позиции». Итог с НДС там же.
+                    $heroSubtotal = 0.0;
+                    $heroMatched = 0;
+                    foreach ($items as $itm) {
+                        $p = $itm->catalogItem?->price;
+                        $q = (float) ($itm->parsed_qty ?? 0);
+                        if ($p !== null && $q > 0) {
+                            $heroSubtotal += (float) $p * $q;
+                            $heroMatched++;
+                        }
+                    }
+                    $heroTotal = $items->count();
+                    $heroHasMoney = $heroSubtotal > 0;
+                    $heroMatchedPct = $heroTotal > 0 ? (int) round($heroMatched / $heroTotal * 100) : 0;
+                @endphp
                 <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle">
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Сумма</span>
-                    <span class="text-fg-3" title="Доступно в Phase 2">—</span>
+                    <span class="{{ $heroHasMoney ? 'text-fg-1' : 'text-fg-3' }} mono"
+                          title="Подытог по каталожным ценам сматченных позиций (без НДС). С НДС см. внизу таба «Позиции».">
+                        {{ $heroHasMoney ? number_format($heroSubtotal, 2, '.', ' ') . ' ₽' : '—' }}
+                    </span>
                 </div>
                 <div class="flex flex-col gap-1">
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Сматчено</span>
-                    <span class="text-fg-3" title="Доступно в Phase 2">—</span>
+                    @if($heroTotal === 0)
+                        <span class="text-fg-3">—</span>
+                    @else
+                        <span class="text-fg-1"
+                              title="Позиций с привязкой к каталогу. На остальных оператор видит только данные парсера.">
+                            {{ $heroMatched }} / {{ $heroTotal }}
+                            <span class="text-fg-3 text-[11.5px]">({{ $heroMatchedPct }}%)</span>
+                        </span>
+                    @endif
                 </div>
             </div>
         </div>
