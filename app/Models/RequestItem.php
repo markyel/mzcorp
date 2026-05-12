@@ -58,8 +58,15 @@ class RequestItem extends Model
     /**
      * Резолвленная KB-категория (Phase 2.0). Null если не разобрано или
      * QualityAssessment вернул `not_covered` / `assessment_failed`.
+     *
+     * Метод намеренно называется `kbCategory`, а не `category`, потому что в
+     * таблице есть строковая колонка `category` (coarse-категория от парсера),
+     * которая в `$fillable`. Имя `category` совпадало с relation → Eloquent
+     * в `getAttribute()` отдавал строку из `$attributes` и relation был
+     * затенён (eager-load работал, но property-access через `$item->category`
+     * возвращал строку и `->slug` валился ErrorException → 500 в карточке).
      */
-    public function category(): BelongsTo
+    public function kbCategory(): BelongsTo
     {
         return $this->belongsTo(EquipmentCategory::class, 'identification_category_id');
     }

@@ -561,10 +561,10 @@
                                             @elseif($item->parsed_brand)
                                                 <span title="бренд не резолвлен">{{ $item->parsed_brand }}</span>
                                             @endif
-                                            @if($item->category)
+                                            @if($item->kbCategory)
                                                 <span class="inline-flex items-center px-1.5 rounded-sm bg-sky-50 text-sky-800 font-medium text-[10.5px]"
-                                                      title="{{ $item->category->slug }}">
-                                                    {{ $item->category->name }}
+                                                      title="{{ $item->kbCategory->slug }}">
+                                                    {{ $item->kbCategory->name }}
                                                 </span>
                                             @endif
                                             @if($qaConfig)
