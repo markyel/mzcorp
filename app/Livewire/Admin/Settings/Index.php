@@ -124,12 +124,26 @@ class Index extends Component
         foreach (self::schema() as $key => $meta) {
             // Текущее значение = app_setting() (DB-override → fallback config()).
             $current = $svc->get($key, config($this->configKeyFor($key), $meta['default']));
-            // Для bool — храним как настоящий bool, для остальных — string-like
-            // (Livewire так передаёт в HTML-input).
-            $this->values[$key] = $meta['type'] === AppSetting::TYPE_BOOL
+            // ВАЖНО: Livewire трактует точки в wire:model="values.X.Y.Z" как
+            // вложенный доступ к массиву ($values[X][Y][Z]), а у нас ключи
+            // плоские с точками (catalog.name_match.threshold). Поэтому в
+            // $values используем подчёркивания (form-key), а при save переводим
+            // обратно через configKeyFor / schema().
+            $formKey = self::formKey($key);
+            $this->values[$formKey] = $meta['type'] === AppSetting::TYPE_BOOL
                 ? (bool) $current
                 : ($current === null ? '' : (string) $current);
         }
+    }
+
+    /**
+     * Перевести dot-key («catalog.name_match.threshold») в underscored
+     * form-key («catalog_name_match_threshold») и обратно. Используется
+     * только в Livewire-биндингах.
+     */
+    public static function formKey(string $dotKey): string
+    {
+        return str_replace('.', '_', $dotKey);
     }
 
     /**
@@ -176,18 +190,19 @@ class Index extends Component
         }
 
         $schema = self::schema();
-        foreach ($this->values as $key => $rawValue) {
-            if (! isset($schema[$key])) {
+        foreach ($schema as $key => $meta) {
+            $formKey = self::formKey($key);
+            if (! array_key_exists($formKey, $this->values)) {
                 continue;
             }
-            $meta = $schema[$key];
+            $rawValue = $this->values[$formKey];
             $typed = $this->coerceForType($rawValue, $meta['type']);
 
             $configDefault = config($this->configKeyFor($key), $meta['default']);
             $defaultTyped = $this->coerceForType($configDefault, $meta['type']);
 
             // Если значение совпадает с config-defaults — удаляем override
-            // (чтобы не плодить мусор и legko вернуться к defaults).
+            // (чтобы не плодить мусор и легко вернуться к defaults).
             if ($this->valuesEqual($typed, $defaultTyped, $meta['type'])) {
                 $svc->unset($key);
                 continue;

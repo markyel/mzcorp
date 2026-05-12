@@ -26,9 +26,10 @@
                 </div>
                 <div class="divide-y divide-[var(--border-subtle)]">
                     @foreach($items as $key => $meta)
+                        @php $formKey = \App\Livewire\Admin\Settings\Index::formKey($key); @endphp
                         <div class="px-[18px] py-3 grid items-start gap-4" style="grid-template-columns: 1fr 220px">
                             <div class="min-w-0">
-                                <label for="setting-{{ $key }}" class="text-[13px] text-fg-1 font-medium">{{ $meta['label'] }}</label>
+                                <label for="setting-{{ $formKey }}" class="text-[13px] text-fg-1 font-medium">{{ $meta['label'] }}</label>
                                 <div class="text-[11.5px] text-fg-3 mt-1 leading-snug">{{ $meta['help'] }}</div>
                                 <div class="text-[10.5px] text-fg-3 mt-1 mono">{{ $key }}</div>
                             </div>
@@ -37,17 +38,17 @@
                                     @case('bool')
                                         <label class="inline-flex items-center gap-2 cursor-pointer">
                                             <input type="checkbox"
-                                                   id="setting-{{ $key }}"
-                                                   wire:model="values.{{ $key }}"
+                                                   id="setting-{{ $formKey }}"
+                                                   wire:model="values.{{ $formKey }}"
                                                    class="rounded border-border focus:ring-sky-500 text-sky-700">
-                                            <span class="text-[12.5px] text-fg-1">{{ $values[$key] ? 'включено' : 'выключено' }}</span>
+                                            <span class="text-[12.5px] text-fg-1">{{ ($values[$formKey] ?? false) ? 'включено' : 'выключено' }}</span>
                                         </label>
                                         @break
                                     @case('int')
                                     @case('float')
                                         <input type="number"
-                                               id="setting-{{ $key }}"
-                                               wire:model="values.{{ $key }}"
+                                               id="setting-{{ $formKey }}"
+                                               wire:model="values.{{ $formKey }}"
                                                step="{{ $meta['step'] ?? ($meta['type'] === 'float' ? '0.01' : '1') }}"
                                                @isset($meta['min']) min="{{ $meta['min'] }}" @endisset
                                                @isset($meta['max']) max="{{ $meta['max'] }}" @endisset
@@ -55,8 +56,8 @@
                                         @break
                                     @default
                                         @if(! empty($meta['options']))
-                                            <select id="setting-{{ $key }}"
-                                                    wire:model="values.{{ $key }}"
+                                            <select id="setting-{{ $formKey }}"
+                                                    wire:model="values.{{ $formKey }}"
                                                     class="w-full px-2.5 py-1.5 border border-border rounded-md text-[13px] focus:outline-none focus:ring-1 focus:ring-sky-500">
                                                 @foreach($meta['options'] as $optVal => $optLabel)
                                                     <option value="{{ $optVal }}">{{ $optLabel }}</option>
@@ -64,8 +65,8 @@
                                             </select>
                                         @else
                                             <input type="text"
-                                                   id="setting-{{ $key }}"
-                                                   wire:model="values.{{ $key }}"
+                                                   id="setting-{{ $formKey }}"
+                                                   wire:model="values.{{ $formKey }}"
                                                    class="w-full px-2.5 py-1.5 border border-border rounded-md text-[13px] focus:outline-none focus:ring-1 focus:ring-sky-500">
                                         @endif
                                 @endswitch
