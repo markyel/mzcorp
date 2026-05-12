@@ -134,6 +134,11 @@ return [
         // Killswitch для LLM-валидации (на случай OpenAI rate limit).
         // false → принимаем все vector-match'и выше threshold без LLM.
         'llm_validation_enabled' => (bool) env('CATALOG_NAME_MATCH_LLM_VALIDATION_ENABLED', true),
+        // Что делать, если LLM-вызов упал (прокси 503 серией / выход за timeout):
+        //   'reject' (default) — match отклоняем, vector без подтверждения LLM
+        //                        не доверяем; precision приоритет;
+        //   'accept'           — принимаем match без проверки; recall приоритет.
+        'llm_fail_action' => env('CATALOG_NAME_MATCH_LLM_FAIL_ACTION', 'reject'),
     ],
 
     /*

@@ -249,9 +249,24 @@ class CatalogEmbeddingService
         // но это РАЗНЫЕ товары.
         $hcThreshold = (float) config('services.catalog_name_match.hc_threshold', 0.90);
         $llmEnabled = (bool) config('services.catalog_name_match.llm_validation_enabled', true);
+        $failAction = (string) config('services.catalog_name_match.llm_fail_action', 'reject');
         $llmDecision = null;
         if ($llmEnabled && $similarity < $hcThreshold) {
-            $llmDecision = $this->validateMatchWithLlm($item, $catalog, $similarity);
+            // Внешний retry поверх Http::retry — на случай, если прокси-сервер
+            // (api.openai-proxy) отдаёт 503 серией (мы наблюдали это в bulk-pass'е).
+            // Стандартный Laravel-retry укладывается в ~6 сек; если outage
+            // длиннее — внешняя пауза в 5с даёт прокси время восстановиться.
+            $attempts = 2;
+            for ($attempt = 0; $attempt < $attempts; $attempt++) {
+                $llmDecision = $this->validateMatchWithLlm($item, $catalog, $similarity);
+                if ($llmDecision !== null) {
+                    break;
+                }
+                if ($attempt + 1 < $attempts) {
+                    sleep(5);
+                }
+            }
+
             if ($llmDecision !== null && $llmDecision['same'] === false) {
                 Log::info('CatalogEmbeddingService: LLM rejected match', [
                     'request_item_id' => $item->id,
@@ -263,7 +278,21 @@ class CatalogEmbeddingService
 
                 return null;
             }
-            // null (LLM упал) или same=true → продолжаем.
+            // LLM упал после всех retry → действуем по config:
+            //   llm_fail_action=reject (default) — отклоняем match, vector
+            //                                       без подтверждения LLM не доверяем;
+            //   llm_fail_action=accept            — принимаем (старое поведение).
+            if ($llmDecision === null && $failAction === 'reject') {
+                Log::info('CatalogEmbeddingService: LLM failed — match rejected by llm_fail_action=reject', [
+                    'request_item_id' => $item->id,
+                    'catalog_id' => $catalog->id,
+                    'catalog_sku' => $catalog->sku,
+                    'similarity' => $similarity,
+                ]);
+
+                return null;
+            }
+            // null + accept → продолжаем, помечаем skipped_llm_failed.
         }
 
         return [
