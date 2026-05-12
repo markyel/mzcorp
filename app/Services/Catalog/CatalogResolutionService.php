@@ -53,7 +53,7 @@ class CatalogResolutionService
             return false;
         }
 
-        $this->applyCatalogToItem($item, $catalog, promoteStatus: true);
+        $this->applyCatalogToItem($item, $catalog, promoteStatus: true, matchMethod: 'A_internal_sku');
 
         Log::info('CatalogResolutionService: item resolved (A:internal-sku)', [
             'request_item_id' => $item->id,
@@ -115,7 +115,7 @@ class CatalogResolutionService
                 continue;
             }
 
-            $this->applyCatalogToItem($item, $catalog, promoteStatus: false);
+            $this->applyCatalogToItem($item, $catalog, promoteStatus: false, matchMethod: 'B_brand_article');
 
             Log::info('CatalogResolutionService: item matched (B:brand-article)', [
                 'request_item_id' => $item->id,
@@ -157,7 +157,7 @@ class CatalogResolutionService
         $catalog = $match['catalog'];
         $similarity = (float) $match['similarity'];
 
-        $this->applyCatalogToItem($item, $catalog, promoteStatus: false);
+        $this->applyCatalogToItem($item, $catalog, promoteStatus: false, matchMethod: 'C_name_vector', extraPayload: ['name_vector_similarity' => $similarity]);
 
         Log::info('CatalogResolutionService: item matched (C:name-vector)', [
             'request_item_id' => $item->id,
@@ -270,16 +270,28 @@ class CatalogResolutionService
     }
 
     /**
-     * @param bool $promoteStatus  Если true — выставит status=sufficient и
-     *                             запишет reason=catalog_resolved в payload
-     *                             (use-case A: M-SKU точно идентифицирует
-     *                             товар). Если false — только привязываем
-     *                             catalog_item_id, status не трогаем
-     *                             (use-case B: brand_article-match — KB может
-     *                             ещё что-то сказать про категорию/extractors).
+     * @param bool   $promoteStatus  Если true — выставит status=sufficient и
+     *                               запишет reason=catalog_resolved в payload
+     *                               (use-case A: M-SKU точно идентифицирует
+     *                               товар). Если false — только привязываем
+     *                               catalog_item_id, status не трогаем
+     *                               (use-case B: brand_article-match — KB может
+     *                               ещё что-то сказать про категорию/extractors).
+     * @param string $matchMethod    Маркер метода матчинга, пишется в payload:
+     *                               'A_internal_sku' | 'B_brand_article' | 'C_name_vector'.
+     *                               Используется для точечного rollback'а
+     *                               (например, переcматчинг только C-step
+     *                               после смены threshold).
+     * @param array<string, mixed> $extraPayload  Доп. поля в payload->catalog_match
+     *                               (например, similarity для C-step).
      */
-    private function applyCatalogToItem(RequestItem $item, CatalogItem $catalog, bool $promoteStatus): void
-    {
+    private function applyCatalogToItem(
+        RequestItem $item,
+        CatalogItem $catalog,
+        bool $promoteStatus,
+        string $matchMethod,
+        array $extraPayload = [],
+    ): void {
         $item->catalog_item_id = $catalog->id;
 
         // parsed_name: если у позиции имя пустое или это просто SKU
@@ -294,8 +306,17 @@ class CatalogResolutionService
             $item->parsed_brand = $catalog->brand;
         }
 
+        $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+
+        // Маркер метода для DB-аналитики и точечного rollback'а.
+        $payload['catalog_match'] = array_merge([
+            'method' => $matchMethod,
+            'matched_at' => now()->toIso8601String(),
+            'catalog_item_id' => $catalog->id,
+            'catalog_sku' => $catalog->sku,
+        ], $extraPayload);
+
         if ($promoteStatus) {
-            $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
             $payload['phase'] = 'completed';
             $payload['resolved_at'] = now()->toIso8601String();
             $payload['reason'] = 'catalog_resolved';
@@ -311,9 +332,9 @@ class CatalogResolutionService
                 'stock_available' => $catalog->stock_available,
             ];
             $item->quality_assessment_status = 'sufficient';
-            $item->quality_assessment_payload = $payload;
         }
 
+        $item->quality_assessment_payload = $payload;
         $item->save();
     }
 }

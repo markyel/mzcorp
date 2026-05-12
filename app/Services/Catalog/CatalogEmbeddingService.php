@@ -222,7 +222,56 @@ class CatalogEmbeddingService
             return null;
         }
 
+        // Article safety-check (two-stage retrieval, second stage):
+        // если у обоих filled артикулы и они нормализованно различаются —
+        // это разные товары (SC-E2/G vs SC-E02, 22214 vs 22220, MS7001.1 vs MS2),
+        // даже если name семантически близкое. Reject.
+        if (! $this->isArticleSafe($item->parsed_article, $catalog->brand_article)) {
+            Log::info('CatalogEmbeddingService: article mismatch — match rejected', [
+                'request_item_id' => $item->id,
+                'item_article' => $item->parsed_article,
+                'catalog_brand_article' => $catalog->brand_article,
+                'catalog_id' => $catalog->id,
+                'similarity' => $similarity,
+            ]);
+
+            return null;
+        }
+
         return ['catalog' => $catalog, 'similarity' => $similarity];
+    }
+
+    /**
+     * Постфильтр для C-step: если у обоих (RequestItem и CatalogItem) есть
+     * непустой артикул и нормализованные формы НЕ совпадают ни по одному
+     * comma-split-токену — match отклоняем.
+     *
+     * Если у одной стороны (или обеих) артикул пустой — пропускаем, не
+     * блокируем (C-step как раз для таких — name-only matching).
+     */
+    public function isArticleSafe(?string $itemArticle, ?string $catalogArticle): bool
+    {
+        $catalogNorm = CatalogImportService::normalizeArticle($catalogArticle);
+        if ($catalogNorm === null || $catalogNorm === '') {
+            return true;
+        }
+        if ($itemArticle === null || trim($itemArticle) === '') {
+            return true;
+        }
+
+        // parsed_article может содержать "GAA638JR1, 3RT2016-2GG22" — тот же
+        // split что в matchByArticle. Если хоть один токен совпадает с
+        // catalog.brand_article — пропускаем (значит B-step тоже бы сматчил,
+        // и мы согласны с этим).
+        $tokens = preg_split('/\s*[,\/]\s*/', $itemArticle) ?: [$itemArticle];
+        foreach ($tokens as $tok) {
+            $norm = CatalogImportService::normalizeArticle($tok);
+            if ($norm !== null && $norm !== '' && $norm === $catalogNorm) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
