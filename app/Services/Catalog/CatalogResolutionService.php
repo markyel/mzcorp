@@ -157,13 +157,21 @@ class CatalogResolutionService
         $catalog = $match['catalog'];
         $similarity = (float) $match['similarity'];
 
-        $this->applyCatalogToItem($item, $catalog, promoteStatus: false, matchMethod: 'C_name_vector', extraPayload: ['name_vector_similarity' => $similarity]);
+        $extra = [
+            'name_vector_similarity' => $similarity,
+            'llm_validation' => $match['llm_validation'] ?? null,
+        ];
+        if (! empty($match['llm_reason'])) {
+            $extra['llm_reason'] = $match['llm_reason'];
+        }
+        $this->applyCatalogToItem($item, $catalog, promoteStatus: false, matchMethod: 'C_name_vector', extraPayload: $extra);
 
         Log::info('CatalogResolutionService: item matched (C:name-vector)', [
             'request_item_id' => $item->id,
             'catalog_item_id' => $catalog->id,
             'catalog_sku' => $catalog->sku,
             'similarity' => $similarity,
+            'llm_validation' => $match['llm_validation'] ?? null,
         ]);
 
         return true;

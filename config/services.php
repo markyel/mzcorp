@@ -124,7 +124,16 @@ return [
     */
     'catalog_name_match' => [
         'enabled' => (bool) env('CATALOG_NAME_MATCH_ENABLED', true),
+        // Минимальный cosine similarity для попадания в C-step.
         'threshold' => (float) env('CATALOG_NAME_MATCH_THRESHOLD', 0.75),
+        // High-confidence порог: similarity >= hc_threshold → LLM-валидацию
+        // не делаем (вектор и так уверен, экономим API-вызовы).
+        // Диапазон [threshold, hc_threshold) → обязательная LLM-проверка
+        // «один ли это товар» через gpt-4o-mini.
+        'hc_threshold' => (float) env('CATALOG_NAME_MATCH_HC_THRESHOLD', 0.90),
+        // Killswitch для LLM-валидации (на случай OpenAI rate limit).
+        // false → принимаем все vector-match'и выше threshold без LLM.
+        'llm_validation_enabled' => (bool) env('CATALOG_NAME_MATCH_LLM_VALIDATION_ENABLED', true),
     ],
 
     /*

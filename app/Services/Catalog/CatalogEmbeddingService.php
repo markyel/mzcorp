@@ -5,6 +5,8 @@ namespace App\Services\Catalog;
 use App\Models\CatalogItem;
 use App\Models\CatalogItemEmbedding;
 use App\Models\RequestItem;
+use App\Prompts\Catalog\ValidateCatalogMatchPrompt;
+use App\Services\AI\OpenAIChatService;
 use App\Services\AI\OpenAIEmbeddingService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -31,8 +33,10 @@ use Illuminate\Support\Facades\Log;
  */
 class CatalogEmbeddingService
 {
-    public function __construct(private readonly OpenAIEmbeddingService $embedder)
-    {
+    public function __construct(
+        private readonly OpenAIEmbeddingService $embedder,
+        private readonly OpenAIChatService $chat,
+    ) {
     }
 
     /**
@@ -238,7 +242,89 @@ class CatalogEmbeddingService
             return null;
         }
 
-        return ['catalog' => $catalog, 'similarity' => $similarity];
+        // Third stage: LLM-валидация для пар с similarity ниже high-confidence
+        // порога. Mini-модель отвечает «one and the same? Y/N» с reasoning.
+        // Это убивает «звено цепи vs звезда», «поручень vs ролик», разные
+        // модификации в одной серии — кейсы, где vector ловит общий контекст,
+        // но это РАЗНЫЕ товары.
+        $hcThreshold = (float) config('services.catalog_name_match.hc_threshold', 0.90);
+        $llmEnabled = (bool) config('services.catalog_name_match.llm_validation_enabled', true);
+        $llmDecision = null;
+        if ($llmEnabled && $similarity < $hcThreshold) {
+            $llmDecision = $this->validateMatchWithLlm($item, $catalog, $similarity);
+            if ($llmDecision !== null && $llmDecision['same'] === false) {
+                Log::info('CatalogEmbeddingService: LLM rejected match', [
+                    'request_item_id' => $item->id,
+                    'catalog_id' => $catalog->id,
+                    'catalog_sku' => $catalog->sku,
+                    'similarity' => $similarity,
+                    'reason' => $llmDecision['reason'] ?? null,
+                ]);
+
+                return null;
+            }
+            // null (LLM упал) или same=true → продолжаем.
+        }
+
+        return [
+            'catalog' => $catalog,
+            'similarity' => $similarity,
+            'llm_validation' => $llmDecision === null
+                ? ($similarity >= $hcThreshold ? 'skipped_high_confidence' : 'skipped_llm_failed')
+                : 'approved',
+            'llm_reason' => $llmDecision['reason'] ?? null,
+        ];
+    }
+
+    /**
+     * Бинарная LLM-валидация. Возвращает {same, reason} или null при сбое.
+     *
+     * @return array{same: bool, reason: string}|null
+     */
+    public function validateMatchWithLlm(RequestItem $item, CatalogItem $catalog, float $similarity): ?array
+    {
+        try {
+            $result = $this->chat->chat(
+                [
+                    ['role' => 'system', 'content' => ValidateCatalogMatchPrompt::systemMessage()],
+                    ['role' => 'user', 'content' => ValidateCatalogMatchPrompt::userMessage(
+                        $item->brand?->name ?: $item->parsed_brand,
+                        $item->parsed_name,
+                        $item->parsed_article,
+                        $catalog->brand,
+                        $catalog->name,
+                        $catalog->brand_article,
+                        (string) $catalog->sku,
+                        $similarity,
+                    )],
+                ],
+                config('services.openai.clarification_model', 'gpt-4o-mini'),
+                ['response_format' => ['type' => 'json_object'], 'temperature' => 0, 'max_tokens' => 200],
+            );
+        } catch (\Throwable $e) {
+            Log::warning('CatalogEmbeddingService: LLM validation call failed (non-fatal)', [
+                'request_item_id' => $item->id,
+                'catalog_id' => $catalog->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        $parsed = json_decode((string) ($result['content'] ?? ''), true);
+        if (! is_array($parsed) || ! array_key_exists('same', $parsed)) {
+            Log::warning('CatalogEmbeddingService: LLM returned malformed response', [
+                'request_item_id' => $item->id,
+                'content' => mb_substr((string) ($result['content'] ?? ''), 0, 200),
+            ]);
+
+            return null;
+        }
+
+        return [
+            'same' => (bool) $parsed['same'],
+            'reason' => is_string($parsed['reason'] ?? null) ? mb_substr($parsed['reason'], 0, 500) : '',
+        ];
     }
 
     /**
