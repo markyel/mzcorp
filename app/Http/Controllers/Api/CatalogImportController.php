@@ -52,7 +52,10 @@ class CatalogImportController extends Controller
         // офисе) сносит всё в is_active=false soft-delete'ом. Отказываем
         // на стороне сервера до записи в БД. Порог — config (env), дефолт 1
         // (просто запрет пустого payload'а).
-        $minRows = (int) config('services.catalog_import.min_full_rows', 1);
+        $minRows = (int) app_setting(
+            'catalog.import.min_full_rows',
+            config('services.catalog_import.min_full_rows', 1),
+        );
         $mode = (string) ($data['mode'] ?? 'full');
         $rowCount = count($data['items']);
         if ($mode === 'full' && $rowCount < $minRows) {

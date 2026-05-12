@@ -70,6 +70,12 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/managers/{user}/edit', function (\App\Models\User $user) {
             return view('admin.managers.edit', ['user' => $user]);
         })->name('managers.edit');
+
+        // Phase 2: настройки приложения (catalog matching, тарифы и т.п.).
+        // Override поверх config(), редактируется через Livewire-страницу.
+        Route::get('/dashboard/settings', function () {
+            return view('admin.settings.index');
+        })->name('settings.index');
     });
 });
 

@@ -800,7 +800,7 @@
                                         $countedItems++;
                                     }
                                 }
-                                $vatPercent = (float) config('services.tax.vat_percent', 22);
+                                $vatPercent = (float) app_setting('tax.vat_percent', config('services.tax.vat_percent', 22));
                                 $vat = $subtotal * $vatPercent / 100;
                                 $totalAll = $subtotal + $vat;
                                 $hasAnyPrice = $countedItems > 0;

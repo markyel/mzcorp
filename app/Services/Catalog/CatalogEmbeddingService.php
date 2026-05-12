@@ -157,7 +157,10 @@ class CatalogEmbeddingService
      */
     public function matchByRequestItem(RequestItem $item, ?float $thresholdOverride = null): ?array
     {
-        $threshold = $thresholdOverride ?? (float) config('services.catalog_name_match.threshold', 0.75);
+        $threshold = $thresholdOverride ?? (float) app_setting(
+            'catalog.name_match.threshold',
+            config('services.catalog_name_match.threshold', 0.75),
+        );
         $queryText = $this->buildQueryText($item);
         if (mb_strlen(trim($queryText)) < 5) {
             return null;
@@ -247,9 +250,18 @@ class CatalogEmbeddingService
         // Это убивает «звено цепи vs звезда», «поручень vs ролик», разные
         // модификации в одной серии — кейсы, где vector ловит общий контекст,
         // но это РАЗНЫЕ товары.
-        $hcThreshold = (float) config('services.catalog_name_match.hc_threshold', 0.90);
-        $llmEnabled = (bool) config('services.catalog_name_match.llm_validation_enabled', true);
-        $failAction = (string) config('services.catalog_name_match.llm_fail_action', 'reject');
+        $hcThreshold = (float) app_setting(
+            'catalog.name_match.hc_threshold',
+            config('services.catalog_name_match.hc_threshold', 0.90),
+        );
+        $llmEnabled = (bool) app_setting(
+            'catalog.name_match.llm_validation_enabled',
+            config('services.catalog_name_match.llm_validation_enabled', true),
+        );
+        $failAction = (string) app_setting(
+            'catalog.name_match.llm_fail_action',
+            config('services.catalog_name_match.llm_fail_action', 'reject'),
+        );
         $llmDecision = null;
         if ($llmEnabled && $similarity < $hcThreshold) {
             // Внешний retry поверх Http::retry — на случай, если прокси-сервер

@@ -143,7 +143,7 @@ class CatalogResolutionService
         if ($item->catalog_item_id !== null) {
             return false;
         }
-        if (! config('services.catalog_name_match.enabled', true)) {
+        if (! (bool) app_setting('catalog.name_match.enabled', config('services.catalog_name_match.enabled', true))) {
             return false;
         }
 
