@@ -800,7 +800,8 @@
                                         $countedItems++;
                                     }
                                 }
-                                $vat = $subtotal * 0.20;
+                                $vatPercent = (float) config('services.tax.vat_percent', 22);
+                                $vat = $subtotal * $vatPercent / 100;
                                 $totalAll = $subtotal + $vat;
                                 $hasAnyPrice = $countedItems > 0;
                                 $totalsTitle = $hasAnyPrice
@@ -812,7 +813,7 @@
                                 <span class="text-fg-3" title="Phase 2">+ добавить позицию</span>
                                 <span class="flex-1"></span>
                                 <span class="text-fg-3">подытог:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($subtotal, 2, '.', ' ') . ' ₽' : '—' }}</span>
-                                <span class="text-fg-3">+ НДС 20%:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($vat, 2, '.', ' ') . ' ₽' : '—' }}</span>
+                                <span class="text-fg-3">+ НДС {{ rtrim(rtrim(number_format($vatPercent, 1, '.', ''), '0'), '.') }}%:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($vat, 2, '.', ' ') . ' ₽' : '—' }}</span>
                                 <span class="text-fg-3">итого:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono text-[14px]">{{ $hasAnyPrice ? number_format($totalAll, 2, '.', ' ') . ' ₽' : '—' }}</span>
                             </div>
                         </div>
