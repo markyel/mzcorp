@@ -25,6 +25,9 @@ class CatalogItem extends Model
         'part_type',
         'brand',
         'brand_article',
+        // Нормализованная форма (uppercase + удалены [\s\-_./]) для быстрого
+        // article-match в use-case B (см. миграцию add_brand_article_normalized).
+        'brand_article_normalized',
         'form_factor',
         'size_a',
         'size_b',

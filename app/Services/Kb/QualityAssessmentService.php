@@ -45,20 +45,21 @@ class QualityAssessmentService
             ]);
         }
 
-        // Phase 2 use-case A: если итог — internal_catalog_pending, сразу
-        // пробуем резолвить через каталог. Если каталог уже импортирован
-        // и содержит этот SKU — позиция мгновенно дозреет до `sufficient`
-        // без ожидания следующего snapshot'а.
-        if (($result['status'] ?? null) === 'internal_catalog_pending') {
-            try {
-                app(\App\Services\Catalog\CatalogResolutionService::class)
-                    ->resolveItem($item->refresh());
-            } catch (Throwable $e) {
-                Log::warning('QualityAssessmentService: catalog resolve failed (non-fatal)', [
-                    'item_id' => $itemId,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        // Phase 2 use-case A+B: после оценки пытаемся резолвить/сматчить
+        // позицию против каталога. Логика matchOrResolve:
+        //   - если status=internal_catalog_pending → resolveItem (M-SKU lookup,
+        //     при success status → sufficient);
+        //   - иначе, если catalog_item_id null и есть parsed_article →
+        //     matchByArticle через brand_article/sku каталога (статус не трогаем,
+        //     просто привязываем FK для UI и refresh-логики).
+        try {
+            app(\App\Services\Catalog\CatalogResolutionService::class)
+                ->matchOrResolve($item->refresh());
+        } catch (Throwable $e) {
+            Log::warning('QualityAssessmentService: catalog match/resolve failed (non-fatal)', [
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 

@@ -674,6 +674,32 @@
                                                 </span>
                                             @endif
                                             @if($item->parsed_article)<span class="mono text-fg-2">{{ $item->parsed_article }}</span>@endif
+                                            {{-- Phase 2 use-case B: бэдж «в каталоге». --}}
+                                            @if($item->catalogItem)
+                                                <span class="inline-flex items-center px-1.5 rounded-sm bg-violet-50 text-violet-800 font-medium text-[10.5px]"
+                                                      title="каталог MyLift: {{ $item->catalogItem->sku }} · {{ $item->catalogItem->brand_article ?: '—' }} · обновлено {{ $item->catalogItem->last_imported_at?->format('d.m.Y') ?? '—' }}">
+                                                    в каталоге · {{ $item->catalogItem->sku }}
+                                                </span>
+                                            @endif
+                                            {{-- Phase 2 use-case A: внешняя ссылка на mylift.ru для M-SKU позиций
+                                                 (даже если catalog_item_id не привязан — позволяет менеджеру быстро
+                                                  открыть карточку товара на сайте каталога). --}}
+                                            @php
+                                                $mylinkSku = null;
+                                                if ($item->catalogItem) {
+                                                    $mylinkSku = $item->catalogItem->sku;
+                                                } elseif (preg_match('/(?<![\p{L}\p{N}_])(M\d{4,})(?![\p{L}\p{N}_])/u', (string) $item->parsed_article, $mm)) {
+                                                    $mylinkSku = $mm[1];
+                                                }
+                                            @endphp
+                                            @if($mylinkSku)
+                                                <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
+                                                   target="_blank" rel="noopener noreferrer"
+                                                   class="inline-flex items-center gap-0.5 px-1.5 rounded-sm bg-sky-50 text-sky-700 hover:text-sky-900 hover:bg-sky-100 font-medium text-[10.5px]"
+                                                   title="Открыть на mylift.ru">
+                                                    mylift.ru ↗
+                                                </a>
+                                            @endif
                                             @if($item->supplier_note)
                                                 <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-50 text-amber-700 font-medium text-[10.5px]">
                                                     {{ \Illuminate\Support\Str::limit($item->supplier_note, 50) }}
@@ -693,19 +719,70 @@
                                         @endif
                                     </div>
                                     <span class="mono text-[12px] text-fg-1 text-right">{{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') ?: '—' }} {{ $item->parsed_unit }}</span>
-                                    <span class="text-fg-3 text-right" title="Phase 2">—</span>
-                                    <span class="text-fg-3" title="Phase 2">—</span>
-                                    <span class="text-fg-3 text-right" title="Phase 2">—</span>
+
+                                    {{-- Phase 2 use-case C: цена и наличие из catalog_items, если есть привязка. --}}
+                                    @php
+                                        $ci = $item->catalogItem;
+                                        $price = $ci?->price;
+                                        $stock = $ci?->stock_available;
+                                        $qty = (float) ($item->parsed_qty ?? 0);
+                                        $total = ($price !== null && $qty > 0) ? ((float) $price * $qty) : null;
+                                        $stockTone = $stock === null ? 'text-fg-3' : ($stock > 0 ? 'text-emerald-700' : 'text-amber-700');
+                                    @endphp
+
+                                    <span class="mono text-[12px] {{ $price !== null ? 'text-fg-1' : 'text-fg-3' }} text-right"
+                                          title="{{ $ci ? 'из каталога, обновлено ' . ($ci->last_imported_at?->format('d.m.Y') ?? '—') : 'нет привязки к каталогу' }}">
+                                        {{ $price !== null ? number_format((float) $price, 2, '.', ' ') . ' ₽' : '—' }}
+                                    </span>
+
+                                    <span class="text-[12px] {{ $stockTone }}"
+                                          title="{{ $ci ? 'остаток на складе' : 'нет данных' }}">
+                                        @if($stock === null)
+                                            —
+                                        @elseif($stock > 0)
+                                            {{ $stock }} шт
+                                        @else
+                                            нет
+                                        @endif
+                                    </span>
+
+                                    <span class="mono text-[12px] {{ $total !== null ? 'text-fg-1' : 'text-fg-3' }} text-right">
+                                        {{ $total !== null ? number_format($total, 2, '.', ' ') . ' ₽' : '—' }}
+                                    </span>
+
                                     <span class="text-fg-3 text-center cursor-not-allowed" title="Phase 2">···</span>
                                 </div>
                             @endforeach
 
-                            <div class="px-[18px] py-3 bg-surface-2 flex items-center gap-3.5 text-[12.5px] border-t border-border-subtle rounded-b-md">
+                            @php
+                                // Phase 2 use-case C: подытог по каталожным ценам тех позиций,
+                                // у которых есть привязка и непустое qty. Если у части позиций
+                                // привязки нет — они в подсчёт не идут, в подсказке покажем
+                                // сколько посчитано.
+                                $subtotal = 0.0;
+                                $countedItems = 0;
+                                foreach ($items as $itm) {
+                                    $p = $itm->catalogItem?->price;
+                                    $q = (float) ($itm->parsed_qty ?? 0);
+                                    if ($p !== null && $q > 0) {
+                                        $subtotal += (float) $p * $q;
+                                        $countedItems++;
+                                    }
+                                }
+                                $vat = $subtotal * 0.20;
+                                $totalAll = $subtotal + $vat;
+                                $hasAnyPrice = $countedItems > 0;
+                                $totalsTitle = $hasAnyPrice
+                                    ? "посчитано позиций: {$countedItems} из {$items->count()}"
+                                    : 'ни одна позиция не привязана к каталогу';
+                            @endphp
+                            <div class="px-[18px] py-3 bg-surface-2 flex items-center gap-3.5 text-[12.5px] border-t border-border-subtle rounded-b-md"
+                                 title="{{ $totalsTitle }}">
                                 <span class="text-fg-3" title="Phase 2">+ добавить позицию</span>
                                 <span class="flex-1"></span>
-                                <span class="text-fg-3">подытог:</span><span class="text-fg-3 mono">—</span>
-                                <span class="text-fg-3">+ НДС 20%:</span><span class="text-fg-3 mono">—</span>
-                                <span class="text-fg-3">итого:</span><span class="text-fg-3 mono text-[14px]">—</span>
+                                <span class="text-fg-3">подытог:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($subtotal, 2, '.', ' ') . ' ₽' : '—' }}</span>
+                                <span class="text-fg-3">+ НДС 20%:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($vat, 2, '.', ' ') . ' ₽' : '—' }}</span>
+                                <span class="text-fg-3">итого:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono text-[14px]">{{ $hasAnyPrice ? number_format($totalAll, 2, '.', ' ') . ' ₽' : '—' }}</span>
                             </div>
                         </div>
                     @endif

@@ -34,6 +34,9 @@ class RequestItem extends Model
         // Phase 2: привязка к фото-вложению email'а, из которого Vision-парсер
         // извлёк позицию (см. add_image_attachment_id_to_request_items_table).
         'image_attachment_id',
+        // Phase 2 use-case A/B: привязка позиции к товару каталога. Заполняется
+        // CatalogResolutionService (M-SKU resolve / article-match).
+        'catalog_item_id',
         'status',
         'is_active',
         // Phase 2.0 KB resolutions:
@@ -90,5 +93,15 @@ class RequestItem extends Model
     public function imageAttachment(): BelongsTo
     {
         return $this->belongsTo(EmailAttachment::class, 'image_attachment_id');
+    }
+
+    /**
+     * Каталожная позиция (Phase 2 use-case A/B). Заполнено если
+     * `CatalogResolutionService` нашёл match по sku или brand_article.
+     * Null — позиция не сматчена.
+     */
+    public function catalogItem(): BelongsTo
+    {
+        return $this->belongsTo(CatalogItem::class, 'catalog_item_id');
     }
 }

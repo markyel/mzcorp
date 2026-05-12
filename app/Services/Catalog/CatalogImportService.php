@@ -222,6 +222,9 @@ class CatalogImportService
             'part_type' => $this->trimOrNull($row['part_type'] ?? null, 128),
             'brand' => $this->trimOrNull($row['brand'] ?? null, 128),
             'brand_article' => $this->trimOrNull($row['brand_article'] ?? null, 128),
+            // Use-case B: префакомпилированная форма артикула для article-match
+            // против `parsed_article` позиций. См. CatalogResolutionService.
+            'brand_article_normalized' => $this->normalizeArticle($row['brand_article'] ?? null),
             'form_factor' => $this->trimOrNull($row['form_factor'] ?? null, 64),
             'size_a' => $this->decimalOrNull($row['size_a'] ?? null),
             'size_b' => $this->decimalOrNull($row['size_b'] ?? null),
@@ -237,6 +240,26 @@ class CatalogImportService
         $data['source_hash'] = $this->hashRow($data);
 
         return $data;
+    }
+
+    /**
+     * Нормализация артикула: uppercase + удаление [\s\-_./]. Совпадает с
+     * `RequestItemParsingService::normalizeArticle`, чтобы catalog vs parsed
+     * сравнения работали симметрично. Использовать ТУ ЖЕ маску, иначе ловим
+     * false-negative на разных вариантах написания у клиента vs в каталоге.
+     */
+    public static function normalizeArticle(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $s = trim((string) $value);
+        if ($s === '') {
+            return null;
+        }
+        $s = preg_replace('/[\s\-_.\/]/', '', mb_strtoupper($s));
+
+        return mb_substr((string) $s, 0, 128) ?: null;
     }
 
     private function trimOrNull(mixed $v, int $max): ?string

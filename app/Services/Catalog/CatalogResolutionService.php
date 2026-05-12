@@ -4,6 +4,7 @@ namespace App\Services\Catalog;
 
 use App\Models\CatalogItem;
 use App\Models\RequestItem;
+use App\Services\Catalog\CatalogImportService;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -27,7 +28,11 @@ use Illuminate\Support\Facades\Log;
 class CatalogResolutionService
 {
     /**
-     * Резолв одной позиции. Возвращает true если применили апдейт.
+     * Use-case A: резолв одной позиции, помеченной internal_catalog_pending.
+     * Если в каталоге найден M-SKU — заполняем catalog_item_id, выставляем
+     * status=sufficient и фиксируем catalog в payload.
+     *
+     * Возвращает true если применили апдейт.
      */
     public function resolveItem(RequestItem $item): bool
     {
@@ -48,9 +53,9 @@ class CatalogResolutionService
             return false;
         }
 
-        $this->applyCatalogToItem($item, $catalog);
+        $this->applyCatalogToItem($item, $catalog, promoteStatus: true);
 
-        Log::info('CatalogResolutionService: item resolved', [
+        Log::info('CatalogResolutionService: item resolved (A:internal-sku)', [
             'request_item_id' => $item->id,
             'sku' => $sku,
             'catalog_item_id' => $catalog->id,
@@ -60,34 +65,137 @@ class CatalogResolutionService
     }
 
     /**
-     * Bulk-резолв всех ожидающих позиций. Используется после успешного
-     * импорта каталога (см. CatalogResolutionAfterImportJob).
+     * Use-case B: матчинг позиции по `parsed_article` через `brand_article`
+     * (или sku) каталога — для непользовательских M-кодов. Например клиент
+     * написал «3RT2016-2GG22» (артикул Siemens), мы находим в каталоге
+     * соответствующую запись и привязываем catalog_item_id.
      *
-     * @return array{checked: int, resolved: int}
+     * НЕ трогаем quality_assessment_status — статус всё равно определяется
+     * KB-цепочкой. Это аддитивная привязка, чтобы в UI можно было
+     * показать цену/наличие + бэдж «в каталоге».
+     *
+     * Идемпотентность: если catalog_item_id уже стоит — выходим, ничего
+     * не делаем (даже если можно было бы нашли другое совпадение —
+     * нынешняя привязка считается приоритетнее).
+     *
+     * `parsed_article` может содержать несколько токенов через ", " или "/".
+     * Берём первый, который успешно сматчится.
+     *
+     * Возвращает true если применили апдейт.
+     */
+    public function matchByArticle(RequestItem $item): bool
+    {
+        if ($item->catalog_item_id !== null) {
+            return false;
+        }
+        $article = (string) ($item->parsed_article ?? '');
+        if ($article === '') {
+            return false;
+        }
+
+        // Разбиваем по запятой/слэшу — клиент может прислать «GAA638JR1, 3RT2016-2GG22»
+        // (наш парсер сам тоже так пишет — см. ParseItemsPrompt v5).
+        $tokens = preg_split('/\s*[,\/]\s*/', $article) ?: [$article];
+        foreach ($tokens as $tok) {
+            $norm = CatalogImportService::normalizeArticle($tok);
+            if ($norm === null || $norm === '') {
+                continue;
+            }
+
+            // Сначала пробуем как sku (на случай если клиент написал точный
+            // M-SKU, например «M02016»), потом как brand_article_normalized.
+            $catalog = CatalogItem::query()
+                ->where('is_active', true)
+                ->where(function ($q) use ($norm) {
+                    $q->where('sku', $norm)
+                        ->orWhere('brand_article_normalized', $norm);
+                })
+                ->first();
+            if ($catalog === null) {
+                continue;
+            }
+
+            $this->applyCatalogToItem($item, $catalog, promoteStatus: false);
+
+            Log::info('CatalogResolutionService: item matched (B:brand-article)', [
+                'request_item_id' => $item->id,
+                'matched_token' => $tok,
+                'normalized' => $norm,
+                'catalog_item_id' => $catalog->id,
+                'catalog_sku' => $catalog->sku,
+            ]);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Try A (internal-sku resolve), then B (article-match). Используется
+     * после импорта каталога и при пост-парсе позиций.
+     */
+    public function matchOrResolve(RequestItem $item): bool
+    {
+        if ($this->resolveItem($item)) {
+            return true;
+        }
+
+        return $this->matchByArticle($item);
+    }
+
+    /**
+     * Bulk: pass over всех несматченных позиций (use-case A + B).
+     *
+     * Сканирует:
+     *  - items со status=internal_catalog_pending — пытается резолвить через
+     *    M-SKU (resolveItem);
+     *  - items с catalog_item_id IS NULL и непустым parsed_article — пытается
+     *    сматчить через brand_article / sku (matchByArticle).
+     *
+     * Используется после успешного импорта каталога (ResolvePendingFromCatalogJob).
+     *
+     * @return array{checked: int, resolved_a: int, matched_b: int}
      */
     public function resolveAllPending(): array
     {
         $checked = 0;
-        $resolved = 0;
+        $resolvedA = 0;
+        $matchedB = 0;
 
         RequestItem::query()
-            ->where('quality_assessment_status', 'internal_catalog_pending')
             ->where('is_active', true)
-            ->chunkById(200, function ($items) use (&$checked, &$resolved) {
+            ->whereNull('catalog_item_id')
+            ->where(function ($q) {
+                $q->where('quality_assessment_status', 'internal_catalog_pending')
+                    ->orWhereNotNull('parsed_article');
+            })
+            ->chunkById(200, function ($items) use (&$checked, &$resolvedA, &$matchedB) {
                 foreach ($items as $item) {
                     $checked++;
                     if ($this->resolveItem($item)) {
-                        $resolved++;
+                        $resolvedA++;
+                        continue;
+                    }
+                    if ($this->matchByArticle($item)) {
+                        $matchedB++;
                     }
                 }
             });
 
-        Log::info('CatalogResolutionService: bulk resolve done', [
+        Log::info('CatalogResolutionService: bulk pass done', [
             'checked' => $checked,
-            'resolved' => $resolved,
+            'resolved_a' => $resolvedA,
+            'matched_b' => $matchedB,
         ]);
 
-        return ['checked' => $checked, 'resolved' => $resolved];
+        return [
+            'checked' => $checked,
+            'resolved_a' => $resolvedA,
+            'matched_b' => $matchedB,
+            // Совместимость с прежним именованием:
+            'resolved' => $resolvedA,
+        ];
     }
 
     private function extractSku(RequestItem $item): ?string
@@ -109,25 +217,18 @@ class CatalogResolutionService
         return null;
     }
 
-    private function applyCatalogToItem(RequestItem $item, CatalogItem $catalog): void
+    /**
+     * @param bool $promoteStatus  Если true — выставит status=sufficient и
+     *                             запишет reason=catalog_resolved в payload
+     *                             (use-case A: M-SKU точно идентифицирует
+     *                             товар). Если false — только привязываем
+     *                             catalog_item_id, status не трогаем
+     *                             (use-case B: brand_article-match — KB может
+     *                             ещё что-то сказать про категорию/extractors).
+     */
+    private function applyCatalogToItem(RequestItem $item, CatalogItem $catalog, bool $promoteStatus): void
     {
-        $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
-        $payload['phase'] = 'completed';
-        $payload['resolved_at'] = now()->toIso8601String();
-        $payload['reason'] = 'catalog_resolved';
-        $payload['catalog'] = [
-            'catalog_item_id' => $catalog->id,
-            'sku' => $catalog->sku,
-            'brand' => $catalog->brand,
-            'brand_article' => $catalog->brand_article,
-            'unit_name' => $catalog->unit_name,
-            'part_type' => $catalog->part_type,
-            'form_factor' => $catalog->form_factor,
-            'price' => $catalog->price,
-            'stock_available' => $catalog->stock_available,
-        ];
-
-        $dirty = false;
+        $item->catalog_item_id = $catalog->id;
 
         // parsed_name: если у позиции имя пустое или это просто SKU
         // (типичный сценарий — клиент прислал «Артикул: M02016 — 5 шт»,
@@ -135,20 +236,32 @@ class CatalogResolutionService
         $name = (string) ($item->parsed_name ?? '');
         if ($name === '' || $name === $catalog->sku) {
             $item->parsed_name = mb_substr((string) $catalog->name, 0, 250);
-            $dirty = true;
         }
 
         if (empty($item->parsed_brand) && ! empty($catalog->brand)) {
             $item->parsed_brand = $catalog->brand;
-            $dirty = true;
         }
 
-        $item->quality_assessment_status = 'sufficient';
-        $item->quality_assessment_payload = $payload;
-        $item->save();
+        if ($promoteStatus) {
+            $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+            $payload['phase'] = 'completed';
+            $payload['resolved_at'] = now()->toIso8601String();
+            $payload['reason'] = 'catalog_resolved';
+            $payload['catalog'] = [
+                'catalog_item_id' => $catalog->id,
+                'sku' => $catalog->sku,
+                'brand' => $catalog->brand,
+                'brand_article' => $catalog->brand_article,
+                'unit_name' => $catalog->unit_name,
+                'part_type' => $catalog->part_type,
+                'form_factor' => $catalog->form_factor,
+                'price' => $catalog->price,
+                'stock_available' => $catalog->stock_available,
+            ];
+            $item->quality_assessment_status = 'sufficient';
+            $item->quality_assessment_payload = $payload;
+        }
 
-        // save() сам ставит dirty=true для status/payload, нет смысла
-        // отдельно их учитывать.
-        unset($dirty);
+        $item->save();
     }
 }
