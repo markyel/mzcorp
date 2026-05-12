@@ -115,6 +115,9 @@ class RequestItemPersister
                 'category' => $item['category'] ?? null,
                 'supplier_note' => $item['note'] ?? null,
                 'data_source' => 'inbound_message',
+                // Phase 2: привязка к фото-вложению (только для vision-items;
+                // у text/документ items это поле null).
+                'image_attachment_id' => $item['email_attachment_id'] ?? null,
                 'status' => 'parsed',
             ]);
         }

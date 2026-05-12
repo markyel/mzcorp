@@ -271,6 +271,12 @@ class RequestItemParsingService
             'unit' => trim($item['unit'] ?? 'шт.'),
             'category' => $category,
             'note' => !empty($item['note']) ? trim($item['note']) : null,
+            // Phase 2: для не-vision источников (text/документ) остаётся null;
+            // parseItemsFromPhotoMarkings выставит позже через mapping
+            // image_index → email_attachments.id.
+            'email_attachment_id' => isset($item['email_attachment_id']) && is_int($item['email_attachment_id'])
+                ? $item['email_attachment_id']
+                : null,
         ];
     }
 
@@ -668,6 +674,10 @@ PROMPT;
 
         if ($imageAttachments->isNotEmpty()) {
             $images = [];
+            // Phase 2: id'ы аттачментов строго в том же порядке, что и data:URI'ы
+            // в $images. Если какой-то аттачмент не прочитался — он пропускается
+            // в ОБА массива, чтобы маппинг image_index не съехал.
+            $attachmentIds = [];
             foreach ($imageAttachments as $att) {
                 try {
                     $content = \Illuminate\Support\Facades\Storage::disk($att->disk)->get($att->file_path);
@@ -676,6 +686,7 @@ PROMPT;
                     }
                     $mime = $att->mime_type ?: 'image/jpeg';
                     $images[] = "data:{$mime};base64," . base64_encode($content);
+                    $attachmentIds[] = (int) $att->id;
                 } catch (\Throwable $e) {
                     Log::warning('parseItemsFromInboundContent: image read failed', [
                         'source' => $sourceTag,
@@ -688,7 +699,7 @@ PROMPT;
                 try {
                     $items = array_merge(
                         $items,
-                        $this->parseItemsFromPhotoMarkings($images, $referenceText),
+                        $this->parseItemsFromPhotoMarkings($images, $referenceText, $attachmentIds),
                     );
                 } catch (\Throwable $e) {
                     Log::error('parseItemsFromInboundContent: vision parse failed', [
@@ -771,12 +782,23 @@ PROMPT;
      * с артикулом и брендом. qty обычно не виден на фото — берём из reference text
      * (тело письма «нужны 3 комплекта») или null.
      *
+     * Phase 2: дополнительно резолвим `image_attachment_id` — Vision возвращает
+     * `image_index` (0..N-1), мапим в id переданных EmailAttachment в том же
+     * порядке, что и data:URI'ы. Если index out-of-range / null — оставляем
+     * email_attachment_id = null (UI покажет дефолтную заглушку).
+     *
      * @param array<string> $images data:image/...;base64,...
-     * @return array<array{name: string, brand: ?string, article: ?string, qty: float, unit: string, note: ?string}>
+     * @param list<int|null> $attachmentIds id из email_attachments в порядке $images
+     * @return array<array{name: string, brand: ?string, article: ?string, qty: float, unit: string, note: ?string, email_attachment_id: ?int}>
      */
-    private function parseItemsFromPhotoMarkings(array $images, ?string $referenceText = null): array
-    {
+    private function parseItemsFromPhotoMarkings(
+        array $images,
+        ?string $referenceText = null,
+        array $attachmentIds = [],
+    ): array {
+        // Срезаем оба массива симметрично, чтобы маппинг index→id не съехал.
         $images = array_slice($images, 0, 8);
+        $attachmentIds = array_slice($attachmentIds, 0, 8);
 
         $intro = "Ты — парсер заявок на запчасти лифтового оборудования.\n"
             . "На изображениях — ФОТО товара (шильдик, маркировка, бирка, упаковка,\n"
@@ -808,9 +830,21 @@ PROMPT;
             . "• если на фото видна посторонняя инфо (логотип компании, реклама,\n"
             . "  чек, штрих-код БЕЗ артикула) — игнорируй\n\n";
 
+        // Phase 2: требуем image_index — порядковый номер фото в массиве
+        // image_url (от 0). Используется для привязки позиции к фото-вложению
+        // в БД (request_items.image_attachment_id). Если позиция собрана по
+        // нескольким фото (например, один товар с разных ракурсов) — указывай
+        // index первого/самого информативного.
+        $intro .= "═══ ВАЖНО: НОМЕР ФОТО ═══\n"
+            . "Изображения переданы по порядку, нумерация с 0. В каждой позиции\n"
+            . "ОБЯЗАТЕЛЬНО указывай `image_index` — номер фото, по которому ты\n"
+            . "извлёк эту позицию. Если позиция выведена из нескольких фото —\n"
+            . "поставь index первого. Если позиция вообще не из фото (что для\n"
+            . "этого промпта не должно случаться) — image_index: null.\n\n";
+
         $intro .= "═══ ФОРМАТ ОТВЕТА ═══\n"
             . "Строго JSON без markdown:\n"
-            . '{"items": [{"name": "...", "brand": "...", "article": "...", "qty": 1, "unit": "шт.", "note": null}]}';
+            . '{"items": [{"name": "...", "brand": "...", "article": "...", "qty": 1, "unit": "шт.", "note": null, "image_index": 0}]}';
 
         $content = [['type' => 'text', 'text' => $intro]];
         foreach ($images as $img) {
@@ -840,7 +874,20 @@ PROMPT;
         $parsed = json_decode($result['content'] ?? '', true);
         $items = $parsed['items'] ?? [];
 
-        return array_map(fn(array $item) => $this->normalizeParsedItem($item), $items);
+        return array_map(function (array $item) use ($attachmentIds) {
+            $normalized = $this->normalizeParsedItem($item);
+            // Phase 2: резолв image_index → конкретный email_attachments.id.
+            // Если Vision не вернул index, вернул не-int, или out-of-range —
+            // FK остаётся null (заглушка в UI).
+            $idx = $item['image_index'] ?? null;
+            $attId = null;
+            if (is_int($idx) && $idx >= 0 && $idx < count($attachmentIds)) {
+                $attId = $attachmentIds[$idx] ?? null;
+            }
+            $normalized['email_attachment_id'] = $attId;
+
+            return $normalized;
+        }, $items);
     }
 
     /**

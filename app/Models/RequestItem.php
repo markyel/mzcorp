@@ -31,6 +31,9 @@ class RequestItem extends Model
         'category',
         'supplier_note',
         'data_source',
+        // Phase 2: привязка к фото-вложению email'а, из которого Vision-парсер
+        // извлёк позицию (см. add_image_attachment_id_to_request_items_table).
+        'image_attachment_id',
         'status',
         'is_active',
         // Phase 2.0 KB resolutions:
@@ -77,5 +80,15 @@ class RequestItem extends Model
     public function brand(): BelongsTo
     {
         return $this->belongsTo(ManufacturerBrand::class, 'manufacturer_brand_id');
+    }
+
+    /**
+     * Фото-вложение письма, из которого Vision извлёк эту позицию (если есть).
+     * Null для позиций из текста/документов или если Vision вернул кривой
+     * image_index. Используется в карточке заявки для thumbnail-превью.
+     */
+    public function imageAttachment(): BelongsTo
+    {
+        return $this->belongsTo(EmailAttachment::class, 'image_attachment_id');
     }
 }

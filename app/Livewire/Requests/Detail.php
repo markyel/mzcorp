@@ -56,6 +56,7 @@ class Detail extends Component
             'items',
             'items.brand:id,name',
             'items.kbCategory:id,slug,name',
+            'items.imageAttachment:id,email_message_id,filename,mime_type,disk,file_path,size_bytes',
             'context:id,request_id,analysis_status,equipment_units,llm_model_version,analyzed_at',
             'emailMessage.attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline',
             'emailMessage.mailbox:id,email,name',

@@ -548,7 +548,30 @@
                                 <div class="grid items-center px-[18px] gap-2.5 py-2.5 border-b border-border-subtle text-[12.5px]"
                                      style="grid-template-columns: 24px 36px 1fr 110px 90px 100px 110px 32px">
                                     <span class="mono text-[12px] text-fg-3 text-right">{{ $item->position }}</span>
-                                    <span class="w-8 h-8 border border-border rounded-sm bg-app flex items-center justify-center text-[9px] text-fg-3">img</span>
+                                    @php
+                                        // Phase 2: превью фото из vision-привязки (request_items.image_attachment_id).
+                                        // Если у позиции нет привязки или превью не картинка — дефолтная заглушка.
+                                        $itemImg = $item->imageAttachment;
+                                        $itemImgIsImage = $itemImg && $isImageAttachment($itemImg);
+                                    @endphp
+                                    @if($itemImgIsImage)
+                                        @php
+                                            $itemPreviewUrl = route('attachments.preview', $itemImg);
+                                            $itemDownloadUrl = route('attachments.download', $itemImg);
+                                        @endphp
+                                        <button type="button"
+                                                x-on:click="$dispatch('open-image', { src: @js($itemPreviewUrl), name: @js($itemImg->filename), dl: @js($itemDownloadUrl) })"
+                                                class="w-8 h-8 border border-border rounded-sm overflow-hidden bg-app block shrink-0"
+                                                title="{{ $itemImg->filename }} — открыть">
+                                            <img src="{{ $itemPreviewUrl }}"
+                                                 alt="{{ $itemImg->filename }}"
+                                                 loading="lazy"
+                                                 class="w-8 h-8 object-cover block">
+                                        </button>
+                                    @else
+                                        <span class="w-8 h-8 border border-border rounded-sm bg-app flex items-center justify-center text-[9px] text-fg-3"
+                                              title="Без привязки к фото">img</span>
+                                    @endif
                                     <div class="min-w-0">
                                         <div class="font-medium text-fg-1 truncate">{{ $item->parsed_name ?: '(без названия)' }}</div>
                                         <div class="text-[11.5px] text-fg-3 mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
