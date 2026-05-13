@@ -94,26 +94,46 @@
 
                 {{-- Attachments --}}
                 <div>
-                    <div class="text-[12px] text-fg-3 uppercase tracking-wider font-semibold mb-1.5">Вложения</div>
-                    @php $atts = $this->attachments; @endphp
+                    <div class="text-[12px] text-fg-3 uppercase tracking-wider font-semibold mb-1.5">
+                        Вложения
+                        @php $atts = $this->attachments; @endphp
+                        @if($atts->isNotEmpty())
+                            <span class="text-fg-1 ml-1">({{ $atts->count() }})</span>
+                        @endif
+                    </div>
+
+                    {{-- Список уже прикреплённых файлов. --}}
                     @if($atts->isNotEmpty())
                         <div class="flex flex-wrap gap-2 mb-2">
                             @foreach($atts as $att)
-                                <span class="att inline-flex items-center gap-2 px-2 py-1 border border-border rounded-md bg-surface text-[12px]">
-                                    <span class="text-fg-1">{{ $att->filename }}</span>
-                                    <span class="text-fg-3">· {{ number_format($att->size_bytes / 1024, 0) }} KB</span>
+                                <span class="att inline-flex items-center gap-2 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px]"
+                                      wire:key="att-{{ $att->id }}">
+                                    <span class="inline-block w-4 h-5 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[7px] font-bold text-center leading-5">
+                                        {{ \Illuminate\Support\Str::upper(\Illuminate\Support\Str::afterLast($att->filename, '.')) ?: 'FILE' }}
+                                    </span>
+                                    <span class="text-fg-1 max-w-[260px] truncate" title="{{ $att->filename }}">{{ $att->filename }}</span>
+                                    <span class="text-fg-3">· {{ number_format($att->size_bytes / 1024, 0, '.', ' ') }} KB</span>
                                     <button type="button"
                                             wire:click="removeAttachment({{ $att->id }})"
-                                            class="text-red-700 hover:text-red-900 ml-1">×</button>
+                                            wire:confirm="Удалить вложение {{ $att->filename }}?"
+                                            class="text-red-700 hover:text-red-900 ml-1 text-[14px] leading-none"
+                                            title="Удалить">×</button>
                                 </span>
                             @endforeach
                         </div>
                     @endif
+
+                    {{-- Добавить файлы. Прикрепляется автоматически после выбора
+                         (см. ComposeForm::updatedNewFiles). --}}
                     <div class="flex items-center gap-2">
-                        <input type="file" wire:model="newFiles" multiple class="text-[12px]" />
-                        <button type="button" wire:click="uploadAttachments" class="btn btn-sm" @if(empty($newFiles)) disabled @endif>📎 Прикрепить</button>
-                        @error('newFiles.*') <span class="text-red-700 text-[12px]">{{ $message }}</span> @enderror
+                        <input type="file" wire:model="newFiles" multiple
+                               class="text-[12px] block file:mr-2 file:px-2.5 file:py-1 file:border file:border-border file:rounded file:bg-surface file:text-fg-1 file:cursor-pointer hover:file:bg-surface-2" />
+                        <span wire:loading wire:target="newFiles,uploadAttachments" class="text-amber-700 text-[12px]">📎 Загружаем…</span>
+                        @if($atts->isEmpty())
+                            <span wire:loading.remove wire:target="newFiles,uploadAttachments" class="text-fg-3 text-[12px]">Вложений нет</span>
+                        @endif
                     </div>
+                    @error('newFiles.*') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
                 </div>
             </div>
 

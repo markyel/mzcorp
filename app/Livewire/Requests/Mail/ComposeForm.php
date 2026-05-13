@@ -216,8 +216,23 @@ class ComposeForm extends Component
     }
 
     /**
+     * Livewire lifecycle: сработает сразу после выбора файлов в input.
+     * Автоматически материализует tmp → EmailAttachment, чтобы менеджеру
+     * не нужно было отдельной кнопкой «прикрепить» (UX-trap: если
+     * нажать «Отправить» с непрожатой кнопкой — файлы НЕ попадают в MIME).
+     */
+    public function updatedNewFiles(): void
+    {
+        if (empty($this->newFiles)) {
+            return;
+        }
+        $this->uploadAttachments();
+    }
+
+    /**
      * Загрузить новые файлы → перенести в постоянное хранилище → создать
-     * EmailAttachment-записи. Вызывается из view по клику «Добавить».
+     * EmailAttachment-записи. Вызывается автоматически через updatedNewFiles
+     * (и опционально по клику кнопки, если включена в view).
      */
     public function uploadAttachments(): void
     {
@@ -251,6 +266,8 @@ class ComposeForm extends Component
             ]);
         }
         $this->newFiles = [];
+        // Сбросим кэш computed-метода чтобы новый список сразу появился.
+        unset($this->attachments);
     }
 
     public function removeAttachment(int $attachmentId, EmailDraftService $drafts): void
@@ -278,7 +295,12 @@ class ComposeForm extends Component
         @set_time_limit(180);
         @ini_set('max_execution_time', '180');
 
-        $this->autoSave($drafts); // финальный flush
+        $this->autoSave($drafts); // финальный flush subject/to/cc/body
+        // Если менеджер выбрал файлы в input, но не дождался auto-upload —
+        // прикручиваем их сейчас, чтобы не уходить без вложений.
+        if (! empty($this->newFiles)) {
+            $this->uploadAttachments();
+        }
         $draft = $this->loadDraftOrFail();
 
         $result = $sender->sendDraft($draft->id);
