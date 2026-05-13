@@ -123,15 +123,51 @@
                         </div>
                     @endif
 
-                    {{-- Добавить файлы. Прикрепляется автоматически после выбора
+                    {{-- Drop-zone: добавить файлы кликом или drag&drop.
+                         Прикрепляется автоматически после выбора
                          (см. ComposeForm::updatedNewFiles). --}}
-                    <div class="flex items-center gap-2">
+                    <div x-data="{
+                            isDragging: false,
+                            handleDrop(event) {
+                                this.isDragging = false;
+                                const dropped = event.dataTransfer?.files;
+                                if (!dropped || dropped.length === 0) return;
+                                const input = $refs.fileInput;
+                                const dt = new DataTransfer();
+                                // Сохраняем уже выбранные (если есть) + добавляем новые.
+                                if (input.files) {
+                                    for (const f of input.files) dt.items.add(f);
+                                }
+                                for (const f of dropped) dt.items.add(f);
+                                input.files = dt.files;
+                                input.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                        }"
+                        @dragenter.prevent="isDragging = true"
+                        @dragover.prevent="isDragging = true"
+                        @dragleave.prevent="isDragging = false"
+                        @drop.prevent="handleDrop($event)"
+                        :class="isDragging ? 'border-[var(--sky-500)] bg-[var(--sky-50)]' : 'border-border'"
+                        class="border border-dashed rounded-md px-3 py-3 transition-colors cursor-pointer"
+                        @click="$refs.fileInput.click()">
                         <input type="file" wire:model="newFiles" multiple
-                               class="text-[12px] block file:mr-2 file:px-2.5 file:py-1 file:border file:border-border file:rounded file:bg-surface file:text-fg-1 file:cursor-pointer hover:file:bg-surface-2" />
-                        <span wire:loading wire:target="newFiles,uploadAttachments" class="text-amber-700 text-[12px]">📎 Загружаем…</span>
-                        @if($atts->isEmpty())
-                            <span wire:loading.remove wire:target="newFiles,uploadAttachments" class="text-fg-3 text-[12px]">Вложений нет</span>
-                        @endif
+                               x-ref="fileInput"
+                               class="hidden" />
+                        <div class="flex items-center gap-2 text-[12px] pointer-events-none">
+                            <span class="text-fg-2">📎</span>
+                            <span class="text-fg-1" x-show="!isDragging">
+                                Перетащите файлы сюда или
+                                <span class="underline text-fg-1">нажмите для выбора</span>
+                            </span>
+                            <span class="text-[var(--sky-700)] font-medium" x-show="isDragging" x-cloak>
+                                Отпустите, чтобы прикрепить
+                            </span>
+                            <span class="flex-1"></span>
+                            <span wire:loading wire:target="newFiles,uploadAttachments" class="text-amber-700">📎 Загружаем…</span>
+                            @if($atts->isEmpty())
+                                <span wire:loading.remove wire:target="newFiles,uploadAttachments" class="text-fg-3">до 25 МБ/файл</span>
+                            @endif
+                        </div>
                     </div>
                     @error('newFiles.*') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
                 </div>
