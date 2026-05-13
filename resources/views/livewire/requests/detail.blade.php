@@ -662,12 +662,31 @@
                     </div>
                 @endif
 
+                @php
+                    // Priority 1: для toggle «Показать удалённые» нужно знать,
+                    // есть ли вообще soft-deleted позиции — иначе кнопку прячем.
+                    $deletedCount = \App\Models\RequestItem::query()
+                        ->where('request_id', $req->id)
+                        ->where('is_active', false)
+                        ->count();
+                    $canEditItems = auth()->id() === $req->assigned_user_id
+                        || auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'secretary']);
+                @endphp
                 <div class="ds-card">
                     <div class="ds-card-header">
                         <h3>Позиции запроса</h3>
                         <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $items->count() }}</span>
                         <span class="flex-1"></span>
                         <span class="text-[11.5px] text-fg-3">источник: {{ $items->first()?->data_source ?? '—' }}</span>
+                        @if($deletedCount > 0)
+                            <button wire:click="toggleDeletedItems" class="btn btn-sm">
+                                @if($showDeletedItems)
+                                    Скрыть удалённые
+                                @else
+                                    Показать удалённые ({{ $deletedCount }})
+                                @endif
+                            </button>
+                        @endif
                         <button class="btn btn-sm" disabled title="Доступно в Phase 2">Refresh всех</button>
                     </div>
 
@@ -700,13 +719,16 @@
                                         'not_covered' => ['chip-neutral', 'нет правил'],
                                         'assessment_failed' => ['chip-over', 'ошибка KB'],
                                         'internal_catalog_pending' => ['chip-info', 'внутренний SKU · ждёт каталог'],
+                                        // Priority 1: оператор подтвердил что M-SKU не появится.
+                                        'internal_catalog_not_found' => ['chip-danger', 'нет в каталоге'],
                                         default => null, // not_assessed → не показываем чип
                                     };
                                     $extracted = is_array($item->quality_assessment_payload['extracted_parameters'] ?? null)
                                         ? $item->quality_assessment_payload['extracted_parameters']
                                         : [];
                                 @endphp
-                                <div class="grid items-center px-[18px] gap-2.5 py-2.5 border-b border-border-subtle text-[12.5px]"
+                                <div wire:key="ri-{{ $item->id }}"
+                                     class="grid items-center px-[18px] gap-2.5 py-2.5 border-b border-border-subtle text-[12.5px] {{ $item->is_active ? '' : 'opacity-50 bg-surface-2' }}"
                                      style="grid-template-columns: 24px 36px 1fr 110px 90px 100px 110px 32px">
                                     <span class="mono text-[12px] text-fg-3 text-right">{{ $item->position }}</span>
                                     @php
@@ -802,7 +824,22 @@
                                             </div>
                                         @endif
                                     </div>
-                                    <span class="mono text-[12px] text-fg-1 text-right">{{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') ?: '—' }} {{ $item->parsed_unit }}</span>
+                                    @if($canEditItems && $item->is_active)
+                                        <div class="flex items-center gap-1 justify-end">
+                                            <input type="number" step="0.001" min="0"
+                                                   value="{{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') }}"
+                                                   wire:change="editItemField({{ $item->id }}, 'parsed_qty', $event.target.value)"
+                                                   class="mono text-[12px] text-right w-[58px] h-[24px] px-1 border border-border rounded bg-surface focus:border-[var(--sky-500)] outline-none"
+                                                   title="Кол-во — нажми Tab или клик вне поля чтобы сохранить" />
+                                            <input type="text" maxlength="20"
+                                                   value="{{ $item->parsed_unit }}"
+                                                   wire:change="editItemField({{ $item->id }}, 'parsed_unit', $event.target.value)"
+                                                   class="mono text-[12px] w-[44px] h-[24px] px-1 border border-border rounded bg-surface focus:border-[var(--sky-500)] outline-none"
+                                                   title="Единица измерения" />
+                                        </div>
+                                    @else
+                                        <span class="mono text-[12px] text-fg-1 text-right">{{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') ?: '—' }} {{ $item->parsed_unit }}</span>
+                                    @endif
 
                                     {{-- Phase 2 use-case C: цена и наличие из catalog_items, если есть привязка. --}}
                                     @php
@@ -834,7 +871,71 @@
                                         {{ $total !== null ? number_format($total, 2, '.', ' ') . ' ₽' : '—' }}
                                     </span>
 
-                                    <span class="text-fg-3 text-center cursor-not-allowed" title="Phase 2">···</span>
+                                    @if($canEditItems)
+                                        @if(! $item->is_active)
+                                            {{-- Soft-deleted: кнопка восстановления вместо меню. --}}
+                                            <button type="button"
+                                                    wire:click="restoreItem({{ $item->id }})"
+                                                    class="text-emerald-700 hover:text-emerald-900 text-center text-[14px]"
+                                                    title="Восстановить позицию">↩</button>
+                                        @else
+                                            <div x-data="{ open: false }" class="relative text-center"
+                                                 @click.outside="open = false">
+                                                <button type="button"
+                                                        @click="open = !open"
+                                                        class="text-fg-2 hover:text-fg-1 text-[16px] leading-none px-1"
+                                                        title="Действия">⋮</button>
+                                                <div x-show="open" x-cloak x-transition.origin.top.right
+                                                     class="absolute right-0 top-full mt-1 z-30 w-[220px] py-1 bg-surface border border-border rounded-md shadow-lg text-left text-[12.5px]">
+                                                    @if($item->parsed_name)
+                                                        <button type="button"
+                                                                @click="open = false; $dispatch('open-item-edit', { itemId: {{ $item->id }} })"
+                                                                class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
+                                                            📝 Редактировать…
+                                                        </button>
+                                                    @endif
+                                                    @if($item->parsed_name || $item->parsed_article)
+                                                        <button type="button"
+                                                                @click="open = false; $wire.refreshItemCatalog({{ $item->id }})"
+                                                                class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
+                                                            🔄 Обновить из каталога
+                                                        </button>
+                                                    @endif
+                                                    @if($item->catalog_item_id)
+                                                        <button type="button"
+                                                                @click="open = false; $wire.unbindItemCatalog({{ $item->id }})"
+                                                                class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
+                                                            🔓 Отвязать от каталога
+                                                        </button>
+                                                    @endif
+                                                    <button type="button"
+                                                            @click="open = false; $dispatch('open-catalog-link', { itemId: {{ $item->id }} })"
+                                                            class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
+                                                        🔗 Привязать вручную…
+                                                    </button>
+                                                    @if($qaStatus === 'internal_catalog_pending')
+                                                        <button type="button"
+                                                                @click="open = false"
+                                                                wire:click="markItemCatalogNotFound({{ $item->id }})"
+                                                                wire:confirm="Подтвердить, что SKU «{{ $item->parsed_article }}» отсутствует в каталоге?"
+                                                                class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
+                                                            ❌ Нет в каталоге
+                                                        </button>
+                                                    @endif
+                                                    <div class="my-1 border-t border-border-subtle"></div>
+                                                    <button type="button"
+                                                            @click="open = false"
+                                                            wire:click="softDeleteItem({{ $item->id }})"
+                                                            wire:confirm="Удалить позицию «{{ \Illuminate\Support\Str::limit($item->parsed_name ?: 'позиция #' . $item->position, 40) }}»?"
+                                                            class="block w-full text-left px-3 py-1.5 hover:bg-red-50 text-red-700">
+                                                        🗑 Удалить позицию
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        @endif
+                                    @else
+                                        <span class="text-fg-3 text-center" title="Менеджер заявки">⋮</span>
+                                    @endif
                                 </div>
                             @endforeach
 
@@ -870,6 +971,17 @@
                                 <span class="text-fg-3">итого:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono text-[14px]">{{ $hasAnyPrice ? number_format($totalAll, 2, '.', ' ') . ' ₽' : '—' }}</span>
                             </div>
                         </div>
+                    @endif
+
+                    {{-- Priority 1: модалки ручных действий с позициями.
+                         Single-instance, слушают $dispatch события от строк. --}}
+                    @if($canEditItems)
+                        <livewire:requests.items.item-edit-dialog
+                            :request-id="$req->id"
+                            wire:key="item-edit-{{ $req->id }}" />
+                        <livewire:requests.items.item-catalog-link-dialog
+                            :request-id="$req->id"
+                            wire:key="item-catalog-link-{{ $req->id }}" />
                     @endif
                 </div>
                 @break

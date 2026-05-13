@@ -88,6 +88,11 @@ class CatalogResolutionService
         if ($item->catalog_item_id !== null) {
             return false;
         }
+        // Priority 1: оператор пометил позицию как «нет в каталоге» —
+        // не перепривязываем через bulk passes, ждём ручной refresh.
+        if ($item->quality_assessment_status === 'internal_catalog_not_found') {
+            return false;
+        }
         $article = (string) ($item->parsed_article ?? '');
         if ($article === '') {
             return false;
@@ -141,6 +146,13 @@ class CatalogResolutionService
     public function matchByName(RequestItem $item): bool
     {
         if ($item->catalog_item_id !== null) {
+            return false;
+        }
+        // Priority 1: оператор пометил позицию как «нет в каталоге» —
+        // C-step (vector + LLM) тоже не запускаем. Возврат — только через
+        // ручной refresh (RequestItemEditor::refreshFromCatalog), он сам
+        // обнулит status перед вызовом matchByName().
+        if ($item->quality_assessment_status === 'internal_catalog_not_found') {
             return false;
         }
         if (! (bool) app_setting('catalog.name_match.enabled', config('services.catalog_name_match.enabled', true))) {

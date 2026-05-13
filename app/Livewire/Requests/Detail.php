@@ -5,8 +5,11 @@ namespace App\Livewire\Requests;
 use App\Enums\Role;
 use App\Models\EmailMessage;
 use App\Models\Request;
+use App\Models\RequestItem;
+use App\Services\Catalog\RequestItemEditor;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -38,6 +41,14 @@ class Detail extends Component
     #[Url(as: 'tab')]
     public string $tab = 'overview';
 
+    /**
+     * Priority 1: toggle «Показать удалённые позиции» в табе «Позиции».
+     * Soft-deleted items (is_active=false) по умолчанию скрыты, в hero
+     * не учитываются. При toggle=true рендерим серой строкой с кнопкой
+     * «Восстановить».
+     */
+    public bool $showDeletedItems = false;
+
     public function mount(Request $request): void
     {
         $user = auth()->user();
@@ -53,7 +64,7 @@ class Detail extends Component
 
         $this->request = $request->load([
             'assignedUser:id,name,email',
-            'items',
+            'items' => fn ($q) => $this->applyItemsFilter($q)->orderBy('position'),
             'items.brand:id,name',
             'items.kbCategory:id,slug,name',
             'items.imageAttachment:id,email_message_id,filename,mime_type,disk,file_path,size_bytes',
@@ -198,7 +209,7 @@ class Detail extends Component
             ->whereKey($this->request->id)
             ->with([
                 'assignedUser:id,name,email',
-                'items',
+                'items' => fn ($q) => $this->applyItemsFilter($q)->orderBy('position'),
                 'items.brand:id,name',
                 'items.kbCategory:id,slug,name',
                 'items.imageAttachment:id,email_message_id,filename,mime_type,disk,file_path,size_bytes',
@@ -211,6 +222,18 @@ class Detail extends Component
                 'assignments.assignedBy:id,name',
             ])
             ->firstOrFail();
+    }
+
+    /**
+     * Фильтр items в зависимости от toggle «Показать удалённые».
+     * По умолчанию — только активные (is_active=true).
+     */
+    private function applyItemsFilter($query)
+    {
+        if ($this->showDeletedItems) {
+            return $query; // все, включая is_active=false
+        }
+        return $query->where('is_active', true);
     }
 
     /**
@@ -342,6 +365,85 @@ class Detail extends Component
         $email = $this->request->emailMessage;
 
         return $email ? $this->bodyHtmlFor($email) : null;
+    }
+
+    /* ---------------- Priority 1 — ручные действия с позициями ---------------- */
+
+    public function toggleDeletedItems(): void
+    {
+        $this->showDeletedItems = ! $this->showDeletedItems;
+        $this->reloadRequest();
+    }
+
+    public function editItemField(int $itemId, string $field, mixed $value, RequestItemEditor $editor): void
+    {
+        $item = $this->loadItemOrFail($itemId);
+        $editor->editFields($item, [$field => $value], auth()->user());
+        $this->reloadRequest();
+    }
+
+    public function softDeleteItem(int $itemId, RequestItemEditor $editor): void
+    {
+        $item = $this->loadItemOrFail($itemId);
+        $editor->softDelete($item, auth()->user());
+        $this->reloadRequest();
+    }
+
+    public function restoreItem(int $itemId, RequestItemEditor $editor): void
+    {
+        $item = $this->loadItemOrFail($itemId, includeDeleted: true);
+        $editor->restore($item, auth()->user());
+        $this->reloadRequest();
+    }
+
+    public function unbindItemCatalog(int $itemId, RequestItemEditor $editor): void
+    {
+        $item = $this->loadItemOrFail($itemId);
+        $editor->unbindCatalog($item, auth()->user());
+        $this->reloadRequest();
+    }
+
+    public function refreshItemCatalog(int $itemId, RequestItemEditor $editor): void
+    {
+        $item = $this->loadItemOrFail($itemId);
+        $result = $editor->refreshFromCatalog($item, auth()->user());
+        $this->reloadRequest();
+        session()->flash(
+            'status',
+            $result->catalog_item_id
+                ? 'Позиция #' . $result->position . ' заново сматчена с каталогом.'
+                : 'Не нашлось каталожного аналога для позиции #' . $result->position . '.',
+        );
+    }
+
+    public function markItemCatalogNotFound(int $itemId, RequestItemEditor $editor): void
+    {
+        $item = $this->loadItemOrFail($itemId);
+        $editor->markCatalogNotFound($item, auth()->user());
+        $this->reloadRequest();
+    }
+
+    #[On('item-relinked')]
+    #[On('item-edited')]
+    public function handleItemChangedEvent(): void
+    {
+        $this->reloadRequest();
+    }
+
+    /**
+     * Загрузить RequestItem с проверкой что он действительно от этой заявки.
+     * Защищает от попытки изменить чужую позицию через подменённый Livewire wire:call.
+     */
+    private function loadItemOrFail(int $itemId, bool $includeDeleted = false): RequestItem
+    {
+        $query = RequestItem::query()
+            ->with(['request:id,assigned_user_id,internal_code'])
+            ->where('request_id', $this->request->id)
+            ->whereKey($itemId);
+        if (! $includeDeleted) {
+            $query->where('is_active', true);
+        }
+        return $query->firstOrFail();
     }
 
     public function render()
