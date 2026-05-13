@@ -59,58 +59,33 @@
                 </div>
 
                 {{-- Preview: подпись + цитата исходного письма.
-                     Не редактируется. При send приклеивается автоматически. --}}
+                     Не редактируется. При send приклеивается автоматически.
+                     Цитата — plain-текст в <pre>: надёжнее iframe-srcdoc
+                     (тот давал нулевую высоту до Alpine fit'а). --}}
                 @php
                     $sig = $this->signaturePreview;
-                    $quoteHtml = $this->quotePreviewHtml;
+                    $quotePlain = $this->quotePreviewPlain;
                 @endphp
-                @if($sig || $quoteHtml)
+                @if($sig || $quotePlain)
                     <details class="border border-border rounded-md bg-surface">
-                        <summary class="cursor-pointer px-3 py-2 text-[12px] text-fg-3 select-none">
+                        <summary class="cursor-pointer px-3 py-2 text-[12px] text-fg-3 select-none hover:bg-surface-2">
                             При отправке к письму добавятся:
                             @if($sig) <span class="text-fg-1 font-medium">подпись</span> @endif
-                            @if($sig && $quoteHtml) <span>+</span> @endif
-                            @if($quoteHtml) <span class="text-fg-1 font-medium">цитата исходного письма</span> @endif
-                            <span class="text-fg-3"> · нажмите чтобы посмотреть</span>
+                            @if($sig && $quotePlain) <span>+</span> @endif
+                            @if($quotePlain) <span class="text-fg-1 font-medium">цитата исходного письма</span> @endif
+                            <span> · нажмите чтобы посмотреть</span>
                         </summary>
                         <div class="border-t border-border-subtle">
                             @if($sig)
                                 <div class="px-3 py-2 text-[12px] text-fg-2 border-b border-border-subtle bg-surface-2">
                                     <div class="text-[11px] text-fg-3 uppercase tracking-wider mb-1 font-semibold">Подпись</div>
-                                    <pre class="whitespace-pre-wrap font-sans m-0">{{ $sig }}</pre>
+                                    <pre class="whitespace-pre-wrap font-sans m-0 text-fg-1">{{ $sig }}</pre>
                                 </div>
                             @endif
-                            @if($quoteHtml)
+                            @if($quotePlain)
                                 <div class="px-3 py-2">
                                     <div class="text-[11px] text-fg-3 uppercase tracking-wider mb-1.5 font-semibold">Цитата исходного письма</div>
-                                    <iframe
-                                        sandbox="allow-same-origin"
-                                        srcdoc="{{ $quoteHtml }}"
-                                        loading="lazy"
-                                        class="w-full block border border-border-subtle rounded bg-surface"
-                                        style="height: 180px;"
-                                        x-data
-                                        x-init="
-                                            const fit = () => {
-                                                try {
-                                                    const h = $el.contentDocument && $el.contentDocument.documentElement
-                                                        ? $el.contentDocument.documentElement.scrollHeight
-                                                        : 180;
-                                                    $el.style.height = Math.min(h + 4, 260) + 'px';
-                                                } catch (e) {}
-                                            };
-                                            $el.addEventListener('load', () => {
-                                                try {
-                                                    const doc = $el.contentDocument;
-                                                    if (!doc) return;
-                                                    const s = doc.createElement('style');
-                                                    s.textContent = 'html,body{margin:0;padding:0}body{padding:6px 10px;font:12px/1.5 system-ui,-apple-system,Segoe UI,Inter,sans-serif;color:#444;background:#fafafa;}body *{max-width:100%}img{max-width:100%;height:auto}';
-                                                    (doc.head || doc.documentElement).appendChild(s);
-                                                    fit();
-                                                } catch (e) {}
-                                            });
-                                        "
-                                    ></iframe>
+                                    <pre class="whitespace-pre-wrap font-sans m-0 text-fg-2 text-[12px] leading-[1.5] max-h-[260px] overflow-auto pl-3 border-l-2 border-border-strong">{{ $quotePlain }}</pre>
                                 </div>
                             @endif
                         </div>

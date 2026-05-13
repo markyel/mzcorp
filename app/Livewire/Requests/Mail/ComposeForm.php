@@ -334,12 +334,16 @@ class ComposeForm extends Component
     }
 
     /**
-     * HTML цитируемого исходного письма (для preview в форме под textarea).
-     * Рендерится через тот же iframe-паттерн что и обычный тред — стили
-     * письма не утекают на страницу.
+     * Plain-text превью цитируемого исходного письма (под textarea).
+     * Plain, а не HTML, потому что:
+     *   - менеджеру важно увидеть «что прицепится», а не идеальный рендер;
+     *   - iframe с srcdoc даёт ноль высоты в момент Livewire-render'а
+     *     (Alpine fit() не успевает, ResizeObserver не подключён);
+     *   - реальная HTML-цитата (с blockquote) собирается в MailQuoteBuilder
+     *     при send и идёт в само письмо клиенту.
      */
     #[Computed]
-    public function quotePreviewHtml(): ?string
+    public function quotePreviewPlain(): ?string
     {
         if (! $this->draftId) {
             return null;
@@ -355,16 +359,23 @@ class ComposeForm extends Component
         if (! $replyTo) {
             return null;
         }
-        $header = sprintf(
-            '<p style="color:#888;font-size:12px;margin:0 0 8px;">%s, %s &lt;%s&gt; писал(а):</p>',
-            htmlspecialchars((string) ($replyTo->sent_at?->format('d.m.Y H:i') ?? ''), ENT_QUOTES, 'UTF-8'),
-            htmlspecialchars((string) ($replyTo->from_name ?? ''), ENT_QUOTES, 'UTF-8'),
-            htmlspecialchars((string) $replyTo->from_email, ENT_QUOTES, 'UTF-8'),
-        );
-        $body = (string) ($replyTo->body_html ?: nl2br(htmlspecialchars(
-            (string) $replyTo->body_plain, ENT_QUOTES, 'UTF-8'
-        )));
-        return $header . $body;
+        $from = trim(($replyTo->from_name ? $replyTo->from_name . ' ' : '')
+            . '<' . $replyTo->from_email . '>');
+        $date = $replyTo->sent_at?->format('d.m.Y H:i') ?? '';
+        $header = sprintf('%s, %s писал(а):', $date, $from);
+
+        $body = (string) ($replyTo->body_plain ?: strip_tags(
+            (string) $replyTo->body_html
+        ));
+        // HTML-entity → plain (на случай если body_plain в письме был nl2br'нут).
+        $body = html_entity_decode($body, ENT_QUOTES, 'UTF-8');
+        $body = preg_replace('/\n{3,}/', "\n\n", trim($body));
+        // Лимит ~3 КБ — preview, не репродукция письма; раздувать DOM не надо.
+        if (mb_strlen($body) > 3000) {
+            $body = mb_substr($body, 0, 3000) . "\n\n…(сокращено, полностью пойдёт в письмо)";
+        }
+
+        return $header . "\n\n" . $body;
     }
 
     /**
