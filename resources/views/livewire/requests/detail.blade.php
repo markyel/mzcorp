@@ -769,7 +769,14 @@
                                               title="Без привязки к фото">img</span>
                                     @endif
                                     <div class="min-w-0">
-                                        <div class="font-medium text-fg-1 truncate">{{ $item->parsed_name ?: '(без названия)' }}</div>
+                                        <div class="font-medium text-fg-1 leading-snug">{{ $item->parsed_name ?: '(без названия)' }}</div>
+                                        @if($item->catalogItem && trim((string) $item->catalogItem->name) !== '' && mb_strtolower(trim((string) $item->catalogItem->name)) !== mb_strtolower(trim((string) $item->parsed_name)))
+                                            {{-- Название из нашего каталога — если отличается от того что прислал клиент. --}}
+                                            <div class="text-[11.5px] text-fg-3 mt-0.5 leading-snug" title="Название из каталога MyLift (SKU {{ $item->catalogItem->sku }})">
+                                                <span class="text-fg-3">↳</span>
+                                                <span class="text-fg-2">{{ $item->catalogItem->name }}</span>
+                                            </div>
+                                        @endif
                                         <div class="text-[11.5px] text-fg-3 mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                                             {{-- Phase 2.0 KB chips: brand + category + qa-status. --}}
                                             @if($item->brand)
