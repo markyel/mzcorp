@@ -2,7 +2,17 @@
      ItemCatalogLinkDialog. Ожидает:
        $rows — Collection<array{catalog: CatalogItem, similarity: ?float}>
        $selectedId — ?int (id выбранной строки для подсветки) --}}
-<table class="w-full text-[12px]">
+<table class="w-full text-[12px]" style="table-layout: auto;">
+    <colgroup>
+        <col style="width: 90px">
+        <col style="width: 160px">
+        <col>
+        <col style="width: 90px">
+        <col style="width: 80px">
+        @if($rows->first()['similarity'] ?? null !== null)
+            <col style="width: 80px">
+        @endif
+    </colgroup>
     <thead class="bg-surface-2 text-fg-3 uppercase tracking-wider text-[10.5px] sticky top-0">
         <tr>
             <th class="px-2 py-1.5 text-left">SKU</th>
@@ -24,14 +34,23 @@
             <tr wire:key="cat-{{ $cat->id }}"
                 wire:click="selectCatalog({{ $cat->id }})"
                 class="cursor-pointer border-b border-border-subtle last:border-b-0 {{ $selectedId === $cat->id ? 'bg-sky-50' : 'hover:bg-surface-2' }} {{ $cat->is_active ? '' : 'opacity-60' }}">
-                <td class="px-2 py-1.5 mono text-fg-1 align-top whitespace-nowrap">{{ $cat->sku }}</td>
-                <td class="px-2 py-1.5 align-top whitespace-nowrap">
-                    <div class="text-fg-1">{{ $cat->brand ?: '—' }}</div>
+                <td class="px-2 py-1.5 mono text-fg-1 align-top whitespace-nowrap">
+                    <div class="flex items-center gap-1">
+                        <span>{{ $cat->sku }}</span>
+                        <a href="https://mylift.ru/?text={{ urlencode($cat->sku) }}&fn=find"
+                           target="_blank" rel="noopener noreferrer"
+                           x-on:click.stop
+                           class="text-sky-700 hover:text-sky-900 text-[11px]"
+                           title="Открыть на mylift.ru">↗</a>
+                    </div>
+                </td>
+                <td class="px-2 py-1.5 align-top">
+                    <div class="text-fg-1 break-words">{{ $cat->brand ?: '—' }}</div>
                     @if($cat->brand_article)
-                        <div class="mono text-fg-3 text-[11px]">{{ $cat->brand_article }}</div>
+                        <div class="mono text-fg-3 text-[11px] break-all">{{ $cat->brand_article }}</div>
                     @endif
                 </td>
-                <td class="px-2 py-1.5 text-fg-1 align-top leading-snug">{{ $cat->name }}</td>
+                <td class="px-2 py-1.5 text-fg-1 align-top leading-snug break-words">{{ $cat->name }}</td>
                 <td class="px-2 py-1.5 mono text-right text-fg-1 align-top whitespace-nowrap">
                     {{ $cat->price !== null ? number_format((float) $cat->price, 2, '.', ' ') . ' ₽' : '—' }}
                 </td>

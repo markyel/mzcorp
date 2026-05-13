@@ -126,7 +126,7 @@
 
                     @php $results = $this->textResults; @endphp
 
-                    <div class="flex-1 overflow-auto border border-border-subtle rounded-md">
+                    <div class="flex-1 overflow-y-auto overflow-x-hidden border border-border-subtle rounded-md">
                         @if(mb_strlen(trim($query)) < 2)
                             <div class="px-3 py-6 text-center text-fg-3 text-[12px]">
                                 Введите минимум 2 символа для поиска.
@@ -151,7 +151,7 @@
 
                     @php $simResults = $this->similarResults; @endphp
 
-                    <div class="flex-1 overflow-auto border border-border-subtle rounded-md">
+                    <div class="flex-1 overflow-y-auto overflow-x-hidden border border-border-subtle rounded-md">
                         @if(empty($simResults))
                             <div class="px-3 py-6 text-center text-fg-3 text-[12px]"
                                  wire:loading.remove wire:target="similarResults,setMode">
