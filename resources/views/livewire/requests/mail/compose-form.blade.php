@@ -47,14 +47,75 @@
                 </div>
                 @error('subject') <div class="text-red-700 text-[12px] ml-[68px]">{{ $message }}</div> @enderror
 
-                {{-- Body --}}
+                {{-- Body (plain text — подпись и цитата автоматически добавятся
+                     при отправке, см. OutgoingMailMimeBuilder::composeFinalBody). --}}
                 <div>
-                    <textarea wire:model.live.debounce.1500ms="bodyHtml"
+                    <textarea wire:model.live.debounce.1500ms="bodyText"
                               rows="10"
+                              placeholder="Напишите ответ клиенту обычным текстом…"
                               class="w-full px-3 py-2 border border-border-strong rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)] resize-vertical"
                               style="font-family: var(--font-sans); line-height: 1.55;"></textarea>
-                    @error('bodyHtml') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
+                    @error('bodyText') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
                 </div>
+
+                {{-- Preview: подпись + цитата исходного письма.
+                     Не редактируется. При send приклеивается автоматически. --}}
+                @php
+                    $sig = $this->signaturePreview;
+                    $quoteHtml = $this->quotePreviewHtml;
+                @endphp
+                @if($sig || $quoteHtml)
+                    <details class="border border-border rounded-md bg-surface">
+                        <summary class="cursor-pointer px-3 py-2 text-[12px] text-fg-3 select-none">
+                            При отправке к письму добавятся:
+                            @if($sig) <span class="text-fg-1 font-medium">подпись</span> @endif
+                            @if($sig && $quoteHtml) <span>+</span> @endif
+                            @if($quoteHtml) <span class="text-fg-1 font-medium">цитата исходного письма</span> @endif
+                            <span class="text-fg-3"> · нажмите чтобы посмотреть</span>
+                        </summary>
+                        <div class="border-t border-border-subtle">
+                            @if($sig)
+                                <div class="px-3 py-2 text-[12px] text-fg-2 border-b border-border-subtle bg-surface-2">
+                                    <div class="text-[11px] text-fg-3 uppercase tracking-wider mb-1 font-semibold">Подпись</div>
+                                    <pre class="whitespace-pre-wrap font-sans m-0">{{ $sig }}</pre>
+                                </div>
+                            @endif
+                            @if($quoteHtml)
+                                <div class="px-3 py-2">
+                                    <div class="text-[11px] text-fg-3 uppercase tracking-wider mb-1.5 font-semibold">Цитата исходного письма</div>
+                                    <iframe
+                                        sandbox="allow-same-origin"
+                                        srcdoc="{{ $quoteHtml }}"
+                                        loading="lazy"
+                                        class="w-full block border border-border-subtle rounded bg-surface"
+                                        style="height: 180px;"
+                                        x-data
+                                        x-init="
+                                            const fit = () => {
+                                                try {
+                                                    const h = $el.contentDocument && $el.contentDocument.documentElement
+                                                        ? $el.contentDocument.documentElement.scrollHeight
+                                                        : 180;
+                                                    $el.style.height = Math.min(h + 4, 260) + 'px';
+                                                } catch (e) {}
+                                            };
+                                            $el.addEventListener('load', () => {
+                                                try {
+                                                    const doc = $el.contentDocument;
+                                                    if (!doc) return;
+                                                    const s = doc.createElement('style');
+                                                    s.textContent = 'html,body{margin:0;padding:0}body{padding:6px 10px;font:12px/1.5 system-ui,-apple-system,Segoe UI,Inter,sans-serif;color:#444;background:#fafafa;}body *{max-width:100%}img{max-width:100%;height:auto}';
+                                                    (doc.head || doc.documentElement).appendChild(s);
+                                                    fit();
+                                                } catch (e) {}
+                                            });
+                                        "
+                                    ></iframe>
+                                </div>
+                            @endif
+                        </div>
+                    </details>
+                @endif
 
                 {{-- Attachments --}}
                 <div>
@@ -92,7 +153,7 @@
                         wire:confirm="Удалить черновик?">Удалить черновик</button>
                 <span class="text-fg-3 text-[12px] ml-auto">
                     Автосохранение
-                    <span wire:loading wire:target="updatedSubject,updatedToRaw,updatedCcRaw,updatedBodyHtml" class="text-amber-700">…</span>
+                    <span wire:loading wire:target="updatedSubject,updatedToRaw,updatedCcRaw,updatedBodyText" class="text-amber-700">…</span>
                 </span>
             </div>
         </div>

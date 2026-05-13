@@ -46,8 +46,12 @@ class ComposeForm extends Component
     #[Validate('nullable|string|max:4000')]
     public string $ccRaw = '';
 
+    /**
+     * Только то, что менеджер ввёл в textarea. Подпись и цитата
+     * оригинала приклеиваются при send в OutgoingMailMimeBuilder.
+     */
     #[Validate('required|string|min:1')]
-    public string $bodyHtml = '';
+    public string $bodyText = '';
 
     /** @var array<int, \Livewire\Features\SupportFileUploads\TemporaryUploadedFile> */
     public array $newFiles = [];
@@ -169,7 +173,9 @@ class ComposeForm extends Component
         $this->subject = (string) $draft->subject;
         $this->toRaw = $this->formatRecipients((array) ($draft->to_recipients ?? []));
         $this->ccRaw = $this->formatRecipients((array) ($draft->cc_recipients ?? []));
-        $this->bodyHtml = (string) $draft->body_html;
+        // В textarea показываем ТОЛЬКО plain текст, который менеджер ввёл.
+        // Подпись и quote оригинала рисуются ниже отдельным preview-блоком.
+        $this->bodyText = (string) $draft->body_plain;
         $this->resetErrorBag();
     }
 
@@ -184,7 +190,7 @@ class ComposeForm extends Component
     public function updatedSubject(EmailDraftService $drafts): void { $this->autoSave($drafts); }
     public function updatedToRaw(EmailDraftService $drafts): void { $this->autoSave($drafts); }
     public function updatedCcRaw(EmailDraftService $drafts): void { $this->autoSave($drafts); }
-    public function updatedBodyHtml(EmailDraftService $drafts): void { $this->autoSave($drafts); }
+    public function updatedBodyText(EmailDraftService $drafts): void { $this->autoSave($drafts); }
 
     private function autoSave(EmailDraftService $drafts): void
     {
@@ -202,8 +208,10 @@ class ComposeForm extends Component
             'subject' => mb_substr($this->subject, 0, 998),
             'to_recipients' => $this->parseRecipients($this->toRaw),
             'cc_recipients' => $this->parseRecipients($this->ccRaw),
-            'body_html' => $this->bodyHtml,
-            'body_plain' => $this->htmlToPlain($this->bodyHtml),
+            // В БД храним только plain (что менеджер ввёл). body_html
+            // перезапишется при send в Sender → composeFinalBody().
+            'body_plain' => $this->bodyText,
+            'body_html' => '',
         ]);
     }
 
@@ -294,7 +302,7 @@ class ComposeForm extends Component
         if ($draft) {
             $drafts->delete($draft);
         }
-        $this->reset(['draftId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bodyHtml']);
+        $this->reset(['draftId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bodyText']);
         $this->open = false;
     }
 
@@ -323,6 +331,50 @@ class ComposeForm extends Component
             return collect();
         }
         return EmailAttachment::where('email_message_id', $this->draftId)->get();
+    }
+
+    /**
+     * HTML цитируемого исходного письма (для preview в форме под textarea).
+     * Рендерится через тот же iframe-паттерн что и обычный тред — стили
+     * письма не утекают на страницу.
+     */
+    #[Computed]
+    public function quotePreviewHtml(): ?string
+    {
+        if (! $this->draftId) {
+            return null;
+        }
+        $draft = EmailMessage::find($this->draftId);
+        if (! $draft || ! $draft->in_reply_to) {
+            return null;
+        }
+        $replyTo = EmailMessage::query()
+            ->where('message_id', $draft->in_reply_to)
+            ->where('is_draft', false)
+            ->first();
+        if (! $replyTo) {
+            return null;
+        }
+        $header = sprintf(
+            '<p style="color:#888;font-size:12px;margin:0 0 8px;">%s, %s &lt;%s&gt; писал(а):</p>',
+            htmlspecialchars((string) ($replyTo->sent_at?->format('d.m.Y H:i') ?? ''), ENT_QUOTES, 'UTF-8'),
+            htmlspecialchars((string) ($replyTo->from_name ?? ''), ENT_QUOTES, 'UTF-8'),
+            htmlspecialchars((string) $replyTo->from_email, ENT_QUOTES, 'UTF-8'),
+        );
+        $body = (string) ($replyTo->body_html ?: nl2br(htmlspecialchars(
+            (string) $replyTo->body_plain, ENT_QUOTES, 'UTF-8'
+        )));
+        return $header . $body;
+    }
+
+    /**
+     * Подпись автора drafft'а — для preview под textarea.
+     */
+    #[Computed]
+    public function signaturePreview(): ?string
+    {
+        $sig = trim((string) (auth()->user()?->email_signature ?? ''));
+        return $sig !== '' ? $sig : null;
     }
 
     public function render()
@@ -393,15 +445,6 @@ class ComposeForm extends Component
             $out[] = $name !== '' ? "{$name} <{$email}>" : $email;
         }
         return implode(', ', $out);
-    }
-
-    private function htmlToPlain(string $html): string
-    {
-        $s = preg_replace('/<br\s*\/?>/i', "\n", $html) ?? $html;
-        $s = preg_replace('/<\/p\s*>/i', "\n\n", $s) ?? $s;
-        $s = strip_tags($s);
-        $s = html_entity_decode($s, ENT_QUOTES, 'UTF-8');
-        return trim($s);
     }
 
     private function safeFilename(string $name): string

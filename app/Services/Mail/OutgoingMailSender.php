@@ -71,6 +71,11 @@ class OutgoingMailSender
         $finalMessageId = $this->mimeBuilder->generateMessageId();
         $draft->message_id = $finalMessageId;
 
+        // Финальный body (user text + подпись + цитата) — то же, что уйдёт
+        // клиенту. Сохраним в БД, чтобы в треде CRM показывалось ровно то,
+        // что увидел клиент, а не «пустое» draft-тело.
+        $finalBody = $this->mimeBuilder->composeFinalBody($draft);
+
         try {
             $email = $this->mimeBuilder->build($draft, $mailbox);
 
@@ -89,11 +94,13 @@ class OutgoingMailSender
             return ['success' => false, 'draft' => $draft, 'error' => 'smtp_send_failed'];
         }
 
-        DB::transaction(function () use ($draft, $finalMessageId) {
+        DB::transaction(function () use ($draft, $finalMessageId, $finalBody) {
             $draft->update([
                 'is_draft' => false,
                 'sent_at' => now(),
                 'message_id' => $finalMessageId,
+                'body_plain' => $finalBody['plain'],
+                'body_html' => $finalBody['html'],
             ]);
         });
 

@@ -23,7 +23,6 @@ class EmailDraftService
 {
     public function __construct(
         private readonly OutgoingMailboxResolver $resolver,
-        private readonly MailQuoteBuilder $quoteBuilder,
     ) {
     }
 
@@ -46,12 +45,9 @@ class EmailDraftService
             $replyTo->message_id,
         );
 
-        $quote = $this->quoteBuilder->build($replyTo);
-        $signature = $this->formatSignature($author);
-
-        $bodyHtml = '<p></p>' . $signature['html'] . $quote['html'];
-        $bodyPlain = "\n\n" . $signature['plain'] . "\n" . $quote['plain'];
-
+        // body_plain/body_html стартуют пустыми. Подпись и quote оригинала
+        // приклеиваются в OutgoingMailMimeBuilder при send (чтобы менеджер
+        // видел в textarea только своё письмо, а не сырой HTML цитаты).
         return $this->createDraft([
             'request' => $request,
             'mailbox' => $mailbox,
@@ -61,8 +57,8 @@ class EmailDraftService
             'cc' => $recipients['cc'],
             'inReplyTo' => $replyTo->message_id,
             'references' => $references,
-            'bodyHtml' => $bodyHtml,
-            'bodyPlain' => $bodyPlain,
+            'bodyHtml' => '',
+            'bodyPlain' => '',
         ]);
     }
 
@@ -73,8 +69,6 @@ class EmailDraftService
     {
         $resolved = $this->resolver->resolve($request);
         $mailbox = $resolved['mailbox'];
-
-        $signature = $this->formatSignature($author);
 
         $to = $request->client_email
             ? [['email' => $request->client_email, 'name' => $request->client_name ?: '']]
@@ -93,8 +87,8 @@ class EmailDraftService
             'cc' => [],
             'inReplyTo' => null,
             'references' => [],
-            'bodyHtml' => '<p></p>' . $signature['html'],
-            'bodyPlain' => "\n\n" . $signature['plain'],
+            'bodyHtml' => '',
+            'bodyPlain' => '',
         ]);
     }
 
@@ -306,21 +300,6 @@ class EmailDraftService
         }
 
         return 'Re: ' . $s;
-    }
-
-    /**
-     * @return array{html: string, plain: string}
-     */
-    private function formatSignature(User $author): array
-    {
-        $raw = (string) ($author->email_signature ?? '');
-        if ($raw === '') {
-            return ['html' => '', 'plain' => ''];
-        }
-        $plain = "\n--\n" . $raw;
-        $html = '<p>--<br>' . nl2br(htmlspecialchars($raw, ENT_QUOTES, 'UTF-8')) . '</p>';
-
-        return ['html' => $html, 'plain' => $plain];
     }
 
     private function deleteAttachmentFile(EmailAttachment $attachment): void

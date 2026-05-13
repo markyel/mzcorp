@@ -4,11 +4,11 @@ namespace App\Services\Mail;
 
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
+use App\Models\User;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email as SymfonyEmail;
-use Symfony\Component\Mime\Header\UnstructuredHeader;
 
 /**
  * Сборка Symfony Email из EmailMessage-draft (Phase 1.9).
@@ -17,9 +17,20 @@ use Symfony\Component\Mime\Header\UnstructuredHeader;
  * - Message-ID генерируем явно, сохраняем в EmailMessage для дедупа при
  *   Sent-sync (см. MessagePersister обновление в Commit 4).
  * - Attachments читаются стримом из storage (не грузим в память целиком).
+ *
+ * Финальный body клиенту строится **здесь**:
+ *   <user text → HTML> + <signature> + <quoted original>.
+ *
+ * В draft.body_plain/body_html лежит ТОЛЬКО то, что менеджер ввёл в textarea.
+ * Подпись и quote клеятся при build, чтобы менеджер видел в форме чистый
+ * текст, а не сырой HTML.
  */
 class OutgoingMailMimeBuilder
 {
+    public function __construct(private readonly MailQuoteBuilder $quoteBuilder)
+    {
+    }
+
     /**
      * Сгенерировать Message-ID, который и пойдёт в MIME, и сохранится в
      * email_messages.message_id (нужно вызвать ДО build()).
@@ -27,6 +38,46 @@ class OutgoingMailMimeBuilder
     public function generateMessageId(): string
     {
         return Str::uuid()->toString() . '@mzcorp.ru';
+    }
+
+    /**
+     * Финальный body, который реально уйдёт клиенту и сохранится в треде.
+     * Используется и при send (build), и при пост-send update'е draft'а
+     * (чтобы в треде CRM показывалось то же, что увидит клиент).
+     *
+     * @return array{html: string, plain: string}
+     */
+    public function composeFinalBody(EmailMessage $draft): array
+    {
+        $userText = (string) ($draft->body_plain ?? '');
+
+        $author = $draft->draft_author_user_id
+            ? User::find($draft->draft_author_user_id)
+            : null;
+        $signature = $this->formatSignature($author);
+
+        $quote = ['html' => '', 'plain' => ''];
+        if ($draft->in_reply_to) {
+            $replyTo = EmailMessage::query()
+                ->where('message_id', $draft->in_reply_to)
+                ->where('is_draft', false)
+                ->first();
+            if ($replyTo) {
+                $quote = $this->quoteBuilder->build($replyTo);
+            }
+        }
+
+        $userHtml = $this->plainToHtml($userText);
+
+        $plain = $userText
+            . ($signature['plain'] !== '' ? "\n" . $signature['plain'] : '')
+            . ($quote['plain'] !== '' ? "\n\n" . $quote['plain'] : '');
+
+        $html = $userHtml
+            . ($signature['html'] !== '' ? $signature['html'] : '')
+            . ($quote['html'] !== '' ? $quote['html'] : '');
+
+        return ['html' => $html, 'plain' => $plain];
     }
 
     public function build(EmailMessage $draft, Mailbox $fromMailbox): SymfonyEmail
@@ -45,11 +96,12 @@ class OutgoingMailMimeBuilder
 
         $email->subject((string) ($draft->subject ?: ''));
 
-        if ($draft->body_plain !== null && $draft->body_plain !== '') {
-            $email->text($draft->body_plain);
+        $finalBody = $this->composeFinalBody($draft);
+        if ($finalBody['plain'] !== '') {
+            $email->text($finalBody['plain']);
         }
-        if ($draft->body_html !== null && $draft->body_html !== '') {
-            $email->html($draft->body_html);
+        if ($finalBody['html'] !== '') {
+            $email->html($finalBody['html']);
         }
 
         // Threading headers (RFC 5322 §3.6.4).
@@ -64,15 +116,14 @@ class OutgoingMailMimeBuilder
         }
 
         // Message-ID: используем уже сохранённый в draft (если он не draft.*
-        // временный) либо генерим новый. Возвращаем итоговый через header,
-        // sender проставит его в БД до отправки.
+        // временный) либо генерим новый. Sender проставит его в БД до send.
         $messageId = $draft->message_id;
         if (! $messageId || str_starts_with($messageId, 'draft.')) {
             $messageId = $this->generateMessageId();
         }
         $headers->addIdHeader('Message-ID', $messageId);
 
-        // Анти-loop маркеры для нашего же Sent-sync (см. Commit 4 — дедуп
+        // Анти-loop маркеры для нашего же Sent-sync (Commit 4 — дедуп
         // по этому заголовку перед созданием новой EmailMessage). НЕ
         // X-MyLift-Forwarded, чтобы MailRouter::isLoopMessage не дропнул.
         $headers->addTextHeader('X-MyLift-Reply', '1');
@@ -83,20 +134,50 @@ class OutgoingMailMimeBuilder
 
         // Attachments.
         foreach ($draft->attachments as $attachment) {
-            $stream = Storage::disk($attachment->disk)->readStream($attachment->file_path);
-            if ($stream === false || $stream === null) {
-                continue;
-            }
+            $diskPath = Storage::disk($attachment->disk)->path($attachment->file_path);
             $email->addPart(new \Symfony\Component\Mime\Part\DataPart(
-                new \Symfony\Component\Mime\Part\File(
-                    Storage::disk($attachment->disk)->path($attachment->file_path)
-                ),
+                new \Symfony\Component\Mime\Part\File($diskPath),
                 $attachment->filename,
                 $attachment->mime_type ?: 'application/octet-stream',
             ));
         }
 
         return $email;
+    }
+
+    /**
+     * Plain user text → безопасный HTML. Двойной перенос → <p>, одиночный → <br>.
+     * Не верим HTML-разметке в input'е менеджера — пропускаем через
+     * htmlspecialchars (XSS guard в случае если в textarea вставили <script>).
+     */
+    private function plainToHtml(string $text): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+        $paragraphs = preg_split('/\r?\n\s*\r?\n/', $text) ?: [];
+        $out = [];
+        foreach ($paragraphs as $p) {
+            $escaped = htmlspecialchars($p, ENT_QUOTES, 'UTF-8');
+            $escaped = nl2br($escaped);
+            $out[] = '<p>' . $escaped . '</p>';
+        }
+        return implode("\n", $out);
+    }
+
+    /**
+     * @return array{html: string, plain: string}
+     */
+    private function formatSignature(?User $author): array
+    {
+        $raw = trim((string) ($author?->email_signature ?? ''));
+        if ($raw === '') {
+            return ['html' => '', 'plain' => ''];
+        }
+        $plain = "\n-- \n" . $raw;
+        $html = '<p style="color:#666;">-- <br>' . nl2br(htmlspecialchars($raw, ENT_QUOTES, 'UTF-8')) . '</p>';
+        return ['html' => $html, 'plain' => $plain];
     }
 
     /**
