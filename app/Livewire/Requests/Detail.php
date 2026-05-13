@@ -2,11 +2,14 @@
 
 namespace App\Livewire\Requests;
 
+use App\Enums\RequestStatus;
 use App\Enums\Role;
 use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Models\RequestItem;
 use App\Services\Catalog\RequestItemEditor;
+use App\Services\Request\RequestPauseService;
+use App\Services\Request\RequestStateService;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
@@ -75,6 +78,9 @@ class Detail extends Component
             'assignments' => fn ($q) => $q->orderByDesc('assigned_at'),
             'assignments.user:id,name',
             'assignments.assignedBy:id,name',
+            // Phase 1.10 — state-changes для таба «Активность».
+            'stateChanges' => fn ($q) => $q->orderByDesc('created_at'),
+            'stateChanges.byUser:id,name',
         ]);
 
         // Полный тред: все письма прицепленные к заявке (trigger + reply'и),
@@ -220,6 +226,8 @@ class Detail extends Component
                 'assignments' => fn ($q) => $q->orderByDesc('assigned_at'),
                 'assignments.user:id,name',
                 'assignments.assignedBy:id,name',
+                'stateChanges' => fn ($q) => $q->orderByDesc('created_at'),
+                'stateChanges.byUser:id,name',
             ])
             ->firstOrFail();
     }
@@ -318,7 +326,10 @@ class Detail extends Component
             fn (int $carry, EmailMessage $msg) => $carry + $msg->attachments->count(),
             0,
         );
-        $activity = $this->request->assignments->count() + 1; // +1 за событие создания
+        // Phase 1.10: activity = assignments + stateChanges + email-event (если есть)
+        $activity = $this->request->assignments->count()
+            + $this->request->stateChanges->count()
+            + ($this->request->emailMessage ? 1 : 0);
 
         return [
             'overview'  => ['label' => 'Обзор',      'count' => null,         'disabled' => false],
@@ -452,6 +463,59 @@ class Detail extends Component
     #[On('item-relinked')]
     #[On('item-edited')]
     public function handleItemChangedEvent(): void
+    {
+        $this->reloadRequest();
+    }
+
+    /* ---------------- Phase 1.10 — state-machine transitions ---------------- */
+
+    /**
+     * Простой переход в статус без модалок: in_progress, quoted, under_review,
+     * awaiting_invoice, invoiced, paid, closed_won, awaiting_client_clarification.
+     */
+    public function transitionStatus(string $to, RequestStateService $service): void
+    {
+        $target = RequestStatus::tryFrom($to);
+        if ($target === null) {
+            $this->addError('status', 'Неизвестный статус: ' . $to);
+            return;
+        }
+        if ($target === RequestStatus::ClosedLost) {
+            $this->addError('status', 'closed_lost — через диалог с reason.');
+            return;
+        }
+        if ($target === RequestStatus::Paused) {
+            $this->addError('status', 'paused — через диалог с датой.');
+            return;
+        }
+
+        try {
+            $req = $this->request->fresh();
+            $service->transitionTo($req, $target, auth()->user());
+            $this->reloadRequest();
+            session()->flash('status', 'Статус обновлён: ' . $target->label());
+        } catch (\DomainException $e) {
+            $this->addError('status', $e->getMessage());
+        }
+    }
+
+    /**
+     * Снять с паузы вручную (не дожидаясь cron).
+     */
+    public function resumeFromPause(RequestPauseService $service): void
+    {
+        try {
+            $req = $this->request->fresh();
+            $service->resume($req, auth()->user(), event: 'manual');
+            $this->reloadRequest();
+            session()->flash('status', 'Заявка снята с паузы.');
+        } catch (\Throwable $e) {
+            $this->addError('status', 'Не удалось снять с паузы: ' . $e->getMessage());
+        }
+    }
+
+    #[On('request-state-changed')]
+    public function handleRequestStateChanged(): void
     {
         $this->reloadRequest();
     }

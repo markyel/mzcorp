@@ -21,3 +21,10 @@ Schedule::command('mail:sync')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Phase 1.10 (Foundation §5.4): возобновление paused-заявок чьи
+// paused_until <= now(). Один раз утром — оператор увидит «оттаявшие»
+// заявки в начале рабочего дня.
+Schedule::command('requests:resume-paused')
+    ->dailyAt('06:00')
+    ->onOneServer();

@@ -143,11 +143,29 @@ class RequestItemPersister
             && $existing->status === RequestStatus::Pending;
 
         if ($needsRouting || $needsAssign) {
+            $wasUnassigned = ! $existing->assigned_user_id;
             $manager = $existing->assigned_user_id
                 ? $existing->assignedUser
                 : $this->assignment->autoAssign($existing);
             if ($manager && $needsRouting) {
                 $this->folders->routeToManager($message, $manager);
+            }
+            // Phase 1.10: первый auto-assign записываем как initial-event
+            // в request_state_changes (Pending → Assigned).
+            if ($manager && $wasUnassigned) {
+                try {
+                    app(\App\Services\Request\RequestStateService::class)
+                        ->recordSystemInitial(
+                            $existing->fresh(),
+                            $manager,
+                            'Авто-распределение после парсинга позиций.',
+                        );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning(
+                        'RequestItemPersister: failed to record system_initial state-change',
+                        ['request_id' => $existing->id, 'error' => $e->getMessage()],
+                    );
+                }
             }
         }
 

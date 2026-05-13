@@ -21,11 +21,8 @@
         return in_array($ext, $imageExtensions, true);
     };
 
-    $statusChip = match ($req->status) {
-        RequestStatus::Pending  => 'chip-paused',
-        RequestStatus::New      => 'chip-attn',
-        RequestStatus::Assigned => 'chip-info',
-    };
+    // Phase 1.10: chipClass через enum-метод (полный набор статусов из Foundation §5.2).
+    $statusChip = $req->status->chipClass();
     $age = $req->created_at?->diffForHumans(['short' => true, 'parts' => 2]) ?? '—';
     $managerInitials = \Illuminate\Support\Str::of($req->assignedUser?->name ?? '?')
         ->substr(0, 1)->upper();
@@ -183,40 +180,184 @@
         </div>
 
         {{-- Actions --}}
+        @php
+            // Phase 1.10 — действия зависят от текущего статуса.
+            $canManage = auth()->id() === $req->assigned_user_id
+                || auth()->user()?->hasAnyRole(['head_of_sales', 'director']);
+            $canReply = auth()->id() === $req->assigned_user_id;
+            $canReassign = auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'secretary']);
+            $lastInbound = $thread->reverse()
+                ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound);
+            $allowed = $req->status->allowedTransitions();
+            $allow = fn (\App\Enums\RequestStatus $t) => in_array($t, $allowed, true);
+            $RS = \App\Enums\RequestStatus::class;
+        @endphp
         <div class="flex flex-col gap-2 min-w-[200px]">
-            <button class="btn btn-primary" disabled title="Доступно в Phase 2">Сформировать КП</button>
-            <div class="flex gap-1.5">
-                <button class="btn flex-1" disabled title="Доступно в Phase 2">Refresh цен</button>
-                @php
-                    $canReply = auth()->id() === $req->assigned_user_id;
-                    $lastInbound = $thread->reverse()
-                        ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound);
-                @endphp
-                @if($canReply)
-                    <button type="button"
-                            class="btn flex-1"
-                            @if($lastInbound)
-                                wire:click="$dispatch('open-reply', { messageId: {{ $lastInbound->id }}, requestId: {{ $req->id }} })"
-                            @else
-                                wire:click="$dispatch('open-compose', { requestId: {{ $req->id }} })"
-                            @endif
-                    >Ответить</button>
-                @else
-                    <button class="btn flex-1" disabled title="Отвечать может только назначенный менеджер">Ответить</button>
-                @endif
-            </div>
-            <div class="flex gap-1.5">
-                <button class="btn btn-sm flex-1" disabled title="Доступно в Phase 2">⏸ Пауза</button>
-                @php
-                    $canReassign = auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'secretary']);
-                @endphp
+            {{-- Terminal: только информационная плашка. --}}
+            @if($req->status->isTerminal())
+                <div class="ds-card p-3 text-[12.5px] {{ $req->status === $RS::ClosedWon ? 'bg-emerald-50 border-emerald-300' : 'bg-red-50 border-red-300' }}">
+                    <div class="font-medium text-fg-1 mb-1">
+                        {{ $req->status === $RS::ClosedWon ? '✓ Заявка закрыта · успех' : '⊘ Заявка закрыта · потеря' }}
+                    </div>
+                    @if($req->closed_at)
+                        <div class="text-fg-3 text-[11.5px]">{{ $req->closed_at->format('d.m.Y H:i') }}</div>
+                    @endif
+                    @if($req->closed_lost_reason)
+                        @php
+                            $lostReasonEnum = \App\Enums\ClosedLostReason::tryFrom($req->closed_lost_reason);
+                        @endphp
+                        <div class="text-fg-2 mt-1.5">
+                            <span class="text-fg-3">Причина:</span> {{ $lostReasonEnum?->label() ?? $req->closed_lost_reason }}
+                        </div>
+                        @if($req->closed_lost_comment)
+                            <div class="text-fg-2 text-[11.5px] mt-1 whitespace-pre-wrap">{{ $req->closed_lost_comment }}</div>
+                        @endif
+                    @endif
+                </div>
                 @if($canReassign)
                     <livewire:requests.reassign-dialog :request="$req" wire:key="reassign-{{ $req->id }}" />
-                @else
-                    <button class="btn btn-sm flex-1" disabled title="Только РОП/директор/секретарь">⊘ Переподчинить</button>
                 @endif
-            </div>
-            <button class="btn btn-sm btn-danger" disabled title="Доступно в Phase 2">Закрыть как «не наша тема»</button>
+
+            {{-- Paused: единственная кнопка «снять с паузы». --}}
+            @elseif($req->status === $RS::Paused)
+                <div class="ds-card p-3 text-[12.5px] bg-neutral-50 border-neutral-300">
+                    <div class="font-medium text-fg-1">⏸ Заявка на паузе</div>
+                    @if($req->paused_until)
+                        <div class="text-fg-3 text-[11.5px] mt-1">
+                            Авто-возврат {{ $req->paused_until->format('d.m.Y') }}
+                            @if($req->paused_from_status)
+                                · в «{{ ($RS::tryFrom($req->paused_from_status))?->label() ?? $req->paused_from_status }}»
+                            @endif
+                        </div>
+                    @endif
+                    @if($req->paused_reason)
+                        <div class="text-fg-2 mt-1.5 whitespace-pre-wrap">{{ $req->paused_reason }}</div>
+                    @endif
+                </div>
+                @if($canManage)
+                    <button type="button" wire:click="resumeFromPause"
+                            class="btn btn-primary"
+                            wire:confirm="Снять заявку с паузы прямо сейчас?">
+                        ▶ Снять с паузы вручную
+                    </button>
+                @endif
+                @if($canReassign)
+                    <livewire:requests.reassign-dialog :request="$req" wire:key="reassign-{{ $req->id }}" />
+                @endif
+
+            {{-- Активные статусы. --}}
+            @else
+                {{-- Главные действия зависят от статуса. --}}
+                @if($allow($RS::InProgress) && $req->status !== $RS::InProgress)
+                    <button type="button" wire:click="transitionStatus('in_progress')"
+                            class="btn btn-primary"
+                            @disabled(! $canManage)>
+                        @if($req->status === $RS::AwaitingClientClarification)
+                            ✓ Клиент ответил
+                        @elseif($req->status === $RS::UnderReview || $req->status === $RS::PostponedUntil || $req->status === $RS::Quoted)
+                            ↩ Вернуться к работе
+                        @else
+                            ▶ Начать работу
+                        @endif
+                    </button>
+                @endif
+
+                @if($allow($RS::Quoted))
+                    <button type="button" wire:click="transitionStatus('quoted')"
+                            class="btn"
+                            @disabled(! $canManage)>📨 КП отправлено</button>
+                @endif
+
+                @if($allow($RS::AwaitingClientClarification))
+                    <button type="button" wire:click="transitionStatus('awaiting_client_clarification')"
+                            class="btn"
+                            @disabled(! $canManage)>❓ Жду уточнение клиента</button>
+                @endif
+
+                @if($allow($RS::UnderReview))
+                    <button type="button" wire:click="transitionStatus('under_review')"
+                            class="btn btn-sm"
+                            @disabled(! $canManage)>📑 Клиент на согласовании</button>
+                @endif
+
+                @if($allow($RS::PostponedUntil))
+                    <button type="button" wire:click="transitionStatus('postponed_until')"
+                            class="btn btn-sm"
+                            @disabled(! $canManage)>⏰ Клиент отложил</button>
+                @endif
+
+                @if($allow($RS::AwaitingInvoice))
+                    <button type="button" wire:click="transitionStatus('awaiting_invoice')"
+                            class="btn btn-sm"
+                            @disabled(! $canManage)>💵 Запросил счёт</button>
+                @endif
+
+                @if($allow($RS::Invoiced))
+                    <button type="button" wire:click="transitionStatus('invoiced')"
+                            class="btn btn-sm"
+                            @disabled(! $canManage)>💴 Счёт отправлен</button>
+                @endif
+
+                @if($allow($RS::Paid))
+                    <button type="button" wire:click="transitionStatus('paid')"
+                            class="btn btn-sm"
+                            @disabled(! $canManage)>💰 Оплачено</button>
+                @endif
+
+                @if($allow($RS::ClosedWon))
+                    <button type="button" wire:click="transitionStatus('closed_won')"
+                            class="btn btn-sm"
+                            wire:confirm="Закрыть заявку как успешно завершённую?"
+                            @disabled(! $canManage)>✓ Закрыть как успех</button>
+                @endif
+
+                {{-- Ответить — отдельной строкой (Phase 1.9). --}}
+                <div class="flex gap-1.5">
+                    @if($canReply)
+                        <button type="button"
+                                class="btn flex-1"
+                                @if($lastInbound)
+                                    wire:click="$dispatch('open-reply', { messageId: {{ $lastInbound->id }}, requestId: {{ $req->id }} })"
+                                @else
+                                    wire:click="$dispatch('open-compose', { requestId: {{ $req->id }} })"
+                                @endif
+                        >✉ Ответить</button>
+                    @else
+                        <button class="btn flex-1" disabled title="Отвечать может только назначенный менеджер">✉ Ответить</button>
+                    @endif
+                </div>
+
+                {{-- Пауза + Переподчинить — компактно. --}}
+                <div class="flex gap-1.5">
+                    @if($req->status->canBePaused() && $canManage)
+                        <button type="button"
+                                wire:click="$dispatch('open-pause-dialog')"
+                                class="btn btn-sm flex-1">⏸ Пауза</button>
+                    @else
+                        <button class="btn btn-sm flex-1" disabled>⏸ Пауза</button>
+                    @endif
+                    @if($canReassign)
+                        <livewire:requests.reassign-dialog :request="$req" wire:key="reassign-{{ $req->id }}" />
+                    @else
+                        <button class="btn btn-sm flex-1" disabled title="Только РОП/директор/секретарь">⊘ Переподчинить</button>
+                    @endif
+                </div>
+
+                @if($allow($RS::ClosedLost))
+                    <button type="button"
+                            wire:click="$dispatch('open-close-lost-dialog')"
+                            class="btn btn-sm btn-danger"
+                            @disabled(! $canManage)>⊘ Закрыть как потеря</button>
+                @endif
+
+                {{-- Disabled buttons (для напоминания — Phase 2/3). --}}
+                <button class="btn btn-sm" disabled title="Доступно в Phase 2">🧾 Сформировать КП</button>
+                <button class="btn btn-sm" disabled title="Доступно в Phase 3">🔄 Refresh цен (поставщики)</button>
+            @endif
+
+            {{-- Модальные диалоги (single-instance per Detail). --}}
+            <livewire:requests.pause-dialog :request="$req" wire:key="pause-{{ $req->id }}" />
+            <livewire:requests.close-lost-dialog :request="$req" wire:key="close-lost-{{ $req->id }}" />
         </div>
     </div>
 
@@ -1018,48 +1159,95 @@
 
             {{-- ───── АКТИВНОСТЬ ───── --}}
             @case('activity')
+                @php
+                    // Phase 1.10: merge stateChanges + assignments в один timeline
+                    // отсортированный по created_at DESC. Каждый элемент — массив
+                    // {at, kind, title, by, details}.
+                    $timeline = collect();
+
+                    foreach ($req->stateChanges as $sc) {
+                        $fromEnum = $sc->fromStatusEnum();
+                        $toEnum = $sc->toStatusEnum();
+                        $title = $fromEnum
+                            ? sprintf('Статус: «%s» → «%s»', $fromEnum->label(), $toEnum?->label() ?? $sc->to_status)
+                            : sprintf('Заявка создана со статусом «%s»', $toEnum?->label() ?? $sc->to_status);
+                        $timeline->push([
+                            'at' => $sc->created_at,
+                            'kind' => $sc->event === 'auto_resume_pause' ? 'state-auto' : 'state',
+                            'title' => $title,
+                            'by' => $sc->byUser?->name ?? ($sc->event === 'auto_resume_pause' ? 'cron · авто-возврат с паузы' : '—'),
+                            'details' => $sc->comment,
+                        ]);
+                    }
+
+                    foreach ($assignments as $a) {
+                        $timeline->push([
+                            'at' => $a->assigned_at,
+                            'kind' => 'assignment',
+                            'title' => 'Назначен ' . ($a->user?->name ?? '—'),
+                            'by' => $a->assignedBy?->name,
+                            'details' => $a->reason,
+                        ]);
+                    }
+
+                    if ($email) {
+                        $timeline->push([
+                            'at' => $email->sent_at,
+                            'kind' => 'email',
+                            'title' => 'Получено письмо от ' . ($email->from_name ?: $email->from_email),
+                            'by' => null,
+                            'details' => $email->attachments->count() > 0
+                                ? $email->attachments->count() . ' вложений'
+                                : null,
+                        ]);
+                    }
+
+                    $timeline = $timeline
+                        ->filter(fn ($e) => $e['at'] !== null)
+                        ->sortByDesc(fn ($e) => $e['at']->timestamp)
+                        ->values();
+                @endphp
                 <div class="ds-card">
                     <div class="ds-card-header">
                         <h3>Активность</h3>
-                        <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $tabs['activity']['count'] }}</span>
+                        <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $timeline->count() }}</span>
                     </div>
                     <div class="ds-card-body">
                         <div class="relative pl-5 text-[12.5px]">
                             <div class="absolute left-[5px] top-1.5 bottom-1.5 w-px bg-border-strong"></div>
-                            @foreach($assignments as $a)
+                            @foreach($timeline as $event)
+                                @php
+                                    $dotClass = match ($event['kind']) {
+                                        'state' => 'bg-sky-700 border-sky-700',
+                                        'state-auto' => 'bg-amber-600 border-amber-600',
+                                        'assignment' => 'bg-violet-700 border-violet-700',
+                                        'email' => 'bg-emerald-700 border-emerald-700',
+                                        default => 'bg-surface border-neutral-400',
+                                    };
+                                    $iconText = match ($event['kind']) {
+                                        'state' => '🔄',
+                                        'state-auto' => '⏰',
+                                        'assignment' => '👤',
+                                        'email' => '✉',
+                                        default => '·',
+                                    };
+                                @endphp
                                 <div class="relative py-1.5">
-                                    <span class="absolute -left-[15px] top-2.5 w-2.5 h-2.5 rounded-full bg-surface border-[1.5px] border-neutral-400"></span>
+                                    <span class="absolute -left-[15px] top-2.5 w-2.5 h-2.5 rounded-full {{ $dotClass }} border-[1.5px]"></span>
                                     <div class="text-fg-1 leading-snug">
-                                        Назначен <b class="font-semibold">{{ $a->user?->name ?? '—' }}</b>
-                                        @if($a->reason) · <span class="text-fg-2">{{ $a->reason }}</span>@endif
+                                        <span class="mr-1">{{ $iconText }}</span>{{ $event['title'] }}
                                     </div>
+                                    @if($event['details'])
+                                        <div class="text-fg-2 text-[11.5px] mt-0.5 whitespace-pre-wrap">{{ $event['details'] }}</div>
+                                    @endif
                                     <div class="mono text-[11px] text-fg-3 mt-0.5">
-                                        {{ $a->assigned_at?->format('d.m.Y H:i') }}
-                                        @if($a->assignedBy)
-                                            · кем: {{ $a->assignedBy->name }}
+                                        {{ $event['at']->format('d.m.Y H:i') }}
+                                        @if($event['by'])
+                                            · {{ $event['by'] }}
                                         @endif
                                     </div>
                                 </div>
                             @endforeach
-
-                            @if($email)
-                                <div class="relative py-1.5">
-                                    <span class="absolute -left-[15px] top-2.5 w-2.5 h-2.5 rounded-full bg-surface border-[1.5px] border-neutral-400"></span>
-                                    <div class="text-fg-1 leading-snug">
-                                        Получено письмо от {{ $email->from_name ?: $email->from_email }}
-                                        @if($email->attachments->isNotEmpty())
-                                            <span class="text-fg-2">· {{ $email->attachments->count() }} вложений</span>
-                                        @endif
-                                    </div>
-                                    <div class="mono text-[11px] text-fg-3 mt-0.5">{{ $email->sent_at?->format('d.m.Y H:i') ?? '—' }}</div>
-                                </div>
-                            @endif
-
-                            <div class="relative py-1.5">
-                                <span class="absolute -left-[15px] top-2.5 w-2.5 h-2.5 rounded-full bg-emerald-700 border-[1.5px] border-emerald-700"></span>
-                                <div class="text-fg-1 leading-snug">Заявка создана</div>
-                                <div class="mono text-[11px] text-fg-3 mt-0.5">{{ $req->created_at?->format('d.m.Y H:i') }}</div>
-                            </div>
                         </div>
                     </div>
                 </div>

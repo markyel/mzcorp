@@ -3,16 +3,23 @@
 namespace App\Enums;
 
 /**
- * Статус заявки.
+ * Статус заявки (Foundation §5.2).
  *
- * Минимальный enum для Phase 1. Foundation §5.2 описывает полную
- * state-machine с десятком статусов — это Phase 4. Пока:
+ * Phase 1.10: minimal manual state-machine. Авто-переходы (DocumentDetector,
+ * client-response classifier, scheduler-таймауты) — Phase 4.
  *
- *   pending   — заявка создана из inbound-письма, парсер позиций ещё в очереди
- *               или вернул пустой результат. Менеджеру в пуле НЕ показывается
- *               (ему не с чем работать), РОП/директор видят (для контроля).
- *   new       — позиции распарсены, ждёт назначения менеджеру.
- *   assigned  — менеджер назначен, в работе.
+ * Жизненный цикл:
+ *   pending → new → assigned → in_progress → ...
+ *     ├─→ awaiting_client_clarification (вопрос клиенту)
+ *     ├─→ quoted (КП ушло)
+ *     │      ├─→ under_review (клиент думает)
+ *     │      ├─→ postponed_until (клиент отложил)
+ *     │      ├─→ awaiting_invoice → invoiced → paid → closed_won
+ *     │      ├─→ closed_won
+ *     │      └─→ closed_lost (+ reason)
+ *     └─→ closed_lost (отказ без КП)
+ *
+ *   paused — мета-статус (заморозка с возвратом в paused_from_status).
  */
 enum RequestStatus: string
 {
@@ -20,21 +27,158 @@ enum RequestStatus: string
     case New = 'new';
     case Assigned = 'assigned';
 
+    // Phase 1.10 — ручные ↓
+    case InProgress = 'in_progress';
+    case AwaitingClientClarification = 'awaiting_client_clarification';
+    case Quoted = 'quoted';
+    case UnderReview = 'under_review';
+    case PostponedUntil = 'postponed_until';
+    case AwaitingInvoice = 'awaiting_invoice';
+    case Invoiced = 'invoiced';
+    case Paid = 'paid';
+    case Paused = 'paused';
+    case ClosedWon = 'closed_won';
+    case ClosedLost = 'closed_lost';
+
     public function label(): string
     {
         return match ($this) {
             self::Pending => 'В обработке',
             self::New => 'Новая',
-            self::Assigned => 'В работе',
+            self::Assigned => 'Назначена',
+            self::InProgress => 'В работе',
+            self::AwaitingClientClarification => 'Жду клиента',
+            self::Quoted => 'КП отправлено',
+            self::UnderReview => 'На согласовании',
+            self::PostponedUntil => 'Отложена',
+            self::AwaitingInvoice => 'Ждём счёт',
+            self::Invoiced => 'Счёт отправлен',
+            self::Paid => 'Оплачено',
+            self::Paused => 'На паузе',
+            self::ClosedWon => 'Закрыто · успех',
+            self::ClosedLost => 'Закрыто · потеря',
         };
     }
 
     /**
-     * Готова ли заявка к показу менеджеру в пуле.
-     * Pending = парсер ещё не отработал, у менеджера нет позиций для работы.
+     * CSS-класс для chip'а статуса в hero-блоке (design tokens):
+     *   chip-attn (красный) / chip-info (синий) / chip-ok (зелёный)
+     *   chip-warn (янтарный) / chip-paused (серый) / chip-danger (красный)
+     *   chip-success (зелёный) / chip-neutral (серый)
+     */
+    public function chipClass(): string
+    {
+        return match ($this) {
+            self::Pending => 'chip-paused',
+            self::New => 'chip-attn',
+            self::Assigned => 'chip-info',
+            self::InProgress => 'chip-info',
+            self::AwaitingClientClarification => 'chip-warn',
+            self::Quoted => 'chip-ok',
+            self::UnderReview => 'chip-warn',
+            self::PostponedUntil => 'chip-warn',
+            self::AwaitingInvoice => 'chip-warn',
+            self::Invoiced => 'chip-info',
+            self::Paid => 'chip-ok',
+            self::Paused => 'chip-paused',
+            self::ClosedWon => 'chip-ok',
+            self::ClosedLost => 'chip-danger',
+        };
+    }
+
+    /** Терминальный статус — после него нет переходов в активный workflow. */
+    public function isTerminal(): bool
+    {
+        return $this === self::ClosedWon || $this === self::ClosedLost;
+    }
+
+    /**
+     * Считается ли заявка «в работе» для целей AssignmentService:
+     *  - load-counter (нагрузка менеджера)
+     *  - sticky lookup
+     *
+     * Excludes: Pending (не назначена), Paused (заморожена), Closed* (терминал).
+     */
+    public function isOpenForAssignment(): bool
+    {
+        return ! in_array($this, [
+            self::Pending,
+            self::Paused,
+            self::ClosedWon,
+            self::ClosedLost,
+        ], true);
+    }
+
+    /**
+     * Видна ли заявка менеджеру в пуле. Pending скрыт — менеджеру не с чем
+     * работать (парсер ещё не отработал). Все остальные видны.
      */
     public function isVisibleToManager(): bool
     {
         return $this !== self::Pending;
+    }
+
+    /**
+     * Карта разрешённых переходов из текущего статуса. Single source of truth
+     * для UI кнопок и backend-валидации.
+     *
+     * Pause — спец-кейс, обрабатывается RequestPauseService::pauseUntil()
+     * вне этой карты (любой not-terminal not-paused → Paused).
+     *
+     * @return array<int, self>
+     */
+    public function allowedTransitions(): array
+    {
+        return match ($this) {
+            self::Pending => [self::New, self::Assigned, self::ClosedLost],
+            self::New => [self::Assigned, self::InProgress, self::ClosedLost],
+            self::Assigned => [self::InProgress, self::ClosedLost],
+            self::InProgress => [
+                self::AwaitingClientClarification,
+                self::Quoted,
+                self::ClosedLost,
+            ],
+            self::AwaitingClientClarification => [
+                self::InProgress,
+                self::ClosedLost,
+            ],
+            self::Quoted => [
+                self::UnderReview,
+                self::PostponedUntil,
+                self::AwaitingInvoice,
+                self::InProgress, // вернуться, если клиент хочет правки
+                self::ClosedWon,
+                self::ClosedLost,
+            ],
+            self::UnderReview => [
+                self::InProgress,
+                self::AwaitingInvoice,
+                self::ClosedWon,
+                self::ClosedLost,
+            ],
+            self::PostponedUntil => [
+                self::InProgress,
+                self::ClosedLost,
+            ],
+            self::AwaitingInvoice => [
+                self::Invoiced,
+                self::ClosedLost,
+            ],
+            self::Invoiced => [
+                self::Paid,
+                self::ClosedLost,
+            ],
+            self::Paid => [
+                self::ClosedWon,
+            ],
+            self::Paused => [], // resume — через RequestPauseService::resume()
+            self::ClosedWon, self::ClosedLost => [], // terminal
+        };
+    }
+
+    /** Кратко: можно ли поставить на паузу из этого статуса. */
+    public function canBePaused(): bool
+    {
+        return ! $this->isTerminal() && $this !== self::Paused && $this !== self::Pending;
     }
 }

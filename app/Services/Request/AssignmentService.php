@@ -113,10 +113,11 @@ class AssignmentService
             return null;
         }
 
-        $openStatuses = [
-            RequestStatus::New->value,
-            RequestStatus::Assigned->value,
-        ];
+        // Phase 1.10: открытые статусы — всё не-terminal и не-paused.
+        $openStatuses = array_map(
+            fn (RequestStatus $s) => $s->value,
+            array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+        );
 
         $matchClosure = function ($q) use ($articles, $names) {
             if (! empty($articles)) {
@@ -180,10 +181,14 @@ class AssignmentService
             return null;
         }
 
-        // Подсчёт активных заявок на каждого менеджера.
+        // Phase 1.10: load = все open-статусы (не-terminal, не-paused).
+        $openStatusValues = array_map(
+            fn (RequestStatus $s) => $s->value,
+            array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+        );
         $loadByUser = Request::query()
             ->whereIn('assigned_user_id', $managers->pluck('id'))
-            ->whereIn('status', [RequestStatus::Assigned->value, RequestStatus::New->value])
+            ->whereIn('status', $openStatusValues)
             ->groupBy('assigned_user_id')
             ->selectRaw('assigned_user_id, COUNT(*) AS load_count, MAX(assigned_at) AS last_assigned_at')
             ->get()

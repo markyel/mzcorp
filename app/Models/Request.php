@@ -31,6 +31,13 @@ class Request extends Model
         // позиции, а не новая». См. миграцию
         // 2026_05_12_160000_add_pending_clarifications_to_requests_table.
         'pending_clarifications',
+        // Phase 1.10 — state-machine: pause + terminal-close.
+        'paused_until',
+        'paused_from_status',
+        'paused_reason',
+        'closed_at',
+        'closed_lost_reason',
+        'closed_lost_comment',
     ];
 
     protected function casts(): array
@@ -39,6 +46,8 @@ class Request extends Model
             'status' => RequestStatus::class,
             'assigned_at' => 'datetime',
             'pending_clarifications' => 'array',
+            'paused_until' => 'datetime',
+            'closed_at' => 'datetime',
         ];
     }
 
@@ -79,5 +88,14 @@ class Request extends Model
     public function context(): HasOne
     {
         return $this->hasOne(\App\Models\Kb\RequestContext::class, 'request_id');
+    }
+
+    /**
+     * Audit-лог переходов статусов (Phase 1.10).
+     * Используется в табе «Активность» merge'ом с request_assignments.
+     */
+    public function stateChanges(): HasMany
+    {
+        return $this->hasMany(RequestStateChange::class);
     }
 }

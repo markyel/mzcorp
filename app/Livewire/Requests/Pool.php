@@ -167,14 +167,20 @@ class Pool extends Component
         // Phase 2 saved views (KONE / возраст ≥ 7 / крупные клиенты) — disabled.
         $myAssigned = Request::query()
             ->where('assigned_user_id', auth()->id())
-            ->whereIn('status', [RequestStatus::New->value, RequestStatus::Assigned->value])
+            ->whereIn('status', array_map(
+                fn (RequestStatus $s) => $s->value,
+                array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+            ))
             ->count();
         $unassigned = $this->canSeeAll
             ? Request::query()->whereNull('assigned_user_id')->count()
             : null;
         $allOpen = $this->canSeeAll
             ? Request::query()
-                ->whereIn('status', [RequestStatus::New->value, RequestStatus::Assigned->value])
+                ->whereIn('status', array_map(
+                fn (RequestStatus $s) => $s->value,
+                array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+            ))
                 ->count()
             : null;
 
