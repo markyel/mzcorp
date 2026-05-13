@@ -36,6 +36,17 @@ class Pool extends Component
     #[Url(as: 'status')]
     public string $status = ''; // '' = все доступные роли, либо конкретный enum-value
 
+    /**
+     * Phase 1.10 — bucket-фильтр (группировка статусов для UI-chip'ов).
+     *   active — все open + paused исключены, видны рабочие
+     *   paused — на паузе (явно)
+     *   closed — closed_won + closed_lost
+     *   all    — всё (кроме pending для менеджера)
+     * По умолчанию `active` — оператор не хочет видеть закрытые в основном пуле.
+     */
+    #[Url(as: 'bucket')]
+    public string $bucket = 'active';
+
     public function updatingSearch(): void
     {
         $this->resetPage();
@@ -49,6 +60,49 @@ class Pool extends Component
     public function updatingStatus(): void
     {
         $this->resetPage();
+    }
+
+    public function updatingBucket(): void
+    {
+        $this->resetPage();
+        // При переключении bucket — сбрасываем уточняющий status-фильтр.
+        $this->status = '';
+    }
+
+    public function setBucket(string $bucket): void
+    {
+        $allowed = ['active', 'paused', 'closed', 'all'];
+        $this->bucket = in_array($bucket, $allowed, true) ? $bucket : 'active';
+        $this->status = '';
+        $this->resetPage();
+    }
+
+    /**
+     * Список enum-значений для текущего bucket.
+     *
+     * @return array<int, string>
+     */
+    private function statusesForBucket(): array
+    {
+        return match ($this->bucket) {
+            'paused' => [RequestStatus::Paused->value],
+            'closed' => [RequestStatus::ClosedWon->value, RequestStatus::ClosedLost->value],
+            'all' => array_map(
+                fn (RequestStatus $s) => $s->value,
+                array_filter(
+                    RequestStatus::cases(),
+                    fn (RequestStatus $s) => $this->canSeeAll || $s->isVisibleToManager(),
+                ),
+            ),
+            default => array_map( // active
+                fn (RequestStatus $s) => $s->value,
+                array_filter(
+                    RequestStatus::cases(),
+                    fn (RequestStatus $s) => $s->isOpenForAssignment()
+                        && ($this->canSeeAll || $s->isVisibleToManager()),
+                ),
+            ),
+        };
     }
 
     /**
@@ -104,11 +158,13 @@ class Pool extends Component
             $query->where('status', '!=', RequestStatus::Pending->value);
         }
 
-        // Фильтр по статусу — только если значение валидно.
-        $allowedStatuses = $this->canSeeAll
-            ? array_map(fn (RequestStatus $s) => $s->value, RequestStatus::cases())
-            : [RequestStatus::New->value, RequestStatus::Assigned->value];
-        $validStatus = $this->status !== '' && in_array($this->status, $allowedStatuses, true);
+        // Phase 1.10: bucket-фильтр (группа статусов).
+        $bucketStatuses = $this->statusesForBucket();
+        $query->whereIn('status', $bucketStatuses);
+
+        // Уточняющий status-фильтр внутри bucket'а — только если значение
+        // принадлежит текущему bucket'у (защита от рассинхронизации URL).
+        $validStatus = $this->status !== '' && in_array($this->status, $bucketStatuses, true);
         if ($validStatus) {
             $query->where('status', $this->status);
         }
@@ -131,10 +187,22 @@ class Pool extends Component
         $grouped = collect($page->items())
             ->groupBy(fn (Request $r) => $r->status->value);
 
+        // Порядок групп — от свежих к завершённым (Foundation §5.2 lifecycle).
         $groupOrder = [
-            RequestStatus::Assigned->value,
             RequestStatus::New->value,
-            RequestStatus::Pending->value,
+            RequestStatus::Assigned->value,
+            RequestStatus::InProgress->value,
+            RequestStatus::AwaitingClientClarification->value,
+            RequestStatus::Quoted->value,
+            RequestStatus::UnderReview->value,
+            RequestStatus::PostponedUntil->value,
+            RequestStatus::AwaitingInvoice->value,
+            RequestStatus::Invoiced->value,
+            RequestStatus::Paid->value,
+            RequestStatus::Paused->value,
+            RequestStatus::ClosedWon->value,
+            RequestStatus::ClosedLost->value,
+            RequestStatus::Pending->value, // для РОПа — в самом низу
         ];
         $groups = [];
         foreach ($groupOrder as $statusValue) {
@@ -153,14 +221,36 @@ class Pool extends Component
         $countsBase = Request::query()
             ->when($effectiveScope === 'mine', fn ($q) => $q->where('assigned_user_id', auth()->id()));
 
-        $statusCounts = [
-            'new' => (clone $countsBase)->where('status', RequestStatus::New->value)->count(),
-            'assigned' => (clone $countsBase)->where('status', RequestStatus::Assigned->value)->count(),
+        // Bucket-counts: для верхней chip-row (активные / на паузе / закрытые / все).
+        $openValues = array_map(
+            fn (RequestStatus $s) => $s->value,
+            array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+        );
+        $bucketCounts = [
+            'active' => (clone $countsBase)
+                ->whereIn('status', array_filter(
+                    $openValues,
+                    fn ($v) => $this->canSeeAll || $v !== RequestStatus::Pending->value,
+                ))
+                ->count(),
+            'paused' => (clone $countsBase)
+                ->where('status', RequestStatus::Paused->value)
+                ->count(),
+            'closed' => (clone $countsBase)
+                ->whereIn('status', [
+                    RequestStatus::ClosedWon->value,
+                    RequestStatus::ClosedLost->value,
+                ])
+                ->count(),
+            'all' => (clone $countsBase)
+                ->when(! $this->canSeeAll, fn ($q) => $q->where('status', '!=', RequestStatus::Pending->value))
+                ->count(),
         ];
-        if ($this->canSeeAll) {
-            $statusCounts['pending'] = (clone $countsBase)
-                ->where('status', RequestStatus::Pending->value)
-                ->count();
+
+        // Per-status counts внутри активного bucket'а — для уточняющих chip'ов.
+        $statusCounts = [];
+        foreach ($bucketStatuses as $sv) {
+            $statusCounts[$sv] = (clone $countsBase)->where('status', $sv)->count();
         }
 
         // Левая навигация: queries «Все открытые», «Нераспределённые», «Мои».
@@ -196,6 +286,8 @@ class Pool extends Component
                 'all_open' => $allOpen,
             ],
             'statusCounts' => $statusCounts,
+            'bucketCounts' => $bucketCounts,
+            'bucketStatuses' => $bucketStatuses,
         ]);
     }
 }

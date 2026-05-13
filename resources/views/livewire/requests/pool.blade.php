@@ -1,7 +1,10 @@
 @php
     use App\Enums\RequestStatus;
 
-    // Палитра status-chip → цвет. Pending/New/Assigned — реальные статусы.
+    // Phase 1.10: chip-цвет берётся через RequestStatus::chipClass()
+    // (универсал на все 14 статусов). Старый $chipClass-массив оставлен
+    // для backward-compat — если где-то в шаблоне ссылается.
+    // Палитра status-chip → цвет (реальные статусы).
     // Богатая таксономия (КП-отправлено, счёт-выставлен, refresh-цен,
     // пауза до DD.MM, просрочено NЧ NМ) — Phase 2-4 state-machine.
     $chipClass = [
@@ -261,29 +264,53 @@
                 </span>
             @endif
 
-            {{-- Status chips: real --}}
+            {{-- Phase 1.10: bucket-chips (группа статусов). --}}
             @php
-                $statusChips = [
-                    ''                             => ['label' => 'Все статусы',     'count' => null],
-                    RequestStatus::New->value      => ['label' => 'Нераспределена', 'count' => $statusCounts['new']],
-                    RequestStatus::Assigned->value => ['label' => 'В работе',        'count' => $statusCounts['assigned']],
+                $bucketChips = [
+                    'active' => ['label' => 'Активные',  'count' => $bucketCounts['active']],
+                    'paused' => ['label' => 'На паузе',  'count' => $bucketCounts['paused']],
+                    'closed' => ['label' => 'Закрытые',  'count' => $bucketCounts['closed']],
+                    'all'    => ['label' => 'Все',       'count' => $bucketCounts['all']],
                 ];
-                if ($this->canSeeAll && isset($statusCounts['pending'])) {
-                    $statusChips[RequestStatus::Pending->value] = ['label' => 'В обработке', 'count' => $statusCounts['pending']];
-                }
             @endphp
-            @foreach($statusChips as $value => $meta)
-                @php $on = $status === $value; @endphp
-                <button wire:click="$set('status', '{{ $value }}')"
+            @foreach($bucketChips as $key => $meta)
+                @php $on = $bucket === $key; @endphp
+                <button wire:click="setBucket('{{ $key }}')"
+                        class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium
+                               {{ $on
+                                  ? 'bg-[var(--accent)] text-fg-on-accent'
+                                  : 'bg-[var(--bg-surface)] border border-[var(--border-strong)] text-[var(--fg-2)] hover:text-[var(--fg-1)]' }}">
+                    <span>{{ $meta['label'] }}</span>
+                    <span class="font-mono text-[11px] {{ $on ? 'opacity-90' : 'opacity-75' }}">{{ $meta['count'] }}</span>
+                </button>
+            @endforeach
+
+            <span class="text-[var(--fg-4)] mx-1">·</span>
+
+            {{-- Уточняющие status-chips внутри текущего bucket'а. --}}
+            <button wire:click="$set('status', '')"
+                    class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap
+                           {{ $status === ''
+                              ? 'bg-[var(--sky-50)] border border-[var(--sky-500)] text-[var(--sky-700)]'
+                              : 'bg-[var(--bg-surface)] border border-[var(--border-strong)] text-[var(--fg-2)] hover:text-[var(--fg-1)]' }}">
+                Любой статус
+            </button>
+            @foreach($bucketStatuses as $sv)
+                @php
+                    $enum = \App\Enums\RequestStatus::tryFrom($sv);
+                    if (! $enum) continue;
+                    $cnt = $statusCounts[$sv] ?? 0;
+                    if ($cnt === 0) continue; // не показываем пустые
+                    $on = $status === $sv;
+                @endphp
+                <button wire:click="$set('status', '{{ $sv }}')"
                         class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap
                                {{ $on
                                   ? 'bg-[var(--sky-50)] border border-[var(--sky-500)] text-[var(--sky-700)]'
                                   : 'bg-[var(--bg-surface)] border border-[var(--border-strong)] text-[var(--fg-2)] hover:text-[var(--fg-1)]' }}">
-                    <span>{{ $meta['label'] }}</span>
-                    @if($meta['count'] !== null)
-                        <span class="font-mono text-[11px] opacity-75">{{ $meta['count'] }}</span>
-                    @endif
-                    @if($on && $value !== '')<span class="text-[var(--fg-3)] text-[14px] leading-none">×</span>@endif
+                    <span>{{ $enum->label() }}</span>
+                    <span class="font-mono text-[11px] opacity-75">{{ $cnt }}</span>
+                    @if($on)<span class="text-[var(--fg-3)] text-[14px] leading-none">×</span>@endif
                 </button>
             @endforeach
 
@@ -437,10 +464,10 @@
                                 @endif
                             </span>
 
-                            {{-- status chip --}}
+                            {{-- status chip — через enum-метод (Phase 1.10 универсал). --}}
                             <span>
-                                <span class="chip {{ $chipClass[$req->status->value] ?? 'chip-neutral' }}">
-                                    <span class="dot"></span>{{ $statusLabel[$req->status->value] ?? $req->status->label() }}
+                                <span class="chip {{ $req->status->chipClass() }}">
+                                    <span class="dot"></span>{{ $req->status->label() }}
                                 </span>
                             </span>
 
