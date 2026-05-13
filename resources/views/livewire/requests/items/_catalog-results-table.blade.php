@@ -24,18 +24,18 @@
             <tr wire:key="cat-{{ $cat->id }}"
                 wire:click="selectCatalog({{ $cat->id }})"
                 class="cursor-pointer border-b border-border-subtle last:border-b-0 {{ $selectedId === $cat->id ? 'bg-sky-50' : 'hover:bg-surface-2' }} {{ $cat->is_active ? '' : 'opacity-60' }}">
-                <td class="px-2 py-1.5 mono text-fg-1">{{ $cat->sku }}</td>
-                <td class="px-2 py-1.5">
+                <td class="px-2 py-1.5 mono text-fg-1 align-top whitespace-nowrap">{{ $cat->sku }}</td>
+                <td class="px-2 py-1.5 align-top whitespace-nowrap">
                     <div class="text-fg-1">{{ $cat->brand ?: '—' }}</div>
                     @if($cat->brand_article)
                         <div class="mono text-fg-3 text-[11px]">{{ $cat->brand_article }}</div>
                     @endif
                 </td>
-                <td class="px-2 py-1.5 text-fg-1 max-w-[260px] truncate" title="{{ $cat->name }}">{{ $cat->name }}</td>
-                <td class="px-2 py-1.5 mono text-right text-fg-1">
+                <td class="px-2 py-1.5 text-fg-1 align-top leading-snug">{{ $cat->name }}</td>
+                <td class="px-2 py-1.5 mono text-right text-fg-1 align-top whitespace-nowrap">
                     {{ $cat->price !== null ? number_format((float) $cat->price, 2, '.', ' ') . ' ₽' : '—' }}
                 </td>
-                <td class="px-2 py-1.5 text-right">
+                <td class="px-2 py-1.5 text-right align-top whitespace-nowrap">
                     @if($cat->stock_available === null)
                         <span class="text-fg-3">—</span>
                     @elseif($cat->stock_available > 0)
@@ -48,7 +48,7 @@
                     @endif
                 </td>
                 @if($sim !== null)
-                    <td class="px-2 py-1.5 mono text-right">
+                    <td class="px-2 py-1.5 mono text-right align-top whitespace-nowrap">
                         @php
                             $pct = (int) round($sim * 100);
                             $tone = $sim >= 0.85
