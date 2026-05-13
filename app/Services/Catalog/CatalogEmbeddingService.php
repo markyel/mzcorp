@@ -155,6 +155,77 @@ class CatalogEmbeddingService
      *
      * @return array{catalog: CatalogItem, similarity: float}|null
      */
+    /**
+     * Top-N похожих позиций каталога к данной RequestItem — для UI-просмотра
+     * оператором («Похожие из каталога» в ItemCatalogLinkDialog).
+     *
+     * Без threshold/safety-фильтров: возвращаем как есть с similarity,
+     * оператор сам решает что выбрать. Запросов к LLM не делаем — это
+     * preview, а не auto-match.
+     *
+     * @return array<int, array{catalog: CatalogItem, similarity: float}>
+     */
+    public function topNByRequestItem(RequestItem $item, int $n = 10): array
+    {
+        $queryText = $this->buildQueryText($item);
+        if (mb_strlen(trim($queryText)) < 5) {
+            return [];
+        }
+
+        try {
+            $result = $this->embedder->embed($queryText);
+        } catch (\Throwable $e) {
+            Log::warning('CatalogEmbeddingService: topN embed failed', [
+                'request_item_id' => $item->id,
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+        $queryVector = $result['embedding'] ?? [];
+        if (empty($queryVector)) {
+            return [];
+        }
+
+        $vectorLiteral = '[' . implode(',', array_map(
+            fn ($v) => is_finite($v) ? sprintf('%.7f', $v) : '0',
+            $queryVector
+        )) . ']';
+
+        $rows = DB::select(
+            <<<'SQL'
+            SELECT ci.id AS catalog_id,
+                   1 - (e.embedding <=> ?::vector) AS similarity
+            FROM catalog_item_embeddings e
+            JOIN catalog_items ci ON ci.id = e.catalog_item_id
+            WHERE ci.is_active = true
+            ORDER BY e.embedding <=> ?::vector
+            LIMIT ?
+            SQL,
+            [$vectorLiteral, $vectorLiteral, max(1, min($n, 50))],
+        );
+
+        if (empty($rows)) {
+            return [];
+        }
+
+        $ids = array_map(fn ($r) => (int) $r->catalog_id, $rows);
+        $catalogs = CatalogItem::query()->whereIn('id', $ids)->get()->keyBy('id');
+
+        $out = [];
+        foreach ($rows as $r) {
+            $cat = $catalogs->get((int) $r->catalog_id);
+            if ($cat === null) {
+                continue;
+            }
+            $out[] = [
+                'catalog' => $cat,
+                'similarity' => (float) $r->similarity,
+            ];
+        }
+
+        return $out;
+    }
+
     public function matchByRequestItem(RequestItem $item, ?float $thresholdOverride = null): ?array
     {
         $threshold = $thresholdOverride ?? (float) app_setting(

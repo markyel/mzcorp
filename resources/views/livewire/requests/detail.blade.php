@@ -687,7 +687,20 @@
                                 @endif
                             </button>
                         @endif
-                        <button class="btn btn-sm" disabled title="Доступно в Phase 2">Refresh всех</button>
+                        @if($canEditItems && $items->isNotEmpty())
+                            <button type="button"
+                                    wire:click="rematchAllItems"
+                                    wire:confirm="Сбросить текущие привязки к каталогу для всех позиций (кроме «нет в каталоге») и заново их сматчить через A/B/C? Это займёт несколько секунд."
+                                    wire:loading.attr="disabled"
+                                    wire:target="rematchAllItems"
+                                    class="btn btn-sm"
+                                    title="Сбросить привязки и заново сматчить через A/B/C">
+                                <span wire:loading.remove wire:target="rematchAllItems">🔄 Refresh всех</span>
+                                <span wire:loading wire:target="rematchAllItems">⏳ Пересматчиваем…</span>
+                            </button>
+                        @else
+                            <button class="btn btn-sm" disabled>Refresh всех</button>
+                        @endif
                     </div>
 
                     @if($items->isEmpty())
@@ -700,7 +713,7 @@
                     @else
                         <div>
                             <div class="grid items-center px-[18px] gap-2.5 text-[11px] uppercase tracking-wider text-fg-3 font-semibold border-b border-border-subtle"
-                                 style="grid-template-columns: 24px 36px 1fr 110px 90px 100px 110px 32px; height: 30px">
+                                 style="grid-template-columns: 24px 36px 1fr 110px 90px 100px 110px 56px; height: 30px">
                                 <span></span><span></span>
                                 <span>позиция</span>
                                 <span>кол-во</span>
@@ -729,7 +742,7 @@
                                 @endphp
                                 <div wire:key="ri-{{ $item->id }}"
                                      class="grid items-center px-[18px] gap-2.5 py-2.5 border-b border-border-subtle text-[12.5px] {{ $item->is_active ? '' : 'opacity-50 bg-surface-2' }}"
-                                     style="grid-template-columns: 24px 36px 1fr 110px 90px 100px 110px 32px">
+                                     style="grid-template-columns: 24px 36px 1fr 110px 90px 100px 110px 56px">
                                     <span class="mono text-[12px] text-fg-3 text-right">{{ $item->position }}</span>
                                     @php
                                         // Phase 2: превью фото из vision-привязки (request_items.image_attachment_id).
@@ -865,7 +878,15 @@
                                                     class="text-emerald-700 hover:text-emerald-900 text-center text-[14px]"
                                                     title="Восстановить позицию">↩</button>
                                         @else
-                                            <div x-data="{ open: false }" class="relative text-center"
+                                        <div class="flex items-center justify-end gap-0.5">
+                                            {{-- Лупа — быстрый vector-поиск похожих позиций каталога. --}}
+                                            @if($item->parsed_name || $item->parsed_article)
+                                                <button type="button"
+                                                        @click="$dispatch('open-catalog-similar', { itemId: {{ $item->id }} })"
+                                                        class="text-fg-3 hover:text-fg-1 text-[13px] px-1 leading-none"
+                                                        title="Найти похожие позиции в каталоге">🔍</button>
+                                            @endif
+                                            <div x-data="{ open: false }" class="relative"
                                                  @click.outside="open = false">
                                                 <button type="button"
                                                         @click="open = !open"
@@ -894,6 +915,13 @@
                                                             🔓 Отвязать от каталога
                                                         </button>
                                                     @endif
+                                                    @if($item->parsed_name || $item->parsed_article)
+                                                        <button type="button"
+                                                                @click="open = false; $dispatch('open-catalog-similar', { itemId: {{ $item->id }} })"
+                                                                class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
+                                                            🔍 Похожие из каталога…
+                                                        </button>
+                                                    @endif
                                                     <button type="button"
                                                             @click="open = false; $dispatch('open-catalog-link', { itemId: {{ $item->id }} })"
                                                             class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
@@ -918,6 +946,7 @@
                                                     </button>
                                                 </div>
                                             </div>
+                                        </div>{{-- /flex action-cell --}}
                                         @endif
                                     @else
                                         <span class="text-fg-3 text-center" title="Менеджер заявки">⋮</span>

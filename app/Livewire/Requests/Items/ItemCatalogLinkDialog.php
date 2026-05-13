@@ -11,12 +11,17 @@ use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
- * Modal manual link к каталогу (Priority 1).
+ * Modal manual link к каталогу (Priority 1+).
  *
- * Поиск по `catalog_items` через CatalogSearchService (SQL ILIKE, без векторов).
- * Слушает event `open-catalog-link {itemId}`, открывает modal, оператор
- * вводит запрос, выбирает строку, жмёт «Привязать» — вызывается
- * RequestItemEditor::linkToCatalog с audit.
+ * Две вкладки:
+ *  - `text` — поиск по SQL ILIKE через CatalogSearchService (по sku /
+ *    brand_article / name);
+ *  - `similar` — top-10 vector-similarity через RequestItemEditor::findSimilar
+ *    (без threshold/LLM — preview, оператор сам решает).
+ *
+ * События:
+ *  - `open-catalog-link {itemId}` → открывает в режиме `text` с pre-fill.
+ *  - `open-catalog-similar {itemId}` → сразу в режиме `similar`.
  *
  * Хранит только id (как ReassignDialog), не Eloquent-модель.
  */
@@ -25,6 +30,8 @@ class ItemCatalogLinkDialog extends Component
     public int $requestId;
     public ?int $requestItemId = null;
     public bool $open = false;
+    /** Активная вкладка: text | similar. */
+    public string $mode = 'text';
     public string $query = '';
     public ?int $selectedCatalogId = null;
 
@@ -36,6 +43,17 @@ class ItemCatalogLinkDialog extends Component
     #[On('open-catalog-link')]
     public function openForItem(int $itemId): void
     {
+        $this->openInMode($itemId, 'text');
+    }
+
+    #[On('open-catalog-similar')]
+    public function openForItemSimilar(int $itemId): void
+    {
+        $this->openInMode($itemId, 'similar');
+    }
+
+    private function openInMode(int $itemId, string $mode): void
+    {
         $item = RequestItem::query()
             ->where('request_id', $this->requestId)
             ->where('is_active', true)
@@ -45,17 +63,28 @@ class ItemCatalogLinkDialog extends Component
             return;
         }
         $this->requestItemId = $item->id;
-        // Pre-fill query из parsed_article (часто оператор именно его ищет).
+        $this->mode = in_array($mode, ['text', 'similar'], true) ? $mode : 'text';
+        // Pre-fill query — для text-режима полезно, для similar используется
+        // напрямую RequestItem-данные через embedder.
         $this->query = (string) ($item->parsed_article ?: $item->parsed_name ?: '');
         $this->selectedCatalogId = $item->catalog_item_id;
         $this->resetErrorBag();
         $this->open = true;
     }
 
+    public function setMode(string $mode): void
+    {
+        if (in_array($mode, ['text', 'similar'], true)) {
+            $this->mode = $mode;
+            $this->selectedCatalogId = null;
+        }
+    }
+
     public function close(): void
     {
         $this->open = false;
         $this->requestItemId = null;
+        $this->mode = 'text';
         $this->query = '';
         $this->selectedCatalogId = null;
     }
@@ -65,13 +94,42 @@ class ItemCatalogLinkDialog extends Component
         $this->selectedCatalogId = $catalogId;
     }
 
+    /**
+     * Результаты текстового поиска (вкладка `text`).
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, CatalogItem>
+     */
     #[Computed]
-    public function results()
+    public function textResults()
     {
-        if (mb_strlen(trim($this->query)) < 2) {
+        if ($this->mode !== 'text' || mb_strlen(trim($this->query)) < 2) {
             return collect();
         }
         return app(CatalogSearchService::class)->search($this->query);
+    }
+
+    /**
+     * Top-10 vector-similarity (вкладка `similar`). Поднимает таймаут —
+     * embed-запрос к OpenAI может занимать 2-5 сек.
+     *
+     * @return array<int, array{catalog: CatalogItem, similarity: float}>
+     */
+    #[Computed]
+    public function similarResults(): array
+    {
+        if ($this->mode !== 'similar' || ! $this->requestItemId) {
+            return [];
+        }
+        $item = RequestItem::query()
+            ->where('request_id', $this->requestId)
+            ->where('is_active', true)
+            ->whereKey($this->requestItemId)
+            ->first();
+        if (! $item) {
+            return [];
+        }
+        @set_time_limit(60);
+        return app(RequestItemEditor::class)->findSimilar($item, auth()->user(), 10);
     }
 
     public function save(RequestItemEditor $editor): void

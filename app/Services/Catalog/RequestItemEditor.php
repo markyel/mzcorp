@@ -44,8 +44,102 @@ class RequestItemEditor
         'supplier_note',
     ];
 
-    public function __construct(private readonly CatalogResolutionService $resolver)
+    public function __construct(
+        private readonly CatalogResolutionService $resolver,
+        private readonly CatalogEmbeddingService $embedder,
+    ) {
+    }
+
+    /**
+     * Top-N похожих позиций каталога для UI-режима «Похожие» в
+     * ItemCatalogLinkDialog. Без LLM/safety-фильтров — preview, оператор
+     * сам выбирает что привязать (через `linkToCatalog`).
+     *
+     * @return array<int, array{catalog: CatalogItem, similarity: float}>
+     */
+    public function findSimilar(RequestItem $item, User $author, int $limit = 10): array
     {
+        $this->ensureCanEdit($item, $author);
+        return $this->embedder->topNByRequestItem($item, $limit);
+    }
+
+    /**
+     * Bulk re-match всех позиций заявки. Для каждой active-позиции:
+     *  - не трогаем `internal_catalog_not_found` (оператор подтвердил, что
+     *    SKU не появится — bulk не должен пересматривать без явного refresh);
+     *  - сбрасываем catalog_item_id если был и пробуем заново matchOrResolve.
+     *
+     * Используется после массового редактирования названий: оператор
+     * правит несколько позиций, нажимает «Refresh всех» — система пытается
+     * подобрать каталожный аналог по новым данным.
+     *
+     * @return array{checked: int, matched: int, unchanged: int, skipped: int}
+     */
+    public function rematchAll(\App\Models\Request $request, User $author): array
+    {
+        // Авторизация — assigned manager + privileged. Проверяем через
+        // первую active-позицию (всё внутри одной заявки).
+        $firstItem = RequestItem::query()
+            ->where('request_id', $request->id)
+            ->where('is_active', true)
+            ->first();
+        if ($firstItem !== null) {
+            $this->ensureCanEdit($firstItem, $author);
+        }
+
+        $stats = ['checked' => 0, 'matched' => 0, 'unchanged' => 0, 'skipped' => 0];
+
+        RequestItem::query()
+            ->where('request_id', $request->id)
+            ->where('is_active', true)
+            ->orderBy('position')
+            ->chunkById(50, function ($items) use ($author, &$stats) {
+                foreach ($items as $item) {
+                    $stats['checked']++;
+                    if ($item->quality_assessment_status === QualityAssessmentStatus::InternalCatalogNotFound->value) {
+                        $stats['skipped']++;
+                        continue;
+                    }
+
+                    $oldCatalogId = $item->catalog_item_id;
+                    // Сбрасываем привязку (если была), чтобы matchOrResolve
+                    // действительно пересчитал по новым parsed_name/article.
+                    if ($oldCatalogId !== null) {
+                        $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+                        if (! empty($payload['catalog_match'])) {
+                            $payload['previous_catalog_match'] = $payload['catalog_match'];
+                        }
+                        unset($payload['catalog_match'], $payload['catalog']);
+                        $item->quality_assessment_payload = $payload;
+                        $item->catalog_item_id = null;
+                        $item->save();
+                    }
+
+                    $matched = $this->resolver->matchOrResolve($item->fresh());
+                    $item->refresh();
+
+                    $this->appendAudit($item, [
+                        'action' => 'bulk_rematch',
+                        'old' => ['catalog_item_id' => $oldCatalogId],
+                        'new' => ['matched' => $matched, 'catalog_item_id' => $item->catalog_item_id],
+                    ], $author);
+                    $item->save();
+
+                    if ($matched) {
+                        $stats['matched']++;
+                    } else {
+                        $stats['unchanged']++;
+                    }
+                }
+            });
+
+        Log::info('RequestItemEditor: bulk rematch done', [
+            'request_id' => $request->id,
+            'stats' => $stats,
+            'by' => $author->id,
+        ]);
+
+        return $stats;
     }
 
     /**

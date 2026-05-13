@@ -423,6 +423,32 @@ class Detail extends Component
         $this->reloadRequest();
     }
 
+    /**
+     * Bulk re-match всех позиций заявки. Сбрасывает catalog_item_id (кроме
+     * internal_catalog_not_found) и прогоняет matchOrResolve. Используется
+     * после редактирования названий — даёт «применить изменения».
+     */
+    public function rematchAllItems(RequestItemEditor $editor): void
+    {
+        // C-step (vector + LLM) per item ≈ 5-10 сек. На 10 позициях — до 100 сек.
+        // PHP-FPM default 30s → поднимаем таймаут.
+        @set_time_limit(300);
+        @ini_set('max_execution_time', '300');
+
+        $stats = $editor->rematchAll($this->request->fresh(), auth()->user());
+        $this->reloadRequest();
+        session()->flash(
+            'status',
+            sprintf(
+                'Пересмотрено %d · сматчено %d · без аналога %d · пропущено %d',
+                $stats['checked'],
+                $stats['matched'],
+                $stats['unchanged'],
+                $stats['skipped'],
+            ),
+        );
+    }
+
     #[On('item-relinked')]
     #[On('item-edited')]
     public function handleItemChangedEvent(): void
