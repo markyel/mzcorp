@@ -1190,7 +1190,9 @@
                         </div>
                     @endif
 
-                    {{-- Phase 1.10 — позиции sticky-связанных заявок (toggle в шапке). --}}
+                    {{-- Phase 1.10 — позиции sticky-связанных заявок (toggle в шапке).
+                         Тот же layout что и у основного списка (через partial _item-row),
+                         только в readonly-режиме — actions заменены на ↗ (открыть заявку).--}}
                     @if($includeStickyItems && $relatedSticky->isNotEmpty())
                         <div class="mt-4 ds-card">
                             <div class="ds-card-header">
@@ -1200,8 +1202,20 @@
                                 <span class="text-[11.5px] text-fg-3">Контекст: что клиент уже спрашивал в связанных заявках</span>
                             </div>
                             <div>
+                                {{-- Header-row как у основной таблицы. --}}
+                                <div class="grid items-center px-[18px] gap-2.5 text-[11px] uppercase tracking-wider text-fg-3 font-semibold border-b border-border-subtle"
+                                     style="grid-template-columns: 24px 36px 1fr 110px 90px 100px 110px 56px; height: 30px">
+                                    <span></span><span></span>
+                                    <span>позиция</span>
+                                    <span>кол-во</span>
+                                    <span>цена</span>
+                                    <span>наличие</span>
+                                    <span class="text-right">сумма</span>
+                                    <span></span>
+                                </div>
                                 @foreach($relatedSticky as $linkedReq)
-                                    <div class="px-[18px] py-2 border-t border-border-subtle bg-surface-2 flex items-center gap-2">
+                                    {{-- Group-header: код связанной заявки + статус + менеджер + дата. --}}
+                                    <div class="px-[18px] py-2 border-b border-border-subtle bg-surface-2 flex items-center gap-2 text-[12px]">
                                         <a href="{{ route('requests.show', $linkedReq) }}"
                                            class="mono text-[13px] text-sky-700 hover:underline font-semibold">{{ $linkedReq->internal_code }}</a>
                                         <span class="chip {{ $linkedReq->status->chipClass() }} text-[10.5px]">
@@ -1215,28 +1229,13 @@
                                         <span class="text-[11.5px] text-fg-3">{{ $linkedReq->items->count() }} позиций</span>
                                     </div>
                                     @foreach($linkedReq->items as $linkedItem)
-                                        <div class="px-[18px] py-1.5 border-t border-border-subtle text-[12px] flex items-start gap-2">
-                                            <span class="mono text-[11px] text-fg-3 w-[24px] text-right">{{ $linkedItem->position }}</span>
-                                            <div class="flex-1 min-w-0">
-                                                <div class="text-fg-1 leading-snug">{{ $linkedItem->parsed_name ?: '(без названия)' }}</div>
-                                                @if($linkedItem->catalogItem && trim((string) $linkedItem->catalogItem->name) !== '' && mb_strtolower(trim((string) $linkedItem->catalogItem->name)) !== mb_strtolower(trim((string) $linkedItem->parsed_name)))
-                                                    <div class="text-[11.5px] text-fg-3">↳ {{ $linkedItem->catalogItem->name }}</div>
-                                                @endif
-                                                <div class="text-[11px] text-fg-3 mt-0.5 flex flex-wrap gap-x-1.5">
-                                                    @if($linkedItem->brand)<span class="text-emerald-800">{{ $linkedItem->brand->name }}</span>@elseif($linkedItem->parsed_brand)<span>{{ $linkedItem->parsed_brand }}</span>@endif
-                                                    @if($linkedItem->parsed_article)<span class="mono text-fg-2">{{ $linkedItem->parsed_article }}</span>@endif
-                                                    @if($linkedItem->catalogItem)<span class="text-violet-800">в каталоге · {{ $linkedItem->catalogItem->sku }}</span>@endif
-                                                </div>
-                                            </div>
-                                            <span class="mono text-[11.5px] text-fg-2 text-right whitespace-nowrap">
-                                                {{ rtrim(rtrim((string) $linkedItem->parsed_qty, '0'), '.') ?: '—' }} {{ $linkedItem->parsed_unit }}
-                                            </span>
-                                            @if($linkedItem->catalogItem?->price !== null)
-                                                <span class="mono text-[11.5px] text-fg-1 text-right whitespace-nowrap min-w-[80px]">
-                                                    {{ number_format((float) $linkedItem->catalogItem->price, 2, '.', ' ') }} ₽
-                                                </span>
-                                            @endif
-                                        </div>
+                                        @include('livewire.requests.items._item-row', [
+                                            'item' => $linkedItem,
+                                            'isImageAttachment' => $isImageAttachment,
+                                            'readonly' => true,
+                                            'canEditItems' => false,
+                                            'items' => collect(),
+                                        ])
                                     @endforeach
                                 @endforeach
                             </div>
