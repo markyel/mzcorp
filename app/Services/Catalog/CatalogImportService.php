@@ -257,9 +257,34 @@ class CatalogImportService
         if ($s === '') {
             return null;
         }
+        // Cyrillic → latin lookalike fold ДО uppercase — иначе клиентский
+        // «М14224» (кириллическая М, U+041C) не сматчится с каталожным
+        // «M14224» (latin M, U+004D).
+        $s = self::cyrillicLookalikeFold($s);
         $s = preg_replace('/[\s\-_.\/]/', '', mb_strtoupper($s));
 
         return mb_substr((string) $s, 0, 128) ?: null;
+    }
+
+    /**
+     * Заменить визуально идентичные кириллические буквы латиницей.
+     * Применяется к артикулам и M-SKU detector'у — клиенты часто
+     * случайно набирают «М» вместо «M», «А» вместо «A» и т.п.
+     * (особенно при copy-paste из 1C / автозамене в Word).
+     *
+     * Список — только uppercase/lowercase пары, которые **визуально
+     * неотличимы** в большинстве шрифтов: А/A В/B Е/E К/K М/M Н/H О/O
+     * Р/P С/C Т/T Х/X (uppercase) + а/a е/e к/k м/m о/o р/p с/c х/x.
+     */
+    public static function cyrillicLookalikeFold(string $value): string
+    {
+        return strtr($value, [
+            'А' => 'A', 'В' => 'B', 'Е' => 'E', 'К' => 'K', 'М' => 'M',
+            'Н' => 'H', 'О' => 'O', 'Р' => 'P', 'С' => 'C', 'Т' => 'T',
+            'Х' => 'X',
+            'а' => 'a', 'е' => 'e', 'к' => 'k', 'м' => 'm', 'о' => 'o',
+            'р' => 'p', 'с' => 'c', 'х' => 'x',
+        ]);
     }
 
     private function trimOrNull(mixed $v, int $max): ?string

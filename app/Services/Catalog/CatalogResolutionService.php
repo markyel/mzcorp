@@ -274,13 +274,14 @@ class CatalogResolutionService
     {
         $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
         if (! empty($payload['internal_catalog_sku'])) {
-            return (string) $payload['internal_catalog_sku'];
+            return CatalogImportService::cyrillicLookalikeFold((string) $payload['internal_catalog_sku']);
         }
         $article = (string) ($item->parsed_article ?? '');
         if ($article === '') {
             return null;
         }
-        // Тот же regex что в QualityAssessmentService::detectInternalCatalogSku.
+        // Cyrillic→latin fold перед regex (см. QualityAssessmentService::detectInternalCatalogSku).
+        $article = CatalogImportService::cyrillicLookalikeFold($article);
         $pattern = '/(?<![\p{L}\p{N}_])(M\d{4,})(?![\p{L}\p{N}_])/u';
         if (preg_match($pattern, $article, $m) === 1) {
             return $m[1];

@@ -551,6 +551,10 @@ class QualityAssessmentService
         if ($article === '') {
             return null;
         }
+        // Cyrillic «М14224» → latin «M14224» — клиенты часто набирают
+        // кириллическую М (U+041C) визуально неотличимую от latin M
+        // (U+004D). Без нормализации regex /M\d{4,}/ не находит SKU.
+        $article = \App\Services\Catalog\CatalogImportService::cyrillicLookalikeFold($article);
 
         $pattern = '/(?<![\p{L}\p{N}_])(M\d{4,})(?![\p{L}\p{N}_])/u';
         if (preg_match($pattern, $article, $m) === 1) {

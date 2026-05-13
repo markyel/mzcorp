@@ -121,8 +121,11 @@
                         <span class="flex items-center gap-1.5 flex-wrap"
                               title="Заявки, по которым AssignmentService прицепил эту через совпадение артикула или названия позиции">
                             @foreach($sticky['links'] as $linked)
+                                {{-- Без wire:navigate — после SPA-перехода между
+                                     двумя Detail-страницами Livewire не пересоздаёт
+                                     state и вкладки/диалоги перестают реагировать.
+                                     Full reload надёжнее (минусом — 200-300мс лаг). --}}
                                 <a href="{{ route('requests.show', $linked) }}"
-                                   wire:navigate
                                    class="mono text-[12px] text-sky-700 hover:underline">{{ $linked->internal_code }}</a>{{ ! $loop->last ? ',' : '' }}
                             @endforeach
                         </span>
