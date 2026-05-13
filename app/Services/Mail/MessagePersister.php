@@ -51,6 +51,20 @@ class MessagePersister
                 ->first();
 
             if ($existing) {
+                // Phase 1.9 outbound: если это наш собственный sent draft
+                // (мы сами создали EmailMessage в OutgoingMailSender и
+                // потом APPEND'нули в Sent), то IMAP-копия должна обновить
+                // imap_uid + imap_flags + raw_source в существующей записи,
+                // а не пропускаться как дубль.
+                if ($direction === MailDirection::Outbound
+                    && $existing->direction === MailDirection::Outbound
+                    && $existing->imap_uid === null) {
+                    $existing->update([
+                        'imap_uid' => $msg->getUid(),
+                        'imap_flags' => $this->extractFlags($msg),
+                        'raw_source' => $this->cleanString((string) $msg->getRawBody()),
+                    ]);
+                }
                 return null;
             }
 

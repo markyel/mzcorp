@@ -142,6 +142,25 @@ return [
     ],
 
     /*
+    | Phase 1.9: UI-переписка. Конфиг для исходящих писем из карточки заявки.
+    | См. app/Services/Mail/OutgoingMailboxResolver.php и OutgoingMailSender.
+    */
+    'mail_outbound' => [
+        // Shared-ящик для fallback'а, когда у assigned менеджера нет своего
+        // OAuth-подключённого personal mailbox'а. Резолвится по точному email'у.
+        'shared_email' => env('MAIL_OUTBOUND_SHARED_EMAIL', 'mail@myzip.ru'),
+        // Список наших mailbox-адресов в lowercase (для Reply-all фильтра —
+        // не отправлять на самих себя). Пусто = берём все Mailbox.email из БД.
+        'our_emails' => array_filter(array_map(
+            'strtolower',
+            array_map('trim', explode(',', (string) env('MAIL_OUTBOUND_OUR_EMAILS', '')))
+        )),
+        // Лимит attachments на одно письмо (MB). Livewire WithFileUploads
+        // ограничивает каждый файл; на агрегат тоже нужен guard.
+        'max_attachment_mb' => (int) env('MAIL_OUTBOUND_MAX_ATTACHMENT_MB', 25),
+    ],
+
+    /*
     | Налоговые ставки. Используются в UI карточки заявки для расчёта
     | итога по каталожным ценам. Меняем через env, если законодательство
     | сдвинет ставку — без правки кода.

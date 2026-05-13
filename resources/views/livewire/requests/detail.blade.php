@@ -187,7 +187,23 @@
             <button class="btn btn-primary" disabled title="Доступно в Phase 2">Сформировать КП</button>
             <div class="flex gap-1.5">
                 <button class="btn flex-1" disabled title="Доступно в Phase 2">Refresh цен</button>
-                <button class="btn flex-1" disabled title="Phase 1.9 — исходящие">Ответить</button>
+                @php
+                    $canReply = auth()->id() === $req->assigned_user_id;
+                    $lastInbound = $thread->reverse()
+                        ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound);
+                @endphp
+                @if($canReply)
+                    <button type="button"
+                            class="btn flex-1"
+                            @if($lastInbound)
+                                wire:click="$dispatch('open-reply', { messageId: {{ $lastInbound->id }}, requestId: {{ $req->id }} })"
+                            @else
+                                wire:click="$dispatch('open-compose', { requestId: {{ $req->id }} })"
+                            @endif
+                    >Ответить</button>
+                @else
+                    <button class="btn flex-1" disabled title="Отвечать может только назначенный менеджер">Ответить</button>
+                @endif
             </div>
             <div class="flex gap-1.5">
                 <button class="btn btn-sm flex-1" disabled title="Доступно в Phase 2">⏸ Пауза</button>
@@ -471,6 +487,31 @@
                                             <div class="text-fg-3">(пустое тело)</div>
                                         @endif
 
+                                        @php
+                                            $canReplyHere = auth()->id() === $req->assigned_user_id;
+                                            $isDraftMsg = (bool) $msg->is_draft;
+                                            $isMyDraft = $isDraftMsg && $msg->draft_author_user_id === auth()->id();
+                                        @endphp
+                                        @if($isDraftMsg)
+                                            <div class="mt-2 flex items-center gap-2 text-[11.5px] text-amber-700">
+                                                <span class="chip chip-attn"><span class="dot"></span>Черновик</span>
+                                                @if($isMyDraft)
+                                                    <button type="button"
+                                                            wire:click="$dispatch('open-draft', { draftId: {{ $msg->id }}, requestId: {{ $req->id }} })"
+                                                            class="underline">Продолжить редактирование</button>
+                                                @endif
+                                            </div>
+                                        @elseif($canReplyHere && ! $isOutbound)
+                                            <div class="mt-2 flex gap-2">
+                                                <button type="button"
+                                                        wire:click="$dispatch('open-reply', { messageId: {{ $msg->id }}, requestId: {{ $req->id }} })"
+                                                        class="btn btn-sm">↩ Ответить</button>
+                                                <button type="button"
+                                                        wire:click="$dispatch('open-reply-all', { messageId: {{ $msg->id }}, requestId: {{ $req->id }} })"
+                                                        class="btn btn-sm">↩↩ Ответить всем</button>
+                                            </div>
+                                        @endif
+
                                         @if($msg->attachments->isNotEmpty())
                                             <div class="mt-3 flex flex-wrap gap-2">
                                                 @foreach($msg->attachments as $att)
@@ -515,16 +556,28 @@
                                 </div>
                             @endforeach
 
-                            {{-- Compose disabled (Phase 1.9 outbound) --}}
-                            <div class="px-[18px] py-3.5 bg-surface-2 border-t border-border">
-                                <textarea disabled placeholder="Compose будет доступен после Phase 1.9 outbound — OutgoingMailObserver"
-                                          class="w-full min-h-[88px] px-3 py-2.5 border border-border-strong rounded-md bg-surface text-fg-3 text-[13px] resize-none cursor-not-allowed"></textarea>
-                                <div class="flex items-center gap-2 mt-2.5">
-                                    <span class="text-[12px] text-fg-3">Phase 1.9 outbound → Sent-tracking + compose клиенту</span>
-                                    <span class="flex-1"></span>
-                                    <button class="btn btn-primary" disabled title="Phase 1.9 outbound">Отправить</button>
+                            {{-- Phase 1.9 — Compose / Reply form. --}}
+                            @if(auth()->id() === $req->assigned_user_id)
+                                <div class="px-[18px] py-3.5 bg-surface-2 border-t border-border">
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <span class="text-[12px] text-fg-3">Ответ клиенту через MyLift — копия сохранится в Sent ящика.</span>
+                                        <span class="flex-1"></span>
+                                        @if($req->client_email)
+                                            <button type="button"
+                                                    wire:click="$dispatch('open-compose', { requestId: {{ $req->id }} })"
+                                                    class="btn btn-sm">＋ Новое сообщение клиенту</button>
+                                        @endif
+                                    </div>
+                                    <livewire:requests.mail.compose-form
+                                        :request-id="$req->id"
+                                        wire:key="compose-{{ $req->id }}" />
                                 </div>
-                            </div>
+                            @else
+                                <div class="px-[18px] py-3.5 bg-surface-2 border-t border-border text-[12px] text-fg-3">
+                                    Отвечать на эту заявку может только назначенный менеджер
+                                    ({{ $req->assignedUser?->name ?? '— не назначен —' }}).
+                                </div>
+                            @endif
                         </div>
                     @endif
                 </div>

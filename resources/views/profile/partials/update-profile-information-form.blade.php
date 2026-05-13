@@ -28,6 +28,15 @@
 
         </div>
 
+        <div>
+            <x-input-label for="email_signature" value="Подпись для исходящих писем" />
+            <textarea id="email_signature" name="email_signature" rows="6"
+                      class="mt-1 block w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm"
+                      placeholder="Иван Иванов&#10;Менеджер MyZip&#10;+7 999 ...&#10;manager@myzip.ru">{{ old('email_signature', $user->email_signature) }}</textarea>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Появляется в начале вашего ответа клиенту в карточке заявки.</p>
+            <x-input-error class="mt-2" :messages="$errors->get('email_signature')" />
+        </div>
+
         <div class="flex items-center gap-4">
             <x-primary-button>{{ __('Save') }}</x-primary-button>
 

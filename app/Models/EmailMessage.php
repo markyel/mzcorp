@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\MailDirection;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -48,6 +49,10 @@ class EmailMessage extends Model
         'category_intent',
         'category_reasoning',
         'categorized_at',
+        // Phase 1.9 — drafts для UI-переписки.
+        'is_draft',
+        'draft_author_user_id',
+        'last_edited_at',
     ];
 
     protected function casts(): array
@@ -67,7 +72,42 @@ class EmailMessage extends Model
             // Phase 1.8c
             'category_confidence' => 'float',
             'categorized_at' => 'datetime',
+            // Phase 1.9
+            'is_draft' => 'bool',
+            'last_edited_at' => 'datetime',
         ];
+    }
+
+    /* ---------------- Phase 1.9 — drafts scopes ---------------- */
+
+    /**
+     * Только отправленные / inbound (не черновики). Используем при обычном
+     * показе треда, где drafts не должны утечь между менеджерами.
+     */
+    public function scopeNotDraft(Builder $query): Builder
+    {
+        return $query->where('is_draft', false);
+    }
+
+    /**
+     * Видимость для пользователя: всё не-draft + свои черновики.
+     * Используется в Detail.php при выборке thread.
+     */
+    public function scopeVisibleTo(Builder $query, ?User $user): Builder
+    {
+        $userId = $user?->id;
+
+        return $query->where(function (Builder $q) use ($userId) {
+            $q->where('is_draft', false);
+            if ($userId !== null) {
+                $q->orWhere('draft_author_user_id', $userId);
+            }
+        });
+    }
+
+    public function draftAuthor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'draft_author_user_id');
     }
 
     public function mailbox(): BelongsTo

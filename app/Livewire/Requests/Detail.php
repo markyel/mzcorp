@@ -69,8 +69,10 @@ class Detail extends Component
         // Полный тред: все письма прицепленные к заявке (trigger + reply'и),
         // отсортированы по sent_at для естественной хронологии. NULL sent_at
         // (редкие письма без Date header) уходят в конец.
+        // Phase 1.9: visibleTo фильтрует чужие черновики (свои показываются).
         $this->thread = EmailMessage::query()
             ->where('related_request_id', $this->request->id)
+            ->visibleTo($user)
             ->with([
                 'attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline',
                 'mailbox:id,email,name',

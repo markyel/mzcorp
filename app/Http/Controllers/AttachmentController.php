@@ -126,6 +126,17 @@ class AttachmentController extends Controller
             abort(403);
         }
 
+        $email = $attachment->emailMessage;
+
+        // Phase 1.9 drafts: чужие черновики не отдаём никому, кроме автора.
+        // Privileged-роли в драфт чужого менеджера не лезут до явной отправки.
+        if ($email?->is_draft) {
+            if ($email->draft_author_user_id === $user->id) {
+                return;
+            }
+            abort(403, 'Это черновик другого менеджера.');
+        }
+
         $isPrivileged = $user->hasAnyRole([
             Role::HeadOfSales->value,
             Role::Director->value,
@@ -136,7 +147,6 @@ class AttachmentController extends Controller
         }
 
         // Менеджер видит вложения только своих писем (через related Request).
-        $email = $attachment->emailMessage;
         $relatedRequest = $email?->related_request_id
             ? \App\Models\Request::find($email->related_request_id)
             : null;

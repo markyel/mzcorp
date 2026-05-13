@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Enums\MailboxType;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -33,6 +34,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'email_signature',
     ];
 
     /**
@@ -76,5 +78,19 @@ class User extends Authenticatable
     public function isArchived(): bool
     {
         return $this->archived_at !== null;
+    }
+
+    /**
+     * Первый active personal mailbox менеджера, годный для отправки исходящих
+     * (Phase 1.9 — OutgoingMailboxResolver). Может быть null — тогда fallback
+     * на shared mailbox в resolver'е.
+     */
+    public function primaryOutboundMailbox(): ?Mailbox
+    {
+        return $this->ownedMailboxes()
+            ->where('type', MailboxType::Personal)
+            ->where('is_active', true)
+            ->get()
+            ->first(fn (Mailbox $m) => $m->canSendOutbound());
     }
 }

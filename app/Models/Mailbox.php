@@ -177,4 +177,23 @@ class Mailbox extends Model
     {
         return $this->auth_type === MailboxAuthType::OAuth;
     }
+
+    /**
+     * Может ли ящик отправлять исходящие письма (Phase 1.9).
+     *
+     * is_active + либо app-password, либо OAuth с действующим refresh_token
+     * (access можно обновить через YandexOAuthService::ensureFreshToken).
+     */
+    public function canSendOutbound(): bool
+    {
+        if (! $this->is_active) {
+            return false;
+        }
+
+        if ($this->isOAuth()) {
+            return $this->refreshToken() !== null || ! $this->isOAuthTokenExpired();
+        }
+
+        return $this->password() !== null;
+    }
 }

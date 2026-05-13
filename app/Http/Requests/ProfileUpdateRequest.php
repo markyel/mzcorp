@@ -26,6 +26,8 @@ class ProfileUpdateRequest extends FormRequest
                 'max:255',
                 Rule::unique(User::class)->ignore($this->user()->id),
             ],
+            // Phase 1.9: подпись для исходящих писем из карточки заявки.
+            'email_signature' => ['nullable', 'string', 'max:5000'],
         ];
     }
 }
