@@ -39,13 +39,28 @@ return new class extends Migration {
         DB::statement('ALTER TABLE email_messages ALTER COLUMN imap_uid DROP NOT NULL');
 
         // Заменить full unique на partial (только для is_draft=false).
-        // Drop старого индекса безопасен — он на (mailbox_id, folder, message_id).
-        $hasOldUnique = collect(DB::select("SELECT indexname FROM pg_indexes WHERE tablename = 'email_messages' AND indexname = 'email_messages_unique_per_folder'"))->isNotEmpty();
-        if ($hasOldUnique) {
-            DB::statement('DROP INDEX email_messages_unique_per_folder');
+        // На Postgres Laravel $table->unique() создаёт UNIQUE CONSTRAINT
+        // (а не голый index), поэтому DROP INDEX падает с
+        // «Dependent objects still exist: constraint requires it».
+        // Нужно ALTER TABLE ... DROP CONSTRAINT.
+        $hasOldConstraint = collect(DB::select(
+            "SELECT conname FROM pg_constraint WHERE conname = 'email_messages_unique_per_folder'"
+        ))->isNotEmpty();
+        if ($hasOldConstraint) {
+            DB::statement('ALTER TABLE email_messages DROP CONSTRAINT email_messages_unique_per_folder');
+        } else {
+            // На всякий случай — если у кого-то это был голый index без constraint.
+            $hasOldIndex = collect(DB::select(
+                "SELECT indexname FROM pg_indexes WHERE tablename = 'email_messages' AND indexname = 'email_messages_unique_per_folder'"
+            ))->isNotEmpty();
+            if ($hasOldIndex) {
+                DB::statement('DROP INDEX email_messages_unique_per_folder');
+            }
         }
 
-        $hasPartial = collect(DB::select("SELECT indexname FROM pg_indexes WHERE tablename = 'email_messages' AND indexname = 'email_messages_unique_per_folder_not_draft'"))->isNotEmpty();
+        $hasPartial = collect(DB::select(
+            "SELECT indexname FROM pg_indexes WHERE tablename = 'email_messages' AND indexname = 'email_messages_unique_per_folder_not_draft'"
+        ))->isNotEmpty();
         if (! $hasPartial) {
             DB::statement('CREATE UNIQUE INDEX email_messages_unique_per_folder_not_draft
                 ON email_messages (mailbox_id, folder, message_id) WHERE is_draft = false');
@@ -54,17 +69,21 @@ return new class extends Migration {
 
     public function down(): void
     {
-        // Partial unique → full unique. Возможны коллизии, но в down() важнее
-        // не уронить откат: дропаем partial, создаём full unique best-effort.
-        $hasPartial = collect(DB::select("SELECT indexname FROM pg_indexes WHERE tablename = 'email_messages' AND indexname = 'email_messages_unique_per_folder_not_draft'"))->isNotEmpty();
+        // Partial unique → full unique CONSTRAINT (зеркало up()).
+        $hasPartial = collect(DB::select(
+            "SELECT indexname FROM pg_indexes WHERE tablename = 'email_messages' AND indexname = 'email_messages_unique_per_folder_not_draft'"
+        ))->isNotEmpty();
         if ($hasPartial) {
             DB::statement('DROP INDEX email_messages_unique_per_folder_not_draft');
         }
 
-        $hasOldUnique = collect(DB::select("SELECT indexname FROM pg_indexes WHERE tablename = 'email_messages' AND indexname = 'email_messages_unique_per_folder'"))->isNotEmpty();
-        if (! $hasOldUnique) {
-            DB::statement('CREATE UNIQUE INDEX email_messages_unique_per_folder
-                ON email_messages (mailbox_id, folder, message_id)');
+        $hasOldConstraint = collect(DB::select(
+            "SELECT conname FROM pg_constraint WHERE conname = 'email_messages_unique_per_folder'"
+        ))->isNotEmpty();
+        if (! $hasOldConstraint) {
+            DB::statement('ALTER TABLE email_messages
+                ADD CONSTRAINT email_messages_unique_per_folder
+                UNIQUE (mailbox_id, folder, message_id)');
         }
 
         Schema::table('email_messages', function (Blueprint $table) {
