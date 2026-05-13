@@ -10,6 +10,100 @@
                     Найдите подходящий товар каталога и нажмите «Привязать».
                 </div>
 
+                {{-- Subject — позиция заявки, к которой подбираем каталог. --}}
+                @php $subject = $this->subjectItem; @endphp
+                @if($subject)
+                    @php
+                        $subjQa = $subject->quality_assessment_status;
+                        $subjQaConfig = match ($subjQa) {
+                            'sufficient' => ['chip-ok', 'данных достаточно'],
+                            'insufficient' => ['chip-attn', 'данных мало'],
+                            'not_covered' => ['chip-neutral', 'нет правил'],
+                            'assessment_failed' => ['chip-over', 'ошибка KB'],
+                            'internal_catalog_pending' => ['chip-info', 'внутренний SKU · ждёт каталог'],
+                            'internal_catalog_not_found' => ['chip-danger', 'нет в каталоге'],
+                            default => null,
+                        };
+                        $subjExtracted = is_array($subject->quality_assessment_payload['extracted_parameters'] ?? null)
+                            ? $subject->quality_assessment_payload['extracted_parameters']
+                            : [];
+                        $subjImg = $subject->imageAttachment;
+                        $subjImgIsImage = $subjImg && str_starts_with((string) $subjImg->mime_type, 'image/');
+                    @endphp
+                    <div class="border border-border rounded-md bg-surface-2 px-3 py-2.5 mb-3 flex gap-3 items-start">
+                        {{-- Vision thumbnail если есть. --}}
+                        @if($subjImgIsImage)
+                            <button type="button"
+                                    x-on:click="$dispatch('open-image', { src: @js(route('attachments.preview', $subjImg)), name: @js($subjImg->filename), dl: @js(route('attachments.download', $subjImg)) })"
+                                    class="w-12 h-12 border border-border rounded-sm overflow-hidden bg-app block shrink-0"
+                                    title="{{ $subjImg->filename }} — открыть">
+                                <img src="{{ route('attachments.preview', $subjImg) }}"
+                                     alt="{{ $subjImg->filename }}"
+                                     class="w-12 h-12 object-cover block">
+                            </button>
+                        @else
+                            <div class="w-12 h-12 border border-border rounded-sm bg-app flex items-center justify-center text-[9px] text-fg-3 shrink-0">img</div>
+                        @endif
+
+                        <div class="min-w-0 flex-1">
+                            <div class="text-[11px] text-fg-3 uppercase tracking-wider font-semibold mb-0.5">
+                                Ищем для позиции
+                                @if($subject->request)
+                                    <span class="mono text-fg-2 normal-case">· {{ $subject->request->internal_code }} · поз. {{ $subject->position }}</span>
+                                @endif
+                            </div>
+                            <div class="font-medium text-[13px] text-fg-1 leading-tight">{{ $subject->parsed_name ?: '(без названия)' }}</div>
+                            <div class="text-[11.5px] text-fg-3 mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                                @if($subject->brand)
+                                    <span class="inline-flex items-center px-1.5 rounded-sm bg-emerald-50 text-emerald-800 font-semibold text-[10.5px]">{{ $subject->brand->name }}</span>
+                                @elseif($subject->parsed_brand)
+                                    <span>{{ $subject->parsed_brand }}</span>
+                                @endif
+                                @if($subject->kbCategory)
+                                    <span class="inline-flex items-center px-1.5 rounded-sm bg-sky-50 text-sky-800 font-medium text-[10.5px]">{{ $subject->kbCategory->name }}</span>
+                                @endif
+                                @if($subjQaConfig)
+                                    <span class="chip {{ $subjQaConfig[0] }} text-[10.5px]"><span class="dot"></span>{{ $subjQaConfig[1] }}</span>
+                                @endif
+                                @if($subject->parsed_article)
+                                    <span class="mono text-fg-2">{{ $subject->parsed_article }}</span>
+                                @endif
+                                @if($subject->parsed_qty)
+                                    <span class="text-fg-2">· {{ rtrim(rtrim((string) $subject->parsed_qty, '0'), '.') }} {{ $subject->parsed_unit }}</span>
+                                @endif
+                                @if($subject->supplier_note)
+                                    <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-50 text-amber-700 font-medium text-[10.5px]">
+                                        {{ \Illuminate\Support\Str::limit($subject->supplier_note, 60) }}
+                                    </span>
+                                @endif
+                            </div>
+                            @if(! empty($subjExtracted))
+                                <div class="text-[11px] text-fg-3 mt-1 flex flex-wrap gap-x-2 gap-y-0.5 mono">
+                                    @foreach(array_slice($subjExtracted, 0, 6, true) as $slug => $value)
+                                        <span><span class="text-fg-3">{{ $slug }}:</span> <span class="text-fg-2">{{ is_scalar($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE) }}</span></span>
+                                    @endforeach
+                                    @if(count($subjExtracted) > 6)
+                                        <span class="text-fg-3">… +{{ count($subjExtracted) - 6 }}</span>
+                                    @endif
+                                </div>
+                            @endif
+                            @if($subject->catalogItem)
+                                <div class="text-[11.5px] text-fg-3 mt-1.5 pt-1.5 border-t border-border-subtle">
+                                    Сейчас привязана:
+                                    <span class="mono text-fg-1">{{ $subject->catalogItem->sku }}</span>
+                                    · {{ $subject->catalogItem->brand ?: '—' }}
+                                    @if($subject->catalogItem->brand_article)
+                                        · <span class="mono">{{ $subject->catalogItem->brand_article }}</span>
+                                    @endif
+                                    @if($subject->catalogItem->price !== null)
+                                        · {{ number_format((float) $subject->catalogItem->price, 2, '.', ' ') }} ₽
+                                    @endif
+                                </div>
+                            @endif
+                        </div>
+                    </div>
+                @endif
+
                 {{-- Tabs --}}
                 <div class="flex gap-1 mb-3 border-b border-border-subtle">
                     <button type="button" wire:click="setMode('text')"

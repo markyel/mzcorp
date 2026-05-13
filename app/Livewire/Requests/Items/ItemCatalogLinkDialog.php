@@ -95,6 +95,29 @@ class ItemCatalogLinkDialog extends Component
     }
 
     /**
+     * Текущая позиция заявки (для контекста в шапке modal'а — оператор
+     * видит «к чему» он подбирает каталожный аналог).
+     */
+    #[Computed]
+    public function subjectItem(): ?RequestItem
+    {
+        if (! $this->requestItemId) {
+            return null;
+        }
+        return RequestItem::query()
+            ->with([
+                'request:id,internal_code,client_name,client_email',
+                'brand:id,name',
+                'kbCategory:id,name,slug',
+                'imageAttachment:id,email_message_id,filename,mime_type,disk,file_path,size_bytes',
+                'catalogItem:id,sku,brand,brand_article,name,price,stock_available,is_active',
+            ])
+            ->where('request_id', $this->requestId)
+            ->whereKey($this->requestItemId)
+            ->first();
+    }
+
+    /**
      * Результаты текстового поиска (вкладка `text`).
      *
      * @return \Illuminate\Database\Eloquent\Collection<int, CatalogItem>
