@@ -133,11 +133,13 @@
                                 const dropped = event.dataTransfer?.files;
                                 if (!dropped || dropped.length === 0) return;
                                 const input = $refs.fileInput;
+                                // НЕ мерджим с input.files. Каждый drop —
+                                // самостоятельная операция: backend сохранит
+                                // эти файлы как EmailAttachment, потом сбросит
+                                // $newFiles. Если мерджить — старые файлы
+                                // (которые DOM не очистил после прошлого
+                                // upload'а) уйдут повторно и создадут дубли.
                                 const dt = new DataTransfer();
-                                // Сохраняем уже выбранные (если есть) + добавляем новые.
-                                if (input.files) {
-                                    for (const f of input.files) dt.items.add(f);
-                                }
                                 for (const f of dropped) dt.items.add(f);
                                 input.files = dt.files;
                                 input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -147,6 +149,7 @@
                         @dragover.prevent="isDragging = true"
                         @dragleave.prevent="isDragging = false"
                         @drop.prevent="handleDrop($event)"
+                        @attachments-uploaded.window="if ($refs.fileInput) { $refs.fileInput.value = ''; }"
                         :class="isDragging ? 'border-[var(--sky-500)] bg-[var(--sky-50)]' : 'border-border'"
                         class="border border-dashed rounded-md px-3 py-3 transition-colors cursor-pointer"
                         @click="$refs.fileInput.click()">

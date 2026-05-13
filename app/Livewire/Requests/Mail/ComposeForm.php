@@ -268,6 +268,10 @@ class ComposeForm extends Component
         $this->newFiles = [];
         // Сбросим кэш computed-метода чтобы новый список сразу появился.
         unset($this->attachments);
+        // Сообщаем dropzone (Alpine) очистить <input>.files. Без этого
+        // следующий drag&drop собрал бы старые DOM-файлы + новые, и
+        // backend сохранил бы дубли.
+        $this->dispatch('attachments-uploaded');
     }
 
     public function removeAttachment(int $attachmentId, EmailDraftService $drafts): void
