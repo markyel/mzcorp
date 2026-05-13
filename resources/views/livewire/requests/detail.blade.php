@@ -824,22 +824,8 @@
                                             </div>
                                         @endif
                                     </div>
-                                    @if($canEditItems && $item->is_active)
-                                        <div class="flex items-center gap-1 justify-end">
-                                            <input type="number" step="0.001" min="0"
-                                                   value="{{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') }}"
-                                                   wire:change="editItemField({{ $item->id }}, 'parsed_qty', $event.target.value)"
-                                                   class="mono text-[12px] text-right w-[58px] h-[24px] px-1 border border-border rounded bg-surface focus:border-[var(--sky-500)] outline-none"
-                                                   title="Кол-во — нажми Tab или клик вне поля чтобы сохранить" />
-                                            <input type="text" maxlength="20"
-                                                   value="{{ $item->parsed_unit }}"
-                                                   wire:change="editItemField({{ $item->id }}, 'parsed_unit', $event.target.value)"
-                                                   class="mono text-[12px] w-[44px] h-[24px] px-1 border border-border rounded bg-surface focus:border-[var(--sky-500)] outline-none"
-                                                   title="Единица измерения" />
-                                        </div>
-                                    @else
-                                        <span class="mono text-[12px] text-fg-1 text-right">{{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') ?: '—' }} {{ $item->parsed_unit }}</span>
-                                    @endif
+                                    {{-- Кол-во — read-only, редактируется через «⋮ → Редактировать». --}}
+                                    <span class="mono text-[12px] text-fg-1 text-right">{{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') ?: '—' }} {{ $item->parsed_unit }}</span>
 
                                     {{-- Phase 2 use-case C: цена и наличие из catalog_items, если есть привязка. --}}
                                     @php
