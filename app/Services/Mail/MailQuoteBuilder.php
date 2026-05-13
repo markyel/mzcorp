@@ -7,8 +7,22 @@ use App\Models\EmailMessage;
 /**
  * Сборка quoted-блока оригинального письма для reply (Phase 1.9).
  *
- * Yandex-style HTML blockquote + Gmail-style plain `>`-prefix — совместимо
- * со всеми клиентами и нашим же iframe-рендерингом в треде Detail.
+ * Markup такой же как у Gmail / Yandex.Mail — без него почтовые клиенты
+ * НЕ распознают цитату как collapsible (троеточие «…»):
+ *   <div class="gmail_quote gmail_quote_container">
+ *     <div dir="ltr" class="gmail_attr">On DATE, NAME &lt;EMAIL&gt; wrote:<br></div>
+ *     <blockquote class="gmail_quote" style="margin:0 0 0 0.8ex;...">
+ *       {original body}
+ *     </blockquote>
+ *   </div>
+ *
+ * Ключевое:
+ *   - attribution-line ВНЕ blockquote (внутри клиенты его игнорируют);
+ *   - blockquote с class="gmail_quote" + точные inline-styles из gmail;
+ *   - один пустой div перед wrapper'ом — gmail-конвенция «отступ от ответа».
+ *
+ * Plain-вариант: «On … wrote:» + `> `-prefix к каждой строке оригинала —
+ * стандартное RFC quoting, любой клиент сворачивает.
  */
 class MailQuoteBuilder
 {
@@ -18,25 +32,49 @@ class MailQuoteBuilder
     public function build(EmailMessage $replyTo): array
     {
         $date = $replyTo->sent_at?->toDateTimeString() ?? '';
-        $from = trim(($replyTo->from_name ? $replyTo->from_name . ' ' : '')
-            . '<' . $replyTo->from_email . '>');
+        $fromEmail = (string) $replyTo->from_email;
+        $fromName = trim((string) ($replyTo->from_name ?? ''));
 
-        $headerPlain = sprintf('On %s, %s wrote:', $date, $from);
-        $headerHtml = htmlspecialchars($headerPlain, ENT_QUOTES, 'UTF-8');
+        $headerPlain = sprintf(
+            'On %s, %s <%s> wrote:',
+            $date,
+            $fromName !== '' ? $fromName : $fromEmail,
+            $fromEmail,
+        );
+
+        // Attribution-line для HTML — со ссылкой на mailto, как у Gmail.
+        $emailEsc = htmlspecialchars($fromEmail, ENT_QUOTES, 'UTF-8');
+        $nameEsc = htmlspecialchars(
+            $fromName !== '' ? $fromName : $fromEmail,
+            ENT_QUOTES,
+            'UTF-8'
+        );
+        $dateEsc = htmlspecialchars($date, ENT_QUOTES, 'UTF-8');
+        $headerHtml = sprintf(
+            'On %s, %s &lt;<a href="mailto:%s">%s</a>&gt; wrote:<br>',
+            $dateEsc,
+            $nameEsc,
+            $emailEsc,
+            $emailEsc,
+        );
 
         $originalHtml = (string) ($replyTo->body_html ?: nl2br(htmlspecialchars(
-            (string) $replyTo->body_plain, ENT_QUOTES, 'UTF-8'
+            (string) $replyTo->body_plain,
+            ENT_QUOTES,
+            'UTF-8'
         )));
 
-        $html = '<blockquote type="cite" '
-            . 'style="margin:0 0 0 0.8ex;border-left:2px solid #ccc;padding-left:10px;color:#555;">'
-            . '<p style="margin:0 0 8px;font-size:12px;color:#888;">' . $headerHtml . '</p>'
+        $html = '<br><div class="gmail_quote gmail_quote_container">'
+            . '<div dir="ltr" class="gmail_attr">' . $headerHtml . '</div>'
+            . '<blockquote class="gmail_quote" '
+            . 'style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">'
             . $originalHtml
-            . '</blockquote>';
+            . '</blockquote>'
+            . '</div>';
 
         $originalPlain = (string) ($replyTo->body_plain ?: strip_tags((string) $replyTo->body_html));
         $plainQuoted = preg_replace('/^/m', '> ', $originalPlain);
-        $plain = $headerPlain . "\n" . $plainQuoted;
+        $plain = "\n" . $headerPlain . "\n" . $plainQuoted;
 
         return ['html' => $html, 'plain' => $plain];
     }
