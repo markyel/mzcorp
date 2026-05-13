@@ -499,6 +499,30 @@ class Detail extends Component
     }
 
     /**
+     * Слить позицию-источник в существующую (operator-driven clarification).
+     * Когда LLM-проход не распознал голый артикул в reply как уточнение
+     * существующей позиции — оператор вручную сматчит через
+     * «⋮ → 🔗 Это уточнение позиции №X».
+     */
+    public function mergeItemInto(int $sourceId, int $targetId, RequestItemEditor $editor): void
+    {
+        $source = $this->loadItemOrFail($sourceId);
+        $target = $this->loadItemOrFail($targetId);
+        try {
+            $editor->mergeIntoExisting($source, $target, auth()->user());
+            session()->flash('status', sprintf(
+                'Позиция #%d слита в #%d.',
+                $source->position,
+                $target->position,
+            ));
+        } catch (\DomainException $e) {
+            $this->addError('status', $e->getMessage());
+            return;
+        }
+        $this->reloadRequest();
+    }
+
+    /**
      * Bulk re-match всех позиций заявки. Сбрасывает catalog_item_id (кроме
      * internal_catalog_not_found) и прогоняет matchOrResolve. Используется
      * после редактирования названий — даёт «применить изменения».

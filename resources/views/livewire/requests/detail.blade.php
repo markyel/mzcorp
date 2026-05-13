@@ -1102,6 +1102,42 @@
                                                             ❌ Нет в каталоге
                                                         </button>
                                                     @endif
+
+                                                    {{-- Phase 1.10: ручной merge как clarification.
+                                                         Сliять текущую позицию в существующую — артикул и (опц.)
+                                                         бренд дописываются в target, текущая soft-удаляется.
+                                                         Раскрывающийся submenu со всеми active позициями кроме
+                                                         текущей. --}}
+                                                    @php
+                                                        $mergeTargets = $items->where('id', '!=', $item->id);
+                                                    @endphp
+                                                    @if($mergeTargets->isNotEmpty())
+                                                        <div x-data="{ subOpen: false }" class="relative">
+                                                            <button type="button"
+                                                                    @click="subOpen = !subOpen"
+                                                                    class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
+                                                                🔗 Это уточнение позиции…
+                                                                <span class="float-right text-fg-3" x-text="subOpen ? '▾' : '▸'"></span>
+                                                            </button>
+                                                            <div x-show="subOpen" x-cloak
+                                                                 class="pl-4 max-h-[200px] overflow-auto bg-surface-2 border-t border-border-subtle">
+                                                                @foreach($mergeTargets as $tgt)
+                                                                    <button type="button"
+                                                                            @click="open = false; subOpen = false"
+                                                                            wire:click="mergeItemInto({{ $item->id }}, {{ $tgt->id }})"
+                                                                            wire:confirm="Слить эту позицию в #{{ $tgt->position }} «{{ \Illuminate\Support\Str::limit($tgt->parsed_name ?: '—', 40) }}»? Артикул будет дописан, эта позиция удалена."
+                                                                            class="block w-full text-left px-3 py-1.5 hover:bg-sky-50 text-fg-1 text-[11.5px]">
+                                                                        <span class="mono text-fg-3">#{{ $tgt->position }}</span>
+                                                                        <span class="text-fg-1">{{ \Illuminate\Support\Str::limit($tgt->parsed_name ?: '(без названия)', 50) }}</span>
+                                                                        @if($tgt->parsed_article)
+                                                                            <span class="mono text-fg-3 text-[10.5px]">· {{ \Illuminate\Support\Str::limit($tgt->parsed_article, 24) }}</span>
+                                                                        @endif
+                                                                    </button>
+                                                                @endforeach
+                                                            </div>
+                                                        </div>
+                                                    @endif
+
                                                     <div class="my-1 border-t border-border-subtle"></div>
                                                     <button type="button"
                                                             @click="open = false"

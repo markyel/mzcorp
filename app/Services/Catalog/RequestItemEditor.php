@@ -392,6 +392,113 @@ class RequestItemEditor
      * Перевод M-SKU позиции из «pending» в «not_found» (оператор подтвердил
      * что SKU не появится). Доступно только для internal_catalog_pending.
      */
+    /**
+     * Слить позицию $source как уточнение в $target — артикул и (опц.) бренд
+     * из $source дописываются в $target, $source soft-удаляется.
+     * Используется когда decideClarifications LLM ошибся и не распознал
+     * голый артикул в reply как уточнение существующей позиции — оператор
+     * вручную мержит через «⋮ → Это уточнение позиции…».
+     *
+     * Audit: запись `manual_merge` в обеих позициях.
+     */
+    public function mergeIntoExisting(RequestItem $source, RequestItem $target, User $author): void
+    {
+        $this->ensureCanEdit($source, $author);
+        if ($source->id === $target->id) {
+            throw new \DomainException('Нельзя слить позицию саму в себя.');
+        }
+        if ($source->request_id !== $target->request_id) {
+            throw new \DomainException('Позиции должны принадлежать одной заявке.');
+        }
+        if (! $source->is_active || ! $target->is_active) {
+            throw new \DomainException('Обе позиции должны быть активны.');
+        }
+
+        DB::transaction(function () use ($source, $target, $author) {
+            $sourceArticle = trim((string) ($source->parsed_article ?? ''));
+            $sourceBrand = trim((string) ($source->parsed_brand ?? ''));
+
+            $changes = [];
+
+            // Article — дописываем через запятую (с проверкой на дубль).
+            if ($sourceArticle !== '') {
+                $existingArt = (string) ($target->parsed_article ?? '');
+                if (! $this->articleAlreadyPresent($existingArt, $sourceArticle)) {
+                    $target->parsed_article = $existingArt === ''
+                        ? $sourceArticle
+                        : $existingArt . ', ' . $sourceArticle;
+                    $changes['article'] = $sourceArticle;
+                }
+            }
+
+            // Brand — переносим только если у target пусто.
+            if ($sourceBrand !== '' && trim((string) ($target->parsed_brand ?? '')) === '') {
+                $target->parsed_brand = $sourceBrand;
+                $changes['brand'] = $sourceBrand;
+            }
+
+            // catalog_item_id — переносим если у target пусто и у source есть.
+            if ($target->catalog_item_id === null && $source->catalog_item_id !== null) {
+                $target->catalog_item_id = $source->catalog_item_id;
+                $changes['catalog_item_id'] = $source->catalog_item_id;
+                // Также переносим catalog snapshot из payload source.
+                $sourcePayload = is_array($source->quality_assessment_payload)
+                    ? $source->quality_assessment_payload : [];
+                if (! empty($sourcePayload['catalog'])) {
+                    $tp = is_array($target->quality_assessment_payload)
+                        ? $target->quality_assessment_payload : [];
+                    $tp['catalog'] = $sourcePayload['catalog'];
+                    $tp['catalog_match'] = ($sourcePayload['catalog_match'] ?? null) ?: [
+                        'method' => 'manual_merge_from_clarification',
+                        'matched_at' => now()->toIso8601String(),
+                        'catalog_item_id' => $source->catalog_item_id,
+                    ];
+                    $target->quality_assessment_payload = $tp;
+                }
+            }
+
+            $this->appendAudit($target, [
+                'action' => 'manual_merge_in',
+                'old' => ['from_item_id' => $source->id, 'from_position' => $source->position],
+                'new' => $changes,
+            ], $author);
+            $target->save();
+
+            // Soft-delete source с audit.
+            $source->is_active = false;
+            $this->appendAudit($source, [
+                'action' => 'manual_merge_out',
+                'old' => ['was_active' => true],
+                'new' => ['merged_into_item_id' => $target->id, 'target_position' => $target->position],
+            ], $author);
+            $source->save();
+        });
+
+        Log::info('RequestItemEditor: manual merge', [
+            'source_id' => $source->id,
+            'target_id' => $target->id,
+            'by' => $author->id,
+        ]);
+    }
+
+    /**
+     * Тот же normalize что в Detail::articleAlreadyPresent (uppercase + strip separators).
+     */
+    private function articleAlreadyPresent(string $existing, string $candidate): bool
+    {
+        $norm = fn (string $s) => preg_replace('/[\s\-_.\/]/', '', mb_strtoupper(trim($s)));
+        $candidateNorm = $norm($candidate);
+        if ($candidateNorm === '') {
+            return true;
+        }
+        foreach (preg_split('/\s*,\s*/', $existing) ?: [] as $part) {
+            if ($norm((string) $part) === $candidateNorm) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public function markCatalogNotFound(RequestItem $item, User $author): RequestItem
     {
         $this->ensureCanEdit($item, $author);
