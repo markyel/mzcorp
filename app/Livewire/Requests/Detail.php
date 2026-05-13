@@ -52,6 +52,13 @@ class Detail extends Component
      */
     public bool $showDeletedItems = false;
 
+    /**
+     * Toggle: вывести позиции sticky-связанных заявок (forward + reverse)
+     * вторым блоком в табе «Позиции» — для контекста «что клиент уже
+     * спрашивал в предыдущих заявках».
+     */
+    public bool $includeStickyItems = false;
+
     public function mount(Request $request): void
     {
         $user = auth()->user();
@@ -384,6 +391,63 @@ class Detail extends Component
     {
         $this->showDeletedItems = ! $this->showDeletedItems;
         $this->reloadRequest();
+    }
+
+    public function toggleStickyItems(): void
+    {
+        $this->includeStickyItems = ! $this->includeStickyItems;
+    }
+
+    /**
+     * Sticky-связанные заявки (forward + reverse) — для опции
+     * «Показать позиции sticky-заявок» в табе «Позиции».
+     *
+     * Forward: эта заявка ссылается на других через sticky['links'].
+     * Reverse: другие заявки ссылаются на эту через
+     * `request_assignments.reason LIKE '%auto_sticky:%"linked":[..., this_id, ...]%'`.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, \App\Models\Request>
+     */
+    #[Computed]
+    public function relatedStickyRequests()
+    {
+        $forward = $this->sticky['links'];
+        $forwardIds = $forward->pluck('id')->all();
+
+        // Reverse: смотрим в request_assignments кто упоминает текущий ID
+        // в auto_sticky:{"linked":[...]}. JSON-as-string в reason — простое
+        // ILIKE-сравнение по подстроке "%, $id]" / "[$id," / "[$id]".
+        $thisId = $this->request->id;
+        $reverseIds = \App\Models\RequestAssignment::query()
+            ->where('reason', 'like', 'auto_sticky:%')
+            ->where(function ($q) use ($thisId) {
+                $q->where('reason', 'like', '%"linked":[' . $thisId . ']%')
+                    ->orWhere('reason', 'like', '%"linked":[' . $thisId . ',%')
+                    ->orWhere('reason', 'like', '%,' . $thisId . ',%')
+                    ->orWhere('reason', 'like', '%,' . $thisId . ']%');
+            })
+            ->pluck('request_id')
+            ->unique()
+            ->reject(fn ($id) => $id === $thisId)
+            ->all();
+
+        $allIds = array_values(array_unique(array_merge($forwardIds, $reverseIds)));
+        if (empty($allIds)) {
+            return collect();
+        }
+
+        return Request::query()
+            ->whereIn('id', $allIds)
+            ->where('id', '!=', $thisId)
+            ->with([
+                'items' => fn ($q) => $q->where('is_active', true)->orderBy('position'),
+                'items.brand:id,name',
+                'items.kbCategory:id,slug,name',
+                'items.catalogItem:id,sku,name,brand,brand_article,price,stock_available',
+                'assignedUser:id,name',
+            ])
+            ->orderByDesc('created_at')
+            ->get();
     }
 
     public function editItemField(int $itemId, string $field, mixed $value, RequestItemEditor $editor): void

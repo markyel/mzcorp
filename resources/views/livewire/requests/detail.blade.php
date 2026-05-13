@@ -831,6 +831,21 @@
                                 @endif
                             </button>
                         @endif
+                        @php
+                            // Sticky-positions toggle — отображаем только если у заявки реально есть связанные.
+                            $relatedSticky = $this->relatedStickyRequests;
+                            $stickyItemsCount = $relatedSticky->sum(fn ($r) => $r->items->count());
+                        @endphp
+                        @if($relatedSticky->isNotEmpty())
+                            <button wire:click="toggleStickyItems" class="btn btn-sm"
+                                    title="Показать позиции связанных через sticky заявок ({{ $relatedSticky->count() }} шт · {{ $stickyItemsCount }} позиций)">
+                                @if($includeStickyItems)
+                                    Скрыть sticky-позиции
+                                @else
+                                    📎 Sticky-позиции ({{ $stickyItemsCount }})
+                                @endif
+                            </button>
+                        @endif
                         @if($canEditItems && $items->isNotEmpty())
                             <button type="button"
                                     wire:click="rematchAllItems"
@@ -1135,6 +1150,59 @@
                                 <span class="text-fg-3">подытог:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($subtotal, 2, '.', ' ') . ' ₽' : '—' }}</span>
                                 <span class="text-fg-3">+ НДС {{ rtrim(rtrim(number_format($vatPercent, 1, '.', ''), '0'), '.') }}%:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($vat, 2, '.', ' ') . ' ₽' : '—' }}</span>
                                 <span class="text-fg-3">итого:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono text-[14px]">{{ $hasAnyPrice ? number_format($totalAll, 2, '.', ' ') . ' ₽' : '—' }}</span>
+                            </div>
+                        </div>
+                    @endif
+
+                    {{-- Phase 1.10 — позиции sticky-связанных заявок (toggle в шапке). --}}
+                    @if($includeStickyItems && $relatedSticky->isNotEmpty())
+                        <div class="mt-4 ds-card">
+                            <div class="ds-card-header">
+                                <h3>Позиции sticky-связанных заявок</h3>
+                                <span class="text-[10.5px] font-semibold text-fg-2 bg-violet-50 text-violet-800 px-1.5 py-0.5 rounded-full">{{ $relatedSticky->count() }} заявок · {{ $stickyItemsCount }} позиций</span>
+                                <span class="flex-1"></span>
+                                <span class="text-[11.5px] text-fg-3">Контекст: что клиент уже спрашивал в связанных заявках</span>
+                            </div>
+                            <div>
+                                @foreach($relatedSticky as $linkedReq)
+                                    <div class="px-[18px] py-2 border-t border-border-subtle bg-surface-2 flex items-center gap-2">
+                                        <a href="{{ route('requests.show', $linkedReq) }}"
+                                           class="mono text-[13px] text-sky-700 hover:underline font-semibold">{{ $linkedReq->internal_code }}</a>
+                                        <span class="chip {{ $linkedReq->status->chipClass() }} text-[10.5px]">
+                                            <span class="dot"></span>{{ $linkedReq->status->label() }}
+                                        </span>
+                                        @if($linkedReq->assignedUser)
+                                            <span class="text-[11.5px] text-fg-3">· {{ $linkedReq->assignedUser->name }}</span>
+                                        @endif
+                                        <span class="text-[11.5px] text-fg-3">· {{ $linkedReq->created_at?->format('d.m.Y') }}</span>
+                                        <span class="flex-1"></span>
+                                        <span class="text-[11.5px] text-fg-3">{{ $linkedReq->items->count() }} позиций</span>
+                                    </div>
+                                    @foreach($linkedReq->items as $linkedItem)
+                                        <div class="px-[18px] py-1.5 border-t border-border-subtle text-[12px] flex items-start gap-2">
+                                            <span class="mono text-[11px] text-fg-3 w-[24px] text-right">{{ $linkedItem->position }}</span>
+                                            <div class="flex-1 min-w-0">
+                                                <div class="text-fg-1 leading-snug">{{ $linkedItem->parsed_name ?: '(без названия)' }}</div>
+                                                @if($linkedItem->catalogItem && trim((string) $linkedItem->catalogItem->name) !== '' && mb_strtolower(trim((string) $linkedItem->catalogItem->name)) !== mb_strtolower(trim((string) $linkedItem->parsed_name)))
+                                                    <div class="text-[11.5px] text-fg-3">↳ {{ $linkedItem->catalogItem->name }}</div>
+                                                @endif
+                                                <div class="text-[11px] text-fg-3 mt-0.5 flex flex-wrap gap-x-1.5">
+                                                    @if($linkedItem->brand)<span class="text-emerald-800">{{ $linkedItem->brand->name }}</span>@elseif($linkedItem->parsed_brand)<span>{{ $linkedItem->parsed_brand }}</span>@endif
+                                                    @if($linkedItem->parsed_article)<span class="mono text-fg-2">{{ $linkedItem->parsed_article }}</span>@endif
+                                                    @if($linkedItem->catalogItem)<span class="text-violet-800">в каталоге · {{ $linkedItem->catalogItem->sku }}</span>@endif
+                                                </div>
+                                            </div>
+                                            <span class="mono text-[11.5px] text-fg-2 text-right whitespace-nowrap">
+                                                {{ rtrim(rtrim((string) $linkedItem->parsed_qty, '0'), '.') ?: '—' }} {{ $linkedItem->parsed_unit }}
+                                            </span>
+                                            @if($linkedItem->catalogItem?->price !== null)
+                                                <span class="mono text-[11.5px] text-fg-1 text-right whitespace-nowrap min-w-[80px]">
+                                                    {{ number_format((float) $linkedItem->catalogItem->price, 2, '.', ' ') }} ₽
+                                                </span>
+                                            @endif
+                                        </div>
+                                    @endforeach
+                                @endforeach
                             </div>
                         </div>
                     @endif
