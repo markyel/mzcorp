@@ -270,6 +270,14 @@ class ComposeForm extends Component
     {
         $this->ensureAuthorized();
         $this->validate();
+
+        // SMTP-отправка с вложениями к Yandex может занимать 20-40+ сек
+        // (TLS handshake + upload). Default PHP-FPM request_terminate_timeout
+        // ≈ 30 сек убил бы процесс посреди send'а. Поднимаем для этого
+        // конкретного запроса.
+        @set_time_limit(180);
+        @ini_set('max_execution_time', '180');
+
         $this->autoSave($drafts); // финальный flush
         $draft = $this->loadDraftOrFail();
 
@@ -282,10 +290,12 @@ class ComposeForm extends Component
         session()->flash('status', 'Письмо отправлено.');
         $this->open = false;
 
+        // navigate: false — full reload надёжнее (wire:navigate иногда
+        // оставляет btn в loading state если что-то в ответе не так).
         return $this->redirect(
             \Illuminate\Support\Facades\Request::header('Referer')
                 ?: route('requests.show', $this->requestId),
-            navigate: true,
+            navigate: false,
         );
     }
 
