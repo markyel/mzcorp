@@ -69,6 +69,20 @@ class Pool extends Component
         $this->status = '';
     }
 
+    /**
+     * Phase 1.10: при заходе на страницу или после URL-навигации
+     * проверяем что выбранный $this->status совместим с текущим $bucket.
+     * Иначе сбрасываем на «Любой статус» — иначе после перехода
+     * Assigned → InProgress заявка пропадала из старого URL-фильтра
+     * (?status=assigned).
+     */
+    public function mount(): void
+    {
+        if ($this->status !== '' && ! in_array($this->status, $this->statusesForBucket(), true)) {
+            $this->status = '';
+        }
+    }
+
     public function setBucket(string $bucket): void
     {
         $allowed = ['active', 'paused', 'closed', 'all'];
