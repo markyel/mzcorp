@@ -366,6 +366,39 @@
                                 wire:confirm="Применить значение «{{ $val }}» к полю «{{ $fieldLabels[$field] ?? $field }}»?">
                             ✓ Применить
                         </button>
+
+                        {{-- Foundation §6.2 Phase C+: «→ в слот» — перенаправить
+                             если LLM ошибся в выборе поля. --}}
+                        <div x-data="{ open: false }" class="relative" @click.outside="open = false">
+                            <button type="button" @click="open = !open"
+                                    class="btn btn-sm"
+                                    title="Применить в другой слот (LLM ошибся)">→</button>
+                            <div x-show="open" x-cloak x-transition.origin.top.right
+                                 class="absolute right-0 top-full mt-1 z-30 w-[240px] py-1 bg-surface border border-border rounded-md shadow-lg text-left text-[12px]">
+                                <div class="px-3 py-1 text-fg-3 text-[10.5px] uppercase tracking-wider font-semibold border-b border-border-subtle">
+                                    Применить в слот:
+                                </div>
+                                @foreach($slots as $sl)
+                                    @php
+                                        $disabled = $sl['status'] === 'filled';
+                                    @endphp
+                                    <button type="button"
+                                            @click="open = false"
+                                            @if(! $disabled)
+                                                wire:click="applyEnrichmentToSlot({{ $item->id }}, '{{ $sid }}', '{{ $sl['key'] }}')"
+                                                wire:confirm="Записать «{{ $val }}» в слот «{{ $sl['label'] }}»?"
+                                            @endif
+                                            @disabled($disabled)
+                                            class="block w-full text-left px-3 py-1.5 {{ $disabled ? 'text-fg-4 cursor-not-allowed' : 'hover:bg-sky-50 text-fg-1' }}">
+                                        <span>{{ $sl['label'] }}</span>
+                                        @if($disabled)
+                                            <span class="text-fg-3 text-[10.5px]">· уже заполнен</span>
+                                        @endif
+                                    </button>
+                                @endforeach
+                            </div>
+                        </div>
+
                         <button type="button"
                                 wire:click="dismissEnrichmentSuggestion({{ $item->id }}, '{{ $sid }}')"
                                 class="btn btn-sm"

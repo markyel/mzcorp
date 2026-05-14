@@ -701,6 +701,20 @@ class Detail extends Component
     }
 
     /**
+     * Foundation §6.2 Phase C+ — менеджер выбрал перенаправить enrichment
+     * в конкретный слот (LLM ошибся / клиент имел в виду другое поле).
+     *
+     * targetSlot: 'brand' | 'article' | 'qty' | 'kb:<slug>'
+     */
+    public function applyEnrichmentToSlot(int $itemId, string $suggestionId, string $targetSlot, RequestItemEditor $editor): void
+    {
+        $item = $this->loadItemOrFail($itemId);
+        $editor->applyEnrichmentSuggestionToSlot($item, $suggestionId, $targetSlot, auth()->user());
+        $this->reloadRequest();
+        session()->flash('status', 'Значение перенесено в выбранный слот.');
+    }
+
+    /**
      * Foundation §6.2: ClarificationPanel сформировал черновик письма
      * и диспатчит этот event. Мы должны переключить таб на «Переписка»
      * (там зарегистрирован ComposeForm) и попросить его открыть draft.

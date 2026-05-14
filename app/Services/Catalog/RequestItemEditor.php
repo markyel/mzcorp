@@ -669,6 +669,107 @@ class RequestItemEditor
     }
 
     /**
+     * Foundation §6.2 Phase C+ — применить enrichment suggestion в
+     * ВЫБРАННЫЙ менеджером слот (а не тот, который угадал LLM).
+     *
+     * targetSlotKey:
+     *  - 'brand' / 'article' / 'qty' → parsed_brand / parsed_article / parsed_qty
+     *  - 'kb:<slug>' → quality_assessment_payload.extracted_parameters[slug]
+     */
+    public function applyEnrichmentSuggestionToSlot(
+        RequestItem $item,
+        string $suggestionId,
+        string $targetSlotKey,
+        User $author,
+    ): RequestItem {
+        $this->ensureCanEdit($item, $author);
+
+        $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+        $suggestions = is_array($payload['enrichment_suggestions'] ?? null) ? $payload['enrichment_suggestions'] : [];
+
+        $idx = null;
+        foreach ($suggestions as $i => $s) {
+            if (is_array($s) && ($s['id'] ?? null) === $suggestionId) {
+                $idx = $i;
+                break;
+            }
+        }
+        if ($idx === null) {
+            return $item;
+        }
+        $sugg = $suggestions[$idx];
+        if (($sugg['status'] ?? 'pending') !== 'pending') {
+            return $item;
+        }
+
+        $value = trim((string) ($sugg['value'] ?? ''));
+        if ($value === '') {
+            return $item;
+        }
+
+        $baseSlotMap = [
+            'brand' => 'parsed_brand',
+            'article' => 'parsed_article',
+            'qty' => 'parsed_qty',
+        ];
+
+        DB::transaction(function () use ($item, $value, $suggestionId, $sugg, $author, $targetSlotKey, $baseSlotMap) {
+            if (isset($baseSlotMap[$targetSlotKey])) {
+                // Base-slot — пишем через editFields (audit включён).
+                $field = $baseSlotMap[$targetSlotKey];
+                $this->editFields($item, [$field => $value], $author);
+            } elseif (str_starts_with($targetSlotKey, 'kb:')) {
+                // KB-slot — пишем в extracted_parameters[slug].
+                $slug = substr($targetSlotKey, 3);
+                $fresh = $item->fresh();
+                $p = is_array($fresh->quality_assessment_payload) ? $fresh->quality_assessment_payload : [];
+                $extracted = is_array($p['extracted_parameters'] ?? null) ? $p['extracted_parameters'] : [];
+                $extracted[$slug] = $value;
+                $p['extracted_parameters'] = $extracted;
+                $fresh->quality_assessment_payload = $p;
+                $fresh->save();
+
+                $this->appendAudit($fresh, [
+                    'action' => 'enrichment_applied_to_kb_slot',
+                    'slot' => $slug,
+                    'value' => $value,
+                    'from_suggestion' => $suggestionId,
+                ], $author);
+            }
+
+            // Mark suggestion applied + сохраняем какой слот выбрал менеджер
+            // (отличается от sugg.field — для аудита и обучения).
+            $fresh = $item->fresh();
+            $payload = is_array($fresh->quality_assessment_payload) ? $fresh->quality_assessment_payload : [];
+            $suggestions = is_array($payload['enrichment_suggestions'] ?? null) ? $payload['enrichment_suggestions'] : [];
+            foreach ($suggestions as $i => $s) {
+                if (is_array($s) && ($s['id'] ?? null) === $suggestionId) {
+                    $suggestions[$i] = array_merge($s, [
+                        'status' => 'applied',
+                        'applied_at' => now()->toIso8601String(),
+                        'applied_by_user_id' => $author->id,
+                        'applied_to_slot' => $targetSlotKey,
+                    ]);
+                    break;
+                }
+            }
+            $payload['enrichment_suggestions'] = $suggestions;
+            $fresh->quality_assessment_payload = $payload;
+            $fresh->save();
+        });
+
+        Log::info('RequestItemEditor: enrichment suggestion applied to slot', [
+            'request_item_id' => $item->id,
+            'suggestion_id' => $suggestionId,
+            'target_slot' => $targetSlotKey,
+            'value' => $value,
+            'by' => $author->id,
+        ]);
+
+        return $item->fresh();
+    }
+
+    /**
      * Foundation §6.2 Phase C — отклонить enrichment suggestion (оператор
      * не согласен / клиент написал ошибочно).
      */
