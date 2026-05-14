@@ -222,6 +222,10 @@ class AttentionService
     /**
      * Добавить N рабочих часов к точке времени. Рабочее время:
      * Пн-Пт 9:00-18:00 Europe/Moscow (9 часов в сутки).
+     *
+     * Используем timestamp-arithmetic (а не Carbon::diffInMinutes) —
+     * у Carbon 2 / Carbon 3 разное соглашение по знаку, при ошибке
+     * направления получали бы 0 доступных минут и бесконечный цикл.
      */
     public function addBusinessHours(CarbonImmutable $from, int $hours): Carbon
     {
@@ -230,24 +234,28 @@ class AttentionService
         }
 
         $cursor = $from->setTimezone(self::TZ);
-        $remaining = $hours;
+        $remainingMinutes = $hours * 60;
+        $safetyIter = 0; // защита от регрессии — не более 10 лет рабочих дней
 
-        while ($remaining > 0) {
+        while ($remainingMinutes > 0) {
+            if (++$safetyIter > 2600) {
+                break; // ~10 лет рабочих дней — что-то пошло не так
+            }
+
             $cursor = $this->shiftToNextBusinessMoment($cursor);
 
-            // Сколько часов до конца сегодняшнего рабочего дня.
             $endOfDay = $cursor->setTime(self::BUSINESS_END_HOUR, 0);
-            $availableMinutes = max(0, $endOfDay->diffInMinutes($cursor, false));
+            $availableMinutes = max(0, (int) (($endOfDay->getTimestamp() - $cursor->getTimestamp()) / 60));
 
-            $needMinutes = $remaining * 60;
-            if ($needMinutes <= $availableMinutes) {
-                $cursor = $cursor->addMinutes((int) $needMinutes);
-                $remaining = 0;
-            } else {
-                $remaining -= (int) ($availableMinutes / 60);
-                // переходим на 9:00 следующего рабочего дня
-                $cursor = $this->nextBusinessDayStart($cursor);
+            if ($availableMinutes >= $remainingMinutes) {
+                $cursor = $cursor->addMinutes($remainingMinutes);
+                $remainingMinutes = 0;
+                break;
             }
+
+            // Используем всё доступное окно сегодня и идём на 9:00 след. раб. дня.
+            $remainingMinutes -= $availableMinutes;
+            $cursor = $this->nextBusinessDayStart($cursor);
         }
 
         return Carbon::instance($cursor);
