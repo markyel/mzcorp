@@ -52,6 +52,95 @@
         </span>
     </div>
 
+    {{-- ────────── AI BANNER (Foundation §6.2 Phase E.2) ──────────
+         Виден всегда (любая вкладка) когда есть pending enrichment
+         suggestions И заявка в AwaitingClientClarification. Резюмирует
+         что распознал LLM + цитата + кнопка «Применить всё → в работу». --}}
+    @php
+        $_aiSuggs = collect();
+        foreach ($req->items as $_i) {
+            if (! $_i->is_active) continue;
+            $_sgs = is_array($_i->quality_assessment_payload['enrichment_suggestions'] ?? null)
+                ? $_i->quality_assessment_payload['enrichment_suggestions'] : [];
+            foreach ($_sgs as $_sg) {
+                if (is_array($_sg) && ($_sg['status'] ?? 'pending') === 'pending') {
+                    $_aiSuggs->push(['item' => $_i, 'sugg' => $_sg]);
+                }
+            }
+        }
+        $_aiPositionsCount = $_aiSuggs->groupBy(fn ($e) => $e['item']->id)->count();
+        $_aiAvgConf = $_aiSuggs->isNotEmpty()
+            ? (int) round($_aiSuggs->avg(fn ($e) => (float) ($e['sugg']['confidence'] ?? 0)) * 100) : 0;
+
+        // Сводка распознанного: «бренд КМЗ и артикул ZAA622Y1»
+        $_aiFieldLabels = ['parsed_brand' => 'бренд', 'parsed_article' => 'артикул', 'parsed_qty' => 'кол-во'];
+        $_aiSummaryParts = [];
+        foreach ($_aiSuggs->take(4) as $_e) {
+            $_f = (string) ($_e['sugg']['field'] ?? '');
+            $_v = (string) ($_e['sugg']['value'] ?? '');
+            $_lbl = $_aiFieldLabels[$_f] ?? (str_starts_with($_f, 'kb:') ? mb_strtolower(\Illuminate\Support\Str::after($_f, 'kb:')) : $_f);
+            if ($_v !== '') {
+                $_aiSummaryParts[] = $_lbl . ' ' . $_v;
+            }
+        }
+        $_aiSummary = implode(', ', $_aiSummaryParts);
+
+        // Sample citation
+        $_aiQuote = '';
+        foreach ($_aiSuggs as $_e) {
+            $_q = trim((string) ($_e['sugg']['source_quote'] ?? ''));
+            if ($_q !== '') { $_aiQuote = $_q; break; }
+        }
+
+        $_inClarif = $req->status === \App\Enums\RequestStatus::AwaitingClientClarification;
+    @endphp
+    @if($_aiSuggs->isNotEmpty() && $canEditItems)
+        <div class="mb-3 rounded-md border border-violet-300 bg-gradient-to-br from-violet-50 to-sky-50/40 p-3.5 flex items-start gap-3 shadow-sm">
+            <div class="shrink-0 w-9 h-9 rounded-md bg-violet-600 text-white flex items-center justify-center font-bold text-[12px] tracking-wider">AI</div>
+            <div class="flex-1 min-w-0 text-[12.5px]">
+                <div class="flex items-baseline gap-2 flex-wrap mb-1">
+                    <span class="font-semibold text-fg-1">
+                        Клиент ответил на уточнения по {{ $_aiPositionsCount }} {{ \Illuminate\Support\Str::plural('позиц', $_aiPositionsCount) }}{{ $_aiPositionsCount === 1 ? 'и' : ($_aiPositionsCount < 5 ? 'ям' : 'иям') }}
+                    </span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-800 text-[10.5px] font-semibold">
+                        уверенность {{ $_aiAvgConf }}%
+                    </span>
+                </div>
+                @if($_aiSummary !== '')
+                    <div class="text-fg-2 mb-1">
+                        Распознал: <span class="font-medium text-fg-1">{{ $_aiSummary }}</span>
+                    </div>
+                @endif
+                @if($_aiQuote !== '')
+                    <div class="text-fg-3 italic text-[11.5px] pl-2 border-l-2 border-violet-300 mb-1">
+                        «{{ \Illuminate\Support\Str::limit($_aiQuote, 200) }}»
+                    </div>
+                @endif
+                <div class="text-[11.5px] text-fg-3">
+                    @if($_inClarif)
+                        Рекомендую: применить все {{ $_aiSuggs->count() }} предложен{{ $_aiSuggs->count() === 1 ? 'ие' : 'ия' }} и вернуть заявку «в работу».
+                    @else
+                        В табе «Позиции» — обзор предложений с diff'ом и confidence bar.
+                    @endif
+                </div>
+            </div>
+            <div class="shrink-0 flex flex-col gap-1.5 items-end">
+                @if($_inClarif)
+                    <button type="button"
+                            wire:click="applyAllAndProgress"
+                            wire:confirm="Применить все {{ $_aiSuggs->count() }} предложений и перевести заявку в «В работе»?"
+                            class="btn btn-primary"
+                            wire:loading.attr="disabled" wire:target="applyAllAndProgress">
+                        <span wire:loading.remove wire:target="applyAllAndProgress">✓ Применить всё → в работу</span>
+                        <span wire:loading wire:target="applyAllAndProgress">…</span>
+                    </button>
+                @endif
+                <a href="#" wire:click.prevent="setTab('items')"
+                   class="text-[11.5px] text-sky-700 hover:underline">Открыть позиции →</a>
+            </div>
+        </div>
+    @endif
+
     {{-- ────────── HERO ────────── --}}
     <div class="ds-card p-[18px] mb-4 grid gap-4" style="grid-template-columns: 1fr auto">
 

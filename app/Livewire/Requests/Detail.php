@@ -788,6 +788,40 @@ class Detail extends Component
     }
 
     /**
+     * Foundation §6.2 Phase E.2 — комбо-действие AI-баннера:
+     * применить ВСЕ pending enrichments + перевести заявку в InProgress.
+     * Если она в AwaitingClientClarification — переход допустим.
+     */
+    public function applyAllAndProgress(RequestItemEditor $editor, RequestStateService $state): void
+    {
+        $this->applyAllEnrichments($editor);
+        // Перевод статуса — только если сейчас в AwaitingClientClarification.
+        $fresh = $this->request->fresh();
+        if ($fresh && $fresh->status === RequestStatus::AwaitingClientClarification) {
+            try {
+                $state->transitionTo($fresh, RequestStatus::InProgress, auth()->user());
+                $this->reloadRequest();
+                session()->flash('status', 'Уточнения применены, заявка возвращена в работу.');
+            } catch (\DomainException $e) {
+                $this->addError('status', 'Не удалось перевести статус: ' . $e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Foundation §6.2 Phase E.2 — откатить applied enrichment suggestion.
+     * Сбрасывает значение в слоте обратно (старое из audit log) либо в null.
+     * status: applied → reverted.
+     */
+    public function rollbackEnrichmentSuggestion(int $itemId, string $suggestionId, RequestItemEditor $editor): void
+    {
+        $item = $this->loadItemOrFail($itemId);
+        $editor->rollbackEnrichmentSuggestion($item, $suggestionId, auth()->user());
+        $this->reloadRequest();
+        session()->flash('status', 'Применение откатано.');
+    }
+
+    /**
      * Foundation §6.2: ClarificationPanel сформировал черновик письма
      * и диспатчит этот event. Мы должны переключить таб на «Переписка»
      * (там зарегистрирован ComposeForm) и попросить его открыть draft.

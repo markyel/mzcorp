@@ -790,6 +790,99 @@ class RequestItemEditor
     }
 
     /**
+     * Foundation §6.2 Phase E.2 — откатить applied enrichment suggestion.
+     * Сбрасывает значение поля обратно (для base — в null, для kb:* —
+     * удаляет ключ из extracted_parameters). Помечает suggestion как
+     * 'reverted', чтобы его снова можно было применить или отклонить.
+     *
+     * NB: для kb:* — мы не восстанавливаем «было», просто удаляем
+     * заполнение, т.к. до применения было empty. Для base полей —
+     * сетим null. Если хочется честный «был X» — нужен дополнительный
+     * audit-чтение из manual_edits.
+     */
+    public function rollbackEnrichmentSuggestion(RequestItem $item, string $suggestionId, User $author): RequestItem
+    {
+        $this->ensureCanEdit($item, $author);
+
+        $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+        $suggestions = is_array($payload['enrichment_suggestions'] ?? null) ? $payload['enrichment_suggestions'] : [];
+
+        $idx = null;
+        foreach ($suggestions as $i => $s) {
+            if (is_array($s) && ($s['id'] ?? null) === $suggestionId) {
+                $idx = $i;
+                break;
+            }
+        }
+        if ($idx === null) {
+            return $item;
+        }
+        $sugg = $suggestions[$idx];
+        if (($sugg['status'] ?? '') !== 'applied') {
+            return $item;
+        }
+
+        // Определяем какой слот заполнялся — applied_to_slot (если был «→ в слот»)
+        // или иначе нативный field.
+        $field = (string) ($sugg['applied_to_slot'] ?? $sugg['field'] ?? '');
+        $baseSlotMap = [
+            'brand' => 'parsed_brand',
+            'article' => 'parsed_article',
+            'qty' => 'parsed_qty',
+        ];
+
+        DB::transaction(function () use ($item, $field, $baseSlotMap, $suggestionId, $sugg, $author) {
+            if (isset($baseSlotMap[$field])) {
+                // Через editFields → null. Это перетрёт текущее значение.
+                $this->editFields($item, [$baseSlotMap[$field] => null], $author);
+            } elseif (in_array($field, self::EDITABLE_FIELDS, true)) {
+                $this->editFields($item, [$field => null], $author);
+            } elseif (str_starts_with($field, 'kb:')) {
+                $slug = substr($field, 3);
+                $fresh = $item->fresh();
+                $p = is_array($fresh->quality_assessment_payload) ? $fresh->quality_assessment_payload : [];
+                $extracted = is_array($p['extracted_parameters'] ?? null) ? $p['extracted_parameters'] : [];
+                unset($extracted[$slug]);
+                $p['extracted_parameters'] = $extracted;
+                $fresh->quality_assessment_payload = $p;
+                $fresh->save();
+                $this->appendAudit($fresh, [
+                    'action' => 'enrichment_rolled_back_kb',
+                    'slot' => $slug,
+                    'from_suggestion' => $suggestionId,
+                ], $author);
+            }
+
+            // Помечаем suggestion как reverted (можно повторно применить).
+            $fresh = $item->fresh();
+            $payload = is_array($fresh->quality_assessment_payload) ? $fresh->quality_assessment_payload : [];
+            $suggestions = is_array($payload['enrichment_suggestions'] ?? null) ? $payload['enrichment_suggestions'] : [];
+            foreach ($suggestions as $i => $s) {
+                if (is_array($s) && ($s['id'] ?? null) === $suggestionId) {
+                    $suggestions[$i] = array_merge($s, [
+                        'status' => 'reverted',
+                        'reverted_at' => now()->toIso8601String(),
+                        'reverted_by_user_id' => $author->id,
+                    ]);
+                    break;
+                }
+            }
+            $payload['enrichment_suggestions'] = $suggestions;
+            $fresh->quality_assessment_payload = $payload;
+            $fresh->save();
+        });
+
+        Log::info('RequestItemEditor: enrichment suggestion rolled back', [
+            'request_item_id' => $item->id,
+            'suggestion_id' => $suggestionId,
+            'field' => $field,
+            'by' => $author->id,
+        ]);
+
+        return $item->fresh();
+    }
+
+    /**
      * Foundation §6.2 Phase C — отклонить enrichment suggestion (оператор
      * не согласен / клиент написал ошибочно).
      */
