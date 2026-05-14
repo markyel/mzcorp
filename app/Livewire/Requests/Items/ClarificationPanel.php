@@ -58,10 +58,14 @@ class ClarificationPanel extends Component
     }
 
     /**
-     * Foundation §6.2 Commit B: позиция-карточка (slot или quick-chip)
-     * дёргает «+ спросить» — мы аппендим заполненный template в
-     * `perItem[itemId]` и раскрываем панель. Если поле уже не пустое —
-     * приписываем шаблон с новой строки.
+     * Foundation §6.2 + комбо-режим: карточка (slot / quick-chip /
+     * free-text textarea) дёргает «+ спросить» — аппендим заполненный
+     * template в `perItem[itemId]`. Если поле уже не пустое — пишем с
+     * новой строки.
+     *
+     * NB: панель НЕ раскрываем автоматически — thin info-bar внизу сам
+     * обновит счётчик. Раскрытие большого preview — только по явному
+     * клику на «👁 Предпросмотр».
      *
      * Payload: {itemId, slotKey, slotLabel, template, itemName?}
      */
@@ -89,8 +93,6 @@ class ClarificationPanel extends Component
         $this->perItem[$itemId] = $current === ''
             ? $tpl
             : $current . "\n" . $tpl;
-
-        $this->expanded = true;
     }
 
     /**
