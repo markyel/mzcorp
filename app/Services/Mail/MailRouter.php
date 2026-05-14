@@ -8,6 +8,7 @@ use App\Models\EmailMessage;
 use App\Models\MailRoutingRule;
 use App\Models\RoutedMail;
 use App\Services\DocumentDetector\AiDecisionService;
+use App\Services\DocumentDetector\InboundIntentClassifier;
 use App\Services\DocumentDetector\OutboundDocumentDetector;
 use Illuminate\Support\Facades\Log;
 
@@ -32,6 +33,7 @@ class MailRouter
         private readonly InboundReplyLinker $replyLinker,
         private readonly OutgoingMailLinker $outgoingLinker,
         private readonly OutboundDocumentDetector $outboundDetector,
+        private readonly InboundIntentClassifier $inboundClassifier,
         private readonly AiDecisionService $aiDecisions,
     ) {
     }
@@ -130,6 +132,30 @@ class MailRouter
         // не блокирует thread_reply если related_request_id уже есть.
         if ($linkedRequest !== null) {
             \App\Jobs\Mail\ParseRequestItemsJob::dispatch($message->id, true);
+
+            // Phase 4 (Foundation §7.2): inbound intent classifier.
+            // Запускаем только для статусов где имеет смысл (quoted /
+            // under_review / postponed / awaiting_clarification).
+            if ($this->inboundClassifier->isApplicable($linkedRequest)) {
+                try {
+                    $intent = $this->inboundClassifier->classify($message->fresh(), $linkedRequest);
+                    if ($intent !== null) {
+                        $this->aiDecisions->recordSuggestion(
+                            $intent['type'],
+                            $linkedRequest,
+                            $message,
+                            (float) $intent['confidence'],
+                            $intent['payload'],
+                        );
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('MailRouter: inbound intent classifier failed (non-fatal)', [
+                        'email_message_id' => $message->id,
+                        'request_id' => $linkedRequest->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
         }
 
         $matches = $this->engine->match($message);

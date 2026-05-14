@@ -219,6 +219,12 @@
                             default => '🤖',
                         };
                     @endphp
+                    @php
+                        $sPayload = is_array($sugg->payload) ? $sugg->payload : [];
+                        $sReasoning = $sPayload['reasoning'] ?? null;
+                        $sQuote = $sPayload['cited_phrase'] ?? null;
+                        $sResumeDate = $sPayload['suggested_resume_date'] ?? null;
+                    @endphp
                     <div class="ds-card p-3 text-[12.5px] bg-[var(--sky-50)] border-[var(--sky-300)]"
                          wire:key="ai-{{ $sugg->id }}">
                         <div class="flex items-start gap-2 mb-2">
@@ -232,7 +238,18 @@
                                     @if($sTarget)
                                         · перевести в «{{ $sTarget->label() }}»
                                     @endif
+                                    @if($sResumeDate)
+                                        · до {{ \Illuminate\Support\Carbon::parse($sResumeDate)->format('d.m.Y') }}
+                                    @endif
                                 </div>
+                                @if($sQuote)
+                                    <div class="text-[11.5px] text-fg-2 mt-1.5 pl-2 border-l-2 border-[var(--sky-400)] italic">
+                                        «{{ \Illuminate\Support\Str::limit($sQuote, 180) }}»
+                                    </div>
+                                @endif
+                                @if($sReasoning && ! $sQuote)
+                                    <div class="text-[11px] text-fg-3 mt-1">{{ \Illuminate\Support\Str::limit($sReasoning, 140) }}</div>
+                                @endif
                             </div>
                         </div>
                         <div class="flex items-center gap-1.5">

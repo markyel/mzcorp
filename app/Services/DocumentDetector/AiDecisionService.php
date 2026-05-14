@@ -142,6 +142,17 @@ class AiDecisionService
             $context['closed_lost_source_message_id'] = $decision->email_message_id;
         }
 
+        // Inbound postponed: дату клиента из payload пробрасываем
+        // в state_change.payload — AttentionService::postponedUntilFor()
+        // прочитает её для дедлайна возврата.
+        if ($target === RequestStatus::PostponedUntil) {
+            $payload = is_array($decision->payload) ? $decision->payload : [];
+            $extracted = $payload['suggested_resume_date'] ?? null;
+            if (is_string($extracted) && $extracted !== '') {
+                $context['payload']['postponed_until'] = $extracted;
+            }
+        }
+
         DB::transaction(function () use ($decision, $request, $target, $author, $context, $extra) {
             try {
                 $this->stateService->transitionTo($request, $target, $author, $context);
