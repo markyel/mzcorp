@@ -844,11 +844,11 @@
                     $pendingClarifications = is_array($req->pending_clarifications) ? $req->pending_clarifications : [];
 
                     // Foundation §6.2: история clarification-batch'ей этой заявки.
-                    // Только sent / answered (drafted не показываем — оператор ещё
-                    // не отправил, виден в панели «Уточняющие вопросы» ниже).
-                    $clarificationBatches = $req->relationLoaded('clarificationBatches')
-                        ? $req->clarificationBatches->whereIn('status', ['sent', 'answered'])
-                        : collect();
+                    // Foundation §6.2: показываем ВСЕ batches заявки (drafted /
+                    // sent / answered). Cancelled — нет (оператор откатил).
+                    // Lazy-load если relation не eager (после dehydrate-цикла).
+                    $clarificationBatches = $req->clarificationBatches
+                        ->whereIn('status', ['drafted', 'sent', 'answered']);
                 @endphp
 
                 @if($clarificationBatches->isNotEmpty())
@@ -858,27 +858,31 @@
                             <h3>История уточнений</h3>
                             <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $clarificationBatches->count() }}</span>
                             <span class="flex-1"></span>
-                            <span class="text-[11.5px] text-fg-3">отправленные клиенту запросы и ответы</span>
+                            <span class="text-[11.5px] text-fg-3">заданные клиенту вопросы и его ответы</span>
                         </div>
                         <div class="divide-y divide-border-subtle">
                             @foreach($clarificationBatches as $batch)
                                 @php
-                                    $isAnswered = $batch->status === 'answered';
-                                    $batchQs = $batch->relationLoaded('questions')
-                                        ? $batch->questions
-                                        : $batch->questions()->orderBy('id')->get();
+                                    $batchStatus = (string) $batch->status;
+                                    $batchQs = $batch->questions ?? collect();
                                     $generalQ = trim((string) $batch->general_question);
                                     $perItemCount = $batchQs->filter(fn ($q) => $q->request_item_id !== null)->count();
+                                    [$badgeText, $badgeClass] = match ($batchStatus) {
+                                        'drafted' => ['✏ черновик не отправлен', 'bg-neutral-100 text-fg-2'],
+                                        'sent' => ['⏳ ждём ответ', 'bg-amber-100 text-amber-800'],
+                                        'answered' => ['✓ ответ получен', 'bg-emerald-100 text-emerald-800'],
+                                        default => [$batchStatus, 'bg-neutral-100 text-fg-2'],
+                                    };
                                 @endphp
                                 <div class="px-[18px] py-3 text-[12.5px]" wire:key="batch-{{ $batch->id }}">
                                     <div class="flex items-baseline gap-2 flex-wrap mb-1.5">
-                                        @if($isAnswered)
-                                            <span class="inline-flex items-center px-1.5 rounded-sm bg-emerald-100 text-emerald-800 font-semibold text-[10.5px]">✓ ответ получен</span>
-                                        @else
-                                            <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-100 text-amber-800 font-semibold text-[10.5px]">⏳ ждём ответ</span>
-                                        @endif
+                                        <span class="inline-flex items-center px-1.5 rounded-sm font-semibold text-[10.5px] {{ $badgeClass }}">{{ $badgeText }}</span>
                                         <span class="text-fg-3 text-[11px]">
-                                            отправлено {{ $batch->sent_at?->format('d.m.Y H:i') ?: '—' }}
+                                            @if($batchStatus === 'drafted')
+                                                создан {{ $batch->created_at?->format('d.m.Y H:i') ?: '—' }}
+                                            @else
+                                                отправлено {{ $batch->sent_at?->format('d.m.Y H:i') ?: '—' }}
+                                            @endif
                                             @if($batch->createdBy)
                                                 · {{ $batch->createdBy->name }}
                                             @endif

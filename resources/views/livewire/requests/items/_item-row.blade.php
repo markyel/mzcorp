@@ -181,7 +181,7 @@
              Из всего batch'а здесь видим только тот вопрос, что относится
              к данной позиции. Общие вопросы (general) — отдельный блок
              над таблицей. --}}
-        @if($item->relationLoaded('clarificationQuestions') && $item->clarificationQuestions->isNotEmpty())
+        @if($item->clarificationQuestions->isNotEmpty())
             <div class="mt-2 space-y-1.5 border-l-2 border-sky-300 pl-2">
                 @foreach($item->clarificationQuestions as $cq)
                     @php
