@@ -99,8 +99,18 @@ class MessagePersister
 
     private function persistAttachment(Attachment $att, EmailMessage $email): void
     {
-        $rawFilename = (string) ($att->getName() ?? ('attachment-' . Str::random(8)));
-        $decodedFilename = $this->decodeMimeHeader($rawFilename);
+        // Phase 2.4a fallback: getName() возвращает null ИЛИ пустую строку
+        // (iPhone-фотки часто шлются как Content-Type: image/jpeg без
+        // параметров name=/filename=). `?? ` ловит только null, поэтому
+        // отдельно проверяем после trim. Синтезируем читаемое имя на
+        // основе MIME — `inline-a3b2c1d4.jpg` понятнее чем UUID-storage-key.
+        $rawName = trim((string) ($att->getName() ?? ''));
+        if ($rawName === '') {
+            $ext = $this->guessExtension((string) $att->getMimeType()) ?: 'bin';
+            $disposition = $att->getDisposition() === 'inline' ? 'inline' : 'attachment';
+            $rawName = $disposition . '-' . Str::random(8) . '.' . $ext;
+        }
+        $decodedFilename = $this->decodeMimeHeader($rawName);
         // varchar(255), плюс защита от ультра-длинных имён (Yandex иногда
         // возвращает MIME-encoded имя из 10+ кусков).
         $filename = $this->truncate($decodedFilename, 255);
@@ -416,6 +426,40 @@ class MessagePersister
         $name = preg_replace('/[^A-Za-z0-9._\-]/', '_', $name) ?? 'file';
 
         return mb_substr($name, 0, 80);
+    }
+
+    /**
+     * Догадаться о расширении файла по MIME — для синтеза имени, когда
+     * Content-Type-header'ы клиента не содержат name=/filename=.
+     * Возвращает расширение БЕЗ точки (jpg/png/pdf/…) или null.
+     */
+    private function guessExtension(string $mime): ?string
+    {
+        $mime = strtolower(trim($mime));
+        $map = [
+            'image/jpeg' => 'jpg',
+            'image/jpg' => 'jpg',
+            'image/png' => 'png',
+            'image/gif' => 'gif',
+            'image/webp' => 'webp',
+            'image/heic' => 'heic',
+            'image/heif' => 'heif',
+            'image/bmp' => 'bmp',
+            'image/tiff' => 'tiff',
+            'image/svg+xml' => 'svg',
+            'application/pdf' => 'pdf',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+            'application/vnd.ms-excel' => 'xls',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+            'application/msword' => 'doc',
+            'application/zip' => 'zip',
+            'application/x-rar-compressed' => 'rar',
+            'text/plain' => 'txt',
+            'text/csv' => 'csv',
+            'text/html' => 'html',
+        ];
+
+        return $map[$mime] ?? null;
     }
 
     /**
