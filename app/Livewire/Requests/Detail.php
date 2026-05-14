@@ -120,6 +120,26 @@ class Detail extends Component
     }
 
     /**
+     * Открыть форму ответа клиенту. ComposeForm живёт внутри таба «Переписка»
+     * (только там зарегистрирован), поэтому action из action-panel (любой таб):
+     *  1) переключает $tab на 'thread' — ComposeForm рендерится;
+     *  2) диспатчит open-reply/open-compose — ComposeForm ловит event
+     *     после DOM-обновления (Livewire выполняет dispatch'ы после patch'а).
+     *
+     * @param  ?int  $messageId  Если есть — открыть как Reply на конкретное
+     *                           inbound-сообщение; иначе compose-blank.
+     */
+    public function composeReply(?int $messageId = null): void
+    {
+        $this->tab = 'thread';
+        if ($messageId) {
+            $this->dispatch('open-reply', messageId: $messageId, requestId: $this->request->id);
+        } else {
+            $this->dispatch('open-compose', requestId: $this->request->id);
+        }
+    }
+
+    /**
      * Phase 2: применить LLM-предположение «это уточнение существующей
      * позиции» — дописать additional_article к parsed_article + (опц.)
      * brand, удалить запись из pending_clarifications.

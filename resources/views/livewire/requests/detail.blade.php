@@ -424,19 +424,17 @@
                             @disabled(! $canManage)>✓ Закрыть как успех</button>
                 @endif
 
-                {{-- Ответить — отдельной строкой (Phase 1.9). --}}
+                {{-- Ответить — отдельной строкой (Phase 1.9).
+                     Переключает таб на «Переписка» (где зарегистрирован
+                     ComposeForm) И диспатчит open-reply одной операцией. --}}
                 <div class="flex gap-1.5">
                     @if($canReply)
                         <button type="button"
                                 class="btn flex-1"
-                                @if($lastInbound)
-                                    wire:click="$dispatch('open-reply', { messageId: {{ $lastInbound->id }}, requestId: {{ $req->id }} })"
-                                @else
-                                    wire:click="$dispatch('open-compose', { requestId: {{ $req->id }} })"
-                                @endif
+                                wire:click="composeReply({{ $lastInbound?->id ?: 'null' }})"
                         >✉ Ответить</button>
                     @else
-                        <button class="btn flex-1" disabled title="Отвечать может только назначенный менеджер">✉ Ответить</button>
+                        <button class="btn flex-1" disabled title="Отвечать может только назначенный менеджер или acting на время отсутствия">✉ Ответить</button>
                     @endif
                 </div>
 
