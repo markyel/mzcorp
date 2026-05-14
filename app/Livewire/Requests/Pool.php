@@ -85,7 +85,7 @@ class Pool extends Component
 
     public function setBucket(string $bucket): void
     {
-        $allowed = ['active', 'paused', 'closed', 'all'];
+        $allowed = ['active', 'overdue', 'paused', 'closed', 'all'];
         $this->bucket = in_array($bucket, $allowed, true) ? $bucket : 'active';
         $this->status = '';
         $this->resetPage();
@@ -106,6 +106,16 @@ class Pool extends Component
                 array_filter(
                     RequestStatus::cases(),
                     fn (RequestStatus $s) => $this->canSeeAll || $s->isVisibleToManager(),
+                ),
+            ),
+            // overdue делит пространство статусов с active (только open),
+            // дополнительный фильтр attention_level=1 — в render().
+            'overdue' => array_map(
+                fn (RequestStatus $s) => $s->value,
+                array_filter(
+                    RequestStatus::cases(),
+                    fn (RequestStatus $s) => $s->isOpenForAssignment()
+                        && ($this->canSeeAll || $s->isVisibleToManager()),
                 ),
             ),
             default => array_map( // active
@@ -157,8 +167,20 @@ class Pool extends Component
                 // SQLSTATE[42702] ambiguous column.
                 'latestAssignment',
             ])
-            ->withCount('items')
-            ->orderByDesc('id');
+            ->withCount('items');
+
+        // Phase 1.11 (Foundation §5.3): sort по attention для active/overdue —
+        // overdue (attention_level=1) сверху, дальше по ближайшему дедлайну.
+        // Для paused / closed / all attention-сорт не имеет смысла,
+        // оставляем по id DESC.
+        if (in_array($this->bucket, ['active', 'overdue'], true)) {
+            $query
+                ->orderByDesc('attention_level')
+                ->orderByRaw('attention_required_at ASC NULLS LAST')
+                ->orderByDesc('id');
+        } else {
+            $query->orderByDesc('id');
+        }
 
         // Менеджер по умолчанию видит свои; РОП/директор — все.
         $effectiveScope = $this->canSeeAll ? $this->scope : 'mine';
@@ -175,6 +197,11 @@ class Pool extends Component
         // Phase 1.10: bucket-фильтр (группа статусов).
         $bucketStatuses = $this->statusesForBucket();
         $query->whereIn('status', $bucketStatuses);
+
+        // Phase 1.11: bucket=overdue — только просроченные (attention_level=1).
+        if ($this->bucket === 'overdue') {
+            $query->where('attention_level', 1);
+        }
 
         // Уточняющий status-фильтр внутри bucket'а — только если значение
         // принадлежит текущему bucket'у (защита от рассинхронизации URL).
@@ -219,16 +246,29 @@ class Pool extends Component
             RequestStatus::Pending->value, // для РОПа — в самом низу
         ];
         $groups = [];
-        foreach ($groupOrder as $statusValue) {
-            if (! $grouped->has($statusValue)) {
-                continue;
+        if ($this->bucket === 'overdue') {
+            // Phase 1.11: bucket=overdue — flat list, attention-sorted.
+            // Один синтетический group со status=null (view не рендерит header).
+            $rows = collect($page->items());
+            if ($rows->isNotEmpty()) {
+                $groups[] = [
+                    'status' => null,
+                    'rows' => $rows,
+                    'count' => $rows->count(),
+                ];
             }
-            $rows = $grouped->get($statusValue);
-            $groups[] = [
-                'status' => RequestStatus::from($statusValue),
-                'rows' => $rows,
-                'count' => $rows->count(),
-            ];
+        } else {
+            foreach ($groupOrder as $statusValue) {
+                if (! $grouped->has($statusValue)) {
+                    continue;
+                }
+                $rows = $grouped->get($statusValue);
+                $groups[] = [
+                    'status' => RequestStatus::from($statusValue),
+                    'rows' => $rows,
+                    'count' => $rows->count(),
+                ];
+            }
         }
 
         // Счётчики для filter-chips и left-list-nav.
@@ -242,6 +282,13 @@ class Pool extends Component
         );
         $bucketCounts = [
             'active' => (clone $countsBase)
+                ->whereIn('status', array_filter(
+                    $openValues,
+                    fn ($v) => $this->canSeeAll || $v !== RequestStatus::Pending->value,
+                ))
+                ->count(),
+            'overdue' => (clone $countsBase)
+                ->where('attention_level', 1)
                 ->whereIn('status', array_filter(
                     $openValues,
                     fn ($v) => $this->canSeeAll || $v !== RequestStatus::Pending->value,

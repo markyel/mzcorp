@@ -30,6 +30,11 @@ use Illuminate\Support\Facades\Log;
  */
 class RequestPauseService
 {
+    public function __construct(
+        private readonly AttentionService $attention,
+    ) {
+    }
+
     public function pauseUntil(
         Request $request,
         Carbon $until,
@@ -84,6 +89,9 @@ class RequestPauseService
                     'paused_from_status' => $fromStatus->value,
                 ],
             ]);
+
+            // Phase 1.11: paused — silent статус, attention снимаем.
+            $this->attention->clear($request);
         });
 
         Log::info('RequestPauseService: paused', [
@@ -135,6 +143,16 @@ class RequestPauseService
                     'paused_until_was' => $previousUntil?->toIso8601String(),
                 ],
             ]);
+
+            // Phase 1.11 (Foundation §5.4): после resume заявка тут же
+            // должна попасть в фокус — явный attention_required_at = now()
+            // с reason=postponed_resume. Перезапишет обычный compute()
+            // (он бы дал нормальный дедлайн от now на ~24ч).
+            $request->forceFill([
+                'attention_required_at' => now(),
+                'attention_reason' => \App\Enums\AttentionReason::PostponedResume->value,
+                'attention_level' => 1,
+            ])->save();
         });
 
         Log::info('RequestPauseService: resumed', [

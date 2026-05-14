@@ -46,10 +46,16 @@
 | 2.7 | Hero «Сумма» / «Сматчено N/M (%)» + НДС 22% configurable | новое | done (`086c55b`, `6729fc6`) |
 | 2.8 | UI «Настройки» (`/dashboard/settings`): `app_settings` override config + Livewire admin страница (7 параметров в 3 группах, role-gate head_of_sales/director) | новое | done (`44f68b1`..`94c5ef8`) |
 | 2.9 | Vision-промпт: numbered text list authoritative count of positions (фикс M-2026-0512 — клиент пишет «1. Левая, 2. Правая», Vision сливал) | новое | done (`a12e20d`) |
+| 1.9-ui | UI-переписка из карточки заявки: Livewire `ComposeForm` (reply / reply-all / compose) + `WithFileUploads` + drag&drop + drafts с auto-save + auto-attach + Apple-Mail RU цитата + подпись из `users.email_signature` + IMAP APPEND в Sent + дедуп по `X-MyLift-Reply` при Sent-sync + ProfileUpdate UI | новое (Phase 1.9) | done (`6864812`..`5afd521`) |
+| 1.10p1 | **Priority 1** ручное управление позициями + каталогом: `RequestItemEditor` (editFields/softDelete/restore/unbind/linkToCatalog/refreshFromCatalog/markCatalogNotFound/mergeIntoExisting) + `CatalogSearchService` + enum `QualityAssessmentStatus` + `internal_catalog_not_found` миграция + UI dropdown «⋮» с действиями + `ItemEditDialog` / `ItemCatalogLinkDialog` (text + similar вкладки) + audit в `payload.manual_edits[]` + toggle «Показать удалённые» + bulk «Refresh всех» + ручной merge «🔗 Это уточнение позиции…» | новое | done (`259d0ed`..`9117c2d`) |
+| 1.10 | Минимальная state-machine (Foundation §5.2): 11 новых статусов (`in_progress`, `awaiting_client_clarification`, `quoted`, `under_review`, `postponed_until`, `awaiting_invoice`, `invoiced`, `paid`, `paused`, `closed_won`, `closed_lost`) + `ClosedLostReason` taxonomy (10) + `RequestStateService` + `RequestPauseService` + audit `request_state_changes` + cron `requests:resume-paused` (dailyAt 06:00) + UI action-panel с allowedTransitions + `PauseDialog` / `CloseLostDialog` + Activity-tab merge state-changes/assignments + Pool bucket-фильтры (active/paused/closed/all) + chip-фильтры внутри bucket + auto-сброс stale URL-фильтра при mount | новое | done (`00a806b`, `49e78a7`, `9522c17`) |
+| 1.10-fixes | Sticky-navigate ломал Detail-page (wire:navigate → SPA-state stuck); + кириллический «М» (U+041C) в M-SKU detector через новый helper `CatalogImportService::cyrillicLookalikeFold()` (11 пар lookalike-букв) — applied в `detectInternalCatalogSku` / `extractSku` / `normalizeArticle`; + toggle «📎 Sticky-позиции» в табе Позиции (forward + reverse-search в `request_assignments.reason`) с тем же layout что main-list через partial `_item-row.blade.php` | новое | done (`a86323f`, `7ccb044`, `1e9e558`) |
+| 1.11 | **Attention-механизм** (Foundation §5.3 + §5.5): `requests.attention_required_at` + `attention_reason` (enum `AttentionReason`, 7 значений) + денорм `attention_level` (0/1 overdue) + composite index `(assigned_user_id, attention_level DESC, attention_required_at NULLS LAST)` + partial index по overdue; `AttentionService::recompute() / clear() / sweepOverdue()` + business-hours helper (Пн-Пт 9-18 Europe/Moscow); интеграция в `RequestStateService::transitionTo()` + `recordSystemInitial()` + `RequestPauseService::pauseUntil()/resume()` (resume → attention_required_at=now, level=1, reason=postponed_resume); cron `requests:check-attention` everyFifteenMinutes (sweep level); Pool — orderBy attention для bucket=active/overdue + новый bucket «Просрочено» (flat-list без status-groups) + красный chip когда count > 0; row-tint `--red-50` + left-border accent для overdue; attention badge в title-cell (icon + «через 4ч» / «просрочено 2д»); Settings UI — 8 редактируемых дедлайнов в группе «Attention · дедлайны»; Dashboard РОПа — 2 KPI-плашки «Просрочено» / «Дедлайн сегодня» с кликом на pool?bucket=overdue; `PostponeDialog` — date + comment, пишет `payload.postponed_until` в state-change | новое | done |
 
-KB drop-in, sticky-snapshot, catalog (A+B+C), settings UI — **в Фазе 2 (закрыты 2026-05-08 и 2026-05-12).**
-Refresh-цены per-item / Unbind UI, internal_catalog_not_found status, регулярный sync MDB, Phase 1.9 outbound — **в очереди (см. план в конце файла).**
-DocumentDetector, экспорт в 1С, паузы/state machine, KB curator UI — **за пределами текущей фазы.**
+KB drop-in, sticky-snapshot, catalog (A+B+C), settings UI — **закрыты в Фазе 2 (2026-05-08, 2026-05-12).**
+Phase 1.9 UI-переписка, Priority 1 ручное управление позициями, Phase 1.10 state-machine — **закрыты 2026-05-14, 2026-05-15.**
+Phase 1.11 Attention-механизм — **закрыт 2026-05-16.**
+DocumentDetector, экспорт в 1С, Reanimate closed, KB curator UI — **за пределами текущей фазы.**
 
 ## Что готово (инфраструктура — Фаза 0)
 
@@ -559,45 +565,202 @@ sudo supervisorctl restart mzcorp-worker:*
 - `inbound_url_fetches`: ноль (новых писем с URL пока не было после деплоя).
 - Failed jobs очищены от старых OAuth-ошибок man2/man3.
 
+### Сессия 2026-05-14..05-15 — Phase 1.9 UI-переписка + Priority 1 ручные действия + Phase 1.10 state-machine + багфиксы
+
+Большая сессия, ~24 коммитов от `6864812` до `1e9e558`. Закрыты три крупные фичи + операторские багфиксы.
+
+**Phase 1.9 — UI-переписка из карточки заявки** (`6864812`..`5afd521`, 14 коммитов):
+- `OutgoingMailboxResolver` (assigned manager → shared `mail@myzip.ru` fallback) + `OutgoingMailMimeBuilder` + `MailQuoteBuilder` (Apple-Mail RU цитата, Yandex сворачивает) + `OutgoingMailSender` + `AppendToSentFolderJob`.
+- `EmailDraftService` — drafts = `email_messages.is_draft=true`. Подпись/цитата клеятся ТОЛЬКО при send (в textarea menager видит чистый текст).
+- Livewire `ComposeForm` с `WithFileUploads`: reply / reply-all / compose, listeners `open-reply` / `open-reply-all` / `open-compose` / `open-draft`, auto-save через `wire:model.live.debounce.1500ms`.
+- **Drag&drop вложений** (Alpine + DataTransfer API) + auto-attach при выборе (`updatedNewFiles`) + cleanup `input.value` через event `attachments-uploaded` (фикс дублей).
+- Migration `add_drafts_to_email_messages` (`is_draft`, `draft_author_user_id`, `last_edited_at`, `imap_uid` nullable, partial unique). **Грабли:** на Postgres `$table->unique()` = CONSTRAINT, `DROP INDEX` не сработал → `ALTER TABLE DROP CONSTRAINT` (см. `f6c2fcf`).
+- `MessagePersister` дедуп по `X-MyLift-Reply: 1` — при Sent-sync найденный наш draft не дублируется, обновляется `imap_uid`.
+- `users.email_signature` + textarea в `/profile`.
+- `config/livewire.php` — `temporary_file_upload.max_upload_size = 26624`. На VPS поднять `php.ini`: `upload_max_filesize=30M`, `post_max_size=60M`, `max_file_uploads=40`.
+- Subject-header в `ItemCatalogLinkDialog` (тут не уместно — это из Priority 1, но был commit `985968b` в эту сессию).
+
+**Priority 1 — ручное управление позициями + каталогом** (`259d0ed`..`9117c2d`, 9 коммитов):
+- Migration `add_internal_catalog_not_found_to_quality_status_enum` — 7-е значение в CHECK.
+- Enum `QualityAssessmentStatus` (backed string, label/chipClass/isCatalogTerminal). Был `internal_catalog_pending`, добавили `internal_catalog_not_found`.
+- `RequestItemEditor` — единая точка ручных действий: `editFields` (whitelist 6 полей), `softDelete` / `restore` (через `is_active`), `unbindCatalog` (с переносом в `previous_catalog_match`), `linkToCatalog` (method=`manual_link`), `refreshFromCatalog` (re-run matchByName + auto-снять not_found), `markCatalogNotFound` (guard pending only), `mergeIntoExisting` (operator-driven clarification fallback), `findSimilar` (top-N vector), `rematchAll` (bulk re-match всех позиций).
+- `CatalogSearchService` — SQL ILIKE по sku/brand_article/normalized/name с priority sort.
+- `CatalogEmbeddingService::topNByRequestItem(item, n=10)` — без threshold/safety/LLM для preview.
+- `CatalogResolutionService` guards: `matchByArticle` / `matchByName` пропускают `internal_catalog_not_found`.
+- UI items-tab переделан с dropdown «⋮» (Редактировать / Обновить из каталога / Отвязать / 🔍 Похожие из каталога / Привязать вручную / ❌ Нет в каталоге / 🔗 Это уточнение позиции… с sub-menu / Удалить) + лупа 🔍 в строке + toggle «Показать удалённые» + «🔄 Refresh всех» + chip `chip-danger` «нет в каталоге».
+- Livewire диалоги: `ItemEditDialog` (6 полей с валидацией), `ItemCatalogLinkDialog` (tabs «По тексту» / «Похожие из каталога», subject-header «Ищем для позиции» с фото+chips+«Сейчас привязана»).
+- Audit в `payload.manual_edits[]` (FIFO до 50 записей).
+- Под `parsed_name` показывается `↳ catalog->name` если отличается.
+
+**Phase 1.10 — минимальная state-machine** (`00a806b`, `49e78a7`, `9522c17`):
+- RequestStatus расширен 11 значениями (Foundation §5.2): `in_progress`, `awaiting_client_clarification`, `quoted`, `under_review`, `postponed_until`, `awaiting_invoice`, `invoiced`, `paid`, `paused`, `closed_won`, `closed_lost`. Методы `label`, `chipClass`, `isTerminal`, `isOpenForAssignment`, `isVisibleToManager`, `allowedTransitions`, `canBePaused`.
+- Enum `ClosedLostReason` — 10 reasons + `requiresComment()` для `*_other`.
+- Migrations: `add_state_fields_to_requests_table` (`paused_until`/`paused_from_status`/`paused_reason`/`closed_at`/`closed_lost_reason`/`closed_lost_comment` + `status varchar(40)` + index `(status, closed_at)`) и `create_request_state_changes_table`.
+- `RequestStateService::transitionTo` с validation+authorization+audit + `recordSystemInitial` для initial-event при autoAssign.
+- `RequestPauseService::pauseUntil / resume / applyDuePauses` с cap `config('services.requests.max_pause_days', 21)`.
+- CLI `requests:resume-paused [--dry-run]` + `Schedule::command()->dailyAt('06:00')`.
+- `RequestItemPersister` после первого autoAssign пишет initial state-change.
+- `AssignmentService` (load + sticky) пересмотрен через `isOpenForAssignment()` — корректная нагрузка по всем active-статусам.
+- UI Detail: hero-chip через `chipClass()`, action-panel переписан под allowedTransitions, terminal/paused info-плашки, Pause/CloseLost диалоги, Activity-tab merge `stateChanges + assignments + email` с цветными точками и иконками 🔄/⏰/👤/✉.
+- UI Pool: bucket-фильтры **active** (default) / **paused** / **closed** / **all** с counts + chip-фильтры внутри bucket'а + `setBucket()` + `mount()` auto-сброс stale URL `?status=` после смены статуса.
+
+**Багфиксы и оператор-просьбы** (`a86323f`, `7ccb044`, `1e9e558`):
+- **Sticky-navigate ломал Detail-страницу** — между двумя Detail-страницами Livewire SPA не пересоздавал state, Alpine dropdown'ы получали stale-инстанс, tabs не реагировали. Фикс: убрать `wire:navigate` со sticky-ссылок → full reload.
+- **Кириллический «М» (U+041C) в M-SKU detector'е** — клиент пишет «М14224» (cyrillic), regex `/M\d{4,}/` (latin) не ловил. Helper `CatalogImportService::cyrillicLookalikeFold(string)` — strtr 11 пар lookalike (А/A В/B Е/E К/K М/M Н/H О/O Р/P С/C Т/T Х/X). Применён в `detectInternalCatalogSku` / `extractSku` / `normalizeArticle`.
+- **Sticky-positions toggle** — кнопка «📎 Sticky-позиции» в табе Позиции показывает позиции связанных заявок (forward `sticky['links']` + reverse-search в `request_assignments.reason LIKE '%auto_sticky:%"linked":[..., this_id, ...]%'`). Общий partial `_item-row.blade.php` для main + sticky lists — одинаковый layout, sticky в `readonly`-режиме, action-cell заменён на ↗ (open карточку заявки).
+- **Operator-driven merge «🔗 Это уточнение позиции…»** — fallback когда LLM `DecideClarificationsPrompt` ошибся и создал лишнюю позицию для голого артикула в reply. Sub-menu в dropdown позиции — выбрать target из существующих, апсинхронно: дописывание article + brand если у target пусто + catalog_item_id + soft-delete source + audit `manual_merge_in` / `manual_merge_out` в обеих позициях.
+
+#### Новые грабли (зафиксированы в «Известные грабли»)
+
+- **Postgres `$table->unique()` = CONSTRAINT, не INDEX** — `DROP INDEX` падает `SQLSTATE[2BP01]`. Нужно `ALTER TABLE ... DROP CONSTRAINT` через raw SQL. Шаблон в миграции `2026_05_14_120000_add_drafts_to_email_messages_table` после `f6c2fcf`.
+- **Yandex сворачивает только Apple-Mail RU формат цитаты** — Gmail Western `On DATE, NAME wrote:` не распознаётся как collapsible. Нужно RU-локализованный «D мес. YYYY г., в HH:MM, NAME <email> написал(а):» + `<blockquote type="cite" style="margin:0 0 0 .8ex; border-left:1px #ccc solid; padding-left:1ex">`. См. `MailQuoteBuilder`.
+- **Livewire `WithFileUploads` + DataTransfer DOM** — после backend `$newFiles = []` нативный `<input>.files` НЕ очищается → следующий drag&drop собирает старые DOM-файлы + новые → дубли EmailAttachment. Фикс: backend `dispatch('attachments-uploaded')` → Alpine `input.value = ''`.
+- **PHP-FPM default request_terminate_timeout ≈ 30s** убивает SMTP send с большими вложениями. `set_time_limit(180)` + `ini_set('max_execution_time', '180')` в send action. На VPS `php.ini`: `upload_max_filesize=30M`, `post_max_size=60M`, `max_file_uploads=40`.
+- **`wire:navigate` между двумя одинаковыми Livewire-page-компонентами** ломает state — Alpine dropdown'ы и tabs не реинициализируются. Между Detail→Detail (sticky-links) использовать обычные `<a>`. SPA-навигация работает между разными типами страниц.
+- **Кириллический «М» (U+041C) визуально неотличим от latin M** — клиенты/1С автозаменяют. Helper `CatalogImportService::cyrillicLookalikeFold()` для 11 пар lookalike. Применять ДО regex/normalize в article-related коде.
+
+### Сессия 2026-05-16 — Phase 1.11 Attention-механизм
+
+Реализован Foundation §5.3 + §5.5 целиком (включая Settings UI + РОП-counters + PostponeDialog):
+
+- Миграция `2026_05_16_120000_add_attention_fields_to_requests_table` — три поля + два индекса (composite `(assigned_user_id, attention_level DESC, attention_required_at NULLS LAST)` для Pool-сорта; partial `WHERE attention_level=1` для дашбордного COUNT просроченных).
+- Enum `App\Enums\AttentionReason` — 7 значений из Foundation, с `label()` и `icon()` для UI-badge.
+- `AttentionService` — single source of truth:
+  - `recompute(Request $r)` — расчёт дедлайна по статусу + save(forceFill). Сбрасывает `attention_level=0` (overdue решает sweep).
+  - `clear(Request $r)` — обнуление для silent-статусов.
+  - `sweepOverdue()` — bulk UPDATE для cron'а; пере-классифицирует и в обе стороны (0↔1).
+  - `compute(Request $r)` — pure-function расчёт `[Carbon|null, AttentionReason|null]` по статусу. Silent: Paused/Closed*/Pending/Paid.
+  - Business-hours helper Пн-Пт 9-18 Europe/Moscow: `addBusinessHours(CarbonImmutable, int)` и `addBusinessDays(CarbonImmutable, int)`.
+  - Anchor для расчёта — последний `request_state_changes.created_at` с `to_status = current` (без него fallback на `updated_at`).
+  - `PostponedUntil` deadline читает `payload.postponed_until` из последнего state_change; fallback +7 раб. дней.
+- Интеграции:
+  - `RequestStateService::transitionTo()` — `$this->attention->recompute($request)` ВНУТРИ транзакции, после insert'а в `request_state_changes` (иначе `compute()` не увидит свежий anchor).
+  - `RequestStateService::recordSystemInitial()` — тоже recompute (свеженазначенная заявка получает первый дедлайн).
+  - `RequestPauseService::pauseUntil()` — `attention->clear()` (silent).
+  - `RequestPauseService::resume()` — явно `attention_required_at = now()`, `reason = postponed_resume`, `level = 1` (Foundation §5.4: «возобновлена — тут же подсвечивается»).
+- Console `requests:check-attention` everyFifteenMinutes — sweep `attention_level`. Артефакт в `app/Console/Commands/RequestsCheckAttentionCommand.php`, schedule в `routes/console.php`.
+- Pool:
+  - orderBy для bucket=active/overdue: `attention_level DESC, attention_required_at ASC NULLS LAST, id DESC`.
+  - Новый bucket `'overdue'` в `setBucket` allow-list + `statusesForBucket()`. WHERE: `attention_level=1` + те же open-statuses что у active.
+  - В `bucketCounts` — `'overdue' => count(active-scope + level=1)`.
+  - View: chip «Просрочено» в bucket-row, красный (`--red-50 / --red-300 / --red-700`) когда count > 0.
+  - При bucket=overdue — flat-list (один синтетический group со `status = null`), view проверяет `@if($group['status'] !== null)` для group header.
+  - В title-cell row — attention-badge `🟡 через 4ч` (amber) или `🔴 просрочено 2д` (red) с tooltip `reason · timestamp`.
+  - Overdue row: tint `bg-[var(--red-50)]` + left-border `--red-500`.
+- Settings UI — 8 новых полей в группе «Attention · дедлайны» (`attention.new_hours / assigned_hours / in_progress_hours / awaiting_clarification_days / quoted_first_followup_days / under_review_days / awaiting_invoice_hours / invoiced_followup_days`). Defaults из Foundation §5.5. `configKeyFor()` пустая строка для них → fix через новый helper `configDefault()` (раньше `config('', $default)` возвращал repository вместо $default).
+- Dashboard РОПа — 2 KPI-плашки над основным KPI-strip:
+  - «Просрочено» — clickable `<a href="?bucket=overdue">`, красная подсветка когда count > 0.
+  - «Дедлайн сегодня» — `attention_required_at BETWEEN now() AND endOfDay() AND level=0`, амбер.
+  - Считаются на той же базе что и существующие `requestCounts` (менеджер видит свои).
+- `PostponeDialog` (`app/Livewire/Requests/PostponeDialog.php` + view) — отдельный диалог для transition в `PostponedUntil`. Пишет `payload.postponed_until` в state_change (Carbon ISO8601, время `09:00` рабочего дня). Cap: 90 дней (`services.requests.max_postpone_days`). Заменил прямой `wire:click="transitionStatus('postponed_until')"` в Detail.
+- Request model: `attention_required_at` / `attention_reason` (cast в enum) / `attention_level` (int) в `$fillable` + `$casts`.
+
+#### Грабли Phase 1.11
+
+- **`config('', $default)` возвращает Repository, не default** — Settings UI хитро ломается для настроек без параллели в config/. Новый helper `Settings\Index::configDefault()` обрабатывает пустой config-key.
+- **`statusEnteredAt()` зависит от `request_state_changes`** — для старых заявок (до Phase 1.10) истории нет, fallback на `updated_at`. Это нормально для backfill.
+- **Pool flat-list для overdue теряет status-groups** — операторы привыкли к группировке; для других bucket'ов сохранено. Если жалоба — можно вернуть группы через флаг.
+- **resume() жёстко проставляет `attention_level=1`** (а не пересчитывает через recompute). Это соответствует Foundation §5.4 («тут же подсвечивается»), но конфликтует с обычной recompute-логикой — стоит помнить при тестах.
+- **Recompute вызывается ВНУТРИ транзакции** state-сервиса, после insert'а state_change. Это критично — иначе `statusEnteredAt()` не найдёт текущий anchor. Если когда-нибудь будем выносить recompute в job — нужно дождаться commit'а транзакции.
+
+#### Деплой Phase 1.11
+
+```bash
+cd /var/www/mzcorp
+sudo -u www-data git pull --ff-only origin main
+sudo -u www-data composer dump-autoload --optimize
+sudo -u www-data php artisan migrate --force          # одна новая миграция (attention-поля + 2 индекса)
+sudo -u www-data php artisan config:cache
+sudo -u www-data php artisan route:cache
+sudo -u www-data php artisan view:clear && sudo -u www-data php artisan view:cache
+sudo -u www-data npm run build
+sudo supervisorctl restart mzcorp-worker:*
+
+# Backfill attention для существующих active-заявок (одноразово):
+sudo -u www-data php artisan tinker --execute='
+$attn = app(App\Services\Request\AttentionService::class);
+$silent = [App\Enums\RequestStatus::Paused->value, App\Enums\RequestStatus::ClosedWon->value,
+           App\Enums\RequestStatus::ClosedLost->value, App\Enums\RequestStatus::Pending->value,
+           App\Enums\RequestStatus::Paid->value];
+$n = 0;
+App\Models\Request::query()
+    ->whereNotIn("status", $silent)
+    ->orderBy("id")
+    ->chunkById(200, function ($chunk) use ($attn, &$n) {
+        foreach ($chunk as $r) { $attn->recompute($r); $n++; }
+    });
+echo "Backfilled: ".$n.PHP_EOL;
+app(App\Services\Request\AttentionService::class)->sweepOverdue();
+'
+
+# Проверка cron:
+sudo -u www-data php artisan schedule:list | grep check-attention
+```
+
+#### Текущее состояние на проде (2026-05-15 вечер)
+
+- `request_state_changes` — пустая (первые записи появятся при ручных transitions через UI после деплоя).
+- `requests.paused_*` / `closed_at` / `closed_lost_*` — пустые (миграция применена, поля nullable).
+- `request_items.quality_assessment_status` — расширен enum (`internal_catalog_not_found` есть в CHECK).
+- `email_messages.is_draft` — boolean индекс, partial unique на (mailbox_id, folder, message_id) WHERE is_draft=false.
+
+#### Деплой-чек-лист после `1e9e558`
+
+```bash
+cd /var/www/mzcorp
+sudo -u www-data git pull --ff-only origin main
+sudo -u www-data composer dump-autoload --optimize    # много новых PSR-4 классов
+sudo -u www-data php artisan migrate --force          # три миграции из этой сессии
+sudo -u www-data php artisan config:cache
+sudo -u www-data php artisan route:cache
+sudo -u www-data php artisan view:clear && sudo -u www-data php artisan view:cache
+sudo -u www-data npm run build
+sudo supervisorctl restart mzcorp-worker:*
+
+# Поднять PHP-FPM лимиты (если ещё не сделано — для compose attachments):
+sudo tee /etc/php/8.3/fpm/conf.d/99-mzcorp-uploads.ini > /dev/null <<'EOF'
+upload_max_filesize = 30M
+post_max_size = 60M
+max_file_uploads = 40
+memory_limit = 256M
+EOF
+sudo systemctl restart php8.3-fpm
+
+# Cron для resume-paused — проверить:
+sudo -u www-data php artisan schedule:list | grep resume-paused
+```
+
 ## План на следующую сессию
 
-Большая часть Phase 2 caталога закрыта. На очереди мелкие добивания + Phase 1.9 outbound (старый план, всё ещё актуален).
+Phase 1.9 (UI-переписка), Priority 1 (ручное управление позициями), Phase 1.10 (state-machine), Phase 1.11 (Attention-механизм) — закрыты. На очереди — auto-переходы и реанимация.
 
-### Приоритет 1 — Refresh per-item / Unbind catalog в UI
+### ~~Приоритет 1 — Attention-механизм~~ ✅ закрыт 2026-05-16
 
-Кнопка в карточке заявки (в строке позиции, либо «···»-меню):
-- «Обновить из каталога» — пересмотреть привязку (повторить matchByName, обновить parsed_name/brand из catalog если поменялись).
-- «Отвязать от каталога» — `catalog_item_id = null`, payload->catalog_match очистить.
-- «Привязать вручную» — поиск по каталогу через autocomplete, оператор выбирает SKU.
+Реализовано в Phase 1.11. См. таблицу декомпозиции выше.
 
-Это позволяет оператору вытаскивать систему из false-positive C-matches без редактирования БД.
+### Приоритет 2 — DocumentDetector (Foundation §7 — Фаза 4)
 
-### Приоритет 2 — `internal_catalog_not_found` status
+Auto-переходы статусов на основе детектирования содержимого outbound/inbound писем. Большая работа:
+- В outbound (Sent): детектор КП (attachment.pdf с КП-pattern либо HTML body с маркерами цены/таблицы позиций) → `in_progress → quoted`.
+- В outbound: детектор счёта (filename начинается на «Счёт_», PDF с реквизитами) → `awaiting_invoice → invoiced`.
+- В inbound (после quoted): классификатор клиентского ответа — `under_review | postponed | client_decline | invoice_request | confirm_order` → авто-transition.
+- Confidence-порог + UI «откатить статус» с записью в audit. При N откатов — ML-поправка.
 
-Сейчас M-SKU позиции, которых нет в каталоге (как M3267 typo), висят в `internal_catalog_pending` навсегда. Добавить отдельный статус:
-- При первом импорте, если M-SKU не нашёлся → `internal_catalog_not_found` (а не `pending`).
-- В UI отдельный chip «SKU не найден в каталоге — нужно уточнить».
-- При следующем импорте: если SKU появился — переходит в `sufficient`. Если несколько импортов подряд нет — статус остаётся `not_found`.
+### Приоритет 3 — Reanimate closed (Foundation §5.2)
 
-### Приоритет 3 — Phase 1.9 outbound (Sent-tracking)
-
-Из старого плана (актуален): `OutgoingMailObserver` для синка папки Sent, привязка исходящих к Request через 5 уровней In-Reply-To / References / subject / to_recipients. Compose-кнопка — следующая итерация.
+Если клиент написал после `closed_lost_no_client_response` или другого «тихого» закрытия — реанимировать ту же заявку, не создавать новую.
+- `InboundReplyLinker` уровень 5 — учитывать closed-заявки в `from_email + по subject M-2026-NNNN`.
+- При match'е closed: status `closed_lost → qualifying`, поле `reanimated_from_request_id` (если был предыдущий reanimate).
+- UI-чип «реанимирована из закрытой N дней назад».
 
 ### Приоритет 4 — Регулярный sync MDB → прод
 
-Сейчас разовая загрузка через `catalog:import file.csv`. Для автоматизации:
-- Python-скрипт `scripts/catalog_import/export_mdb.py` уже готов (pyodbc + requests).
-- На офисной Windows-машине поставить Python 3.10 + Access Database Engine 2016 + зарегистрировать в Task Scheduler.
-- README в `scripts/catalog_import/README.md` готов с инструкцией.
+Старый план (Python-скрипт готов, на офисной машине поставить Task Scheduler).
 
-### Приоритет 5 — Top-K vector + LLM best-of-N
+### Приоритет 5 — Дашборд РОПа v1
 
-Vector retrieval сейчас top-1 → если top-1 является ложным, теряем шанс на правильный top-2. Опция:
-- Vector выбирает top-5 кандидатов.
-- LLM получает список и выбирает best (или говорит «никто»).
-- Дороже на ~5x для embedding (но это уже сделано) и ~1x для LLM (всё равно 1 вызов на запрос).
-
-Если C-recall будет недостаточен на боевых письмах — это следующий ход.
+- Sticky group-headers в Pool уже есть. Добавить heatmap inflow-by-hour, sparklines per менеджер, funnel (received → quoted → closed_won).
+- В дашборде — counter open/quoted/closed_won/closed_lost за период, conversion rate.
 
 ### Бэклог низкого приоритета
 

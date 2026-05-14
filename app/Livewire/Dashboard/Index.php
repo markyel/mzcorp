@@ -52,7 +52,28 @@ class Index extends Component
         $today = (clone $base)->where('created_at', '>=', now()->subDay())->count();
         $week = (clone $base)->where('created_at', '>=', now()->subWeek())->count();
 
-        return compact('total', 'new', 'assigned', 'unassigned', 'today', 'week');
+        // Phase 1.11 (Foundation §5.3): KPI «Просрочено» и «Сегодня дедлайн».
+        // Считаются только в active-области (исключаем silent-статусы),
+        // даже у менеджера — это его рабочее напоминание.
+        $silent = [
+            RequestStatus::Paused->value,
+            RequestStatus::ClosedWon->value,
+            RequestStatus::ClosedLost->value,
+            RequestStatus::Pending->value,
+            RequestStatus::Paid->value,
+        ];
+        $overdue = (clone $base)
+            ->where('attention_level', 1)
+            ->whereNotIn('status', $silent)
+            ->count();
+        $dueToday = (clone $base)
+            ->whereNotNull('attention_required_at')
+            ->whereBetween('attention_required_at', [now(), now()->endOfDay()])
+            ->where('attention_level', 0)
+            ->whereNotIn('status', $silent)
+            ->count();
+
+        return compact('total', 'new', 'assigned', 'unassigned', 'today', 'week', 'overdue', 'dueToday');
     }
 
     /**

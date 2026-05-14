@@ -116,6 +116,81 @@ class Index extends Component
                 'min' => 0,
                 'max' => 50,
             ],
+
+            // ─── Attention — дедлайны (Foundation §5.5) ──────────────────
+            // Раб. часы = Пн-Пт 9-18 Europe/Moscow. Раб. дни — Пн-Пт.
+            'attention.new_hours' => [
+                'group' => 'Attention · дедлайны',
+                'label' => 'Новая заявка → действие (раб. часов)',
+                'help' => 'Сколько раб. часов после попадания заявки в статус «Новая» считается нормой. Дольше — sla_breach.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 1,
+                'step' => 1,
+                'min' => 1,
+            ],
+            'attention.assigned_hours' => [
+                'group' => 'Attention · дедлайны',
+                'label' => 'Назначена → менеджер открыл (раб. часов)',
+                'help' => 'Foundation §5.5: 4 раб. часа на первый отклик менеджера после назначения.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 4,
+                'step' => 1,
+                'min' => 1,
+            ],
+            'attention.in_progress_hours' => [
+                'group' => 'Attention · дедлайны',
+                'label' => 'В работе без активности (раб. часов)',
+                'help' => 'Сколько раб. часов разрешено заявке висеть в InProgress без новых state-changes / переходов.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 24,
+                'step' => 1,
+                'min' => 1,
+            ],
+            'attention.awaiting_clarification_days' => [
+                'group' => 'Attention · дедлайны',
+                'label' => 'Жду клиента — первый ремайндер (раб. дней)',
+                'help' => 'Через сколько раб. дней без ответа клиента в AwaitingClientClarification менеджеру нужно его пинговать.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 2,
+                'step' => 1,
+                'min' => 1,
+            ],
+            'attention.quoted_first_followup_days' => [
+                'group' => 'Attention · дедлайны',
+                'label' => 'КП отправлено — первый нудж (раб. дней)',
+                'help' => 'Через сколько раб. дней после отправки КП без реакции клиента менеджер должен нагнать.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 3,
+                'step' => 1,
+                'min' => 1,
+            ],
+            'attention.under_review_days' => [
+                'group' => 'Attention · дедлайны',
+                'label' => 'На согласовании (раб. дней)',
+                'help' => 'Дефолтный дедлайн в статусе UnderReview, если у клиента нет конкретной даты ответа.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 3,
+                'step' => 1,
+                'min' => 1,
+            ],
+            'attention.awaiting_invoice_hours' => [
+                'group' => 'Attention · дедлайны',
+                'label' => 'Ждём счёт (раб. часов)',
+                'help' => 'Сколько раб. часов на выставление счёта от клиента/корп-базы.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 24,
+                'step' => 1,
+                'min' => 1,
+            ],
+            'attention.invoiced_followup_days' => [
+                'group' => 'Attention · дедлайны',
+                'label' => 'Счёт отправлен — нудж (раб. дней)',
+                'help' => 'Через сколько дней после отправки счёта без оплаты — напомнить клиенту.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 5,
+                'step' => 1,
+                'min' => 1,
+            ],
         ];
     }
 
@@ -123,7 +198,7 @@ class Index extends Component
     {
         foreach (self::schema() as $key => $meta) {
             // Текущее значение = app_setting() (DB-override → fallback config()).
-            $current = $svc->get($key, config($this->configKeyFor($key), $meta['default']));
+            $current = $svc->get($key, $this->configDefault($key, $meta['default']));
             // ВАЖНО: Livewire трактует точки в wire:model="values.X.Y.Z" как
             // вложенный доступ к массиву ($values[X][Y][Z]), а у нас ключи
             // плоские с точками (catalog.name_match.threshold). Поэтому в
@@ -169,6 +244,21 @@ class Index extends Component
     }
 
     /**
+     * Безопасный config-default: если configKeyFor вернул пустую строку
+     * (для настройки нет параллели в config/) — отдаём schema-default,
+     * не дёргая config(''), который вернул бы весь репозиторий.
+     */
+    private function configDefault(string $key, mixed $schemaDefault): mixed
+    {
+        $configKey = $this->configKeyFor($key);
+        if ($configKey === '') {
+            return $schemaDefault;
+        }
+
+        return config($configKey, $schemaDefault);
+    }
+
+    /**
      * @return array<string, array<string, array>>  group → [key → meta]
      */
     #[Computed]
@@ -198,7 +288,7 @@ class Index extends Component
             $rawValue = $this->values[$formKey];
             $typed = $this->coerceForType($rawValue, $meta['type']);
 
-            $configDefault = config($this->configKeyFor($key), $meta['default']);
+            $configDefault = $this->configDefault($key, $meta['default']);
             $defaultTyped = $this->coerceForType($configDefault, $meta['type']);
 
             // Если значение совпадает с config-defaults — удаляем override

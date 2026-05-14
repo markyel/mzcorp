@@ -264,22 +264,31 @@
                 </span>
             @endif
 
-            {{-- Phase 1.10: bucket-chips (группа статусов). --}}
+            {{-- Phase 1.10: bucket-chips (группа статусов). Phase 1.11
+                 добавляет «Просрочено» — flat-list заявок с просроченным
+                 attention_required_at; кнопка красная если счётчик > 0. --}}
             @php
                 $bucketChips = [
-                    'active' => ['label' => 'Активные',  'count' => $bucketCounts['active']],
-                    'paused' => ['label' => 'На паузе',  'count' => $bucketCounts['paused']],
-                    'closed' => ['label' => 'Закрытые',  'count' => $bucketCounts['closed']],
-                    'all'    => ['label' => 'Все',       'count' => $bucketCounts['all']],
+                    'active'  => ['label' => 'Активные',   'count' => $bucketCounts['active']],
+                    'overdue' => ['label' => 'Просрочено', 'count' => $bucketCounts['overdue'] ?? 0],
+                    'paused'  => ['label' => 'На паузе',   'count' => $bucketCounts['paused']],
+                    'closed'  => ['label' => 'Закрытые',   'count' => $bucketCounts['closed']],
+                    'all'     => ['label' => 'Все',        'count' => $bucketCounts['all']],
                 ];
             @endphp
             @foreach($bucketChips as $key => $meta)
-                @php $on = $bucket === $key; @endphp
+                @php
+                    $on = $bucket === $key;
+                    $isOverdueChip = $key === 'overdue';
+                    $overdueAttn = $isOverdueChip && $meta['count'] > 0;
+                @endphp
                 <button wire:click="setBucket('{{ $key }}')"
                         class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium
                                {{ $on
-                                  ? 'bg-[var(--accent)] text-fg-on-accent'
-                                  : 'bg-[var(--bg-surface)] border border-[var(--border-strong)] text-[var(--fg-2)] hover:text-[var(--fg-1)]' }}">
+                                  ? ($overdueAttn ? 'bg-[var(--red-600)] text-white' : 'bg-[var(--accent)] text-fg-on-accent')
+                                  : ($overdueAttn
+                                        ? 'bg-[var(--red-50)] border border-[var(--red-300)] text-[var(--red-700)] hover:bg-[var(--red-100)]'
+                                        : 'bg-[var(--bg-surface)] border border-[var(--border-strong)] text-[var(--fg-2)] hover:text-[var(--fg-1)]') }}">
                     <span>{{ $meta['label'] }}</span>
                     <span class="font-mono text-[11px] {{ $on ? 'opacity-90' : 'opacity-75' }}">{{ $meta['count'] }}</span>
                 </button>
@@ -368,7 +377,9 @@
                 </div>
 
                 @foreach($groups as $group)
-                    {{-- Group header sticky --}}
+                    {{-- Group header sticky. Phase 1.11: bucket=overdue даёт
+                         flat-list — group со status=null, header не рендерим. --}}
+                    @if($group['status'] !== null)
                     <div class="flex items-center gap-2.5 px-5 pt-2.5 pb-2 bg-[var(--bg-surface-2)] border-t border-[var(--border)] border-b border-[var(--border-subtle)] sticky top-[32px] z-[1]">
                         <span class="w-3.5 text-[var(--fg-3)] text-[10px]">▼</span>
                         <h3 class="m-0 font-semibold text-[12px] uppercase tracking-wider text-[var(--fg-1)]">
@@ -380,6 +391,7 @@
                             <span title="{{ $disabledTitle }}">сумма —</span>
                         </span>
                     </div>
+                    @endif
 
                     @foreach($group['rows'] as $req)
                         @php
@@ -425,6 +437,22 @@
                             $isSticky = $req->latestAssignment?->reason === 'auto_sticky';
                             $attachCount = $req->emailMessage?->attachments_count ?? 0;
 
+                            // Phase 1.11: attention badge + overdue tint.
+                            $attnReason = $req->attention_reason; // AttentionReason|null
+                            $attnAt = $req->attention_required_at;
+                            $isOverdue = $req->attention_level === 1;
+                            $attnText = null;
+                            if ($attnAt) {
+                                $diffSecs = (int) now()->diffInSeconds($attnAt, false);
+                                $absSecs = abs($diffSecs);
+                                $unit = $absSecs < 3600 ? (int) max(1, floor($absSecs / 60)) . 'м'
+                                    : ($absSecs < 86400 ? (int) max(1, floor($absSecs / 3600)) . 'ч'
+                                    : (int) max(1, floor($absSecs / 86400)) . 'д');
+                                $attnText = $diffSecs < 0
+                                    ? 'просрочено ' . $unit
+                                    : 'через ' . $unit;
+                            }
+
                             $managerName = $req->assignedUser?->name;
                             $managerInitials = $managerName
                                 ? collect(preg_split('/\s+/u', trim($managerName)))
@@ -438,7 +466,8 @@
                         @endphp
 
                         <a href="{{ $href }}" wire:key="req-{{ $req->id }}"
-                           class="grid items-center px-5 h-[42px] gap-x-3 border-b border-[var(--border-subtle)] text-[12.5px] hover:bg-[var(--bg-hover)] transition-colors"
+                           class="grid items-center px-5 h-[42px] gap-x-3 border-b border-[var(--border-subtle)] text-[12.5px] hover:bg-[var(--bg-hover)] transition-colors
+                                  {{ $isOverdue ? 'bg-[var(--red-50)] hover:bg-[var(--red-100)] border-l-2 border-l-[var(--red-500)] pl-[18px]' : '' }}"
                            style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 140px 160px 100px 80px 32px;">
 
                             {{-- checkbox (Phase 2) --}}
@@ -457,6 +486,15 @@
                                     @endif
                                     @if($attachCount > 0)
                                         <span class="inline-flex items-center gap-0.5 font-semibold text-[10px] px-1.5 py-0.5 rounded-[3px] bg-[var(--neutral-100)] text-[var(--fg-2)] flex-shrink-0">📎 {{ $attachCount }}</span>
+                                    @endif
+                                    @if($attnReason && $attnAt)
+                                        <span class="inline-flex items-center gap-0.5 font-semibold text-[10px] px-1.5 py-0.5 rounded-[3px] flex-shrink-0
+                                                     {{ $isOverdue
+                                                         ? 'bg-[var(--red-100)] text-[var(--red-700)]'
+                                                         : 'bg-[var(--amber-50)] text-[var(--amber-700)]' }}"
+                                              title="{{ $attnReason->label() }} · {{ $attnAt->format('d.m.Y H:i') }}">
+                                            {{ $attnReason->icon() }} {{ $attnText }}
+                                        </span>
                                     @endif
                                 </div>
                                 @if($titleT2 !== '')

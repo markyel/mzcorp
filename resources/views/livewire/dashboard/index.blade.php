@@ -7,6 +7,45 @@
 
 <div class="space-y-4">
 
+    {{-- ───────── Attention strip (Phase 1.11, Foundation §5.3) ───────── --}}
+    @php
+        $overdue = $counts['overdue'] ?? 0;
+        $dueToday = $counts['dueToday'] ?? 0;
+        $poolHrefOverdue = route('requests.index', ['bucket' => 'overdue']);
+    @endphp
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <a href="{{ $poolHrefOverdue }}"
+           class="ds-card p-4 flex items-center gap-4 transition-colors
+                  {{ $overdue > 0 ? 'bg-[var(--red-50)] border-[var(--red-300)] hover:bg-[var(--red-100)]' : '' }}">
+            <div class="flex-1">
+                <div class="text-[10.5px] uppercase tracking-wider font-semibold {{ $overdue > 0 ? 'text-[var(--red-700)]' : 'text-fg-3' }}">
+                    Просрочено
+                </div>
+                <div class="text-[28px] leading-none font-semibold mt-2 mono tnum {{ $overdue > 0 ? 'text-[var(--red-700)]' : 'text-fg-1' }}">
+                    {{ $overdue }}
+                </div>
+                <div class="text-[11.5px] text-fg-3 mt-1">
+                    {{ $overdue > 0 ? 'Дедлайн прошёл — открыть пул' : 'Все дедлайны соблюдены' }}
+                </div>
+            </div>
+            <div class="text-[28px] {{ $overdue > 0 ? 'text-[var(--red-500)]' : 'text-[var(--fg-4)]' }}">⚡</div>
+        </a>
+        <div class="ds-card p-4 flex items-center gap-4 {{ $dueToday > 0 ? 'bg-[var(--amber-50)] border-[var(--amber-700)]/30' : '' }}">
+            <div class="flex-1">
+                <div class="text-[10.5px] uppercase tracking-wider font-semibold {{ $dueToday > 0 ? 'text-[var(--amber-700)]' : 'text-fg-3' }}">
+                    Дедлайн сегодня
+                </div>
+                <div class="text-[28px] leading-none font-semibold mt-2 mono tnum {{ $dueToday > 0 ? 'text-[var(--amber-700)]' : 'text-fg-1' }}">
+                    {{ $dueToday }}
+                </div>
+                <div class="text-[11.5px] text-fg-3 mt-1">
+                    Заявки, у которых attention_required_at сегодня
+                </div>
+            </div>
+            <div class="text-[28px] {{ $dueToday > 0 ? 'text-[var(--amber-700)]' : 'text-[var(--fg-4)]' }}">⏰</div>
+        </div>
+    </div>
+
     {{-- ───────── KPI strip (6 tiles) ───────── --}}
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
 

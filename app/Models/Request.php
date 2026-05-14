@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\AttentionReason;
 use App\Enums\RequestStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -38,6 +39,10 @@ class Request extends Model
         'closed_at',
         'closed_lost_reason',
         'closed_lost_comment',
+        // Phase 1.11 — Attention-механизм (Foundation §5.3 + §5.5).
+        'attention_required_at',
+        'attention_reason',
+        'attention_level',
     ];
 
     protected function casts(): array
@@ -48,6 +53,9 @@ class Request extends Model
             'pending_clarifications' => 'array',
             'paused_until' => 'datetime',
             'closed_at' => 'datetime',
+            'attention_required_at' => 'datetime',
+            'attention_reason' => AttentionReason::class,
+            'attention_level' => 'integer',
         ];
     }
 

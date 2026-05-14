@@ -284,7 +284,7 @@
                 @endif
 
                 @if($allow($RS::PostponedUntil))
-                    <button type="button" wire:click="transitionStatus('postponed_until')"
+                    <button type="button" wire:click="$dispatch('open-postpone-dialog')"
                             class="btn btn-sm"
                             @disabled(! $canManage)>⏰ Клиент отложил</button>
                 @endif
@@ -360,6 +360,7 @@
 
             {{-- Модальные диалоги (single-instance per Detail). --}}
             <livewire:requests.pause-dialog :request="$req" wire:key="pause-{{ $req->id }}" />
+            <livewire:requests.postpone-dialog :request="$req" wire:key="postpone-{{ $req->id }}" />
             <livewire:requests.close-lost-dialog :request="$req" wire:key="close-lost-{{ $req->id }}" />
         </div>
     </div>

@@ -28,3 +28,11 @@ Schedule::command('mail:sync')
 Schedule::command('requests:resume-paused')
     ->dailyAt('06:00')
     ->onOneServer();
+
+// Phase 1.11 (Foundation §5.3): денормализованный sweep `attention_level`
+// для overdue-подсветки в Pool. Каждые 15 минут — компромисс между
+// точностью и нагрузкой; для просрочек в часах/днях этого достаточно.
+Schedule::command('requests:check-attention')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping()
+    ->onOneServer();

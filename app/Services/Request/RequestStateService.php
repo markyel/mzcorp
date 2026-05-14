@@ -25,6 +25,11 @@ use Illuminate\Support\Facades\Log;
  */
 class RequestStateService
 {
+    public function __construct(
+        private readonly AttentionService $attention,
+    ) {
+    }
+
     /**
      * @param  array{closed_lost_reason?: string, closed_lost_comment?: string, comment?: string, event?: string, payload?: array}  $context
      */
@@ -107,6 +112,13 @@ class RequestStateService
                     'closed_lost_reason' => $closedLostReason?->value,
                 ])),
             ]);
+
+            // Phase 1.11 (Foundation §5.3): пересчёт attention_required_at
+            // после каждого перехода. compute() читает request_state_changes
+            // только что вставленный row — поэтому делаем внутри транзакции
+            // ПОСЛЕ insert'а. Для terminal/paid → AttentionService сам
+            // вернёт NULL и очистит поля.
+            $this->attention->recompute($request);
         });
 
         Log::info('RequestStateService: transition', [
@@ -135,6 +147,9 @@ class RequestStateService
             'comment' => $note ?: null,
             'payload' => $assignedTo ? ['assigned_to_user_id' => $assignedTo->id] : null,
         ]);
+
+        // Phase 1.11: первый дедлайн для свеженазначенной заявки.
+        $this->attention->recompute($request);
     }
 
     private function ensureCanTransition(Request $request, ?User $author): void
