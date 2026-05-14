@@ -3,7 +3,7 @@
 namespace App\Livewire\Requests\Items;
 
 use App\Models\Request as RequestModel;
-use App\Services\Request\RequestItemEditor;
+use App\Services\Catalog\RequestItemEditor;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
 

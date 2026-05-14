@@ -144,6 +144,71 @@ class RequestItemEditor
     }
 
     /**
+     * Ручное добавление позиции оператором.
+     *
+     * Парсер пишет позиции через RequestItemPersister (data_source='inbound_message').
+     * Здесь — позиция, инициированная менеджером из UI (кнопка «+ добавить
+     * позицию» в табе Позиции). data_source='manual' — маркер происхождения
+     * для аналитики/аудита.
+     *
+     * Permission-чек выполняется на уровне Livewire-компонента
+     * (`AddItemForm`) — assigned + delegate + privileged. Здесь — чистая
+     * запись, без `ensureCanEdit` (у которого требуется существующий
+     * RequestItem).
+     *
+     * @param array{
+     *     name: string,
+     *     brand?: ?string,
+     *     article?: ?string,
+     *     qty?: float|int|string|null,
+     *     unit?: ?string,
+     *     note?: ?string,
+     * } $data
+     */
+    public function addManual(\App\Models\Request $request, array $data): RequestItem
+    {
+        return DB::transaction(function () use ($request, $data): RequestItem {
+            // max+1 среди ВСЕХ позиций заявки (включая is_active=false),
+            // чтобы номер не повторился если позже сделают soft-deactivate.
+            $maxPosition = (int) $request->items()->max('position');
+
+            return RequestItem::create([
+                'request_id' => $request->id,
+                'position' => $maxPosition + 1,
+                'parsed_name' => trim($data['name']),
+                'parsed_brand' => $this->nullableTrim($data['brand'] ?? null),
+                'parsed_article' => $this->nullableTrim($data['article'] ?? null),
+                'parsed_qty' => $this->normalizeManualQty($data['qty'] ?? null),
+                'parsed_unit' => $this->nullableTrim($data['unit'] ?? null) ?? 'шт.',
+                'supplier_note' => $this->nullableTrim($data['note'] ?? null),
+                'data_source' => 'manual',
+                'status' => 'parsed',
+                'is_active' => true,
+            ]);
+        });
+    }
+
+    private function nullableTrim(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $trimmed = trim($value);
+
+        return $trimmed === '' ? null : $trimmed;
+    }
+
+    private function normalizeManualQty(mixed $value): float
+    {
+        if ($value === null || $value === '') {
+            return 1.0;
+        }
+        $normalized = (float) str_replace(',', '.', (string) $value);
+
+        return $normalized > 0 ? $normalized : 1.0;
+    }
+
+    /**
      * Inline / modal edit. $fields — ассоциативный массив, только из EDITABLE_FIELDS.
      *
      * @param  array<string, mixed>  $fields
