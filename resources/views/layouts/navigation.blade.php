@@ -48,6 +48,7 @@
     }
     if ($user?->hasAnyRole(['head_of_sales', 'director'])) {
         $navLinks[] = ['route' => 'mail-rules.index', 'label' => 'Правила почты', 'pattern' => 'mail-rules.*'];
+        $navLinks[] = ['route' => 'mail-review.index', 'label' => 'Авто-отклонённые', 'pattern' => 'mail-review.*'];
         $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];
         $navLinks[] = ['route' => 'settings.index', 'label' => 'Настройки', 'pattern' => 'settings.*'];
     }

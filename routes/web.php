@@ -76,6 +76,13 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/settings', function () {
             return view('admin.settings.index');
         })->name('settings.index');
+
+        // Foundation Фаза 2: auto-rejection — РОП пересматривает письма,
+        // которые AI классифицировал как irrelevant/reclamation/accounting/...,
+        // и реоткрывает ошибочно отклонённые как Request.
+        Route::get('/dashboard/mail-review', function () {
+            return view('admin.mail-review.index');
+        })->name('mail-review.index');
     });
 });
 
