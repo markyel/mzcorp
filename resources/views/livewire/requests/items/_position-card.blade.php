@@ -1,17 +1,21 @@
-{{-- Foundation §6.2 + дизайн 04b-request-positions.html:
-     Slot-based card одной позиции с заголовком, slot grid, историей
-     уточнений и (опц.) панелью «Спросить ещё».
+{{-- Foundation §6.2 + дизайн 04b-request-positions.html (комбо-режим):
+     По умолчанию позиция = compact-row (header only). Менеджер жмёт
+     иконку ❓/▾ → раскрывается полная карточка со slot-grid,
+     quick-chips, free-text textarea, enrichment плитой и history.
+     Сматчённые с каталогом позиции — slots/chips скрыты даже в
+     expanded (уточнять нечего); textarea и history остаются.
 
      Ожидаемые переменные:
        $item — RequestItem с eager-loaded brand, kbCategory, catalogItem,
                imageAttachment, clarificationQuestions.batch
        $slots — array от PositionSlotResolver::resolve($item)
-       $progress — array от PositionSlotResolver::progress($slots)
        $isImageAttachment — closure для проверки картинки
        $canEditItems — bool
        $items — Collection всех позиций (для merge sub-menu в dropdown)
+       $expanded — bool, true = раскрыть всё содержимое карточки
 --}}
 @php
+    $isExpanded = (bool) ($expanded ?? false);
     $qaStatus = $item->quality_assessment_status;
     $qaConfig = match ($qaStatus) {
         'sufficient' => ['chip-ok',     'данных достаточно'],
@@ -30,28 +34,43 @@
     $qty = (float) ($item->parsed_qty ?? 0);
     $total = ($price !== null && $qty > 0) ? ((float) $price * $qty) : null;
 
-    // Card border tone: amber если данных мало (нужны уточнения),
-    // emerald если только что обогащено (есть applied suggestions),
-    // дефолт-border иначе.
     $hasPendingClarification = $item->clarificationQuestions->isNotEmpty()
-        && $item->clarificationQuestions->contains(fn ($q) => trim((string) $q->answer) === '');
+        && $item->clarificationQuestions->contains(fn ($q) => trim((string) $q->answer) === ''
+            && in_array($q->batch?->status, ['sent', 'answered'], true));
     $hasJustAnswered = $item->clarificationQuestions->isNotEmpty()
         && $item->clarificationQuestions->contains(fn ($q) => trim((string) $q->answer) !== '');
-    $cardTone = $hasPendingClarification ? 'border-amber-300 bg-gradient-to-b from-amber-50/40 to-transparent'
-        : ($hasJustAnswered ? 'border-emerald-300 bg-gradient-to-b from-emerald-50/40 to-transparent'
-        : 'border-border');
+    $clarQAnswered = $item->clarificationQuestions->filter(fn ($q) => trim((string) $q->answer) !== '')->count();
+    $clarQTotal = $item->clarificationQuestions->count();
 
-    // Image url shortcuts.
+    $pendingSuggCount = is_array($item->quality_assessment_payload['enrichment_suggestions'] ?? null)
+        ? count(array_filter(
+            $item->quality_assessment_payload['enrichment_suggestions'],
+            fn ($s) => is_array($s) && ($s['status'] ?? 'pending') === 'pending',
+        )) : 0;
+
+    // Tone: amber если ждём ответ, emerald если есть свежий ответ,
+    // sky для просто раскрытой карточки, neutral в compact.
+    $cardTone = $hasPendingClarification ? 'border-amber-300'
+        : ($hasJustAnswered ? 'border-emerald-300'
+        : ($isExpanded ? 'border-sky-300' : 'border-border'));
+    $cardBg = $isExpanded
+        ? ($hasPendingClarification ? 'bg-gradient-to-b from-amber-50/40 to-transparent'
+            : ($hasJustAnswered ? 'bg-gradient-to-b from-emerald-50/40 to-transparent'
+            : 'bg-gradient-to-b from-sky-50/30 to-transparent'))
+        : 'bg-surface';
+
+    $isCatalogBound = (bool) $item->catalog_item_id;
+
     $itemPreviewUrl = $itemImgIsImage ? route('attachments.preview', $itemImg) : null;
     $itemDownloadUrl = $itemImgIsImage ? route('attachments.download', $itemImg) : null;
 @endphp
 
 <div wire:key="position-card-{{ $item->id }}"
-     class="bg-surface border {{ $cardTone }} rounded-md overflow-hidden mb-3 {{ $item->is_active ? '' : 'opacity-50' }}">
+     class="border {{ $cardTone }} {{ $cardBg }} rounded-md overflow-hidden mb-1.5 {{ $item->is_active ? '' : 'opacity-50' }}">
 
     {{-- HEADER --}}
-    <div class="grid items-center px-[18px] py-3 border-b border-border-subtle gap-3"
-         style="grid-template-columns: 28px 56px 1fr 130px 80px 90px 90px 90px 32px">
+    <div class="grid items-center px-[12px] {{ $isExpanded ? 'py-2.5 border-b border-border-subtle' : 'py-1.5' }} gap-2.5"
+         style="grid-template-columns: 24px 40px 1fr 110px 70px 80px 80px 80px 30px 32px">
         {{-- Position number --}}
         <div class="text-fg-3 font-semibold text-[15px] text-right mono">{{ $item->position }}</div>
 
@@ -99,14 +118,26 @@
             </div>
         </div>
 
-        {{-- Status --}}
-        <div>
+        {{-- Status — основной + compact-индикаторы (вопросы/предложения) --}}
+        <div class="flex items-center gap-1 flex-wrap">
             @if($hasPendingClarification)
                 <span class="chip chip-warn text-[10.5px]"><span class="dot"></span>ждём ответ</span>
             @elseif($hasJustAnswered)
                 <span class="chip chip-ok text-[10.5px]"><span class="dot"></span>уточнено</span>
-            @else
+            @elseif($clarQTotal === 0 && $pendingSuggCount === 0)
                 <span class="text-[11px] text-fg-3">—</span>
+            @endif
+            @if($clarQTotal > 0)
+                <span class="inline-flex items-center px-1 rounded-sm bg-sky-50 text-sky-800 text-[10px] font-semibold mono"
+                      title="вопросов задано / ответов получено">
+                    ❓{{ $clarQAnswered }}/{{ $clarQTotal }}
+                </span>
+            @endif
+            @if($pendingSuggCount > 0)
+                <span class="inline-flex items-center px-1 rounded-sm bg-amber-50 text-amber-800 text-[10px] font-semibold"
+                      title="предложений обогащения к применению">
+                    💡{{ $pendingSuggCount }}
+                </span>
             @endif
         </div>
 
@@ -180,9 +211,26 @@
         @else
             <span class="text-fg-4 text-center">⋮</span>
         @endif
+
+        {{-- TOGGLE: раскрыть/свернуть карточку для уточнений --}}
+        @php
+            $toggleAttn = ($hasPendingClarification || $pendingSuggCount > 0);
+        @endphp
+        <button type="button"
+                wire:click="togglePositionExpand({{ $item->id }})"
+                class="text-center w-full leading-none {{ $isExpanded
+                    ? 'text-sky-700'
+                    : ($toggleAttn ? 'text-amber-700 hover:text-amber-900' : 'text-fg-3 hover:text-sky-700') }}"
+                title="{{ $isExpanded ? 'Свернуть' : ($isCatalogBound ? 'Раскрыть (история уточнений)' : 'Раскрыть для уточнений и слотов') }}">
+            <span class="text-[16px]">{{ $isExpanded ? '▾' : '▸' }}</span>
+        </button>
     </div>
 
-    {{-- SLOTS GRID — 4 колонки --}}
+    {{-- ====== EXPANDED-ONLY CONTENT ====== --}}
+    @if($isExpanded)
+
+    {{-- SLOTS GRID — 4 колонки (скрыто для catalog-bound: уточнять нечего) --}}
+    @if(! $isCatalogBound)
     <div class="grid grid-cols-2 md:grid-cols-4 bg-border-subtle gap-px">
         @foreach($slots as $slot)
             @php
@@ -215,11 +263,10 @@
             </div>
         @endforeach
     </div>
+    @endif {{-- /SLOTS not catalog-bound --}}
 
-    {{-- QUICK-CHIPS — универсальные шаблоны для одного клика
-         «спросить». Не дублируют slot-кнопки: тут типовые запросы,
-         которые не привязаны к конкретному слоту. --}}
-    @if(($canEditItems ?? false))
+    {{-- QUICK-CHIPS — универсальные шаблоны (скрыто для catalog-bound). --}}
+    @if(($canEditItems ?? false) && ! $isCatalogBound)
         @php
             $quickChips = [
                 ['icon' => '📷', 'label' => 'Фото шильдика',
@@ -244,6 +291,30 @@
                     <span>{{ $chip['label'] }}</span>
                 </button>
             @endforeach
+        </div>
+    @endif
+
+    {{-- FREE-TEXT QUESTION: произвольный вопрос по этой позиции.
+         Alpine state-only: набираем текст, по «✓ Спросить» вызываем
+         Detail::addFreeTextQuestion который dispatch'ит общий
+         clarification-add-slot-question event. --}}
+    @if(($canEditItems ?? false))
+        <div x-data="{ q: '' }"
+             class="px-[12px] py-2 bg-surface border-t border-border-subtle flex items-start gap-2">
+            <div class="flex-1">
+                <textarea x-model="q"
+                          rows="2"
+                          maxlength="800"
+                          placeholder="Ваш вопрос по этой позиции (например: «уточните напряжение катушки»)"
+                          class="w-full px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-[var(--sky-500)] resize-y"></textarea>
+            </div>
+            <button type="button"
+                    x-bind:disabled="q.trim() === ''"
+                    x-on:click="$wire.addFreeTextQuestion({{ $item->id }}, q); q = ''"
+                    class="btn btn-sm btn-primary shrink-0"
+                    title="Добавить вопрос в черновик уточнений">
+                ✓ Спросить
+            </button>
         </div>
     @endif
 
@@ -347,4 +418,6 @@
             </div>
         </div>
     @endif
+
+    @endif {{-- /EXPANDED-ONLY CONTENT --}}
 </div>

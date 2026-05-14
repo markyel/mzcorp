@@ -1088,7 +1088,7 @@
                                 @endif
                             </div>
 
-                            <div class="p-[12px] bg-app">
+                            <div class="p-[8px] bg-app">
                             @foreach($items as $item)
                                 @php $slots = $slotResolver->resolve($item); @endphp
                                 @include('livewire.requests.items._position-card', [
@@ -1097,6 +1097,7 @@
                                     'isImageAttachment' => $isImageAttachment,
                                     'canEditItems' => $canEditItems,
                                     'items' => $items,
+                                    'expanded' => (bool) ($expandedPositions[$item->id] ?? false),
                                 ])
                             @endforeach
                             </div>

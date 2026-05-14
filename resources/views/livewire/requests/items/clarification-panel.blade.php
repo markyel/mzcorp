@@ -1,29 +1,45 @@
-<div class="ds-card mt-3 sticky bottom-0 z-20 shadow-[0_-4px_18px_-6px_rgba(0,0,0,0.12)]"
+<div class="mt-3 sticky bottom-0 z-20"
      wire:key="clarification-panel-{{ $requestId }}">
     @php
         $pending = $this->pendingCount;
     @endphp
-    <div class="ds-card-header cursor-pointer {{ $pending > 0 ? 'bg-amber-50' : '' }}" wire:click="toggle">
-        <span class="text-[14px]">❓</span>
-        <h3 class="m-0">Черновик уточнений клиенту</h3>
+
+    {{-- Thin info-bar: всегда виден внизу страницы. Не expand'ит по
+         клику на сам бар — только по кнопке «Предпросмотр».
+         Если pending = 0 — мягкий приветственный hint. --}}
+    <div class="border border-border bg-surface rounded-md px-3 py-1.5 flex items-center gap-2 text-[12px] shadow-[0_-4px_14px_-6px_rgba(0,0,0,0.1)] {{ $pending > 0 ? 'border-amber-300 bg-amber-50/70' : '' }}">
+        <span class="text-[14px] leading-none">{{ $pending > 0 ? '✎' : '❓' }}</span>
         @if($pending > 0)
-            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-200 text-amber-900 text-[10.5px] font-bold">
-                ✎ {{ $pending }} {{ \Illuminate\Support\Str::plural('вопрос', $pending) }}
+            <span class="font-semibold text-amber-900">
+                В черновике уточнений: {{ $pending }} {{ \Illuminate\Support\Str::plural('вопрос', $pending) }}
+            </span>
+        @else
+            <span class="text-fg-3">
+                Чтобы спросить клиента — раскройте позицию (▸) и введите вопрос
             </span>
         @endif
         <span class="flex-1"></span>
-        @if($pending > 0 && ! $expanded)
+
+        <button type="button"
+                wire:click="toggle"
+                class="btn btn-sm"
+                title="{{ $expanded ? 'Свернуть черновик' : 'Открыть редактор черновика — общий вопрос + правка всех вопросов' }}">
+            {{ $expanded ? '▾ Свернуть' : '👁 Предпросмотр' }}
+        </button>
+
+        @if($pending > 0)
             <button type="button"
-                    wire:click.stop="formLetter"
+                    wire:click="formLetter"
                     class="btn btn-sm btn-primary"
                     wire:loading.attr="disabled" wire:target="formLetter">
-                📨 Сформировать ({{ $pending }})
+                <span wire:loading.remove wire:target="formLetter">📨 Сформировать ({{ $pending }})</span>
+                <span wire:loading wire:target="formLetter">…</span>
             </button>
         @endif
-        <span class="text-[11px] text-fg-3">{{ $expanded ? '▾ свернуть' : '▸ раскрыть' }}</span>
     </div>
 
     @if($expanded)
+        <div class="ds-card mt-2 shadow-[0_-4px_18px_-6px_rgba(0,0,0,0.12)]">
         <div class="ds-card-body space-y-3">
             @if(! $canCompose)
                 <div class="text-[12.5px] text-fg-3 p-3 bg-surface-2 rounded-md">
@@ -102,6 +118,7 @@
                     </span>
                 </div>
             @endif
+        </div>
         </div>
     @endif
 </div>

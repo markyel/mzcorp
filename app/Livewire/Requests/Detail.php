@@ -61,6 +61,15 @@ class Detail extends Component
      */
     public bool $includeStickyItems = false;
 
+    /**
+     * Foundation §6.2 комбо-режим: map item_id => true для позиций
+     * раскрытых в expanded-вид (со slot-grid, quick-chips, free-text
+     * textarea, history). Остальные позиции — compact-row.
+     *
+     * @var array<int, bool>
+     */
+    public array $expandedPositions = [];
+
     public function mount(Request $request): void
     {
         $user = auth()->user();
@@ -431,6 +440,41 @@ class Detail extends Component
     public function toggleStickyItems(): void
     {
         $this->includeStickyItems = ! $this->includeStickyItems;
+    }
+
+    /**
+     * Foundation §6.2 комбо-режим: раскрыть/свернуть карточку позиции.
+     * Свёрнутая = compact-row; раскрытая = full card со слотами,
+     * quick-chips, textarea произвольного вопроса, history.
+     */
+    public function togglePositionExpand(int $itemId): void
+    {
+        if (isset($this->expandedPositions[$itemId])) {
+            unset($this->expandedPositions[$itemId]);
+        } else {
+            $this->expandedPositions[$itemId] = true;
+        }
+    }
+
+    /**
+     * Free-text вопрос из expanded-карточки — добавляет произвольный
+     * текст в clarification draft через тот же payload, что и
+     * slot/quick-chip кнопки. Полная валидация в ClarificationPanel.
+     */
+    public function addFreeTextQuestion(int $itemId, string $text): void
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return;
+        }
+        $this->dispatch(
+            'clarification-add-slot-question',
+            itemId: $itemId,
+            slotKey: 'free',
+            slotLabel: null,
+            template: $text,
+            itemName: null,
+        );
     }
 
     /**
