@@ -87,18 +87,29 @@
                     <span class="dot"></span>{{ $qaConfig[1] }}
                 </span>
             @endif
-            @if($item->parsed_article)<span class="mono text-fg-2">{{ $item->parsed_article }}</span>@endif
-            @if($ci)
-                <span class="inline-flex items-center px-1.5 rounded-sm bg-violet-50 text-violet-800 font-medium text-[10.5px]"
-                      title="каталог MyLift: {{ $ci->sku }} · {{ $ci->brand_article ?: '—' }} · обновлено {{ $ci->last_imported_at?->format('d.m.Y') ?? '—' }}">
-                    в каталоге · {{ $ci->sku }}
-                </span>
-            @endif
-            @if($mylinkSku)
+            @if($item->parsed_article)
+                @if($mylinkSku && trim((string) $item->parsed_article) === $mylinkSku)
+                    {{-- parsed_article === M-SKU → весь артикул кликабельный --}}
+                    <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
+                       target="_blank" rel="noopener noreferrer"
+                       class="mono text-sky-700 hover:text-sky-900 hover:underline"
+                       title="Открыть на mylift.ru — каталог MyLift · {{ $ci?->brand_article ?: '—' }} · обн. {{ $ci?->last_imported_at?->format('d.m.Y') ?? '—' }}">{{ $item->parsed_article }} ↗</a>
+                @else
+                    <span class="mono text-fg-2">{{ $item->parsed_article }}</span>
+                    @if($mylinkSku)
+                        {{-- M-SKU отличается от parsed_article (составной артикул или
+                             $ci найден через brand_article match) — отдельная ссылка. --}}
+                        <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
+                           target="_blank" rel="noopener noreferrer"
+                           class="mono text-sky-700 hover:text-sky-900 hover:underline"
+                           title="Открыть на mylift.ru">{{ $mylinkSku }} ↗</a>
+                    @endif
+                @endif
+            @elseif($mylinkSku)
                 <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
                    target="_blank" rel="noopener noreferrer"
-                   class="inline-flex items-center gap-0.5 px-1.5 rounded-sm bg-sky-50 text-sky-700 hover:text-sky-900 hover:bg-sky-100 font-medium text-[10.5px]"
-                   title="Открыть на mylift.ru">mylift.ru ↗</a>
+                   class="mono text-sky-700 hover:text-sky-900 hover:underline"
+                   title="Открыть на mylift.ru">{{ $mylinkSku }} ↗</a>
             @endif
             @if($item->supplier_note)
                 <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-50 text-amber-700 font-medium text-[10.5px]">

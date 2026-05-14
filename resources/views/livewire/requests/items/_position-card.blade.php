@@ -34,6 +34,17 @@
     $qty = (float) ($item->parsed_qty ?? 0);
     $total = ($price !== null && $qty > 0) ? ((float) $price * $qty) : null;
 
+    // M-SKU для линка на mylift.ru. Логика parity с _item-row.blade.php:
+    // (1) $ci найден → используем $ci->sku (authoritative MyLift SKU);
+    // (2) $ci нет, но в parsed_article есть M\d{4,} токен → берём его
+    //     (internal_catalog_pending кейс: SKU есть, каталог ещё не догружен).
+    $mylinkSku = null;
+    if ($ci) {
+        $mylinkSku = $ci->sku;
+    } elseif (preg_match('/(?<![\p{L}\p{N}_])(M\d{4,})(?![\p{L}\p{N}_])/u', (string) $item->parsed_article, $mm)) {
+        $mylinkSku = $mm[1];
+    }
+
     // Defensive: legacy "null"/"—" из старых LLM-ответов — не считаем ответом.
     $_clarHasAnswer = function ($q) {
         $a = trim((string) $q->answer);
@@ -117,11 +128,28 @@
                 @endif
                 @if($item->parsed_article)
                     <span class="text-border-strong">·</span>
-                    <span class="mono text-fg-2">арт. {{ $item->parsed_article }}</span>
-                @endif
-                @if($ci?->sku)
+                    @if($mylinkSku && trim((string) $item->parsed_article) === $mylinkSku)
+                        {{-- parsed_article === M-SKU → весь артикул кликабельный, дубль убран. --}}
+                        <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
+                           target="_blank" rel="noopener noreferrer"
+                           class="mono text-sky-700 hover:text-sky-900 hover:underline"
+                           title="Открыть на mylift.ru — каталог MyLift · {{ $ci?->brand_article ?: '—' }} · обн. {{ $ci?->last_imported_at?->format('d.m.Y') ?? '—' }}">арт. {{ $item->parsed_article }} ↗</a>
+                    @else
+                        <span class="mono text-fg-2">арт. {{ $item->parsed_article }}</span>
+                        @if($mylinkSku)
+                            <span class="text-border-strong">·</span>
+                            <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
+                               target="_blank" rel="noopener noreferrer"
+                               class="mono text-sky-700 hover:text-sky-900 hover:underline"
+                               title="Открыть на mylift.ru">{{ $mylinkSku }} ↗</a>
+                        @endif
+                    @endif
+                @elseif($mylinkSku)
                     <span class="text-border-strong">·</span>
-                    <span class="mono text-fg-3" title="каталожный SKU">{{ $ci->sku }}</span>
+                    <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
+                       target="_blank" rel="noopener noreferrer"
+                       class="mono text-sky-700 hover:text-sky-900 hover:underline"
+                       title="Открыть на mylift.ru">{{ $mylinkSku }} ↗</a>
                 @endif
             </div>
         </div>
