@@ -53,12 +53,14 @@
 | 1.10-fixes | Sticky-navigate ломал Detail-page (wire:navigate → SPA-state stuck); + кириллический «М» (U+041C) в M-SKU detector через новый helper `CatalogImportService::cyrillicLookalikeFold()` (11 пар lookalike-букв) — applied в `detectInternalCatalogSku` / `extractSku` / `normalizeArticle`; + toggle «📎 Sticky-позиции» в табе Позиции (forward + reverse-search в `request_assignments.reason`) с тем же layout что main-list через partial `_item-row.blade.php` | новое | done (`a86323f`, `7ccb044`, `1e9e558`) |
 | 1.11 | **Attention-механизм** (Foundation §5.3 + §5.5): `requests.attention_required_at` + `attention_reason` (enum `AttentionReason`, 7 значений) + денорм `attention_level` (0/1 overdue) + composite index `(assigned_user_id, attention_level DESC, attention_required_at NULLS LAST)` + partial index по overdue; `AttentionService::recompute() / clear() / sweepOverdue()` + business-hours helper (Пн-Пт 9-18 Europe/Moscow); интеграция в `RequestStateService::transitionTo()` + `recordSystemInitial()` + `RequestPauseService::pauseUntil()/resume()` (resume → attention_required_at=now, level=1, reason=postponed_resume); cron `requests:check-attention` everyFifteenMinutes (sweep level); Pool — orderBy attention для bucket=active/overdue + новый bucket «Просрочено» (flat-list без status-groups) + красный chip когда count > 0; row-tint `--red-50` + left-border accent для overdue; attention badge в title-cell (icon + «через 4ч» / «просрочено 2д»); Settings UI — 8 редактируемых дедлайнов в группе «Attention · дедлайны»; Dashboard РОПа — 2 KPI-плашки «Просрочено» / «Дедлайн сегодня» с кликом на pool?bucket=overdue; `PostponeDialog` — date + comment, пишет `payload.postponed_until` в state-change | новое | done |
 | 4.0 | **DocumentDetector** (Foundation §7) — auto-переходы статусов по детекту КП/счёта/clarification в outbound и intent-классификатора reply'ев клиента в inbound. Schema: `ai_decisions` таблица (detector_type, status enum suggested→auto_applied/manually_confirmed/manually_overridden/dismissed/failed + confidence + payload + applied_by audit), `requests.closed_lost_quote` + `closed_lost_source_message_id` (Foundation §7.4). Enums `DetectorType` (10 значений с `targetStatus()` map), `AiDecisionStatus`. `AiDecisionService::recordSuggestion / apply / override / dismiss` — single source of truth для жизненного цикла, идемпотентен по (email_message_id, detector_type). `OutboundDocumentDetector` rule-based (filename regex + body keywords RU/EN; priority invoice > quotation > clarification; confidence 0.6/0.9/0.95 от комбинации сигналов). `InboundIntentClassifier` (gpt-4o-mini, `ClassifyClientResponsePrompt`) — 6 intent'ов с suggested_resume_date / suggested_closed_lost_reason / cited_phrase извлечением. Triggers в MailRouter: outbound-ветка после OutgoingMailLinker + inbound после InboundReplyLinker если статус Request в {quoted, under_review, postponed, awaiting_clarification}. UI plashka в Detail action-panel — иконка + label + confidence% + target-status + cited_phrase (italic blockquote) или reasoning + apply/dismiss кнопки. Apply disabled если переход не разрешён из текущего статуса. Foundation §7.3 validation framework: 8 toggle'ов auto_mode + общий `confidence_threshold` (default 0.85) в Settings; auto-apply gate в recordSuggestion (если включён И ≥ threshold → apply(auto=true) сразу). Dashboard РОПа — таблица «AI quality (30 дн.)» с counts (auto/confirmed/overridden/dismissed/pending) и correctness% per type, цветовая индикация (≥90 emerald, ≥70 amber, <70 red). | новое | done (`b876244`, `9fb94f5`, `cefd439`, `5ebe671`) |
+| 5.2 | **Reanimate closed** (Foundation §5.2) — `closed_lost` заявки реанимируются автоматически при ответе клиента, без создания дубликата. Migration: `requests.reanimated_at` + `reanimated_count`. `RequestStateService::reanimate(Request, ?User, EmailMessage)` — guard ClosedLost only (ClosedWon никогда — сделка состоялась), сохраняет snapshot closed_at/reason/comment/quote в `state_change.payload.restored_from`, очищает closed_lost_* поля, status → InProgress, reanimated_at = now(), reanimated_count++, event=`reanimate`, AttentionService::recompute. `InboundReplyLinker`: header-threading (levels 1-3) реанимирует любой ClosedLost (явный thread-link); level 4-bis (from_email + closed_lost) с фильтрами — только silent reasons (`no_client_response_to_clarification/quote`, `off_topic`, `manual_other`) + lookback 180 дн. (декларативные decline'ы price/timing/competitor НЕ реанимируются по этому уровню). ClosedWon match → linker возвращает null, IncomingMailProcessor создаёт новую Request. UI Hero: violet chip «↻ реанимирована ×N · M дн.» рядом со статус-чипом если reanimated_count>0 + tooltip. Activity-tab: новый kind `state-reanimate` с violet dot + иконкой ↻ + by-line «InboundReplyLinker · автоматически». | новое | done (`6e51dc4`) |
 
 KB drop-in, sticky-snapshot, catalog (A+B+C), settings UI — **закрыты в Фазе 2 (2026-05-08, 2026-05-12).**
 Phase 1.9 UI-переписка, Priority 1 ручное управление позициями, Phase 1.10 state-machine — **закрыты 2026-05-14, 2026-05-15.**
 Phase 1.11 Attention-механизм — **закрыт 2026-05-16.**
 Phase 4.0 DocumentDetector — **закрыт 2026-05-17.**
-Экспорт в 1С, Reanimate closed, KB curator UI — **за пределами текущей фазы.**
+Phase 5.2 Reanimate closed — **закрыт 2026-05-18.**
+Экспорт в 1С, KB curator UI — **за пределами текущей фазы.**
 
 ## Что готово (инфраструктура — Фаза 0)
 
@@ -823,6 +825,61 @@ echo "InboundClassifier OK\n";
 
 После 2-4 недель боевого режима оценить точность через Dashboard «AI quality» — если correctness% по конкретному detector_type ≥ 99% на ≥1000 решений, можно осторожно включить auto-mode в Settings.
 
+### Сессия 2026-05-18 — Phase 5.2 Reanimate closed
+
+Один коммит `6e51dc4`. Foundation §5.2 — закрытые заявки реанимируются автоматически при ответе клиента, без создания дубликата.
+
+**Migration** `2026_05_18_120000_add_reanimated_fields_to_requests_table`:
+- `reanimated_at` (timestamp nullable) — момент последней реанимации
+- `reanimated_count` (smallint default 0) — счётчик циклов
+
+**RequestStateService::reanimate(Request, ?User, EmailMessage)**:
+- Guard: только `ClosedLost`. `ClosedWon` → `DomainException` («сделка состоялась, новое письмо = новый запрос»).
+- Snapshot `closed_at` / `closed_lost_reason` / `closed_lost_comment` / `closed_lost_quote` / `closed_lost_source_message_id` → `request_state_changes.payload.restored_from`.
+- Очищает все closed_lost_* поля.
+- status → `InProgress` (Foundation §5.2 говорит `qualifying`, но в нашей state-machine эквивалент = InProgress: заявка уже была assigned + распарсена, менеджер сразу видит в Pool).
+- `reanimated_at = now()`, `reanimated_count++`.
+- Audit `event='reanimate'`, `comment='Клиент написал после закрытия — реанимация'`, by_user_id=null (если author не передан — линкер ставит null).
+- AttentionService::recompute (новый SLA-дедлайн от now).
+
+**InboundReplyLinker integration**:
+- В `tryLink` после успешного match'а проверяем `$request->status`:
+  - `ClosedLost` → вызываем `stateService->reanimate($request, null, $message)`; `matchedBy` дополняется `:reanimated`.
+  - `ClosedWon` → возвращаем null (IncomingMailProcessor создаст новую Request).
+  - Иначе — обычный flow.
+- `matchByOpenRequestForFromEmail` (level 4) расширен **level 4-bis**: если open-кандидатов нет, ищем `ClosedLost` с тем же `client_email` + `closed_lost_reason IN (silent_reasons)` + `closed_at >= now() - 180 дн`. Constant `REANIMATE_FROM_EMAIL_SILENT_REASONS` = `['no_client_response_to_clarification', 'no_client_response_to_quote', 'manual_other', 'off_topic']`. Декларативные decline'ы (price/timing/competitor) сюда не входят — клиент явно отказался, по этому уровню НЕ реанимируем. Header-threading (levels 1-3) реанимирует ВСЁ ClosedLost независимо от reason — там есть явный thread-link, контекст важнее.
+
+**UI Hero status row**: violet chip «↻ реанимирована ×N · M дн.» рядом со статус-чипом если `reanimated_count > 0`. Tooltip = «Реанимирована DD.MM.YYYY HH:MM · циклов: N».
+
+**Activity-tab**: новый kind `state-reanimate` для event=`reanimate`. Violet dot + иконка ↻ (matches hero chip цвет). by-line = «InboundReplyLinker · автоматически» если by_user_id отсутствует.
+
+#### Грабли Phase 5.2
+
+- **Реанимация через header-threading vs from_email** — разные guard'ы. Levels 1-3 (In-Reply-To/References/subject-code) реанимируют любой ClosedLost, потому что есть явный thread-link и контекст важнее false-positive risk. Level 4-bis (from_email) — только silent reasons + lookback 180 дн, потому что match по email без header'ов слишком слабый сигнал.
+- **ClosedWon никогда не реанимируется** — даже header-threading на closed_won возвращает null из tryLink → IncomingMailProcessor создаёт новую Request. Это сознательное решение: сделка состоялась, новое письмо клиента — другой контекст.
+- **`reanimate` НЕ через `transitionTo`** — отдельный метод сервиса. Causes: (1) `closed_lost → in_progress` запрещён `allowedTransitions()` map (terminal!), и нет смысла открывать; (2) нужны специфичные поля (`reanimated_at`, snapshot в payload) которые transitionTo не знает. Если когда-нибудь будем выносить state-machine в общую абстракцию — этот частный путь стоит сохранить.
+- **`reanimated_count` после двух реанимаций может быть 2+** — это нормально и видно в UI как «×2». Если оператор закрыл reanimated-заявку и она снова получила ответ — снова reanimate. История каждого цикла в `request_state_changes` (filter `event=reanimate`).
+
+#### Деплой Phase 5.2
+
+```bash
+cd /var/www/mzcorp
+sudo -u www-data git pull --ff-only origin main
+sudo -u www-data php artisan migrate --force          # 1 миграция
+sudo -u www-data php artisan view:clear && sudo -u www-data php artisan view:cache
+sudo -u www-data php artisan config:cache && sudo -u www-data php artisan route:cache
+sudo supervisorctl restart mzcorp-worker:*
+
+# Бэкфилл reanimated_count для исторических данных НЕ нужен —
+# поле default 0, реанимации до Phase 5.2 не были возможны (closed_lost
+# был окончательным терминалом).
+```
+
+После деплоя — мониторить лог на предмет реанимаций (ожидается несколько за первую неделю на closed_lost из августа-апреля):
+```bash
+sudo grep 'RequestStateService: reanimated' /var/www/mzcorp/storage/logs/laravel.log | tail -20
+```
+
 #### Текущее состояние на проде (2026-05-15 вечер)
 
 - `request_state_changes` — пустая (первые записи появятся при ручных transitions через UI после деплоя).
@@ -868,12 +925,9 @@ Phase 1.9 (UI-переписка), Priority 1 (ручное управление
 
 Реализован в Phase 4.0 (четыре коммита `b876244..5ebe671`). См. таблицу декомпозиции выше.
 
-### Приоритет 3 — Reanimate closed (Foundation §5.2)
+### ~~Приоритет 3 — Reanimate closed~~ ✅ закрыт 2026-05-18
 
-Если клиент написал после `closed_lost_no_client_response` или другого «тихого» закрытия — реанимировать ту же заявку, не создавать новую.
-- `InboundReplyLinker` уровень 5 — учитывать closed-заявки в `from_email + по subject M-2026-NNNN`.
-- При match'е closed: status `closed_lost → qualifying`, поле `reanimated_from_request_id` (если был предыдущий reanimate).
-- UI-чип «реанимирована из закрытой N дней назад».
+Реализован в Phase 5.2 (`6e51dc4`). См. таблицу декомпозиции выше.
 
 ### Приоритет 4 — Регулярный sync MDB → прод
 
