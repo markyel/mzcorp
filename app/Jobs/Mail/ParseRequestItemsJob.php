@@ -147,8 +147,32 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
             // в Request->pending_clarifications, новые items идут в persist
             // как обычно. Reset-режим отключает split — там старые items
             // только что стёрты, контекста нет.
+            //
+            // Foundation §6.2 gate: если у Request есть отправленный
+            // ClarificationBatch (sent), и inbound пришёл ПОСЛЕ batch.sent_at —
+            // это гарантированно ответ на наш уточняющий вопрос (Phase 6.2),
+            // НЕ «уточнение позиции от клиента». Запуск Phase 2.5
+            // decideClarifications даёт ложноположительные срабатывания
+            // («КМЗ» в ответе «уточните марку лифта» → LLM решает добавить
+            // КМЗ как brand для двигателя). Skip.
             $clarifications = [];
-            if ($hadItemsBefore && ! $this->reset && $message->related_request_id) {
+            $hasRecentSentBatch = false;
+            if ($message->related_request_id) {
+                $hasRecentSentBatch = \App\Models\ClarificationBatch::query()
+                    ->where('request_id', $message->related_request_id)
+                    ->where('status', \App\Models\ClarificationBatch::STATUS_SENT)
+                    ->whereNotNull('sent_at')
+                    ->where('sent_at', '<', $message->sent_at ?? now())
+                    ->exists();
+            }
+            if ($hasRecentSentBatch) {
+                Log::info('ParseRequestItemsJob: skip decideClarifications — reply to active clarification batch', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $message->related_request_id,
+                ]);
+            }
+
+            if ($hadItemsBefore && ! $this->reset && $message->related_request_id && ! $hasRecentSentBatch) {
                 $existing = \App\Models\RequestItem::query()
                     ->where('request_id', $message->related_request_id)
                     ->orderBy('position')
