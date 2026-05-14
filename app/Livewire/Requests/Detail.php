@@ -400,8 +400,13 @@ class Detail extends Component
     }
 
     /**
-     * Заменить cid:NNN в src/href HTML body на наш inline-роут.
-     * Принимает любое EmailMessage из треда (не только trigger-email).
+     * Заменить cid:NNN в src/href HTML body на наш inline-роут + свернуть
+     * `<blockquote type="cite">` в `<details>` (по умолчанию закрыт).
+     *
+     * Сворачивание цитат в CRM-треде: иначе при ответе менеджера на письмо
+     * Liftway/корп-системы плашка оригинала разворачивается на пол-экрана
+     * и затрудняет чтение. Auto-resize iframe (ResizeObserver в шаблоне)
+     * подтянет высоту при раскрытии цитаты пользователем.
      */
     public function bodyHtmlFor(EmailMessage $email): ?string
     {
@@ -411,7 +416,7 @@ class Detail extends Component
 
         $messageId = $email->id;
 
-        return preg_replace_callback(
+        $html = preg_replace_callback(
             '/(src|href)\s*=\s*(["\'])cid:([^"\']+)\2/i',
             function ($m) use ($messageId) {
                 $url = route('attachments.inline', [
@@ -422,7 +427,76 @@ class Detail extends Component
                 return $m[1] . '=' . $m[2] . $url . $m[2];
             },
             $email->body_html
-        );
+        ) ?? $email->body_html;
+
+        return $this->collapseQuotedBlocks($html);
+    }
+
+    /**
+     * Обернуть верхнеуровневые `<blockquote type="cite">` в `<details>` для
+     * сворачивания цитат в CRM-треде. Вложенные blockquote не трогаем — они
+     * рендерятся внутри родительского details.
+     *
+     * Формат `<blockquote type="cite">` — стандарт Apple Mail / iOS Mail /
+     * наш MailQuoteBuilder. Gmail-стиль (`<div class="gmail_quote">`) пока
+     * не покрываем — у наших клиентов в основном Yandex/Apple/Outlook.
+     */
+    private function collapseQuotedBlocks(string $html): string
+    {
+        if (stripos($html, '<blockquote') === false) {
+            return $html;
+        }
+
+        $previous = libxml_use_internal_errors(true);
+        $doc = new \DOMDocument('1.0', 'UTF-8');
+        // Префикс для UTF-8 + корневой контейнер, чтобы saveHTML мог обойти
+        // только наши дочерние ноды без `<html><body>` обёртки.
+        $wrapped = '<?xml encoding="UTF-8"?><div id="mylift-thread-root">' . $html . '</div>';
+        $loaded = $doc->loadHTML($wrapped, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        if (! $loaded) {
+            return $html;
+        }
+
+        $xpath = new \DOMXPath($doc);
+        $nodes = $xpath->query('//blockquote[@type="cite" and not(ancestor::blockquote)]');
+        if ($nodes === false || $nodes->length === 0) {
+            return $html;
+        }
+
+        foreach ($nodes as $bq) {
+            /** @var \DOMElement $bq */
+            $details = $doc->createElement('details');
+            $details->setAttribute(
+                'style',
+                'margin-top:6px;'
+            );
+
+            $summary = $doc->createElement('summary', '· · · показать цитату');
+            $summary->setAttribute(
+                'style',
+                'cursor:pointer;list-style:none;font-size:12px;color:#7280a0;'
+                . 'user-select:none;padding:2px 0;outline:none;'
+            );
+            $details->appendChild($summary);
+
+            $bq->parentNode->replaceChild($details, $bq);
+            $details->appendChild($bq);
+        }
+
+        $root = $doc->getElementById('mylift-thread-root');
+        if (! $root) {
+            return $html;
+        }
+
+        $out = '';
+        foreach ($root->childNodes as $child) {
+            $out .= $doc->saveHTML($child);
+        }
+
+        return $out;
     }
 
     /**
