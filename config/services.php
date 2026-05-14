@@ -55,6 +55,19 @@ return [
     | OPENAI_BASE_URL по умолчанию api.openai.com, но для России может быть
     | reverse-proxy (тогда задаётся вместе с OPENAI_PROXY_KEY).
     */
+    /*
+    | Foundation §6.2 Phase E.3 — auto-apply enrichment suggestions.
+    | Когда LLM-матчер создаёт suggestion с confidence >= порога И у
+    | вопроса был target_slot_key (точно знаем куда писать), мы можем
+    | сразу применить его без участия менеджера. Порог 0.95 = очень
+    | высокая уверенность.
+    | Если 0 — auto-apply выключен, все ручные.
+    */
+    'clarifications' => [
+        'auto_apply_threshold' => (float) env('CLARIFICATIONS_AUTO_APPLY_THRESHOLD', 0.95),
+        'auto_apply_require_target_slot' => (bool) env('CLARIFICATIONS_AUTO_APPLY_REQUIRE_TARGET', true),
+    ],
+
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com'),

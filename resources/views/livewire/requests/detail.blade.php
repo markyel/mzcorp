@@ -1310,6 +1310,83 @@
                                 </div>
                             @endif
 
+                            {{-- Foundation §6.2 Phase E.3 — applied lane:
+                                 показываем applied / auto_applied suggestions
+                                 за последние ~20 штук, с кнопкой «откатить».
+                                 Помогает менеджеру быстро отозвать ошибочно
+                                 применённое значение, не лезя в правки. --}}
+                            @php
+                                $allAppliedSuggestions = collect();
+                                foreach ($items as $_it) {
+                                    $_sgs = is_array($_it->quality_assessment_payload['enrichment_suggestions'] ?? null)
+                                        ? $_it->quality_assessment_payload['enrichment_suggestions'] : [];
+                                    foreach ($_sgs as $_sg) {
+                                        if (is_array($_sg) && ($_sg['status'] ?? '') === 'applied') {
+                                            $allAppliedSuggestions->push(['item' => $_it, 'sugg' => $_sg]);
+                                        }
+                                    }
+                                }
+                                // newest first by applied_at
+                                $allAppliedSuggestions = $allAppliedSuggestions
+                                    ->sortByDesc(fn ($e) => $e['sugg']['applied_at'] ?? '')
+                                    ->take(20);
+                            @endphp
+                            @if($allAppliedSuggestions->isNotEmpty() && $canEditItems)
+                                <div class="mt-2 ds-card border-emerald-200">
+                                    <div class="ds-card-header bg-emerald-50/50">
+                                        <span class="text-[14px]">✓</span>
+                                        <h3 class="m-0 text-emerald-900 text-[13px]">Применено</h3>
+                                        <span class="text-[10.5px] font-semibold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded-full">{{ $allAppliedSuggestions->count() }}</span>
+                                        <span class="text-[11px] text-emerald-700 ml-1">· можно откатить если применили зря</span>
+                                    </div>
+                                    <div class="divide-y divide-border-subtle">
+                                        @foreach($allAppliedSuggestions as $entry)
+                                            @php
+                                                $_it = $entry['item'];
+                                                $_sg = $entry['sugg'];
+                                                $_sid = (string) ($_sg['id'] ?? '');
+                                                $_field = (string) ($_sg['applied_to_slot'] ?? $_sg['field'] ?? '');
+                                                $_val = (string) ($_sg['value'] ?? '');
+                                                $_autoApplied = (bool) ($_sg['auto_applied'] ?? false);
+                                                $_appliedAt = $_sg['applied_at'] ?? null;
+
+                                                // Slot label resolution
+                                                $_slots = $slotResolver->resolve($_it);
+                                                $_slotsByKey = collect($_slots)->keyBy('key');
+                                                $_label = match (true) {
+                                                    $_field === 'brand', $_field === 'parsed_brand'     => 'Бренд',
+                                                    $_field === 'article', $_field === 'parsed_article' => 'Артикул',
+                                                    $_field === 'qty', $_field === 'parsed_qty'         => 'Кол-во',
+                                                    str_starts_with($_field, 'kb:') => $_slotsByKey[$_field]['label'] ?? substr($_field, 3),
+                                                    default => $_field,
+                                                };
+                                            @endphp
+                                            <div class="px-[18px] py-1.5 flex items-center gap-2.5 text-[12px]"
+                                                 wire:key="appliedsugg-{{ $_it->id }}-{{ $_sid }}">
+                                                @if($_autoApplied)
+                                                    <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm bg-violet-100 text-violet-800 text-[10px] font-semibold uppercase tracking-wider shrink-0">AI авто</span>
+                                                @else
+                                                    <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm bg-emerald-100 text-emerald-800 text-[10px] font-semibold uppercase tracking-wider shrink-0">вручную</span>
+                                                @endif
+                                                <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm bg-surface-2 border border-border-subtle text-fg-2 text-[10.5px] mono shrink-0">#{{ $_it->position }}</span>
+                                                <span class="text-fg-2 truncate">{{ \Illuminate\Support\Str::limit($_it->parsed_name ?: '(без названия)', 45) }}</span>
+                                                <span class="text-fg-3 text-[10.5px] shrink-0">{{ $_label }}</span>
+                                                <span class="text-fg-3 text-[14px] leading-none shrink-0">→</span>
+                                                <span class="mono text-fg-1 font-medium truncate">{{ $_val }}</span>
+                                                <span class="flex-1"></span>
+                                                @if($_appliedAt)
+                                                    <span class="text-fg-3 text-[10.5px] mono shrink-0">{{ \Carbon\Carbon::parse($_appliedAt)->format('d.m H:i') }}</span>
+                                                @endif
+                                                <button type="button"
+                                                        wire:click="rollbackEnrichmentSuggestion({{ $_it->id }}, '{{ $_sid }}')"
+                                                        wire:confirm="Откатить применение «{{ $_val }}» в слот «{{ $_label }}»?"
+                                                        class="text-[11px] text-red-600 hover:underline shrink-0">↶ откатить</button>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                </div>
+                            @endif
+
                             <div class="p-[8px] bg-app">
                             @foreach($items as $item)
                                 @php $slots = $slotResolver->resolve($item); @endphp

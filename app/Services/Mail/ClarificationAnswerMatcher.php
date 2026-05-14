@@ -9,6 +9,8 @@ use App\Models\Request as RequestModel;
 use App\Models\RequestItem;
 use App\Prompts\Mail\MatchClarificationAnswersPrompt;
 use App\Services\AI\OpenAIChatService;
+use App\Services\Catalog\RequestItemEditor;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -48,6 +50,7 @@ class ClarificationAnswerMatcher
     public function __construct(
         private readonly OpenAIChatService $openai,
         private readonly MatchClarificationAnswersPrompt $prompt,
+        private readonly RequestItemEditor $editor,
     ) {
     }
 
@@ -163,8 +166,11 @@ class ClarificationAnswerMatcher
                 $confidence = (float) ($s['confidence'] ?? 0);
                 $sourceQuote = trim((string) ($s['source_quote'] ?? ''));
 
+                // Phase D: field может быть базовым (parsed_*) или kb:<slug>.
+                $isKbField = str_starts_with($field, 'kb:');
+                $isBaseField = in_array($field, self::ENRICHABLE_FIELDS, true);
                 if ($itemId === 0
-                    || ! in_array($field, self::ENRICHABLE_FIELDS, true)
+                    || (! $isBaseField && ! $isKbField)
                     || $value === ''
                     || $confidence < self::CONFIDENCE_FLOOR
                 ) {
@@ -194,8 +200,9 @@ class ClarificationAnswerMatcher
                     continue;
                 }
 
+                $suggId = bin2hex(random_bytes(4));
                 $existing[] = [
-                    'id' => bin2hex(random_bytes(4)),
+                    'id' => $suggId,
                     'field' => $field,
                     'value' => $value,
                     'source_quote' => mb_substr($sourceQuote, 0, 500),
@@ -203,13 +210,63 @@ class ClarificationAnswerMatcher
                     'suggested_at' => now()->toIso8601String(),
                     'source_message_id' => $inbound->id,
                     'source_batch_id' => $batch->id,
-                    'status' => 'pending', // pending | applied | dismissed
+                    'status' => 'pending', // pending | applied | dismissed | reverted
                 ];
 
                 $payload['enrichment_suggestions'] = $existing;
                 $item->quality_assessment_payload = $payload;
                 $item->save();
                 $suggestionsCount++;
+
+                // Phase E.3 — auto-apply при высокой уверенности.
+                $autoApplyThreshold = (float) config('services.clarifications.auto_apply_threshold', 0.95);
+                $requireTarget = (bool) config('services.clarifications.auto_apply_require_target', true);
+                $hasTargetSlotMatch = $this->suggestionMatchesQuestionTarget($batch, $field);
+                $shouldAutoApply = $autoApplyThreshold > 0
+                    && $confidence >= $autoApplyThreshold
+                    && (! $requireTarget || $hasTargetSlotMatch);
+
+                if ($shouldAutoApply) {
+                    try {
+                        // Применяем от имени менеджера, создавшего batch.
+                        $author = $batch->createdBy;
+                        if ($author === null) {
+                            // Fallback: первый assignment'ный manager. Если и тут
+                            // нет — пропускаем auto-apply (применит вручную).
+                            $author = $request->assignedUser;
+                        }
+                        if ($author !== null) {
+                            $this->editor->applyEnrichmentSuggestion($item->fresh(), $suggId, $author);
+
+                            // Помечаем как auto_applied для UI («✓ применено авто»).
+                            $fresh = $item->fresh();
+                            $p = is_array($fresh->quality_assessment_payload) ? $fresh->quality_assessment_payload : [];
+                            $sugs = is_array($p['enrichment_suggestions'] ?? null) ? $p['enrichment_suggestions'] : [];
+                            foreach ($sugs as $i => $s) {
+                                if (is_array($s) && ($s['id'] ?? null) === $suggId
+                                    && ($s['status'] ?? '') === 'applied') {
+                                    $sugs[$i]['auto_applied'] = true;
+                                }
+                            }
+                            $p['enrichment_suggestions'] = $sugs;
+                            $fresh->quality_assessment_payload = $p;
+                            $fresh->save();
+
+                            Log::info('ClarificationAnswerMatcher: auto-applied', [
+                                'item_id' => $item->id,
+                                'suggestion_id' => $suggId,
+                                'field' => $field,
+                                'confidence' => $confidence,
+                            ]);
+                        }
+                    } catch (\Throwable $e) {
+                        Log::warning('ClarificationAnswerMatcher: auto-apply failed, оставляем pending', [
+                            'item_id' => $item->id,
+                            'suggestion_id' => $suggId,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
             }
         });
 
@@ -233,7 +290,15 @@ class ClarificationAnswerMatcher
      */
     private function valueAlreadyPresent(RequestItem $item, string $field, string $value): bool
     {
-        $current = (string) ($item->{$field} ?? '');
+        // Phase D: kb:<slug> → проверяем в extracted_parameters[slug].
+        if (str_starts_with($field, 'kb:')) {
+            $slug = substr($field, 3);
+            $p = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+            $extracted = is_array($p['extracted_parameters'] ?? null) ? $p['extracted_parameters'] : [];
+            $current = (string) ($extracted[$slug] ?? '');
+        } else {
+            $current = (string) ($item->{$field} ?? '');
+        }
         if ($current === '') {
             return false;
         }
@@ -245,5 +310,37 @@ class ClarificationAnswerMatcher
     {
         // Удалить все non-alphanum, привести к UC. Подходит для article/brand/qty.
         return mb_strtoupper(preg_replace('/[\s\-_.,\/]/', '', trim($value)) ?? '');
+    }
+
+    /**
+     * Phase E.3: проверяем, есть ли в batch'е вопрос с target_slot_key,
+     * совпадающим с field у suggestion. Match-ит:
+     *   field=parsed_brand   ← target_slot_key='brand'
+     *   field=parsed_article ← target_slot_key='article'
+     *   field=parsed_qty     ← target_slot_key='qty'
+     *   field=kb:<slug>      ← target_slot_key='kb:<slug>'
+     *
+     * Если совпадает — LLM попал в правильный слот, auto-apply безопасен.
+     */
+    private function suggestionMatchesQuestionTarget(ClarificationBatch $batch, string $field): bool
+    {
+        $expectedSlotKey = match (true) {
+            $field === 'parsed_brand'   => 'brand',
+            $field === 'parsed_article' => 'article',
+            $field === 'parsed_qty'     => 'qty',
+            str_starts_with($field, 'kb:') => $field,
+            default => null,
+        };
+        if ($expectedSlotKey === null) {
+            return false;
+        }
+
+        foreach ($batch->questions as $q) {
+            if ($q->target_slot_key === $expectedSlotKey) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
