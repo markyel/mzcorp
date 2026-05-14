@@ -657,6 +657,7 @@ sudo supervisorctl restart mzcorp-worker:*
 
 #### Грабли Phase 1.11
 
+- **`Carbon::diffInMinutes($cursor, false)` reversed-направление → бесконечный цикл** (hotfix `f465cc9`): первая версия `addBusinessHours` делала `$endOfDay->diffInMinutes($cursor, false)`. Когда $cursor < $endOfDay (например 14:00 < 18:00), Carbon 2 возвращает -240, `max(0, -240) = 0` → availableMinutes=0 → `$remaining` не убывает, while крутится вечно → PHP execution timeout → 500 на ЛЮБОЙ `RequestStateService::transitionTo`. Симптом в UI: «multiple instances of Alpine», табы перестают кликаться, child Livewire-компонент крашится (Phase 1.13 паттерн «отвалился child = вся страница плывёт»). **Решение:** timestamp-арифметика `(int)(($endOfDay->getTimestamp() - $cursor->getTimestamp()) / 60)` — version-agnostic, не зависит от Carbon 2 vs 3 signage. Плюс safety-iter cap (2600 итераций ≈ 10 лет рабочих дней) на случай будущей регрессии.
 - **`config('', $default)` возвращает Repository, не default** — Settings UI хитро ломается для настроек без параллели в config/. Новый helper `Settings\Index::configDefault()` обрабатывает пустой config-key.
 - **`statusEnteredAt()` зависит от `request_state_changes`** — для старых заявок (до Phase 1.10) истории нет, fallback на `updated_at`. Это нормально для backfill.
 - **Pool flat-list для overdue теряет status-groups** — операторы привыкли к группировке; для других bucket'ов сохранено. Если жалоба — можно вернуть группы через флаг.
