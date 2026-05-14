@@ -156,6 +156,27 @@ class MailRouter
                     ]);
                 }
             }
+
+            // Foundation §6.2 Phase B/C: если у Request есть pending
+            // clarification batches (sent, без answered_at) — async LLM-job
+            // сматчит ответ клиента с конкретными вопросами и извлечёт
+            // enrichment suggestions (артикул / бренд / qty).
+            try {
+                $pendingBatches = \App\Models\ClarificationBatch::query()
+                    ->where('request_id', $linkedRequest->id)
+                    ->where('status', \App\Models\ClarificationBatch::STATUS_SENT)
+                    ->whereNull('answered_at')
+                    ->pluck('id');
+                foreach ($pendingBatches as $batchId) {
+                    \App\Jobs\Mail\MatchClarificationAnswersJob::dispatch($message->id, $batchId);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: dispatch clarification matcher failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $linkedRequest->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         $matches = $this->engine->match($message);

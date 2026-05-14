@@ -593,6 +593,115 @@ class RequestItemEditor
         return $item;
     }
 
+    /**
+     * Foundation §6.2 Phase C — применить enrichment suggestion из
+     * LLM-извлечения ответа клиента к позиции (поле parsed_article /
+     * parsed_brand / parsed_qty).
+     *
+     * Логика:
+     *  - находим suggestion по id в quality_assessment_payload.enrichment_suggestions[];
+     *  - если status != pending — no-op (уже применён или dismissed);
+     *  - editFields([field => value]) — стандартный механизм правки + audit;
+     *  - помечаем suggestion как applied + applied_at + applied_by.
+     */
+    public function applyEnrichmentSuggestion(RequestItem $item, string $suggestionId, User $author): RequestItem
+    {
+        $this->ensureCanEdit($item, $author);
+
+        $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+        $suggestions = is_array($payload['enrichment_suggestions'] ?? null) ? $payload['enrichment_suggestions'] : [];
+
+        $idx = null;
+        foreach ($suggestions as $i => $s) {
+            if (is_array($s) && ($s['id'] ?? null) === $suggestionId) {
+                $idx = $i;
+                break;
+            }
+        }
+        if ($idx === null) {
+            return $item;
+        }
+        $sugg = $suggestions[$idx];
+        if (($sugg['status'] ?? 'pending') !== 'pending') {
+            return $item;
+        }
+
+        $field = (string) ($sugg['field'] ?? '');
+        $value = (string) ($sugg['value'] ?? '');
+        if (! in_array($field, self::EDITABLE_FIELDS, true) || $value === '') {
+            return $item;
+        }
+
+        DB::transaction(function () use ($item, $field, $value, $suggestionId, $sugg, $author) {
+            // editFields внутри делает audit. Делаем в той же транзакции
+            // чтобы suggestion-mark + edit были атомарны.
+            $this->editFields($item, [$field => $value], $author);
+
+            // Пометить suggestion как applied (re-load payload, потому что
+            // editFields мог тронуть payload через manual_edits).
+            $fresh = $item->fresh();
+            $payload = is_array($fresh->quality_assessment_payload) ? $fresh->quality_assessment_payload : [];
+            $suggestions = is_array($payload['enrichment_suggestions'] ?? null) ? $payload['enrichment_suggestions'] : [];
+            foreach ($suggestions as $i => $s) {
+                if (is_array($s) && ($s['id'] ?? null) === $suggestionId) {
+                    $suggestions[$i] = array_merge($s, [
+                        'status' => 'applied',
+                        'applied_at' => now()->toIso8601String(),
+                        'applied_by_user_id' => $author->id,
+                    ]);
+                    break;
+                }
+            }
+            $payload['enrichment_suggestions'] = $suggestions;
+            $fresh->quality_assessment_payload = $payload;
+            $fresh->save();
+        });
+
+        Log::info('RequestItemEditor: enrichment suggestion applied', [
+            'request_item_id' => $item->id,
+            'suggestion_id' => $suggestionId,
+            'field' => $field,
+            'value' => $value,
+            'by' => $author->id,
+        ]);
+
+        return $item->fresh();
+    }
+
+    /**
+     * Foundation §6.2 Phase C — отклонить enrichment suggestion (оператор
+     * не согласен / клиент написал ошибочно).
+     */
+    public function dismissEnrichmentSuggestion(RequestItem $item, string $suggestionId, User $author): RequestItem
+    {
+        $this->ensureCanEdit($item, $author);
+
+        $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+        $suggestions = is_array($payload['enrichment_suggestions'] ?? null) ? $payload['enrichment_suggestions'] : [];
+
+        $changed = false;
+        foreach ($suggestions as $i => $s) {
+            if (is_array($s) && ($s['id'] ?? null) === $suggestionId && ($s['status'] ?? 'pending') === 'pending') {
+                $suggestions[$i] = array_merge($s, [
+                    'status' => 'dismissed',
+                    'dismissed_at' => now()->toIso8601String(),
+                    'dismissed_by_user_id' => $author->id,
+                ]);
+                $changed = true;
+                break;
+            }
+        }
+        if (! $changed) {
+            return $item;
+        }
+
+        $payload['enrichment_suggestions'] = $suggestions;
+        $item->quality_assessment_payload = $payload;
+        $item->save();
+
+        return $item;
+    }
+
     /* ----------------------- internals ----------------------- */
 
     private function ensureCanEdit(RequestItem $item, User $author): void

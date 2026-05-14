@@ -117,6 +117,66 @@
             </div>
         @endif
 
+        {{-- Foundation §6.2 Phase C: enrichment suggestions от LLM
+             (артикул/бренд/qty извлечены из ответа клиента). Pending —
+             амбер-карточка с кнопкой «✓ Применить». --}}
+        @php
+            $allSuggestions = is_array($item->quality_assessment_payload['enrichment_suggestions'] ?? null)
+                ? $item->quality_assessment_payload['enrichment_suggestions']
+                : [];
+            $pendingSuggestions = array_filter(
+                $allSuggestions,
+                fn ($s) => is_array($s) && ($s['status'] ?? 'pending') === 'pending',
+            );
+            $fieldLabels = [
+                'parsed_article' => 'Артикул',
+                'parsed_brand' => 'Бренд',
+                'parsed_qty' => 'Кол-во',
+            ];
+        @endphp
+        @if(! empty($pendingSuggestions) && ($canEditItems ?? false))
+            <div class="mt-2 space-y-1.5">
+                @foreach($pendingSuggestions as $sugg)
+                    @php
+                        $sid = (string) ($sugg['id'] ?? '');
+                        $field = (string) ($sugg['field'] ?? '');
+                        $val = (string) ($sugg['value'] ?? '');
+                        $quote = (string) ($sugg['source_quote'] ?? '');
+                        $confPct = (int) round(((float) ($sugg['confidence'] ?? 0)) * 100);
+                    @endphp
+                    <div class="rounded-md border border-amber-300 bg-amber-50 p-2 flex items-start gap-2.5"
+                         wire:key="ensugg-{{ $item->id }}-{{ $sid }}">
+                        <span class="text-[14px] leading-none mt-0.5">💡</span>
+                        <div class="flex-1 min-w-0 text-[12px]">
+                            <div class="text-amber-900">
+                                <span class="font-semibold">Клиент прислал:</span>
+                                <span class="text-fg-3">{{ $fieldLabels[$field] ?? $field }} →</span>
+                                <span class="mono font-semibold text-fg-1">{{ $val }}</span>
+                                <span class="text-amber-700 text-[10.5px]">· {{ $confPct }}%</span>
+                            </div>
+                            @if($quote !== '')
+                                <div class="text-fg-2 text-[11px] mt-0.5 italic pl-2 border-l border-amber-400">
+                                    «{{ \Illuminate\Support\Str::limit($quote, 200) }}»
+                                </div>
+                            @endif
+                        </div>
+                        <div class="shrink-0 flex items-center gap-1.5">
+                            <button type="button"
+                                    wire:click="applyEnrichmentSuggestion({{ $item->id }}, '{{ $sid }}')"
+                                    class="btn btn-sm btn-primary"
+                                    wire:confirm="Применить значение «{{ $val }}» к полю «{{ $fieldLabels[$field] ?? $field }}»?">
+                                ✓ Применить
+                            </button>
+                            <button type="button"
+                                    wire:click="dismissEnrichmentSuggestion({{ $item->id }}, '{{ $sid }}')"
+                                    class="btn btn-sm"
+                                    title="Отклонить — клиент не имел в виду эту позицию">✕</button>
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+        @endif
+
         {{-- Foundation §6.2: история уточняющих вопросов по этой позиции.
              Из всего batch'а здесь видим только тот вопрос, что относится
              к данной позиции. Общие вопросы (general) — отдельный блок

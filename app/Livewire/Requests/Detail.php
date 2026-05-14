@@ -638,6 +638,25 @@ class Detail extends Component
     }
 
     /**
+     * Foundation §6.2 Phase C — применить enrichment suggestion
+     * (LLM извлёк из ответа клиента артикул/бренд/qty) к позиции.
+     */
+    public function applyEnrichmentSuggestion(int $itemId, string $suggestionId, RequestItemEditor $editor): void
+    {
+        $item = $this->loadItemOrFail($itemId);
+        $editor->applyEnrichmentSuggestion($item, $suggestionId, auth()->user());
+        $this->reloadRequest();
+        session()->flash('status', 'Позиция обогащена данными из ответа клиента.');
+    }
+
+    public function dismissEnrichmentSuggestion(int $itemId, string $suggestionId, RequestItemEditor $editor): void
+    {
+        $item = $this->loadItemOrFail($itemId);
+        $editor->dismissEnrichmentSuggestion($item, $suggestionId, auth()->user());
+        $this->reloadRequest();
+    }
+
+    /**
      * Foundation §6.2: ClarificationPanel сформировал черновик письма
      * и диспатчит этот event. Мы должны переключить таб на «Переписка»
      * (там зарегистрирован ComposeForm) и попросить его открыть draft.
