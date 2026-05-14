@@ -116,6 +116,53 @@
                 @endif
             </div>
         @endif
+
+        {{-- Foundation §6.2: история уточняющих вопросов по этой позиции.
+             Из всего batch'а здесь видим только тот вопрос, что относится
+             к данной позиции. Общие вопросы (general) — отдельный блок
+             над таблицей. --}}
+        @if($item->relationLoaded('clarificationQuestions') && $item->clarificationQuestions->isNotEmpty())
+            <div class="mt-2 space-y-1.5 border-l-2 border-sky-300 pl-2">
+                @foreach($item->clarificationQuestions as $cq)
+                    @php
+                        $cqBatch = $cq->batch;
+                        $isSent = $cqBatch && in_array($cqBatch->status, ['sent', 'answered'], true);
+                        $hasAnswer = trim((string) $cq->answer) !== '';
+                        $stateLabel = match(true) {
+                            $hasAnswer => '✓ ответ получен',
+                            $isSent => '⏳ ждём ответ',
+                            $cqBatch?->status === 'drafted' => '✏ в черновике',
+                            default => '·',
+                        };
+                        $stateTone = match(true) {
+                            $hasAnswer => 'bg-emerald-50 text-emerald-800',
+                            $isSent => 'bg-amber-50 text-amber-700',
+                            default => 'bg-neutral-100 text-fg-2',
+                        };
+                    @endphp
+                    <div class="text-[11.5px] leading-snug">
+                        <div class="flex items-baseline gap-1.5 flex-wrap">
+                            <span class="inline-flex items-center px-1.5 rounded-sm font-semibold text-[10px] {{ $stateTone }}">
+                                ❓ {{ $stateLabel }}
+                            </span>
+                            @if($cqBatch?->sent_at)
+                                <span class="text-fg-3 text-[10.5px]">отправлено {{ $cqBatch->sent_at->format('d.m.Y') }}</span>
+                            @endif
+                            @if($cqBatch?->createdBy)
+                                <span class="text-fg-3 text-[10.5px]">· {{ $cqBatch->createdBy->name }}</span>
+                            @endif
+                        </div>
+                        <div class="text-fg-1 mt-0.5">{{ $cq->question }}</div>
+                        @if($hasAnswer)
+                            <div class="mt-0.5 px-2 py-1 rounded-sm bg-emerald-50 border-l-2 border-emerald-400 text-fg-1">
+                                <span class="text-emerald-700 font-semibold text-[10px] uppercase tracking-wider">Ответ клиента{{ $cq->answered_at ? ' · ' . $cq->answered_at->format('d.m.Y') : '' }}:</span>
+                                <div class="mt-0.5">{{ $cq->answer }}</div>
+                            </div>
+                        @endif
+                    </div>
+                @endforeach
+            </div>
+        @endif
     </div>
 
     <span class="mono text-[12px] text-fg-1 text-right">{{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') ?: '—' }} {{ $item->parsed_unit }}</span>

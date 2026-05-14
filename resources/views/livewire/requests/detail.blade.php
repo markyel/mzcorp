@@ -842,7 +842,62 @@
                     // Phase 2: очередь LLM-предположений об уточнениях артикулов.
                     // Заполняется decideClarifications при парсинге reply'я.
                     $pendingClarifications = is_array($req->pending_clarifications) ? $req->pending_clarifications : [];
+
+                    // Foundation §6.2: история clarification-batch'ей этой заявки.
+                    // Только sent / answered (drafted не показываем — оператор ещё
+                    // не отправил, виден в панели «Уточняющие вопросы» ниже).
+                    $clarificationBatches = $req->relationLoaded('clarificationBatches')
+                        ? $req->clarificationBatches->whereIn('status', ['sent', 'answered'])
+                        : collect();
                 @endphp
+
+                @if($clarificationBatches->isNotEmpty())
+                    <div class="ds-card mb-3">
+                        <div class="ds-card-header">
+                            <span class="text-[14px]">❓</span>
+                            <h3>История уточнений</h3>
+                            <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $clarificationBatches->count() }}</span>
+                            <span class="flex-1"></span>
+                            <span class="text-[11.5px] text-fg-3">отправленные клиенту запросы и ответы</span>
+                        </div>
+                        <div class="divide-y divide-border-subtle">
+                            @foreach($clarificationBatches as $batch)
+                                @php
+                                    $isAnswered = $batch->status === 'answered';
+                                    $batchQs = $batch->relationLoaded('questions')
+                                        ? $batch->questions
+                                        : $batch->questions()->orderBy('id')->get();
+                                    $generalQ = trim((string) $batch->general_question);
+                                    $perItemCount = $batchQs->filter(fn ($q) => $q->request_item_id !== null)->count();
+                                @endphp
+                                <div class="px-[18px] py-3 text-[12.5px]" wire:key="batch-{{ $batch->id }}">
+                                    <div class="flex items-baseline gap-2 flex-wrap mb-1.5">
+                                        @if($isAnswered)
+                                            <span class="inline-flex items-center px-1.5 rounded-sm bg-emerald-100 text-emerald-800 font-semibold text-[10.5px]">✓ ответ получен</span>
+                                        @else
+                                            <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-100 text-amber-800 font-semibold text-[10.5px]">⏳ ждём ответ</span>
+                                        @endif
+                                        <span class="text-fg-3 text-[11px]">
+                                            отправлено {{ $batch->sent_at?->format('d.m.Y H:i') ?: '—' }}
+                                            @if($batch->createdBy)
+                                                · {{ $batch->createdBy->name }}
+                                            @endif
+                                        </span>
+                                        <span class="text-fg-3 text-[11px]">
+                                            · {{ $perItemCount }} вопрос(ов) по позициям{{ $generalQ !== '' ? ' + общий' : '' }}
+                                        </span>
+                                    </div>
+                                    @if($generalQ !== '')
+                                        <div class="text-fg-1 mb-1">
+                                            <span class="text-fg-3 uppercase tracking-wider text-[10px] font-semibold">общий вопрос:</span>
+                                            <div class="mt-0.5">{{ $generalQ }}</div>
+                                        </div>
+                                    @endif
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                @endif
 
                 @if(! empty($pendingClarifications))
                     <div class="ds-card mb-3 border-amber-300">
