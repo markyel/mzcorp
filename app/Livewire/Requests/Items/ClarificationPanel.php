@@ -115,6 +115,41 @@ class ClarificationPanel extends Component
     }
 
     /**
+     * Комбо-режим: превью готового письма по текущим perItem +
+     * generalQuestion. Read-only — менеджер видит как будет выглядеть
+     * текст, и принимает решение «Сформировать» либо возвращается к
+     * inline-редактору в карточках.
+     */
+    #[Computed]
+    public function previewBody(): string
+    {
+        $request = RequestModel::with(['items' => fn ($q) => $q->where('is_active', true)->orderBy('position')])
+            ->find($this->requestId);
+        if (! $request) {
+            return '';
+        }
+
+        return $this->renderBodyFromState($request);
+    }
+
+    /**
+     * Удалить вопрос по конкретной позиции из черновика (если
+     * менеджер передумал — кнопка ✕ возле строки в превью).
+     */
+    public function clearItemQuestion(int $itemId): void
+    {
+        unset($this->perItem[$itemId]);
+    }
+
+    /**
+     * Удалить общий вопрос.
+     */
+    public function clearGeneralQuestion(): void
+    {
+        $this->generalQuestion = '';
+    }
+
+    /**
      * Сформировать batch + draft и открыть ComposeForm.
      *
      * @return mixed Livewire-friendly return.
@@ -243,7 +278,8 @@ class ClarificationPanel extends Component
     }
 
     /**
-     * Генерация body для clarification-письма.
+     * Генерация body для clarification-письма по сохранённому batch
+     * (для formLetter после создания записи в БД).
      */
     private function renderBody(RequestModel $request, ClarificationBatch $batch): string
     {
@@ -287,6 +323,73 @@ class ClarificationPanel extends Component
                 }
                 $lines[] = $label;
                 $lines[] = '   ' . $q->question;
+                $lines[] = '';
+            }
+        }
+
+        $lines[] = 'Жду вашего ответа. Спасибо!';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Генерация body для превью — по текущему состоянию формы
+     * (perItem + generalQuestion), без обращения к persisted batch.
+     */
+    private function renderBodyFromState(RequestModel $request): string
+    {
+        $clientGreeting = $request->client_name
+            ? 'Здравствуйте, ' . $request->client_name . '!'
+            : 'Здравствуйте!';
+
+        $lines = [];
+        $lines[] = $clientGreeting;
+        $lines[] = '';
+        $lines[] = sprintf(
+            'По вашему запросу №%s%s нужны уточнения, чтобы корректно подобрать предложение.',
+            $request->internal_code,
+            $request->subject ? ' («' . trim((string) $request->subject) . '»)' : '',
+        );
+        $lines[] = '';
+
+        $generalQ = trim($this->generalQuestion);
+        if ($generalQ !== '') {
+            $lines[] = $generalQ;
+            $lines[] = '';
+        }
+
+        // Только непустые per-item вопросы, в порядке позиций.
+        $itemsById = $request->items->keyBy('id');
+        $perItemPairs = [];
+        foreach ($this->perItem as $itemId => $q) {
+            $q = trim((string) $q);
+            if ($q === '' || ! $itemsById->has((int) $itemId)) {
+                continue;
+            }
+            $perItemPairs[] = [
+                'item' => $itemsById[(int) $itemId],
+                'q' => $q,
+            ];
+        }
+        usort($perItemPairs, fn ($a, $b) => ($a['item']->position ?? 0) <=> ($b['item']->position ?? 0));
+
+        if (! empty($perItemPairs)) {
+            $lines[] = 'По позициям:';
+            foreach ($perItemPairs as $pair) {
+                $item = $pair['item'];
+                $label = sprintf(
+                    '%d. %s',
+                    $item->position,
+                    trim((string) $item->parsed_name) ?: '(без названия)',
+                );
+                if ($item->parsed_brand) {
+                    $label .= ' (' . $item->parsed_brand . ')';
+                }
+                if ($item->parsed_article) {
+                    $label .= ' — арт. ' . $item->parsed_article;
+                }
+                $lines[] = $label;
+                $lines[] = '   ' . $pair['q'];
                 $lines[] = '';
             }
         }

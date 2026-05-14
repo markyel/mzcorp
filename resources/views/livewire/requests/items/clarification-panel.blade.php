@@ -47,55 +47,56 @@
                 </div>
             @else
                 <div class="text-[12px] text-fg-3 mb-2">
-                    Введите вопросы по конкретным позициям и/или общий. После «Сформировать письмо» откроется черновик, его можно отредактировать перед отправкой. Заявка автоматически перейдёт в «Жду уточнение клиента».
+                    Вопросы по позициям задаются прямо в карточках (раскройте позицию ▸). Здесь — общий вопрос и предпросмотр готового письма.
                 </div>
 
-                {{-- Общий вопрос --}}
+                {{-- Общий вопрос (нет inline-эквивалента в карточке) --}}
                 <div>
-                    <label class="block text-[12px] uppercase tracking-wider text-fg-3 font-semibold mb-1">
-                        Общий вопрос
-                    </label>
+                    <div class="flex items-center gap-2 mb-1">
+                        <label class="block text-[12px] uppercase tracking-wider text-fg-3 font-semibold">
+                            Общий вопрос
+                        </label>
+                        @if(trim($generalQuestion) !== '')
+                            <button type="button"
+                                    wire:click="clearGeneralQuestion"
+                                    class="text-[10.5px] text-red-600 hover:underline">очистить</button>
+                        @endif
+                    </div>
                     <textarea wire:model.live.debounce.500ms="generalQuestion"
                               rows="2" maxlength="2000"
                               placeholder="Например: уточните, пожалуйста, бренд оборудования и серию лифта"
                               class="w-full px-3 py-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-[var(--sky-500)] resize-y"></textarea>
                 </div>
 
-                {{-- Per-item --}}
-                @if($items->isEmpty())
-                    <div class="text-[12px] text-fg-3 italic">Позиций в заявке нет — введите только общий вопрос.</div>
-                @else
+                {{-- Список добавленных per-item вопросов (read-only, с ✕ для очистки) --}}
+                @php
+                    $perItemNonEmpty = collect($perItem)
+                        ->filter(fn ($q) => trim((string) $q) !== '')
+                        ->mapWithKeys(fn ($q, $id) => [(int) $id => $q]);
+                @endphp
+                @if($perItemNonEmpty->isNotEmpty())
                     <div>
-                        <div class="text-[12px] uppercase tracking-wider text-fg-3 font-semibold mb-2">
-                            Вопросы по конкретным позициям
+                        <div class="text-[12px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">
+                            Вопросы по позициям ({{ $perItemNonEmpty->count() }})
                         </div>
-                        <div class="space-y-2">
+                        <div class="space-y-1">
                             @foreach($items as $item)
-                                @php
-                                    $key = $item->id;
-                                    $cur = (string) ($perItem[$key] ?? '');
-                                    $hasQ = trim($cur) !== '';
-                                @endphp
-                                <div class="p-2 rounded-md {{ $hasQ ? 'bg-amber-50' : 'bg-surface-2' }}">
-                                    <div class="flex items-baseline gap-1.5 mb-1.5 text-[12.5px] text-fg-1 leading-snug flex-wrap">
-                                        <span class="mono text-fg-3 text-[11px] shrink-0">#{{ $item->position }}</span>
-                                        <span class="font-medium">{{ $item->parsed_name ?: '(без названия)' }}</span>
-                                        @if($item->parsed_brand)
-                                            <span class="inline-flex items-center px-1.5 rounded-sm bg-emerald-50 text-emerald-800 font-semibold text-[10.5px]">{{ $item->parsed_brand }}</span>
-                                        @endif
-                                        @if($item->parsed_article)
-                                            <span class="text-[11px] text-fg-3 mono">арт. {{ $item->parsed_article }}</span>
-                                        @endif
-                                        @if($item->parsed_qty)
-                                            <span class="text-[11px] text-fg-3">· {{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') }} {{ $item->parsed_unit ?: 'шт.' }}</span>
-                                        @endif
+                                @continue(! $perItemNonEmpty->has($item->id))
+                                <div class="flex items-start gap-2 p-2 rounded-md bg-amber-50 border border-amber-200">
+                                    <span class="mono text-fg-3 text-[11px] shrink-0 mt-0.5">#{{ $item->position }}</span>
+                                    <div class="flex-1 min-w-0 text-[12.5px]">
+                                        <div class="font-medium text-fg-1 mb-0.5">{{ $item->parsed_name ?: '(без названия)' }}</div>
+                                        <div class="text-fg-2 whitespace-pre-line">{{ $perItemNonEmpty[$item->id] }}</div>
                                     </div>
-                                    <textarea wire:model.live.debounce.500ms="perItem.{{ $item->id }}"
-                                              rows="2" maxlength="1000"
-                                              placeholder="Вопрос по этой позиции (например: пришлите фото шильдика)"
-                                              class="w-full px-3 py-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-[var(--sky-500)] resize-y"></textarea>
+                                    <button type="button"
+                                            wire:click="clearItemQuestion({{ $item->id }})"
+                                            class="text-red-600 hover:text-red-800 text-[14px] leading-none px-1 shrink-0"
+                                            title="Убрать этот вопрос из черновика">✕</button>
                                 </div>
                             @endforeach
+                        </div>
+                        <div class="text-[11px] text-fg-3 mt-1.5">
+                            Чтобы изменить — закройте предпросмотр и отредактируйте текст в карточке позиции.
                         </div>
                     </div>
                 @endif
@@ -103,6 +104,14 @@
                 @error('generalQuestion')
                     <div class="text-red-700 text-[12px]">{{ $message }}</div>
                 @enderror
+
+                {{-- Read-only preview готового текста письма --}}
+                <div>
+                    <div class="text-[12px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">
+                        Так увидит клиент
+                    </div>
+                    <pre class="text-[12.5px] font-mono text-fg-1 bg-surface-2 border border-border rounded-md p-3 whitespace-pre-wrap leading-snug max-h-[280px] overflow-auto">{{ $this->previewBody }}</pre>
+                </div>
 
                 <div class="flex items-center gap-2 pt-2 border-t border-border-subtle">
                     <button type="button"
