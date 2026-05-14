@@ -8,6 +8,7 @@ use App\Models\Request as RequestModel;
 use App\Services\Mail\EmailDraftService;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
@@ -54,6 +55,42 @@ class ClarificationPanel extends Component
     public function toggle(): void
     {
         $this->expanded = ! $this->expanded;
+    }
+
+    /**
+     * Foundation §6.2 Commit B: позиция-карточка (slot или quick-chip)
+     * дёргает «+ спросить» — мы аппендим заполненный template в
+     * `perItem[itemId]` и раскрываем панель. Если поле уже не пустое —
+     * приписываем шаблон с новой строки.
+     *
+     * Payload: {itemId, slotKey, slotLabel, template, itemName?}
+     */
+    #[On('clarification-add-slot-question')]
+    public function addSlotQuestion(
+        int $itemId,
+        ?string $slotKey = null,
+        ?string $slotLabel = null,
+        ?string $template = null,
+        ?string $itemName = null,
+    ): void {
+        $tpl = trim((string) $template);
+        if ($tpl === '') {
+            // Fallback по label: «Уточните <label>».
+            $tpl = $slotLabel
+                ? sprintf('Уточните, пожалуйста: %s.', mb_strtolower($slotLabel))
+                : 'Уточните, пожалуйста, эту позицию.';
+        }
+        // Простая подстановка плейсхолдеров если template из KB.
+        if ($itemName) {
+            $tpl = str_replace(['{name}', '{item}'], $itemName, $tpl);
+        }
+
+        $current = trim((string) ($this->perItem[$itemId] ?? ''));
+        $this->perItem[$itemId] = $current === ''
+            ? $tpl
+            : $current . "\n" . $tpl;
+
+        $this->expanded = true;
     }
 
     /**

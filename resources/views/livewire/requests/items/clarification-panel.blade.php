@@ -1,16 +1,25 @@
-<div class="ds-card mt-3" wire:key="clarification-panel-{{ $requestId }}">
+<div class="ds-card mt-3 sticky bottom-0 z-20 shadow-[0_-4px_18px_-6px_rgba(0,0,0,0.12)]"
+     wire:key="clarification-panel-{{ $requestId }}">
     @php
         $pending = $this->pendingCount;
     @endphp
-    <div class="ds-card-header cursor-pointer" wire:click="toggle">
+    <div class="ds-card-header cursor-pointer {{ $pending > 0 ? 'bg-amber-50' : '' }}" wire:click="toggle">
         <span class="text-[14px]">❓</span>
-        <h3 class="m-0">Уточняющие вопросы клиенту</h3>
+        <h3 class="m-0">Черновик уточнений клиенту</h3>
         @if($pending > 0)
-            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10.5px] font-semibold">
-                {{ $pending }} вопросов в форме
+            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-200 text-amber-900 text-[10.5px] font-bold">
+                ✎ {{ $pending }} {{ \Illuminate\Support\Str::plural('вопрос', $pending) }}
             </span>
         @endif
         <span class="flex-1"></span>
+        @if($pending > 0 && ! $expanded)
+            <button type="button"
+                    wire:click.stop="formLetter"
+                    class="btn btn-sm btn-primary"
+                    wire:loading.attr="disabled" wire:target="formLetter">
+                📨 Сформировать ({{ $pending }})
+            </button>
+        @endif
         <span class="text-[11px] text-fg-3">{{ $expanded ? '▾ свернуть' : '▸ раскрыть' }}</span>
     </div>
 

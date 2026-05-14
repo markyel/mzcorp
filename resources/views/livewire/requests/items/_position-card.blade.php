@@ -216,6 +216,37 @@
         @endforeach
     </div>
 
+    {{-- QUICK-CHIPS — универсальные шаблоны для одного клика
+         «спросить». Не дублируют slot-кнопки: тут типовые запросы,
+         которые не привязаны к конкретному слоту. --}}
+    @if(($canEditItems ?? false))
+        @php
+            $quickChips = [
+                ['icon' => '📷', 'label' => 'Фото шильдика',
+                 'tpl' => 'Пришлите, пожалуйста, фото шильдика этой позиции.'],
+                ['icon' => '🏷', 'label' => 'Марка/серия лифта',
+                 'tpl' => 'Уточните, пожалуйста, марку и серию лифта, для которого нужна эта позиция.'],
+                ['icon' => '📐', 'label' => 'Точные параметры',
+                 'tpl' => 'Какие точные параметры нужны (диаметр / длина / мощность / напряжение)?'],
+                ['icon' => '🔢', 'label' => 'Количество',
+                 'tpl' => 'Уточните, пожалуйста, требуемое количество.'],
+            ];
+            $itemNameJs = trim((string) ($item->parsed_name ?: 'позиция #' . $item->position));
+        @endphp
+        <div class="px-[18px] py-2 bg-surface border-t border-border-subtle flex items-center gap-1.5 flex-wrap">
+            <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mr-1">Спросить:</span>
+            @foreach($quickChips as $chip)
+                <button type="button"
+                        wire:click="$dispatch('clarification-add-slot-question', { itemId: {{ $item->id }}, slotKey: 'quick:{{ $loop->index }}', slotLabel: @js($chip['label']), template: @js($chip['tpl']), itemName: @js($itemNameJs) })"
+                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-[11px] transition-colors"
+                        title="{{ $chip['tpl'] }}">
+                    <span>{{ $chip['icon'] }}</span>
+                    <span>{{ $chip['label'] }}</span>
+                </button>
+            @endforeach
+        </div>
+    @endif
+
     {{-- ENRICHMENT SUGGESTIONS (Foundation §6.2 Phase C) --}}
     @php
         $allSuggestions = is_array($item->quality_assessment_payload['enrichment_suggestions'] ?? null)
