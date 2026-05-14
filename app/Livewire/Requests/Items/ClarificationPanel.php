@@ -5,6 +5,7 @@ namespace App\Livewire\Requests\Items;
 use App\Models\ClarificationBatch;
 use App\Models\ClarificationQuestion;
 use App\Models\Request as RequestModel;
+use App\Models\RequestItem;
 use App\Services\Mail\EmailDraftService;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
@@ -95,10 +96,25 @@ class ClarificationPanel extends Component
                 ? sprintf('Уточните, пожалуйста: %s.', mb_strtolower($slotLabel))
                 : 'Уточните, пожалуйста, эту позицию.';
         }
-        // Простая подстановка плейсхолдеров если template из KB.
-        if ($itemName) {
-            $tpl = str_replace(['{name}', '{item}'], $itemName, $tpl);
-        }
+        // Подстановка плейсхолдеров KB-шаблона. Источник истины ключей —
+        // QuestionGenerationService::generate(): position_number, item_name,
+        // brand, category_name. Раньше резолвили только {name}/{item} —
+        // остальные ключи (особенно {position_number}) улетали в письмо
+        // литералом. Здесь резолвим из RequestItem на лету; неизвестные/
+        // пустые ключи заменяем на пустую строку, чтобы placeholder не
+        // оказался в исходящем письме.
+        $item = RequestItem::find($itemId);
+        $resolvedItemName = $itemName !== null && $itemName !== ''
+            ? $itemName
+            : (string) ($item->parsed_name ?? '');
+        $tpl = strtr($tpl, [
+            '{position_number}' => (string) ($item->position ?? ''),
+            '{item_name}' => $resolvedItemName,
+            '{name}' => $resolvedItemName,
+            '{item}' => $resolvedItemName,
+            '{brand}' => (string) ($item->parsed_brand ?? ''),
+            '{category_name}' => (string) ($item?->kbCategory?->name ?? $item?->category ?? ''),
+        ]);
 
         $current = trim((string) ($this->perItem[$itemId] ?? ''));
         $this->perItem[$itemId] = $current === ''

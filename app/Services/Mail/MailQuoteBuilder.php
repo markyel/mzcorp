@@ -61,6 +61,7 @@ class MailQuoteBuilder
             ENT_QUOTES,
             'UTF-8'
         )));
+        $originalHtml = $this->sanitizeQuotedHtml($originalHtml);
 
         $html = '<br><div>' . $attributionHtml . '<br></div>'
             . '<blockquote type="cite" '
@@ -83,6 +84,50 @@ class MailQuoteBuilder
             $displayName,
             $fromEmail,
         );
+    }
+
+    /**
+     * Изоляция цитируемого HTML от внешних писем.
+     *
+     * Письма из шаблонизаторов (Liftway, Mailchimp, корп-системы) часто
+     * приходят как «полный документ»: `<html><head><style>blockquote{…}</style>
+     * <style>* { … }</style></head><body>…</body></html>`. Если положить такое
+     * целиком внутрь нашего `<blockquote type="cite" …>`, происходит две
+     * проблемы:
+     *   1. `<style>` каскадирует на ВЕСЬ родительский iframe — переопределяет
+     *      нашу рамку blockquote, шрифты, поля. В CRM-треде цитата визуально
+     *      перестаёт отличаться от тела письма («продолжение»).
+     *   2. Apple Mail / Yandex Web UI при наличии вложенного `<html>`/`<head>`
+     *      перестают распознавать blockquote как quoted text и не сворачивают
+     *      цитату троеточием.
+     *
+     * Распаковываем `<body>…</body>` если оригинал — full doc, и срезаем
+     * `<style>`, `<script>`, `<head>`, `<html>`, `<body>`-теги (атрибуты
+     * `style="…"` остаются — это inline-стили, они безопасны и нужны для
+     * сохранения вида КП-плашек и таблиц).
+     */
+    private function sanitizeQuotedHtml(string $html): string
+    {
+        if ($html === '') {
+            return '';
+        }
+
+        // Выдрать содержимое <body>...</body> если это полный документ.
+        if (preg_match('/<body\b[^>]*>(.*?)<\/body>/is', $html, $m)) {
+            $html = $m[1];
+        }
+
+        // Срезать <head>...</head> если каким-то образом дошёл (без body).
+        $html = preg_replace('/<head\b[^>]*>.*?<\/head>/is', '', $html) ?? $html;
+
+        // Срезать <style>, <script>, <link>, <meta> вместе с содержимым.
+        $html = preg_replace('/<(style|script)\b[^>]*>.*?<\/\1>/is', '', $html) ?? $html;
+        $html = preg_replace('/<(link|meta)\b[^>]*\/?>/i', '', $html) ?? $html;
+
+        // Срезать обёрточные теги документа (оставляем содержимое).
+        $html = preg_replace('/<\/?(html|body)\b[^>]*>/i', '', $html) ?? $html;
+
+        return trim($html);
     }
 
     /**
