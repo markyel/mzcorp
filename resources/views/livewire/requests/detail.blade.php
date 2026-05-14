@@ -54,8 +54,9 @@
 
     {{-- ────────── AI BANNER (Foundation §6.2 Phase E.2) ──────────
          Виден всегда (любая вкладка) когда есть pending enrichment
-         suggestions И заявка в AwaitingClientClarification. Резюмирует
-         что распознал LLM + цитата + кнопка «Применить всё → в работу». --}}
+         suggestions. Inline-фраза с распознанными значениями + цитата.
+         Кнопка «Применить всё → в работу» — только в AwaitingClient.
+         «Открыть позиции →» — только если не на этом табе. --}}
     @php
         $_aiSuggs = collect();
         foreach ($req->items as $_i) {
@@ -72,20 +73,30 @@
         $_aiAvgConf = $_aiSuggs->isNotEmpty()
             ? (int) round($_aiSuggs->avg(fn ($e) => (float) ($e['sugg']['confidence'] ?? 0)) * 100) : 0;
 
-        // Сводка распознанного: «бренд КМЗ и артикул ZAA622Y1»
-        $_aiFieldLabels = ['parsed_brand' => 'бренд', 'parsed_article' => 'артикул', 'parsed_qty' => 'кол-во'];
-        $_aiSummaryParts = [];
+        // Распознанные пары «глагол значение» с inline-форматированием
+        // (значение mono+bold). Глагол per-field, чтобы фраза читалась.
+        $_aiFieldVerbs = [
+            'parsed_brand' => 'бренд',
+            'parsed_article' => 'подтверждение артикула',
+            'parsed_qty' => 'количество',
+        ];
+        $_aiSummaryPairs = [];
         foreach ($_aiSuggs->take(4) as $_e) {
             $_f = (string) ($_e['sugg']['field'] ?? '');
             $_v = (string) ($_e['sugg']['value'] ?? '');
-            $_lbl = $_aiFieldLabels[$_f] ?? (str_starts_with($_f, 'kb:') ? mb_strtolower(\Illuminate\Support\Str::after($_f, 'kb:')) : $_f);
-            if ($_v !== '') {
-                $_aiSummaryParts[] = $_lbl . ' ' . $_v;
+            if ($_v === '') continue;
+            if (isset($_aiFieldVerbs[$_f])) {
+                $_aiSummaryPairs[] = [$_aiFieldVerbs[$_f], $_v];
+            } elseif (str_starts_with($_f, 'kb:')) {
+                $_kbSlug = substr($_f, 3);
+                $_aiSlots = isset($slotResolver) ? $slotResolver->resolve($_e['item'])
+                    : app(\App\Services\Kb\PositionSlotResolver::class)->resolve($_e['item']);
+                $_kbLabel = collect($_aiSlots)->firstWhere('key', $_f)['label'] ?? $_kbSlug;
+                $_aiSummaryPairs[] = [mb_strtolower($_kbLabel), $_v];
             }
         }
-        $_aiSummary = implode(', ', $_aiSummaryParts);
 
-        // Sample citation
+        // Sample citation — берём первый непустой quote.
         $_aiQuote = '';
         foreach ($_aiSuggs as $_e) {
             $_q = trim((string) ($_e['sugg']['source_quote'] ?? ''));
@@ -94,54 +105,88 @@
 
         $_inClarif = $req->status === \App\Enums\RequestStatus::AwaitingClientClarification;
 
+        // Рекомендация — action-цепочка.
+        $_aiRecs = [];
+        if ($_inClarif) {
+            $_aiRecs[] = 'перевести в статус «в работе»';
+        }
+        $_aiRecs[] = 'применить ' . $_aiSuggs->count() . ' '
+            . \Illuminate\Support\Str::plural('уточнение', $_aiSuggs->count());
+
         // $canEditItems определена внутри @case('items'), здесь баннер
         // отрисовывается ВНЕ tabs — вычисляем локально.
         $_canEdit = auth()->id() === $req->assigned_user_id
             || auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'secretary']);
+
+        // «Открыть позиции →» только если мы не на items-табе.
+        $_onItemsTab = $tab === 'items';
     @endphp
-    @if($_aiSuggs->isNotEmpty() && $_canEdit)
-        <div class="mb-3 rounded-md border border-violet-300 bg-gradient-to-br from-violet-50 to-sky-50/40 p-3.5 flex items-start gap-3 shadow-sm">
+    @if($_aiSuggs->isNotEmpty() && $_canEdit && ! $aiBannerHidden)
+        <div class="mb-3 rounded-md border border-violet-300 bg-gradient-to-br from-violet-50 to-sky-50/40 p-3.5 flex items-center gap-3 shadow-sm">
             <div class="shrink-0 w-9 h-9 rounded-md bg-violet-600 text-white flex items-center justify-center font-bold text-[12px] tracking-wider">AI</div>
-            <div class="flex-1 min-w-0 text-[12.5px]">
+            <div class="flex-1 min-w-0 text-[12.5px] leading-snug">
+                {{-- Title + confidence chip --}}
                 <div class="flex items-baseline gap-2 flex-wrap mb-1">
-                    <span class="font-semibold text-fg-1">
-                        Клиент ответил на уточнения по {{ $_aiPositionsCount }} {{ \Illuminate\Support\Str::plural('позиц', $_aiPositionsCount) }}{{ $_aiPositionsCount === 1 ? 'и' : ($_aiPositionsCount < 5 ? 'ям' : 'иям') }}
+                    <span class="font-semibold text-fg-1 text-[13px]">
+                        Клиент ответил на уточнение по {{ $_aiPositionsCount }} {{ \Illuminate\Support\Str::plural('позиц', $_aiPositionsCount) }}{{ $_aiPositionsCount === 1 ? 'и' : ($_aiPositionsCount < 5 ? 'ям' : 'иям') }}
                     </span>
-                    <span class="inline-flex items-center px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-800 text-[10.5px] font-semibold">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm bg-violet-100 text-violet-800 text-[10.5px] font-semibold uppercase tracking-wider">
                         уверенность {{ $_aiAvgConf }}%
                     </span>
                 </div>
-                @if($_aiSummary !== '')
-                    <div class="text-fg-2 mb-1">
-                        Распознал: <span class="font-medium text-fg-1">{{ $_aiSummary }}</span>
+
+                {{-- Inline: «Распознал бренд X и подтверждение артикула Y. Цитата из ответа: «...»» --}}
+                @if(! empty($_aiSummaryPairs) || $_aiQuote !== '')
+                    <div class="text-fg-2 mb-0.5">
+                        @if(! empty($_aiSummaryPairs))
+                            <span>Распознал </span>
+                            @foreach($_aiSummaryPairs as $_idx => $_pair)
+                                <span class="text-fg-3">{{ $_pair[0] }}</span>
+                                <span class="inline-flex items-baseline px-1 rounded-sm bg-violet-50 text-fg-1 font-semibold mono">{{ $_pair[1] }}</span>{{ $_idx < count($_aiSummaryPairs) - 2 ? ', ' : ($_idx === count($_aiSummaryPairs) - 2 ? ' и ' : '') }}
+                            @endforeach
+                            @if($_aiQuote !== '')<span class="text-fg-2"> · </span>@endif
+                        @endif
+                        @if($_aiQuote !== '')
+                            <span class="text-fg-3">Цитата из ответа: </span>
+                            <span class="inline-flex items-baseline px-1.5 rounded-sm bg-surface-2 border border-border-subtle text-fg-2 italic text-[11.5px]">«{{ \Illuminate\Support\Str::limit($_aiQuote, 140) }}»</span>
+                        @endif
                     </div>
                 @endif
-                @if($_aiQuote !== '')
-                    <div class="text-fg-3 italic text-[11.5px] pl-2 border-l-2 border-violet-300 mb-1">
-                        «{{ \Illuminate\Support\Str::limit($_aiQuote, 200) }}»
-                    </div>
-                @endif
+
+                {{-- Recommendation line --}}
                 <div class="text-[11.5px] text-fg-3">
-                    @if($_inClarif)
-                        Рекомендую: применить все {{ $_aiSuggs->count() }} предложен{{ $_aiSuggs->count() === 1 ? 'ие' : 'ия' }} и вернуть заявку «в работу».
-                    @else
-                        В табе «Позиции» — обзор предложений с diff'ом и confidence bar.
-                    @endif
+                    Рекомендую: {{ implode(', ', $_aiRecs) }}.
                 </div>
             </div>
-            <div class="shrink-0 flex flex-col gap-1.5 items-end">
+
+            {{-- Right column: actions --}}
+            <div class="shrink-0 flex items-center gap-2.5">
+                <button type="button"
+                        wire:click="hideAiBanner"
+                        class="text-[12px] text-fg-3 hover:text-fg-1 hover:underline">Скрыть</button>
+                @if(! $_onItemsTab)
+                    <a href="#" wire:click.prevent="setTab('items')"
+                       class="text-[12px] text-sky-700 hover:underline">Открыть позиции →</a>
+                @endif
                 @if($_inClarif)
                     <button type="button"
                             wire:click="applyAllAndProgress"
                             wire:confirm="Применить все {{ $_aiSuggs->count() }} предложений и перевести заявку в «В работе»?"
                             class="btn btn-primary"
                             wire:loading.attr="disabled" wire:target="applyAllAndProgress">
-                        <span wire:loading.remove wire:target="applyAllAndProgress">✓ Применить всё → в работу</span>
+                        <span wire:loading.remove wire:target="applyAllAndProgress">✓ Применить всё и → в работу</span>
                         <span wire:loading wire:target="applyAllAndProgress">…</span>
                     </button>
+                @else
+                    <button type="button"
+                            wire:click="applyAllEnrichments"
+                            wire:confirm="Применить все {{ $_aiSuggs->count() }} предложений?"
+                            class="btn btn-primary"
+                            wire:loading.attr="disabled" wire:target="applyAllEnrichments">
+                        <span wire:loading.remove wire:target="applyAllEnrichments">✓ Применить всё</span>
+                        <span wire:loading wire:target="applyAllEnrichments">…</span>
+                    </button>
                 @endif
-                <a href="#" wire:click.prevent="setTab('items')"
-                   class="text-[11.5px] text-sky-700 hover:underline">Открыть позиции →</a>
             </div>
         </div>
     @endif

@@ -70,6 +70,12 @@ class Detail extends Component
      */
     public array $expandedPositions = [];
 
+    /**
+     * Phase E.2: менеджер скрыл AI-баннер вручную. Состояние в Livewire-
+     * сессии, ресетится при reload страницы.
+     */
+    public bool $aiBannerHidden = false;
+
     public function mount(Request $request): void
     {
         $user = auth()->user();
@@ -454,6 +460,14 @@ class Detail extends Component
         } else {
             $this->expandedPositions[$itemId] = true;
         }
+    }
+
+    /**
+     * Phase E.2: «Скрыть» AI-баннер до перезагрузки страницы.
+     */
+    public function hideAiBanner(): void
+    {
+        $this->aiBannerHidden = true;
     }
 
     /**
