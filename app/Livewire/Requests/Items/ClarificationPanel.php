@@ -42,6 +42,17 @@ class ClarificationPanel extends Component
      */
     public array $perItem = [];
 
+    /**
+     * Foundation §6.2 Phase D — Map item_id → target_slot_key
+     * (последний slot из которого был добавлен вопрос). При formLetter
+     * сохраняется в clarification_questions.target_slot_key — LLM-
+     * матчер потом получит и направит enrichment suggestion в правильное
+     * поле без угадывания.
+     *
+     * @var array<int, string>
+     */
+    public array $perItemSlotKey = [];
+
     /** Общий вопрос (не привязан к конкретной позиции). */
     public string $generalQuestion = '';
 
@@ -93,6 +104,15 @@ class ClarificationPanel extends Component
         $this->perItem[$itemId] = $current === ''
             ? $tpl
             : $current . "\n" . $tpl;
+
+        // Phase D: запоминаем target slot для последующего матчинга ответа.
+        // 'free' / 'quick:*' — не дают надёжного target, оставляем существующий
+        // если уже был, иначе null. Базовые / KB слоты — перезаписываем.
+        if ($slotKey !== null
+            && $slotKey !== 'free'
+            && ! str_starts_with($slotKey, 'quick:')) {
+            $this->perItemSlotKey[$itemId] = $slotKey;
+        }
     }
 
     /**
@@ -139,6 +159,7 @@ class ClarificationPanel extends Component
     public function clearItemQuestion(int $itemId): void
     {
         unset($this->perItem[$itemId]);
+        unset($this->perItemSlotKey[$itemId]);
     }
 
     /**
@@ -207,6 +228,7 @@ class ClarificationPanel extends Component
                     'batch_id' => $batch->id,
                     'request_item_id' => $itemId,
                     'question' => $question,
+                    'target_slot_key' => $this->perItemSlotKey[$itemId] ?? null,
                 ]);
             }
 
@@ -260,6 +282,7 @@ class ClarificationPanel extends Component
 
         // Очищаем форму + закрываем панель.
         $this->perItem = [];
+        $this->perItemSlotKey = [];
         $this->generalQuestion = '';
         $this->expanded = false;
 

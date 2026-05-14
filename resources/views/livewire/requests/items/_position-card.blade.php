@@ -327,11 +327,17 @@
             $allSuggestions,
             fn ($s) => is_array($s) && ($s['status'] ?? 'pending') === 'pending',
         );
+        // Phase D: динамические fieldLabels — базовые + kb:* из slots.
         $fieldLabels = [
             'parsed_article' => 'Артикул',
             'parsed_brand' => 'Бренд',
             'parsed_qty' => 'Кол-во',
         ];
+        foreach ($slots as $_sl) {
+            if (str_starts_with($_sl['key'], 'kb:')) {
+                $fieldLabels[$_sl['key']] = $_sl['label'];
+            }
+        }
     @endphp
     @if(! empty($pendingSuggestions) && ($canEditItems ?? false))
         <div class="px-[18px] py-2.5 bg-amber-50/50 border-t border-amber-200 space-y-1.5">

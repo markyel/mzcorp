@@ -18,6 +18,7 @@ class ClarificationQuestion extends Model
         'batch_id',
         'request_item_id',
         'question',
+        'target_slot_key',
         'answer',
         'answered_at',
         'answered_via_message_id',

@@ -628,14 +628,34 @@ class RequestItemEditor
 
         $field = (string) ($sugg['field'] ?? '');
         $value = (string) ($sugg['value'] ?? '');
-        if (! in_array($field, self::EDITABLE_FIELDS, true) || $value === '') {
+        $isKb = str_starts_with($field, 'kb:');
+        $isBase = in_array($field, self::EDITABLE_FIELDS, true);
+        if ((! $isKb && ! $isBase) || $value === '') {
             return $item;
         }
 
-        DB::transaction(function () use ($item, $field, $value, $suggestionId, $sugg, $author) {
-            // editFields внутри делает audit. Делаем в той же транзакции
-            // чтобы suggestion-mark + edit были атомарны.
-            $this->editFields($item, [$field => $value], $author);
+        DB::transaction(function () use ($item, $field, $value, $suggestionId, $sugg, $author, $isKb) {
+            if ($isKb) {
+                // Phase D: KB-слот — пишем в extracted_parameters[slug].
+                $slug = substr($field, 3);
+                $fresh = $item->fresh();
+                $p = is_array($fresh->quality_assessment_payload) ? $fresh->quality_assessment_payload : [];
+                $extracted = is_array($p['extracted_parameters'] ?? null) ? $p['extracted_parameters'] : [];
+                $extracted[$slug] = $value;
+                $p['extracted_parameters'] = $extracted;
+                $fresh->quality_assessment_payload = $p;
+                $fresh->save();
+                $this->appendAudit($fresh, [
+                    'action' => 'enrichment_applied_to_kb_slot',
+                    'slot' => $slug,
+                    'value' => $value,
+                    'from_suggestion' => $suggestionId,
+                ], $author);
+            } else {
+                // editFields внутри делает audit. В той же транзакции
+                // чтобы suggestion-mark + edit были атомарны.
+                $this->editFields($item, [$field => $value], $author);
+            }
 
             // Пометить suggestion как applied (re-load payload, потому что
             // editFields мог тронуть payload через manual_edits).
