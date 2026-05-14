@@ -141,12 +141,31 @@ class ClarificationPanel extends Component
 
         $bodyPlain = $this->renderBody($request, $batch->fresh('questions.requestItem'));
 
-        // Создаём draft через EmailDraftService::createCompose.
-        $draft = $drafts->createCompose($request, $user);
+        // Phase 6.2: создаём reply на последнее inbound клиента — даёт
+        // In-Reply-To/References (threading в клиентской почте) и
+        // OutgoingMailMimeBuilder приклеит цитату оригинала. Если inbound
+        // нет (заявка создана не из email или письмо отвалилось) —
+        // fallback на createCompose без цитаты.
+        $lastInbound = \App\Models\EmailMessage::query()
+            ->where('related_request_id', $request->id)
+            ->where('direction', \App\Enums\MailDirection::Inbound->value)
+            ->where('is_draft', false)
+            ->orderByDesc('sent_at')
+            ->orderByDesc('id')
+            ->first();
 
-        // Перезаполняем subject + body + помечаем clarification-маркером
-        // в detected_artifacts (ComposeForm::send читает его).
-        $subject = '[' . $request->internal_code . '] Уточнения по заявке';
+        $draft = $lastInbound
+            ? $drafts->createReply($request, $lastInbound, $user, false)
+            : $drafts->createCompose($request, $user);
+
+        // Subject:
+        //  - reply: createReply уже поставил «Re: <orig>». Оставляем как есть,
+        //    клиент увидит «Re: ...» — Yandex/Outlook сгруппируют в один thread.
+        //  - compose: ставим осмысленный subject с кодом заявки.
+        $newSubject = $lastInbound
+            ? $draft->subject // от createReply
+            : '[' . $request->internal_code . '] Уточнения по заявке';
+
         $artifacts = is_array($draft->detected_artifacts ?? null) ? $draft->detected_artifacts : [];
         $artifacts[] = [
             'type' => 'clarification_batch',
@@ -156,7 +175,7 @@ class ClarificationPanel extends Component
         ];
 
         $draft->forceFill([
-            'subject' => $subject,
+            'subject' => $newSubject,
             'body_plain' => $bodyPlain,
             'detected_artifacts' => $artifacts,
             'last_edited_at' => now(),

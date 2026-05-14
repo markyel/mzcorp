@@ -131,8 +131,8 @@ enum RequestStatus: string
     {
         return match ($this) {
             self::Pending => [self::New, self::Assigned, self::ClosedLost],
-            self::New => [self::Assigned, self::InProgress, self::ClosedLost],
-            self::Assigned => [self::InProgress, self::ClosedLost],
+            self::New => [self::Assigned, self::InProgress, self::AwaitingClientClarification, self::ClosedLost],
+            self::Assigned => [self::InProgress, self::AwaitingClientClarification, self::ClosedLost],
             self::InProgress => [
                 self::AwaitingClientClarification,
                 self::Quoted,
