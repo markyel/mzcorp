@@ -943,7 +943,7 @@ PROMPT;
             ), fn ($v) => $v !== null)),
         ]);
 
-        return array_map(function (array $item) use ($attachmentIds) {
+        $normalizedItems = array_map(function (array $item) use ($attachmentIds) {
             $normalized = $this->normalizeParsedItem($item);
             // Phase 2: резолв image_index → конкретный email_attachments.id.
             // Если Vision не вернул index, вернул не-int, или out-of-range —
@@ -957,6 +957,36 @@ PROMPT;
 
             return $normalized;
         }, $items);
+
+        // Phase 2.4b fallback: тривиальный случай 1×1.
+        // Vision-промпт «лучше null чем угадывать» (CoT a39e314) иногда
+        // возвращает image_index=null даже когда у заявки ровно одно фото
+        // и одна позиция — например, close-up шильдика, где «главный объект»
+        // с точки зрения LLM = шильдик, а не товар. Это false null:
+        // менеджер всё равно привяжет вручную, а 1-к-1 связь однозначна.
+        $itemsWithoutAtt = array_keys(array_filter(
+            $normalizedItems,
+            fn ($it) => empty($it['email_attachment_id']),
+        ));
+        $usedAttIds = array_filter(array_map(
+            fn ($it) => $it['email_attachment_id'] ?? null,
+            $normalizedItems,
+        ));
+        $unusedAttIds = array_values(array_diff(
+            array_filter($attachmentIds, fn ($id) => $id !== null),
+            $usedAttIds,
+        ));
+        if (count($itemsWithoutAtt) === 1 && count($unusedAttIds) === 1) {
+            $itemIdx = $itemsWithoutAtt[0];
+            $normalizedItems[$itemIdx]['email_attachment_id'] = $unusedAttIds[0];
+            Log::info('RequestItemParsingService: trivial 1×1 photo fallback applied', [
+                'item_index' => $itemIdx,
+                'email_attachment_id' => $unusedAttIds[0],
+                'reason' => 'Vision returned image_index=null but only one item/photo — safe auto-bind',
+            ]);
+        }
+
+        return $normalizedItems;
     }
 
     /**
