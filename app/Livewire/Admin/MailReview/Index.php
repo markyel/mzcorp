@@ -182,8 +182,10 @@ class Index extends Component
     #[Computed]
     public function counters(): array
     {
+        // EmailClassification::Request исключён в buildQuery() — counters
+        // показывают все «не-заявочные» классы. Irrelevant — это термин
+        // из EmailCategory (3 значения), а не EmailClassification (6).
         $classes = [
-            EmailClassification::Irrelevant->value,
             EmailClassification::Reclamation->value,
             EmailClassification::Accounting->value,
             EmailClassification::GeneralQuestion->value,
