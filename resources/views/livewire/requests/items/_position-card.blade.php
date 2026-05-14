@@ -66,33 +66,33 @@
 @endphp
 
 <div wire:key="position-card-{{ $item->id }}"
-     class="border {{ $cardTone }} {{ $cardBg }} rounded-md overflow-hidden mb-1.5 {{ $item->is_active ? '' : 'opacity-50' }}">
+     class="border {{ $cardTone }} {{ $cardBg }} rounded-md mb-1.5 {{ $item->is_active ? '' : 'opacity-50' }}">
 
     {{-- HEADER --}}
-    <div class="grid items-center px-[12px] {{ $isExpanded ? 'py-2.5 border-b border-border-subtle' : 'py-1.5' }} gap-2.5"
-         style="grid-template-columns: 24px 40px 1fr 110px 70px 80px 80px 80px 30px 32px">
+    <div class="grid items-center px-[12px] {{ $isExpanded ? 'py-2 border-b border-border-subtle' : 'py-1' }} gap-2.5 min-h-[44px]"
+         style="grid-template-columns: 28px 44px minmax(0,1fr) 130px 80px 90px 80px 90px 28px 24px">
         {{-- Position number --}}
-        <div class="text-fg-3 font-semibold text-[15px] text-right mono">{{ $item->position }}</div>
+        <div class="text-fg-3 font-semibold text-[13px] text-right mono">{{ $item->position }}</div>
 
         {{-- Image --}}
         @if($itemImgIsImage)
             <button type="button"
                     x-on:click="$dispatch('open-image', { src: @js($itemPreviewUrl), name: @js($itemImg->filename), dl: @js($itemDownloadUrl) })"
-                    class="w-[52px] h-[52px] border border-border rounded-[6px] overflow-hidden bg-app block"
+                    class="w-10 h-10 border border-border rounded-[6px] overflow-hidden bg-app block shrink-0"
                     title="{{ $itemImg->filename }} — открыть">
                 <img src="{{ $itemPreviewUrl }}"
                      alt="{{ $itemImg->filename }}"
                      loading="lazy"
-                     class="w-[52px] h-[52px] object-cover block">
+                     class="w-10 h-10 object-cover block">
             </button>
         @else
-            <div class="w-[52px] h-[52px] border border-border rounded-[6px] bg-app flex items-center justify-center text-[9px] text-fg-3 mono"
+            <div class="w-10 h-10 border border-border rounded-[6px] bg-app flex items-center justify-center text-[9px] text-fg-3 mono shrink-0"
                  title="Без привязки к фото">img</div>
         @endif
 
         {{-- Title --}}
         <div class="min-w-0">
-            <div class="font-medium text-[14px] leading-tight text-fg-1 flex items-baseline gap-2 flex-wrap mb-1">
+            <div class="font-medium text-[13px] leading-tight text-fg-1 flex items-baseline gap-1.5 flex-wrap">
                 <span>{{ $item->parsed_name ?: '(без названия)' }}</span>
                 @if($item->brand)
                     <span class="inline-flex items-center px-1.5 rounded-sm bg-neutral-100 text-neutral-700 font-semibold text-[10.5px] uppercase tracking-wider">{{ $item->brand->name }}</span>
