@@ -104,4 +104,13 @@ class RequestItem extends Model
     {
         return $this->belongsTo(CatalogItem::class, 'catalog_item_id');
     }
+
+    /**
+     * Уточняющие вопросы по этой позиции (Foundation §6.2).
+     * Может быть несколько — каждый batch формирует свой ряд.
+     */
+    public function clarificationQuestions(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(ClarificationQuestion::class);
+    }
 }

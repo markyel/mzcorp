@@ -144,6 +144,15 @@ class Request extends Model
     }
 
     /**
+     * Уточняющие вопросы клиенту (Foundation §6.2).
+     * Каждый batch — одно исходящее письмо.
+     */
+    public function clarificationBatches(): HasMany
+    {
+        return $this->hasMany(ClarificationBatch::class);
+    }
+
+    /**
      * Активные делегации (ended_at IS NULL) — обычно 0 или 1 одновременно,
      * но schema допускает несколько (теоретически несколько оригиналов
      * для одной заявки никогда не будет, но запас).

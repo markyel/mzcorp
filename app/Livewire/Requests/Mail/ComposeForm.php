@@ -313,6 +313,12 @@ class ComposeForm extends Component
             return null;
         }
 
+        // Foundation §6.2: post-send hook для clarification batches.
+        // Если в draft.detected_artifacts есть marker `clarification_batch`,
+        // помечаем batch как sent + переводим Request в
+        // awaiting_client_clarification.
+        $this->applyPostSendHooks($result['draft'] ?? $draft);
+
         session()->flash('status', 'Письмо отправлено.');
         $this->open = false;
 
@@ -498,6 +504,82 @@ class ComposeForm extends Component
     {
         $name = preg_replace('/[^A-Za-z0-9._\-]/', '_', $name) ?? 'file';
         return mb_substr($name, 0, 80);
+    }
+
+    /**
+     * Foundation §6.2: пост-обработка отправленного письма.
+     * Если в detected_artifacts есть marker `clarification_batch`:
+     *   - помечаем ClarificationBatch::sent
+     *   - переводим Request в awaiting_client_clarification
+     *   - audit в request_state_changes (event=clarification_sent)
+     */
+    private function applyPostSendHooks(\App\Models\EmailMessage $sent): void
+    {
+        $artifacts = is_array($sent->detected_artifacts ?? null) ? $sent->detected_artifacts : [];
+        $marker = collect($artifacts)
+            ->first(fn ($a) => is_array($a) && ($a['type'] ?? null) === 'clarification_batch');
+
+        if ($marker === null) {
+            return;
+        }
+
+        $batchId = (int) ($marker['batch_id'] ?? 0);
+        if ($batchId === 0) {
+            return;
+        }
+        $batch = \App\Models\ClarificationBatch::find($batchId);
+        if (! $batch) {
+            return;
+        }
+
+        // 1. Mark batch sent.
+        $batch->update([
+            'status' => \App\Models\ClarificationBatch::STATUS_SENT,
+            'sent_at' => now(),
+            'sent_message_id' => $sent->id,
+        ]);
+
+        // 2. Transition Request → AwaitingClientClarification (если переход
+        // разрешён). transitionTo выкинет DomainException если нельзя —
+        // ловим non-fatal и логируем.
+        $targetStatus = $marker['transition_to_status'] ?? null;
+        if ($targetStatus !== 'awaiting_client_clarification') {
+            return;
+        }
+
+        $request = $batch->request;
+        if (! $request) {
+            return;
+        }
+        try {
+            app(\App\Services\Request\RequestStateService::class)->transitionTo(
+                $request,
+                \App\Enums\RequestStatus::AwaitingClientClarification,
+                auth()->user(),
+                [
+                    'event' => 'clarification_sent',
+                    'comment' => sprintf(
+                        'Отправлены уточняющие вопросы клиенту (batch #%d, %d вопросов).',
+                        $batch->id,
+                        $batch->questions()->count(),
+                    ),
+                    'payload' => [
+                        'clarification_batch_id' => $batch->id,
+                        'sent_message_id' => $sent->id,
+                    ],
+                ],
+            );
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning(
+                'ComposeForm: clarification post-send transition failed (non-fatal)',
+                [
+                    'batch_id' => $batch->id,
+                    'request_id' => $request->id,
+                    'current_status' => $request->status->value,
+                    'error' => $e->getMessage(),
+                ],
+            );
+        }
     }
 
     private function describeError(string $code): string

@@ -1364,6 +1364,14 @@
                             :request-id="$req->id"
                             wire:key="item-photo-rebind-{{ $req->id }}" />
                     @endif
+
+                    {{-- Foundation §6.2: панель уточняющих вопросов клиенту.
+                         Доступна и read-only ролям (но они увидят disabled).
+                         Кнопка «Сформировать письмо» откроет draft в табе
+                         «Переписка» через open-draft event. --}}
+                    <livewire:requests.items.clarification-panel
+                        :request-id="$req->id"
+                        wire:key="clarification-{{ $req->id }}" />
                 </div>
                 @break
 
