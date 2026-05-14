@@ -7,7 +7,9 @@ use App\Enums\Role;
 use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Models\RequestItem;
+use App\Models\AiDecision;
 use App\Services\Catalog\RequestItemEditor;
+use App\Services\DocumentDetector\AiDecisionService;
 use App\Services\Request\RequestPauseService;
 use App\Services\Request\RequestStateService;
 use Illuminate\Support\Collection;
@@ -448,6 +450,53 @@ class Detail extends Component
             ])
             ->orderByDesc('created_at')
             ->get();
+    }
+
+    /**
+     * Pending AI-suggestion'ы DocumentDetector (Foundation §7).
+     * Если есть — в action-panel рендерится плашка «AI: …» с apply/dismiss.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, AiDecision>
+     */
+    #[Computed]
+    public function pendingAiDecisions()
+    {
+        return AiDecision::query()
+            ->where('request_id', $this->request->id)
+            ->where('status', \App\Enums\AiDecisionStatus::Suggested->value)
+            ->with(['emailMessage:id,subject,from_email,sent_at,direction'])
+            ->orderByDesc('id')
+            ->get();
+    }
+
+    public function applyAiDecision(int $decisionId, AiDecisionService $svc): void
+    {
+        $decision = AiDecision::query()
+            ->where('request_id', $this->request->id)
+            ->whereKey($decisionId)
+            ->first();
+        if (! $decision) {
+            return;
+        }
+        $svc->apply($decision, auth()->user());
+        $this->reloadRequest();
+        session()->flash('status', sprintf(
+            'AI-предложение применено: %s.',
+            $decision->detector_type->label(),
+        ));
+    }
+
+    public function dismissAiDecision(int $decisionId, AiDecisionService $svc): void
+    {
+        $decision = AiDecision::query()
+            ->where('request_id', $this->request->id)
+            ->whereKey($decisionId)
+            ->first();
+        if (! $decision) {
+            return;
+        }
+        $svc->dismiss($decision, auth()->user());
+        $this->reloadRequest();
     }
 
     public function editItemField(int $itemId, string $field, mixed $value, RequestItemEditor $editor): void

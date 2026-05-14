@@ -7,6 +7,8 @@ use App\Enums\MailRuleActionType;
 use App\Models\EmailMessage;
 use App\Models\MailRoutingRule;
 use App\Models\RoutedMail;
+use App\Services\DocumentDetector\AiDecisionService;
+use App\Services\DocumentDetector\OutboundDocumentDetector;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -29,6 +31,8 @@ class MailRouter
         private readonly MailCategoryClassifier $categorizer,
         private readonly InboundReplyLinker $replyLinker,
         private readonly OutgoingMailLinker $outgoingLinker,
+        private readonly OutboundDocumentDetector $outboundDetector,
+        private readonly AiDecisionService $aiDecisions,
     ) {
     }
 
@@ -39,12 +43,37 @@ class MailRouter
         // (это наше письмо, не клиентский запрос). Отдельная короткая ветка.
         if ($message->direction === MailDirection::Outbound) {
             try {
-                $this->outgoingLinker->tryLink($message);
+                $linkedRequest = $this->outgoingLinker->tryLink($message);
             } catch (\Throwable $e) {
+                $linkedRequest = null;
                 Log::warning('MailRouter: outgoing linker failed (non-fatal)', [
                     'email_message_id' => $message->id,
                     'error' => $e->getMessage(),
                 ]);
+            }
+
+            // Phase 4 (Foundation §7.1): outbound document detector.
+            // Сработает только если linker уже привязал письмо к Request —
+            // иначе непонятно к чему относится «КП» (общая переписка с
+            // клиентом по другим заявкам, маркетинг и т.п.).
+            if ($linkedRequest !== null) {
+                try {
+                    $detected = $this->outboundDetector->analyze($message->fresh(), $linkedRequest);
+                    if ($detected !== null) {
+                        $this->aiDecisions->recordSuggestion(
+                            $detected['type'],
+                            $linkedRequest,
+                            $message,
+                            (float) $detected['confidence'],
+                            ['signals' => $detected['signals']],
+                        );
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('MailRouter: outbound document detector failed (non-fatal)', [
+                        'email_message_id' => $message->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
 
             return;

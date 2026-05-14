@@ -196,6 +196,66 @@
             $RS = \App\Enums\RequestStatus::class;
         @endphp
         <div class="flex flex-col gap-2 min-w-[200px]">
+
+            {{-- Phase 4 (Foundation §7): pending AI-suggestion'ы DocumentDetector'а.
+                 Рендерятся ВЫШЕ action-panel чтобы оператор увидел и принял
+                 решение до основных кнопок переходов. --}}
+            @php $aiSuggestions = $this->pendingAiDecisions; @endphp
+            @if($aiSuggestions->isNotEmpty() && $canManage)
+                @foreach($aiSuggestions as $sugg)
+                    @php
+                        $sType = $sugg->detector_type;
+                        $sTarget = $sType->targetStatus();
+                        $sConf = (int) round(($sugg->confidence ?? 0) * 100);
+                        $sIcon = match($sType->value) {
+                            'outbound_quotation_full', 'outbound_quotation_partial' => '📨',
+                            'outbound_invoice' => '🧾',
+                            'outbound_clarification' => '❓',
+                            'inbound_under_review' => '📑',
+                            'inbound_postponed' => '⏰',
+                            'inbound_invoice_request' => '💵',
+                            'inbound_decline' => '⊘',
+                            'inbound_clarification_response' => '↩',
+                            default => '🤖',
+                        };
+                    @endphp
+                    <div class="ds-card p-3 text-[12.5px] bg-[var(--sky-50)] border-[var(--sky-300)]"
+                         wire:key="ai-{{ $sugg->id }}">
+                        <div class="flex items-start gap-2 mb-2">
+                            <span class="text-[18px] leading-none">{{ $sIcon }}</span>
+                            <div class="flex-1 min-w-0">
+                                <div class="font-medium text-fg-1 text-[12.5px] leading-tight">
+                                    AI: {{ $sType->label() }}
+                                </div>
+                                <div class="text-[11px] text-fg-3 mt-0.5">
+                                    Уверенность {{ $sConf }}%
+                                    @if($sTarget)
+                                        · перевести в «{{ $sTarget->label() }}»
+                                    @endif
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            @if($sTarget && $allow($sTarget))
+                                <button type="button"
+                                        wire:click="applyAiDecision({{ $sugg->id }})"
+                                        class="btn btn-sm btn-primary flex-1">
+                                    ✓ Применить
+                                </button>
+                            @else
+                                <button type="button" class="btn btn-sm flex-1" disabled
+                                        title="Переход не разрешён из текущего статуса">✓ Применить</button>
+                            @endif
+                            <button type="button"
+                                    wire:click="dismissAiDecision({{ $sugg->id }})"
+                                    class="btn btn-sm">
+                                ✕
+                            </button>
+                        </div>
+                    </div>
+                @endforeach
+            @endif
+
             {{-- Terminal: только информационная плашка. --}}
             @if($req->status->isTerminal())
                 <div class="ds-card p-3 text-[12.5px] {{ $req->status === $RS::ClosedWon ? 'bg-emerald-50 border-emerald-300' : 'bg-red-50 border-red-300' }}">
