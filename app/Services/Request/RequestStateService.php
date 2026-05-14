@@ -31,7 +31,7 @@ class RequestStateService
     }
 
     /**
-     * @param  array{closed_lost_reason?: string, closed_lost_comment?: string, comment?: string, event?: string, payload?: array}  $context
+     * @param  array{closed_lost_reason?: string, closed_lost_comment?: string, closed_lost_quote?: string, closed_lost_source_message_id?: int, comment?: string, event?: string, payload?: array}  $context
      */
     public function transitionTo(
         Request $request,
@@ -95,6 +95,15 @@ class RequestStateService
                 if ($to === RequestStatus::ClosedLost) {
                     $request->closed_lost_reason = $closedLostReason->value;
                     $request->closed_lost_comment = $closedLostComment;
+                    // Foundation §7.4: цитата из inbound-письма + ссылка
+                    // на это письмо (заполняется InboundIntentClassifier'ом
+                    // или вручную через CloseLostDialog).
+                    if (isset($context['closed_lost_quote'])) {
+                        $request->closed_lost_quote = trim((string) $context['closed_lost_quote']) ?: null;
+                    }
+                    if (isset($context['closed_lost_source_message_id'])) {
+                        $request->closed_lost_source_message_id = (int) $context['closed_lost_source_message_id'] ?: null;
+                    }
                 }
             }
 

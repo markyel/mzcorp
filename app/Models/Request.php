@@ -39,6 +39,11 @@ class Request extends Model
         'closed_at',
         'closed_lost_reason',
         'closed_lost_comment',
+        // Foundation §7.4: точная цитата из inbound-письма + ссылка
+        // на это письмо. Заполняется когда InboundIntentClassifier
+        // распознал decline.
+        'closed_lost_quote',
+        'closed_lost_source_message_id',
         // Phase 1.11 — Attention-механизм (Foundation §5.3 + §5.5).
         'attention_required_at',
         'attention_reason',
@@ -105,5 +110,22 @@ class Request extends Model
     public function stateChanges(): HasMany
     {
         return $this->hasMany(RequestStateChange::class);
+    }
+
+    /**
+     * AI-решения DocumentDetector (Foundation §7).
+     * Pending suggestions (status=suggested) — UI prompt'ы оператору.
+     */
+    public function aiDecisions(): HasMany
+    {
+        return $this->hasMany(AiDecision::class);
+    }
+
+    /**
+     * Письмо клиента, из которого AI извлёк отказ (Foundation §7.4).
+     */
+    public function closedLostSourceMessage(): BelongsTo
+    {
+        return $this->belongsTo(EmailMessage::class, 'closed_lost_source_message_id');
     }
 }
