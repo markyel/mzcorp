@@ -166,6 +166,9 @@ class Pool extends Component
                 // self-join, и колонки без префикса (request_id) дают
                 // SQLSTATE[42702] ambiguous column.
                 'latestAssignment',
+                // Phase 2 delegation: для UI badge «временно от @{owner}».
+                'activeDelegations' => fn ($q) => $q->select(['id', 'request_id', 'original_user_id', 'acting_user_id', 'started_at'])
+                    ->with(['originalUser:id,name']),
             ])
             ->withCount('items');
 
@@ -183,9 +186,21 @@ class Pool extends Component
         }
 
         // Менеджер по умолчанию видит свои; РОП/директор — все.
+        // Foundation Фаза 2: «свои» теперь включает active delegations
+        // (заявки, временно открытые ему коллегой в отпуске).
         $effectiveScope = $this->canSeeAll ? $this->scope : 'mine';
         if ($effectiveScope === 'mine') {
-            $query->where('assigned_user_id', auth()->id());
+            $authId = auth()->id();
+            $query->where(function ($q) use ($authId) {
+                $q->where('assigned_user_id', $authId)
+                    ->orWhereExists(function ($sub) use ($authId) {
+                        $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                            ->from('request_delegations')
+                            ->whereColumn('request_delegations.request_id', 'requests.id')
+                            ->where('request_delegations.acting_user_id', $authId)
+                            ->whereNull('request_delegations.ended_at');
+                    });
+            });
         }
 
         // Менеджеру не показываем pending — у него нет позиций для работы.
@@ -316,8 +331,18 @@ class Pool extends Component
 
         // Левая навигация: queries «Все открытые», «Нераспределённые», «Мои».
         // Phase 2 saved views (KONE / возраст ≥ 7 / крупные клиенты) — disabled.
+        $authId = auth()->id();
         $myAssigned = Request::query()
-            ->where('assigned_user_id', auth()->id())
+            ->where(function ($q) use ($authId) {
+                $q->where('assigned_user_id', $authId)
+                    ->orWhereExists(function ($sub) use ($authId) {
+                        $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                            ->from('request_delegations')
+                            ->whereColumn('request_delegations.request_id', 'requests.id')
+                            ->where('request_delegations.acting_user_id', $authId)
+                            ->whereNull('request_delegations.ended_at');
+                    });
+            })
             ->whereIn('status', array_map(
                 fn (RequestStatus $s) => $s->value,
                 array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),

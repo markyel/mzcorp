@@ -122,12 +122,22 @@
                 </div>
                 <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle">
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Менеджер</span>
-                    <span class="text-fg-1 inline-flex items-center gap-1.5">
+                    <span class="text-fg-1 inline-flex items-center gap-1.5 flex-wrap">
                         @if($req->assignedUser)
                             <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-neutral-200 text-fg-2 text-[9.5px] font-semibold">{{ $managerInitials }}</span>
                             {{ $req->assignedUser->name }}
                         @else
                             <span class="text-fg-3">— не назначен —</span>
+                        @endif
+                        {{-- Phase 2 delegation: badge acting'а если есть. --}}
+                        @php
+                            $activeDel = $req->activeDelegations()->with('actingUser:id,name')->first();
+                        @endphp
+                        @if($activeDel)
+                            <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-50 text-amber-700 font-semibold text-[10.5px]"
+                                  title="Открыто {{ $activeDel->actingUser?->name }} на время отсутствия владельца{{ $req->assignedUser?->unavailable_until ? ' до '.$req->assignedUser->unavailable_until->format('d.m.Y') : '' }}">
+                                ↺ acting: {{ $activeDel->actingUser?->name }}
+                            </span>
                         @endif
                     </span>
                 </div>
@@ -202,10 +212,16 @@
         {{-- Actions --}}
         @php
             // Phase 1.10 — действия зависят от текущего статуса.
-            $canManage = auth()->id() === $req->assigned_user_id
-                || auth()->user()?->hasAnyRole(['head_of_sales', 'director']);
-            $canReply = auth()->id() === $req->assigned_user_id;
-            $canReassign = auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'secretary']);
+            // Foundation Фаза 2: acting (active delegation) тоже может управлять.
+            $authUser = auth()->user();
+            $isOwner = $authUser && $req->assigned_user_id === $authUser->id;
+            $isDelegate = $authUser && $req->isDelegatedTo($authUser);
+            $canManage = $isOwner || $isDelegate
+                || $authUser?->hasAnyRole(['head_of_sales', 'director']);
+            // Отвечать клиенту — owner или acting (но не РОП без явной делегации
+            // — он не должен «случайно» писать клиенту от чужого имени).
+            $canReply = $isOwner || $isDelegate;
+            $canReassign = $authUser?->hasAnyRole(['head_of_sales', 'director', 'secretary']);
             $lastInbound = $thread->reverse()
                 ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound);
             $allowed = $req->status->allowedTransitions();

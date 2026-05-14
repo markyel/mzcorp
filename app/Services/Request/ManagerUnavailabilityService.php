@@ -4,7 +4,8 @@ namespace App\Services\Request;
 
 use App\Enums\Role as RoleEnum;
 use App\Models\Request;
-use App\Models\RequestAssignment;
+use App\Models\RequestDelegation;
+use App\Models\RequestStateChange;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -14,20 +15,25 @@ use Illuminate\Support\Facades\Log;
  * Менеджер «недоступен» — отпуск / командировка / больничный
  * (Foundation Фаза 2).
  *
- * 3 operation:
+ * Семантика — DELEGATION, не reassignment. Заявка ОСТАЁТСЯ за оригинальным
+ * менеджером (`requests.assigned_user_id` НЕ меняется), но на время его
+ * отсутствия выбранный коллега получает временный доступ — видит её в
+ * Pool, может работать (отвечать клиенту, менять статус, править позиции).
+ * Когда оригинал вернулся → delegation закрывается, коллега больше не
+ * видит заявку, оригинал продолжает работу.
+ *
  *  - markUnavailable(User, Carbon $until, string $reason, User $by)
  *      — выставить `unavailable_until` + `unavailable_reason`.
  *  - markAvailable(User, User $by)
- *      — снять «недоступен» немедленно (вернулся раньше).
- *  - reassignActiveRequests(User $unavailable, User $by)
- *      — массово переподчинить все open-заявки этого менеджера через
- *        AssignmentService::autoAssign (round-robin + sticky). Sticky
- *        не сматчится на самого недоступного (он выбит из available()).
+ *      — снять «недоступен» И закрыть все active delegations этого
+ *        менеджера (acting'и больше не видят его заявки).
+ *  - delegateActiveRequests(User $unavailable, User $by)
+ *      — открыть active-заявкам недоступного менеджера временный доступ
+ *        для коллег. Round-robin по available() менеджерам.
  *
- * Phase 1.13 чекаут: `AssignmentService` уже сейчас фильтрует по
- * `available()`, так что просто пометить «недоступен» — достаточно для
- * новых заявок. Reassign — отдельная явная операция РОПа: пометил
- * «отпуск 14 дней» → нажал «передать все заявки коллегам».
+ * AssignmentService уже фильтрует по `available()` — недоступный
+ * менеджер не получает НОВЫХ заявок. Delegation — отдельный механизм
+ * для уже существующих open-заявок.
  */
 class ManagerUnavailabilityService
 {
@@ -36,9 +42,6 @@ class ManagerUnavailabilityService
     ) {
     }
 
-    /**
-     * @return User обновлённый user
-     */
     public function markUnavailable(
         User $user,
         Carbon $until,
@@ -71,15 +74,30 @@ class ManagerUnavailabilityService
         return $user;
     }
 
+    /**
+     * Снять «недоступен» + закрыть active delegations.
+     * Коллеги-acting'и больше не видят заявок этого менеджера.
+     */
     public function markAvailable(User $user, ?User $byUser = null): User
     {
-        $user->forceFill([
-            'unavailable_until' => null,
-            'unavailable_reason' => null,
-        ])->save();
+        $closedCount = 0;
+        DB::transaction(function () use ($user, &$closedCount) {
+            $user->forceFill([
+                'unavailable_until' => null,
+                'unavailable_reason' => null,
+            ])->save();
+
+            // Закрываем все active delegations где original_user_id = $user.
+            // Коллеги-acting'и больше не увидят эти заявки в своих Pool.
+            $closedCount = RequestDelegation::query()
+                ->where('original_user_id', $user->id)
+                ->whereNull('ended_at')
+                ->update(['ended_at' => now()]);
+        });
 
         Log::info('ManagerUnavailabilityService: marked available', [
             'user_id' => $user->id,
+            'closed_delegations' => $closedCount,
             'by' => $byUser?->id,
         ]);
 
@@ -87,63 +105,117 @@ class ManagerUnavailabilityService
     }
 
     /**
-     * Массово переподчинить open-заявки от $unavailable другим менеджерам.
-     * Использует AssignmentService::autoAssign (sticky + round-robin), что
-     * даёт реалистичное распределение (а не «всё одному», как тупой fallback).
+     * Открыть active-заявкам $unavailable временный доступ для коллег.
+     *
+     * Семантика: заявка ОСТАЁТСЯ за $unavailable (assigned_user_id не
+     * меняется), но создаётся `request_delegations` row на коллегу-acting'а.
+     * Round-robin по доступным менеджерам (sticky-резолвер тоже задействован
+     * — если у кого-то уже есть похожие позиции, ему быстрее войти в курс).
      *
      * Только active-статусы (isOpenForAssignment). Paused / closed / pending
-     * не трогаем — там либо menager заморозил, либо терминал, либо парсинг
-     * ещё не отработал.
+     * не делегируем — там либо менеджер заморозил, либо терминал, либо
+     * парсинг ещё не отработал.
      *
-     * @return array{reassigned: int, skipped: int}
+     * @return array{delegated: int, skipped: int}
      */
-    public function reassignActiveRequests(User $unavailable, ?User $byUser = null): array
+    public function delegateActiveRequests(User $unavailable, ?User $byUser = null): array
     {
-        $reassigned = 0;
+        $delegated = 0;
         $skipped = 0;
 
+        // Доступные менеджеры (без самого недоступного) для round-robin.
+        $available = User::role(RoleEnum::Manager->value)
+            ->available()
+            ->where('id', '!=', $unavailable->id)
+            ->get();
+
+        if ($available->isEmpty()) {
+            Log::warning('ManagerUnavailabilityService: no available managers to delegate to', [
+                'unavailable_user_id' => $unavailable->id,
+            ]);
+
+            return ['delegated' => 0, 'skipped' => 0];
+        }
+
+        $reasonText = sprintf(
+            'Отсутствие %s (%s) до %s',
+            $unavailable->name,
+            $unavailable->unavailable_reason ?: 'нет причины',
+            $unavailable->unavailable_until?->format('d.m.Y') ?: '—',
+        );
+
+        // Простой round-robin: считаем сколько delegations уже досталось
+        // каждому acting'у, отдаём наименее загруженному.
         Request::query()
             ->where('assigned_user_id', $unavailable->id)
             ->orderBy('id')
-            ->chunkById(100, function ($chunk) use ($unavailable, $byUser, &$reassigned, &$skipped) {
+            ->chunkById(100, function ($chunk) use ($unavailable, $byUser, $available, $reasonText, &$delegated, &$skipped) {
                 foreach ($chunk as $req) {
                     if (! $req->status->isOpenForAssignment()) {
                         $skipped++;
                         continue;
                     }
-                    DB::transaction(function () use ($req, $unavailable, $byUser, &$reassigned, &$skipped) {
-                        // Отвязываем заявку, чтобы autoAssign отработал «как с нуля».
-                        $req->assigned_user_id = null;
-                        $req->save();
+                    // Идемпотентность: если у заявки уже есть active delegation —
+                    // не плодим дублей.
+                    $alreadyActive = RequestDelegation::query()
+                        ->where('request_id', $req->id)
+                        ->whereNull('ended_at')
+                        ->exists();
+                    if ($alreadyActive) {
+                        $skipped++;
+                        continue;
+                    }
 
-                        $newManager = $this->assignment->autoAssign($req->fresh(), $byUser?->id);
-                        if ($newManager !== null && $newManager->id !== $unavailable->id) {
-                            // Audit-причина — отдельная для batch-reassign.
-                            RequestAssignment::query()
-                                ->where('request_id', $req->id)
-                                ->latest('id')
-                                ->limit(1)
-                                ->update(['reason' => 'reassign_from_unavailable']);
-                            $reassigned++;
-                        } else {
-                            // autoAssign не нашёл другого менеджера (один сотрудник
-                            // в системе или все недоступны). Возвращаем как было —
-                            // оператор-РОП ещё разберётся.
-                            $req->assigned_user_id = $unavailable->id;
-                            $req->save();
-                            $skipped++;
-                        }
+                    // Round-robin: считаем active delegations per acting в этом
+                    // батче, отдаём кому меньше.
+                    $loadByActing = RequestDelegation::query()
+                        ->whereIn('acting_user_id', $available->pluck('id'))
+                        ->whereNull('ended_at')
+                        ->selectRaw('acting_user_id, COUNT(*) as c')
+                        ->groupBy('acting_user_id')
+                        ->pluck('c', 'acting_user_id');
+
+                    $actingId = $available
+                        ->sortBy(fn ($u) => (int) ($loadByActing[$u->id] ?? 0))
+                        ->first()
+                        ->id;
+
+                    DB::transaction(function () use ($req, $unavailable, $actingId, $byUser, $reasonText) {
+                        RequestDelegation::create([
+                            'request_id' => $req->id,
+                            'original_user_id' => $unavailable->id,
+                            'acting_user_id' => $actingId,
+                            'started_at' => now(),
+                            'reason' => $reasonText,
+                        ]);
+
+                        // Audit в state_changes (от текущего статуса в тот же
+                        // — фиксируем факт делегации в общей timeline).
+                        RequestStateChange::create([
+                            'request_id' => $req->id,
+                            'from_status' => $req->status->value,
+                            'to_status' => $req->status->value,
+                            'by_user_id' => $byUser?->id,
+                            'event' => 'delegated_during_absence',
+                            'comment' => $reasonText,
+                            'payload' => [
+                                'original_user_id' => $unavailable->id,
+                                'acting_user_id' => $actingId,
+                            ],
+                        ]);
                     });
+
+                    $delegated++;
                 }
             });
 
-        Log::info('ManagerUnavailabilityService: batch reassign done', [
+        Log::info('ManagerUnavailabilityService: batch delegate done', [
             'from_user_id' => $unavailable->id,
-            'reassigned' => $reassigned,
+            'delegated' => $delegated,
             'skipped' => $skipped,
             'by' => $byUser?->id,
         ]);
 
-        return ['reassigned' => $reassigned, 'skipped' => $skipped];
+        return ['delegated' => $delegated, 'skipped' => $skipped];
     }
 }

@@ -509,7 +509,17 @@
                                 </span>
                             </span>
 
-                            {{-- manager --}}
+                            {{-- manager + (optional) acting badge --}}
+                            @php
+                                // Phase 2 delegation: для текущего юзера если он
+                                // acting в active delegation — показываем badge
+                                // «временно от @{owner}».
+                                $authId = auth()->id();
+                                $activeDelegation = $req->relationLoaded('activeDelegations')
+                                    ? $req->activeDelegations->first()
+                                    : null;
+                                $iAmActing = $activeDelegation && $activeDelegation->acting_user_id === $authId;
+                            @endphp
                             <span class="inline-flex items-center gap-1.5 min-w-0">
                                 @if($managerName)
                                     <span class="w-[22px] h-[22px] rounded-full bg-[var(--neutral-200)] text-[var(--fg-2)] font-semibold text-[10px] leading-[22px] text-center flex-shrink-0">{{ $managerInitials }}</span>
@@ -517,6 +527,12 @@
                                 @else
                                     <span class="w-[22px] h-[22px] rounded-full bg-[var(--bg-app)] border border-dashed border-[var(--border-strong)] text-[var(--fg-3)] font-semibold text-[10px] leading-[20px] text-center flex-shrink-0">?</span>
                                     <span class="text-[var(--fg-3)] truncate">не назначено</span>
+                                @endif
+                                @if($iAmActing)
+                                    <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-50 text-amber-700 font-semibold text-[10.5px] flex-shrink-0"
+                                          title="Заявка открыта вам на время отсутствия {{ $activeDelegation->originalUser?->name ?? $managerName }}">
+                                        ↺ открыто мне
+                                    </span>
                                 @endif
                             </span>
 

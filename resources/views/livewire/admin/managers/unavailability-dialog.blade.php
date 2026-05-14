@@ -35,11 +35,11 @@
                     </div>
 
                     <label class="flex items-start gap-2 text-[12.5px] cursor-pointer">
-                        <input type="checkbox" wire:model="reassign" class="mt-0.5">
+                        <input type="checkbox" wire:model="delegate" class="mt-0.5">
                         <span class="text-fg-1">
-                            Передать активные заявки другим менеджерам
+                            Открыть активные заявки коллегам на время отсутствия
                             <div class="text-fg-3 text-[11.5px]">
-                                AssignmentService раскидает по round-robin / sticky. Заявки на паузе и закрытые — не трогаем.
+                                Заявки <strong>остаются за этим менеджером</strong>. Коллеги получат временный доступ (видят в своём пуле, могут отвечать клиентам). При возвращении доступ автоматически закрывается. Round-robin по доступным менеджерам.
                             </div>
                         </span>
                     </label>
@@ -48,7 +48,7 @@
                         <button type="submit" class="btn btn-primary"
                                 wire:loading.attr="disabled" wire:target="save">
                             <span wire:loading.remove wire:target="save">Сохранить</span>
-                            <span wire:loading wire:target="save">Передаём заявки…</span>
+                            <span wire:loading wire:target="save">Открываем заявки коллегам…</span>
                         </button>
                         <button type="button" wire:click="close" class="btn">Отмена</button>
                     </div>

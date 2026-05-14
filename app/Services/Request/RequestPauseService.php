@@ -201,6 +201,11 @@ class RequestPauseService
         if ($request->assigned_user_id === $author->id) {
             return;
         }
+        // Foundation Фаза 2: acting (active delegation) тоже может паузить
+        // на время отсутствия оригинального менеджера.
+        if ($request->isDelegatedTo($author)) {
+            return;
+        }
         abort(403, 'Ставить на паузу может только assigned-менеджер или РОП.');
     }
 }

@@ -606,9 +606,16 @@ class RequestItemEditor
             return;
         }
 
-        $assignedUserId = $item->request->assigned_user_id ?? null;
-        if ($assignedUserId === $author->id) {
-            return;
+        $request = $item->request;
+        if ($request !== null) {
+            if (($request->assigned_user_id ?? null) === $author->id) {
+                return;
+            }
+            // Foundation Фаза 2: acting (active delegation) тоже может
+            // править позиции на время отсутствия оригинального менеджера.
+            if ($request->isDelegatedTo($author)) {
+                return;
+            }
         }
 
         abort(403, 'Эта позиция принадлежит заявке другого менеджера.');

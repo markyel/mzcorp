@@ -13,9 +13,13 @@ use Livewire\Component;
  * Modal-диалог для пометки менеджера как «недоступен»
  * (Foundation Фаза 2 — отпуск / командировка / больничный).
  *
+ * Семантика — DELEGATION. Заявка остаётся за менеджером, но на время
+ * его отсутствия другой менеджер получает временный доступ. При
+ * возвращении (markAvailable) delegation закрывается.
+ *
  * Слушает `open-unavailability {userId}`. После save:
  *  - mark unavailable;
- *  - если стоял чекбокс «передать заявки» — батч переподчинение;
+ *  - если стоял чекбокс «открыть заявки коллегам» — batch delegation;
  *  - flash + emit `manager-availability-changed`.
  */
 class UnavailabilityDialog extends Component
@@ -29,7 +33,7 @@ class UnavailabilityDialog extends Component
     #[Validate('required|string|min:3|max:500')]
     public string $reason = '';
 
-    public bool $reassign = true;
+    public bool $delegate = true;
 
     #[On('open-unavailability')]
     public function show(int $userId): void
@@ -37,7 +41,7 @@ class UnavailabilityDialog extends Component
         $this->userId = $userId;
         $this->until = now()->addDays(7)->format('Y-m-d');
         $this->reason = '';
-        $this->reassign = true;
+        $this->delegate = true;
         $this->resetErrorBag();
         $this->open = true;
     }
@@ -65,9 +69,9 @@ class UnavailabilityDialog extends Component
                 $this->reason,
                 auth()->user(),
             );
-            $reassignStats = null;
-            if ($this->reassign) {
-                $reassignStats = $svc->reassignActiveRequests($user, auth()->user());
+            $delegateStats = null;
+            if ($this->delegate) {
+                $delegateStats = $svc->delegateActiveRequests($user, auth()->user());
             }
         } catch (\DomainException $e) {
             $this->addError('reason', $e->getMessage());
@@ -81,8 +85,8 @@ class UnavailabilityDialog extends Component
             '«%s» недоступен до %s.%s',
             $user->name,
             Carbon::parse($this->until)->format('d.m.Y'),
-            $reassignStats
-                ? sprintf(' Передано заявок: %d (пропущено: %d).', $reassignStats['reassigned'], $reassignStats['skipped'])
+            $delegateStats
+                ? sprintf(' Открыто коллегам: %d заявок (пропущено: %d).', $delegateStats['delegated'], $delegateStats['skipped'])
                 : '',
         ));
 

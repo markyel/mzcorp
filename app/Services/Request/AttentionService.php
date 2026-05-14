@@ -93,16 +93,28 @@ class AttentionService
 
         // Foundation Фаза 2: in-app уведомления менеджерам о overdue-заявках.
         // Шлём ОДНОКРАТНО на переход 0→1 (повторный sweep не шлёт, потому что
-        // attention_level уже 1). Если менеджер не назначен — пропускаем.
+        // attention_level уже 1).
+        //
+        // Routing: если у заявки есть active delegation — шлём ACTING'у
+        // (он сейчас фактически работает с этой заявкой, оригинал в отпуске).
+        // Иначе — оригинальному assigned-менеджеру.
         if (! empty($newlyOverdueIds)) {
             $overdueRequests = Request::query()
                 ->whereIn('id', $newlyOverdueIds)
                 ->whereNotNull('assigned_user_id')
-                ->with('assignedUser:id,name')
+                ->with([
+                    'assignedUser:id,name',
+                    'activeDelegations' => fn ($q) => $q->with('actingUser:id,name'),
+                ])
                 ->get();
             foreach ($overdueRequests as $req) {
+                $targetUser = $req->activeDelegations->first()?->actingUser
+                    ?? $req->assignedUser;
+                if ($targetUser === null) {
+                    continue;
+                }
                 try {
-                    $req->assignedUser?->notify(
+                    $targetUser->notify(
                         \App\Notifications\RequestAttentionOverdueNotification::from($req),
                     );
                 } catch (\Throwable $e) {

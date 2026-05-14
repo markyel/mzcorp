@@ -133,4 +133,83 @@ class Request extends Model
     {
         return $this->belongsTo(EmailMessage::class, 'closed_lost_source_message_id');
     }
+
+    /**
+     * Foundation Фаза 2 — delegation механизм.
+     * История всех делегаций (включая закрытые).
+     */
+    public function delegations(): HasMany
+    {
+        return $this->hasMany(RequestDelegation::class);
+    }
+
+    /**
+     * Активные делегации (ended_at IS NULL) — обычно 0 или 1 одновременно,
+     * но schema допускает несколько (теоретически несколько оригиналов
+     * для одной заявки никогда не будет, но запас).
+     */
+    public function activeDelegations(): HasMany
+    {
+        return $this->hasMany(RequestDelegation::class)->whereNull('ended_at');
+    }
+
+    /**
+     * Помощник: текущий «исполняющий обязанности» (acting user) —
+     * первый active delegation. Null если делегации нет.
+     */
+    public function actingUser(): ?User
+    {
+        $delegation = $this->relationLoaded('activeDelegations')
+            ? $this->activeDelegations->first()
+            : $this->activeDelegations()->with('actingUser')->first();
+
+        return $delegation?->actingUser;
+    }
+
+    /**
+     * Помощник: ИСТИННЫЙ «владелец» (по полю assigned_user_id).
+     * Для UI badge'а acting'а: «временно от @{owner}».
+     */
+    public function isOwnedBy(?User $user): bool
+    {
+        return $user !== null && $this->assigned_user_id === $user->id;
+    }
+
+    /**
+     * У $user есть активная delegation acting'ом на эту заявку.
+     */
+    public function isDelegatedTo(?User $user): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+
+        return $this->activeDelegations()
+            ->where('acting_user_id', $user->id)
+            ->exists();
+    }
+
+    /**
+     * Может ли $user работать с этой заявкой:
+     *  - owner (assigned_user_id) ИЛИ
+     *  - active acting (delegation) ИЛИ
+     *  - privileged role (head_of_sales / director / secretary).
+     *
+     * Используется в Detail::canManage / RequestItemEditor::ensureCanEdit /
+     * RequestStateService::ensureCanTransition / RequestPauseService::ensureCanPause.
+     */
+    public function isAccessibleBy(?User $user): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+        if ($this->isOwnedBy($user)) {
+            return true;
+        }
+        if ($user->hasAnyRole(['head_of_sales', 'director', 'secretary'])) {
+            return true;
+        }
+
+        return $this->isDelegatedTo($user);
+    }
 }

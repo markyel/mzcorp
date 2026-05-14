@@ -257,6 +257,11 @@ class RequestStateService
         if ($request->assigned_user_id === $author->id) {
             return;
         }
+        // Foundation Фаза 2: acting (active delegation) тоже может менять
+        // статус на время отсутствия оригинального менеджера.
+        if ($request->isDelegatedTo($author)) {
+            return;
+        }
         abort(403, 'Менять статус может только assigned-менеджер или РОП.');
     }
 }
