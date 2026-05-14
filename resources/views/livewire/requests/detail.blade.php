@@ -124,55 +124,61 @@
         $_onItemsTab = $tab === 'items';
     @endphp
     @if($_aiSuggs->isNotEmpty() && $_canEdit && ! $aiBannerHidden)
-        <div class="mb-4 rounded-md border border-violet-200 bg-violet-50/60 px-5 py-4 flex items-start gap-4 shadow-sm">
-            <div class="shrink-0 w-11 h-11 rounded-md bg-violet-600 text-white flex items-center justify-center font-bold text-[13px] tracking-[0.08em] mt-0.5">AI</div>
-            <div class="flex-1 min-w-0 text-[12.5px] leading-relaxed">
-                {{-- Title + confidence chip (lowercase, light, как в макете) --}}
-                <div class="flex items-baseline gap-2 flex-wrap mb-1">
-                    <span class="font-semibold text-fg-1 text-[13.5px]">
-                        Клиент ответил на уточнение по {{ $_aiPositionsCount }} {{ \Illuminate\Support\Str::plural('позиц', $_aiPositionsCount) }}{{ $_aiPositionsCount === 1 ? 'и' : ($_aiPositionsCount < 5 ? 'ям' : 'иям') }}
-                    </span>
-                    <span class="inline-flex items-baseline px-2 py-0.5 rounded-md bg-violet-100/70 text-violet-700 text-[11px] font-medium">
+        {{-- Layout по макету 04c: grid auto/1fr/auto, мягкий gradient
+             violet → surface, AI-плашка 36×36, conf-чип в mono pill,
+             body — flex wrap c inline-цитатой и рекомендацией. --}}
+        <div class="grid items-center gap-4 mb-3.5 px-[18px] py-3.5 rounded-md border shadow-sm"
+             style="grid-template-columns: auto 1fr auto;
+                    background: linear-gradient(180deg, oklch(97% 0.03 280) 0%, var(--bg-surface) 100%);
+                    border-color: oklch(82% 0.10 280)">
+            {{-- AI icon --}}
+            <span class="w-9 h-9 rounded-lg flex items-center justify-center text-white font-bold text-[16px] leading-none"
+                  style="background: oklch(58% 0.18 280)">AI</span>
+
+            {{-- Content column --}}
+            <div class="min-w-0">
+                {{-- Title + confidence pill --}}
+                <h3 class="m-0 font-semibold text-[13.5px] text-fg-1" style="line-height:1.3">
+                    Клиент ответил на уточнение по {{ $_aiPositionsCount }} {{ \Illuminate\Support\Str::plural('позиц', $_aiPositionsCount) }}{{ $_aiPositionsCount === 1 ? 'и' : ($_aiPositionsCount < 5 ? 'ям' : 'иям') }}
+                    <span class="inline-flex items-baseline ml-2 px-1.5 py-0.5 rounded-full mono text-[11.5px] font-semibold leading-none bg-surface border"
+                          style="border-color: oklch(86% 0.08 280); color: oklch(46% 0.16 280)">
                         уверенность {{ $_aiAvgConf }}%
                     </span>
-                </div>
+                </h3>
 
-                {{-- Inline: «Распознал бренд X и подтверждение артикула Y. Цитата из ответа: ...» --}}
-                @if(! empty($_aiSummaryPairs))
-                    <div class="text-fg-2 mb-1">
-                        <span>Распознал </span>
-                        @foreach($_aiSummaryPairs as $_idx => $_pair)
-                            <span class="text-fg-2">{{ $_pair[0] }}</span>
-                            <span class="inline-flex items-baseline px-1.5 rounded-sm bg-violet-50 text-fg-1 font-semibold mono text-[12px]">{{ $_pair[1] }}</span>{{ $_idx < count($_aiSummaryPairs) - 2 ? ', ' : ($_idx === count($_aiSummaryPairs) - 2 ? ' и ' : '') }}
-                        @endforeach
-                        @if($_aiQuote !== '')<span class="text-fg-2"> . Цитата из ответа:</span>@else .@endif
-                    </div>
-                @endif
-
-                {{-- Quote box — отдельным блоком (monospace, italic, тонкая рамка) --}}
-                @if($_aiQuote !== '')
-                    <div class="mb-1.5 inline-block max-w-full px-2 py-0.5 rounded-sm bg-surface-2 border border-border-subtle text-fg-2 italic mono text-[11.5px]">
-                        «{{ \Illuminate\Support\Str::limit($_aiQuote, 200) }}»
-                    </div>
-                @endif
-
-                {{-- Recommendation line (highlight «в работе» pill, добавили «отправить КП») --}}
-                <div class="text-[11.5px] text-fg-3">
-                    Рекомендую:
-                    @foreach($_aiRecs as $_idx => $_rec)
-                        <span>{{ $_rec[0] }}</span>@if($_rec[1] !== null)<span class="inline-flex items-baseline px-1.5 rounded-sm bg-sky-50 text-sky-800 font-medium">«{{ $_rec[1] }}»</span>@endif{{ $_idx < count($_aiRecs) - 1 ? ', ' : '.' }}
-                    @endforeach
+                {{-- Body — единый flex-wrap с inline-цитатой и рекомендацией --}}
+                <div class="mt-1 text-[12.5px] text-fg-2 flex items-center gap-2 flex-wrap" style="line-height:1.45">
+                    @if(! empty($_aiSummaryPairs))
+                        <span>
+                            Распознал
+                            @foreach($_aiSummaryPairs as $_idx => $_pair)
+                                {{ $_pair[0] }} <b class="text-fg-1 font-medium">{{ $_pair[1] }}</b>{{ $_idx < count($_aiSummaryPairs) - 2 ? ', ' : ($_idx === count($_aiSummaryPairs) - 2 ? ' и ' : '') }}
+                            @endforeach
+                            @if($_aiQuote !== '') . Цитата из ответа:@else .@endif
+                        </span>
+                    @endif
+                    @if($_aiQuote !== '')
+                        <span class="px-1.5 py-0.5 rounded-sm bg-surface border border-border mono text-fg-2 text-[11.5px]">«{{ \Illuminate\Support\Str::limit($_aiQuote, 200) }}»</span>
+                    @endif
+                    @if(! empty($_aiRecs))
+                        <span>
+                            Рекомендую:
+                            @foreach($_aiRecs as $_idx => $_rec)
+                                {{ $_rec[0] }}@if($_rec[1] !== null)<b class="text-fg-1 font-medium">«{{ $_rec[1] }}»</b>@endif{{ $_idx < count($_aiRecs) - 1 ? ', ' : '.' }}
+                            @endforeach
+                        </span>
+                    @endif
                 </div>
             </div>
 
-            {{-- Right column: actions (выровнено к первой строке title) --}}
-            <div class="shrink-0 flex items-center gap-2.5 mt-1">
+            {{-- Actions column --}}
+            <div class="flex items-center gap-1.5">
                 <button type="button"
                         wire:click="hideAiBanner"
-                        class="text-[12px] text-fg-3 hover:text-fg-1 hover:underline">Скрыть</button>
+                        class="btn btn-sm">Скрыть</button>
                 @if(! $_onItemsTab)
                     <a href="#" wire:click.prevent="setTab('items')"
-                       class="text-[12px] text-sky-700 hover:underline">Открыть позиции →</a>
+                       class="text-[12px] text-sky-700 hover:underline px-1">Открыть позиции →</a>
                 @endif
                 @if($_inClarif)
                     <button type="button"
@@ -180,7 +186,7 @@
                             wire:confirm="Применить все {{ $_aiSuggs->count() }} предложений и перевести заявку в «В работе»?"
                             class="btn btn-primary"
                             wire:loading.attr="disabled" wire:target="applyAllAndProgress">
-                        <span wire:loading.remove wire:target="applyAllAndProgress">✓ Применить всё и → в работу</span>
+                        <span wire:loading.remove wire:target="applyAllAndProgress">Применить всё и → в работу</span>
                         <span wire:loading wire:target="applyAllAndProgress">…</span>
                     </button>
                 @else
@@ -189,7 +195,7 @@
                             wire:confirm="Применить все {{ $_aiSuggs->count() }} предложений?"
                             class="btn btn-primary"
                             wire:loading.attr="disabled" wire:target="applyAllEnrichments">
-                        <span wire:loading.remove wire:target="applyAllEnrichments">✓ Применить всё</span>
+                        <span wire:loading.remove wire:target="applyAllEnrichments">Применить всё</span>
                         <span wire:loading wire:target="applyAllEnrichments">…</span>
                     </button>
                 @endif
