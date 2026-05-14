@@ -105,13 +105,15 @@
 
         $_inClarif = $req->status === \App\Enums\RequestStatus::AwaitingClientClarification;
 
-        // Рекомендация — action-цепочка.
+        // Рекомендация — action-цепочка. Возвращаем массив [verb, ?highlight_label]
+        // чтобы шаблон мог визуально выделить статус-пилюлю.
         $_aiRecs = [];
         if ($_inClarif) {
-            $_aiRecs[] = 'перевести в статус «в работе»';
+            $_aiRecs[] = ['перевести в статус ', 'в работе'];
         }
-        $_aiRecs[] = 'применить ' . $_aiSuggs->count() . ' '
-            . \Illuminate\Support\Str::plural('уточнение', $_aiSuggs->count());
+        $_aiRecs[] = ['применить ' . $_aiSuggs->count() . ' '
+            . \Illuminate\Support\Str::plural('уточнение', $_aiSuggs->count()), null];
+        $_aiRecs[] = ['отправить КП', null];
 
         // $canEditItems определена внутри @case('items'), здесь баннер
         // отрисовывается ВНЕ tabs — вычисляем локально.
@@ -125,37 +127,41 @@
         <div class="mb-3 rounded-md border border-violet-300 bg-gradient-to-br from-violet-50 to-sky-50/40 p-3.5 flex items-center gap-3 shadow-sm">
             <div class="shrink-0 w-9 h-9 rounded-md bg-violet-600 text-white flex items-center justify-center font-bold text-[12px] tracking-wider">AI</div>
             <div class="flex-1 min-w-0 text-[12.5px] leading-snug">
-                {{-- Title + confidence chip --}}
+                {{-- Title + confidence chip (lowercase, light, как в макете) --}}
                 <div class="flex items-baseline gap-2 flex-wrap mb-1">
-                    <span class="font-semibold text-fg-1 text-[13px]">
+                    <span class="font-semibold text-fg-1 text-[13.5px]">
                         Клиент ответил на уточнение по {{ $_aiPositionsCount }} {{ \Illuminate\Support\Str::plural('позиц', $_aiPositionsCount) }}{{ $_aiPositionsCount === 1 ? 'и' : ($_aiPositionsCount < 5 ? 'ям' : 'иям') }}
                     </span>
-                    <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm bg-violet-100 text-violet-800 text-[10.5px] font-semibold uppercase tracking-wider">
+                    <span class="inline-flex items-baseline px-2 py-0.5 rounded-md bg-violet-100/70 text-violet-700 text-[11px] font-medium">
                         уверенность {{ $_aiAvgConf }}%
                     </span>
                 </div>
 
-                {{-- Inline: «Распознал бренд X и подтверждение артикула Y. Цитата из ответа: «...»» --}}
-                @if(! empty($_aiSummaryPairs) || $_aiQuote !== '')
-                    <div class="text-fg-2 mb-0.5">
-                        @if(! empty($_aiSummaryPairs))
-                            <span>Распознал </span>
-                            @foreach($_aiSummaryPairs as $_idx => $_pair)
-                                <span class="text-fg-3">{{ $_pair[0] }}</span>
-                                <span class="inline-flex items-baseline px-1 rounded-sm bg-violet-50 text-fg-1 font-semibold mono">{{ $_pair[1] }}</span>{{ $_idx < count($_aiSummaryPairs) - 2 ? ', ' : ($_idx === count($_aiSummaryPairs) - 2 ? ' и ' : '') }}
-                            @endforeach
-                            @if($_aiQuote !== '')<span class="text-fg-2"> · </span>@endif
-                        @endif
-                        @if($_aiQuote !== '')
-                            <span class="text-fg-3">Цитата из ответа: </span>
-                            <span class="inline-flex items-baseline px-1.5 rounded-sm bg-surface-2 border border-border-subtle text-fg-2 italic text-[11.5px]">«{{ \Illuminate\Support\Str::limit($_aiQuote, 140) }}»</span>
-                        @endif
+                {{-- Inline: «Распознал бренд X и подтверждение артикула Y. Цитата из ответа: ...» --}}
+                @if(! empty($_aiSummaryPairs))
+                    <div class="text-fg-2 mb-1">
+                        <span>Распознал </span>
+                        @foreach($_aiSummaryPairs as $_idx => $_pair)
+                            <span class="text-fg-2">{{ $_pair[0] }}</span>
+                            <span class="inline-flex items-baseline px-1.5 rounded-sm bg-violet-50 text-fg-1 font-semibold mono text-[12px]">{{ $_pair[1] }}</span>{{ $_idx < count($_aiSummaryPairs) - 2 ? ', ' : ($_idx === count($_aiSummaryPairs) - 2 ? ' и ' : '') }}
+                        @endforeach
+                        @if($_aiQuote !== '')<span class="text-fg-2"> . Цитата из ответа:</span>@else .@endif
                     </div>
                 @endif
 
-                {{-- Recommendation line --}}
+                {{-- Quote box — отдельным блоком (monospace, italic, тонкая рамка) --}}
+                @if($_aiQuote !== '')
+                    <div class="mb-1.5 inline-block max-w-full px-2 py-0.5 rounded-sm bg-surface-2 border border-border-subtle text-fg-2 italic mono text-[11.5px]">
+                        «{{ \Illuminate\Support\Str::limit($_aiQuote, 200) }}»
+                    </div>
+                @endif
+
+                {{-- Recommendation line (highlight «в работе» pill, добавили «отправить КП») --}}
                 <div class="text-[11.5px] text-fg-3">
-                    Рекомендую: {{ implode(', ', $_aiRecs) }}.
+                    Рекомендую:
+                    @foreach($_aiRecs as $_idx => $_rec)
+                        <span>{{ $_rec[0] }}</span>@if($_rec[1] !== null)<span class="inline-flex items-baseline px-1.5 rounded-sm bg-sky-50 text-sky-800 font-medium">«{{ $_rec[1] }}»</span>@endif{{ $_idx < count($_aiRecs) - 1 ? ', ' : '.' }}
+                    @endforeach
                 </div>
             </div>
 
