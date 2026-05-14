@@ -78,6 +78,16 @@ class AssignmentService
             ]);
         });
 
+        // Foundation Фаза 2: in-app уведомление менеджеру о новой заявке.
+        try {
+            $manager->notify(\App\Notifications\RequestAssignedNotification::from($request->fresh(), $reason));
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning(
+                'AssignmentService: notification dispatch failed (non-fatal)',
+                ['request_id' => $request->id, 'manager_id' => $manager->id, 'error' => $e->getMessage()],
+            );
+        }
+
         return $manager;
     }
 

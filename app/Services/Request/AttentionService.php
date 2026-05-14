@@ -68,11 +68,18 @@ class AttentionService
      */
     public function sweepOverdue(): array
     {
-        $marked = Request::query()
+        // Шаг 1: собрать ids тех, кто СЕЙЧАС переходит 0 → 1.
+        // Делаем это до UPDATE, чтобы знать кому слать notification.
+        $newlyOverdueIds = Request::query()
             ->whereNotNull('attention_required_at')
             ->where('attention_level', 0)
             ->where('attention_required_at', '<', now())
             ->whereNotIn('status', $this->silentStatuses())
+            ->pluck('id')
+            ->all();
+
+        $marked = empty($newlyOverdueIds) ? 0 : Request::query()
+            ->whereIn('id', $newlyOverdueIds)
             ->update(['attention_level' => 1]);
 
         $reset = Request::query()
@@ -83,6 +90,29 @@ class AttentionService
                     ->orWhereIn('status', $this->silentStatuses());
             })
             ->update(['attention_level' => 0]);
+
+        // Foundation Фаза 2: in-app уведомления менеджерам о overdue-заявках.
+        // Шлём ОДНОКРАТНО на переход 0→1 (повторный sweep не шлёт, потому что
+        // attention_level уже 1). Если менеджер не назначен — пропускаем.
+        if (! empty($newlyOverdueIds)) {
+            $overdueRequests = Request::query()
+                ->whereIn('id', $newlyOverdueIds)
+                ->whereNotNull('assigned_user_id')
+                ->with('assignedUser:id,name')
+                ->get();
+            foreach ($overdueRequests as $req) {
+                try {
+                    $req->assignedUser?->notify(
+                        \App\Notifications\RequestAttentionOverdueNotification::from($req),
+                    );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning(
+                        'AttentionService: overdue notification failed (non-fatal)',
+                        ['request_id' => $req->id, 'error' => $e->getMessage()],
+                    );
+                }
+            }
+        }
 
         return [$marked, $reset];
     }

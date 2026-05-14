@@ -116,11 +116,8 @@
             <button type="button" class="hidden md:inline-flex items-center gap-1.5 h-[30px] px-3 rounded-md bg-[var(--accent)] text-[var(--fg-on-accent)] border border-[var(--accent)] text-[12.5px] font-medium opacity-55 cursor-not-allowed"
                     disabled title="{{ $disabledTitle }}">+ Заявка вручную</button>
 
-            {{-- Bell --}}
-            <button type="button" class="relative w-[30px] h-[30px] inline-flex items-center justify-center border border-[var(--border)] rounded-md bg-[var(--bg-surface)] text-[var(--fg-2)] opacity-55 cursor-not-allowed"
-                    disabled title="Уведомления — {{ $disabledTitle }}">
-                🔔
-            </button>
+            {{-- Bell — Foundation Фаза 2 in-app notifications. --}}
+            <livewire:notifications.bell wire:key="notif-bell-{{ $user->id ?? 'guest' }}" />
         @endauth
 
         {{-- User avatar dropdown --}}
