@@ -38,6 +38,7 @@
 | 2.2 | Web-fetch URL'ов из тела письма: `inbound_url_fetches` + SSRF guard + DOMDocument-based extraction + cache 7д + sync intеграция в parseItemsFromInboundMessage | новое | done (`1d5c703`) |
 | 2.3 | `--reset` флаг для force re-parse — стирает RequestItem'ы перед persist | новое | done (`e63feba`) |
 | 2.4 | Привязка фото-вложений к позициям через Vision `image_index` → `request_items.image_attachment_id` + thumbnail+lightbox в UI | новое | done (`cca3109`) |
+| 2.4a | Vision dup-mapping fix: (1) `RequestItemEditor::rebindPhoto` + `ItemPhotoRebindDialog` (grid превью всех image-вложений письма + «без фото», audit в `payload.manual_edits[]` с `action=rebind_photo`); (2) Vision-промпт двухшаговый CoT — `photo_descriptions[]` сначала (main_subject / secondary_items / has_readable_marking), потом `image_index` с явными правилами (главный объект а не «виден в кадре», предпочтение closeup, запрет дубликатов кроме group-shot, «лучше null чем угадывать»); max_tokens 4096→6144; (3) `MessagePersister` filename fallback (trim + synthesize `<disposition>-<random>.<ext>` через `guessExtension` MIME-таблицу) + CLI `mail:backfill-attachment-names` для исторических ''-filename | новое | done (`c331c7d`, `a39e314`, `9709eaa`) |
 | 2.5 | Thread-aware clarifications queue: 2-й LLM-проход (`DecideClarificationsPrompt`) на reply'е разделяет «new positions» vs «article clarifications»; `requests.pending_clarifications` (jsonb) + UI Apply/Reject | новое | done (`1e5640c`) |
 | 2.6 | Каталог Liftway.ru drop-in: 30649 строк, POST /api/catalog/import (token-auth, hash-aware upsert, soft-delete, min_full_rows guard), CLI `catalog:import file.csv` (cp1251 autodetect) | новое | done (`a3a2d8f`..`94c5ef8`) |
 | 2.6-A | Use-case A: M-SKU resolve через CatalogResolutionService::resolveItem → status=sufficient + payload.catalog | новое | done |
@@ -696,6 +697,59 @@ app(App\Services\Request\AttentionService::class)->sweepOverdue();
 
 # Проверка cron:
 sudo -u www-data php artisan schedule:list | grep check-attention
+```
+
+### Сессия 2026-05-16 (продолжение) — Phase 2.4a Vision photo-binding fixes
+
+Боевой кейс M-2026-0673: «Резистор LAD4RCU» и «Пускатель A013250» получили одно и то же фото (att=1370 — общий план обоих устройств), «Доп.контакт A013256» получил closeup LAD4RCU (att=1374). Vision-промпт image_index не различал «главный объект» и «виден в кадре», не запрещал dup-mapping. Три патча:
+
+**Шаг 1 — UI ручная перепривязка** (`c331c7d`):
+- `RequestItemEditor::rebindPhoto(RequestItem, ?int $attachmentId, User)` — валидация: attachment принадлежит тому же email_message_id, mime_type начинается с `image/`. Идемпотентен. Audit `payload.manual_edits[]` с `action=rebind_photo`.
+- Livewire `ItemPhotoRebindDialog` (`app/Livewire/Requests/Items/`) — слушает `open-photo-rebind {itemId}`, computed `photoAttachments` отдаёт все image-вложения письма в порядке id ASC (тот же что видел Vision). Grid 3-5 колонок с превью + плитка «⊘ без фото». Тот же modal-паттерн что у `ItemCatalogLinkDialog`.
+- Пункт «📷 Сменить фото…» в dropdown `⋮` строки позиции (`_item-row.blade.php`).
+- Registered в Detail рядом с item-edit / catalog-link диалогами.
+
+**Шаг 2 — Vision-промпт CoT** (`a39e314`):
+- Двухшаговый Chain-of-Thought в `RequestItemParsingService::parseItemsFromPhotoMarkings()`:
+  - **ШАГ 1: `photo_descriptions[]`** — для каждого фото `{index, main_subject, secondary_items[], has_readable_marking}`. Модель сначала разбирает все 10 фото, потом распределяет.
+  - **ШАГ 2: image_index с правилами** — (а) главный объект, не «виден»; (б) closeup приоритет; (в) запрет дубликатов кроме group-shot; (г) «лучше null чем угадывать».
+- `max_tokens` 4096 → 6144 (CoT-preamble ~80-150 токенов на фото).
+- В Log: `photo_descriptions`, `image_index_distribution` (array_count_values) — видно как Vision сам обосновал каждый index, легко регресс-анализировать.
+
+**Шаг 3 — filename fallback** (`9709eaa`):
+- `MessagePersister::persistAttachment` баг: `?? ` срабатывал только когда `getName()` возвращал `null`. iPhone-фотки приходят с `Content-Type: image/jpeg` БЕЗ name=/filename= параметров — webklex отдаёт `''`, fallback не срабатывал, в БД попадал пустой string. UI показывал UUID-storage-key вместо имени.
+- Fix: `trim((string)$att->getName())` → если пусто → синтезируем `<disposition>-<random>.<ext>` (e.g. `inline-a3b2c1d4.jpg`). `guessExtension()` — таблица 20 MIME-типов (jpeg/png/heic/pdf/xlsx/zip/…).
+- CLI `mail:backfill-attachment-names` для исторических записей (~200 заявок). `--dry-run`, `--chunk=N`. Идёт по `filename IS NULL OR filename = ''`.
+
+#### Грабли Phase 2.4a
+
+- **Vision dup-mapping** — модель честно подбирает фото где товар *виден*, а не где он *главный объект*. Один общий план легко прилипает к двум-трём позициям. CoT-preamble + явное правило «main_subject vs secondary_items» в промпте — лечится. UI rebind — страховка.
+- **`?? ` не ловит пустую строку** — классическая PHP-грабля. `getName() ?? 'fallback'` — fallback не сработает если getName() вернул `''`. Нужно `trim((string)$x); if ($x === '') ...`.
+- **webklex `Attachment::getName()`** ведёт себя по-разному для разных клиентов: iPhone/iOS Mail часто шлёт inline-фото без `name=`/`filename=` → null или ''. Outlook/Yandex web — MIME-encoded в name. Содержимое RFC обычно есть, но `Content-Disposition: inline; filename=` не обязательно.
+- **gpt-4o с `response_format: json_object`** прекрасно принимает структурированный CoT — `photo_descriptions[]` + `items[]` в одном ответе. Не надо выносить в отдельный preceding-call.
+
+#### Деплой Phase 2.4a
+
+```bash
+cd /var/www/mzcorp
+sudo -u www-data git pull --ff-only origin main
+sudo -u www-data composer dump-autoload --optimize        # ItemPhotoRebindDialog + MailBackfillAttachmentNamesCommand
+sudo -u www-data php artisan view:clear && sudo -u www-data php artisan view:cache
+sudo -u www-data php artisan route:clear && sudo -u www-data php artisan route:cache
+sudo supervisorctl restart mzcorp-worker:*
+
+# Backfill пустых filename (~200 заявок, ~1500 attachment'ов):
+sudo -u www-data php artisan mail:backfill-attachment-names --dry-run
+sudo -u www-data php artisan mail:backfill-attachment-names
+```
+
+Тест нового Vision-промпта на M-2026-0673 (если оператор согласен потерять текущие image-привязки):
+```bash
+sudo -u www-data php artisan tinker --execute='
+$r = App\Models\Request::where("internal_code", "M-2026-0673")->first();
+\App\Jobs\Mail\ParseRequestItemsJob::dispatchSync($r->email_message_id, force: true, reset: true);
+'
+sudo grep -A 30 'parseItemsFromPhotoMarkings: GPT responded' /var/www/mzcorp/storage/logs/laravel.log | tail -60
 ```
 
 #### Текущее состояние на проде (2026-05-15 вечер)
