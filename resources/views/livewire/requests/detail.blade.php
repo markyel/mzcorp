@@ -124,9 +124,9 @@
         $_onItemsTab = $tab === 'items';
     @endphp
     @if($_aiSuggs->isNotEmpty() && $_canEdit && ! $aiBannerHidden)
-        <div class="mb-3 rounded-md border border-violet-300 bg-gradient-to-br from-violet-50 to-sky-50/40 p-3.5 flex items-center gap-3 shadow-sm">
-            <div class="shrink-0 w-9 h-9 rounded-md bg-violet-600 text-white flex items-center justify-center font-bold text-[12px] tracking-wider">AI</div>
-            <div class="flex-1 min-w-0 text-[12.5px] leading-snug">
+        <div class="mb-4 rounded-md border border-violet-200 bg-violet-50/60 px-5 py-4 flex items-start gap-4 shadow-sm">
+            <div class="shrink-0 w-11 h-11 rounded-md bg-violet-600 text-white flex items-center justify-center font-bold text-[13px] tracking-[0.08em] mt-0.5">AI</div>
+            <div class="flex-1 min-w-0 text-[12.5px] leading-relaxed">
                 {{-- Title + confidence chip (lowercase, light, как в макете) --}}
                 <div class="flex items-baseline gap-2 flex-wrap mb-1">
                     <span class="font-semibold text-fg-1 text-[13.5px]">
@@ -165,8 +165,8 @@
                 </div>
             </div>
 
-            {{-- Right column: actions --}}
-            <div class="shrink-0 flex items-center gap-2.5">
+            {{-- Right column: actions (выровнено к первой строке title) --}}
+            <div class="shrink-0 flex items-center gap-2.5 mt-1">
                 <button type="button"
                         wire:click="hideAiBanner"
                         class="text-[12px] text-fg-3 hover:text-fg-1 hover:underline">Скрыть</button>
