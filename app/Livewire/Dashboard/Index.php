@@ -221,9 +221,13 @@ class Index extends Component
             ->get();
 
         // Группируем по type → status → count.
+        // detector_type / status — enum-cast'ы (DetectorType / AiDecisionStatus),
+        // PHP 8.1+ не разрешает enum как ключ массива → используем ->value.
         $byType = [];
         foreach ($rows as $r) {
-            $byType[$r->detector_type][$r->status] = (int) $r->c;
+            $typeKey = $r->detector_type instanceof \BackedEnum ? $r->detector_type->value : (string) $r->detector_type;
+            $statusKey = $r->status instanceof \BackedEnum ? $r->status->value : (string) $r->status;
+            $byType[$typeKey][$statusKey] = (int) $r->c;
         }
 
         $out = [];
