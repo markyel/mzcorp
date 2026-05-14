@@ -93,8 +93,13 @@
         }
 
         $_inClarif = $req->status === \App\Enums\RequestStatus::AwaitingClientClarification;
+
+        // $canEditItems определена внутри @case('items'), здесь баннер
+        // отрисовывается ВНЕ tabs — вычисляем локально.
+        $_canEdit = auth()->id() === $req->assigned_user_id
+            || auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'secretary']);
     @endphp
-    @if($_aiSuggs->isNotEmpty() && $canEditItems)
+    @if($_aiSuggs->isNotEmpty() && $_canEdit)
         <div class="mb-3 rounded-md border border-violet-300 bg-gradient-to-br from-violet-50 to-sky-50/40 p-3.5 flex items-start gap-3 shadow-sm">
             <div class="shrink-0 w-9 h-9 rounded-md bg-violet-600 text-white flex items-center justify-center font-bold text-[12px] tracking-wider">AI</div>
             <div class="flex-1 min-w-0 text-[12.5px]">
