@@ -22,9 +22,10 @@ use Livewire\Component;
  *      батча). В draft.detected_artifacts кладём marker
  *      `clarification_batch:<id>` чтобы ComposeForm::send знал что
  *      это clarification и применил post-send hook.
- *   4. Dispatch `open-draft` → ComposeForm раскрывает форму с готовым
- *      письмом, оператор может править subject/body/attachments и
- *      нажать «Отправить».
+ *   4. Dispatch `clarification-letter-ready` → Detail переключает таб
+ *      на «Переписка» и сам диспатчит open-draft → ComposeForm
+ *      раскрывает форму с готовым письмом, оператор может править
+ *      subject/body/attachments и нажать «Отправить».
  *
  * Visibility: только assigned manager + acting (delegation) +
  * privileged head_of_sales/director могут составлять. У secretary
@@ -169,8 +170,11 @@ class ClarificationPanel extends Component
         $this->generalQuestion = '';
         $this->expanded = false;
 
-        // Дёргаем ComposeForm — он показывает draft в стандартной форме.
-        $this->dispatch('open-draft', draftId: $draft->id, requestId: $request->id);
+        // Уведомляем parent Detail — он переключит таб на «Переписка»
+        // (там зарегистрирован ComposeForm) и сам сделает dispatch open-draft.
+        // Прямой open-draft из таба «Позиции» не работает: ComposeForm
+        // не отрендерен, событие никто не ловит.
+        $this->dispatch('clarification-letter-ready', draftId: $draft->id);
 
         session()->flash('status', sprintf(
             'Сформирован черновик письма с %d вопросом(ами). Проверьте, отредактируйте и отправьте.',

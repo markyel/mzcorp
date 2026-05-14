@@ -624,6 +624,21 @@ class Detail extends Component
         $this->reloadRequest();
     }
 
+    /**
+     * Foundation §6.2: ClarificationPanel сформировал черновик письма
+     * и диспатчит этот event. Мы должны переключить таб на «Переписка»
+     * (там зарегистрирован ComposeForm) и попросить его открыть draft.
+     * ComposeForm::openDraft слушает 'open-draft' — он поймает после
+     * того как Livewire patch'нет DOM (tab='thread' → ComposeForm
+     * рендерится → потом исполняется dispatch на client).
+     */
+    #[On('clarification-letter-ready')]
+    public function openClarificationDraft(int $draftId): void
+    {
+        $this->tab = 'thread';
+        $this->dispatch('open-draft', draftId: $draftId, requestId: $this->request->id);
+    }
+
     /* ---------------- Phase 1.10 — state-machine transitions ---------------- */
 
     /**
