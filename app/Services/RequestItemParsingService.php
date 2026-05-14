@@ -853,21 +853,55 @@ PROMPT;
             . "• если на фото видна посторонняя инфо (логотип компании, реклама,\n"
             . "  чек, штрих-код БЕЗ артикула) — игнорируй\n\n";
 
-        // Phase 2: требуем image_index — порядковый номер фото в массиве
-        // image_url (от 0). Используется для привязки позиции к фото-вложению
-        // в БД (request_items.image_attachment_id). Если позиция собрана по
-        // нескольким фото (например, один товар с разных ракурсов) — указывай
-        // index первого/самого информативного.
-        $intro .= "═══ ВАЖНО: НОМЕР ФОТО ═══\n"
-            . "Изображения переданы по порядку, нумерация с 0. В каждой позиции\n"
-            . "указывай `image_index` — номер фото, по которому ты извлёк эту\n"
-            . "позицию. Если позиция выведена из нескольких фото — поставь index\n"
-            . "первого/самого информативного. Если позиция взята только из текста\n"
-            . "(нет подходящего фото) — `image_index: null`.\n\n";
+        // Phase 2.4a: двухшаговый Chain-of-Thought:
+        //  1) описать каждое фото отдельно — главный объект и побочные товары
+        //     в кадре (`photo_descriptions[]`);
+        //  2) только потом подбирать image_index для каждой позиции, выбирая
+        //     фото где товар *главный* объект (closeup label), а не где он
+        //     просто виден в кадре.
+        //
+        // Это лечит Vision dup-mapping (один общий план «прилипает» к двум
+        // позициям) и cases когда модель угадывает фото для item'а без
+        // подходящего closeup'а.
+        $intro .= "═══ ШАГ 1: ОПИСАНИЕ ФОТО ═══\n"
+            . "Прежде чем выводить позиции, для КАЖДОГО фото (по порядку, начиная с 0)\n"
+            . "запиши в `photo_descriptions[]`:\n"
+            . "  • `index` — порядковый номер фото (0..N-1)\n"
+            . "  • `main_subject` — что главный/центральный объект фото в одной фразе\n"
+            . "    (например «closeup шильдика контактора Schneider A013250», «общий план\n"
+            . "    двух устройств на ладони», «упаковка/коробка», «логотип бренда»,\n"
+            . "    «штрих-код без артикула»)\n"
+            . "  • `secondary_items` — массив других товаров, которые видны в кадре, но\n"
+            . "    НЕ главный объект (пустой массив если только один товар или фото\n"
+            . "    нерелевантно)\n"
+            . "  • `has_readable_marking` — true если на фото читается артикул/маркировка\n\n";
+
+        $intro .= "═══ ШАГ 2: ВЫБОР image_index ДЛЯ ПОЗИЦИЙ ═══\n"
+            . "Для каждой позиции в `items[]` поставь `image_index` следуя правилам:\n\n"
+            . "1) **Главный объект, а не «виден в кадре».** Выбирай только то фото,\n"
+            . "   где этот товар — main_subject. Если товар фигурирует лишь как\n"
+            . "   secondary_items на общем плане — это НЕ повод выбрать его.\n"
+            . "2) **Предпочтение closeup'у.** Если для одной позиции есть и общий\n"
+            . "   план, и closeup label/маркировки — ВСЕГДА выбирай closeup\n"
+            . "   (has_readable_marking=true).\n"
+            . "3) **Уникальность.** Один image_index можно присваивать НЕСКОЛЬКИМ\n"
+            . "   позициям ТОЛЬКО если это group-shot, где все эти товары стоят\n"
+            . "   в равной композиции (например пакет с тремя одинаковыми платами).\n"
+            . "   Если у каждой позиции есть собственный closeup — выбирай его,\n"
+            . "   а не повторяй общий план.\n"
+            . "4) **Лучше null, чем угадывать.** Если для позиции НЕТ фото, где этот\n"
+            . "   товар главный объект, или вообще нет подходящего фото — `image_index: null`.\n"
+            . "   Неверная привязка хуже отсутствия привязки.\n\n";
 
         $intro .= "═══ ФОРМАТ ОТВЕТА ═══\n"
             . "Строго JSON без markdown:\n"
-            . '{"items": [{"name": "...", "brand": "...", "article": "...", "qty": 1, "unit": "шт.", "note": null, "image_index": 0}]}';
+            . '{'
+            . '"photo_descriptions":['
+                . '{"index":0,"main_subject":"...","secondary_items":["...","..."],"has_readable_marking":true}'
+            . '],'
+            . '"items":['
+                . '{"name":"...","brand":"...","article":"...","qty":1,"unit":"шт.","note":null,"image_index":0}'
+            . ']}';
 
         $content = [['type' => 'text', 'text' => $intro]];
         foreach ($images as $img) {
@@ -882,20 +916,32 @@ PROMPT;
             config('services.openai.vision_model'),
             [
                 'temperature' => 0,
-                'max_tokens' => 4096,
+                // CoT-preamble (photo_descriptions[]) добавляет ~80-150 токенов
+                // на каждое фото — поднимаем потолок чтобы не обрезать ответ.
+                'max_tokens' => 6144,
                 'response_format' => ['type' => 'json_object'],
             ],
         );
+
+        $parsed = json_decode($result['content'] ?? '', true);
+        $items = $parsed['items'] ?? [];
+        $photoDescriptions = is_array($parsed['photo_descriptions'] ?? null)
+            ? $parsed['photo_descriptions']
+            : [];
 
         Log::info('parseItemsFromPhotoMarkings: GPT responded', [
             'images' => count($images),
             'reference_text_chars' => $referenceText !== null ? mb_strlen($referenceText) : 0,
             'finish_reason' => $result['raw']['choices'][0]['finish_reason'] ?? null,
             'usage' => $result['usage'] ?? null,
+            'photo_descriptions_count' => count($photoDescriptions),
+            // Для regress-анализа: видно, как Vision сам себе обосновал image_index.
+            'photo_descriptions' => $photoDescriptions,
+            'image_index_distribution' => array_count_values(array_filter(array_map(
+                fn ($it) => $it['image_index'] ?? null,
+                $items,
+            ), fn ($v) => $v !== null)),
         ]);
-
-        $parsed = json_decode($result['content'] ?? '', true);
-        $items = $parsed['items'] ?? [];
 
         return array_map(function (array $item) use ($attachmentIds) {
             $normalized = $this->normalizeParsedItem($item);
