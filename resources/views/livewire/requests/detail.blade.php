@@ -326,8 +326,14 @@
 
             {{-- Phase 4 (Foundation §7): pending AI-suggestion'ы DocumentDetector'а.
                  Рендерятся ВЫШЕ action-panel чтобы оператор увидел и принял
-                 решение до основных кнопок переходов. --}}
-            @php $aiSuggestions = $this->pendingAiDecisions; @endphp
+                 решение до основных кнопок переходов.
+                 Phase E.2: inbound_clarification_response теперь показывается
+                 отдельным баннером вверху страницы (детализированно с diff/bar),
+                 поэтому здесь отфильтровываем — не дублируем. --}}
+            @php
+                $aiSuggestions = $this->pendingAiDecisions
+                    ->reject(fn ($s) => ($s->detector_type->value ?? null) === 'inbound_clarification_response');
+            @endphp
             @if($aiSuggestions->isNotEmpty() && $canManage)
                 @foreach($aiSuggestions as $sugg)
                     @php
