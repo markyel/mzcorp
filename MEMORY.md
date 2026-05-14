@@ -52,11 +52,13 @@
 | 1.10 | Минимальная state-machine (Foundation §5.2): 11 новых статусов (`in_progress`, `awaiting_client_clarification`, `quoted`, `under_review`, `postponed_until`, `awaiting_invoice`, `invoiced`, `paid`, `paused`, `closed_won`, `closed_lost`) + `ClosedLostReason` taxonomy (10) + `RequestStateService` + `RequestPauseService` + audit `request_state_changes` + cron `requests:resume-paused` (dailyAt 06:00) + UI action-panel с allowedTransitions + `PauseDialog` / `CloseLostDialog` + Activity-tab merge state-changes/assignments + Pool bucket-фильтры (active/paused/closed/all) + chip-фильтры внутри bucket + auto-сброс stale URL-фильтра при mount | новое | done (`00a806b`, `49e78a7`, `9522c17`) |
 | 1.10-fixes | Sticky-navigate ломал Detail-page (wire:navigate → SPA-state stuck); + кириллический «М» (U+041C) в M-SKU detector через новый helper `CatalogImportService::cyrillicLookalikeFold()` (11 пар lookalike-букв) — applied в `detectInternalCatalogSku` / `extractSku` / `normalizeArticle`; + toggle «📎 Sticky-позиции» в табе Позиции (forward + reverse-search в `request_assignments.reason`) с тем же layout что main-list через partial `_item-row.blade.php` | новое | done (`a86323f`, `7ccb044`, `1e9e558`) |
 | 1.11 | **Attention-механизм** (Foundation §5.3 + §5.5): `requests.attention_required_at` + `attention_reason` (enum `AttentionReason`, 7 значений) + денорм `attention_level` (0/1 overdue) + composite index `(assigned_user_id, attention_level DESC, attention_required_at NULLS LAST)` + partial index по overdue; `AttentionService::recompute() / clear() / sweepOverdue()` + business-hours helper (Пн-Пт 9-18 Europe/Moscow); интеграция в `RequestStateService::transitionTo()` + `recordSystemInitial()` + `RequestPauseService::pauseUntil()/resume()` (resume → attention_required_at=now, level=1, reason=postponed_resume); cron `requests:check-attention` everyFifteenMinutes (sweep level); Pool — orderBy attention для bucket=active/overdue + новый bucket «Просрочено» (flat-list без status-groups) + красный chip когда count > 0; row-tint `--red-50` + left-border accent для overdue; attention badge в title-cell (icon + «через 4ч» / «просрочено 2д»); Settings UI — 8 редактируемых дедлайнов в группе «Attention · дедлайны»; Dashboard РОПа — 2 KPI-плашки «Просрочено» / «Дедлайн сегодня» с кликом на pool?bucket=overdue; `PostponeDialog` — date + comment, пишет `payload.postponed_until` в state-change | новое | done |
+| 4.0 | **DocumentDetector** (Foundation §7) — auto-переходы статусов по детекту КП/счёта/clarification в outbound и intent-классификатора reply'ев клиента в inbound. Schema: `ai_decisions` таблица (detector_type, status enum suggested→auto_applied/manually_confirmed/manually_overridden/dismissed/failed + confidence + payload + applied_by audit), `requests.closed_lost_quote` + `closed_lost_source_message_id` (Foundation §7.4). Enums `DetectorType` (10 значений с `targetStatus()` map), `AiDecisionStatus`. `AiDecisionService::recordSuggestion / apply / override / dismiss` — single source of truth для жизненного цикла, идемпотентен по (email_message_id, detector_type). `OutboundDocumentDetector` rule-based (filename regex + body keywords RU/EN; priority invoice > quotation > clarification; confidence 0.6/0.9/0.95 от комбинации сигналов). `InboundIntentClassifier` (gpt-4o-mini, `ClassifyClientResponsePrompt`) — 6 intent'ов с suggested_resume_date / suggested_closed_lost_reason / cited_phrase извлечением. Triggers в MailRouter: outbound-ветка после OutgoingMailLinker + inbound после InboundReplyLinker если статус Request в {quoted, under_review, postponed, awaiting_clarification}. UI plashka в Detail action-panel — иконка + label + confidence% + target-status + cited_phrase (italic blockquote) или reasoning + apply/dismiss кнопки. Apply disabled если переход не разрешён из текущего статуса. Foundation §7.3 validation framework: 8 toggle'ов auto_mode + общий `confidence_threshold` (default 0.85) в Settings; auto-apply gate в recordSuggestion (если включён И ≥ threshold → apply(auto=true) сразу). Dashboard РОПа — таблица «AI quality (30 дн.)» с counts (auto/confirmed/overridden/dismissed/pending) и correctness% per type, цветовая индикация (≥90 emerald, ≥70 amber, <70 red). | новое | done (`b876244`, `9fb94f5`, `cefd439`, `5ebe671`) |
 
 KB drop-in, sticky-snapshot, catalog (A+B+C), settings UI — **закрыты в Фазе 2 (2026-05-08, 2026-05-12).**
 Phase 1.9 UI-переписка, Priority 1 ручное управление позициями, Phase 1.10 state-machine — **закрыты 2026-05-14, 2026-05-15.**
 Phase 1.11 Attention-механизм — **закрыт 2026-05-16.**
-DocumentDetector, экспорт в 1С, Reanimate closed, KB curator UI — **за пределами текущей фазы.**
+Phase 4.0 DocumentDetector — **закрыт 2026-05-17.**
+Экспорт в 1С, Reanimate closed, KB curator UI — **за пределами текущей фазы.**
 
 ## Что готово (инфраструктура — Фаза 0)
 
@@ -752,6 +754,75 @@ $r = App\Models\Request::where("internal_code", "M-2026-0673")->first();
 sudo grep -A 30 'parseItemsFromPhotoMarkings: GPT responded' /var/www/mzcorp/storage/logs/laravel.log | tail -60
 ```
 
+### Сессия 2026-05-17 — Phase 4.0 DocumentDetector
+
+Четыре коммита `b876244..5ebe671`. Полная реализация Foundation §7 включая validation framework (Foundation §7.3) — auto-mode выключен по умолчанию для всех 8 типов, РОП включает per type через Settings после валидации.
+
+**Commit 1 — schema** (`b876244`):
+- Migration `2026_05_17_120000_create_ai_decisions_table` — журнал AI-решений (detector_type + status lifecycle + confidence + payload jsonb + applied_by audit). Composite индексы `(request_id, status)` и `(detector_type, status, created_at)`.
+- Migration `2026_05_17_120001_add_closed_lost_quote_to_requests_table` — Foundation §7.4 (`closed_lost_quote` text + `closed_lost_source_message_id` FK).
+- Enums `DetectorType` (10 значений) с `targetStatus()` map; `AiDecisionStatus` (6 значений).
+- `AiDecision` model + relations Request::aiDecisions / closedLostSourceMessage.
+- `RequestStateService::transitionTo` принимает в context `closed_lost_quote` + `closed_lost_source_message_id` (для inbound-classifier).
+
+**Commit 2 — outbound rule-based detector** (`9fb94f5`):
+- `OutboundDocumentDetector::analyze()` — без OCR/PDF-разбора:
+  - filename regex (RU/EN: `КП_*.pdf`, `Quote-*`, `Счёт_*.pdf`, `Invoice-*`, `Bill_*`, `INV-*`)
+  - body/subject keywords (~25 фраз, normalize ё→е для recall)
+  - confidence 0.95 / 0.90 / 0.65 / 0.60 от комбинации сигналов
+  - priority: invoice > quotation > clarification
+  - clarification только если НЕТ relevant-attachments
+- `AiDecisionService::recordSuggestion / apply / override / dismiss` — single source of truth жизненного цикла. Идемпотентен по (email_message_id, detector_type).
+- MailRouter outbound branch: после OutgoingMailLinker если linked Request → анализ → recordSuggestion.
+- UI plashka в Detail action-panel ВЫШЕ кнопок: иконка + label + confidence% + target-status + apply/dismiss. Apply disabled если переход не разрешён из текущего статуса.
+
+**Commit 3 — inbound LLM classifier** (`cefd439`):
+- `ClassifyClientResponsePrompt` (gpt-4o-mini) — 6 intent'ов: under_review_acknowledgment / postponement_request / invoice_request / decline_with_reason / clarification_response / unclear. Извлекает `suggested_resume_date`, `suggested_closed_lost_reason`, `cited_phrase` (точная цитата из письма).
+- `InboundIntentClassifier::isApplicable()` — фильтр статуса Request (quoted / under_review / postponed / awaiting_clarification). `classify()` — confidence floor 0.6 (ниже → unclear). clarification_response downgrade в unclear если статус Request не AwaitingClientClarification.
+- MailRouter inbound branch: после InboundReplyLinker если applicable → classify → recordSuggestion.
+- `AiDecisionService::apply` пробрасывает inbound postponed `suggested_resume_date` в state_change.payload (AttentionService::postponedUntilFor читает её). Для decline pre-filled `closed_lost_reason` + `cited_phrase` → `closed_lost_quote` + `closed_lost_source_message_id`.
+- UI plashka: cited_phrase отображается italic blockquote (если decline), иначе reasoning.
+
+**Commit 4 — validation framework** (`5ebe671`):
+- Settings (9 новых полей в группе «DocumentDetector · auto-mode»):
+  - `detector.confidence_threshold` (float, default 0.85)
+  - 8× `detector.auto_mode.<type>` (bool, default false)
+- `AiDecisionService::recordSuggestion` — если `shouldAutoApply(type, confidence)` (auto-mode включён И confidence ≥ threshold) → apply сразу с `auto=true` (status=auto_applied, без UI-подтверждения).
+- Dashboard РОПа — новая таблица «AI quality (детектор · 30 дн.)»: per DetectorType counts (auto + confirmed / overridden / dismissed / pending) + correctness% с цветовой индикацией (≥90 emerald, ≥70 amber, <70 red). Скрыты строки где total=0.
+
+#### Грабли Phase 4.0
+
+- **Idempotency suggestion'ов** — повторный запуск пайплайна (sync re-pull одного и того же письма) не должен плодить дублей. Проверка по `(email_message_id, detector_type, status=suggested)` в `recordSuggestion`. Финальные status (auto_applied и т.д.) не блокируют новый suggestion на следующее письмо.
+- **clarification_response trap** — LLM любит ставить этот intent любому ответу клиента. Дополнительный server-side gate: downgrade в unclear если Request.status ≠ AwaitingClientClarification.
+- **`apply` рекурсия** — recordSuggestion при auto-mode дёргает apply(auto=true), который вернёт fresh()→Decision. Если apply падает (transitionTo throws) — переводим в Failed, не в Suggested (чтобы не висело в pending).
+- **Confidence floor 0.6** — задан и в промпте, и в коде. Дублирование сознательное — LLM иногда возвращает 0.55 и `intent` ≠ unclear, не доверяя промпту в одиночку.
+- **Auto-mode по умолчанию выключен** — это критично. Foundation §7.3 описывает 1000+ выборку перед включением. Не включать ни один toggle на старте, даже если соблазн «outbound_invoice с confidence 0.95 — точно правильно».
+
+#### Деплой Phase 4.0
+
+```bash
+cd /var/www/mzcorp
+sudo -u www-data git pull --ff-only origin main
+sudo -u www-data composer dump-autoload --optimize
+sudo -u www-data php artisan migrate --force          # 2 новые миграции
+sudo -u www-data php artisan config:cache
+sudo -u www-data php artisan route:cache
+sudo -u www-data php artisan view:clear && sudo -u www-data php artisan view:cache
+sudo supervisorctl restart mzcorp-worker:*
+
+# Проверка что MailRouter подхватил новые сервисы:
+sudo -u www-data php artisan tinker --execute='
+$r = app(App\Services\Mail\MailRouter::class);
+echo "MailRouter OK\n";
+$o = app(App\Services\DocumentDetector\OutboundDocumentDetector::class);
+echo "OutboundDetector OK\n";
+$i = app(App\Services\DocumentDetector\InboundIntentClassifier::class);
+echo "InboundClassifier OK\n";
+'
+```
+
+После 2-4 недель боевого режима оценить точность через Dashboard «AI quality» — если correctness% по конкретному detector_type ≥ 99% на ≥1000 решений, можно осторожно включить auto-mode в Settings.
+
 #### Текущее состояние на проде (2026-05-15 вечер)
 
 - `request_state_changes` — пустая (первые записи появятся при ручных transitions через UI после деплоя).
@@ -793,13 +864,9 @@ Phase 1.9 (UI-переписка), Priority 1 (ручное управление
 
 Реализовано в Phase 1.11. См. таблицу декомпозиции выше.
 
-### Приоритет 2 — DocumentDetector (Foundation §7 — Фаза 4)
+### ~~Приоритет 2 — DocumentDetector~~ ✅ закрыт 2026-05-17
 
-Auto-переходы статусов на основе детектирования содержимого outbound/inbound писем. Большая работа:
-- В outbound (Sent): детектор КП (attachment.pdf с КП-pattern либо HTML body с маркерами цены/таблицы позиций) → `in_progress → quoted`.
-- В outbound: детектор счёта (filename начинается на «Счёт_», PDF с реквизитами) → `awaiting_invoice → invoiced`.
-- В inbound (после quoted): классификатор клиентского ответа — `under_review | postponed | client_decline | invoice_request | confirm_order` → авто-transition.
-- Confidence-порог + UI «откатить статус» с записью в audit. При N откатов — ML-поправка.
+Реализован в Phase 4.0 (четыре коммита `b876244..5ebe671`). См. таблицу декомпозиции выше.
 
 ### Приоритет 3 — Reanimate closed (Foundation §5.2)
 
