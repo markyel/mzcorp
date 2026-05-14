@@ -214,8 +214,12 @@ class Pool extends Component
         $query->whereIn('status', $bucketStatuses);
 
         // Phase 1.11: bucket=overdue — только просроченные (attention_level=1).
+        // ClientReplied имеет attention_level=1 (немедленный показ), но это
+        // не алярм — исключаем из overdue bucket. Менеджер увидит ClientReplied
+        // в обычном bucket=active (amber-подсветка строки).
         if ($this->bucket === 'overdue') {
-            $query->where('attention_level', 1);
+            $query->where('attention_level', 1)
+                ->where('attention_reason', '!=', \App\Enums\AttentionReason::ClientReplied->value);
         }
 
         // Уточняющий status-фильтр внутри bucket'а — только если значение
@@ -304,6 +308,7 @@ class Pool extends Component
                 ->count(),
             'overdue' => (clone $countsBase)
                 ->where('attention_level', 1)
+                ->where('attention_reason', '!=', \App\Enums\AttentionReason::ClientReplied->value)
                 ->whereIn('status', array_filter(
                     $openValues,
                     fn ($v) => $this->canSeeAll || $v !== RequestStatus::Pending->value,

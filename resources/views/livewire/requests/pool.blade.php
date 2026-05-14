@@ -437,12 +437,21 @@
                             $isSticky = $req->latestAssignment?->reason === 'auto_sticky';
                             $attachCount = $req->emailMessage?->attachments_count ?? 0;
 
-                            // Phase 1.11: attention badge + overdue tint.
+                            // Phase 1.11 + minimize 2026-05-21:
+                            // attention badge + tint. ClientReplied — info (amber),
+                            // не алярм: «есть новости», менеджер ещё не открыл.
+                            // Snimaется в Detail::mount → onManagerOpened.
+                            // SlaBreach / PostponedResume — red, реальная просрочка.
                             $attnReason = $req->attention_reason; // AttentionReason|null
                             $attnAt = $req->attention_required_at;
-                            $isOverdue = $req->attention_level === 1;
+                            $isClientReplied = $attnReason === \App\Enums\AttentionReason::ClientReplied;
+                            $isOverdueAlarm = $req->attention_level === 1 && ! $isClientReplied;
                             $attnText = null;
-                            if ($attnAt) {
+                            if ($isClientReplied) {
+                                // Для ClientReplied не показываем «через/просрочено» —
+                                // это не SLA-таймер, это статус «непрочитанные новости».
+                                $attnText = 'есть ответ';
+                            } elseif ($attnAt) {
                                 $diffSecs = (int) now()->diffInSeconds($attnAt, false);
                                 $absSecs = abs($diffSecs);
                                 $unit = $absSecs < 3600 ? (int) max(1, floor($absSecs / 60)) . 'м'
@@ -467,7 +476,7 @@
 
                         <a href="{{ $href }}" wire:key="req-{{ $req->id }}"
                            class="grid items-center px-5 h-[42px] gap-x-3 border-b border-[var(--border-subtle)] text-[12.5px] hover:bg-[var(--bg-hover)] transition-colors
-                                  {{ $isOverdue ? 'bg-[var(--red-50)] hover:bg-[var(--red-100)] border-l-2 border-l-[var(--red-500)] pl-[18px]' : '' }}"
+                                  {{ $isOverdueAlarm ? 'bg-[var(--red-50)] hover:bg-[var(--red-100)] border-l-2 border-l-[var(--red-500)] pl-[18px]' : ($isClientReplied ? 'bg-[var(--amber-50)] hover:bg-[var(--amber-100)] border-l-2 border-l-[var(--amber-500)] pl-[18px]' : '') }}"
                            style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 140px 160px 100px 80px 32px;">
 
                             {{-- checkbox (Phase 2) --}}
@@ -487,12 +496,14 @@
                                     @if($attachCount > 0)
                                         <span class="inline-flex items-center gap-0.5 font-semibold text-[10px] px-1.5 py-0.5 rounded-[3px] bg-[var(--neutral-100)] text-[var(--fg-2)] flex-shrink-0">📎 {{ $attachCount }}</span>
                                     @endif
-                                    @if($attnReason && $attnAt)
+                                    @if($attnReason && ($attnAt || $isClientReplied))
                                         <span class="inline-flex items-center gap-0.5 font-semibold text-[10px] px-1.5 py-0.5 rounded-[3px] flex-shrink-0
-                                                     {{ $isOverdue
+                                                     {{ $isOverdueAlarm
                                                          ? 'bg-[var(--red-100)] text-[var(--red-700)]'
-                                                         : 'bg-[var(--amber-50)] text-[var(--amber-700)]' }}"
-                                              title="{{ $attnReason->label() }} · {{ $attnAt->format('d.m.Y H:i') }}">
+                                                         : ($isClientReplied
+                                                             ? 'bg-[var(--amber-100)] text-[var(--amber-800)]'
+                                                             : 'bg-[var(--amber-50)] text-[var(--amber-700)]') }}"
+                                              title="{{ $attnReason->label() }}{{ $attnAt ? ' · ' . $attnAt->format('d.m.Y H:i') : '' }}">
                                             {{ $attnReason->icon() }} {{ $attnText }}
                                         </span>
                                     @endif

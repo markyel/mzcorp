@@ -132,6 +132,20 @@ class Detail extends Component
         if (! in_array($this->tab, self::TABS, true)) {
             $this->tab = 'overview';
         }
+
+        // Attention «📨 Ответ от клиента» — менеджер открыл карточку, фиксируем
+        // last_seen_at и снимаем ClientReplied (recompute вернёт SlaBreach по
+        // статусу или null). Не делаем для secretary — он не «менеджер»
+        // заявки, только просматривает; и не для гостей (тогда mount абортит
+        // выше).
+        if ($user !== null && ! $user->hasRole(Role::Secretary->value)) {
+            \App\Models\RequestUserView::updateOrCreate(
+                ['request_id' => $this->request->id, 'user_id' => $user->id],
+                ['last_seen_at' => now()],
+            );
+            app(\App\Services\Request\AttentionService::class)
+                ->onManagerOpened($this->request);
+        }
     }
 
     public function setTab(string $tab): void

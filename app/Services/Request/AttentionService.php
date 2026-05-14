@@ -58,6 +58,46 @@ class AttentionService
     }
 
     /**
+     * Hook: клиент прислал inbound в активную заявку. Ставим reason=ClientReplied
+     * + attention_level=1 (немедленный показ как «есть новости»), но в Pool
+     * рендерится как info (amber/sky), а не алярм (red) — AttentionReason::isInfo().
+     *
+     * Затирает любой существующий attention (SlaBreach / PostponedResume) —
+     * это сильнее, потому что прямо сейчас есть что прочитать. Когда менеджер
+     * откроет карточку, onManagerOpened вернёт обычный SlaBreach по статусу.
+     *
+     * НЕ ставим если статус — терминальный или Pending (заявка ещё не у
+     * менеджера). Reanimate для ClosedLost обрабатывается отдельно в
+     * RequestStateService::reanimate (там свой transition → recompute).
+     */
+    public function onClientReplied(Request $request): void
+    {
+        if (in_array($request->status, $this->silentStatuses(), true)) {
+            return;
+        }
+
+        $request->forceFill([
+            'attention_required_at' => now(),
+            'attention_reason' => AttentionReason::ClientReplied->value,
+            'attention_level' => 1,
+        ])->save();
+    }
+
+    /**
+     * Hook: менеджер открыл карточку. Снимает attention_reason=ClientReplied
+     * (recompute вернёт обычный SlaBreach по статусу или null) — менеджер
+     * увидел новости. Не трогает SlaBreach / PostponedResume — те снимаются
+     * только через transitionTo / resume / explicit clear.
+     */
+    public function onManagerOpened(Request $request): void
+    {
+        if ($request->attention_reason !== AttentionReason::ClientReplied->value) {
+            return;
+        }
+        $this->recompute($request);
+    }
+
+    /**
      * Sweep: ставит attention_level=1 строкам, у которых дедлайн в прошлом.
      * Сбрасывает attention_level=0 если дедлайн снова в будущем (например,
      * после resume / transitionTo).
@@ -167,17 +207,22 @@ class AttentionService
                 $this->addBusinessHours($anchor, $this->cfgInt('in_progress_hours', 24)),
                 AttentionReason::SlaBreach,
             ],
+            // Phase «attention reasons minimize» (2026-05-21): для всех
+            // не-терминальных статусов с дедлайном reason всегда SlaBreach.
+            // Заявка светится красным только когда дедлайн ИСТЁК — до этого
+            // в Pool тихо. AwaitingClient / Followup / Partial — это рабочие
+            // фазы, не алярм; их визуальная подсветка убрана.
             RequestStatus::AwaitingClientClarification => [
                 $this->addBusinessDays($anchor, $this->cfgInt('awaiting_clarification_days', 2)),
-                AttentionReason::AwaitingClient,
+                AttentionReason::SlaBreach,
             ],
             RequestStatus::Quoted => [
                 $this->addBusinessDays($anchor, $this->cfgInt('quoted_first_followup_days', 3)),
-                AttentionReason::QuoteFollowupDue,
+                AttentionReason::SlaBreach,
             ],
             RequestStatus::UnderReview => [
                 $this->addBusinessDays($anchor, $this->cfgInt('under_review_days', 3)),
-                AttentionReason::AwaitingClient,
+                AttentionReason::SlaBreach,
             ],
             RequestStatus::PostponedUntil => [
                 $this->postponedUntilFor($request),
@@ -189,7 +234,7 @@ class AttentionService
             ],
             RequestStatus::Invoiced => [
                 $this->addBusinessDays($anchor, $this->cfgInt('invoiced_followup_days', 5)),
-                AttentionReason::InvoiceFollowupDue,
+                AttentionReason::SlaBreach,
             ],
             default => [null, null],
         };

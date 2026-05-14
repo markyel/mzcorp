@@ -35,6 +35,7 @@ class MailRouter
         private readonly OutboundDocumentDetector $outboundDetector,
         private readonly InboundIntentClassifier $inboundClassifier,
         private readonly AiDecisionService $aiDecisions,
+        private readonly \App\Services\Request\AttentionService $attention,
     ) {
     }
 
@@ -132,6 +133,24 @@ class MailRouter
         // не блокирует thread_reply если related_request_id уже есть.
         if ($linkedRequest !== null) {
             \App\Jobs\Mail\ParseRequestItemsJob::dispatch($message->id, true);
+
+            // Attention «📨 Ответ от клиента» — пометить заявку «есть новости»
+            // на любом не-терминальном статусе. onClientReplied сам пропустит
+            // silent-статусы (Pending/Paused/Closed*/Paid). Если ниже
+            // InboundIntentClassifier auto-apply'ит transition (например,
+            // postponed_resume на дате) — последующий transitionTo()
+            // вызовет recompute() и затрёт ClientReplied на SlaBreach или
+            // null. Если intent не auto-apply'нулся — ClientReplied остаётся
+            // до Detail::mount менеджера (onManagerOpened).
+            try {
+                $this->attention->onClientReplied($linkedRequest);
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: attention onClientReplied failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $linkedRequest->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             // Phase 4 (Foundation §7.2): inbound intent classifier.
             // Запускаем только для статусов где имеет смысл (quoted /
