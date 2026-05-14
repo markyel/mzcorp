@@ -51,18 +51,24 @@
                                     $cur = (string) ($perItem[$key] ?? '');
                                     $hasQ = trim($cur) !== '';
                                 @endphp
-                                <div class="flex gap-3 items-start p-2 rounded-md {{ $hasQ ? 'bg-amber-50' : 'bg-surface-2' }}">
-                                    <div class="w-[150px] shrink-0 text-[12.5px] text-fg-1 leading-tight">
-                                        <span class="mono text-fg-3 text-[11px]">#{{ $item->position }}</span>
-                                        <div class="font-medium truncate" title="{{ $item->parsed_name }}">{{ \Illuminate\Support\Str::limit($item->parsed_name ?: '(без названия)', 30) }}</div>
+                                <div class="p-2 rounded-md {{ $hasQ ? 'bg-amber-50' : 'bg-surface-2' }}">
+                                    <div class="flex items-baseline gap-1.5 mb-1.5 text-[12.5px] text-fg-1 leading-snug flex-wrap">
+                                        <span class="mono text-fg-3 text-[11px] shrink-0">#{{ $item->position }}</span>
+                                        <span class="font-medium">{{ $item->parsed_name ?: '(без названия)' }}</span>
+                                        @if($item->parsed_brand)
+                                            <span class="inline-flex items-center px-1.5 rounded-sm bg-emerald-50 text-emerald-800 font-semibold text-[10.5px]">{{ $item->parsed_brand }}</span>
+                                        @endif
                                         @if($item->parsed_article)
-                                            <div class="text-[11px] text-fg-3 mono truncate" title="{{ $item->parsed_article }}">{{ \Illuminate\Support\Str::limit($item->parsed_article, 30) }}</div>
+                                            <span class="text-[11px] text-fg-3 mono">арт. {{ $item->parsed_article }}</span>
+                                        @endif
+                                        @if($item->parsed_qty)
+                                            <span class="text-[11px] text-fg-3">· {{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') }} {{ $item->parsed_unit ?: 'шт.' }}</span>
                                         @endif
                                     </div>
                                     <textarea wire:model.live.debounce.500ms="perItem.{{ $item->id }}"
                                               rows="2" maxlength="1000"
                                               placeholder="Вопрос по этой позиции (например: пришлите фото шильдика)"
-                                              class="flex-1 px-3 py-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-[var(--sky-500)] resize-y"></textarea>
+                                              class="w-full px-3 py-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-[var(--sky-500)] resize-y"></textarea>
                                 </div>
                             @endforeach
                         </div>
