@@ -131,9 +131,9 @@
              style="grid-template-columns: auto 1fr auto;
                     background: linear-gradient(180deg, oklch(97% 0.03 280) 0%, var(--bg-surface) 100%);
                     border-color: oklch(82% 0.10 280)">
-            {{-- AI icon --}}
-            <span class="w-9 h-9 rounded-lg flex items-center justify-center text-white font-bold text-[16px] leading-none"
-                  style="background: oklch(58% 0.18 280)">AI</span>
+            {{-- AI icon — 40×40, насыщенный violet, лёгкая тень для объёма --}}
+            <span class="w-10 h-10 rounded-[10px] flex items-center justify-center text-white font-bold text-[17px] leading-none shadow-sm"
+                  style="background: oklch(54% 0.22 280)">AI</span>
 
             {{-- Content column --}}
             <div class="min-w-0">
