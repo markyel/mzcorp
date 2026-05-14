@@ -1252,6 +1252,9 @@
                         <livewire:requests.items.item-catalog-link-dialog
                             :request-id="$req->id"
                             wire:key="item-catalog-link-{{ $req->id }}" />
+                        <livewire:requests.items.item-photo-rebind-dialog
+                            :request-id="$req->id"
+                            wire:key="item-photo-rebind-{{ $req->id }}" />
                     @endif
                 </div>
                 @break

@@ -5,6 +5,7 @@ namespace App\Services\Catalog;
 use App\Enums\QualityAssessmentStatus;
 use App\Enums\Role as RoleEnum;
 use App\Models\CatalogItem;
+use App\Models\EmailAttachment;
 use App\Models\RequestItem;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -527,6 +528,65 @@ class RequestItemEditor
 
         Log::info('RequestItemEditor: marked as not_found', [
             'request_item_id' => $item->id,
+            'by' => $author->id,
+        ]);
+
+        return $item;
+    }
+
+    /**
+     * Перепривязка фото-вложения к позиции (Phase 2.4a, операторская правка
+     * Vision-mistake'ов).
+     *
+     * Vision-промпт image_index не гарантирует уникальность и не различает
+     * «главный объект» от «виден в кадре» — закрытие пробелов через UI.
+     *
+     * @param  ?int  $attachmentId  null = снять привязку
+     * @throws \DomainException если attachment не принадлежит письму заявки
+     */
+    public function rebindPhoto(RequestItem $item, ?int $attachmentId, User $author): RequestItem
+    {
+        $this->ensureCanEdit($item, $author);
+
+        $oldAttachmentId = $item->image_attachment_id;
+        if ($oldAttachmentId === $attachmentId) {
+            return $item; // идемпотентность
+        }
+
+        // Validate: attachment должен принадлежать тому же письму, что и заявка.
+        // Это закрывает риск кросс-заявочной привязки — оператор не сможет
+        // прикрепить случайную картинку из чужого треда.
+        if ($attachmentId !== null) {
+            $emailMessageId = $item->request?->email_message_id;
+            if ($emailMessageId === null) {
+                throw new \DomainException('У заявки нет привязанного письма — фото менять некуда.');
+            }
+            $attachment = EmailAttachment::query()
+                ->where('email_message_id', $emailMessageId)
+                ->whereKey($attachmentId)
+                ->first(['id', 'mime_type']);
+            if ($attachment === null) {
+                throw new \DomainException('Это вложение не относится к письму заявки.');
+            }
+            if (! str_starts_with((string) $attachment->mime_type, 'image/')) {
+                throw new \DomainException('Можно привязать только вложение типа image/*.');
+            }
+        }
+
+        DB::transaction(function () use ($item, $attachmentId, $author, $oldAttachmentId) {
+            $item->image_attachment_id = $attachmentId;
+            $this->appendAudit($item, [
+                'action' => 'rebind_photo',
+                'old' => ['image_attachment_id' => $oldAttachmentId],
+                'new' => ['image_attachment_id' => $attachmentId],
+            ], $author);
+            $item->save();
+        });
+
+        Log::info('RequestItemEditor: photo rebound', [
+            'request_item_id' => $item->id,
+            'old' => $oldAttachmentId,
+            'new' => $attachmentId,
             'by' => $author->id,
         ]);
 

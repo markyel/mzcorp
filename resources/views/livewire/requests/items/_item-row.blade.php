@@ -196,6 +196,11 @@
                                 class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
                             🔗 Привязать вручную…
                         </button>
+                        <button type="button"
+                                @click="open = false; $dispatch('open-photo-rebind', { itemId: {{ $item->id }} })"
+                                class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
+                            📷 Сменить фото…
+                        </button>
                         @if($qaStatus === 'internal_catalog_pending')
                             <button type="button"
                                     @click="open = false"
