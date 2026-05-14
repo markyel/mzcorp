@@ -44,6 +44,9 @@ class Request extends Model
         // распознал decline.
         'closed_lost_quote',
         'closed_lost_source_message_id',
+        // Foundation §5.2 — reanimate closed_lost.
+        'reanimated_at',
+        'reanimated_count',
         // Phase 1.11 — Attention-механизм (Foundation §5.3 + §5.5).
         'attention_required_at',
         'attention_reason',
@@ -58,6 +61,8 @@ class Request extends Model
             'pending_clarifications' => 'array',
             'paused_until' => 'datetime',
             'closed_at' => 'datetime',
+            'reanimated_at' => 'datetime',
+            'reanimated_count' => 'integer',
             'attention_required_at' => 'datetime',
             'attention_reason' => AttentionReason::class,
             'attention_level' => 'integer',

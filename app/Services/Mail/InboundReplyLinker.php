@@ -6,6 +6,7 @@ use App\Enums\EmailCategory;
 use App\Enums\RequestStatus;
 use App\Models\EmailMessage;
 use App\Models\Request;
+use App\Services\Request\RequestStateService;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -37,8 +38,31 @@ class InboundReplyLinker
 {
     public function __construct(
         private readonly ThreadClarificationAi $clarifier,
+        private readonly RequestStateService $stateService,
     ) {
     }
+
+    /**
+     * Lookback для реанимации по from_email (level 4-bis).
+     * Header-threading (levels 1-3) реанимирует без ограничения по сроку —
+     * там явный thread-link и контекст важнее.
+     */
+    private const REANIMATE_FROM_EMAIL_LOOKBACK_DAYS = 180;
+
+    /**
+     * Foundation §5.2: реанимация по from_email допустима только для
+     * «тихих» причин закрытия. Декларативные decline'ы (price/timing/
+     * competitor) НЕ реанимируем по этому уровню — клиент явно отказался,
+     * новое письмо скорее всего другая тема (создастся новая Request).
+     * Декларативные decline'ы ВСЁ ЕЩЁ реанимируются по header-threading
+     * (levels 1-3) — там есть прямой message_id link.
+     */
+    private const REANIMATE_FROM_EMAIL_SILENT_REASONS = [
+        'no_client_response_to_clarification',
+        'no_client_response_to_quote',
+        'manual_other',
+        'off_topic',
+    ];
 
     /**
      * @return Request|null  null = thread не найден, обычный flow.
@@ -86,6 +110,29 @@ class InboundReplyLinker
             return null;
         }
 
+        // Foundation §5.2: реанимация закрытых заявок.
+        // Header-threading (levels 1-3) — реанимируем любой closed_lost,
+        // потому что есть явный thread-link.
+        // From_email-match (level 4-bis) — уже отфильтрован в matchByOpenRequestForFromEmail
+        // (только silent reasons + lookback).
+        // ClosedWon никогда не реанимируем — там сделка состоялась, новое
+        // письмо обрабатывается как новая заявка.
+        if ($request->status === RequestStatus::ClosedLost) {
+            try {
+                $request = $this->stateService->reanimate($request, null, $message);
+                $matchedBy = ($matchedBy ?? 'unknown') . ':reanimated';
+            } catch (\Throwable $e) {
+                Log::warning('InboundReplyLinker: reanimate failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $request->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        } elseif ($request->status === RequestStatus::ClosedWon) {
+            // Не реанимируем won — это новый запрос от клиента.
+            return null;
+        }
+
         $message->forceFill(['related_request_id' => $request->id])->save();
 
         Log::info('InboundReplyLinker: linked to existing Request', [
@@ -94,6 +141,7 @@ class InboundReplyLinker
             'internal_code' => $request->internal_code,
             'matched_by' => $matchedBy,
             'matched_email_id' => $matched?->id,
+            'reanimated_count' => $request->reanimated_count,
         ]);
 
         return $request;
@@ -198,17 +246,31 @@ class InboundReplyLinker
             ->orderByDesc('created_at')
             ->get();
 
-        if ($candidates->isEmpty()) {
-            return null;
+        if ($candidates->isNotEmpty()) {
+            if ($candidates->count() === 1) {
+                return $candidates->first();
+            }
+
+            // 5-й уровень: AI multi-choice. На сбое clarifier возвращает либо
+            // самую свежую (fallback), либо null (если AI решил что это новая тема).
+            return $this->clarifier->chooseRequest($message, $candidates);
         }
 
-        if ($candidates->count() === 1) {
-            return $candidates->first();
-        }
+        // Foundation §5.2: level 4-bis — reanimate closed_lost.
+        // Только если у клиента нет ОТКРЫТЫХ заявок (иначе приоритет
+        // у open). Только silent reasons. Только за последние N дней.
+        // Это спасает кейс «клиент молчал 30 дней после КП → no_client_response_to_quote
+        // → через 2 недели передумал, написал → реанимируем ту же заявку».
+        $lookbackDate = now()->subDays(self::REANIMATE_FROM_EMAIL_LOOKBACK_DAYS);
+        $closedCandidate = Request::query()
+            ->where('client_email', $message->from_email)
+            ->where('status', RequestStatus::ClosedLost->value)
+            ->whereIn('closed_lost_reason', self::REANIMATE_FROM_EMAIL_SILENT_REASONS)
+            ->where('closed_at', '>=', $lookbackDate)
+            ->orderByDesc('closed_at')
+            ->first();
 
-        // 5-й уровень: AI multi-choice. На сбое clarifier возвращает либо
-        // самую свежую (fallback), либо null (если AI решил что это новая тема).
-        return $this->clarifier->chooseRequest($message, $candidates);
+        return $closedCandidate;
     }
 
     /**

@@ -97,7 +97,24 @@
             <div class="mt-3.5 pt-3.5 border-t border-border-subtle flex items-center gap-3.5 flex-wrap text-[12.5px]">
                 <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle">
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Статус</span>
-                    <span><span class="chip {{ $statusChip }}"><span class="dot"></span>{{ $req->status->label() }}</span></span>
+                    <span class="inline-flex items-center gap-1.5 flex-wrap">
+                        <span class="chip {{ $statusChip }}"><span class="dot"></span>{{ $req->status->label() }}</span>
+                        @if(($req->reanimated_count ?? 0) > 0 && $req->reanimated_at)
+                            @php
+                                $daysSinceReanimate = (int) abs(now()->diffInDays($req->reanimated_at, false));
+                                $reanimateTooltip = 'Реанимирована ' . $req->reanimated_at->format('d.m.Y H:i')
+                                    . ' · циклов: ' . $req->reanimated_count;
+                            @endphp
+                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-violet-50 text-violet-700 text-[10.5px] font-semibold uppercase tracking-wider"
+                                  title="{{ $reanimateTooltip }}">
+                                ↻ реанимирована
+                                @if($req->reanimated_count > 1)
+                                    <span class="opacity-75">×{{ $req->reanimated_count }}</span>
+                                @endif
+                                <span class="opacity-75 normal-case font-normal">· {{ $daysSinceReanimate }} дн.</span>
+                            </span>
+                        @endif
+                    </span>
                 </div>
                 <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle">
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">SLA</span>
@@ -1358,11 +1375,21 @@
                         $title = $fromEnum
                             ? sprintf('Статус: «%s» → «%s»', $fromEnum->label(), $toEnum?->label() ?? $sc->to_status)
                             : sprintf('Заявка создана со статусом «%s»', $toEnum?->label() ?? $sc->to_status);
+                        $kind = match ($sc->event) {
+                            'auto_resume_pause' => 'state-auto',
+                            'reanimate' => 'state-reanimate',
+                            default => 'state',
+                        };
+                        $by = $sc->byUser?->name ?? match ($sc->event) {
+                            'auto_resume_pause' => 'cron · авто-возврат с паузы',
+                            'reanimate' => 'InboundReplyLinker · автоматически',
+                            default => '—',
+                        };
                         $timeline->push([
                             'at' => $sc->created_at,
-                            'kind' => $sc->event === 'auto_resume_pause' ? 'state-auto' : 'state',
+                            'kind' => $kind,
                             'title' => $title,
-                            'by' => $sc->byUser?->name ?? ($sc->event === 'auto_resume_pause' ? 'cron · авто-возврат с паузы' : '—'),
+                            'by' => $by,
                             'details' => $sc->comment,
                         ]);
                     }
@@ -1407,6 +1434,7 @@
                                     $dotClass = match ($event['kind']) {
                                         'state' => 'bg-sky-700 border-sky-700',
                                         'state-auto' => 'bg-amber-600 border-amber-600',
+                                        'state-reanimate' => 'bg-violet-600 border-violet-600',
                                         'assignment' => 'bg-violet-700 border-violet-700',
                                         'email' => 'bg-emerald-700 border-emerald-700',
                                         default => 'bg-surface border-neutral-400',
@@ -1414,6 +1442,7 @@
                                     $iconText = match ($event['kind']) {
                                         'state' => '🔄',
                                         'state-auto' => '⏰',
+                                        'state-reanimate' => '↻',
                                         'assignment' => '👤',
                                         'email' => '✉',
                                         default => '·',

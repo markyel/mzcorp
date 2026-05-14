@@ -5,6 +5,7 @@ namespace App\Services\Request;
 use App\Enums\ClosedLostReason;
 use App\Enums\RequestStatus;
 use App\Enums\Role as RoleEnum;
+use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Models\RequestStateChange;
 use App\Models\User;
@@ -136,6 +137,83 @@ class RequestStateService
             'to' => $to->value,
             'by' => $author?->id,
             'event' => $context['event'] ?? 'manual',
+        ]);
+
+        return $request;
+    }
+
+    /**
+     * Реанимация closed_lost заявки (Foundation §5.2).
+     *
+     * Triggered InboundReplyLinker'ом когда клиент написал после «тихого»
+     * закрытия. НЕ создаёт новую Request — возвращает эту в работу
+     * (status=in_progress), сохраняя историю в state_change.payload.
+     * closed_lost_* поля очищаются, потому что заявка снова активна;
+     * reanimated_at/_count фиксируют факт реанимации для UI-маркера.
+     *
+     * Реанимировать можно только из closed_lost — closed_won не трогаем
+     * (там сделка состоялась, новое письмо клиента = новый запрос).
+     */
+    public function reanimate(Request $request, ?User $author, EmailMessage $sourceMessage): Request
+    {
+        if ($request->status !== RequestStatus::ClosedLost) {
+            throw new \DomainException(sprintf(
+                'Реанимация доступна только из closed_lost, текущий статус: %s.',
+                $request->status->value,
+            ));
+        }
+
+        $from = $request->status;
+        // Foundation §5.2: возврат в qualifying. У нас нет qualifying —
+        // используем in_progress (заявка уже была назначена + распарсена,
+        // менеджер сразу видит её в Pool).
+        $to = RequestStatus::InProgress;
+
+        $snapshot = [
+            'closed_at' => $request->closed_at?->toIso8601String(),
+            'closed_lost_reason' => $request->closed_lost_reason,
+            'closed_lost_comment' => $request->closed_lost_comment,
+            'closed_lost_quote' => $request->closed_lost_quote,
+            'closed_lost_source_message_id' => $request->closed_lost_source_message_id,
+        ];
+
+        DB::transaction(function () use ($request, $to, $author, $from, $snapshot, $sourceMessage) {
+            $newCount = (int) ($request->reanimated_count ?? 0) + 1;
+            $request->status = $to;
+            $request->closed_at = null;
+            $request->closed_lost_reason = null;
+            $request->closed_lost_comment = null;
+            $request->closed_lost_quote = null;
+            $request->closed_lost_source_message_id = null;
+            $request->reanimated_at = now();
+            $request->reanimated_count = $newCount;
+            $request->save();
+
+            RequestStateChange::create([
+                'request_id' => $request->id,
+                'from_status' => $from->value,
+                'to_status' => $to->value,
+                'by_user_id' => $author?->id,
+                'event' => 'reanimate',
+                'comment' => 'Клиент написал после закрытия — реанимация',
+                'payload' => [
+                    'reanimate_count' => $newCount,
+                    'restored_from' => $snapshot,
+                    'source_email_message_id' => $sourceMessage->id,
+                ],
+            ]);
+
+            // Phase 1.11: после reanimate ставим attention now+SLA-дедлайн
+            // (recompute учитывает новый статус InProgress).
+            $this->attention->recompute($request);
+        });
+
+        Log::info('RequestStateService: reanimated', [
+            'request_id' => $request->id,
+            'previous_count' => $snapshot['closed_at'] !== null ? $request->reanimated_count - 1 : 0,
+            'new_count' => $request->reanimated_count,
+            'source_email_message_id' => $sourceMessage->id,
+            'restored_from' => $snapshot,
         ]);
 
         return $request;
