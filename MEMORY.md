@@ -54,13 +54,15 @@
 | 1.11 | **Attention-механизм** (Foundation §5.3 + §5.5): `requests.attention_required_at` + `attention_reason` (enum `AttentionReason`, 7 значений) + денорм `attention_level` (0/1 overdue) + composite index `(assigned_user_id, attention_level DESC, attention_required_at NULLS LAST)` + partial index по overdue; `AttentionService::recompute() / clear() / sweepOverdue()` + business-hours helper (Пн-Пт 9-18 Europe/Moscow); интеграция в `RequestStateService::transitionTo()` + `recordSystemInitial()` + `RequestPauseService::pauseUntil()/resume()` (resume → attention_required_at=now, level=1, reason=postponed_resume); cron `requests:check-attention` everyFifteenMinutes (sweep level); Pool — orderBy attention для bucket=active/overdue + новый bucket «Просрочено» (flat-list без status-groups) + красный chip когда count > 0; row-tint `--red-50` + left-border accent для overdue; attention badge в title-cell (icon + «через 4ч» / «просрочено 2д»); Settings UI — 8 редактируемых дедлайнов в группе «Attention · дедлайны»; Dashboard РОПа — 2 KPI-плашки «Просрочено» / «Дедлайн сегодня» с кликом на pool?bucket=overdue; `PostponeDialog` — date + comment, пишет `payload.postponed_until` в state-change | новое | done |
 | 4.0 | **DocumentDetector** (Foundation §7) — auto-переходы статусов по детекту КП/счёта/clarification в outbound и intent-классификатора reply'ев клиента в inbound. Schema: `ai_decisions` таблица (detector_type, status enum suggested→auto_applied/manually_confirmed/manually_overridden/dismissed/failed + confidence + payload + applied_by audit), `requests.closed_lost_quote` + `closed_lost_source_message_id` (Foundation §7.4). Enums `DetectorType` (10 значений с `targetStatus()` map), `AiDecisionStatus`. `AiDecisionService::recordSuggestion / apply / override / dismiss` — single source of truth для жизненного цикла, идемпотентен по (email_message_id, detector_type). `OutboundDocumentDetector` rule-based (filename regex + body keywords RU/EN; priority invoice > quotation > clarification; confidence 0.6/0.9/0.95 от комбинации сигналов). `InboundIntentClassifier` (gpt-4o-mini, `ClassifyClientResponsePrompt`) — 6 intent'ов с suggested_resume_date / suggested_closed_lost_reason / cited_phrase извлечением. Triggers в MailRouter: outbound-ветка после OutgoingMailLinker + inbound после InboundReplyLinker если статус Request в {quoted, under_review, postponed, awaiting_clarification}. UI plashka в Detail action-panel — иконка + label + confidence% + target-status + cited_phrase (italic blockquote) или reasoning + apply/dismiss кнопки. Apply disabled если переход не разрешён из текущего статуса. Foundation §7.3 validation framework: 8 toggle'ов auto_mode + общий `confidence_threshold` (default 0.85) в Settings; auto-apply gate в recordSuggestion (если включён И ≥ threshold → apply(auto=true) сразу). Dashboard РОПа — таблица «AI quality (30 дн.)» с counts (auto/confirmed/overridden/dismissed/pending) и correctness% per type, цветовая индикация (≥90 emerald, ≥70 amber, <70 red). | новое | done (`b876244`, `9fb94f5`, `cefd439`, `5ebe671`) |
 | 5.2 | **Reanimate closed** (Foundation §5.2) — `closed_lost` заявки реанимируются автоматически при ответе клиента, без создания дубликата. Migration: `requests.reanimated_at` + `reanimated_count`. `RequestStateService::reanimate(Request, ?User, EmailMessage)` — guard ClosedLost only (ClosedWon никогда — сделка состоялась), сохраняет snapshot closed_at/reason/comment/quote в `state_change.payload.restored_from`, очищает closed_lost_* поля, status → InProgress, reanimated_at = now(), reanimated_count++, event=`reanimate`, AttentionService::recompute. `InboundReplyLinker`: header-threading (levels 1-3) реанимирует любой ClosedLost (явный thread-link); level 4-bis (from_email + closed_lost) с фильтрами — только silent reasons (`no_client_response_to_clarification/quote`, `off_topic`, `manual_other`) + lookback 180 дн. (декларативные decline'ы price/timing/competitor НЕ реанимируются по этому уровню). ClosedWon match → linker возвращает null, IncomingMailProcessor создаёт новую Request. UI Hero: violet chip «↻ реанимирована ×N · M дн.» рядом со статус-чипом если reanimated_count>0 + tooltip. Activity-tab: новый kind `state-reanimate` с violet dot + иконкой ↻ + by-line «InboundReplyLinker · автоматически». | новое | done (`6e51dc4`) |
+| Ф2-add | **Доделки Foundation Фазы 2:** (1) **Менеджер «недоступен»** — `users.unavailable_until` + `unavailable_reason` + `scopeAvailable`; `AssignmentService::autoAssign` использует `available()` вместо `active()`; новый `ManagerUnavailabilityService` (markUnavailable / markAvailable / reassignActiveRequests — bulk через autoAssign + sticky/round-robin); UI в Admin/Managers: chip-warn «недоступен до DD.MM.YYYY» + tooltip с reason; диалог `UnavailabilityDialog` (date + reason + checkbox «передать активные заявки»). (2) **Auto-rejection irrelevant + reopen UI** — экран `/dashboard/mail-review` (role:head_of_sales,director): listing inbound писем где `ai_classification IN (irrelevant, reclamation, accounting, general_question, spam, other)` AND `related_request_id IS NULL`; фильтры по периоду (today/7d/30d/90d/all) + категориям chip-row с counters; action «↻ Это заявка» создаёт Request (Pending) + dispatch ParseRequestItemsJob, audit `manual_reopen_as_request` в detected_artifacts; action «✓ Согласен» audit `manual_confirm_rejection`. Nav-link «Авто-отклонённые» в topbar. (3) **In-app notifications** — стандартная Laravel notifications table (UUID + morphs notifiable + data jsonb); два класса `RequestAssignedNotification` (диспатчится из AssignmentService::autoAssign) и `RequestAttentionOverdueNotification` (диспатчится из AttentionService::sweepOverdue только на переход level 0→1, anti-spam); Livewire Bell-component в topbar (🔔 + red badge unread count + dropdown 8 последних, unread сверху, wire:poll.30s, markRead/markAllRead). Email digest — Phase 6. | новое | done (`c4326ee`, `ccb01e7`, `1b2b917`) |
 
 KB drop-in, sticky-snapshot, catalog (A+B+C), settings UI — **закрыты в Фазе 2 (2026-05-08, 2026-05-12).**
 Phase 1.9 UI-переписка, Priority 1 ручное управление позициями, Phase 1.10 state-machine — **закрыты 2026-05-14, 2026-05-15.**
 Phase 1.11 Attention-механизм — **закрыт 2026-05-16.**
 Phase 4.0 DocumentDetector — **закрыт 2026-05-17.**
 Phase 5.2 Reanimate closed — **закрыт 2026-05-18.**
-Экспорт в 1С, KB curator UI — **за пределами текущей фазы.**
+Foundation Фаза 2 хвост (unavailable / mail-review / notifications) — **закрыт 2026-05-19.**
+Экспорт в 1С, KB curator UI, PriceRefreshService — **за пределами текущей фазы.**
 
 ## Что готово (инфраструктура — Фаза 0)
 
@@ -879,6 +881,62 @@ sudo supervisorctl restart mzcorp-worker:*
 ```bash
 sudo grep 'RequestStateService: reanimated' /var/www/mzcorp/storage/logs/laravel.log | tail -20
 ```
+
+### Сессия 2026-05-19 — Foundation Фаза 2 (хвост)
+
+Три коммита (`c4326ee`, `ccb01e7`, `1b2b917`) после сверки плана с реализацией. Закрыты три остававшихся пункта Foundation Фазы 2: менеджер «недоступен», auto-rejection irrelevant + reopen UI, базовые in-app notifications.
+
+**Commit 1 — `c4326ee` менеджер «недоступен»**:
+- Migration `2026_05_19_120000_add_unavailability_to_users_table` — `users.unavailable_until` (timestamp nullable) + `unavailable_reason` (varchar 500).
+- `User::scopeAvailable()` — `archived_at IS NULL AND (unavailable_until IS NULL OR <= now())`. Возврат в пул автоматический — cron не нужен.
+- `User::isUnavailable()` — для UI-маркеров.
+- `AssignmentService::autoAssign` использует `available()` вместо `active()` — менеджеры в отпуске не получают новые заявки.
+- `ManagerUnavailabilityService` — single source of truth: `markUnavailable / markAvailable / reassignActiveRequests`. Batch reassign отвязывает заявку (assigned_user_id=null) и дёргает autoAssign — sticky-resolver САМ не вернёт недоступного, потому что он выбит из `available()`. Если других менеджеров нет — возвращает заявку как было (skipped counter).
+- UI Admin/Managers: chip-warn «недоступен до DD.MM.YYYY» в status-колонке, tooltip с reason. Кнопка «⏸ Недоступен…» открывает `UnavailabilityDialog` (date + reason min 3 chars + checkbox «передать активные заявки», default=true). Cap 120 дней на дату — простой sanity.
+
+**Commit 2 — `ccb01e7` auto-rejection + reopen UI**:
+- Route `/dashboard/mail-review` (role:head_of_sales,director).
+- Livewire `Admin\MailReview\Index`: filterable listing inbound писем где `ai_classification ≠ request` AND `related_request_id IS NULL`. Период (today/7d/30d/90d/all) + chip-row категорий с counters.
+- Action `reopenAsRequest(int $emailId)`: создаёт Request (Pending) + email→related_request_id + audit `manual_reopen_as_request` в `email_messages.detected_artifacts` (тот же столбец что DocumentDetector использует — единая audit-точка для AI-overrides) + dispatch ParseRequestItemsJob. Дальше pipeline идёт как обычно (RequestItemPersister → autoAssign → MailFolderRouter).
+- Action `confirmRejection(int $emailId)`: audit `manual_confirm_rejection` без изменений — для статистики «сколько раз РОП согласился с AI».
+- Nav-link «Авто-отклонённые» в `resources/views/layouts/navigation.blade.php`.
+
+**Commit 3 — `1b2b917` in-app notifications**:
+- Migration `2026_05_14_093649_create_notifications_table` — стандартная Laravel notifications table (UUID id + morphs notifiable + data jsonb + read_at). Дата файла из `php artisan notifications:table` (Herd-системная дата мог быть прошлым) — порядок применения миграций не зависит, не баг.
+- `App\Notifications\RequestAssignedNotification(Request $r, string $reason)` — статическая фабрика `::from(Request)`. via=['database']. Диспатчится из `AssignmentService::autoAssign` после save (try/catch — non-fatal на ошибке).
+- `App\Notifications\RequestAttentionOverdueNotification(Request $r)` — to-database. Диспатчится из `AttentionService::sweepOverdue` ТОЛЬКО на переход level 0→1. Логика sweep'а переделана: сначала `pluck('id')` тех кто переходит, потом UPDATE по ids; иначе bulk UPDATE не вернул бы перечень.
+- Livewire `Notifications\Bell` — `wire:poll.30s`. Computed `unreadCount` + `recent` (8 последних, unread сверху через `read_at IS NULL DESC`). Actions: `toggle / close / markRead(string $id) / markAllRead`. Bell в topbar заменил placeholder-кнопку с disabled-классом.
+
+#### Грабли Foundation Фазы 2 (хвост)
+
+- **`scopeAvailable` не нужен cron** — он реакционный: при чтении смотрит `unavailable_until <= now()`. Если менеджер «недоступен до 25.05», 26.05 он автоматически снова в available(). НО UI продолжает показывать chip «недоступен до 25.05» пока РОП не нажмёт «Доступен» (чтобы обнулить поля). Это сознательно: chip остаётся как след «был в отпуске», но AssignmentService уже не фильтрует.
+- **Bulk reassign + sticky** — если sticky-резолвер находит другую заявку у недоступного менеджера, по идее sticky сматчит обратно. Но scopeAvailable исключает недоступного из `$managers` collection, который передаётся в `pickStickyManager` — поэтому matching idle. Корректно.
+- **detected_artifacts как audit-stack для AI-overrides** — `email_messages.detected_artifacts` jsonb уже использовался DocumentDetector. Сейчас туда же пишутся `manual_reopen_as_request` и `manual_confirm_rejection`. Поле логически «всё что AI решил и оператор подтвердил/изменил по этому письму». Может разрастаться, но FIFO-truncate ещё не сделан — стоит держать в уме (для items есть 50-cap в RequestItemEditor).
+- **AttentionService sweep — bulk UPDATE→pluck rework** — раньше bulk update делал всё одним SQL. Теперь сначала pluck(), потом whereIn UPDATE, потом for-loop notify. Слегка тяжелее на больших объёмах overdue (>1000 строк), но на нашем масштабе незаметно. Не оптимизировать преждевременно.
+- **Notification queue** — `via=['database']` пишет напрямую через Eloquent в той же транзакции вызова. Если AssignmentService уже в DB::transaction, notify может затормозить commit. Не баг, просто наблюдение — на большом объёме стоит вынести в queued notification (`implements ShouldQueue`).
+
+#### Деплой Foundation Фазы 2 хвост
+
+```bash
+cd /var/www/mzcorp
+sudo -u www-data git pull --ff-only origin main
+sudo -u www-data composer dump-autoload --optimize        # новые PSR-4 классы (Notifications + UnavailabilityDialog + MailReview)
+sudo -u www-data php artisan migrate --force              # 2 миграции: unavailability + notifications
+sudo -u www-data php artisan config:cache
+sudo -u www-data php artisan route:cache
+sudo -u www-data php artisan view:clear && sudo -u www-data php artisan view:cache
+sudo -u www-data npm run build                            # новый Bell-component в topbar — Tailwind-классы могут не быть в текущем build
+sudo supervisorctl restart mzcorp-worker:*
+
+# Проверка route'а и services:
+sudo -u www-data php artisan route:list --name=mail-review
+sudo -u www-data php artisan tinker --execute='
+echo app(App\Services\Request\ManagerUnavailabilityService::class)::class.PHP_EOL;
+echo app(App\Livewire\Notifications\Bell::class)::class.PHP_EOL;
+'
+```
+
+После деплоя — РОП должен увидеть в topbar bell-icon (badge=0 на старте); в Admin/Managers — кнопки «⏸ Недоступен…»; в nav — «Авто-отклонённые». Первые notifications появятся при следующем sweep AttentionService (через ≤15 мин) или при следующей входящей заявке (autoAssign).
 
 #### Текущее состояние на проде (2026-05-15 вечер)
 
