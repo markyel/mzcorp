@@ -2,9 +2,12 @@
 
 namespace App\Livewire\Dashboard;
 
+use App\Enums\AiDecisionStatus;
+use App\Enums\DetectorType;
 use App\Enums\EmailClassification;
 use App\Enums\RequestStatus;
 use App\Enums\Role as RoleEnum;
+use App\Models\AiDecision;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use App\Models\Request;
@@ -190,6 +193,71 @@ class Index extends Component
             ->orderByDesc('id')
             ->limit(8)
             ->get();
+    }
+
+    /**
+     * Foundation §7.3: AI quality score за последние 30 дней.
+     * По каждому DetectorType — counts per status + correctness rate.
+     * Используется РОПом для решения «включать ли auto-mode для этого типа».
+     *
+     * correctness = (auto_applied + manually_confirmed) / total_final
+     *   total_final = все кроме suggested (текущие pending)
+     *
+     * @return array<int, array{type: string, label: string, total: int,
+     *     auto_applied: int, confirmed: int, overridden: int, dismissed: int,
+     *     failed: int, pending: int, correctness: ?float}>
+     */
+    #[Computed]
+    public function aiQualityScore(): array
+    {
+        if (! $this->isPrivileged) {
+            return [];
+        }
+
+        $rows = AiDecision::query()
+            ->where('created_at', '>=', now()->subDays(30))
+            ->groupBy('detector_type', 'status')
+            ->selectRaw('detector_type, status, COUNT(*) as c')
+            ->get();
+
+        // Группируем по type → status → count.
+        $byType = [];
+        foreach ($rows as $r) {
+            $byType[$r->detector_type][$r->status] = (int) $r->c;
+        }
+
+        $out = [];
+        foreach (DetectorType::cases() as $type) {
+            $stats = $byType[$type->value] ?? [];
+            $autoApplied = (int) ($stats[AiDecisionStatus::AutoApplied->value] ?? 0);
+            $confirmed = (int) ($stats[AiDecisionStatus::ManuallyConfirmed->value] ?? 0);
+            $overridden = (int) ($stats[AiDecisionStatus::ManuallyOverridden->value] ?? 0);
+            $dismissed = (int) ($stats[AiDecisionStatus::Dismissed->value] ?? 0);
+            $failed = (int) ($stats[AiDecisionStatus::Failed->value] ?? 0);
+            $pending = (int) ($stats[AiDecisionStatus::Suggested->value] ?? 0);
+            $total = $autoApplied + $confirmed + $overridden + $dismissed + $failed + $pending;
+            $totalFinal = $autoApplied + $confirmed + $overridden + $dismissed + $failed;
+
+            $correctness = $totalFinal > 0
+                ? round(($autoApplied + $confirmed) * 100 / $totalFinal, 1)
+                : null;
+
+            $out[] = [
+                'type' => $type->value,
+                'label' => $type->label(),
+                'total' => $total,
+                'auto_applied' => $autoApplied,
+                'confirmed' => $confirmed,
+                'overridden' => $overridden,
+                'dismissed' => $dismissed,
+                'failed' => $failed,
+                'pending' => $pending,
+                'correctness' => $correctness,
+            ];
+        }
+
+        // Скрываем строки где total=0 (детектор не срабатывал).
+        return array_values(array_filter($out, fn ($r) => $r['total'] > 0));
     }
 
     /**

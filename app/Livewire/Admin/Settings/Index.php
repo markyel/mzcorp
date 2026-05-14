@@ -191,6 +191,76 @@ class Index extends Component
                 'step' => 1,
                 'min' => 1,
             ],
+
+            // ─── DocumentDetector — auto-mode (Foundation §7.3) ──────────
+            // Включается РОПом ПОСЛЕ накопления ~1000 решений и проверки
+            // error_rate. До этого все детектирования идут как suggestion.
+            'detector.confidence_threshold' => [
+                'group' => 'DocumentDetector · auto-mode',
+                'label' => 'Минимальная confidence для auto-apply',
+                'help' => 'Общий порог 0..1. Ниже — даже включённый auto-mode оставит решение как suggestion. Дефолт 0.85.',
+                'type' => AppSetting::TYPE_FLOAT,
+                'default' => 0.85,
+                'step' => 0.01,
+                'min' => 0.0,
+                'max' => 1.0,
+            ],
+            'detector.auto_mode.outbound_quotation_full' => [
+                'group' => 'DocumentDetector · auto-mode',
+                'label' => 'Auto: КП отправлено → quoted',
+                'help' => 'При обнаружении исходящего КП автоматически переводить заявку в «КП отправлено». Без подтверждения оператора. Включать после валидации.',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
+            'detector.auto_mode.outbound_invoice' => [
+                'group' => 'DocumentDetector · auto-mode',
+                'label' => 'Auto: Счёт отправлен → invoiced',
+                'help' => 'Автоматически переводить в «Счёт отправлен» при обнаружении outbound-счёта.',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
+            'detector.auto_mode.outbound_clarification' => [
+                'group' => 'DocumentDetector · auto-mode',
+                'label' => 'Auto: Запрос уточнения → awaiting_client_clarification',
+                'help' => 'Автоматически переводить в «Жду уточнения клиента» при обнаружении исходящего запроса.',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
+            'detector.auto_mode.inbound_under_review' => [
+                'group' => 'DocumentDetector · auto-mode',
+                'label' => 'Auto: Клиент «на согласовании» → under_review',
+                'help' => 'Автоматически переводить в «На согласовании» при ответе клиента «получили, изучаем».',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
+            'detector.auto_mode.inbound_postponed' => [
+                'group' => 'DocumentDetector · auto-mode',
+                'label' => 'Auto: Клиент отложил → postponed_until',
+                'help' => 'Автоматически переводить в «Отложено» с датой клиента (если AI извлёк её).',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
+            'detector.auto_mode.inbound_invoice_request' => [
+                'group' => 'DocumentDetector · auto-mode',
+                'label' => 'Auto: Клиент просит счёт → awaiting_invoice',
+                'help' => 'Автоматически переводить в «Ждём счёт» при явном invoice_request.',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
+            'detector.auto_mode.inbound_decline' => [
+                'group' => 'DocumentDetector · auto-mode',
+                'label' => 'Auto: Клиент отказался → closed_lost',
+                'help' => 'Опасно — закрывает заявку с reason. Включать только после очень тщательной валидации precision (терминальное действие).',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
+            'detector.auto_mode.inbound_clarification_response' => [
+                'group' => 'DocumentDetector · auto-mode',
+                'label' => 'Auto: Клиент ответил на уточнение → in_progress',
+                'help' => 'Автоматически возвращать в «В работе» после ответа клиента (статус был «Жду уточнения»).',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
         ];
     }
 

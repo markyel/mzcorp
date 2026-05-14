@@ -65,6 +65,13 @@ class AiDecisionService
             'payload' => $payload,
         ]);
 
+        // Foundation §7.3: auto-mode проверка — если type включён в auto и
+        // confidence >= threshold, применяем сразу без UI-подтверждения.
+        // Иначе остаётся suggested — оператор увидит плашку.
+        if ($this->shouldAutoApply($type, $confidence)) {
+            $decision = $this->apply($decision, null, ['auto' => true]);
+        }
+
         // Foundation §7.3: дублируем в `email_messages.detected_artifacts`
         // (jsonb массив) для backward-compatibility и быстрой выгрузки.
         $existingArtifacts = is_array($message->detected_artifacts ?? null)
@@ -245,5 +252,22 @@ class AiDecisionService
         ]);
 
         return $decision;
+    }
+
+    /**
+     * Foundation §7.3: auto-mode gate.
+     * РОП включает auto-mode per type в Settings ПОСЛЕ накопления выборки
+     * и проверки error rate. Если включён И confidence >= порога —
+     * recordSuggestion дёргает apply сразу.
+     */
+    private function shouldAutoApply(DetectorType $type, float $confidence): bool
+    {
+        $autoEnabled = (bool) app_setting('detector.auto_mode.' . $type->value, false);
+        if (! $autoEnabled) {
+            return false;
+        }
+        $threshold = (float) app_setting('detector.confidence_threshold', 0.85);
+
+        return $confidence >= $threshold;
     }
 }

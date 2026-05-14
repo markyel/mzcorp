@@ -220,6 +220,56 @@
             </div>
 
             @if($this->isPrivileged)
+                {{-- Foundation §7.3: AI quality score (DocumentDetector). --}}
+                @php $aiScore = $this->aiQualityScore; @endphp
+                @if(! empty($aiScore))
+                    <div class="ds-card">
+                        <div class="ds-card-header">
+                            <h3>AI quality (детектор · 30 дн.)</h3>
+                            <span class="flex-1"></span>
+                            <a href="{{ route('settings.index') }}" class="text-[12px] text-sky-700 hover:underline">настройки →</a>
+                        </div>
+                        <div class="ds-card-body">
+                            <table class="w-full text-[12px]">
+                                <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider">
+                                    <tr>
+                                        <th class="text-left py-1.5">Тип</th>
+                                        <th class="text-right py-1.5" title="Всего срабатываний">всего</th>
+                                        <th class="text-right py-1.5" title="auto_applied + manually_confirmed">подтв.</th>
+                                        <th class="text-right py-1.5" title="manually_overridden — оператор изменил target">оверр.</th>
+                                        <th class="text-right py-1.5" title="dismissed">прочерк</th>
+                                        <th class="text-right py-1.5" title="suggested — ждут решения">pending</th>
+                                        <th class="text-right py-1.5" title="(auto + confirmed) / total_final">corr%</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($aiScore as $row)
+                                        @php
+                                            $corrTone = $row['correctness'] === null ? 'text-fg-3'
+                                                : ($row['correctness'] >= 90 ? 'text-emerald-700'
+                                                : ($row['correctness'] >= 70 ? 'text-amber-700' : 'text-red-700'));
+                                        @endphp
+                                        <tr class="border-t border-border-subtle">
+                                            <td class="py-1.5 text-fg-1">{{ $row['label'] }}</td>
+                                            <td class="py-1.5 text-right mono">{{ $row['total'] }}</td>
+                                            <td class="py-1.5 text-right mono text-emerald-700">{{ $row['auto_applied'] + $row['confirmed'] }}</td>
+                                            <td class="py-1.5 text-right mono text-amber-700">{{ $row['overridden'] }}</td>
+                                            <td class="py-1.5 text-right mono text-fg-3">{{ $row['dismissed'] }}</td>
+                                            <td class="py-1.5 text-right mono {{ $row['pending'] > 0 ? 'text-sky-700 font-semibold' : 'text-fg-3' }}">{{ $row['pending'] }}</td>
+                                            <td class="py-1.5 text-right mono font-semibold {{ $corrTone }}">
+                                                {{ $row['correctness'] !== null ? $row['correctness'] . '%' : '—' }}
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                            <div class="text-[10.5px] text-fg-4 mt-2">
+                                corr% = (auto-applied + подтверждённые) / total. Auto-mode включается в настройках вручную после достижения ≥99% (Foundation §7.3).
+                            </div>
+                        </div>
+                    </div>
+                @endif
+
                 {{-- Последние пересылки --}}
                 <div class="ds-card">
                     <div class="ds-card-header">
