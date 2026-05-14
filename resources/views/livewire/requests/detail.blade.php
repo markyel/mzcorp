@@ -1039,290 +1039,67 @@
                         </div>
                     @else
                         <div>
-                            <div class="grid items-center px-[18px] gap-2.5 text-[11px] uppercase tracking-wider text-fg-3 font-semibold border-b border-border-subtle"
-                                 style="grid-template-columns: 24px 36px 1fr 110px 90px 100px 110px 56px; height: 30px">
-                                <span></span><span></span>
-                                <span>позиция</span>
-                                <span>кол-во</span>
-                                <span>цена</span>
-                                <span>наличие</span>
-                                <span class="text-right">сумма</span>
-                                <span></span>
-                            </div>
-                            @foreach($items as $item)
-                                @php
-                                    // Phase 2.0 KB: chip конфигурация по quality_assessment_status.
-                                    $qaStatus = $item->quality_assessment_status;
-                                    $qaConfig = match ($qaStatus) {
-                                        'sufficient' => ['chip-ok',     'данных достаточно'],
-                                        'insufficient' => ['chip-attn', 'данных мало'],
-                                        'not_covered' => ['chip-neutral', 'нет правил'],
-                                        'assessment_failed' => ['chip-over', 'ошибка KB'],
-                                        'internal_catalog_pending' => ['chip-info', 'внутренний SKU · ждёт каталог'],
-                                        // Priority 1: оператор подтвердил что M-SKU не появится.
-                                        'internal_catalog_not_found' => ['chip-danger', 'нет в каталоге'],
-                                        default => null, // not_assessed → не показываем чип
-                                    };
-                                    $extracted = is_array($item->quality_assessment_payload['extracted_parameters'] ?? null)
-                                        ? $item->quality_assessment_payload['extracted_parameters']
-                                        : [];
-                                @endphp
-                                <div wire:key="ri-{{ $item->id }}"
-                                     class="grid items-center px-[18px] gap-2.5 py-2.5 border-b border-border-subtle text-[12.5px] {{ $item->is_active ? '' : 'opacity-50 bg-surface-2' }}"
-                                     style="grid-template-columns: 24px 36px 1fr 110px 90px 100px 110px 56px">
-                                    <span class="mono text-[12px] text-fg-3 text-right">{{ $item->position }}</span>
-                                    @php
-                                        // Phase 2: превью фото из vision-привязки (request_items.image_attachment_id).
-                                        // Если у позиции нет привязки или превью не картинка — дефолтная заглушка.
-                                        $itemImg = $item->imageAttachment;
-                                        $itemImgIsImage = $itemImg && $isImageAttachment($itemImg);
-                                    @endphp
-                                    @if($itemImgIsImage)
-                                        @php
-                                            $itemPreviewUrl = route('attachments.preview', $itemImg);
-                                            $itemDownloadUrl = route('attachments.download', $itemImg);
-                                        @endphp
-                                        <button type="button"
-                                                x-on:click="$dispatch('open-image', { src: @js($itemPreviewUrl), name: @js($itemImg->filename), dl: @js($itemDownloadUrl) })"
-                                                class="w-8 h-8 border border-border rounded-sm overflow-hidden bg-app block shrink-0"
-                                                title="{{ $itemImg->filename }} — открыть">
-                                            <img src="{{ $itemPreviewUrl }}"
-                                                 alt="{{ $itemImg->filename }}"
-                                                 loading="lazy"
-                                                 class="w-8 h-8 object-cover block">
-                                        </button>
-                                    @else
-                                        <span class="w-8 h-8 border border-border rounded-sm bg-app flex items-center justify-center text-[9px] text-fg-3"
-                                              title="Без привязки к фото">img</span>
-                                    @endif
-                                    <div class="min-w-0">
-                                        <div class="font-medium text-fg-1 leading-snug">{{ $item->parsed_name ?: '(без названия)' }}</div>
-                                        @if($item->catalogItem && trim((string) $item->catalogItem->name) !== '' && mb_strtolower(trim((string) $item->catalogItem->name)) !== mb_strtolower(trim((string) $item->parsed_name)))
-                                            {{-- Название из нашего каталога — если отличается от того что прислал клиент. --}}
-                                            <div class="text-[11.5px] text-fg-3 mt-0.5 leading-snug" title="Название из каталога MyLift (SKU {{ $item->catalogItem->sku }})">
-                                                <span class="text-fg-3">↳</span>
-                                                <span class="text-fg-2">{{ $item->catalogItem->name }}</span>
-                                            </div>
-                                        @endif
-                                        <div class="text-[11.5px] text-fg-3 mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                                            {{-- Phase 2.0 KB chips: brand + category + qa-status. --}}
-                                            @if($item->brand)
-                                                <span class="inline-flex items-center px-1.5 rounded-sm bg-emerald-50 text-emerald-800 font-semibold text-[10.5px]"
-                                                      title="резолв KB по бренду">
-                                                    {{ $item->brand->name }}
-                                                </span>
-                                            @elseif($item->parsed_brand)
-                                                <span title="бренд не резолвлен">{{ $item->parsed_brand }}</span>
-                                            @endif
-                                            @if($item->kbCategory)
-                                                <span class="inline-flex items-center px-1.5 rounded-sm bg-sky-50 text-sky-800 font-medium text-[10.5px]"
-                                                      title="{{ $item->kbCategory->slug }}">
-                                                    {{ $item->kbCategory->name }}
-                                                </span>
-                                            @endif
-                                            @if($qaConfig)
-                                                <span class="chip {{ $qaConfig[0] }} text-[10.5px]"
-                                                      title="quality_assessment_status: {{ $qaStatus }}">
-                                                    <span class="dot"></span>{{ $qaConfig[1] }}
-                                                </span>
-                                            @endif
-                                            @if($item->parsed_article)<span class="mono text-fg-2">{{ $item->parsed_article }}</span>@endif
-                                            {{-- Phase 2 use-case B: бэдж «в каталоге». --}}
-                                            @if($item->catalogItem)
-                                                <span class="inline-flex items-center px-1.5 rounded-sm bg-violet-50 text-violet-800 font-medium text-[10.5px]"
-                                                      title="каталог MyLift: {{ $item->catalogItem->sku }} · {{ $item->catalogItem->brand_article ?: '—' }} · обновлено {{ $item->catalogItem->last_imported_at?->format('d.m.Y') ?? '—' }}">
-                                                    в каталоге · {{ $item->catalogItem->sku }}
-                                                </span>
-                                            @endif
-                                            {{-- Phase 2 use-case A: внешняя ссылка на mylift.ru для M-SKU позиций
-                                                 (даже если catalog_item_id не привязан — позволяет менеджеру быстро
-                                                  открыть карточку товара на сайте каталога). --}}
-                                            @php
-                                                $mylinkSku = null;
-                                                if ($item->catalogItem) {
-                                                    $mylinkSku = $item->catalogItem->sku;
-                                                } elseif (preg_match('/(?<![\p{L}\p{N}_])(M\d{4,})(?![\p{L}\p{N}_])/u', (string) $item->parsed_article, $mm)) {
-                                                    $mylinkSku = $mm[1];
-                                                }
-                                            @endphp
-                                            @if($mylinkSku)
-                                                <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
-                                                   target="_blank" rel="noopener noreferrer"
-                                                   class="inline-flex items-center gap-0.5 px-1.5 rounded-sm bg-sky-50 text-sky-700 hover:text-sky-900 hover:bg-sky-100 font-medium text-[10.5px]"
-                                                   title="Открыть на mylift.ru">
-                                                    mylift.ru ↗
-                                                </a>
-                                            @endif
-                                            @if($item->supplier_note)
-                                                <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-50 text-amber-700 font-medium text-[10.5px]">
-                                                    {{ \Illuminate\Support\Str::limit($item->supplier_note, 50) }}
-                                                </span>
-                                            @endif
-                                        </div>
-                                        @if(! empty($extracted))
-                                            {{-- Извлечённые KB-параметры (diameter, current, voltage, ...). --}}
-                                            <div class="text-[11px] text-fg-3 mt-1 flex flex-wrap gap-x-2 gap-y-0.5 mono">
-                                                @foreach(array_slice($extracted, 0, 6, true) as $slug => $value)
-                                                    <span><span class="text-fg-3">{{ $slug }}:</span> <span class="text-fg-2">{{ is_scalar($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE) }}</span></span>
-                                                @endforeach
-                                                @if(count($extracted) > 6)
-                                                    <span class="text-fg-3">… +{{ count($extracted) - 6 }}</span>
-                                                @endif
-                                            </div>
-                                        @endif
-                                    </div>
-                                    {{-- Кол-во — read-only, редактируется через «⋮ → Редактировать». --}}
-                                    <span class="mono text-[12px] text-fg-1 text-right">{{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') ?: '—' }} {{ $item->parsed_unit }}</span>
+                            @php
+                                // Foundation §6.2 + дизайн 04b: slot-based view.
+                                $slotResolver = app(\App\Services\Kb\PositionSlotResolver::class);
+                                $aggregate = $slotResolver->aggregateProgress($items);
 
-                                    {{-- Phase 2 use-case C: цена и наличие из catalog_items, если есть привязка. --}}
-                                    @php
-                                        $ci = $item->catalogItem;
-                                        $price = $ci?->price;
-                                        $stock = $ci?->stock_available;
-                                        $qty = (float) ($item->parsed_qty ?? 0);
-                                        $total = ($price !== null && $qty > 0) ? ((float) $price * $qty) : null;
-                                        $stockTone = $stock === null ? 'text-fg-3' : ($stock > 0 ? 'text-emerald-700' : 'text-amber-700');
-                                    @endphp
+                                $itemsWithPending = $items->filter(fn ($i) => $i->is_active
+                                    && $i->clarificationQuestions->isNotEmpty()
+                                    && $i->clarificationQuestions->contains(fn ($q) => trim((string) $q->answer) === ''
+                                        && in_array($q->batch?->status, ['sent', 'answered'], true)))->count();
+                                $itemsWithJustAnswered = $items->filter(fn ($i) => $i->is_active
+                                    && $i->clarificationQuestions->isNotEmpty()
+                                    && $i->clarificationQuestions->contains(fn ($q) => trim((string) $q->answer) !== ''))->count();
+                                $itemsWithEnrichment = $items->filter(function ($i) {
+                                    $sugg = is_array($i->quality_assessment_payload['enrichment_suggestions'] ?? null)
+                                        ? $i->quality_assessment_payload['enrichment_suggestions'] : [];
+                                    return $i->is_active && ! empty(array_filter($sugg,
+                                        fn ($s) => is_array($s) && ($s['status'] ?? 'pending') === 'pending'));
+                                })->count();
+                            @endphp
 
-                                    <span class="mono text-[12px] {{ $price !== null ? 'text-fg-1' : 'text-fg-3' }} text-right"
-                                          title="{{ $ci ? 'из каталога, обновлено ' . ($ci->last_imported_at?->format('d.m.Y') ?? '—') : 'нет привязки к каталогу' }}">
-                                        {{ $price !== null ? number_format((float) $price, 2, '.', ' ') . ' ₽' : '—' }}
-                                    </span>
-
-                                    <span class="text-[12px] {{ $stockTone }}"
-                                          title="{{ $ci ? 'остаток на складе' : 'нет данных' }}">
-                                        @if($stock === null)
-                                            —
-                                        @elseif($stock > 0)
-                                            {{ $stock }} шт
-                                        @else
-                                            нет
-                                        @endif
-                                    </span>
-
-                                    <span class="mono text-[12px] {{ $total !== null ? 'text-fg-1' : 'text-fg-3' }} text-right">
-                                        {{ $total !== null ? number_format($total, 2, '.', ' ') . ' ₽' : '—' }}
-                                    </span>
-
-                                    @if($canEditItems)
-                                        @if(! $item->is_active)
-                                            {{-- Soft-deleted: кнопка восстановления вместо меню. --}}
-                                            <button type="button"
-                                                    wire:click="restoreItem({{ $item->id }})"
-                                                    class="text-emerald-700 hover:text-emerald-900 text-center text-[14px]"
-                                                    title="Восстановить позицию">↩</button>
-                                        @else
-                                        <div class="flex items-center justify-end gap-0.5">
-                                            {{-- Лупа — быстрый vector-поиск похожих позиций каталога. --}}
-                                            @if($item->parsed_name || $item->parsed_article)
-                                                <button type="button"
-                                                        @click="$dispatch('open-catalog-similar', { itemId: {{ $item->id }} })"
-                                                        class="text-fg-3 hover:text-fg-1 text-[13px] px-1 leading-none"
-                                                        title="Найти похожие позиции в каталоге">🔍</button>
-                                            @endif
-                                            <div x-data="{ open: false }" class="relative"
-                                                 @click.outside="open = false">
-                                                <button type="button"
-                                                        @click="open = !open"
-                                                        class="text-fg-2 hover:text-fg-1 text-[16px] leading-none px-1"
-                                                        title="Действия">⋮</button>
-                                                <div x-show="open" x-cloak x-transition.origin.top.right
-                                                     class="absolute right-0 top-full mt-1 z-30 w-[220px] py-1 bg-surface border border-border rounded-md shadow-lg text-left text-[12.5px]">
-                                                    @if($item->parsed_name)
-                                                        <button type="button"
-                                                                @click="open = false; $dispatch('open-item-edit', { itemId: {{ $item->id }} })"
-                                                                class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
-                                                            📝 Редактировать…
-                                                        </button>
-                                                    @endif
-                                                    @if($item->parsed_name || $item->parsed_article)
-                                                        <button type="button"
-                                                                @click="open = false; $wire.refreshItemCatalog({{ $item->id }})"
-                                                                class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
-                                                            🔄 Обновить из каталога
-                                                        </button>
-                                                    @endif
-                                                    @if($item->catalog_item_id)
-                                                        <button type="button"
-                                                                @click="open = false; $wire.unbindItemCatalog({{ $item->id }})"
-                                                                class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
-                                                            🔓 Отвязать от каталога
-                                                        </button>
-                                                    @endif
-                                                    @if($item->parsed_name || $item->parsed_article)
-                                                        <button type="button"
-                                                                @click="open = false; $dispatch('open-catalog-similar', { itemId: {{ $item->id }} })"
-                                                                class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
-                                                            🔍 Похожие из каталога…
-                                                        </button>
-                                                    @endif
-                                                    <button type="button"
-                                                            @click="open = false; $dispatch('open-catalog-link', { itemId: {{ $item->id }} })"
-                                                            class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
-                                                        🔗 Привязать вручную…
-                                                    </button>
-                                                    @if($qaStatus === 'internal_catalog_pending')
-                                                        <button type="button"
-                                                                @click="open = false"
-                                                                wire:click="markItemCatalogNotFound({{ $item->id }})"
-                                                                wire:confirm="Подтвердить, что SKU «{{ $item->parsed_article }}» отсутствует в каталоге?"
-                                                                class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
-                                                            ❌ Нет в каталоге
-                                                        </button>
-                                                    @endif
-
-                                                    {{-- Phase 1.10: ручной merge как clarification.
-                                                         Сliять текущую позицию в существующую — артикул и (опц.)
-                                                         бренд дописываются в target, текущая soft-удаляется.
-                                                         Раскрывающийся submenu со всеми active позициями кроме
-                                                         текущей. --}}
-                                                    @php
-                                                        $mergeTargets = $items->where('id', '!=', $item->id);
-                                                    @endphp
-                                                    @if($mergeTargets->isNotEmpty())
-                                                        <div x-data="{ subOpen: false }" class="relative">
-                                                            <button type="button"
-                                                                    @click="subOpen = !subOpen"
-                                                                    class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">
-                                                                🔗 Это уточнение позиции…
-                                                                <span class="float-right text-fg-3" x-text="subOpen ? '▾' : '▸'"></span>
-                                                            </button>
-                                                            <div x-show="subOpen" x-cloak
-                                                                 class="pl-4 max-h-[200px] overflow-auto bg-surface-2 border-t border-border-subtle">
-                                                                @foreach($mergeTargets as $tgt)
-                                                                    <button type="button"
-                                                                            @click="open = false; subOpen = false"
-                                                                            wire:click="mergeItemInto({{ $item->id }}, {{ $tgt->id }})"
-                                                                            wire:confirm="Слить эту позицию в #{{ $tgt->position }} «{{ \Illuminate\Support\Str::limit($tgt->parsed_name ?: '—', 40) }}»? Артикул будет дописан, эта позиция удалена."
-                                                                            class="block w-full text-left px-3 py-1.5 hover:bg-sky-50 text-fg-1 text-[11.5px]">
-                                                                        <span class="mono text-fg-3">#{{ $tgt->position }}</span>
-                                                                        <span class="text-fg-1">{{ \Illuminate\Support\Str::limit($tgt->parsed_name ?: '(без названия)', 50) }}</span>
-                                                                        @if($tgt->parsed_article)
-                                                                            <span class="mono text-fg-3 text-[10.5px]">· {{ \Illuminate\Support\Str::limit($tgt->parsed_article, 24) }}</span>
-                                                                        @endif
-                                                                    </button>
-                                                                @endforeach
-                                                            </div>
-                                                        </div>
-                                                    @endif
-
-                                                    <div class="my-1 border-t border-border-subtle"></div>
-                                                    <button type="button"
-                                                            @click="open = false"
-                                                            wire:click="softDeleteItem({{ $item->id }})"
-                                                            wire:confirm="Удалить позицию «{{ \Illuminate\Support\Str::limit($item->parsed_name ?: 'позиция #' . $item->position, 40) }}»?"
-                                                            class="block w-full text-left px-3 py-1.5 hover:bg-red-50 text-red-700">
-                                                        🗑 Удалить позицию
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>{{-- /flex action-cell --}}
-                                        @endif
-                                    @else
-                                        <span class="text-fg-3 text-center" title="Менеджер заявки">⋮</span>
-                                    @endif
+                            {{-- Hero strip: aggregate slot progress + notice chips --}}
+                            <div class="px-[18px] py-2.5 border-b border-border-subtle bg-surface-2 flex items-center gap-3 text-[12.5px] flex-wrap">
+                                <span class="text-fg-3 text-[11px] uppercase tracking-wider font-semibold">Заполнено</span>
+                                <span class="text-fg-1 font-semibold mono">{{ $aggregate['filled'] }}/{{ $aggregate['total'] }}</span>
+                                <div class="flex-1 max-w-[260px] h-1.5 bg-border-subtle rounded-full overflow-hidden">
+                                    <div class="h-full bg-emerald-500 transition-all" style="width: {{ $aggregate['percent'] }}%"></div>
                                 </div>
+                                <span class="mono text-fg-2 text-[11.5px]">{{ $aggregate['percent'] }}%</span>
+                                <span class="flex-1"></span>
+                                @if($itemsWithEnrichment > 0)
+                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-amber-50 text-amber-800 text-[10.5px] font-semibold"
+                                          title="есть предложения для одного клика «применить»">
+                                        💡 предложения · {{ $itemsWithEnrichment }}
+                                    </span>
+                                @endif
+                                @if($itemsWithPending > 0)
+                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-amber-50 text-amber-800 text-[10.5px] font-semibold"
+                                          title="отправленные вопросы без ответа">
+                                        ⏳ ждут ответа · {{ $itemsWithPending }}
+                                    </span>
+                                @endif
+                                @if($itemsWithJustAnswered > 0)
+                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-emerald-50 text-emerald-800 text-[10.5px] font-semibold"
+                                          title="позиции с полученным ответом от клиента">
+                                        ✓ уточнено · {{ $itemsWithJustAnswered }}
+                                    </span>
+                                @endif
+                            </div>
+
+                            <div class="p-[12px] bg-app">
+                            @foreach($items as $item)
+                                @php $slots = $slotResolver->resolve($item); @endphp
+                                @include('livewire.requests.items._position-card', [
+                                    'item' => $item,
+                                    'slots' => $slots,
+                                    'isImageAttachment' => $isImageAttachment,
+                                    'canEditItems' => $canEditItems,
+                                    'items' => $items,
+                                ])
                             @endforeach
+                            </div>
 
                             @php
                                 // Phase 2 use-case C: подытог по каталожным ценам тех позиций,

@@ -1,0 +1,568 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<title>MyLift CRM · Ответ клиента · M-2026-0699</title>
+<link rel="stylesheet" href="../../colors_and_type.css">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg-app);font-family:var(--font-sans);color:var(--fg-1);font-size:var(--fs-base)}
+.app{display:grid;grid-template-columns:var(--rail-w) 1fr;grid-template-rows:var(--topbar-h) 1fr;min-height:100vh}
+
+/* TOPBAR */
+.top{grid-column:1/-1;display:flex;align-items:center;gap:16px;padding:0 16px;background:var(--bg-surface);border-bottom:1px solid var(--border)}
+.top .brand{display:flex;align-items:center;gap:8px;width:calc(var(--rail-w) - 16px + 240px)}
+.top .brand img{height:24px}
+.top .ws{font-size:12.5px;color:var(--fg-2);display:flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--border);border-radius:var(--r-md)}
+.top .ws .dot{width:6px;height:6px;border-radius:999px;background:var(--emerald-600)}
+.top .search{flex:1;max-width:480px;position:relative}
+.top .search input{width:100%;height:30px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-app);padding:0 12px 0 32px;font:400 13px/1 var(--font-sans);color:var(--fg-1);outline:none}
+.top .search:before{content:"⌕";position:absolute;left:10px;top:8px;color:var(--fg-3);font-size:14px}
+.top .search kbd{position:absolute;right:8px;top:6px;font:500 10.5px/1 var(--font-mono);color:var(--fg-3);border:1px solid var(--border);padding:3px 5px;border-radius:3px;background:var(--bg-surface)}
+.top .spacer{flex:1}
+.top .icon-btn{width:30px;height:30px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-surface);display:inline-flex;align-items:center;justify-content:center;color:var(--fg-2);position:relative;cursor:pointer}
+.top .icon-btn .badge{position:absolute;top:-3px;right:-3px;background:var(--accent);color:#fff;font:700 9px/1 var(--font-sans);padding:2px 4px;border-radius:999px;border:1.5px solid var(--bg-surface)}
+.top .av{width:28px;height:28px;border-radius:999px;background:var(--neutral-300);color:var(--fg-1);font:600 11px/28px var(--font-sans);text-align:center}
+
+/* RAIL */
+.rail{background:var(--bg-sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:2px}
+.rail .item{width:40px;height:40px;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;color:var(--fg-3);position:relative;cursor:pointer;font-family:var(--font-mono);font-size:13px;font-weight:600}
+.rail .item.active{color:var(--accent);background:var(--bg-surface)}
+.rail .item.active::before{content:"";position:absolute;left:-8px;top:8px;bottom:8px;width:2px;background:var(--accent);border-radius:0 2px 2px 0}
+.rail .item .badge{position:absolute;top:4px;right:4px;background:var(--accent);color:#fff;font:700 9px/1 var(--font-sans);padding:2px 4px;border-radius:999px;border:1.5px solid var(--bg-sidebar)}
+.rail .sep{width:24px;height:1px;background:var(--border);margin:6px 0}
+
+/* PAGE */
+.page{overflow-y:auto;background:var(--bg-app);padding-bottom:120px}
+.page-inner{max-width:1280px;margin:0 auto;padding:16px 24px}
+
+/* SUBNAV */
+.subnav{display:flex;align-items:center;gap:14px;padding:10px 0 14px;font-size:12.5px}
+.subnav .back{display:inline-flex;align-items:center;gap:6px;color:var(--sky-700);text-decoration:none;font-weight:500;border:1px solid var(--border);padding:5px 10px;border-radius:var(--r-md);background:var(--bg-surface)}
+.subnav .crumbs{font:500 11.5px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em;display:flex;align-items:center;gap:8px}
+.subnav .crumbs .sep{color:var(--border-strong)}
+.subnav .crumbs b{color:var(--fg-1);font-weight:500}
+
+/* AI banner — горизонтальный, на всю ширину */
+.aibanner{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center;background:linear-gradient(180deg, oklch(97% 0.03 280) 0%, var(--bg-surface) 100%);border:1px solid oklch(82% 0.10 280);border-radius:var(--r-lg);padding:14px 18px;margin-bottom:14px}
+.aibanner .ico{width:36px;height:36px;border-radius:8px;background:oklch(58% 0.18 280);color:#fff;display:flex;align-items:center;justify-content:center;font:700 16px/1 var(--font-sans)}
+.aibanner h3{margin:0 0 4px;font:600 13.5px/1.3 var(--font-sans);color:var(--fg-1)}
+.aibanner h3 .conf{font:600 11.5px/1 var(--font-mono);background:var(--bg-surface);color:oklch(46% 0.16 280);padding:3px 7px;border-radius:999px;margin-left:8px;border:1px solid oklch(86% 0.08 280)}
+.aibanner .body{font-size:12.5px;color:var(--fg-2);line-height:1.45;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.aibanner .body b{color:var(--fg-1);font-weight:500}
+.aibanner .body .quote{font-family:var(--font-mono);font-size:11.5px;background:var(--bg-surface);border:1px solid var(--border);padding:2px 7px;border-radius:4px;color:var(--fg-2)}
+.aibanner .acts{display:flex;gap:6px}
+
+/* HERO */
+.hero{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px 20px;margin-bottom:14px;display:grid;grid-template-columns:1fr auto;gap:16px;align-items:flex-start}
+.hero .id{display:flex;align-items:center;gap:10px;font:500 12px/1 var(--font-mono);color:var(--fg-3);margin-bottom:6px}
+.hero h1{margin:0 0 6px;font:600 18px/1.3 var(--font-sans);color:var(--fg-1);letter-spacing:-0.005em}
+.hero .sub{font-size:12.5px;color:var(--fg-3);display:flex;align-items:center;gap:8px}
+.hero .sub b{color:var(--fg-1);font-weight:500}
+.hero .sub .sep{color:var(--border-strong)}
+.hero .statusrow{display:flex;align-items:center;gap:14px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border-subtle);flex-wrap:wrap;font-size:12.5px}
+.hero .statusrow .item{display:flex;flex-direction:column;gap:3px;padding-right:18px;border-right:1px solid var(--border-subtle)}
+.hero .statusrow .item:last-child{border-right:none}
+.hero .statusrow .lbl{font:600 10.5px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em}
+.hero .statusrow .val{font:500 13px/1.3 var(--font-sans);color:var(--fg-1);display:flex;align-items:center;gap:6px}
+.hero .statusrow .val .av{width:20px;height:20px;border-radius:999px;background:var(--neutral-200);color:var(--fg-2);font:600 9.5px/20px var(--font-sans);text-align:center}
+.hero .actions{display:flex;flex-direction:column;gap:6px;align-items:stretch;min-width:220px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--bg-surface);font:500 12.5px/1 var(--font-sans);color:var(--fg-1);cursor:pointer;white-space:nowrap}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.ok{background:var(--emerald-600);color:#fff;border-color:var(--emerald-600)}
+.btn.ok:hover{background:var(--emerald-700);border-color:var(--emerald-700)}
+.btn.sm{height:26px;padding:0 10px;font-size:12px}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--fg-2)}
+.btn.ghost:hover{background:var(--bg-hover)}
+.btn.danger{color:var(--accent);border-color:var(--red-300);background:var(--bg-surface)}
+
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font:500 11.5px/1.4 var(--font-sans)}
+.chip .dot{width:5px;height:5px;border-radius:999px;background:currentColor}
+.chip.info{background:var(--sky-50);color:var(--sky-700)}
+.chip.attn{background:var(--amber-50);color:var(--amber-700)}
+.chip.ok{background:var(--emerald-50);color:var(--emerald-700)}
+.chip.neutral{background:var(--neutral-100);color:var(--neutral-700)}
+
+/* TABS */
+.tabs{display:flex;gap:0;padding:0 18px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-md) var(--r-md) 0 0;border-bottom:1px solid var(--border-subtle)}
+.tabs .t{padding:10px 14px 11px;font:500 12.5px/1 var(--font-sans);color:var(--fg-3);cursor:pointer;border-bottom:2px solid transparent;display:inline-flex;align-items:center;gap:6px;margin-bottom:-1px}
+.tabs .t.on{color:var(--fg-1);border-bottom-color:var(--accent);font-weight:600}
+.tabs .t .n{background:var(--neutral-100);color:var(--fg-2);font:600 10.5px/1 var(--font-sans);padding:2px 6px;border-radius:999px}
+.tabs .t.on .n{background:var(--red-50);color:var(--red-700)}
+.tabs .t .ok-pulse{width:6px;height:6px;border-radius:999px;background:var(--emerald-600);animation:pulse 1.8s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* CONTENT */
+.content{background:var(--bg-surface-2);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--r-md) var(--r-md);padding:16px}
+
+/* SUGGESTIONS BLOCK */
+.sblock{background:var(--bg-surface);border:1px solid oklch(82% 0.10 280);border-radius:var(--r-md);overflow:hidden;margin-bottom:14px}
+.sbh{display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(180deg, oklch(97% 0.025 280) 0%, var(--bg-surface) 100%);border-bottom:1px solid var(--border-subtle)}
+.sbh h2{margin:0;font:600 14px/1.2 var(--font-sans);color:var(--fg-1);display:flex;align-items:center;gap:8px}
+.sbh h2 .pill{background:oklch(58% 0.18 280);color:#fff;font:700 11px/1 var(--font-sans);padding:3px 7px;border-radius:999px;font-feature-settings:'tnum'}
+.sbh .meta{color:var(--fg-3);font-size:12px}
+.sbh .spacer{flex:1}
+.sbh .bulk{display:flex;gap:6px}
+
+.scard{padding:16px 18px;border-top:1px solid var(--border-subtle);display:grid;grid-template-columns:1fr 220px;gap:18px;align-items:center}
+.scard:first-of-type{border-top:none}
+.scard.applied{background:var(--emerald-50);border-left:3px solid var(--emerald-600)}
+.scard.rejected{background:var(--bg-surface-2);opacity:.6;border-left:3px solid var(--neutral-300)}
+.scard.applied .applied-mark{display:inline-flex;align-items:center;gap:5px;font:500 11.5px/1 var(--font-sans);color:var(--emerald-700)}
+.scard .left{display:flex;flex-direction:column;gap:10px;min-width:0}
+.scard .target{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px}
+.scard .target .lbl{font:500 10.5px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em}
+.scard .target .pos{font:600 12px/1 var(--font-mono);color:var(--fg-3);background:var(--bg-surface-2);border:1px solid var(--border);padding:3px 7px;border-radius:4px}
+.scard .target .nm{font-weight:500;color:var(--fg-1)}
+.scard .target .br{font:600 11px/1 var(--font-sans);background:var(--neutral-100);color:var(--neutral-700);padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:.02em}
+
+.scard .diff{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px}
+.scard .diff .lbl{font:500 10.5px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em}
+.scard .diff .slot{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;border:1px solid}
+.scard .diff .slot .k{font:500 10.5px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em}
+.scard .diff .slot .v{font:600 12.5px/1 var(--font-sans);color:var(--fg-1)}
+.scard .diff .slot.was{background:var(--neutral-100);border-color:var(--border)}
+.scard .diff .slot.was .v{color:var(--fg-3);text-decoration:line-through}
+.scard .diff .slot.was .v.empty{text-decoration:none;color:var(--fg-3);font-style:italic;font-weight:400}
+.scard .diff .slot.now{background:var(--emerald-50);border-color:oklch(82% 0.10 160)}
+.scard .diff .slot.now .v{color:var(--emerald-700);font-family:var(--font-mono)}
+.scard .diff .arrow{font:600 16px/1 var(--font-mono);color:var(--fg-3)}
+
+.scard .reason{font:400 12px/1.5 var(--font-sans);color:var(--fg-3);font-style:italic;display:flex;align-items:flex-start;gap:8px}
+.scard .reason .q{font:600 11px/1.4 var(--font-mono);background:var(--bg-surface-2);border:1px solid var(--border);padding:2px 7px;border-radius:3px;color:var(--fg-2);font-style:normal;flex-shrink:0}
+.scard .reason .q.match{background:var(--emerald-50);border-color:oklch(86% 0.08 160);color:var(--emerald-700)}
+
+.scard .right{display:flex;flex-direction:column;gap:6px;align-items:stretch}
+.scard .right .conf{font:500 10.5px/1 var(--font-sans);color:var(--fg-3);text-align:center;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+.scard .right .confbar{height:4px;border-radius:999px;background:var(--neutral-100);overflow:hidden}
+.scard .right .confbar i{display:block;height:100%;background:oklch(58% 0.18 280)}
+.scard .right .confval{font:600 12px/1 var(--font-mono);color:oklch(46% 0.16 280);text-align:center;margin-bottom:6px}
+.scard.applied .right .actions, .scard.rejected .right .actions{display:none}
+.scard.applied .right .applied-state, .scard.rejected .right .rejected-state{display:flex;flex-direction:column;gap:4px;align-items:center;justify-content:center;padding:8px 0}
+.scard .right .applied-state, .scard .right .rejected-state{display:none}
+.applied-state{color:var(--emerald-700);font:500 12.5px/1 var(--font-sans);text-align:center}
+.applied-state b{font-weight:600;display:block;font-size:13px;margin-bottom:2px}
+.applied-state a{color:var(--sky-700);font-size:11px;text-decoration:underline dashed;text-underline-offset:3px;cursor:pointer}
+.rejected-state{color:var(--fg-3);font:500 12.5px/1 var(--font-sans);text-align:center}
+.rejected-state a{color:var(--sky-700);font-size:11px;text-decoration:underline dashed;text-underline-offset:3px;cursor:pointer}
+
+/* History timeline with answers */
+.htimeline{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;margin-bottom:14px}
+.htimeline .hh{padding:12px 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border-subtle)}
+.htimeline .hh h3{margin:0;font:600 13px/1.2 var(--font-sans)}
+.htimeline .hh .spacer{flex:1}
+.htimeline .hh .meta{color:var(--fg-3);font-size:12px}
+.htimeline .row{display:grid;grid-template-columns:18px 1fr 130px;gap:12px;padding:12px 18px;border-top:1px solid var(--border-subtle);align-items:flex-start;font-size:12.5px}
+.htimeline .row .d{width:11px;height:11px;border-radius:999px;background:var(--sky-500);margin-top:4px}
+.htimeline .row.ans .d{background:var(--emerald-600)}
+.htimeline .row .msg{color:var(--fg-1);line-height:1.5}
+.htimeline .row .msg b{font-weight:600}
+.htimeline .row .msg .quote{display:block;margin-top:6px;padding:8px 12px;background:var(--bg-surface-2);border-left:2px solid var(--emerald-600);border-radius:0 4px 4px 0;font-style:italic;color:var(--fg-2);line-height:1.5}
+.htimeline .row .msg .quote .hl{background:var(--emerald-100,oklch(94% 0.05 160));color:var(--emerald-700);padding:0 3px;border-radius:2px;font-style:normal;font-weight:500;font-family:var(--font-mono);font-size:11.5px}
+.htimeline .row .msg .qchips{margin-top:6px;display:flex;flex-wrap:wrap;gap:5px}
+.htimeline .row .msg .qchip{font:500 11px/1.3 var(--font-sans);background:var(--bg-surface);border:1px solid var(--border);padding:2px 7px;border-radius:999px;color:var(--fg-2);display:inline-flex;align-items:center;gap:4px}
+.htimeline .row .msg .qchip.matched{background:var(--emerald-50);color:var(--emerald-700);border-color:oklch(86% 0.08 160)}
+.htimeline .row .when{font:500 11px/1.4 var(--font-mono);color:var(--fg-3);text-align:right}
+
+/* POSITIONS table — кратко */
+.pblock{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;margin-bottom:14px}
+.pbh{padding:12px 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border-subtle)}
+.pbh h3{margin:0;font:600 13px/1.2 var(--font-sans)}
+.pbh .meta{color:var(--fg-3);font-size:12px;margin-left:6px}
+.pbh .spacer{flex:1}
+.pthead{display:grid;grid-template-columns:32px 56px 1fr 90px 100px 100px 100px 32px;column-gap:14px;align-items:center;padding:8px 18px;border-bottom:1px solid var(--border-subtle);font:600 11px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em}
+.prow{display:grid;grid-template-columns:32px 56px 1fr 90px 100px 100px 100px 32px;column-gap:14px;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border-subtle);font-size:13px}
+.prow:last-child{border-bottom:none}
+.prow.pending-update{background:linear-gradient(90deg, var(--emerald-50) 0%, var(--bg-surface) 60%)}
+.prow .n{font:600 14px/1 var(--font-sans);color:var(--fg-3);text-align:right}
+.prow .img{width:52px;height:52px;border-radius:6px;background:var(--bg-app);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--fg-3);font:500 9.5px/1 var(--font-mono)}
+.prow .nm{min-width:0}
+.prow .nm .t1{font:500 13.5px/1.3 var(--font-sans);color:var(--fg-1);display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.prow .nm .t1 .br{font:600 11px/1 var(--font-sans);background:var(--neutral-100);color:var(--neutral-700);padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:.02em}
+.prow .nm .t1 .br.incoming{background:var(--emerald-50);color:var(--emerald-700);border:1px dashed oklch(78% 0.10 160);animation:pulse 2s ease-in-out infinite}
+.prow .nm .t2{font-size:11.5px;color:var(--fg-3);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.prow .nm .t2 .code{font-family:var(--font-mono);color:var(--fg-2)}
+.prow .nm .t2 .code.incoming{background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:3px;border:1px dashed oklch(78% 0.10 160);font-family:var(--font-mono)}
+.prow .qty{text-align:right;font:500 13px/1 var(--font-mono);color:var(--fg-1)}
+.prow .price,.prow .stock,.prow .sum{text-align:right;font-size:12px;color:var(--fg-3);font-family:var(--font-mono)}
+.prow .menu{text-align:center;color:var(--fg-3);font-weight:700;letter-spacing:1px;cursor:pointer}
+
+</style></head><body>
+
+<div class="app">
+  <!-- TOPBAR -->
+  <div class="top">
+    <div class="brand"><img src="../../assets/logos/mylift-wordmark.svg" alt="MyLift CRM"></div>
+    <div class="ws"><span class="dot"></span> <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="7c111d15103c110506150c520e09">[email&#160;protected]</a> · +3 ящика</div>
+    <div class="search"><input placeholder="Поиск по заявкам, клиентам, артикулам…"><kbd>⌘ K</kbd></div>
+    <div class="spacer"></div>
+    <button class="btn">Импорт из 1С</button>
+    <button class="btn primary">+ Заявка вручную</button>
+    <button class="icon-btn" title="Уведомления">🔔<span class="badge">59</span></button>
+    <div class="av">MA</div>
+  </div>
+
+  <div class="rail">
+    <div class="item">⌂</div>
+    <div class="item active">≡<span class="badge">8</span></div>
+    <div class="item">✉</div>
+    <div class="item">⌗</div>
+    <div class="item">▦</div>
+    <div class="sep"></div>
+    <div class="item">◇</div>
+    <div class="item">◷</div>
+    <div class="item">⌕</div>
+    <div class="sep" style="margin-top:auto"></div>
+    <div class="item">⚙</div>
+  </div>
+
+  <!-- PAGE -->
+  <div class="page">
+    <div class="page-inner">
+
+      <!-- SUBNAV -->
+      <div class="subnav">
+        <a class="back" href="03-requests.html">← К списку</a>
+        <span class="crumbs">Заявки <span class="sep">/</span> Все открытые <span class="sep">/</span> <b>M-2026-0699</b></span>
+      </div>
+
+      <!-- AI BANNER — горизонтальный, с уверенностью и обоснованием -->
+      <div class="aibanner">
+        <span class="ico">AI</span>
+        <div>
+          <h3>Клиент ответил на уточнение по 2 позициям <span class="conf">уверенность 90%</span></h3>
+          <div class="body">
+            Распознал бренд <b>КМЗ</b> и подтверждение артикула <b>ZAA622Y1</b>. Цитата из ответа:
+            <span class="quote">«…все оба двигателя — марка КМЗ, фотодатчик OTIS ZAA622Y1 как заказывали…»</span>
+            Рекомендую: перевести в статус <b>«в работе»</b>, применить 2 уточнения, отправить КП.
+          </div>
+        </div>
+        <div class="acts">
+          <button class="btn sm ghost">Скрыть</button>
+          <button class="btn primary">Применить всё и → в работу</button>
+        </div>
+      </div>
+
+      <!-- HERO -->
+      <div class="hero">
+        <div>
+          <div class="id">
+            <span>#M-2026-0699</span>
+            <span style="border:1px solid var(--border);padding:2px 6px;border-radius:3px;font-size:10px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer">копировать</span>
+            <span style="color:var(--border-strong)">·</span>
+            <span>создано 14.05.2026 09:00</span>
+            <span style="color:var(--border-strong)">·</span>
+            <span>обновлено 14.05.2026 12:54</span>
+          </div>
+          <h1>Заявка на двигатель привода дверей · #LZ-REQ-1305 · SUP-00001 · Liftway.ru · 2 позиции</h1>
+          <div class="sub">
+            <b>Liftway.ru</b> <span class="sep">·</span>
+            <span>Запросы поставщикам</span>
+            <span class="sep">·</span>
+            <a href="/cdn-cgi/l/email-protection#4d223f29283f0d21242b393a2c34633e39223f28" style="color:var(--sky-700);text-decoration:none"><span class="__cf_email__" data-cfemail="107f62747562507c7976646771693e63647f6275">[email&#160;protected]</span></a>
+            <span class="sep">·</span>
+            <span>через <b><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="137e727a7f537e6a697a633d6166">[email&#160;protected]</a></b></span>
+          </div>
+
+          <div class="statusrow">
+            <div class="item">
+              <span class="lbl">Статус</span>
+              <span class="val"><span class="chip ok"><span class="dot"></span>клиент ответил</span></span>
+            </div>
+            <div class="item">
+              <span class="lbl">SLA</span>
+              <span class="val"><span class="chip ok"><span class="dot"></span>в норме</span></span>
+            </div>
+            <div class="item">
+              <span class="lbl">Менеджер</span>
+              <span class="val"><span class="av">МА</span>Морозов А.</span>
+            </div>
+            <div class="item">
+              <span class="lbl">Сматчено</span>
+              <span class="val">0 / 2 → <b style="color:var(--emerald-700)">2 / 2</b> <span style="color:var(--fg-3);font-weight:400">после применения</span></span>
+            </div>
+            <div class="item">
+              <span class="lbl">Ответ получен</span>
+              <span class="val">14.05.2026 12:54 · через 3 ч 54 м</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn ok">✓ Применить всё (2)</button>
+          <button class="btn">Открыть ответ клиента →</button>
+          <div style="display:flex;gap:6px">
+            <button class="btn sm" style="flex:1">⏸ Пауза</button>
+            <button class="btn sm" style="flex:1">Переподчинить</button>
+          </div>
+          <button class="btn sm danger">Закрыть как потеря</button>
+        </div>
+      </div>
+
+      <!-- TABS -->
+      <div class="tabs" style="margin-top:6px">
+        <span class="t">Обзор</span>
+        <span class="t">Переписка <span class="n">6</span><span class="ok-pulse" title="новый ответ"></span></span>
+        <span class="t on">Позиции <span class="n">2</span></span>
+        <span class="t">Поставщики <span class="n">0</span></span>
+        <span class="t">Активность <span class="n">5</span></span>
+        <span class="t">Файлы <span class="n">2</span></span>
+        <span class="t" style="color:var(--fg-3)">Связанные</span>
+        <span style="flex:1"></span>
+        <span class="t" style="color:var(--fg-3)">⛶</span>
+      </div>
+
+      <!-- CONTENT -->
+      <div class="content">
+
+        <!-- SUGGESTED ENRICHMENTS -->
+        <div class="sblock">
+          <div class="sbh">
+            <h2>Предложенные уточнения <span class="pill">2</span></h2>
+            <span class="meta">· LLM нашёл в reply'е уточнения к существующим позициям · уверенность 90%</span>
+            <span class="spacer"></span>
+            <div class="bulk">
+              <button class="btn sm">Отклонить все</button>
+              <button class="btn sm ok">Применить все (2)</button>
+            </div>
+          </div>
+
+          <!-- Suggestion #1 — pending review -->
+          <div class="scard">
+            <div class="left">
+              <div class="target">
+                <span class="lbl">К позиции</span>
+                <span class="pos">#1</span>
+                <span class="nm">Двигатель привода дверей OPR500</span>
+                <span class="br">Vega</span>
+                <span style="color:var(--fg-3)">·</span>
+                <span style="color:var(--fg-3)">1 шт</span>
+              </div>
+              <div class="diff">
+                <span class="lbl">Изменение:</span>
+                <span class="slot was"><span class="k">бренд</span><span class="v">Vega</span></span>
+                <span class="arrow">→</span>
+                <span class="slot now"><span class="k">бренд</span><span class="v">КМЗ</span></span>
+              </div>
+              <div class="reason">
+                <span class="q match">match · 92%</span>
+                <span>оба «Двигатель привода дверей OPR500», qty=1 шт совпадает, reply говорит о том же товаре, только другой бренд: <b style="color:var(--fg-1);font-style:normal">«все двигатели — марка КМЗ»</b>. Поставщик Vega не выпускает OPR500 — вероятный фикс описки клиента.</span>
+              </div>
+            </div>
+            <div class="right">
+              <div class="conf">Уверенность LLM</div>
+              <div class="confbar"><i style="width:92%"></i></div>
+              <div class="confval">92%</div>
+              <div class="actions" style="display:flex;flex-direction:column;gap:6px;margin-top:6px">
+                <button class="btn ok sm">✓ Применить</button>
+                <button class="btn sm">Отклонить</button>
+                <a style="color:var(--sky-700);text-decoration:underline dashed;text-underline-offset:3px;font-size:11.5px;text-align:center;cursor:pointer;margin-top:2px">правка вручную</a>
+              </div>
+              <div class="applied-state"><b>✓ Применено</b><a>откатить</a></div>
+              <div class="rejected-state"><span>Отклонено</span><a>вернуть</a></div>
+            </div>
+          </div>
+
+          <!-- Suggestion #2 — pending review -->
+          <div class="scard">
+            <div class="left">
+              <div class="target">
+                <span class="lbl">К позиции</span>
+                <span class="pos">#2</span>
+                <span class="nm">Фотодатчик LRD (приёмник + передатчик)</span>
+                <span class="br">OTIS</span>
+                <span style="color:var(--fg-3)">·</span>
+                <span style="color:var(--fg-3)">1 шт</span>
+              </div>
+              <div class="diff">
+                <span class="lbl">Подтверждение:</span>
+                <span class="slot was"><span class="k">артикул</span><span class="v empty">ZAA622Y1 (предварительно)</span></span>
+                <span class="arrow">→</span>
+                <span class="slot now"><span class="k">артикул</span><span class="v">ZAA622Y1</span></span>
+                <span class="slot now" style="background:var(--sky-50);border-color:oklch(82% 0.10 235)">
+                  <span class="k" style="color:var(--sky-700)">+ серия</span>
+                  <span class="v" style="color:var(--sky-700);font-family:var(--font-sans)">GeN2 Comfort</span>
+                </span>
+              </div>
+              <div class="reason">
+                <span class="q match">match · 98%</span>
+                <span>точное совпадение «Фотодатчик LRD (приёмник+передатчик)», qty=1 шт. Reply содержит тот же артикул и дополнительно серию лифта: <b style="color:var(--fg-1);font-style:normal">«фотодатчик OTIS ZAA622Y1, как заказывали на GeN2 Comfort»</b>.</span>
+              </div>
+            </div>
+            <div class="right">
+              <div class="conf">Уверенность LLM</div>
+              <div class="confbar"><i style="width:98%"></i></div>
+              <div class="confval">98%</div>
+              <div class="actions" style="display:flex;flex-direction:column;gap:6px;margin-top:6px">
+                <button class="btn ok sm">✓ Применить</button>
+                <button class="btn sm">Отклонить</button>
+                <a style="color:var(--sky-700);text-decoration:underline dashed;text-underline-offset:3px;font-size:11.5px;text-align:center;cursor:pointer;margin-top:2px">правка вручную</a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Suggestion #3 — already applied (example) -->
+          <div class="scard applied">
+            <div class="left">
+              <div class="target">
+                <span class="lbl">К позиции</span>
+                <span class="pos">#2</span>
+                <span class="nm">Фотодатчик LRD</span>
+                <span class="br">OTIS</span>
+                <span class="applied-mark">· применено 12:54</span>
+              </div>
+              <div class="diff">
+                <span class="lbl">+ слот:</span>
+                <span class="slot now"><span class="k">фото шильдика</span><span class="v" style="font-family:var(--font-sans)">2 файла</span></span>
+                <span class="slot now"><span class="k">комплектация</span><span class="v" style="font-family:var(--font-sans)">приёмник + передатчик</span></span>
+              </div>
+              <div class="reason">
+                <span class="q match">attach · авто</span>
+                <span>распознаны 2 JPG-вложения с шильдиками + текстовое подтверждение комплектации. Применено автоматически (порог уверенности &gt; 95%).</span>
+              </div>
+            </div>
+            <div class="right">
+              <div class="conf">Уверенность LLM</div>
+              <div class="confbar"><i style="width:99%;background:var(--emerald-600)"></i></div>
+              <div class="confval" style="color:var(--emerald-700)">99%</div>
+              <div class="applied-state"><b>✓ Применено авто</b><a>откатить</a></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- HISTORY of clarifications — all answered -->
+        <div class="htimeline">
+          <div class="hh">
+            <h3>История уточнений · 3 раунда</h3>
+            <span class="spacer"></span>
+            <span class="meta">все ответы получены · открыть переписку →</span>
+          </div>
+
+          <div class="row">
+            <span class="d"></span>
+            <div class="msg">
+              <b>Морозов А.</b> спросил по позициям: артикул, серия лифта, фото шильдика
+              <div class="qchips">
+                <span class="qchip">#1 артикул</span>
+                <span class="qchip">#2 серия лифта</span>
+                <span class="qchip">#2 фото шильдика</span>
+              </div>
+            </div>
+            <span class="when">14.05 11:26</span>
+          </div>
+          <div class="row">
+            <span class="d"></span>
+            <div class="msg">
+              <b>Морозов А.</b> повторил: бренд OPR500, фото в сборе
+              <div class="qchips">
+                <span class="qchip">#1 бренд</span>
+                <span class="qchip">#1 фото в сборе</span>
+              </div>
+            </div>
+            <span class="when">14.05 11:47</span>
+          </div>
+          <div class="row">
+            <span class="d"></span>
+            <div class="msg">
+              <b>Морозов А.</b> повторил: размеры (Д×Ш×В)
+              <div class="qchips"><span class="qchip">#1 размеры</span></div>
+            </div>
+            <span class="when">14.05 12:33</span>
+          </div>
+
+          <div class="row ans">
+            <span class="d"></span>
+            <div class="msg">
+              <b>Клиент ответил:</b>
+              <div class="quote">
+                «Алексей, добрый день. Уточняю по позициям —<br>
+                все <span class="hl">оба двигателя марка КМЗ</span>, размеры <span class="hl">285 × 220 × 95 мм</span>, фото в сборе во вложении.<br>
+                Второй — <span class="hl">фотодатчик OTIS ZAA622Y1</span>, как заказывали на <span class="hl">GeN2 Comfort</span>, нужен полный комплект приёмник + передатчик. Фото шильдиков прикрепил».
+              </div>
+              <div class="qchips" style="margin-top:8px">
+                <span class="qchip matched">✓ #1 бренд → КМЗ</span>
+                <span class="qchip matched">✓ #1 размеры → 285×220×95</span>
+                <span class="qchip matched">✓ #1 фото в сборе → 1 файл</span>
+                <span class="qchip matched">✓ #2 артикул → ZAA622Y1</span>
+                <span class="qchip matched">✓ #2 серия → GeN2 Comfort</span>
+                <span class="qchip matched">✓ #2 фото шильдика → 2 файла</span>
+              </div>
+            </div>
+            <span class="when">14.05 12:54 ✓</span>
+          </div>
+        </div>
+
+        <!-- POSITIONS — preview of what they'll look like AFTER apply -->
+        <div class="pblock">
+          <div class="pbh">
+            <h3>Позиции запроса</h3>
+            <span class="meta">· 2 · превью с применёнными уточнениями</span>
+            <span class="spacer"></span>
+            <button class="btn sm">↻ Refresh всех</button>
+          </div>
+          <div class="pthead">
+            <span></span><span></span><span>позиция</span><span>кол-во</span><span>цена</span><span>наличие</span><span>сумма</span><span></span>
+          </div>
+
+          <div class="prow pending-update">
+            <span class="n">1</span>
+            <span class="img">img</span>
+            <div class="nm">
+              <div class="t1">
+                Двигатель привода дверей OPR500
+                <span class="br" style="text-decoration:line-through;opacity:.5">Vega</span>
+                <span class="br incoming">КМЗ</span>
+                <span class="chip ok"><span class="dot"></span>будет обогащено</span>
+              </div>
+              <div class="t2">
+                <span>Привод дверей</span>
+                <span style="color:var(--border-strong)">·</span>
+                <span class="code incoming">+ размеры 285×220×95 мм</span>
+                <span style="color:var(--border-strong)">·</span>
+                <span class="code incoming">+ фото в сборе</span>
+              </div>
+            </div>
+            <span class="qty">1 шт.</span>
+            <span class="price">—</span>
+            <span class="stock">после применения</span>
+            <span class="sum">—</span>
+            <span class="menu">⋯</span>
+          </div>
+
+          <div class="prow pending-update">
+            <span class="n">2</span>
+            <span class="img">img</span>
+            <div class="nm">
+              <div class="t1">
+                Фотодатчик LRD (приёмник + передатчик)
+                <span class="br">OTIS</span>
+                <span class="chip ok"><span class="dot"></span>будет обогащено</span>
+              </div>
+              <div class="t2">
+                <span class="code">арт. ZAA622Y1</span>
+                <span style="color:var(--border-strong)">·</span>
+                <span class="code incoming">+ серия GeN2 Comfort</span>
+                <span style="color:var(--border-strong)">·</span>
+                <span class="code incoming">+ фото шильдика · 2 файла</span>
+              </div>
+            </div>
+            <span class="qty">1 шт.</span>
+            <span class="price">12 800 ₽</span>
+            <span class="stock" style="color:var(--emerald-700);font-weight:500">в наличии</span>
+            <span class="sum">12 800 ₽</span>
+            <span class="menu">⋯</span>
+          </div>
+        </div>
+
+        <!-- Footer hint -->
+        <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-md);padding:12px 18px;display:flex;align-items:center;gap:14px;font-size:12.5px;color:var(--fg-3)">
+          <span>После применения всех уточнений заявка автоматически перейдёт в статус</span>
+          <span class="chip info"><span class="dot"></span>в работе</span>
+          <span>и появится в очереди <b style="color:var(--fg-1);font-weight:500">«КП в работе»</b> у менеджера.</span>
+          <span style="flex:1"></span>
+          <button class="btn ok">✓ Применить всё и перевести в «в работе»</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script></body></html>
