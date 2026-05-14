@@ -113,6 +113,11 @@ class ClarificationAnswerMatcher
                 }
                 $qid = (int) ($qa['question_id'] ?? 0);
                 $answer = trim((string) ($qa['answer'] ?? ''));
+                // LLM иногда возвращает строку "null" / "—" / "n/a" вместо
+                // настоящего JSON-null. Фильтруем сразу — это «нет ответа».
+                if (in_array(mb_strtolower($answer), ['null', 'none', '—', '-', 'n/a'], true)) {
+                    $answer = '';
+                }
                 if ($qid === 0 || $answer === '' || ! in_array($qid, $batchQuestionIds, true)) {
                     continue;
                 }

@@ -34,12 +34,20 @@
     $qty = (float) ($item->parsed_qty ?? 0);
     $total = ($price !== null && $qty > 0) ? ((float) $price * $qty) : null;
 
+    // Defensive: legacy "null"/"—" из старых LLM-ответов — не считаем ответом.
+    $_clarHasAnswer = function ($q) {
+        $a = trim((string) $q->answer);
+        if (in_array(mb_strtolower($a), ['null', 'none', '—', '-', 'n/a'], true)) {
+            return false;
+        }
+        return $a !== '';
+    };
     $hasPendingClarification = $item->clarificationQuestions->isNotEmpty()
-        && $item->clarificationQuestions->contains(fn ($q) => trim((string) $q->answer) === ''
+        && $item->clarificationQuestions->contains(fn ($q) => ! $_clarHasAnswer($q)
             && in_array($q->batch?->status, ['sent', 'answered'], true));
     $hasJustAnswered = $item->clarificationQuestions->isNotEmpty()
-        && $item->clarificationQuestions->contains(fn ($q) => trim((string) $q->answer) !== '');
-    $clarQAnswered = $item->clarificationQuestions->filter(fn ($q) => trim((string) $q->answer) !== '')->count();
+        && $item->clarificationQuestions->contains($_clarHasAnswer);
+    $clarQAnswered = $item->clarificationQuestions->filter($_clarHasAnswer)->count();
     $clarQTotal = $item->clarificationQuestions->count();
 
     $pendingSuggCount = is_array($item->quality_assessment_payload['enrichment_suggestions'] ?? null)

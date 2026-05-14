@@ -851,57 +851,9 @@
                         ->whereIn('status', ['drafted', 'sent', 'answered']);
                 @endphp
 
-                @if($clarificationBatches->isNotEmpty())
-                    <div class="ds-card mb-3">
-                        <div class="ds-card-header">
-                            <span class="text-[14px]">❓</span>
-                            <h3>История уточнений</h3>
-                            <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $clarificationBatches->count() }}</span>
-                            <span class="flex-1"></span>
-                            <span class="text-[11.5px] text-fg-3">заданные клиенту вопросы и его ответы</span>
-                        </div>
-                        <div class="divide-y divide-border-subtle">
-                            @foreach($clarificationBatches as $batch)
-                                @php
-                                    $batchStatus = (string) $batch->status;
-                                    $batchQs = $batch->questions ?? collect();
-                                    $generalQ = trim((string) $batch->general_question);
-                                    $perItemCount = $batchQs->filter(fn ($q) => $q->request_item_id !== null)->count();
-                                    [$badgeText, $badgeClass] = match ($batchStatus) {
-                                        'drafted' => ['✏ черновик не отправлен', 'bg-neutral-100 text-fg-2'],
-                                        'sent' => ['⏳ ждём ответ', 'bg-amber-100 text-amber-800'],
-                                        'answered' => ['✓ ответ получен', 'bg-emerald-100 text-emerald-800'],
-                                        default => [$batchStatus, 'bg-neutral-100 text-fg-2'],
-                                    };
-                                @endphp
-                                <div class="px-[18px] py-3 text-[12.5px]" wire:key="batch-{{ $batch->id }}">
-                                    <div class="flex items-baseline gap-2 flex-wrap mb-1.5">
-                                        <span class="inline-flex items-center px-1.5 rounded-sm font-semibold text-[10.5px] {{ $badgeClass }}">{{ $badgeText }}</span>
-                                        <span class="text-fg-3 text-[11px]">
-                                            @if($batchStatus === 'drafted')
-                                                создан {{ $batch->created_at?->format('d.m.Y H:i') ?: '—' }}
-                                            @else
-                                                отправлено {{ $batch->sent_at?->format('d.m.Y H:i') ?: '—' }}
-                                            @endif
-                                            @if($batch->createdBy)
-                                                · {{ $batch->createdBy->name }}
-                                            @endif
-                                        </span>
-                                        <span class="text-fg-3 text-[11px]">
-                                            · {{ $perItemCount }} вопрос(ов) по позициям{{ $generalQ !== '' ? ' + общий' : '' }}
-                                        </span>
-                                    </div>
-                                    @if($generalQ !== '')
-                                        <div class="text-fg-1 mb-1">
-                                            <span class="text-fg-3 uppercase tracking-wider text-[10px] font-semibold">общий вопрос:</span>
-                                            <div class="mt-0.5">{{ $generalQ }}</div>
-                                        </div>
-                                    @endif
-                                </div>
-                            @endforeach
-                        </div>
-                    </div>
-                @endif
+                {{-- Старый верхний блок «История уточнений» удалён —
+                     сводный блок теперь рендерится один раз под списком
+                     позиций (см. ниже после @foreach($items)). --}}
 
                 @if(! empty($pendingClarifications))
                     <div class="ds-card mb-3 border-amber-300">
@@ -1128,7 +1080,12 @@
                                                 @php
                                                     $cqBatch = $cq->batch;
                                                     $isSent = $cqBatch && in_array($cqBatch->status, ['sent', 'answered'], true);
-                                                    $hasAnswer = trim((string) $cq->answer) !== '';
+                                                    $answerText = trim((string) $cq->answer);
+                                                    // Defensive: legacy "null"/"—" из старых LLM-ответов трактуем как «нет ответа».
+                                                    if (in_array(mb_strtolower($answerText), ['null', 'none', '—', '-', 'n/a'], true)) {
+                                                        $answerText = '';
+                                                    }
+                                                    $hasAnswer = $answerText !== '';
                                                     $stateColor = $hasAnswer
                                                         ? 'bg-emerald-500'
                                                         : ($isSent ? 'bg-amber-500' : 'bg-neutral-400');
@@ -1163,7 +1120,7 @@
                                                         @if($hasAnswer)
                                                             <div class="mt-1.5 px-2.5 py-1.5 rounded-sm bg-emerald-50 border-l-2 border-emerald-400">
                                                                 <span class="text-emerald-700 font-semibold text-[10px] uppercase tracking-wider">Клиент{{ $cq->answered_at ? ' · ' . $cq->answered_at->format('d.m H:i') : '' }}:</span>
-                                                                <div class="text-fg-1 mt-0.5">{{ $cq->answer }}</div>
+                                                                <div class="text-fg-1 mt-0.5">{{ $answerText }}</div>
                                                             </div>
                                                         @endif
                                                     </div>
