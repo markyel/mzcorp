@@ -1102,6 +1102,86 @@
                             @endforeach
                             </div>
 
+                            {{-- Foundation §6.2 — сводный блок «История уточнений»
+                                 под списком позиций. Раньше дублировался в каждой
+                                 раскрытой карточке. Теперь один раз: все вопросы/
+                                 ответы по всем позициям, по datetime. Скрывается
+                                 если уточнений никаких ещё не было. --}}
+                            @php
+                                $allClarQuestions = $items
+                                    ->flatMap(fn ($i) => $i->clarificationQuestions)
+                                    ->filter(fn ($q) => $q->batch !== null)
+                                    ->sortBy(fn ($q) => $q->batch?->sent_at?->timestamp ?? $q->id);
+                            @endphp
+                            @if($allClarQuestions->isNotEmpty())
+                                <div class="mt-4 ds-card">
+                                    <div class="ds-card-header">
+                                        <span class="text-[14px]">📜</span>
+                                        <h3 class="m-0">История уточнений</h3>
+                                        <span class="inline-flex items-center px-1.5 py-0.5 rounded-full bg-surface-2 text-fg-2 text-[10.5px] font-semibold">
+                                            {{ $allClarQuestions->count() }}
+                                        </span>
+                                    </div>
+                                    <div class="ds-card-body">
+                                        <div class="space-y-2">
+                                            @foreach($allClarQuestions as $cq)
+                                                @php
+                                                    $cqBatch = $cq->batch;
+                                                    $isSent = $cqBatch && in_array($cqBatch->status, ['sent', 'answered'], true);
+                                                    $hasAnswer = trim((string) $cq->answer) !== '';
+                                                    $stateColor = $hasAnswer
+                                                        ? 'bg-emerald-500'
+                                                        : ($isSent ? 'bg-amber-500' : 'bg-neutral-400');
+                                                    $cqItem = $cq->requestItem;
+                                                @endphp
+                                                <div class="grid items-start gap-3 px-2 py-2 rounded-md hover:bg-surface-2 text-[12.5px]"
+                                                     style="grid-template-columns: 10px 60px 1fr 100px">
+                                                    {{-- State dot --}}
+                                                    <span class="w-2.5 h-2.5 rounded-full {{ $stateColor }} mt-1.5"></span>
+
+                                                    {{-- Position pill --}}
+                                                    @if($cqItem)
+                                                        <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm bg-surface-2 border border-border-subtle text-fg-2 text-[11px] font-medium mono leading-tight">
+                                                            #{{ $cqItem->position }}
+                                                        </span>
+                                                    @else
+                                                        <span class="text-fg-3 text-[10.5px] uppercase tracking-wider">общий</span>
+                                                    @endif
+
+                                                    {{-- Question + Answer --}}
+                                                    <div class="min-w-0">
+                                                        @if($cqItem)
+                                                            <div class="text-[11.5px] text-fg-3 mb-0.5 leading-tight">
+                                                                {{ $cqItem->parsed_name ?: '(без названия)' }}
+                                                            </div>
+                                                        @endif
+                                                        <div class="text-fg-1 leading-snug">
+                                                            <b class="font-medium">{{ $cqBatch?->createdBy?->name ?? 'Менеджер' }}</b>
+                                                            спросил:
+                                                            <span class="text-fg-2">{{ $cq->question }}</span>
+                                                        </div>
+                                                        @if($hasAnswer)
+                                                            <div class="mt-1.5 px-2.5 py-1.5 rounded-sm bg-emerald-50 border-l-2 border-emerald-400">
+                                                                <span class="text-emerald-700 font-semibold text-[10px] uppercase tracking-wider">Клиент{{ $cq->answered_at ? ' · ' . $cq->answered_at->format('d.m H:i') : '' }}:</span>
+                                                                <div class="text-fg-1 mt-0.5">{{ $cq->answer }}</div>
+                                                            </div>
+                                                        @endif
+                                                    </div>
+
+                                                    {{-- Timestamp + state --}}
+                                                    <div class="text-right text-fg-3 mono text-[10.5px] leading-tight whitespace-nowrap">
+                                                        {{ $cqBatch?->sent_at?->format('d.m H:i') ?: '—' }}
+                                                        <div class="mt-0.5">
+                                                            {{ $hasAnswer ? '✓ отвечено' : ($isSent ? '⏳ ждём' : '✏ черновик') }}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                </div>
+                            @endif
+
                             @php
                                 // Phase 2 use-case C: подытог по каталожным ценам тех позиций,
                                 // у которых есть привязка и непустое qty. Если у части позиций

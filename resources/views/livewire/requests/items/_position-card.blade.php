@@ -212,17 +212,36 @@
             <span class="text-fg-4 text-center">⋮</span>
         @endif
 
-        {{-- TOGGLE: раскрыть/свернуть карточку для уточнений --}}
+        {{-- TOGGLE: иконка ❓ с цветовым состоянием + WhatsApp-style
+             badge с числом заданных вопросов.
+             • серый ❓ — нет вопросов
+             • красный — заданы, ответов нет
+             • жёлтый — заданы, часть отвечена
+             • зелёный — все отвечены
+             Если есть pending enrichment suggestions — точка badge амбер. --}}
         @php
-            $toggleAttn = ($hasPendingClarification || $pendingSuggCount > 0);
+            $iconColor = match (true) {
+                $clarQTotal === 0 => 'text-fg-3 hover:text-sky-700',
+                $clarQAnswered === 0 => 'text-red-600',
+                $clarQAnswered < $clarQTotal => 'text-amber-500',
+                default => 'text-emerald-600',
+            };
+            $badgeColor = match (true) {
+                $clarQAnswered === 0 => 'bg-red-600',
+                $clarQAnswered < $clarQTotal => 'bg-amber-500',
+                default => 'bg-emerald-600',
+            };
         @endphp
         <button type="button"
                 wire:click="togglePositionExpand({{ $item->id }})"
-                class="text-center w-full leading-none {{ $isExpanded
-                    ? 'text-sky-700'
-                    : ($toggleAttn ? 'text-amber-700 hover:text-amber-900' : 'text-fg-3 hover:text-sky-700') }}"
-                title="{{ $isExpanded ? 'Свернуть' : ($isCatalogBound ? 'Раскрыть (история уточнений)' : 'Раскрыть для уточнений и слотов') }}">
-            <span class="text-[16px]">{{ $isExpanded ? '▾' : '▸' }}</span>
+                class="relative text-center leading-none w-full {{ $iconColor }}"
+                title="{{ $isExpanded ? 'Свернуть' : ($clarQTotal === 0 ? 'Раскрыть и спросить клиента' : 'Раскрыть (вопросы / ответы)') }}">
+            <span class="text-[16px]">{{ $isExpanded ? '▾' : '❓' }}</span>
+            @if($clarQTotal > 0 && ! $isExpanded)
+                <span class="absolute -top-1 -right-0.5 inline-flex items-center justify-center min-w-[14px] h-[14px] px-1 rounded-full {{ $badgeColor }} text-white text-[9px] font-bold leading-none">
+                    {{ $clarQTotal }}
+                </span>
+            @endif
         </button>
     </div>
 
@@ -415,48 +434,9 @@
         </div>
     @endif
 
-    {{-- HISTORY of clarifications per position (если есть) --}}
-    @if($item->clarificationQuestions->isNotEmpty())
-        <div class="px-[18px] py-3 bg-surface-2 border-t border-border-subtle text-[12.5px]">
-            <div class="flex items-center gap-2 mb-2 text-fg-3 text-[10.5px] font-semibold uppercase tracking-wider">
-                <span>История уточнений</span>
-                <span class="inline-flex items-center px-1.5 rounded-full bg-surface border border-border text-fg-2 normal-case tracking-normal text-[10.5px] font-semibold">
-                    {{ $item->clarificationQuestions->count() }}
-                </span>
-            </div>
-            <div class="space-y-1.5">
-                @foreach($item->clarificationQuestions as $cq)
-                    @php
-                        $cqBatch = $cq->batch;
-                        $isSent = $cqBatch && in_array($cqBatch->status, ['sent', 'answered'], true);
-                        $hasAnswer = trim((string) $cq->answer) !== '';
-                        $stateClass = $hasAnswer ? 'bg-emerald-600' : ($isSent ? 'bg-amber-600' : 'bg-neutral-400');
-                    @endphp
-                    <div class="grid items-start gap-2"
-                         style="grid-template-columns: 10px 1fr 110px">
-                        <span class="w-2 h-2 rounded-full {{ $stateClass }} mt-1.5"></span>
-                        <div class="min-w-0">
-                            <div class="text-fg-1 leading-snug">
-                                <b class="font-medium">{{ $cqBatch?->createdBy?->name ?? 'Менеджер' }}</b>
-                                {{ $hasAnswer ? 'спросил:' : 'спросил:' }}
-                                {{ $cq->question }}
-                            </div>
-                            @if($hasAnswer)
-                                <div class="mt-1 px-2 py-1 rounded-sm bg-emerald-50 border-l-2 border-emerald-400 text-fg-1">
-                                    <span class="text-emerald-700 font-semibold text-[10px] uppercase tracking-wider">Клиент:</span>
-                                    <span class="ml-1">{{ $cq->answer }}</span>
-                                </div>
-                            @endif
-                        </div>
-                        <div class="text-right text-fg-3 mono text-[10.5px] leading-tight">
-                            {{ $cqBatch?->sent_at?->format('d.m H:i') ?: '—' }}
-                            <div>{{ $hasAnswer ? '✓' : '⏳' }}</div>
-                        </div>
-                    </div>
-                @endforeach
-            </div>
-        </div>
-    @endif
+    {{-- History удалена из карточки — теперь общий блок «История
+         уточнений» рендерится один раз под списком позиций
+         (detail.blade.php). --}}
 
     @endif {{-- /EXPANDED-ONLY CONTENT --}}
 </div>
