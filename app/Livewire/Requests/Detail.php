@@ -764,6 +764,7 @@ class Detail extends Component
 
     #[On('item-relinked')]
     #[On('item-edited')]
+    #[On('items-changed')]
     public function handleItemChangedEvent(): void
     {
         $this->reloadRequest();

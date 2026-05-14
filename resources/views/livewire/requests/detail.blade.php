@@ -1640,7 +1640,13 @@
                             @endphp
                             <div class="px-[18px] py-3 bg-surface-2 flex items-center gap-3.5 text-[12.5px] border-t border-border-subtle rounded-b-md"
                                  title="{{ $totalsTitle }}">
-                                <span class="text-fg-3" title="Phase 2">+ добавить позицию</span>
+                                @if($canEditItems && ! auth()->user()?->hasRole('secretary'))
+                                    <livewire:requests.items.add-item-form
+                                        :request-id="$req->id"
+                                        :key="'add-item-form-' . $req->id" />
+                                @else
+                                    <span class="text-fg-3">+ добавить позицию</span>
+                                @endif
                                 <span class="flex-1"></span>
                                 <span class="text-fg-3">подытог:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($subtotal, 2, '.', ' ') . ' ₽' : '—' }}</span>
                                 <span class="text-fg-3">+ НДС {{ rtrim(rtrim(number_format($vatPercent, 1, '.', ''), '0'), '.') }}%:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($vat, 2, '.', ' ') . ' ₽' : '—' }}</span>
