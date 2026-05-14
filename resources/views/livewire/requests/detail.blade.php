@@ -1040,6 +1040,182 @@
                                 @endif
                             </div>
 
+                            {{-- Foundation §6.2 Phase E — топ-секция «Предложенные
+                                 уточнения»: все pending suggestions со всех позиций,
+                                 diff-визуал «было → будет», bar уверенности LLM,
+                                 bulk apply/dismiss. --}}
+                            @php
+                                $allPendingSuggestions = collect();
+                                foreach ($items as $_it) {
+                                    $_sgs = is_array($_it->quality_assessment_payload['enrichment_suggestions'] ?? null)
+                                        ? $_it->quality_assessment_payload['enrichment_suggestions'] : [];
+                                    foreach ($_sgs as $_sg) {
+                                        if (is_array($_sg) && ($_sg['status'] ?? 'pending') === 'pending') {
+                                            $allPendingSuggestions->push(['item' => $_it, 'sugg' => $_sg]);
+                                        }
+                                    }
+                                }
+                            @endphp
+                            @if($allPendingSuggestions->isNotEmpty() && $canEditItems)
+                                <div class="mt-3 ds-card border-amber-300">
+                                    <div class="ds-card-header bg-amber-50">
+                                        <span class="text-[14px]">💡</span>
+                                        <h3 class="m-0 text-amber-900">Предложенные уточнения</h3>
+                                        <span class="text-[10.5px] font-semibold text-amber-900 bg-amber-200 px-1.5 py-0.5 rounded-full">{{ $allPendingSuggestions->count() }}</span>
+                                        <span class="text-[11.5px] text-amber-800 ml-1">· LLM нашёл уточнения к существующим позициям</span>
+                                        <span class="flex-1"></span>
+                                        <button type="button"
+                                                wire:click="dismissAllEnrichments"
+                                                wire:confirm="Отклонить все {{ $allPendingSuggestions->count() }} предложений?"
+                                                class="btn btn-sm">Отклонить все</button>
+                                        <button type="button"
+                                                wire:click="applyAllEnrichments"
+                                                wire:confirm="Применить все {{ $allPendingSuggestions->count() }} предложений? Данные запишутся в позиции."
+                                                class="btn btn-sm btn-primary">✓ Применить все ({{ $allPendingSuggestions->count() }})</button>
+                                    </div>
+                                    <div class="divide-y divide-border-subtle">
+                                        @foreach($allPendingSuggestions as $entry)
+                                            @php
+                                                $_it = $entry['item'];
+                                                $_sg = $entry['sugg'];
+                                                $_sid = (string) ($_sg['id'] ?? '');
+                                                $_field = (string) ($_sg['field'] ?? '');
+                                                $_newVal = (string) ($_sg['value'] ?? '');
+                                                $_quote = (string) ($_sg['source_quote'] ?? '');
+                                                $_conf = (float) ($_sg['confidence'] ?? 0);
+                                                $_confPct = (int) round($_conf * 100);
+
+                                                // Slots для этой позиции — нужен label slot'а и текущее значение.
+                                                $_slots = $slotResolver->resolve($_it);
+                                                $_slotsByKey = collect($_slots)->keyBy('key');
+
+                                                // Map field → label + current.
+                                                $_currentValue = null;
+                                                $_targetLabel = $_field;
+                                                if ($_field === 'parsed_brand') {
+                                                    $_currentValue = $_it->brand?->name ?: ($_it->parsed_brand ?: null);
+                                                    $_targetLabel = 'Бренд';
+                                                } elseif ($_field === 'parsed_article') {
+                                                    $_currentValue = $_it->parsed_article ?: null;
+                                                    $_targetLabel = 'Артикул';
+                                                } elseif ($_field === 'parsed_qty') {
+                                                    $_currentValue = $_it->parsed_qty
+                                                        ? rtrim(rtrim((string) $_it->parsed_qty, '0'), '.') . ' ' . ($_it->parsed_unit ?: 'шт.')
+                                                        : null;
+                                                    $_targetLabel = 'Кол-во';
+                                                } elseif (str_starts_with($_field, 'kb:')) {
+                                                    $_slug = substr($_field, 3);
+                                                    $_extracted = is_array($_it->quality_assessment_payload['extracted_parameters'] ?? null)
+                                                        ? $_it->quality_assessment_payload['extracted_parameters'] : [];
+                                                    $_currentValue = $_extracted[$_slug] ?? null;
+                                                    $_targetLabel = $_slotsByKey[$_field]['label'] ?? $_slug;
+                                                }
+
+                                                // Confidence bar color.
+                                                $_confColor = $_confPct >= 90 ? 'bg-emerald-500' : ($_confPct >= 75 ? 'bg-amber-500' : 'bg-red-500');
+                                                $_confTextColor = $_confPct >= 90 ? 'text-emerald-700' : ($_confPct >= 75 ? 'text-amber-700' : 'text-red-700');
+                                            @endphp
+                                            <div class="px-[18px] py-3 grid gap-4"
+                                                 style="grid-template-columns: minmax(0, 1fr) 220px"
+                                                 wire:key="sugg-{{ $_it->id }}-{{ $_sid }}">
+                                                {{-- LEFT: position + diff + quote --}}
+                                                <div class="min-w-0">
+                                                    <div class="flex items-baseline gap-2 flex-wrap text-[12px] mb-2">
+                                                        <span class="text-fg-3 text-[10.5px] uppercase tracking-wider font-semibold">К позиции</span>
+                                                        <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm bg-surface-2 border border-border-subtle text-fg-2 mono text-[11px]">#{{ $_it->position }}</span>
+                                                        <span class="font-medium text-fg-1">{{ $_it->parsed_name ?: '(без названия)' }}</span>
+                                                        @if($_it->brand)
+                                                            <span class="inline-flex items-center px-1.5 rounded-sm bg-neutral-100 text-neutral-700 font-semibold text-[10.5px] uppercase tracking-wider">{{ $_it->brand->name }}</span>
+                                                        @elseif($_it->parsed_brand)
+                                                            <span class="inline-flex items-center px-1.5 rounded-sm bg-neutral-100 text-neutral-700 font-semibold text-[10.5px] uppercase tracking-wider">{{ $_it->parsed_brand }}</span>
+                                                        @endif
+                                                        @if($_it->parsed_qty)
+                                                            <span class="text-fg-3 text-[11px]">· {{ rtrim(rtrim((string) $_it->parsed_qty, '0'), '.') }} {{ $_it->parsed_unit ?: 'шт.' }}</span>
+                                                        @endif
+                                                    </div>
+
+                                                    {{-- DIFF: было → будет --}}
+                                                    <div class="flex items-center gap-2 flex-wrap text-[12.5px] mb-2">
+                                                        <span class="text-fg-3 text-[10.5px] uppercase tracking-wider font-semibold mr-1">{{ $_currentValue !== null ? 'Изменение' : 'Заполнение' }}</span>
+                                                        @if($_currentValue !== null)
+                                                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm bg-neutral-100 text-fg-2 text-[11.5px]">
+                                                                <span class="text-[10px] uppercase tracking-wider text-fg-3">{{ $_targetLabel }}</span>
+                                                                <span class="mono line-through decoration-red-400">{{ $_currentValue }}</span>
+                                                            </span>
+                                                        @else
+                                                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm bg-neutral-100 text-fg-3 text-[11.5px]">
+                                                                <span class="text-[10px] uppercase tracking-wider">{{ $_targetLabel }}</span>
+                                                                <span class="italic">пусто</span>
+                                                            </span>
+                                                        @endif
+                                                        <span class="text-fg-3 text-[14px] leading-none">→</span>
+                                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm bg-emerald-50 border border-emerald-300 text-emerald-900 text-[11.5px] font-medium">
+                                                            <span class="text-[10px] uppercase tracking-wider text-emerald-700">{{ $_targetLabel }}</span>
+                                                            <span class="mono font-semibold">{{ $_newVal }}</span>
+                                                        </span>
+                                                    </div>
+
+                                                    {{-- Quote --}}
+                                                    @if($_quote !== '')
+                                                        <div class="text-[12px] text-fg-2 italic pl-3 border-l-2 border-amber-300">
+                                                            «{{ \Illuminate\Support\Str::limit($_quote, 240) }}»
+                                                        </div>
+                                                    @endif
+                                                </div>
+
+                                                {{-- RIGHT: confidence bar + actions --}}
+                                                <div class="flex flex-col gap-2">
+                                                    <div>
+                                                        <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Уверенность LLM</div>
+                                                        <div class="h-1.5 bg-border-subtle rounded-full overflow-hidden">
+                                                            <div class="h-full {{ $_confColor }} transition-all" style="width: {{ $_confPct }}%"></div>
+                                                        </div>
+                                                        <div class="mt-1 mono text-[12.5px] font-semibold {{ $_confTextColor }}">{{ $_confPct }}%</div>
+                                                    </div>
+                                                    <div class="flex flex-col gap-1">
+                                                        <button type="button"
+                                                                wire:click="applyEnrichmentSuggestion({{ $_it->id }}, '{{ $_sid }}')"
+                                                                wire:confirm="Применить «{{ $_newVal }}» к полю «{{ $_targetLabel }}»?"
+                                                                class="btn btn-primary btn-sm w-full">✓ Применить</button>
+                                                        <button type="button"
+                                                                wire:click="dismissEnrichmentSuggestion({{ $_it->id }}, '{{ $_sid }}')"
+                                                                class="btn btn-sm w-full">Отклонить</button>
+                                                        <div x-data="{ open: false }" class="relative" @click.outside="open = false">
+                                                            <button type="button" @click="open = !open"
+                                                                    class="text-[11px] text-sky-700 hover:underline w-full text-center">правка вручную ▾</button>
+                                                            <div x-show="open" x-cloak x-transition
+                                                                 class="absolute right-0 top-full mt-1 z-30 w-[220px] py-1 bg-surface border border-border rounded-md shadow-lg text-left text-[12px]">
+                                                                <div class="px-3 py-1 text-fg-3 text-[10.5px] uppercase tracking-wider font-semibold border-b border-border-subtle">
+                                                                    Применить в другой слот:
+                                                                </div>
+                                                                @foreach($_slots as $_sl)
+                                                                    @php
+                                                                        $_disabled = $_sl['status'] === 'filled';
+                                                                    @endphp
+                                                                    <button type="button"
+                                                                            @click="open = false"
+                                                                            @if(! $_disabled)
+                                                                                wire:click="applyEnrichmentToSlot({{ $_it->id }}, '{{ $_sid }}', '{{ $_sl['key'] }}')"
+                                                                                wire:confirm="Записать «{{ $_newVal }}» в «{{ $_sl['label'] }}»?"
+                                                                            @endif
+                                                                            @disabled($_disabled)
+                                                                            class="block w-full text-left px-3 py-1.5 {{ $_disabled ? 'text-fg-4 cursor-not-allowed' : 'hover:bg-sky-50 text-fg-1' }}">
+                                                                        <span>{{ $_sl['label'] }}</span>
+                                                                        @if($_disabled)
+                                                                            <span class="text-fg-3 text-[10.5px]">· заполнен</span>
+                                                                        @endif
+                                                                    </button>
+                                                                @endforeach
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                </div>
+                            @endif
+
                             <div class="p-[8px] bg-app">
                             @foreach($items as $item)
                                 @php $slots = $slotResolver->resolve($item); @endphp

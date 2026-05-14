@@ -715,6 +715,79 @@ class Detail extends Component
     }
 
     /**
+     * Foundation §6.2 Phase E — bulk apply: применить ВСЕ pending
+     * enrichment suggestions всех активных позиций заявки одним
+     * действием. Используется кнопкой «Применить все (N)» в топ-секции.
+     */
+    public function applyAllEnrichments(RequestItemEditor $editor): void
+    {
+        $applied = 0;
+        $user = auth()->user();
+        foreach ($this->request->items as $item) {
+            if (! $item->is_active) {
+                continue;
+            }
+            $sugs = is_array($item->quality_assessment_payload['enrichment_suggestions'] ?? null)
+                ? $item->quality_assessment_payload['enrichment_suggestions'] : [];
+            foreach ($sugs as $sugg) {
+                if (is_array($sugg) && ($sugg['status'] ?? 'pending') === 'pending'
+                    && ! empty($sugg['id'])) {
+                    try {
+                        $editor->applyEnrichmentSuggestion($item->fresh(), (string) $sugg['id'], $user);
+                        $applied++;
+                    } catch (\Throwable $e) {
+                        \Illuminate\Support\Facades\Log::warning('applyAllEnrichments: skip', [
+                            'item_id' => $item->id,
+                            'sugg_id' => $sugg['id'],
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            }
+        }
+        $this->reloadRequest();
+        session()->flash('status', $applied > 0
+            ? sprintf('Применено %d предложен%s.', $applied, $applied === 1 ? 'ие' : ($applied < 5 ? 'ия' : 'ий'))
+            : 'Не было pending-предложений.');
+    }
+
+    /**
+     * Foundation §6.2 Phase E — bulk dismiss: отклонить ВСЕ pending
+     * enrichment suggestions заявки. Кнопка «Отклонить все».
+     */
+    public function dismissAllEnrichments(RequestItemEditor $editor): void
+    {
+        $dismissed = 0;
+        $user = auth()->user();
+        foreach ($this->request->items as $item) {
+            if (! $item->is_active) {
+                continue;
+            }
+            $sugs = is_array($item->quality_assessment_payload['enrichment_suggestions'] ?? null)
+                ? $item->quality_assessment_payload['enrichment_suggestions'] : [];
+            foreach ($sugs as $sugg) {
+                if (is_array($sugg) && ($sugg['status'] ?? 'pending') === 'pending'
+                    && ! empty($sugg['id'])) {
+                    try {
+                        $editor->dismissEnrichmentSuggestion($item->fresh(), (string) $sugg['id'], $user);
+                        $dismissed++;
+                    } catch (\Throwable $e) {
+                        \Illuminate\Support\Facades\Log::warning('dismissAllEnrichments: skip', [
+                            'item_id' => $item->id,
+                            'sugg_id' => $sugg['id'],
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            }
+        }
+        $this->reloadRequest();
+        if ($dismissed > 0) {
+            session()->flash('status', sprintf('Отклонено %d предложений.', $dismissed));
+        }
+    }
+
+    /**
      * Foundation §6.2: ClarificationPanel сформировал черновик письма
      * и диспатчит этот event. Мы должны переключить таб на «Переписка»
      * (там зарегистрирован ComposeForm) и попросить его открыть draft.
