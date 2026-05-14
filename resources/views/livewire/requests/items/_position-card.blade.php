@@ -126,26 +126,16 @@
             </div>
         </div>
 
-        {{-- Status — основной + compact-индикаторы (вопросы/предложения) --}}
+        {{-- Status — только enrichment-индикатор (clarification дублируется
+             toggle-иконкой ❓ справа c badge'ом). --}}
         <div class="flex items-center gap-1 flex-wrap">
-            @if($hasPendingClarification)
-                <span class="chip chip-warn text-[10.5px]"><span class="dot"></span>ждём ответ</span>
-            @elseif($hasJustAnswered)
-                <span class="chip chip-ok text-[10.5px]"><span class="dot"></span>уточнено</span>
-            @elseif($clarQTotal === 0 && $pendingSuggCount === 0)
-                <span class="text-[11px] text-fg-3">—</span>
-            @endif
-            @if($clarQTotal > 0)
-                <span class="inline-flex items-center px-1 rounded-sm bg-sky-50 text-sky-800 text-[10px] font-semibold mono"
-                      title="вопросов задано / ответов получено">
-                    ❓{{ $clarQAnswered }}/{{ $clarQTotal }}
-                </span>
-            @endif
             @if($pendingSuggCount > 0)
                 <span class="inline-flex items-center px-1 rounded-sm bg-amber-50 text-amber-800 text-[10px] font-semibold"
                       title="предложений обогащения к применению">
                     💡{{ $pendingSuggCount }}
                 </span>
+            @else
+                <span class="text-[11px] text-fg-3">—</span>
             @endif
         </div>
 
