@@ -35,8 +35,10 @@ class User extends Authenticatable
         'email',
         'password',
         'email_signature',
+        'unavailable_from',
         'unavailable_until',
         'unavailable_reason',
+        'unavailable_auto_delegate',
     ];
 
     /**
@@ -59,7 +61,9 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'archived_at' => 'datetime',
+            'unavailable_from' => 'datetime',
             'unavailable_until' => 'datetime',
+            'unavailable_auto_delegate' => 'boolean',
             'password' => 'hashed',
         ];
     }
@@ -84,22 +88,55 @@ class User extends Authenticatable
     }
 
     /**
-     * Foundation Фаза 2: менеджер «недоступен» (отпуск/командировка/больничный).
-     * Используется AssignmentService для исключения из distribution + UI-маркер.
+     * Foundation Фаза 2: менеджер «доступен» (получает новые заявки).
+     *
+     * Доступен iff:
+     *   - archived_at IS NULL (не в архиве);
+     *   - unavailable_until IS NULL (никогда не помечался) ИЛИ
+     *     unavailable_until <= now() (вернулся) ИЛИ
+     *     unavailable_from > now() (запланировано, но ещё не наступило).
+     *
+     * Используется AssignmentService для исключения из distribution.
      */
     public function scopeAvailable(Builder $query): Builder
     {
         return $query->whereNull('archived_at')
             ->where(function ($q) {
                 $q->whereNull('unavailable_until')
-                    ->orWhere('unavailable_until', '<=', now());
+                    ->orWhere('unavailable_until', '<=', now())
+                    ->orWhere(function ($q2) {
+                        $q2->whereNotNull('unavailable_from')
+                            ->where('unavailable_from', '>', now());
+                    });
             });
     }
 
+    /**
+     * Сейчас в окне отсутствия (период идёт).
+     * `from IS NULL OR from <= now` AND `until > now`.
+     */
     public function isUnavailable(): bool
     {
-        return $this->unavailable_until !== null
-            && $this->unavailable_until->isFuture();
+        if ($this->unavailable_until === null || $this->unavailable_until->isPast()) {
+            return false;
+        }
+        if ($this->unavailable_from !== null && $this->unavailable_from->isFuture()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Отсутствие запланировано, но ещё не началось.
+     * `from > now AND until > from`.
+     */
+    public function isUnavailabilityPlanned(): bool
+    {
+        return $this->unavailable_from !== null
+            && $this->unavailable_from->isFuture()
+            && $this->unavailable_until !== null
+            && $this->unavailable_until->greaterThan($this->unavailable_from);
     }
 
     /**

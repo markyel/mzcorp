@@ -96,6 +96,10 @@
                                 <span class="chip chip-warn" title="{{ $u->unavailable_reason }}">
                                     <span class="dot"></span>недоступен до {{ $u->unavailable_until->format('d.m.Y') }}
                                 </span>
+                            @elseif($u->isUnavailabilityPlanned())
+                                <span class="chip chip-info" title="{{ $u->unavailable_reason }}">
+                                    <span class="dot"></span>план: {{ $u->unavailable_from->format('d.m') }} – {{ $u->unavailable_until->format('d.m.Y') }}
+                                </span>
                             @else
                                 <span class="chip chip-ok"><span class="dot"></span>активен</span>
                             @endif
@@ -109,10 +113,10 @@
                                             class="btn btn-sm">Восстановить</button>
                                 @else
                                     @if($u->hasRole('manager'))
-                                        @if($u->isUnavailable())
+                                        @if($u->isUnavailable() || $u->isUnavailabilityPlanned())
                                             <button type="button" wire:click="markAvailable({{ $u->id }})"
-                                                    wire:confirm="Снять «недоступен» с «{{ $u->name }}» прямо сейчас? Менеджер снова попадёт в round-robin."
-                                                    class="btn btn-sm">Доступен</button>
+                                                    wire:confirm="Снять «недоступен» / отменить план с «{{ $u->name }}» прямо сейчас? Менеджер снова попадёт в round-robin, активные delegation'ы закроются."
+                                                    class="btn btn-sm">{{ $u->isUnavailable() ? 'Доступен' : 'Отменить план' }}</button>
                                         @else
                                             <button type="button"
                                                     wire:click="$dispatch('open-unavailability', { userId: {{ $u->id }} })"

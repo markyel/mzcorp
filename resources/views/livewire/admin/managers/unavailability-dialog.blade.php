@@ -11,17 +11,32 @@
                 </div>
 
                 <form wire:submit="save" class="space-y-3">
-                    <div>
-                        <label class="block text-[12px] uppercase tracking-wider text-fg-3 font-semibold mb-1">
-                            Возвращается
-                        </label>
-                        <input type="date" wire:model="until"
-                               min="{{ $minAllowed }}" max="{{ $maxAllowed }}"
-                               class="w-full h-[34px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)]" />
-                        <div class="text-[11.5px] text-fg-3 mt-1">
-                            После этой даты менеджер автоматически снова в распределении (по факту запроса).
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[12px] uppercase tracking-wider text-fg-3 font-semibold mb-1">
+                                С (опционально)
+                            </label>
+                            <input type="date" wire:model="from"
+                                   min="{{ \Illuminate\Support\Carbon::now()->format('Y-m-d') }}"
+                                   max="{{ $maxAllowed }}"
+                                   class="w-full h-[34px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)]" />
+                            <div class="text-[11.5px] text-fg-3 mt-1">
+                                Пусто = сразу. Будущая дата = планирование.
+                            </div>
+                            @error('from') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
                         </div>
-                        @error('until') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
+                        <div>
+                            <label class="block text-[12px] uppercase tracking-wider text-fg-3 font-semibold mb-1">
+                                По
+                            </label>
+                            <input type="date" wire:model="until"
+                                   min="{{ $minAllowed }}" max="{{ $maxAllowed }}"
+                                   class="w-full h-[34px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)]" />
+                            <div class="text-[11.5px] text-fg-3 mt-1">
+                                После — снова в распределении.
+                            </div>
+                            @error('until') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
+                        </div>
                     </div>
 
                     <div>
@@ -39,7 +54,7 @@
                         <span class="text-fg-1">
                             Открыть активные заявки коллегам на время отсутствия
                             <div class="text-fg-3 text-[11.5px]">
-                                Заявки <strong>остаются за этим менеджером</strong>. Коллеги получат временный доступ (видят в своём пуле, могут отвечать клиентам). При возвращении доступ автоматически закрывается. Round-robin по доступным менеджерам.
+                                Заявки <strong>остаются за этим менеджером</strong>. Коллеги получат временный доступ (видят в своём пуле, могут отвечать клиентам). При возвращении доступ автоматически закрывается. Если поле «С» в будущем — открытие сработает автоматически в день начала отсутствия (cron).
                             </div>
                         </span>
                     </label>

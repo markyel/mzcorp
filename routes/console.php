@@ -36,3 +36,12 @@ Schedule::command('requests:check-attention')
     ->everyFifteenMinutes()
     ->withoutOverlapping()
     ->onOneServer();
+
+// Foundation Фаза 2: применение запланированных отсутствий — open
+// активные заявки коллегам в момент наступления unavailable_from
+// (если РОП поставил флаг auto_delegate). Hourly даёт max 1 час
+// отставания от момента «с».
+Schedule::command('users:apply-planned-unavailability')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer();

@@ -42,11 +42,26 @@ class ManagerUnavailabilityService
     ) {
     }
 
+    /**
+     * Пометить менеджера «недоступен».
+     *
+     * @param  ?Carbon  $from  начало периода. NULL = «прямо сейчас» (с now()).
+     *                        В будущем — планирование, до этого момента
+     *                        менеджер ещё в available().
+     * @param  bool  $autoDelegate  Открыть активные заявки коллегам автоматически
+     *                              в момент начала отсутствия. Применяется
+     *                              cron'ом `users:apply-planned-unavailability`
+     *                              если from > now(); либо сразу синхронно
+     *                              если from <= now() (текущая логика
+     *                              UnavailabilityDialog).
+     */
     public function markUnavailable(
         User $user,
+        ?Carbon $from,
         Carbon $until,
         string $reason,
         ?User $byUser = null,
+        bool $autoDelegate = false,
     ): User {
         if (! $user->hasRole(RoleEnum::Manager->value)) {
             throw new \DomainException('Помечать «недоступен» можно только менеджеров.');
@@ -54,19 +69,27 @@ class ManagerUnavailabilityService
         if ($until->isPast()) {
             throw new \DomainException('Дата возврата должна быть в будущем.');
         }
+        if ($from !== null && $from->greaterThanOrEqualTo($until)) {
+            throw new \DomainException('Начало периода должно быть раньше даты возврата.');
+        }
         $reason = trim($reason);
         if (mb_strlen($reason) < 3) {
             throw new \DomainException('Укажите причину (минимум 3 символа).');
         }
 
         $user->forceFill([
+            'unavailable_from' => $from,
             'unavailable_until' => $until,
             'unavailable_reason' => mb_substr($reason, 0, 500),
+            'unavailable_auto_delegate' => $autoDelegate,
         ])->save();
 
         Log::info('ManagerUnavailabilityService: marked unavailable', [
             'user_id' => $user->id,
+            'from' => $from?->toIso8601String(),
             'until' => $until->toIso8601String(),
+            'planned' => $from !== null && $from->isFuture(),
+            'auto_delegate' => $autoDelegate,
             'reason' => $reason,
             'by' => $byUser?->id,
         ]);
@@ -83,8 +106,10 @@ class ManagerUnavailabilityService
         $closedCount = 0;
         DB::transaction(function () use ($user, &$closedCount) {
             $user->forceFill([
+                'unavailable_from' => null,
                 'unavailable_until' => null,
                 'unavailable_reason' => null,
+                'unavailable_auto_delegate' => false,
             ])->save();
 
             // Закрываем все active delegations где original_user_id = $user.
