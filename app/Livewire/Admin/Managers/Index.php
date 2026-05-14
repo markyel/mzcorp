@@ -4,7 +4,9 @@ namespace App\Livewire\Admin\Managers;
 
 use App\Enums\Role as RoleEnum;
 use App\Models\User;
+use App\Services\Request\ManagerUnavailabilityService;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -62,6 +64,24 @@ class Index extends Component
         $user->forceFill(['archived_at' => null])->save();
 
         session()->flash('status', "«{$user->name}» восстановлен.");
+    }
+
+    /**
+     * Снять «недоступен» немедленно (менеджер вернулся раньше срока).
+     * Mark-as-unavailable идёт через диалог `open-unavailability {userId}`.
+     */
+    public function markAvailable(int $userId, ManagerUnavailabilityService $svc): void
+    {
+        $user = User::findOrFail($userId);
+        $svc->markAvailable($user, auth()->user());
+        session()->flash('status', "«{$user->name}» снова доступен для распределения.");
+    }
+
+    #[On('manager-availability-changed')]
+    public function refreshAfterAvailabilityChange(): void
+    {
+        // Computed-перерасчёт — Livewire сам refresh'нёт users / counters.
+        $this->resetPage();
     }
 
     #[Computed]

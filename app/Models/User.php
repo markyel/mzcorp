@@ -35,6 +35,8 @@ class User extends Authenticatable
         'email',
         'password',
         'email_signature',
+        'unavailable_until',
+        'unavailable_reason',
     ];
 
     /**
@@ -57,6 +59,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'archived_at' => 'datetime',
+            'unavailable_until' => 'datetime',
             'password' => 'hashed',
         ];
     }
@@ -78,6 +81,25 @@ class User extends Authenticatable
     public function isArchived(): bool
     {
         return $this->archived_at !== null;
+    }
+
+    /**
+     * Foundation Фаза 2: менеджер «недоступен» (отпуск/командировка/больничный).
+     * Используется AssignmentService для исключения из distribution + UI-маркер.
+     */
+    public function scopeAvailable(Builder $query): Builder
+    {
+        return $query->whereNull('archived_at')
+            ->where(function ($q) {
+                $q->whereNull('unavailable_until')
+                    ->orWhere('unavailable_until', '<=', now());
+            });
+    }
+
+    public function isUnavailable(): bool
+    {
+        return $this->unavailable_until !== null
+            && $this->unavailable_until->isFuture();
     }
 
     /**

@@ -33,9 +33,11 @@ class AssignmentService
      */
     public function autoAssign(Request $request, ?int $byUserId = null): ?User
     {
-        // Round-robin и sticky работают только по активным менеджерам;
-        // архивированные исключаются из распределения (Phase 1.13).
-        $managers = User::role(RoleEnum::Manager->value)->active()->get();
+        // Round-robin и sticky работают только по доступным менеджерам:
+        //  - archived_at IS NULL (Phase 1.13)
+        //  - unavailable_until IS NULL ИЛИ <= now (Foundation Фаза 2)
+        // Менеджеры в отпуске/командировке не получают новых заявок.
+        $managers = User::role(RoleEnum::Manager->value)->available()->get();
         if ($managers->isEmpty()) {
             return null;
         }

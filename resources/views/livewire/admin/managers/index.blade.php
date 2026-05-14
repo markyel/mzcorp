@@ -92,6 +92,10 @@
                         <td class="px-4 py-2">
                             @if($isArchived)
                                 <span class="chip chip-paused"><span class="dot"></span>в архиве</span>
+                            @elseif($u->isUnavailable())
+                                <span class="chip chip-warn" title="{{ $u->unavailable_reason }}">
+                                    <span class="dot"></span>недоступен до {{ $u->unavailable_until->format('d.m.Y') }}
+                                </span>
                             @else
                                 <span class="chip chip-ok"><span class="dot"></span>активен</span>
                             @endif
@@ -104,6 +108,17 @@
                                             wire:confirm="Восстановить «{{ $u->name }}»?"
                                             class="btn btn-sm">Восстановить</button>
                                 @else
+                                    @if($u->hasRole('manager'))
+                                        @if($u->isUnavailable())
+                                            <button type="button" wire:click="markAvailable({{ $u->id }})"
+                                                    wire:confirm="Снять «недоступен» с «{{ $u->name }}» прямо сейчас? Менеджер снова попадёт в round-robin."
+                                                    class="btn btn-sm">Доступен</button>
+                                        @else
+                                            <button type="button"
+                                                    wire:click="$dispatch('open-unavailability', { userId: {{ $u->id }} })"
+                                                    class="btn btn-sm" title="Отпуск / командировка / больничный">⏸ Недоступен…</button>
+                                        @endif
+                                    @endif
                                     <button type="button" wire:click="archive({{ $u->id }})"
                                             wire:confirm="Перевести «{{ $u->name }}» в архив? Логин будет заблокирован, в round-robin он не попадёт. Открытые заявки нужно переподчинить вручную."
                                             class="btn btn-sm btn-danger">Архивировать</button>
@@ -129,4 +144,7 @@
     @if($users->hasPages())
         <div class="mt-3">{{ $users->links() }}</div>
     @endif
+
+    {{-- Foundation Фаза 2: модалка «недоступен» — single-instance per page. --}}
+    <livewire:admin.managers.unavailability-dialog wire:key="unavail-dialog" />
 </div>
