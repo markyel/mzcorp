@@ -18,10 +18,10 @@ use Illuminate\Support\Collection;
  *
  * Источники slot значений:
  *  - Базовые слоты (Категория, Бренд, Артикул, Кол-во, Цена) —
- *    из parsed_*/catalogItem/identification_category напрямую.
- *  - KB-слоты — из `IdentificationRule.alternatives.required_parameter_ids`
+ *    из parsed_* полей, catalogItem или identification_category напрямую.
+ *  - KB-слоты — из IdentificationRule.alternatives.required_parameter_ids
  *    для категории item.identification_category_id. Значения берутся
- *    из `quality_assessment_payload.extracted_parameters[slug]`.
+ *    из quality_assessment_payload.extracted_parameters[slug].
  *
  * Кэш: per-request (через property) — повторные вызовы для разных items
  * с одинаковой категорией не плодят SQL.
