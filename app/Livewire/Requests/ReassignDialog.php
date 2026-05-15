@@ -96,12 +96,13 @@ class ReassignDialog extends Component
         $this->open = false;
         session()->flash('status', "Заявка переподчинена: {$newAssignee->name}.");
 
-        // Перезагрузка родителя (Detail::mount() заново вытащит assignments).
-        return $this->redirect(
-            \Illuminate\Support\Facades\Request::header('Referer')
-                ?: route('requests.show', $request),
-            navigate: true,
-        );
+        // Дёргаем существующий listener в Detail (Detail::handleRequestStateChanged
+        // → reloadRequest) — он перетянет assignedUser, items, activity.
+        // Раньше тут был $this->redirect(... navigate:true), но Alpine.navigate
+        // ломался («not a function») и модалка зависала с disabled кнопкой.
+        $this->dispatch('request-state-changed');
+
+        return null;
     }
 
     private function ensureAuthorized(): void
