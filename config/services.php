@@ -174,6 +174,25 @@ return [
     ],
 
     /*
+    | Внешние маркеры заявок (Phase pool-event +1).
+    |
+    | Используются InboundReplyLinker::matchByExternalCode (Level 3.5) и
+    | аналогом в OutgoingMailLinker. Каждый regex ищется в subject + body_plain
+    | входящего/исходящего письма; найденный маркер ведёт к Request через
+    | самое раннее EmailMessage с тем же маркером (parent lookup).
+    |
+    | Решает: (1) дубль-привязку напоминаний партнёрской системы к
+    | случайной open Request клиента (Level 4 fallback), (2) дедупликацию
+    | копий одного письма, рассылаемого на несколько внутренних адресов.
+    */
+    'mail' => [
+        'external_codes' => [
+            // Liftway-saas: LZ-REQ-NNNN — общий маркер запроса в их системе.
+            '/\bLZ-REQ-\d+\b/u',
+        ],
+    ],
+
+    /*
     | Phase 1.10: state-machine заявок (Foundation §5.4).
     | См. RequestPauseService и `requests:resume-paused` cron.
     */

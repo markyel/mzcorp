@@ -67,15 +67,49 @@ class OutgoingMailMimeBuilder
             }
         }
 
+        // Footer с internal_code — safety net для linker'а (Level 3 +
+        // matchBySubjectCode): если клиент уберёт `[M-2026-NNNN]` из subject
+        // или Outlook потеряет In-Reply-To при ответе, код останется в теле,
+        // и InboundReplyLinker сматчит обратно к нужной Request.
+        $footer = $this->buildRequestCodeFooter($draft);
+
         $userHtml = $this->plainToHtml($userText);
 
         $plain = $userText
             . ($signature['plain'] !== '' ? "\n" . $signature['plain'] : '')
+            . ($footer['plain'] !== '' ? "\n\n" . $footer['plain'] : '')
             . ($quote['plain'] !== '' ? "\n\n" . $quote['plain'] : '');
 
         $html = $userHtml
             . ($signature['html'] !== '' ? $signature['html'] : '')
+            . ($footer['html'] !== '' ? $footer['html'] : '')
             . ($quote['html'] !== '' ? $quote['html'] : '');
+
+        return ['html' => $html, 'plain' => $plain];
+    }
+
+    /**
+     * Невзрачный footer с № заявки. Клиент видит мелкий «—\n№ заявки:
+     * M-2026-NNNN» в конце письма; для нас это надёжный матчер на случай
+     * сломанных headers / удалённого префикса в subject.
+     *
+     * @return array{html: string, plain: string}
+     */
+    private function buildRequestCodeFooter(EmailMessage $draft): array
+    {
+        if (! $draft->related_request_id) {
+            return ['html' => '', 'plain' => ''];
+        }
+        $request = \App\Models\Request::query()->find($draft->related_request_id, ['internal_code']);
+        if (! $request || ! $request->internal_code) {
+            return ['html' => '', 'plain' => ''];
+        }
+
+        $code = $request->internal_code;
+        $plain = "—\n№ заявки: {$code}";
+        $html = '<div style="margin-top:18px;color:#94a3b8;font-size:12px;font-family:Arial,sans-serif">'
+            . '— <br>№ заявки: <span style="font-family:monospace">' . htmlspecialchars($code, ENT_QUOTES, 'UTF-8') . '</span>'
+            . '</div>';
 
         return ['html' => $html, 'plain' => $plain];
     }

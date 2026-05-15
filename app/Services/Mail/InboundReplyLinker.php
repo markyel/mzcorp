@@ -19,6 +19,12 @@ use Illuminate\Support\Facades\Log;
  *   1. In-Reply-To       — точное совпадение со сохранённым EmailMessage.message_id.
  *   2. References        — любой ID в цепочке (поиск с конца — самый свежий первым).
  *   3. Subject internal_code `M-2026-NNNN`  — safety net для Fwd / поломанных headers.
+ *   3.5 External codes (LZ-REQ-NNNN и др.) — маркеры партнёрских систем
+ *       (Liftway-saas). Через regex из `config('services.mail.external_codes')`.
+ *       Находит самое раннее EmailMessage с тем же маркером и связанным Request.
+ *       Решает: (а) дубль-привязку «напоминаний» партнёрской системы к случайной
+ *       open Request клиента; (б) дедупликацию копий одного письма, разосланного
+ *       по нескольким нашим внутренним адресам.
  *   4. From_email + open Requests этого клиента — для случаев, когда headers
  *      потеряны вовсе (mobile-клиент, ручной forward, новый thread без citing).
  *      Гейтим по category Phase 1.8c: client_request не линкуем (это новая
@@ -91,6 +97,13 @@ class InboundReplyLinker
         if (! $matched) {
             $matched = $this->matchBySubjectCode($message);
             $matchedBy = $matched ? 'subject_internal_code' : null;
+        }
+
+        // Уровень 3.5: маркеры партнёрских систем (LZ-REQ-NNNN и т.п.) —
+        // см. config('services.mail.external_codes').
+        if (! $matched) {
+            $matched = $this->matchByExternalCode($message);
+            $matchedBy = $matched ? 'external_code' : null;
         }
 
         // Уровень 4: по from_email + open Requests того же клиента.
@@ -204,6 +217,68 @@ class InboundReplyLinker
         }
 
         return EmailMessage::find($request->email_message_id);
+    }
+
+    /**
+     * Уровень 3.5: маркеры партнёрских систем.
+     *
+     * Извлекаем все маркеры по конфигурируемым regex-паттернам из subject+body.
+     * Для каждого маркера ищем самое раннее EmailMessage с тем же маркером и
+     * непустым related_request_id — это «правильный родитель».
+     *
+     * Идея: 6 копий одного письма с `LZ-REQ-1208` (рассылка партнёра на наши
+     * адреса) → первое создаст Request, остальные 5 через этот уровень
+     * прицепятся к нему. То же — для напоминаний без header threading.
+     */
+    private function matchByExternalCode(EmailMessage $message): ?EmailMessage
+    {
+        $patterns = (array) config('services.mail.external_codes', []);
+        if (empty($patterns)) {
+            return null;
+        }
+
+        $haystack = ((string) $message->subject) . "\n" . ((string) $message->body_plain);
+        $haystack = trim($haystack);
+        if ($haystack === '') {
+            return null;
+        }
+
+        $codes = [];
+        foreach ($patterns as $pattern) {
+            if (preg_match_all($pattern, $haystack, $m)) {
+                foreach ($m[0] as $code) {
+                    $codes[$code] = true;
+                }
+            }
+        }
+        if (empty($codes)) {
+            return null;
+        }
+
+        // Сначала ищем самое раннее письмо для каждого маркера. Из всех
+        // найденных родителей берём тот, что в самой ранней Request (id ASC).
+        $bestParent = null;
+        foreach (array_keys($codes) as $code) {
+            $parent = EmailMessage::query()
+                ->whereNotNull('related_request_id')
+                ->where('id', '!=', $message->id)
+                ->where(function ($q) use ($code) {
+                    $needle = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $code) . '%';
+                    $q->where('subject', 'ilike', $needle)
+                        ->orWhere('body_plain', 'ilike', $needle);
+                })
+                ->orderBy('id')
+                ->first(['id', 'related_request_id']);
+
+            if ($parent === null) {
+                continue;
+            }
+            if ($bestParent === null || $parent->id < $bestParent->id) {
+                $bestParent = $parent;
+            }
+        }
+
+        return $bestParent;
     }
 
     private function normalize(string $id): string

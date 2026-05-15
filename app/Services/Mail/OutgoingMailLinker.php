@@ -19,6 +19,8 @@ use Illuminate\Support\Facades\Log;
  *       related_request_id.
  *   L2: References → то же по массиву.
  *   L3: Subject `M-2026-NNNN` → lookup Request по internal_code.
+ *   L3.5: External codes (LZ-REQ-NNNN и др.) → самое раннее EmailMessage с
+ *         тем же маркером. См. config('services.mail.external_codes').
  *   L4: to_recipients[].email → открытые Request с `client_email`. Если 1 —
  *       линкуем. Если 2+ — берём самую свежую и пишем WARNING (РОП может
  *       поправить вручную через переподчинение, либо мы добавим UI-«сменить
@@ -59,6 +61,12 @@ class OutgoingMailLinker
         if (! $matched) {
             $matched = $this->matchBySubjectCode($message);
             $matchedBy = $matched ? 'subject_internal_code' : null;
+        }
+
+        // L3.5: external partner codes (LZ-REQ-NNNN и т.п.).
+        if (! $matched) {
+            $matched = $this->matchByExternalCode($message);
+            $matchedBy = $matched ? 'external_code' : null;
         }
 
         $request = $matched && $matched->related_request_id
@@ -144,6 +152,58 @@ class OutgoingMailLinker
         }
 
         return EmailMessage::find($request->email_message_id);
+    }
+
+    /**
+     * L3.5: маркеры партнёрских систем — то же что в InboundReplyLinker.
+     * См. config('services.mail.external_codes').
+     */
+    private function matchByExternalCode(EmailMessage $message): ?EmailMessage
+    {
+        $patterns = (array) config('services.mail.external_codes', []);
+        if (empty($patterns)) {
+            return null;
+        }
+
+        $haystack = trim(((string) $message->subject) . "\n" . ((string) $message->body_plain));
+        if ($haystack === '') {
+            return null;
+        }
+
+        $codes = [];
+        foreach ($patterns as $pattern) {
+            if (preg_match_all($pattern, $haystack, $m)) {
+                foreach ($m[0] as $code) {
+                    $codes[$code] = true;
+                }
+            }
+        }
+        if (empty($codes)) {
+            return null;
+        }
+
+        $bestParent = null;
+        foreach (array_keys($codes) as $code) {
+            $parent = EmailMessage::query()
+                ->whereNotNull('related_request_id')
+                ->where('id', '!=', $message->id)
+                ->where(function ($q) use ($code) {
+                    $needle = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $code) . '%';
+                    $q->where('subject', 'ilike', $needle)
+                        ->orWhere('body_plain', 'ilike', $needle);
+                })
+                ->orderBy('id')
+                ->first(['id', 'related_request_id']);
+
+            if ($parent === null) {
+                continue;
+            }
+            if ($bestParent === null || $parent->id < $bestParent->id) {
+                $bestParent = $parent;
+            }
+        }
+
+        return $bestParent;
     }
 
     /**
