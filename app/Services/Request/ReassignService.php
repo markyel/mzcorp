@@ -3,6 +3,7 @@
 namespace App\Services\Request;
 
 use App\Enums\RequestStatus;
+use App\Jobs\Mail\DeliverToManagerInboxJob;
 use App\Jobs\Mail\RouteMailToManagerJob;
 use App\Models\Request as RequestModel;
 use App\Models\RequestAssignment;
@@ -51,11 +52,16 @@ class ReassignService
             ]);
         });
 
-        // IMAP-move async: ReassignService возвращает управление сразу,
-        // воркер сделает COPY в Yandex 360 в фоне.
+        // Два IMAP job'а async:
+        //   - RouteMailToManagerJob — COPY в подпапку MZ|<Фамилия> общего
+        //     ящика (для секретаря, web UI видит распределение);
+        //   - DeliverToManagerInboxJob — APPEND в INBOX личного ящика
+        //     менеджера (рабочий поток менеджера).
+        // Оба идемпотентны: повторный dispatch не задвоит.
         $email = $request->emailMessage;
         if ($email) {
             RouteMailToManagerJob::dispatch($email->id, $newAssignee->id);
+            DeliverToManagerInboxJob::dispatch($email->id, $newAssignee->id);
         }
 
         return $assignment;

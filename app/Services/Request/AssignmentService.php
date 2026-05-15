@@ -103,6 +103,15 @@ class AssignmentService
             );
         }
 
+        // Доставка оригинала письма в личный IMAP-ящик менеджера (async).
+        // MailDeliverToManagerService сам пропустит если письмо уже у
+        // менеджера или нет личного ящика с OAuth. Без \Seen — увидит
+        // как новое.
+        $email = $request->emailMessage;
+        if ($email) {
+            \App\Jobs\Mail\DeliverToManagerInboxJob::dispatch($email->id, $manager->id);
+        }
+
         return $manager;
     }
 
