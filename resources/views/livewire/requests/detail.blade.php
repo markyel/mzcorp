@@ -1848,25 +1848,63 @@
             {{-- ───── АКТИВНОСТЬ ───── --}}
             @case('activity')
                 @php
-                    // Phase 1.10: merge stateChanges + assignments в один timeline
-                    // отсортированный по created_at DESC. Каждый элемент — массив
-                    // {at, kind, title, by, details}.
+                    // Phase 1.10 + расширения: state_changes + assignments + ВСЕ
+                    // письма треда + новые типы событий (merge, suggestion,
+                    // items_parsed_from_reply) в один timeline.
                     $timeline = collect();
 
                     foreach ($req->stateChanges as $sc) {
                         $fromEnum = $sc->fromStatusEnum();
                         $toEnum = $sc->toStatusEnum();
-                        $title = $fromEnum
-                            ? sprintf('Статус: «%s» → «%s»', $fromEnum->label(), $toEnum?->label() ?? $sc->to_status)
-                            : sprintf('Заявка создана со статусом «%s»', $toEnum?->label() ?? $sc->to_status);
-                        $kind = match ($sc->event) {
-                            'auto_resume_pause' => 'state-auto',
-                            'reanimate' => 'state-reanimate',
-                            default => 'state',
-                        };
+                        $payload = is_array($sc->payload) ? $sc->payload : [];
+
+                        // Заголовок и kind зависят от event'а: новые semantic-events
+                        // имеют свой текст, статусные — стандартный «из → в».
+                        switch ($sc->event) {
+                            case 'merge_from':
+                                $kind = 'state-merge-from';
+                                $title = sprintf('Объединена заявка %s', $payload['merged_from_internal_code'] ?? '—');
+                                break;
+                            case 'merged_into':
+                                $kind = 'state-merge-into';
+                                $title = sprintf('Заявка объединена с %s', $payload['merged_into_internal_code'] ?? '—');
+                                break;
+                            case 'items_parsed_from_reply':
+                                $kind = 'state-items-from-reply';
+                                $active = (int) ($payload['items_added_active'] ?? 0);
+                                $pending = (int) ($payload['items_added_pending'] ?? 0);
+                                $skipped = (int) ($payload['items_skipped_low_confidence'] ?? 0);
+                                $title = sprintf('Парсер из reply: +%d активных, %d предложений, %d пропущено', $active, $pending, $skipped);
+                                break;
+                            case 'suggestion_applied':
+                                $kind = 'state-suggestion-apply';
+                                $title = 'Подтверждена pending-позиция от парсера';
+                                break;
+                            case 'suggestion_rejected':
+                                $kind = 'state-suggestion-reject';
+                                $title = 'Отклонена pending-позиция от парсера';
+                                break;
+                            case 'auto_resume_pause':
+                                $kind = 'state-auto';
+                                $title = $fromEnum
+                                    ? sprintf('Статус: «%s» → «%s»', $fromEnum->label(), $toEnum?->label() ?? $sc->to_status)
+                                    : ($toEnum?->label() ?? $sc->to_status);
+                                break;
+                            case 'reanimate':
+                                $kind = 'state-reanimate';
+                                $title = sprintf('Реанимация: «%s» → «%s»', $fromEnum?->label() ?? '—', $toEnum?->label() ?? $sc->to_status);
+                                break;
+                            default:
+                                $kind = 'state';
+                                $title = $fromEnum
+                                    ? sprintf('Статус: «%s» → «%s»', $fromEnum->label(), $toEnum?->label() ?? $sc->to_status)
+                                    : sprintf('Заявка создана со статусом «%s»', $toEnum?->label() ?? $sc->to_status);
+                        }
+
                         $by = $sc->byUser?->name ?? match ($sc->event) {
                             'auto_resume_pause' => 'cron · авто-возврат с паузы',
                             'reanimate' => 'InboundReplyLinker · автоматически',
+                            'items_parsed_from_reply' => 'парсер · автоматически',
                             default => '—',
                         };
                         $timeline->push([
@@ -1888,15 +1926,22 @@
                         ]);
                     }
 
-                    if ($email) {
+                    // ВСЕ письма треда — inbound + outbound (раньше показывался
+                    // только initial $email).
+                    foreach ($thread as $m) {
+                        $isIn = $m->direction?->value === 'inbound';
+                        $titlePrefix = $isIn ? 'Получено письмо от' : 'Отправлено письмо';
+                        $person = $isIn
+                            ? ($m->from_name ?: $m->from_email)
+                            : (collect((array) $m->to_recipients)->first()['email'] ?? '');
+                        $attCount = $m->attachments?->count() ?? 0;
                         $timeline->push([
-                            'at' => $email->sent_at,
-                            'kind' => 'email',
-                            'title' => 'Получено письмо от ' . ($email->from_name ?: $email->from_email),
+                            'at' => $m->sent_at,
+                            'kind' => $isIn ? 'email-in' : 'email-out',
+                            'title' => trim($titlePrefix . ' ' . $person),
                             'by' => null,
-                            'details' => $email->attachments->count() > 0
-                                ? $email->attachments->count() . ' вложений'
-                                : null,
+                            'details' => $m->subject
+                                . ($attCount > 0 ? ' · ' . $attCount . ' вложений' : ''),
                         ]);
                     }
 
@@ -1919,7 +1964,14 @@
                                         'state' => 'bg-sky-700 border-sky-700',
                                         'state-auto' => 'bg-amber-600 border-amber-600',
                                         'state-reanimate' => 'bg-violet-600 border-violet-600',
+                                        'state-merge-from' => 'bg-sky-700 border-sky-700',
+                                        'state-merge-into' => 'bg-red-700 border-red-700',
+                                        'state-items-from-reply' => 'bg-amber-700 border-amber-700',
+                                        'state-suggestion-apply' => 'bg-emerald-600 border-emerald-600',
+                                        'state-suggestion-reject' => 'bg-red-600 border-red-600',
                                         'assignment' => 'bg-violet-700 border-violet-700',
+                                        'email-in' => 'bg-emerald-700 border-emerald-700',
+                                        'email-out' => 'bg-indigo-600 border-indigo-600',
                                         'email' => 'bg-emerald-700 border-emerald-700',
                                         default => 'bg-surface border-neutral-400',
                                     };
@@ -1927,7 +1979,14 @@
                                         'state' => '🔄',
                                         'state-auto' => '⏰',
                                         'state-reanimate' => '↻',
+                                        'state-merge-from' => '⊌',
+                                        'state-merge-into' => '⊌',
+                                        'state-items-from-reply' => '💡',
+                                        'state-suggestion-apply' => '✓',
+                                        'state-suggestion-reject' => '✕',
                                         'assignment' => '👤',
+                                        'email-in' => '✉',
+                                        'email-out' => '↗',
                                         'email' => '✉',
                                         default => '·',
                                     };

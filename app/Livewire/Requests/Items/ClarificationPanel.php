@@ -116,6 +116,14 @@ class ClarificationPanel extends Component
             '{category_name}' => (string) ($item?->kbCategory?->name ?? $item?->category ?? ''),
         ]);
 
+        // Safety net: если KB-шаблон содержит неизвестный плейсхолдер
+        // (новый ключ, не описанный выше) — удалить его, чтобы литерал
+        // вида «{xxx}» НИКОГДА не уехал в письмо клиенту. Заодно сжимаем
+        // double-spaces, которые могут остаться после удаления.
+        $tpl = (string) preg_replace('/\{[a-zA-Z_][a-zA-Z0-9_]*\}/u', '', $tpl);
+        $tpl = (string) preg_replace('/[ \t]{2,}/u', ' ', $tpl);
+        $tpl = trim($tpl);
+
         $current = trim((string) ($this->perItem[$itemId] ?? ''));
         $this->perItem[$itemId] = $current === ''
             ? $tpl

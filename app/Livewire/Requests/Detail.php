@@ -397,10 +397,11 @@ class Detail extends Component
             fn (int $carry, EmailMessage $msg) => $carry + $msg->attachments->count(),
             0,
         );
-        // Phase 1.10: activity = assignments + stateChanges + email-event (если есть)
+        // Phase 1.10 + расширение: activity = assignments + stateChanges
+        // + ВСЕ письма треда (не только initial).
         $activity = $this->request->assignments->count()
             + $this->request->stateChanges->count()
-            + ($this->request->emailMessage ? 1 : 0);
+            + $this->thread->count();
 
         return [
             'overview'  => ['label' => 'Обзор',      'count' => null,         'disabled' => false],
@@ -447,17 +448,23 @@ class Detail extends Component
     }
 
     /**
-     * Обернуть верхнеуровневые `<blockquote type="cite">` в `<details>` для
-     * сворачивания цитат в CRM-треде. Вложенные blockquote не трогаем — они
-     * рендерятся внутри родительского details.
+     * Обернуть верхнеуровневые quoted-блоки в `<details>` для сворачивания
+     * цитат в CRM-треде. Вложенные не трогаем — они рендерятся внутри
+     * родительского details.
      *
-     * Формат `<blockquote type="cite">` — стандарт Apple Mail / iOS Mail /
-     * наш MailQuoteBuilder. Gmail-стиль (`<div class="gmail_quote">`) пока
-     * не покрываем — у наших клиентов в основном Yandex/Apple/Outlook.
+     * Покрываем форматы:
+     *   - `<blockquote type="cite">`  — Apple Mail / iOS Mail / наш MailQuoteBuilder
+     *   - `<blockquote class*="gmail_quote">` — Gmail
+     *   - `<blockquote class*="cite">` — Yandex / некоторые корп-системы
+     *   - `<blockquote>` без атрибутов — общий fallback
+     *   - `<div class*="gmail_quote">`  — Gmail обёртка
+     *   - `<div class*="yahoo_quoted">` — Yahoo
      */
     private function collapseQuotedBlocks(string $html): string
     {
-        if (stripos($html, '<blockquote') === false) {
+        if (stripos($html, '<blockquote') === false
+            && stripos($html, 'gmail_quote') === false
+            && stripos($html, 'yahoo_quoted') === false) {
             return $html;
         }
 
@@ -475,7 +482,14 @@ class Detail extends Component
         }
 
         $xpath = new \DOMXPath($doc);
-        $nodes = $xpath->query('//blockquote[@type="cite" and not(ancestor::blockquote)]');
+        // Расширенный selector: любые top-level blockquote + Gmail/Yahoo div'ы.
+        // ancestor::blockquote / ancestor::details — чтобы не оборачивать
+        // повторно при перерендере.
+        $nodes = $xpath->query(
+            '//blockquote[not(ancestor::blockquote) and not(ancestor::details)]'
+            . ' | //div[contains(@class, "gmail_quote") and not(ancestor::blockquote) and not(ancestor::details)]'
+            . ' | //div[contains(@class, "yahoo_quoted") and not(ancestor::blockquote) and not(ancestor::details)]'
+        );
         if ($nodes === false || $nodes->length === 0) {
             return $html;
         }

@@ -94,6 +94,7 @@ CLI backfill + duplicate-detector (mail:reassign-by-external-code + mail:detect-
 Багфикс pingpong'а в mail:reassign + защиты (--keep-outbound/--keep-active/--only-if-newer/--code) + TrustedPartnerOverride для категоризатора — **закрыт 2026-05-22.**
 Слияние заявок-дубликатов (RequestMergeService + MergeDialog UI + ClosedLostReason::Duplicate) — **закрыт 2026-05-22.**
 ReplyParseGate (signal-based отрезание пустых reply'ев от парсера) + confidence-based suggestion для item-create из reply (auto/suggest/skip, pending UI плашка, Activity audit) + переименование «слияние дубликата» → «объединение заявок» — **закрыт 2026-05-22.**
+Activity-расширение (все письма треда + новые типы events: merge_from/merged_into / items_parsed_from_reply / suggestion_applied/rejected) + placeholder safety net в ClarificationPanel + расширенный blockquote-selector в collapseQuotedBlocks (Gmail/Yahoo/fallback any blockquote) — **закрыт 2026-05-22.**
 Экспорт в 1С, KB curator UI, PriceRefreshService — **за пределами текущей фазы.**
 
 ## Открытые вопросы / TODO
