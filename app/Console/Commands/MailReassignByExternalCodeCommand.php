@@ -160,9 +160,14 @@ class MailReassignByExternalCodeCommand extends Command
                 }
 
                 // Защита: не двигаем письма привязанные к active Request.
+                // Используем SQL `whereIn`, потому что value('status') в
+                // Laravel 11+ возвращает enum object (cast в model), а не string.
                 if ($keepActive && $msg->related_request_id !== null) {
-                    $currentStatus = Request::query()->whereKey($msg->related_request_id)->value('status');
-                    if (in_array($currentStatus, $activeStatusValues, true)) {
+                    $isActive = Request::query()
+                        ->whereKey($msg->related_request_id)
+                        ->whereIn('status', $activeStatusValues)
+                        ->exists();
+                    if ($isActive) {
                         $skipActive++;
                         continue;
                     }
