@@ -4,7 +4,7 @@ namespace App\Livewire\Dashboard;
 
 use App\Enums\AiDecisionStatus;
 use App\Enums\DetectorType;
-use App\Enums\EmailClassification;
+use App\Enums\EmailCategory;
 use App\Enums\RequestStatus;
 use App\Enums\Role as RoleEnum;
 use App\Models\AiDecision;
@@ -80,24 +80,24 @@ class Index extends Component
     }
 
     /**
-     * Распределение AI-классификации последних 30 дней.
+     * Распределение писем по EmailCategory за последние 30 дней.
      *
      * @return array<int, array{class: string, label: string, count: int}>
      */
     #[Computed]
-    public function aiBreakdown(): array
+    public function categoryBreakdown(): array
     {
         $rows = EmailMessage::query()
             ->where('direction', 'inbound')
-            ->whereNotNull('ai_classification')
-            ->where('classified_at', '>=', now()->subDays(30))
-            ->groupBy('ai_classification')
-            ->selectRaw('ai_classification AS class, COUNT(*) AS c')
+            ->whereNotNull('category')
+            ->where('categorized_at', '>=', now()->subDays(30))
+            ->groupBy('category')
+            ->selectRaw('category AS class, COUNT(*) AS c')
             ->orderByDesc('c')
             ->get();
 
         return $rows->map(function ($r) {
-            $enum = EmailClassification::tryFrom($r->class);
+            $enum = EmailCategory::tryFrom($r->class);
 
             return [
                 'class' => $r->class,
@@ -108,17 +108,17 @@ class Index extends Component
     }
 
     /**
-     * Какой % писем за 30 дней успешно классифицирован.
+     * Какой % писем за 30 дней успешно категоризирован.
      */
     #[Computed]
-    public function aiCoverage(): array
+    public function categoryCoverage(): array
     {
         $total = EmailMessage::where('direction', 'inbound')
             ->where('created_at', '>=', now()->subDays(30))
             ->count();
         $classified = EmailMessage::where('direction', 'inbound')
             ->where('created_at', '>=', now()->subDays(30))
-            ->whereNotNull('classified_at')
+            ->whereNotNull('categorized_at')
             ->count();
 
         return [

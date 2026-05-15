@@ -19,10 +19,9 @@ use Illuminate\Support\Collection;
  * Этот сервис ТОЛЬКО матчит — действия (forward/label) делает MailRouter,
  * который вызывает LabelService и Forwarder.
  *
- * AI-классификация (match_mode=ai_classified) активируется в Phase 1.6,
- * когда EmailMessage.ai_classification будет заполняться. На Phase 1.5
- * правила с match_mode=ai_classified просто никогда не сработают, пока
- * ai_classification = null.
+ * Режим match_mode=ai_classified удалён вместе со вторым уровнем
+ * AI-классификации (gpt-4o-mini) — решение «создать Request» теперь
+ * принимается строго по EmailCategory в MailRouter до запуска engine.
  */
 class MailRoutingRuleEngine
 {
@@ -80,11 +79,6 @@ class MailRoutingRuleEngine
 
     private function ruleMatches(MailRoutingRule $rule, EmailMessage $message): bool
     {
-        if ($rule->match_mode === MailRuleMatchMode::AiClassified) {
-            return $rule->ai_match_type !== null
-                && $message->ai_classification === $rule->ai_match_type;
-        }
-
         $criteria = $rule->match_criteria ?? [];
         if (empty($criteria)) {
             // Пустой набор критериев на rule-based режиме — считаем НЕ совпало.

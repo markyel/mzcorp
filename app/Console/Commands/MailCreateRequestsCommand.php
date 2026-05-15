@@ -2,13 +2,13 @@
 
 namespace App\Console\Commands;
 
-use App\Enums\EmailClassification;
+use App\Enums\EmailCategory;
 use App\Models\EmailMessage;
 use App\Services\Mail\IncomingMailProcessor;
 use Illuminate\Console\Command;
 
 /**
- * Backfill: создать Request из всех писем с ai_classification=request,
+ * Backfill: создать Request из всех писем с category=client_request,
  * у которых ещё нет привязанного Request.
  *
  *   php artisan mail:create-requests              # dry-run
@@ -29,7 +29,7 @@ class MailCreateRequestsCommand extends Command
 
         $query = EmailMessage::query()
             ->where('direction', 'inbound')
-            ->where('ai_classification', EmailClassification::Request->value)
+            ->where('category', EmailCategory::ClientRequest->value)
             ->whereNull('related_request_id')
             ->orderBy('id')
             ->limit($limit);

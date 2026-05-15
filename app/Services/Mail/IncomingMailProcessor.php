@@ -2,7 +2,7 @@
 
 namespace App\Services\Mail;
 
-use App\Enums\EmailClassification;
+use App\Enums\EmailCategory;
 use App\Enums\RequestStatus;
 use App\Jobs\Mail\ParseRequestItemsJob;
 use App\Models\EmailMessage;
@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Создание Request из inbound email-а с ai_classification=request.
+ * Создание Request из inbound email-а с category=client_request.
  *
  * Phase 1.8d: создаём Request со статусом `Pending` (БЕЗ assignment, БЕЗ
  * folder routing) и сразу dispatch'им `ParseRequestItemsJob`. Парсер позиций
@@ -36,8 +36,9 @@ class IncomingMailProcessor
 
     public function processIfRequest(EmailMessage $message): ?Request
     {
-        // Только заявки.
-        if ($message->ai_classification !== EmailClassification::Request->value) {
+        // Только заявки клиентов. Решение принимает Level-1 категоризатор
+        // (gpt-4o), Level-2 (gpt-4o-mini) удалён — системно ошибался.
+        if ($message->category !== EmailCategory::ClientRequest->value) {
             return null;
         }
 

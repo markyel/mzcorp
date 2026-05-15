@@ -48,44 +48,35 @@
                             @switch($m->value)
                                 @case('any_of') Хотя бы одно условие @break
                                 @case('all_of') Все условия @break
-                                @case('ai_classified') AI-классификация (Phase 1.6) @break
                             @endswitch
                         </option>
                     @endforeach
                 </select>
             </div>
 
-            @if($matchMode === 'ai_classified')
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">AI-тип письма</label>
-                    <input type="text" wire:model="aiMatchType" placeholder="request | reclamation | accounting | general_question | spam | other"
-                           class="mt-1 block w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 rounded shadow-sm font-mono text-xs">
-                </div>
-            @else
-                <div class="space-y-2">
-                    @foreach($criteria as $i => $c)
-                        <div wire:key="crit-{{ $i }}" class="flex gap-2 items-start">
-                            <select wire:model="criteria.{{ $i }}.field" class="border-gray-300 dark:border-gray-700 dark:bg-gray-900 rounded shadow-sm text-sm">
-                                @foreach($fields as $f)
-                                    <option value="{{ $f->value }}">{{ $f->label() }}</option>
-                                @endforeach
-                            </select>
-                            <select wire:model="criteria.{{ $i }}.op" class="border-gray-300 dark:border-gray-700 dark:bg-gray-900 rounded shadow-sm text-sm">
-                                @foreach($operators as $op)
-                                    <option value="{{ $op->value }}">{{ $op->label() }}</option>
-                                @endforeach
-                            </select>
-                            <input type="text" wire:model="criteria.{{ $i }}.values"
-                                   placeholder="значения через запятую: рекламация, претензия, брак"
-                                   class="flex-1 border-gray-300 dark:border-gray-700 dark:bg-gray-900 rounded shadow-sm text-sm">
-                            <button type="button" wire:click="removeCriterion({{ $i }})"
-                                    class="text-gray-400 hover:text-red-600 px-2">×</button>
-                        </div>
-                    @endforeach
-                    <button type="button" wire:click="addCriterion"
-                            class="text-xs text-[#D32027] hover:underline">+ ещё условие</button>
-                </div>
-            @endif
+            <div class="space-y-2">
+                @foreach($criteria as $i => $c)
+                    <div wire:key="crit-{{ $i }}" class="flex gap-2 items-start">
+                        <select wire:model="criteria.{{ $i }}.field" class="border-gray-300 dark:border-gray-700 dark:bg-gray-900 rounded shadow-sm text-sm">
+                            @foreach($fields as $f)
+                                <option value="{{ $f->value }}">{{ $f->label() }}</option>
+                            @endforeach
+                        </select>
+                        <select wire:model="criteria.{{ $i }}.op" class="border-gray-300 dark:border-gray-700 dark:bg-gray-900 rounded shadow-sm text-sm">
+                            @foreach($operators as $op)
+                                <option value="{{ $op->value }}">{{ $op->label() }}</option>
+                            @endforeach
+                        </select>
+                        <input type="text" wire:model="criteria.{{ $i }}.values"
+                               placeholder="значения через запятую: рекламация, претензия, брак"
+                               class="flex-1 border-gray-300 dark:border-gray-700 dark:bg-gray-900 rounded shadow-sm text-sm">
+                        <button type="button" wire:click="removeCriterion({{ $i }})"
+                                class="text-gray-400 hover:text-red-600 px-2">×</button>
+                    </div>
+                @endforeach
+                <button type="button" wire:click="addCriterion"
+                        class="text-xs text-[#D32027] hover:underline">+ ещё условие</button>
+            </div>
         </div>
 
         <div class="bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 p-4 space-y-4">

@@ -2,6 +2,7 @@
 
 namespace App\Services\Mail;
 
+use App\Enums\EmailCategory;
 use App\Enums\MailDirection;
 use App\Enums\MailRuleActionType;
 use App\Models\EmailMessage;
@@ -14,10 +15,13 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Pipeline маршрутизации одного письма:
- *   inbound  → loop-guard → categorize → reply-linker → rules engine
- *              → AI fallback → IncomingProcessor → apply rules.
+ *   inbound  → loop-guard → categorize → reply-linker → IncomingProcessor → rules engine
  *   outbound → OutgoingMailLinker (header threading + subject code +
- *              recipient open-request match). Без правил, без AI-классификатора.
+ *              recipient open-request match). Без правил, без классификатора.
+ *
+ * Решение «создать Request» принимается строго по EmailCategory (gpt-4o,
+ * Phase 1.8c). Старый «Level-2» классификатор (gpt-4o-mini) удалён —
+ * системно ошибался на «Прошу счёт MNNNN» → accounting (см. MEMORY.md).
  *
  * Foundation §1.5 pipeline.
  */
@@ -27,7 +31,6 @@ class MailRouter
         private readonly MailRoutingRuleEngine $engine,
         private readonly MailLabelService $labels,
         private readonly MailForwarder $forwarder,
-        private readonly MailClassifierService $classifier,
         private readonly IncomingMailProcessor $incoming,
         private readonly MailCategoryClassifier $categorizer,
         private readonly InboundReplyLinker $replyLinker,
@@ -198,24 +201,15 @@ class MailRouter
             }
         }
 
-        $matches = $this->engine->match($message);
-
-        // Foundation §2.3-2.4: если ни одно rule-based правило не сработало —
-        // AI fallback. После AI пробуем правила ещё раз (теперь могут
-        // сработать те, что match_mode=ai_classified).
-        if (empty($matches)) {
-            $classified = $this->classifier->classify($message);
-            if ($classified !== null) {
-                $message->refresh();
-                $matches = $this->engine->match($message);
-            }
-        }
-
-        // Phase 1.8: для писем-заявок создаём Request (даже если правил
-        // не было — Foundation §2.5, request → создать Request).
-        if ($message->ai_classification === \App\Enums\EmailClassification::Request->value) {
+        // Phase 1.8: для писем-заявок создаём Request. Решение принимается
+        // ТОЛЬКО по EmailCategory — без второго LLM-прохода. IncomingMailProcessor
+        // идемпотентен по related_request_id (reply linker мог уже прицепить
+        // письмо к существующей заявке выше).
+        if ($message->category === EmailCategory::ClientRequest->value) {
             $this->incoming->processIfRequest($message);
         }
+
+        $matches = $this->engine->match($message);
 
         if (empty($matches)) {
             $this->recordNoMatch($message);
@@ -233,7 +227,7 @@ class MailRouter
         $audit = new RoutedMail([
             'email_message_id' => $message->id,
             'rule_id' => $rule->id,
-            'ai_classified_as' => $message->ai_classification,
+            'ai_classified_as' => $message->category,
             'action_taken' => $rule->action_type->value,
             'forwarded_to' => $rule->forward_to_email,
             'label_applied' => $rule->label,
@@ -293,7 +287,7 @@ class MailRouter
         RoutedMail::create([
             'email_message_id' => $message->id,
             'rule_id' => null,
-            'ai_classified_as' => $message->ai_classification,
+            'ai_classified_as' => $message->category,
             'action_taken' => 'none',
             'success' => true,
             'processed_at' => now(),
@@ -305,7 +299,7 @@ class MailRouter
         RoutedMail::create([
             'email_message_id' => $message->id,
             'rule_id' => null,
-            'ai_classified_as' => $message->ai_classification,
+            'ai_classified_as' => $message->category,
             'action_taken' => 'loop_skipped',
             'success' => true,
             'processed_at' => now(),

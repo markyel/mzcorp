@@ -28,7 +28,6 @@ class RuleEditor extends Component
     public array $mailboxScope = [];
 
     public string $matchMode = 'any_of';
-    public ?string $aiMatchType = null;
 
     /** @var array<int, array{field: string, op: string, values: string}> */
     public array $criteria = [];
@@ -47,7 +46,6 @@ class RuleEditor extends Component
             $this->isTerminal = (bool) $rule->is_terminal;
             $this->mailboxScope = (array) ($rule->mailbox_scope ?? []);
             $this->matchMode = $rule->match_mode->value;
-            $this->aiMatchType = $rule->ai_match_type;
             $this->actionType = $rule->action_type->value;
             $this->forwardToEmail = $rule->forward_to_email;
             $this->label = $rule->label;
@@ -119,7 +117,7 @@ class RuleEditor extends Component
             'is_terminal' => $this->isTerminal,
             'mailbox_scope' => $this->mailboxScope ?: null,
             'match_mode' => MailRuleMatchMode::from($this->matchMode),
-            'ai_match_type' => $this->matchMode === 'ai_classified' ? $this->aiMatchType : null,
+            'ai_match_type' => null,
             'match_criteria' => $compiledCriteria,
             'action_type' => MailRuleActionType::from($this->actionType),
             'forward_to_email' => $this->actionType === 'forward' ? $this->forwardToEmail : null,

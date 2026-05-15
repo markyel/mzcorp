@@ -30,32 +30,6 @@
                     {{ $label }}
                 </button>
             @endforeach
-
-            <span class="text-fg-4 mx-1.5">·</span>
-
-            <span class="text-fg-3 uppercase tracking-wider text-[10.5px] font-semibold mr-1">Категория:</span>
-            @php
-                $counts = $this->counters;
-                $classes = [
-                    'all' => ['label' => 'Все', 'count' => array_sum($counts)],
-                    'irrelevant' => ['label' => 'irrelevant', 'count' => $counts['irrelevant'] ?? 0],
-                    'reclamation' => ['label' => 'reclamation', 'count' => $counts['reclamation'] ?? 0],
-                    'accounting' => ['label' => 'accounting', 'count' => $counts['accounting'] ?? 0],
-                    'general_question' => ['label' => 'general', 'count' => $counts['general_question'] ?? 0],
-                    'spam' => ['label' => 'spam', 'count' => $counts['spam'] ?? 0],
-                    'other' => ['label' => 'other', 'count' => $counts['other'] ?? 0],
-                ];
-            @endphp
-            @foreach($classes as $key => $meta)
-                @php $on = $classification === $key; @endphp
-                <button type="button" wire:click="setClass('{{ $key }}')"
-                        class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap
-                               {{ $on ? 'bg-[var(--sky-100)] border border-[var(--sky-500)] text-[var(--sky-700)] font-semibold'
-                                       : 'bg-[var(--bg-surface)] border border-[var(--border-strong)] text-[var(--fg-2)] hover:text-[var(--fg-1)]' }}">
-                    <span>{{ $meta['label'] }}</span>
-                    <span class="mono text-[11px] opacity-75">{{ $meta['count'] }}</span>
-                </button>
-            @endforeach
         </div>
     </div>
 
@@ -67,7 +41,7 @@
                 @if($search !== '')
                     Ничего не нашли по запросу «{{ $search }}».
                 @else
-                    В этом периоде/категории — пусто. AI всё корректно отсортировал.
+                    В этом периоде — пусто. AI всё корректно отсортировал.
                 @endif
             </div>
         @else
@@ -76,7 +50,7 @@
                     <tr>
                         <th class="px-4 py-2 text-left">От / Тема</th>
                         <th class="px-4 py-2 text-left">Дата</th>
-                        <th class="px-4 py-2 text-left">AI</th>
+                        <th class="px-4 py-2 text-left">Причина AI</th>
                         <th class="px-4 py-2 text-left">Влож.</th>
                         <th class="px-4 py-2 text-right">Действия</th>
                     </tr>
@@ -88,6 +62,7 @@
                             $alreadyConfirmed = collect($artifacts)
                                 ->contains(fn ($a) => ($a['type'] ?? null) === 'manual_confirm_rejection');
                             $bodyPreview = mb_substr(trim((string) ($em->body_plain ?? '')), 0, 200);
+                            $reasoning = trim((string) ($em->category_reasoning ?? ''));
                         @endphp
                         <tr wire:key="em-{{ $em->id }}" class="border-b border-border-subtle last:border-b-0 hover:bg-hover {{ $alreadyConfirmed ? 'opacity-65' : '' }}">
                             <td class="px-4 py-2 max-w-[400px]">
@@ -100,8 +75,12 @@
                             <td class="px-4 py-2 mono text-[11px] text-fg-2 whitespace-nowrap">
                                 {{ $em->sent_at?->format('d.m.Y H:i') ?: '—' }}
                             </td>
-                            <td class="px-4 py-2">
-                                <span class="chip chip-neutral text-[10.5px]"><span class="dot"></span>{{ $em->ai_classification }}</span>
+                            <td class="px-4 py-2 max-w-[260px]">
+                                @if($reasoning !== '')
+                                    <div class="text-fg-3 text-[11px] line-clamp-3" style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;" title="{{ $reasoning }}">{{ $reasoning }}</div>
+                                @else
+                                    <span class="text-fg-4 text-[11px]">—</span>
+                                @endif
                             </td>
                             <td class="px-4 py-2 mono text-fg-3 text-[12px]">
                                 @if($em->attachments_count > 0)
@@ -113,7 +92,7 @@
                             <td class="px-4 py-2 text-right whitespace-nowrap">
                                 <button type="button"
                                         wire:click="reopenAsRequest({{ $em->id }})"
-                                        wire:confirm="Создать заявку из этого письма? AI-классификация ({{ $em->ai_classification }}) будет перезаписана ручным решением."
+                                        wire:confirm="Создать заявку из этого письма? AI-решение «не заявка» будет перезаписано вручную."
                                         class="btn btn-sm btn-primary">↻ Это заявка</button>
                                 @if(! $alreadyConfirmed)
                                     <button type="button"

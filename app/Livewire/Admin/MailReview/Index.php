@@ -2,7 +2,7 @@
 
 namespace App\Livewire\Admin\MailReview;
 
-use App\Enums\EmailClassification;
+use App\Enums\EmailCategory;
 use App\Enums\MailDirection;
 use App\Enums\RequestStatus;
 use App\Jobs\Mail\ParseRequestItemsJob;
@@ -20,15 +20,9 @@ use Livewire\WithPagination;
 /**
  * Foundation Фаза 2: auto-rejection нерелевантных + reopen РОПом.
  *
- * AI-классификатор отсортировал письма в категории, отличные от `request`
- * (`irrelevant`, `reclamation`, `accounting`, `general_question`, `spam`,
- * `other`). Для каждого такого письма Request НЕ создаётся — это и есть
- * «auto-rejection».
- *
- * Иногда AI ошибается: реальная заявка попадает в irrelevant из-за
- * шаблонного тела (Правило 3 в промпте обычно срабатывает, но не всегда).
- * Этот экран — рабочий интерфейс РОПа: пересмотреть AI-решения и
- * принудительно создать Request там, где AI ошибся.
+ * Решение «не заявка» теперь принимает только Level-1 категоризатор (gpt-4o).
+ * Здесь видим письма с category=irrelevant, у которых нет связанного Request.
+ * Иногда AI ошибается (шаблонное тело + вложение) — РОП реоткрывает вручную.
  */
 class Index extends Component
 {
@@ -36,13 +30,6 @@ class Index extends Component
 
     #[Url(as: 'q')]
     public string $search = '';
-
-    /**
-     * Фильтр по AI-классификации. Default = irrelevant (самая частая ошибка
-     * — false-negative на «запрос с шаблонным телом + вложение»).
-     */
-    #[Url(as: 'class')]
-    public string $classification = 'irrelevant';
 
     /**
      * Окно по времени: today / 7d / 30d / 90d / all.
@@ -55,19 +42,8 @@ class Index extends Component
         $this->resetPage();
     }
 
-    public function updatingClassification(): void
-    {
-        $this->resetPage();
-    }
-
     public function updatingWindow(): void
     {
-        $this->resetPage();
-    }
-
-    public function setClass(string $class): void
-    {
-        $this->classification = $class;
         $this->resetPage();
     }
 
@@ -117,7 +93,7 @@ class Index extends Component
                 : [];
             $existing[] = [
                 'type' => 'manual_reopen_as_request',
-                'overrode_ai_classification' => $email->ai_classification,
+                'overrode_category' => $email->category,
                 'reopened_at' => now()->toIso8601String(),
                 'reopened_by_user_id' => auth()->id(),
                 'request_id' => $req->id,
@@ -132,7 +108,7 @@ class Index extends Component
         Log::info('MailReview: email reopened as Request', [
             'email_message_id' => $email->id,
             'request_id' => $request->id,
-            'overrode_ai_classification' => $email->ai_classification,
+            'overrode_category' => $email->category,
             'by_user_id' => auth()->id(),
         ]);
 
@@ -156,7 +132,7 @@ class Index extends Component
         $existing = is_array($email->detected_artifacts ?? null) ? $email->detected_artifacts : [];
         $existing[] = [
             'type' => 'manual_confirm_rejection',
-            'classification' => $email->ai_classification,
+            'category' => $email->category,
             'confirmed_at' => now()->toIso8601String(),
             'confirmed_by_user_id' => auth()->id(),
         ];
@@ -173,47 +149,13 @@ class Index extends Component
             ->paginate(25);
     }
 
-    /**
-     * Counters per classification — для верхних chip'ов.
-     * Считаем в текущем временном окне, чтобы цифры были осмысленные.
-     *
-     * @return array<string, int>
-     */
-    #[Computed]
-    public function counters(): array
-    {
-        // EmailClassification::Request исключён в buildQuery() — counters
-        // показывают все «не-заявочные» классы. Irrelevant — это термин
-        // из EmailCategory (3 значения), а не EmailClassification (6).
-        $classes = [
-            EmailClassification::Reclamation->value,
-            EmailClassification::Accounting->value,
-            EmailClassification::GeneralQuestion->value,
-            EmailClassification::Spam->value,
-            EmailClassification::Other->value,
-        ];
-
-        $counts = [];
-        foreach ($classes as $cls) {
-            $counts[$cls] = $this->buildQuery(applyClassification: false)
-                ->where('ai_classification', $cls)
-                ->count();
-        }
-
-        return $counts;
-    }
-
-    private function buildQuery(bool $applyClassification = true): Builder
+    private function buildQuery(): Builder
     {
         $q = EmailMessage::query()
             ->where('direction', MailDirection::Inbound->value)
-            ->whereNotNull('ai_classification')
-            ->whereNull('related_request_id') // только письма БЕЗ связанной заявки
-            ->where('ai_classification', '!=', EmailClassification::Request->value);
-
-        if ($applyClassification && $this->classification !== '' && $this->classification !== 'all') {
-            $q->where('ai_classification', $this->classification);
-        }
+            ->whereNotNull('categorized_at')
+            ->whereNull('related_request_id')
+            ->where('category', EmailCategory::Irrelevant->value);
 
         $since = match ($this->window) {
             'today' => now()->subDay(),

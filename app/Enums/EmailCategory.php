@@ -3,18 +3,18 @@
 namespace App\Enums;
 
 /**
- * Категория письма по новой классификации Phase 1.8c (drop-in из LazyLift Flow 1).
+ * Категория письма (единственный AI-классификатор, gpt-4o, Phase 1.8c).
  *
- * Старый App\Enums\EmailClassification оставлен для обратной совместимости
- * с MailRoutingRule.match_mode='ai_classified', но триггером для создания
- * Request теперь служит EmailCategory::ClientRequest.
+ * Решение «создать Request» в MailRouter принимается по этой категории.
+ * Второй уровень (gpt-4o-mini, EmailClassification) удалён — системно
+ * ошибался на «Прошу счёт MNNNN» → accounting.
  *
  *   client_request — клиент просит у нас запчасти / КП. Только эта категория
- *                     запускает RequestItemParsingService.
+ *                     запускает IncomingMailProcessor + RequestItemParsingService.
  *   thread_reply   — клиент отвечает в существующем треде (Re:/Fwd: + цитата
  *                     от нас). Не создаём новый Request, прикрепляем к существующему.
  *   irrelevant     — всё прочее (наши же исходящие, поставщики, авто-ответы,
- *                     newsletter, спам, услуги без ТМЦ, internal).
+ *                     newsletter, спам, бухгалтерия, услуги без ТМЦ, internal).
  */
 enum EmailCategory: string
 {

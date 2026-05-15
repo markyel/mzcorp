@@ -1,7 +1,7 @@
 @php
     $counts = $this->requestCounts;
-    $coverage = $this->aiCoverage;
-    $breakdown = $this->aiBreakdown;
+    $coverage = $this->categoryCoverage;
+    $breakdown = $this->categoryBreakdown;
     $maxBreakdown = !empty($breakdown) ? max(array_column($breakdown, 'count')) : 0;
 @endphp
 
@@ -89,10 +89,10 @@
         <div class="lg:col-span-2 space-y-4">
 
             @if($this->isPrivileged)
-                {{-- AI-классификация писем --}}
+                {{-- AI-категории писем --}}
                 <div class="ds-card">
                     <div class="ds-card-header">
-                        <h3>AI-классификация писем</h3>
+                        <h3>AI-категории писем</h3>
                         <span class="flex-1"></span>
                         <span class="text-[11.5px] text-fg-3">
                             покрытие 30 дн: <span class="mono tnum text-fg-2">{{ $coverage['classified'] }} / {{ $coverage['total'] }}</span>
