@@ -53,9 +53,14 @@
                                 place(el) {
                                     const r = el.getBoundingClientRect();
                                     const W = 400, H = 400, gap = 8;
-                                    this.left = (r.right + gap + W > window.innerWidth)
-                                        ? Math.max(8, r.left - gap - W)
-                                        : r.right + gap;
+                                    // Default: флип ВЛЕВО от миниатюры — превью
+                                    // приземляется в whitespace модала, не
+                                    // закрывая таблицу справа. Если слева мало
+                                    // места (миниатюра у левого края viewport) —
+                                    // выпадаем вправо.
+                                    this.left = (r.left - gap - W >= 8)
+                                        ? r.left - gap - W
+                                        : Math.min(window.innerWidth - W - 8, r.right + gap);
                                     this.top = Math.min(
                                         window.innerHeight - H - 8,
                                         Math.max(8, r.top)
