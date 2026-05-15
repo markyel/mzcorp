@@ -36,22 +36,36 @@
             <tr wire:key="cat-{{ $cat->id }}"
                 wire:click="selectCatalog({{ $cat->id }})"
                 class="cursor-pointer border-b border-border-subtle last:border-b-0 {{ $selectedId === $cat->id ? 'bg-sky-50' : 'hover:bg-surface-2' }} {{ $cat->is_active ? '' : 'opacity-60' }}">
-                {{-- Photo preview (MDB-поле «Фото» → photo_url). Внешняя
-                     ссылка с mylift.ru, lazy-load + onerror fallback на
-                     заглушку, click открывает оригинал в новой вкладке. --}}
+                {{-- Photo preview (MDB-поле «Фото» → photo_url).
+                     Миниатюра 40×40, lazy-load + onerror fallback.
+                     Hover ≥1 сек → большой предпросмотр справа (~288×288),
+                     pointer-events-none на превью чтобы мышь не зацикливалась.
+                     Click открывает оригинал в новой вкладке. --}}
                 <td class="px-2 py-1.5 align-top">
                     @if($cat->photo_url)
-                        <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
-                           x-on:click.stop
-                           class="block w-10 h-10 rounded overflow-hidden bg-surface-2 border border-border-subtle"
-                           title="Открыть фото в новой вкладке">
-                            <img src="{{ $cat->photo_url }}"
-                                 alt=""
-                                 loading="lazy"
-                                 referrerpolicy="no-referrer"
-                                 class="w-full h-full object-cover"
-                                 onerror="this.style.display='none'; this.parentElement.classList.add('flex','items-center','justify-center'); this.parentElement.innerHTML += '<span class=\'text-fg-3 text-[9px]\'>нет</span>';">
-                        </a>
+                        <div x-data="{ show: false, t: null }"
+                             x-on:mouseenter="t = setTimeout(() => show = true, 1000)"
+                             x-on:mouseleave="clearTimeout(t); show = false"
+                             class="relative">
+                            <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
+                               x-on:click.stop
+                               class="block w-10 h-10 rounded overflow-hidden bg-surface-2 border border-border-subtle"
+                               title="Открыть фото в новой вкладке">
+                                <img src="{{ $cat->photo_url }}"
+                                     alt=""
+                                     loading="lazy"
+                                     referrerpolicy="no-referrer"
+                                     class="w-full h-full object-cover"
+                                     onerror="this.style.display='none'; this.parentElement.classList.add('flex','items-center','justify-center'); this.parentElement.innerHTML += '<span class=\'text-fg-3 text-[9px]\'>нет</span>';">
+                            </a>
+                            <div x-show="show" x-cloak x-transition.opacity
+                                 class="absolute z-50 left-12 top-0 w-72 h-72 rounded-lg shadow-xl border border-border-subtle bg-white p-1 pointer-events-none">
+                                <img src="{{ $cat->photo_url }}"
+                                     alt=""
+                                     referrerpolicy="no-referrer"
+                                     class="w-full h-full object-contain">
+                            </div>
+                        </div>
                     @else
                         <div class="w-10 h-10 rounded bg-surface-2 border border-border-subtle flex items-center justify-center text-fg-3 text-[9px]">нет</div>
                     @endif
