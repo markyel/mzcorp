@@ -535,7 +535,38 @@ class Detail extends Component
             );
             $details->appendChild($summary);
 
+            // Yandex web UI кладёт attribution-header'ы (Кому: / Тема: /
+            // DATE, NAME <email>:) ПЕРЕД blockquote отдельными div/p
+            // блоками — наш сворачиватель ловил только blockquote, и эти
+            // строки оставались видимыми над «показать цитату». Затягиваем
+            // в details все «attribution-like» соседи непосредственно
+            // перед blockquote.
+            $attributionNodes = [];
+            $prev = $bq->previousSibling;
+            while ($prev !== null) {
+                if ($this->looksLikeQuoteAttribution($prev)) {
+                    $attributionNodes[] = $prev;
+                    $prev = $prev->previousSibling;
+                    continue;
+                }
+                // Пустой text-node или <br> — тоже включаем, чтобы не
+                // оставлять висящие разделители.
+                if (($prev->nodeType === XML_TEXT_NODE && trim($prev->textContent) === '')
+                    || ($prev->nodeType === XML_ELEMENT_NODE && strtolower($prev->nodeName) === 'br')
+                ) {
+                    $attributionNodes[] = $prev;
+                    $prev = $prev->previousSibling;
+                    continue;
+                }
+                break;
+            }
+
             $bq->parentNode->replaceChild($details, $bq);
+            // Прицепляем attribution-блоки В details ПЕРЕД blockquote
+            // (в естественном порядке — мы шли назад, теперь reverse).
+            foreach (array_reverse($attributionNodes) as $node) {
+                $details->appendChild($node);
+            }
             $details->appendChild($bq);
         }
 
@@ -550,6 +581,56 @@ class Detail extends Component
         }
 
         return $out;
+    }
+
+    /**
+     * Эвристика: похож ли DOM-нода на attribution-строку перед цитатой?
+     *
+     * Yandex web UI / Outlook / Apple Mail RU кладут перед blockquote
+     * блок с «Кому:», «Тема:», «От:», «DD.MM.YYYY, ..., NAME <email>
+     * написал(а):» или « ---- Original message ----». Эти строки логически
+     * принадлежат цитате, но физически в HTML лежат отдельно.
+     *
+     * Мы их детектим по тексту: если первая непустая строка содержит
+     * один из якорей — считаем attribution.
+     */
+    private function looksLikeQuoteAttribution(\DOMNode $node): bool
+    {
+        if ($node->nodeType !== XML_ELEMENT_NODE) {
+            return false;
+        }
+        $tag = strtolower($node->nodeName);
+        if (! in_array($tag, ['div', 'p', 'span', 'blockquote'], true)) {
+            return false;
+        }
+        $text = trim($node->textContent);
+        if ($text === '' || mb_strlen($text) > 600) {
+            // Слишком длинный — это уже не header, а body соседнего письма.
+            return false;
+        }
+        // Якоря — RU/EN attribution patterns.
+        $patterns = [
+            '/^\s*Кому\s*:/iu',
+            '/^\s*Тема\s*:/iu',
+            '/^\s*От\s*:/iu',
+            '/^\s*Дата\s*:/iu',
+            '/^\s*To\s*:/i',
+            '/^\s*From\s*:/i',
+            '/^\s*Subject\s*:/i',
+            '/^\s*Date\s*:/i',
+            '/-{3,}\s*(Original message|Перенаправленное сообщение|Forwarded message|Пересылаемое сообщение)/iu',
+            // «14.05.2026, 19:43, "Имя" <email> написал(а):»
+            '/\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4}.*(написал|wrote)/iu',
+            // «14 мая 2026 г., в 19:43, Имя <email> написал(а):»
+            '/\d{1,2}\s+\p{L}+\s+\d{4}.*(написал|wrote)/iu',
+        ];
+        foreach ($patterns as $p) {
+            if (preg_match($p, $text)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

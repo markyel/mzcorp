@@ -639,17 +639,16 @@
                     </button>
                 @endif
 
-                @if($allow($RS::Quoted))
-                    <button type="button" wire:click="transitionStatus('quoted')"
-                            class="btn"
-                            @disabled(! $canManage)>📨 КП отправлено</button>
-                @endif
-
-                @if($allow($RS::AwaitingClientClarification))
-                    <button type="button" wire:click="transitionStatus('awaiting_client_clarification')"
-                            class="btn"
-                            @disabled(! $canManage)>❓ Жду уточнение клиента</button>
-                @endif
+                {{-- Убраны кнопки «📨 КП отправлено» и «❓ Жду уточнение клиента» —
+                     эти статусы ставятся в semi-auto режиме:
+                       • Quoted        — через OutboundDocumentDetector + LLM-fallback
+                                         (AI-плашка «Применить» в action-panel сверху).
+                       • AwaitingClientClarification — через ClarificationPanel
+                                         post-send hook (отправка batch вопросов
+                                         сама переводит статус).
+                     Если detector промахнулся в редком кейсе — менеджер
+                     либо отправит исправленный КП (detector подхватит),
+                     либо обратится к РОПу. --}}
 
                 @if($allow($RS::UnderReview))
                     <button type="button" wire:click="transitionStatus('under_review')"
