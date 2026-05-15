@@ -124,7 +124,7 @@ class AttentionService
             AttentionReason::ClientReplied->value,
             AttentionReason::FreshAssignment->value,
         ];
-        if (! in_array($request->attention_reason, $clearable, true)) {
+        if (! in_array($this->reasonValue($request), $clearable, true)) {
             return;
         }
         $this->recompute($request);
@@ -166,7 +166,7 @@ class AttentionService
             AttentionReason::FreshAssignment->value,
             AttentionReason::SupplierReplied->value,
         ];
-        if (! in_array($request->attention_reason, $clearable, true)) {
+        if (! in_array($this->reasonValue($request), $clearable, true)) {
             return;
         }
         $this->recompute($request);
@@ -207,7 +207,7 @@ class AttentionService
 
     private function isManualSet(Request $request): bool
     {
-        return $request->attention_reason === AttentionReason::Manual->value;
+        return $this->reasonValue($request) === AttentionReason::Manual->value;
     }
 
     /**
@@ -215,12 +215,26 @@ class AttentionService
      */
     private function isStickyReason(Request $request): bool
     {
-        return in_array($request->attention_reason, [
+        return in_array($this->reasonValue($request), [
             AttentionReason::Manual->value,
             AttentionReason::ClientReplied->value,
             AttentionReason::FreshAssignment->value,
             AttentionReason::SupplierReplied->value,
         ], true);
+    }
+
+    /**
+     * Нормализовать attention_reason в string-value (Eloquent cast возвращает
+     * BackedEnum object, а сравнения везде через ->value string).
+     */
+    private function reasonValue(Request $request): ?string
+    {
+        $r = $request->attention_reason;
+        if ($r instanceof \BackedEnum) {
+            return $r->value;
+        }
+
+        return $r;
     }
 
     /**
