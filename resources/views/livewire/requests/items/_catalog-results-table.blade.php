@@ -2,6 +2,28 @@
      ItemCatalogLinkDialog. Ожидает:
        $rows — Collection<array{catalog: CatalogItem, similarity: ?float}>
        $selectedId — ?int (id выбранной строки для подсветки) --}}
+{{-- Hover-preview: ОДИН элемент на всю таблицу. Каждая миниатюра
+     при mouseenter вызывает openPreview(el, url) — стейт переиспользуется,
+     поэтому стекаться нечему. Раньше у каждой строки был свой x-data scope
+     и show=false в mouseleave callback не всегда триггерил обновление. --}}
+<div x-data="{
+        show: false, url: '', t: null, top: 0, left: 0,
+        openPreview(el, photoUrl) {
+            clearTimeout(this.t);
+            const r = el.getBoundingClientRect();
+            const W = 400, H = 400, gap = 8;
+            this.left = (r.left - gap - W >= 8)
+                ? r.left - gap - W
+                : Math.min(window.innerWidth - W - 8, r.right + gap);
+            this.top = Math.min(window.innerHeight - H - 8, Math.max(8, r.top));
+            this.url = photoUrl;
+            this.t = setTimeout(() => { this.show = true; }, 1000);
+        },
+        closePreview() {
+            clearTimeout(this.t);
+            this.show = false;
+        }
+     }">
 <table class="w-full text-[12px]" style="table-layout: auto;">
     <colgroup>
         <col style="width: 56px">
@@ -43,53 +65,19 @@
                      Click открывает оригинал в новой вкладке. --}}
                 <td class="px-2 py-1.5 align-top">
                     @if($cat->photo_url)
-                        {{-- Position: fixed (а не absolute) — превью якорится
-                             к viewport, минует overflow:hidden модального окна.
-                             Координаты считаем по getBoundingClientRect миниатюры
-                             на mouseenter; если справа места нет — флип влево;
-                             top клампится в [8 .. viewport-408]. --}}
-                        <div x-data="{
-                                show: false, t: null, top: 0, left: 0,
-                                place(el) {
-                                    const r = el.getBoundingClientRect();
-                                    const W = 400, H = 400, gap = 8;
-                                    // Default: флип ВЛЕВО от миниатюры — превью
-                                    // приземляется в whitespace модала, не
-                                    // закрывая таблицу справа. Если слева мало
-                                    // места (миниатюра у левого края viewport) —
-                                    // выпадаем вправо.
-                                    this.left = (r.left - gap - W >= 8)
-                                        ? r.left - gap - W
-                                        : Math.min(window.innerWidth - W - 8, r.right + gap);
-                                    this.top = Math.min(
-                                        window.innerHeight - H - 8,
-                                        Math.max(8, r.top)
-                                    );
-                                }
-                             }"
-                             x-on:mouseenter="place($refs.thumb); t = setTimeout(() => show = true, 1000)"
-                             x-on:mouseleave="clearTimeout(t); show = false">
-                            <a x-ref="thumb"
-                               href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
-                               x-on:click.stop
-                               class="block w-10 h-10 rounded overflow-hidden bg-surface-2 border border-border-subtle"
-                               title="Открыть фото в новой вкладке">
-                                <img src="{{ $cat->photo_url }}"
-                                     alt=""
-                                     loading="lazy"
-                                     referrerpolicy="no-referrer"
-                                     class="w-full h-full object-cover"
-                                     onerror="this.style.display='none'; this.parentElement.classList.add('flex','items-center','justify-center'); this.parentElement.innerHTML += '<span class=\'text-fg-3 text-[9px]\'>нет</span>';">
-                            </a>
-                            <div x-show="show" x-cloak x-transition.opacity
-                                 :style="`position: fixed; left: ${left}px; top: ${top}px; width: 400px; height: 400px; z-index: 9999; pointer-events: none;`"
-                                 class="rounded-lg shadow-xl border border-border-subtle bg-white p-1">
-                                <img src="{{ $cat->photo_url }}"
-                                     alt=""
-                                     referrerpolicy="no-referrer"
-                                     style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">
-                            </div>
-                        </div>
+                        <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
+                           x-on:click.stop
+                           x-on:mouseenter="openPreview($el, '{{ addslashes($cat->photo_url) }}')"
+                           x-on:mouseleave="closePreview()"
+                           class="block w-10 h-10 rounded overflow-hidden bg-surface-2 border border-border-subtle"
+                           title="Открыть фото в новой вкладке">
+                            <img src="{{ $cat->photo_url }}"
+                                 alt=""
+                                 loading="lazy"
+                                 referrerpolicy="no-referrer"
+                                 class="w-full h-full object-cover"
+                                 onerror="this.style.display='none'; this.parentElement.classList.add('flex','items-center','justify-center'); this.parentElement.innerHTML += '<span class=\'text-fg-3 text-[9px]\'>нет</span>';">
+                        </a>
                     @else
                         <div class="w-10 h-10 rounded bg-surface-2 border border-border-subtle flex items-center justify-center text-fg-3 text-[9px]">нет</div>
                     @endif
@@ -141,3 +129,14 @@
         @endforeach
     </tbody>
 </table>
+
+{{-- Единственное hover-превью на всю таблицу: координаты и src свапаются
+     openPreview/closePreview из миниатюр. Никакого стекирования. --}}
+<div x-show="show" x-cloak x-transition.opacity
+     :style="`position: fixed; left: ${left}px; top: ${top}px; width: 400px; height: 400px; z-index: 9999; pointer-events: none;`"
+     class="rounded-lg shadow-xl border border-border-subtle bg-white p-1">
+    <img :src="url" alt=""
+         referrerpolicy="no-referrer"
+         style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">
+</div>
+</div>{{-- /x-data hover-preview wrapper --}}
