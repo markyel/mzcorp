@@ -364,11 +364,12 @@
                 {{-- THEAD (sticky) --}}
                 <div class="sticky top-0 bg-[var(--bg-surface)] border-b border-[var(--border-strong)] z-[2] grid items-center px-5 h-[32px] gap-x-3
                             text-[11px] font-semibold uppercase tracking-wider text-[var(--fg-3)]"
-                     style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 140px 160px 100px 80px 32px;">
+                     style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 170px 140px 160px 100px 80px 32px;">
                     <span></span>
                     <span>код</span>
                     <span>заявка</span>
                     <span>статус</span>
+                    <span>событие</span>
                     <span>менеджер</span>
                     <span>клиент</span>
                     <span class="text-right">сумма</span>
@@ -477,7 +478,7 @@
                         <a href="{{ $href }}" wire:key="req-{{ $req->id }}"
                            class="grid items-center px-5 h-[42px] gap-x-3 border-b border-[var(--border-subtle)] text-[12.5px] hover:bg-[var(--bg-hover)] transition-colors
                                   {{ $isOverdueAlarm ? 'bg-[var(--red-50)] hover:bg-[var(--red-100)] border-l-2 border-l-[var(--red-500)] pl-[18px]' : ($isClientReplied ? 'bg-[var(--amber-50)] hover:bg-[var(--amber-100)] border-l-2 border-l-[var(--amber-500)] pl-[18px]' : '') }}"
-                           style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 140px 160px 100px 80px 32px;">
+                           style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 170px 140px 160px 100px 80px 32px;">
 
                             {{-- checkbox (Phase 2) --}}
                             <span class="w-3.5 h-3.5 border border-[var(--border-strong)] rounded-[3px] bg-[var(--bg-surface)] opacity-50"
@@ -518,6 +519,29 @@
                                 <span class="chip {{ $req->status->chipClass() }}">
                                     <span class="dot"></span>{{ $req->status->label() }}
                                 </span>
+                            </span>
+
+                            {{-- событие: тип последней активности (Phase pool-event).
+                                 requiresAttention() — амбер, silencesAttention() / нейтральные — серый. --}}
+                            @php
+                                $actType = $req->last_activity_type;
+                                $actAt = $req->last_activity_at;
+                                if ($actType) {
+                                    $actClasses = $actType->requiresAttention()
+                                        ? 'bg-[var(--amber-50)] text-[var(--amber-800)] border-[var(--amber-700)]/30'
+                                        : 'bg-[var(--neutral-100)] text-[var(--fg-2)] border-[var(--border-subtle)]';
+                                }
+                            @endphp
+                            <span class="min-w-0 overflow-hidden">
+                                @if($actType)
+                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[3px] border text-[11px] font-medium {{ $actClasses }}"
+                                          title="{{ $actType->label() }}{{ $actAt ? ' · ' . $actAt->format('d.m.Y H:i') : '' }}">
+                                        <span>{{ $actType->icon() }}</span>
+                                        <span class="truncate">{{ $actType->label() }}</span>
+                                    </span>
+                                @else
+                                    <span class="text-[var(--fg-4)] text-[11px]">—</span>
+                                @endif
                             </span>
 
                             {{-- manager + (optional) acting badge --}}

@@ -131,6 +131,48 @@ class AttentionService
     }
 
     /**
+     * Hook: пришёл ответ от поставщика (Phase 3, supplier flow). Аналог
+     * onClientReplied, отдельная reason — РОП понимает, чьё именно письмо.
+     */
+    public function onSupplierReplied(Request $request): void
+    {
+        if (in_array($request->status, $this->silentStatuses(), true)) {
+            return;
+        }
+        if ($this->isManualSet($request)) {
+            return;
+        }
+
+        $request->forceFill([
+            'attention_required_at' => now(),
+            'attention_reason' => AttentionReason::SupplierReplied->value,
+            'attention_level' => 1,
+        ])->save();
+    }
+
+    /**
+     * Hook: менеджер передал ход клиенту/поставщику (отправил уточнение,
+     * КП, счёт или просто ответ). Снимает info-flags ClientReplied /
+     * FreshAssignment / SupplierReplied — заявка должна уйти из top'а.
+     * Manual / SlaBreach / PostponedResume не трогаем.
+     *
+     * После snimaния — recompute вернёт обычный SlaBreach по новому статусу
+     * (с дедлайном в будущем → level=0, заявка тонет).
+     */
+    public function onManagerHandled(Request $request): void
+    {
+        $clearable = [
+            AttentionReason::ClientReplied->value,
+            AttentionReason::FreshAssignment->value,
+            AttentionReason::SupplierReplied->value,
+        ];
+        if (! in_array($request->attention_reason, $clearable, true)) {
+            return;
+        }
+        $this->recompute($request);
+    }
+
+    /**
      * Ручной флаг attention. Менеджер ставит «вернись ко мне» на свою/
      * делегированную заявку; РОП — на любую. level=1, reason=Manual,
      * attention_manual_by_user_id=$byUser. Sticky: не затирается
@@ -177,6 +219,7 @@ class AttentionService
             AttentionReason::Manual->value,
             AttentionReason::ClientReplied->value,
             AttentionReason::FreshAssignment->value,
+            AttentionReason::SupplierReplied->value,
         ], true);
     }
 

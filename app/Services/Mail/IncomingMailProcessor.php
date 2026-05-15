@@ -63,7 +63,7 @@ class IncomingMailProcessor
 
             $message->forceFill(['related_request_id' => $req->id])->save();
 
-            $this->activity->touch($req);
+            $this->activity->touch($req, \App\Enums\RequestActivityType::RequestCreated);
 
             return $req;
         });

@@ -94,7 +94,7 @@ class RequestPauseService
             // Phase 1.11: paused — silent статус, attention снимаем.
             $this->attention->clear($request);
 
-            $this->activity->touch($request);
+            $this->activity->touch($request, \App\Enums\RequestActivityType::Paused);
         });
 
         Log::info('RequestPauseService: paused', [
@@ -157,7 +157,7 @@ class RequestPauseService
                 'attention_level' => 1,
             ])->save();
 
-            $this->activity->touch($request);
+            $this->activity->touch($request, \App\Enums\RequestActivityType::Resumed);
         });
 
         Log::info('RequestPauseService: resumed', [

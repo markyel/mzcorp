@@ -976,8 +976,10 @@ class Detail extends Component
      * делегированную заявку; РОП/директор — на любую. Manual флаг sticky:
      * не затирается recompute/onClientReplied/onManagerOpened.
      */
-    public function toggleManualAttention(\App\Services\Request\AttentionService $attention): void
-    {
+    public function toggleManualAttention(
+        \App\Services\Request\AttentionService $attention,
+        \App\Services\Request\RequestActivityService $activity,
+    ): void {
         $user = auth()->user();
         if ($user === null) {
             abort(403);
@@ -998,12 +1000,22 @@ class Detail extends Component
             return;
         }
 
+        // Eloquent cast attention_reason → AttentionReason enum; сравниваем
+        // через ->value на случай если каст ещё не сработал (forceFill).
+        $manualValue = \App\Enums\AttentionReason::Manual->value;
+        $currentReason = $req->attention_reason instanceof \App\Enums\AttentionReason
+            ? $req->attention_reason->value
+            : $req->attention_reason;
+        $isSet = $currentReason === $manualValue;
+
         try {
-            if ($req->attention_reason === \App\Enums\AttentionReason::Manual->value) {
+            if ($isSet) {
                 $attention->clearManual($req);
+                $activity->touch($req, \App\Enums\RequestActivityType::ManualFlagCleared);
                 session()->flash('status', 'Ручной флаг внимания снят.');
             } else {
                 $attention->setManual($req, $user);
+                $activity->touch($req, \App\Enums\RequestActivityType::ManualFlagSet);
                 session()->flash('status', 'Заявка помечена как «требует внимания».');
             }
         } catch (\Throwable $e) {

@@ -79,9 +79,15 @@ class OutgoingMailLinker
 
         $message->forceFill(['related_request_id' => $request->id])->save();
 
-        // Pool-сортировка: исходящее от менеджера тоже считается активностью
-        // (например, отправили КП — заявка должна быть видна в Pool наверху).
-        $this->activity->touch($request, $message->sent_at ?: now());
+        // Pool: исходящее от менеджера → ManagerReplied. silencesAttention()
+        // снимает существующий ClientReplied/FreshAssignment — ход передан.
+        // RequestStateService::transitionTo (на КП / Уточнение / Счёт) может
+        // позже перезатереть на более конкретный тип через touch().
+        $this->activity->touch(
+            $request,
+            \App\Enums\RequestActivityType::ManagerReplied,
+            $message->sent_at ?: now(),
+        );
 
         Log::info('OutgoingMailLinker: linked outbound to Request', [
             'email_message_id' => $message->id,

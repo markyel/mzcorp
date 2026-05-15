@@ -87,7 +87,7 @@ class AssignmentService
             // первого открытия менеджером (onManagerOpened сбросит).
             $this->attention->onAssigned($request);
 
-            $this->activity->touch($request);
+            $this->activity->touch($request, \App\Enums\RequestActivityType::Assigned);
         });
 
         // Foundation Фаза 2: in-app уведомление менеджеру о новой заявке.

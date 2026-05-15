@@ -136,10 +136,13 @@ class InboundReplyLinker
 
         $message->forceFill(['related_request_id' => $request->id])->save();
 
-        // Pool-сортировка «свежие сверху»: входящее от клиента поднимает
-        // заявку. Использовать sent_at письма как activity-time (а не now),
-        // чтобы бэкфилл/перезапуск sync'а давал стабильный порядок.
-        $this->activity->touch($request, $message->sent_at ?: now());
+        // Pool: входящее от клиента → ClientReplied (требует внимания).
+        // sent_at — стабильный порядок при бэкфилле/перезапуске sync'а.
+        $this->activity->touch(
+            $request,
+            \App\Enums\RequestActivityType::ClientReplied,
+            $message->sent_at ?: now(),
+        );
 
         Log::info('InboundReplyLinker: linked to existing Request', [
             'email_message_id' => $message->id,

@@ -131,7 +131,19 @@ class RequestStateService
             // вернёт NULL и очистит поля.
             $this->attention->recompute($request);
 
-            $this->activity->touch($request);
+            // Pool «Событие»: тип события по новому статусу. silencesAttention
+            // для quote_sent / invoice_sent / clarification_sent — заявка
+            // тонет вниз Pool, ход за клиентом.
+            $activityType = match ($to) {
+                RequestStatus::AwaitingClientClarification => \App\Enums\RequestActivityType::ClarificationSent,
+                RequestStatus::Quoted => \App\Enums\RequestActivityType::QuoteSent,
+                RequestStatus::Invoiced => \App\Enums\RequestActivityType::InvoiceSent,
+                RequestStatus::Paid => \App\Enums\RequestActivityType::Paid,
+                RequestStatus::ClosedWon => \App\Enums\RequestActivityType::ClosedWon,
+                RequestStatus::ClosedLost => \App\Enums\RequestActivityType::ClosedLost,
+                default => \App\Enums\RequestActivityType::StatusChange,
+            };
+            $this->activity->touch($request, $activityType);
         });
 
         Log::info('RequestStateService: transition', [
@@ -210,7 +222,7 @@ class RequestStateService
             // (recompute учитывает новый статус InProgress).
             $this->attention->recompute($request);
 
-            $this->activity->touch($request);
+            $this->activity->touch($request, \App\Enums\RequestActivityType::Reanimated);
         });
 
         Log::info('RequestStateService: reanimated', [

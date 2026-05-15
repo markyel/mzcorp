@@ -42,6 +42,7 @@ enum AttentionReason: string
     case ClientReplied = 'client_replied';
     case FreshAssignment = 'fresh_assignment';
     case Manual = 'manual';
+    case SupplierReplied = 'supplier_replied';
 
     // ──────────── deprecated, не возвращаются compute() ────────────
     case AwaitingClient = 'awaiting_client';
@@ -58,6 +59,7 @@ enum AttentionReason: string
             self::ClientReplied => 'Ответ от клиента',
             self::FreshAssignment => 'Новая заявка',
             self::Manual => 'Ручной флаг',
+            self::SupplierReplied => 'Ответ поставщика',
             // legacy
             self::AwaitingClient => 'Жду клиента',
             self::AwaitingSupplier => 'Жду поставщика',
@@ -78,6 +80,7 @@ enum AttentionReason: string
             self::ClientReplied => '📨',
             self::FreshAssignment => '🆕',
             self::Manual => '🚩',
+            self::SupplierReplied => '📦',
             // legacy
             self::AwaitingClient => '👤',
             self::AwaitingSupplier => '📦',
@@ -94,7 +97,11 @@ enum AttentionReason: string
     public function isInfo(): bool
     {
         return match ($this) {
-            self::ClientReplied, self::FreshAssignment, self::Manual, self::PostponedResume => true,
+            self::ClientReplied,
+            self::FreshAssignment,
+            self::Manual,
+            self::PostponedResume,
+            self::SupplierReplied => true,
             default => false,
         };
     }
