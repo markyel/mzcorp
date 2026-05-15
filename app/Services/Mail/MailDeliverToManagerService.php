@@ -6,6 +6,7 @@ use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
+use Webklex\PHPIMAP\IMAP;
 
 /**
  * Доставка оригинала письма в личный IMAP-ящик assigned-менеджера.
@@ -90,11 +91,17 @@ class MailDeliverToManagerService
             }
         }
 
-        $raw = (string) $message->raw_source;
+        // Re-fetch ПОЛНЫЙ RFC822 (headers + body) из source-ящика. Наш
+        // `raw_source` хранит только body через `Message::getRawBody()` —
+        // если APPEND'ить body без top-level headers, Yandex не знает что
+        // это multipart и показывает MIME boundary как plain-text. Кейс
+        // LZ-REQ-1315: «Без отправителя/темы» + attachment как base64-простыня.
+        $raw = $this->fetchFullRfc822($message);
         if ($raw === '') {
-            Log::warning('MailDeliverToManagerService: empty raw_source, skip APPEND', [
+            Log::warning('MailDeliverToManagerService: cannot reconstruct RFC822, skip APPEND', [
                 'email_message_id' => $message->id,
                 'manager_id' => $manager->id,
+                'has_raw_source' => $message->raw_source !== null && $message->raw_source !== '',
             ]);
 
             return false;
@@ -135,5 +142,69 @@ class MailDeliverToManagerService
         ]);
 
         return true;
+    }
+
+    /**
+     * Подтянуть полный RFC822-исходник письма из source-ящика по UID.
+     *
+     * Webklex `Message::getRawBody()` возвращает только тело, а нам для APPEND
+     * нужно `headers . CRLF CRLF . body`. Идём в source-ящик, FETCH'им письмо
+     * по UID, склеиваем `$msg->getHeader()->raw` + `$msg->getRawBody()`.
+     *
+     * FT_PEEK — без \Seen побочного эффекта.
+     */
+    private function fetchFullRfc822(EmailMessage $message): string
+    {
+        $sourceMailbox = $message->mailbox;
+        if (! $sourceMailbox || ! $message->imap_uid || ! $message->folder) {
+            return '';
+        }
+
+        $client = null;
+        try {
+            $client = $this->connector->imapClient($sourceMailbox);
+            $folder = $client->getFolderByPath((string) $message->folder, soft_fail: true);
+            if (! $folder) {
+                return '';
+            }
+            $msgs = $folder->query()
+                ->setFetchOptions(IMAP::FT_PEEK)
+                ->setFetchBody(true)
+                ->setFetchFlags(false)
+                ->whereUid($message->imap_uid)
+                ->get();
+            $msg = $msgs->first();
+            if (! $msg) {
+                return '';
+            }
+
+            $headerRaw = (string) ($msg->getHeader()?->raw ?? '');
+            $bodyRaw = (string) $msg->getRawBody();
+
+            if ($headerRaw === '') {
+                return '';
+            }
+
+            // RFC822 разделитель — пустая строка между headers и body.
+            // Headers webklex обычно отдаёт с CRLF; нормализуем хвост.
+            $headerRaw = rtrim($headerRaw, "\r\n") . "\r\n\r\n";
+
+            return $headerRaw . $bodyRaw;
+        } catch (\Throwable $e) {
+            Log::warning('MailDeliverToManagerService: re-fetch failed', [
+                'email_message_id' => $message->id,
+                'source_mailbox_id' => $sourceMailbox->id,
+                'imap_uid' => $message->imap_uid,
+                'error' => $e->getMessage(),
+            ]);
+
+            return '';
+        } finally {
+            try {
+                $client?->disconnect();
+            } catch (\Throwable) {
+                // ignore
+            }
+        }
     }
 }

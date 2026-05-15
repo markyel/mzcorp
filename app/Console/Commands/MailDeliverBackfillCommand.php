@@ -32,7 +32,8 @@ class MailDeliverBackfillCommand extends Command
         {--apply : Реально dispatch job\'ы, иначе dry-run}
         {--since= : Период (например 7d / 30d), отсекает старые письма}
         {--request= : Точечно по internal_code заявки (M-2026-NNNN)}
-        {--limit=2000 : Максимум dispatch\'ей за прогон (защита от перегруза Yandex)}';
+        {--limit=2000 : Максимум dispatch\'ей за прогон (защита от перегруза Yandex)}
+        {--force : Игнорировать inbox_deliveries[] marker — перезалить даже уже доставленные (для replay после фикса MIME)}';
 
     protected $description = 'Backfill доставки оригиналов писем в личные ящики assigned-менеджеров';
 
@@ -42,6 +43,7 @@ class MailDeliverBackfillCommand extends Command
         $since = $this->option('since');
         $requestCode = $this->option('request');
         $limit = (int) $this->option('limit');
+        $force = (bool) $this->option('force');
 
         $sinceDate = null;
         if ($since !== null && $since !== '') {
@@ -81,7 +83,7 @@ class MailDeliverBackfillCommand extends Command
         $skipped = 0;
         $missing = 0;
 
-        $q->orderBy('id')->chunkById(200, function ($chunk) use ($apply, $limit, &$dispatched, &$skipped, &$missing) {
+        $q->orderBy('id')->chunkById(200, function ($chunk) use ($apply, $force, $limit, &$dispatched, &$skipped, &$missing) {
             foreach ($chunk as $req) {
                 if ($dispatched >= $limit) {
                     return false; // stop chunking
@@ -96,6 +98,8 @@ class MailDeliverBackfillCommand extends Command
 
                 // Уже доставляли этому пользователю? — service сам проверит,
                 // но дешевле срезать тут (меньше job'ов в очереди).
+                // С --force: всё равно dispatch'аем + чистим marker, чтобы
+                // service не отвергнул re-delivery (после фикса MIME repack).
                 $artifacts = (array) ($email->detected_artifacts ?? []);
                 $deliveries = (array) ($artifacts['inbox_deliveries'] ?? []);
                 $alreadyDelivered = false;
@@ -105,10 +109,18 @@ class MailDeliverBackfillCommand extends Command
                         break;
                     }
                 }
-                if ($alreadyDelivered) {
+                if ($alreadyDelivered && ! $force) {
                     $skipped++;
 
                     continue;
+                }
+                if ($alreadyDelivered && $force && $apply) {
+                    // Снимаем marker для этого user_id, чтобы service пропустил idempotency-check.
+                    $artifacts['inbox_deliveries'] = array_values(array_filter(
+                        $deliveries,
+                        fn ($d) => (int) ($d['user_id'] ?? 0) !== (int) $req->assigned_user_id,
+                    ));
+                    $email->forceFill(['detected_artifacts' => $artifacts])->save();
                 }
 
                 if ($apply) {
