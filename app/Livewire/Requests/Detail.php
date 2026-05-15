@@ -145,6 +145,31 @@ class Detail extends Component
             );
             app(\App\Services\Request\AttentionService::class)
                 ->onManagerOpened($this->request);
+
+            // Implicit-state: ответственный менеджер (или acting через
+            // delegation) открыл заявку — значит он начал работу. Без
+            // кнопки «Начать работу» — статус подсасывается по факту.
+            // РОП/директор-наблюдатель НЕ триггерит — они просто смотрят.
+            if (
+                in_array($this->request->status, [RequestStatus::Assigned, RequestStatus::New], true)
+                && $this->request->isAccessibleBy($user)
+            ) {
+                try {
+                    app(\App\Services\Request\RequestStateService::class)
+                        ->transitionTo(
+                            $this->request,
+                            RequestStatus::InProgress,
+                            $user,
+                            ['event' => 'auto_first_open'],
+                        );
+                    $this->request = $this->request->fresh();
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning(
+                        'Detail::mount auto-transition InProgress failed (non-fatal)',
+                        ['request_id' => $this->request->id, 'user_id' => $user->id, 'error' => $e->getMessage()],
+                    );
+                }
+            }
         }
     }
 

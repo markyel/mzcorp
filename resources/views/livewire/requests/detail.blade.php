@@ -617,17 +617,24 @@
 
             {{-- Активные статусы. --}}
             @else
-                {{-- Главные действия зависят от статуса. --}}
-                @if($allow($RS::InProgress) && $req->status !== $RS::InProgress)
+                {{-- Главные действия зависят от статуса.
+                     Assigned/New статусы НЕ показывают кнопку «Начать работу» —
+                     это работает auto-transition в Detail::mount (открытие
+                     карточки = начало работы, implicit-state).
+                     Кнопка остаётся для возврата из ожидающих/quoted состояний. --}}
+                @if(
+                    $allow($RS::InProgress)
+                    && $req->status !== $RS::InProgress
+                    && $req->status !== $RS::Assigned
+                    && $req->status !== $RS::New
+                )
                     <button type="button" wire:click="transitionStatus('in_progress')"
                             class="btn btn-primary"
                             @disabled(! $canManage)>
                         @if($req->status === $RS::AwaitingClientClarification)
                             ✓ Клиент ответил
-                        @elseif($req->status === $RS::UnderReview || $req->status === $RS::PostponedUntil || $req->status === $RS::Quoted)
-                            ↩ Вернуться к работе
                         @else
-                            ▶ Начать работу
+                            ↩ Вернуться к работе
                         @endif
                     </button>
                 @endif
