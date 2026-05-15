@@ -172,17 +172,22 @@ class Pool extends Component
             ])
             ->withCount('items');
 
-        // Phase 1.11 (Foundation §5.3): sort по attention для active/overdue —
-        // overdue (attention_level=1) сверху, дальше по ближайшему дедлайну.
+        // Pool re-sort («как в почте»):
+        //  - attention_level=1 сверху (manual / fresh / client_replied /
+        //    postponed_resume / overdue SlaBreach)
+        //  - дальше — last_activity_at DESC (свежие сверху)
+        //  - id DESC как tiebreak
         // Для paused / closed / all attention-сорт не имеет смысла,
-        // оставляем по id DESC.
+        // но last_activity_at DESC всё равно даёт «свежие сверху».
         if (in_array($this->bucket, ['active', 'overdue'], true)) {
             $query
                 ->orderByDesc('attention_level')
-                ->orderByRaw('attention_required_at ASC NULLS LAST')
+                ->orderByRaw('last_activity_at DESC NULLS LAST')
                 ->orderByDesc('id');
         } else {
-            $query->orderByDesc('id');
+            $query
+                ->orderByRaw('last_activity_at DESC NULLS LAST')
+                ->orderByDesc('id');
         }
 
         // Менеджер по умолчанию видит свои; РОП/директор — все.

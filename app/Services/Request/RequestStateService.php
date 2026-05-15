@@ -28,6 +28,7 @@ class RequestStateService
 {
     public function __construct(
         private readonly AttentionService $attention,
+        private readonly RequestActivityService $activity,
     ) {
     }
 
@@ -129,6 +130,8 @@ class RequestStateService
             // ПОСЛЕ insert'а. Для terminal/paid → AttentionService сам
             // вернёт NULL и очистит поля.
             $this->attention->recompute($request);
+
+            $this->activity->touch($request);
         });
 
         Log::info('RequestStateService: transition', [
@@ -206,6 +209,8 @@ class RequestStateService
             // Phase 1.11: после reanimate ставим attention now+SLA-дедлайн
             // (recompute учитывает новый статус InProgress).
             $this->attention->recompute($request);
+
+            $this->activity->touch($request);
         });
 
         Log::info('RequestStateService: reanimated', [

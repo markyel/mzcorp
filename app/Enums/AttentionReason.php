@@ -11,7 +11,7 @@ namespace App\Enums;
  * (терминал / paused / Paid).
  *
  * ─────────────────────────────────────────────────────────────────────
- *  АКТИВНЫЕ ПРИЧИНЫ (минимизация 2026-05-21):
+ *  АКТИВНЫЕ ПРИЧИНЫ:
  * ─────────────────────────────────────────────────────────────────────
  *   - SlaBreach       ⚡  «Срок реакции» — единый дедлайн SLA по статусу,
  *                          истёк (overdue) → красная подсветка в Pool.
@@ -21,27 +21,27 @@ namespace App\Enums;
  *                          явной отсрочки (status=PostponedUntil).
  *   - ClientReplied   📨  «Ответ от клиента» — inbound клиента привязан к
  *                          активной заявке, менеджер ещё не открыл карточку.
- *                          Снимается в Detail::mount по last_seen_at.
+ *                          Снимается в Detail::mount по onManagerOpened.
+ *   - FreshAssignment 🆕  «Новая заявка» — auto-assigned менеджеру, ещё не
+ *                          открывал. info-уровень. Снимается onManagerOpened.
+ *   - Manual          🚩  «Ручной флаг» — менеджер/РОП явно поставил «вернуть
+ *                          в фокус». Самый сильный: НЕ затирается recompute()
+ *                          / onClientReplied / onManagerOpened. Снимается
+ *                          только явным `clearManual()`.
  *
  * ─────────────────────────────────────────────────────────────────────
- *  DEPRECATED (оставлены для совместимости с существующими записями БД,
- *  AttentionService::compute() НЕ возвращает, в Pool рендерятся как fallback):
+ *  DEPRECATED (оставлены для совместимости с существующими записями БД):
  * ─────────────────────────────────────────────────────────────────────
- *   - AwaitingClient        — «ждём клиента» это статус, не алярм
- *   - AwaitingSupplier      — не использовался, Phase 2 reserve
- *   - QuoteFollowupDue      — нудж по КП — заменён на SlaBreach
- *   - InvoiceFollowupDue    — нудж по счёту — заменён на SlaBreach
- *   - PartialQuoteOverdue   — не использовался
- *
- * Backfill старых записей: миграция чистит deprecated reason'ы при деплое;
- * на следующем cron-tick / transition'е recompute() пересчитает по новой
- * логике.
+ *   - AwaitingClient / AwaitingSupplier / QuoteFollowupDue /
+ *     InvoiceFollowupDue / PartialQuoteOverdue — не возвращаются compute().
  */
 enum AttentionReason: string
 {
     case SlaBreach = 'sla_breach';
     case PostponedResume = 'postponed_resume';
     case ClientReplied = 'client_replied';
+    case FreshAssignment = 'fresh_assignment';
+    case Manual = 'manual';
 
     // ──────────── deprecated, не возвращаются compute() ────────────
     case AwaitingClient = 'awaiting_client';
@@ -56,6 +56,8 @@ enum AttentionReason: string
             self::SlaBreach => 'Срок реакции',
             self::PostponedResume => 'Возврат после отсрочки',
             self::ClientReplied => 'Ответ от клиента',
+            self::FreshAssignment => 'Новая заявка',
+            self::Manual => 'Ручной флаг',
             // legacy
             self::AwaitingClient => 'Жду клиента',
             self::AwaitingSupplier => 'Жду поставщика',
@@ -74,6 +76,8 @@ enum AttentionReason: string
             self::SlaBreach => '⚡',
             self::PostponedResume => '⏰',
             self::ClientReplied => '📨',
+            self::FreshAssignment => '🆕',
+            self::Manual => '🚩',
             // legacy
             self::AwaitingClient => '👤',
             self::AwaitingSupplier => '📦',
@@ -85,10 +89,22 @@ enum AttentionReason: string
 
     /**
      * Информационный (sky / amber) тон, а не алярмический (red).
-     * ClientReplied — позитивный сигнал «есть новости», не пропущенный SLA.
+     * Только SlaBreach с истёкшим дедлайном — алярм (red).
      */
     public function isInfo(): bool
     {
-        return $this === self::ClientReplied;
+        return match ($this) {
+            self::ClientReplied, self::FreshAssignment, self::Manual, self::PostponedResume => true,
+            default => false,
+        };
+    }
+
+    /**
+     * Manual flag — самый сильный, НЕ затирается обычным recompute /
+     * onClientReplied / onManagerOpened. Только явный clearManual().
+     */
+    public function isSticky(): bool
+    {
+        return $this === self::Manual;
     }
 }

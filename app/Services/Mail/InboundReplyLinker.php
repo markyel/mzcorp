@@ -39,6 +39,7 @@ class InboundReplyLinker
     public function __construct(
         private readonly ThreadClarificationAi $clarifier,
         private readonly RequestStateService $stateService,
+        private readonly \App\Services\Request\RequestActivityService $activity,
     ) {
     }
 
@@ -134,6 +135,11 @@ class InboundReplyLinker
         }
 
         $message->forceFill(['related_request_id' => $request->id])->save();
+
+        // Pool-сортировка «свежие сверху»: входящее от клиента поднимает
+        // заявку. Использовать sent_at письма как activity-time (а не now),
+        // чтобы бэкфилл/перезапуск sync'а давал стабильный порядок.
+        $this->activity->touch($request, $message->sent_at ?: now());
 
         Log::info('InboundReplyLinker: linked to existing Request', [
             'email_message_id' => $message->id,

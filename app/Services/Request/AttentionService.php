@@ -32,9 +32,18 @@ class AttentionService
     /**
      * Пересчитать attention для заявки и сохранить. Сбрасывает
      * attention_level в 0 — overdue определит cron-sweep.
+     *
+     * Sticky-reason'ы НЕ затираются recompute:
+     *   Manual          — снимается только clearManual()
+     *   ClientReplied   — снимается onManagerOpened()
+     *   FreshAssignment — снимается onManagerOpened()
      */
     public function recompute(Request $request): void
     {
+        if ($this->isStickyReason($request)) {
+            return;
+        }
+
         [$at, $reason] = $this->compute($request);
 
         $request->forceFill([
@@ -45,8 +54,8 @@ class AttentionService
     }
 
     /**
-     * Очистить attention (terminal / paused / pending). Делает явный
-     * save без forceFill через fillable — поля разрешены.
+     * Очистить attention (terminal / paused / pending). Заодно снимает
+     * manual flag — на терминальных переходах он теряет смысл.
      */
     public function clear(Request $request): void
     {
@@ -54,25 +63,25 @@ class AttentionService
             'attention_required_at' => null,
             'attention_reason' => null,
             'attention_level' => 0,
+            'attention_manual_by_user_id' => null,
         ])->save();
     }
 
     /**
-     * Hook: клиент прислал inbound в активную заявку. Ставим reason=ClientReplied
-     * + attention_level=1 (немедленный показ как «есть новости»), но в Pool
-     * рендерится как info (amber/sky), а не алярм (red) — AttentionReason::isInfo().
+     * Hook: клиент прислал inbound в активную заявку. Ставим
+     * reason=ClientReplied + attention_level=1 (info, amber/sky).
      *
-     * Затирает любой существующий attention (SlaBreach / PostponedResume) —
-     * это сильнее, потому что прямо сейчас есть что прочитать. Когда менеджер
-     * откроет карточку, onManagerOpened вернёт обычный SlaBreach по статусу.
+     * Не затирает Manual — он сильнее.
      *
-     * НЕ ставим если статус — терминальный или Pending (заявка ещё не у
-     * менеджера). Reanimate для ClosedLost обрабатывается отдельно в
-     * RequestStateService::reanimate (там свой transition → recompute).
+     * НЕ ставим если статус — терминальный или Pending. Reanimate для
+     * ClosedLost обрабатывается отдельно в RequestStateService::reanimate.
      */
     public function onClientReplied(Request $request): void
     {
         if (in_array($request->status, $this->silentStatuses(), true)) {
+            return;
+        }
+        if ($this->isManualSet($request)) {
             return;
         }
 
@@ -84,17 +93,91 @@ class AttentionService
     }
 
     /**
-     * Hook: менеджер открыл карточку. Снимает attention_reason=ClientReplied
-     * (recompute вернёт обычный SlaBreach по статусу или null) — менеджер
-     * увидел новости. Не трогает SlaBreach / PostponedResume — те снимаются
-     * только через transitionTo / resume / explicit clear.
+     * Hook: заявка только что назначена менеджеру (auto-assign / sticky /
+     * round-robin / РОП-reassign). Ставит reason=FreshAssignment, level=1
+     * info. Снимается onManagerOpened.
+     */
+    public function onAssigned(Request $request): void
+    {
+        if (in_array($request->status, $this->silentStatuses(), true)) {
+            return;
+        }
+        if ($this->isManualSet($request)) {
+            return;
+        }
+
+        $request->forceFill([
+            'attention_required_at' => now(),
+            'attention_reason' => AttentionReason::FreshAssignment->value,
+            'attention_level' => 1,
+        ])->save();
+    }
+
+    /**
+     * Hook: менеджер открыл карточку. Снимает info-флаги (ClientReplied /
+     * FreshAssignment) — recompute вернёт обычный SlaBreach по статусу.
+     * SlaBreach / PostponedResume / Manual не трогаем.
      */
     public function onManagerOpened(Request $request): void
     {
-        if ($request->attention_reason !== AttentionReason::ClientReplied->value) {
+        $clearable = [
+            AttentionReason::ClientReplied->value,
+            AttentionReason::FreshAssignment->value,
+        ];
+        if (! in_array($request->attention_reason, $clearable, true)) {
             return;
         }
         $this->recompute($request);
+    }
+
+    /**
+     * Ручной флаг attention. Менеджер ставит «вернись ко мне» на свою/
+     * делегированную заявку; РОП — на любую. level=1, reason=Manual,
+     * attention_manual_by_user_id=$byUser. Sticky: не затирается
+     * recompute / onClientReplied / onManagerOpened.
+     */
+    public function setManual(Request $request, \App\Models\User $byUser): void
+    {
+        $request->forceFill([
+            'attention_required_at' => now(),
+            'attention_reason' => AttentionReason::Manual->value,
+            'attention_manual_by_user_id' => $byUser->id,
+            'attention_level' => 1,
+        ])->save();
+    }
+
+    /**
+     * Снять manual flag. После снятия — recompute по текущему статусу.
+     */
+    public function clearManual(Request $request): void
+    {
+        if (! $this->isManualSet($request)) {
+            return;
+        }
+        $request->forceFill([
+            'attention_manual_by_user_id' => null,
+            'attention_reason' => null,
+            'attention_required_at' => null,
+            'attention_level' => 0,
+        ])->save();
+        $this->recompute($request->fresh());
+    }
+
+    private function isManualSet(Request $request): bool
+    {
+        return $request->attention_reason === AttentionReason::Manual->value;
+    }
+
+    /**
+     * Sticky-reason: текущая attention НЕ должна затираться recompute().
+     */
+    private function isStickyReason(Request $request): bool
+    {
+        return in_array($request->attention_reason, [
+            AttentionReason::Manual->value,
+            AttentionReason::ClientReplied->value,
+            AttentionReason::FreshAssignment->value,
+        ], true);
     }
 
     /**

@@ -32,6 +32,7 @@ class RequestPauseService
 {
     public function __construct(
         private readonly AttentionService $attention,
+        private readonly RequestActivityService $activity,
     ) {
     }
 
@@ -92,6 +93,8 @@ class RequestPauseService
 
             // Phase 1.11: paused — silent статус, attention снимаем.
             $this->attention->clear($request);
+
+            $this->activity->touch($request);
         });
 
         Log::info('RequestPauseService: paused', [
@@ -153,6 +156,8 @@ class RequestPauseService
                 'attention_reason' => \App\Enums\AttentionReason::PostponedResume->value,
                 'attention_level' => 1,
             ])->save();
+
+            $this->activity->touch($request);
         });
 
         Log::info('RequestPauseService: resumed', [

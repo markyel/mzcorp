@@ -51,6 +51,9 @@ class Request extends Model
         'attention_required_at',
         'attention_reason',
         'attention_level',
+        'attention_manual_by_user_id',
+        // Pool re-sort: denormalized timestamp последней активности.
+        'last_activity_at',
     ];
 
     protected function casts(): array
@@ -66,6 +69,8 @@ class Request extends Model
             'attention_required_at' => 'datetime',
             'attention_reason' => AttentionReason::class,
             'attention_level' => 'integer',
+            'attention_manual_by_user_id' => 'integer',
+            'last_activity_at' => 'datetime',
         ];
     }
 

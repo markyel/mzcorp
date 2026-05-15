@@ -972,6 +972,50 @@ class Detail extends Component
     }
 
     /**
+     * Поставить / снять ручной флаг attention. Менеджер — на свою или
+     * делегированную заявку; РОП/директор — на любую. Manual флаг sticky:
+     * не затирается recompute/onClientReplied/onManagerOpened.
+     */
+    public function toggleManualAttention(\App\Services\Request\AttentionService $attention): void
+    {
+        $user = auth()->user();
+        if ($user === null) {
+            abort(403);
+        }
+        $privileged = $user->hasAnyRole([
+            Role::HeadOfSales->value,
+            Role::Director->value,
+        ]);
+        if ($user->hasRole(Role::Secretary->value)) {
+            abort(403, 'Секретарь только просматривает заявки.');
+        }
+        if (! $privileged && ! $this->request->isAccessibleBy($user)) {
+            abort(403, 'Менять флаг внимания может только assigned-менеджер, acting или РОП.');
+        }
+
+        $req = $this->request->fresh();
+        if ($req === null) {
+            return;
+        }
+
+        try {
+            if ($req->attention_reason === \App\Enums\AttentionReason::Manual->value) {
+                $attention->clearManual($req);
+                session()->flash('status', 'Ручной флаг внимания снят.');
+            } else {
+                $attention->setManual($req, $user);
+                session()->flash('status', 'Заявка помечена как «требует внимания».');
+            }
+        } catch (\Throwable $e) {
+            $this->addError('status', 'Не удалось переключить флаг: ' . $e->getMessage());
+
+            return;
+        }
+
+        $this->reloadRequest();
+    }
+
+    /**
      * Снять с паузы вручную (не дожидаясь cron).
      */
     public function resumeFromPause(RequestPauseService $service): void

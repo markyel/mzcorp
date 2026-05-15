@@ -28,6 +28,12 @@ use Illuminate\Support\Facades\DB;
  */
 class AssignmentService
 {
+    public function __construct(
+        private readonly AttentionService $attention,
+        private readonly RequestActivityService $activity,
+    ) {
+    }
+
     /**
      * @return User|null  null если в системе нет активных менеджеров.
      */
@@ -76,6 +82,12 @@ class AssignmentService
                 'reason' => $reason,
                 'assigned_at' => now(),
             ]);
+
+            // FreshAssignment — info-уровень, поднимает в Pool наверх до
+            // первого открытия менеджером (onManagerOpened сбросит).
+            $this->attention->onAssigned($request);
+
+            $this->activity->touch($request);
         });
 
         // Foundation Фаза 2: in-app уведомление менеджеру о новой заявке.

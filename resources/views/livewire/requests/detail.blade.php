@@ -381,6 +381,29 @@
         @endphp
         <div class="flex flex-col gap-2 min-w-[200px]">
 
+            {{-- Ручной флаг attention. Менеджер/acting/РОП — toggle через
+                 AttentionService::setManual/clearManual. Sticky: не затирается
+                 recompute/onClientReplied/onManagerOpened. --}}
+            @php
+                $isManualSet = $req->attention_reason?->value === \App\Enums\AttentionReason::Manual->value;
+                $canToggleManual = $canManage || $canReassign;
+            @endphp
+            @if($canToggleManual)
+                @if($isManualSet)
+                    <button type="button" wire:click="toggleManualAttention"
+                            class="btn"
+                            style="background:var(--amber-50);border-color:var(--amber-700);color:var(--amber-700)"
+                            wire:confirm="Снять ручной флаг внимания с заявки?">
+                        🚩 Снять флаг внимания
+                    </button>
+                @else
+                    <button type="button" wire:click="toggleManualAttention"
+                            class="btn">
+                        🚩 Требует внимания
+                    </button>
+                @endif
+            @endif
+
             {{-- Phase 4 (Foundation §7): pending AI-suggestion'ы DocumentDetector'а.
                  Рендерятся ВЫШЕ action-panel чтобы оператор увидел и принял
                  решение до основных кнопок переходов.

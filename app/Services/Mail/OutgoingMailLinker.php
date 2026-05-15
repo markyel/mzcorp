@@ -30,6 +30,11 @@ use Illuminate\Support\Facades\Log;
  */
 class OutgoingMailLinker
 {
+    public function __construct(
+        private readonly \App\Services\Request\RequestActivityService $activity,
+    ) {
+    }
+
     public function tryLink(EmailMessage $message): ?Request
     {
         if ($message->related_request_id) {
@@ -73,6 +78,10 @@ class OutgoingMailLinker
         }
 
         $message->forceFill(['related_request_id' => $request->id])->save();
+
+        // Pool-сортировка: исходящее от менеджера тоже считается активностью
+        // (например, отправили КП — заявка должна быть видна в Pool наверху).
+        $this->activity->touch($request, $message->sent_at ?: now());
 
         Log::info('OutgoingMailLinker: linked outbound to Request', [
             'email_message_id' => $message->id,

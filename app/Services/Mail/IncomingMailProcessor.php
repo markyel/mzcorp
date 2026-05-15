@@ -9,6 +9,7 @@ use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Services\Request\AssignmentService;
 use App\Services\Request\InternalCodeGenerator;
+use App\Services\Request\RequestActivityService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -31,6 +32,7 @@ class IncomingMailProcessor
         private readonly InternalCodeGenerator $codeGenerator,
         private readonly AssignmentService $assignment,
         private readonly MailFolderRouter $folders,
+        private readonly RequestActivityService $activity,
     ) {
     }
 
@@ -60,6 +62,8 @@ class IncomingMailProcessor
             ]);
 
             $message->forceFill(['related_request_id' => $req->id])->save();
+
+            $this->activity->touch($req);
 
             return $req;
         });
