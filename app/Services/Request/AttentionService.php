@@ -117,6 +117,11 @@ class AttentionService
      * Hook: менеджер открыл карточку. Снимает info-флаги (ClientReplied /
      * FreshAssignment) — recompute вернёт обычный SlaBreach по статусу.
      * SlaBreach / PostponedResume / Manual не трогаем.
+     *
+     * NB: сначала ОБНУЛЯЕМ reason — иначе recompute exit'нет рано через
+     * isStickyReason (FreshAssignment / ClientReplied — sticky). После
+     * обнуления — recompute поставит SLA-дедлайн в будущее с level=0,
+     * заявка опустится в Pool.
      */
     public function onManagerOpened(Request $request): void
     {
@@ -127,7 +132,12 @@ class AttentionService
         if (! in_array($this->reasonValue($request), $clearable, true)) {
             return;
         }
-        $this->recompute($request);
+        $request->forceFill([
+            'attention_reason' => null,
+            'attention_required_at' => null,
+            'attention_level' => 0,
+        ])->save();
+        $this->recompute($request->fresh());
     }
 
     /**
@@ -169,7 +179,13 @@ class AttentionService
         if (! in_array($this->reasonValue($request), $clearable, true)) {
             return;
         }
-        $this->recompute($request);
+        // Сначала обнуляем sticky reason — иначе recompute exit'нет рано.
+        $request->forceFill([
+            'attention_reason' => null,
+            'attention_required_at' => null,
+            'attention_level' => 0,
+        ])->save();
+        $this->recompute($request->fresh());
     }
 
     /**

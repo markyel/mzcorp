@@ -446,12 +446,23 @@
                             $attnReason = $req->attention_reason; // AttentionReason|null
                             $attnAt = $req->attention_required_at;
                             $isClientReplied = $attnReason === \App\Enums\AttentionReason::ClientReplied;
-                            $isOverdueAlarm = $req->attention_level === 1 && ! $isClientReplied;
+                            $isFreshAssignment = $attnReason === \App\Enums\AttentionReason::FreshAssignment;
+                            $isManualFlag = $attnReason === \App\Enums\AttentionReason::Manual;
+                            $isSupplierReplied = $attnReason === \App\Enums\AttentionReason::SupplierReplied;
+                            // info-флаги — это «есть новости» / «новая» / «🚩 пометка»,
+                            // НЕ просрочка по SLA. Красным фоном не подсвечиваем,
+                            // «просрочено N» текстом не пишем.
+                            $isInfoFlag = $isClientReplied || $isFreshAssignment || $isManualFlag || $isSupplierReplied;
+                            $isOverdueAlarm = $req->attention_level === 1 && ! $isInfoFlag;
                             $attnText = null;
                             if ($isClientReplied) {
-                                // Для ClientReplied не показываем «через/просрочено» —
-                                // это не SLA-таймер, это статус «непрочитанные новости».
                                 $attnText = 'есть ответ';
+                            } elseif ($isFreshAssignment) {
+                                $attnText = 'новая';
+                            } elseif ($isSupplierReplied) {
+                                $attnText = 'ответ поставщика';
+                            } elseif ($isManualFlag) {
+                                $attnText = '🚩 пометка';
                             } elseif ($attnAt) {
                                 $diffSecs = (int) now()->diffInSeconds($attnAt, false);
                                 $absSecs = abs($diffSecs);
@@ -477,7 +488,7 @@
 
                         <a href="{{ $href }}" wire:key="req-{{ $req->id }}"
                            class="grid items-center px-5 h-[42px] gap-x-3 border-b border-[var(--border-subtle)] text-[12.5px] hover:bg-[var(--bg-hover)] transition-colors
-                                  {{ $isOverdueAlarm ? 'bg-[var(--red-50)] hover:bg-[var(--red-100)] border-l-2 border-l-[var(--red-500)] pl-[18px]' : ($isClientReplied ? 'bg-[var(--amber-50)] hover:bg-[var(--amber-100)] border-l-2 border-l-[var(--amber-500)] pl-[18px]' : '') }}"
+                                  {{ $isOverdueAlarm ? 'bg-[var(--red-50)] hover:bg-[var(--red-100)] border-l-2 border-l-[var(--red-500)] pl-[18px]' : ($isInfoFlag ? 'bg-[var(--amber-50)] hover:bg-[var(--amber-100)] border-l-2 border-l-[var(--amber-500)] pl-[18px]' : '') }}"
                            style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 170px 140px 160px 100px 80px 32px;">
 
                             {{-- checkbox (Phase 2) --}}
