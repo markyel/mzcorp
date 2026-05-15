@@ -111,6 +111,10 @@
                    class="mono text-sky-700 hover:text-sky-900 hover:underline"
                    title="Открыть на mylift.ru">{{ $mylinkSku }} ↗</a>
             @endif
+            @if($ci?->name)
+                <span class="text-fg-2 truncate"
+                      title="Название из каталога MyLift: {{ $ci->name }}">📦 «{{ $ci->name }}»</span>
+            @endif
             @if($item->supplier_note)
                 <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-50 text-amber-700 font-medium text-[10.5px]">
                     {{ \Illuminate\Support\Str::limit($item->supplier_note, 50) }}

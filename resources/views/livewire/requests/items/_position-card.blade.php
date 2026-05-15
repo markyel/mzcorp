@@ -151,6 +151,11 @@
                        class="mono text-sky-700 hover:text-sky-900 hover:underline"
                        title="Открыть на mylift.ru">{{ $mylinkSku }} ↗</a>
                 @endif
+                @if($ci?->name)
+                    <span class="text-border-strong">·</span>
+                    <span class="text-fg-2 truncate max-w-[440px]"
+                          title="Название из каталога MyLift: {{ $ci->name }}">📦 «{{ $ci->name }}»</span>
+                @endif
             </div>
         </div>
 

@@ -131,8 +131,11 @@ enum RequestStatus: string
     {
         return match ($this) {
             self::Pending => [self::New, self::Assigned, self::ClosedLost],
-            self::New => [self::Assigned, self::InProgress, self::AwaitingClientClarification, self::ClosedLost],
-            self::Assigned => [self::InProgress, self::AwaitingClientClarification, self::ClosedLost],
+            self::New => [self::Assigned, self::InProgress, self::AwaitingClientClarification, self::Quoted, self::ClosedLost],
+            // Phase 2: добавлен Quoted — менеджер может сразу отправить КП
+            // без формального «Начать работу». Auto-detect КП работает
+            // на любом активном статусе.
+            self::Assigned => [self::InProgress, self::AwaitingClientClarification, self::Quoted, self::ClosedLost],
             self::InProgress => [
                 self::AwaitingClientClarification,
                 self::Quoted,
@@ -140,6 +143,7 @@ enum RequestStatus: string
             ],
             self::AwaitingClientClarification => [
                 self::InProgress,
+                self::Quoted,
                 self::ClosedLost,
             ],
             self::Quoted => [
