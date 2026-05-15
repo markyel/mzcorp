@@ -125,6 +125,50 @@ class MailDeliverToManagerService
             }
         }
 
+        // Pre-create запись в email_messages — чтобы будущий IMAP-sync
+        // личного ящика НЕ создавал новый row через MessagePersister
+        // (он найдёт existing по uniq (mailbox_id, folder, message_id)).
+        // MailRouter таким образом не вызывается, gpt-4o categorize не
+        // дёргается, дубля Request не возникает. Sync ТОЛЬКО заполнит
+        // imap_uid + imap_flags + raw_source у этой записи.
+        if ($message->message_id) {
+            $alreadyPreCreated = \App\Models\EmailMessage::query()
+                ->where('mailbox_id', $managerMailbox->id)
+                ->where('folder', 'INBOX')
+                ->where('message_id', $message->message_id)
+                ->exists();
+            if (! $alreadyPreCreated) {
+                \App\Models\EmailMessage::create([
+                    'mailbox_id' => $managerMailbox->id,
+                    'folder' => 'INBOX',
+                    'direction' => \App\Enums\MailDirection::Inbound->value,
+                    'imap_uid' => null,
+                    'message_id' => $message->message_id,
+                    'in_reply_to' => $message->in_reply_to,
+                    'references_header' => $message->references_header,
+                    'subject' => $message->subject,
+                    'from_email' => $message->from_email,
+                    'from_name' => $message->from_name,
+                    'to_recipients' => $message->to_recipients,
+                    'cc_recipients' => $message->cc_recipients,
+                    'sent_at' => $message->sent_at,
+                    'body_plain' => $message->body_plain,
+                    'body_html' => $message->body_html,
+                    'raw_source' => null,
+                    'headers' => $message->headers,
+                    'related_request_id' => $message->related_request_id,
+                    'category' => $message->category,
+                    'category_confidence' => $message->category_confidence,
+                    'category_intent' => $message->category_intent,
+                    'category_reasoning' => 'Cross-mailbox copy of msg#' . $message->id,
+                    'categorized_at' => $message->categorized_at ?: now(),
+                    'detected_artifacts' => [
+                        'cross_mailbox_copy_of' => $message->id,
+                    ],
+                ]);
+            }
+        }
+
         // Audit: фиксируем доставку, чтобы повторный dispatch не задвоил.
         $deliveries[] = [
             'user_id' => $manager->id,

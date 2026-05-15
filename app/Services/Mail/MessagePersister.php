@@ -65,6 +65,20 @@ class MessagePersister
                         'raw_source' => $this->cleanString((string) $msg->getRawBody()),
                     ]);
                 }
+                // Cross-mailbox delivery: pre-create'ный нашим
+                // MailDeliverToManagerService row в личном ящике менеджера.
+                // Sync видит existing → только заполняем UID + flags +
+                // raw_source. MailRouter (через return null) не запускается,
+                // gpt-4o categorize/linker не тратятся, дубля Request нет.
+                if ($direction === MailDirection::Inbound
+                    && $existing->direction === MailDirection::Inbound
+                    && $existing->imap_uid === null) {
+                    $existing->update([
+                        'imap_uid' => $msg->getUid(),
+                        'imap_flags' => $this->extractFlags($msg),
+                        'raw_source' => $this->cleanString((string) $msg->getRawBody()),
+                    ]);
+                }
                 return null;
             }
 

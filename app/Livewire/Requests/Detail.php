@@ -120,6 +120,11 @@ class Detail extends Component
         // Phase 1.9: visibleTo фильтрует чужие черновики (свои показываются).
         $this->thread = EmailMessage::query()
             ->where('related_request_id', $this->request->id)
+            // Скрываем cross-mailbox копии — то же письмо, доставленное
+            // в личный ящик менеджера через DeliverToManagerInboxJob
+            // (detected_artifacts.cross_mailbox_copy_of). Показываем
+            // только оригинал, чтобы в треде не дублировалось.
+            ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
             ->visibleTo($user)
             ->with([
                 'attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline',

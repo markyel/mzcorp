@@ -107,6 +107,47 @@ class MailRouter
             return;
         }
 
+        // Cross-mailbox дедуп — ДО любых LLM-шагов. Когда мы APPEND'или
+        // оригинал письма в личный ящик менеджера (DeliverToManagerInboxJob),
+        // sync личного ящика создаёт ВТОРОЙ row в email_messages с тем же
+        // Message-ID. Без этого guard'а MailRouter гнал бы его повторно
+        // через gpt-4o categorize → gpt-4o-mini linker AI → parser:
+        // лишние $0.01+/копия + риск создать дубль Request.
+        //
+        // Логика: если есть РАНЕЕ сохранённый EmailMessage с тем же
+        // message_id и related_request_id != null — это копия известного
+        // письма. Наследуем category + related_request_id, выходим.
+        if ($message->message_id) {
+            $sameIdLinked = EmailMessage::query()
+                ->where('message_id', $message->message_id)
+                ->where('id', '!=', $message->id)
+                ->whereNotNull('related_request_id')
+                ->orderBy('id')
+                ->first();
+            if ($sameIdLinked) {
+                $artifacts = (array) ($message->detected_artifacts ?? []);
+                $artifacts['cross_mailbox_copy_of'] = $sameIdLinked->id;
+                $message->forceFill([
+                    'related_request_id' => $sameIdLinked->related_request_id,
+                    'category' => $sameIdLinked->category,
+                    'category_confidence' => $sameIdLinked->category_confidence,
+                    'category_intent' => $sameIdLinked->category_intent,
+                    'category_reasoning' => 'Cross-mailbox copy of msg#' . $sameIdLinked->id,
+                    'categorized_at' => $sameIdLinked->categorized_at ?: now(),
+                    'detected_artifacts' => $artifacts,
+                ])->save();
+
+                Log::info('MailRouter: cross-mailbox copy — skip pipeline', [
+                    'email_message_id' => $message->id,
+                    'parent_email_message_id' => $sameIdLinked->id,
+                    'related_request_id' => $sameIdLinked->related_request_id,
+                    'message_id' => $message->message_id,
+                ]);
+
+                return;
+            }
+        }
+
         // Phase 1.8c: категоризация (LazyLift drop-in). Заполняет
         // email_messages.category — для дальнейших шагов (linker уровня 4
         // использует это как сигнал, парсер позиций — как gate).
