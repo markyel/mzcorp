@@ -58,12 +58,18 @@
                                      class="w-full h-full object-cover"
                                      onerror="this.style.display='none'; this.parentElement.classList.add('flex','items-center','justify-center'); this.parentElement.innerHTML += '<span class=\'text-fg-3 text-[9px]\'>нет</span>';">
                             </a>
+                            {{-- Preview: object-cover, чтобы маленькая
+                                 исходная картинка (mylift.ru отдаёт ~100px)
+                                 заполняла бокс целиком — иначе выглядит
+                                 «практически такого же размера, как миниатюра».
+                                 Цена: обрезка краёв. Точную картинку оператор
+                                 видит кликом по миниатюре (новая вкладка). --}}
                             <div x-show="show" x-cloak x-transition.opacity
-                                 class="absolute z-50 left-12 top-0 w-72 h-72 rounded-lg shadow-xl border border-border-subtle bg-white p-1 pointer-events-none">
+                                 class="absolute z-50 left-12 top-0 w-96 h-96 rounded-lg shadow-xl border border-border-subtle bg-white p-1 pointer-events-none">
                                 <img src="{{ $cat->photo_url }}"
                                      alt=""
                                      referrerpolicy="no-referrer"
-                                     class="w-full h-full object-contain">
+                                     class="w-full h-full object-cover rounded">
                             </div>
                         </div>
                     @else
