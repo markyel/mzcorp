@@ -190,6 +190,26 @@ return [
             // Liftway-saas: LZ-REQ-NNNN — общий маркер запроса в их системе.
             '/\bLZ-REQ-\d+\b/u',
         ],
+
+        /*
+        | Trusted partners: партнёрские системы, чьи входящие письма мы
+        | хотим принудительно квалифицировать как client_request, минуя
+        | LLM-категоризатор. Категоризатор формально прав («это запрос
+        | от маркетплейса, не клиент»), но бизнес-логика: каждая такая
+        | заявка — полноценный client_request для MyLift (менеджер по
+        | ней пишет КП).
+        |
+        | Match: sender_pattern AND marker_pattern (оба должны совпасть).
+        | Action: category=client_request, confidence=1.0, intent=null,
+        |         reasoning="Trusted partner override: <name>".
+        */
+        'trusted_partners' => [
+            [
+                'name' => 'Liftway-saas',
+                'sender_pattern' => '/@(liftway\.store|liftway\.ru)$/i',
+                'marker_pattern' => '/\bLZ-REQ-\d+\b/u',
+            ],
+        ],
     ],
 
     /*

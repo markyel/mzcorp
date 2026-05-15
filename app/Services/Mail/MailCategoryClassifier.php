@@ -32,6 +32,7 @@ class MailCategoryClassifier
     public function __construct(
         private readonly OpenAIChatService $openai,
         private readonly CategorizeIncomingPrompt $prompt,
+        private readonly TrustedPartnerOverride $partnerOverride,
     ) {
     }
 
@@ -46,6 +47,36 @@ class MailCategoryClassifier
                 'confidence' => $message->category_confidence !== null ? (float) $message->category_confidence : null,
                 'intent' => $message->category_intent,
                 'reasoning' => $message->category_reasoning,
+            ];
+        }
+
+        // Trusted-partner short-circuit: для known партнёрских систем
+        // (Liftway-saas) детерминированно ставим client_request, минуя LLM.
+        // Категоризатор формально прав («запрос от маркетплейса»), но
+        // бизнес-факт: это client_request для нашего workflow.
+        $override = $this->partnerOverride->resolve($message);
+        if ($override !== null) {
+            $category = $override['category'];
+            $reasoning = 'Trusted partner override: ' . $override['partner'];
+            $message->forceFill([
+                'category' => $category->value,
+                'category_confidence' => 1.0,
+                'category_intent' => null,
+                'category_reasoning' => $reasoning,
+                'categorized_at' => now(),
+            ])->save();
+
+            Log::info('MailCategoryClassifier: trusted partner override', [
+                'email_message_id' => $message->id,
+                'partner' => $override['partner'],
+                'category' => $category->value,
+            ]);
+
+            return [
+                'category' => $category,
+                'confidence' => 1.0,
+                'intent' => null,
+                'reasoning' => $reasoning,
             ];
         }
 

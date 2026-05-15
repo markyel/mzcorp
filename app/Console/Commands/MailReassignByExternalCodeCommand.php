@@ -2,6 +2,8 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\MailDirection;
+use App\Enums\RequestStatus;
 use App\Models\EmailMessage;
 use App\Models\Request;
 use Illuminate\Console\Command;
@@ -10,39 +12,85 @@ use Illuminate\Support\Facades\Log;
 /**
  * Backfill: пересвязать письма с внешними маркерами (LZ-REQ-NNNN и др.)
  * на «правильного родителя» — самое раннее EmailMessage с тем же маркером
- * и непустым related_request_id.
+ * и непустым related_request_id (по id ASC).
  *
- * Появилась после введения Level 3.5 matchByExternalCode в InboundReplyLinker
- * (commit 33a3252) — для тех писем, что пришли ДО фикса и попали к не своим
- * заявкам через Level 4 fallback.
+ * Алгоритм:
+ *   1. Pre-pass: для каждого уникального маркера определить parent_request_id
+ *      ОДИН раз — это самое раннее EmailMessage с этим маркером и не пустой
+ *      related_request_id. Используем этот target для ВСЕХ писем с маркером
+ *      (идемпотентно, без пинг-понга).
+ *   2. Pass: для каждого письма с маркером, если current related_request_id
+ *      != target — перепривязать (с учётом защит).
  *
- *   php artisan mail:reassign-by-external-code            # dry-run
- *   php artisan mail:reassign-by-external-code --apply    # реально меняет
- *   php artisan mail:reassign-by-external-code --apply --limit=50
+ * Защиты (все по умолчанию ВКЛ):
+ *   --keep-outbound   — не двигать наши исходящие (direction=outbound)
+ *   --keep-active     — не двигать письма с current Request в активном статусе
+ *                       (работа менеджера уже идёт, потеряем контекст)
+ *   --only-if-newer   — не двигать письмо, чей id меньше id parent'а
+ *                       (защита от обратной хронологии)
+ *   --code=LZ-REQ-N   — точечный режим для одного маркера
+ *
+ *   php artisan mail:reassign-by-external-code                       # dry-run, все защиты
+ *   php artisan mail:reassign-by-external-code --apply               # реально, с защитами
+ *   php artisan mail:reassign-by-external-code --code=LZ-REQ-1182    # один маркер
+ *   php artisan mail:reassign-by-external-code --no-keep-active      # снять защиту active
  */
 class MailReassignByExternalCodeCommand extends Command
 {
     protected $signature = 'mail:reassign-by-external-code
         {--apply : Реально перепривязать, иначе только показать что планируется}
-        {--limit=0 : Ограничить число обработанных писем (0 = все)}';
+        {--limit=0 : Ограничить число обработанных писем (0 = все)}
+        {--code= : Точечный режим — обрабатывать только письма с этим маркером}
+        {--keep-outbound=1 : Не двигать наши исходящие (default ON)}
+        {--keep-active=1 : Не двигать письма привязанные к active Request (default ON)}
+        {--only-if-newer=1 : Не двигать письма старше parent (default ON)}';
 
     protected $description = 'Перепривязать письма с external-маркерами (LZ-REQ-NNNN) к правильному родителю';
+
+    private const ACTIVE_STATUSES = [
+        RequestStatus::InProgress,
+        RequestStatus::Assigned,
+        RequestStatus::Quoted,
+        RequestStatus::UnderReview,
+        RequestStatus::AwaitingInvoice,
+        RequestStatus::AwaitingClientClarification,
+        RequestStatus::Invoiced,
+        RequestStatus::Paid,
+    ];
 
     public function handle(): int
     {
         $patterns = (array) config('services.mail.external_codes', []);
         if (empty($patterns)) {
-            $this->warn('Нет паттернов в config(services.mail.external_codes). Нечего делать.');
+            $this->warn('Нет паттернов в config(services.mail.external_codes).');
 
             return self::SUCCESS;
         }
 
         $apply = (bool) $this->option('apply');
         $limit = max(0, (int) $this->option('limit'));
+        $targetCode = trim((string) $this->option('code'));
+        $keepOutbound = (bool) $this->option('keep-outbound');
+        $keepActive = (bool) $this->option('keep-active');
+        $onlyIfNewer = (bool) $this->option('only-if-newer');
 
-        // Собираем все письма, в subject/body которых есть хотя бы один маркер.
-        // Используем общий ILIKE по 'LZ-REQ-' (упрощение для текущих паттернов).
-        // Если паттерны станут разнородными — переделать.
+        // Шаг 1: pre-compute mapping code → earliest parent message.
+        // Один запрос на маркер, потом применяем target ко всем письмам.
+        $this->info('Шаг 1: сбор parent-mapping по маркерам…');
+        $codeToParent = $this->buildCodeToParentMapping($patterns, $targetCode);
+        $this->info('Найдено уникальных маркеров с parent: ' . count($codeToParent));
+
+        if (empty($codeToParent)) {
+            $this->warn('Не нашлось ни одного маркера с привязанным родителем. Нечего делать.');
+
+            return self::SUCCESS;
+        }
+
+        $activeStatusValues = array_map(fn (RequestStatus $s) => $s->value, self::ACTIVE_STATUSES);
+
+        // Шаг 2: пройти по всем письмам с маркером и решить про reassign.
+        $this->info('Шаг 2: проход по письмам…');
+
         $query = EmailMessage::query()
             ->where(function ($q) {
                 $q->where('subject', 'ilike', '%LZ-REQ-%')
@@ -50,36 +98,80 @@ class MailReassignByExternalCodeCommand extends Command
             })
             ->orderBy('id');
 
-        $total = (clone $query)->count();
-        $this->info("Найдено писем с external-маркерами: {$total}");
-
+        if ($targetCode !== '') {
+            $needle = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $targetCode) . '%';
+            $query->where(function ($q) use ($needle) {
+                $q->where('subject', 'ilike', $needle)
+                    ->orWhere('body_plain', 'ilike', $needle);
+            });
+        }
         if ($limit > 0) {
             $query->limit($limit);
-            $this->info("Лимит обработки: {$limit}");
         }
 
         $changed = 0;
         $kept = 0;
+        $skipOutbound = 0;
+        $skipActive = 0;
+        $skipNewer = 0;
         $orphan = 0;
-        $noCode = 0;
 
-        $query->chunkById(200, function ($messages) use (&$changed, &$kept, &$orphan, &$noCode, $apply, $patterns) {
+        $query->chunkById(200, function ($messages) use (
+            &$changed, &$kept, &$skipOutbound, &$skipActive, &$skipNewer, &$orphan,
+            $codeToParent, $apply, $patterns, $keepOutbound, $keepActive, $onlyIfNewer,
+            $activeStatusValues,
+        ) {
             foreach ($messages as $msg) {
                 $codes = $this->extractCodes((string) $msg->subject . "\n" . (string) $msg->body_plain, $patterns);
                 if (empty($codes)) {
-                    $noCode++;
-
                     continue;
                 }
 
-                $parentRequestId = $this->findParentRequestId($msg, $codes);
-                if ($parentRequestId === null) {
+                // target — самый ранний parent среди всех маркеров письма.
+                $target = null;
+                $targetCodeMatched = null;
+                foreach (array_keys($codes) as $code) {
+                    if (! isset($codeToParent[$code])) {
+                        continue;
+                    }
+                    [$parentId, $parentRequestId] = $codeToParent[$code];
+                    if ($target === null || $parentId < $target[0]) {
+                        $target = [$parentId, $parentRequestId];
+                        $targetCodeMatched = $code;
+                    }
+                }
+
+                if ($target === null) {
                     $orphan++;
                     continue;
                 }
 
+                [$parentMsgId, $parentRequestId] = $target;
+
                 if ($msg->related_request_id === $parentRequestId) {
                     $kept++;
+                    continue;
+                }
+
+                // Защита: не двигаем outbound.
+                if ($keepOutbound && $msg->direction === MailDirection::Outbound) {
+                    $skipOutbound++;
+                    continue;
+                }
+
+                // Защита: не двигаем письма привязанные к active Request.
+                if ($keepActive && $msg->related_request_id !== null) {
+                    $currentStatus = Request::query()->whereKey($msg->related_request_id)->value('status');
+                    if (in_array($currentStatus, $activeStatusValues, true)) {
+                        $skipActive++;
+                        continue;
+                    }
+                }
+
+                // Защита: не двигаем письмо чей id меньше parent'а
+                // (защита от обратной хронологии).
+                if ($onlyIfNewer && $msg->id < $parentMsgId) {
+                    $skipNewer++;
                     continue;
                 }
 
@@ -87,11 +179,10 @@ class MailReassignByExternalCodeCommand extends Command
                 $fromCode = $from ? Request::query()->whereKey($from)->value('internal_code') : 'NULL';
                 $toCode = Request::query()->whereKey($parentRequestId)->value('internal_code') ?: '?';
 
-                $codesStr = implode(',', array_keys($codes));
                 $this->line(sprintf(
                     '  #%d  [%s]  %s  →  %s',
                     $msg->id,
-                    $codesStr,
+                    $targetCodeMatched,
                     $fromCode ?: 'NULL',
                     $toCode,
                 ));
@@ -105,19 +196,71 @@ class MailReassignByExternalCodeCommand extends Command
 
         $this->newLine();
         $this->info(sprintf(
-            'Итого: будет перепривязано=%d, оставлено как есть=%d, осиротевших=%d, без маркера=%d',
+            'Итого: будет перепривязано=%d, без изменений=%d, осиротевших=%d',
             $changed,
             $kept,
             $orphan,
-            $noCode,
+        ));
+        $this->line(sprintf(
+            'Пропущено защитами: outbound=%d, active-status=%d, only-newer=%d',
+            $skipOutbound,
+            $skipActive,
+            $skipNewer,
         ));
 
         if (! $apply && $changed > 0) {
-            $this->line('');
-            $this->line('Это был dry-run. Запустите с --apply для реального изменения.');
+            $this->newLine();
+            $this->line('Это dry-run. Запустите с --apply для реального изменения.');
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Pre-pass: для каждого уникального external-маркера найти самое
+     * раннее EmailMessage (по id ASC) с этим маркером и
+     * related_request_id IS NOT NULL.
+     *
+     * @param  array<int, string>  $patterns
+     * @return array<string, array{0:int, 1:int}>  code => [parent_msg_id, parent_request_id]
+     */
+    private function buildCodeToParentMapping(array $patterns, string $filterCode = ''): array
+    {
+        // Собираем все уникальные маркеры.
+        $codes = [];
+
+        $q = EmailMessage::query()
+            ->whereNotNull('related_request_id')
+            ->where(function ($w) {
+                $w->where('subject', 'ilike', '%LZ-REQ-%')
+                    ->orWhere('body_plain', 'ilike', '%LZ-REQ-%');
+            });
+        if ($filterCode !== '') {
+            $needle = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $filterCode) . '%';
+            $q->where(function ($w) use ($needle) {
+                $w->where('subject', 'ilike', $needle)
+                    ->orWhere('body_plain', 'ilike', $needle);
+            });
+        }
+
+        $q->orderBy('id')->chunkById(200, function ($messages) use (&$codes, $patterns) {
+            foreach ($messages as $m) {
+                $h = (string) $m->subject . "\n" . (string) $m->body_plain;
+                foreach ($patterns as $p) {
+                    if (preg_match_all($p, $h, $mm)) {
+                        foreach (array_unique($mm[0]) as $code) {
+                            // Уже встречали — пропускаем (этот msg НЕ самый ранний).
+                            if (isset($codes[$code])) {
+                                continue;
+                            }
+                            $codes[$code] = [$m->id, $m->related_request_id];
+                        }
+                    }
+                }
+            }
+        });
+
+        return $codes;
     }
 
     /**
@@ -136,38 +279,6 @@ class MailReassignByExternalCodeCommand extends Command
         }
 
         return $codes;
-    }
-
-    /**
-     * Найти request_id «правильного родителя» — самое раннее EmailMessage
-     * с тем же маркером и непустым related_request_id (исключая сам $msg).
-     *
-     * @param  array<string, true>  $codes
-     */
-    private function findParentRequestId(EmailMessage $msg, array $codes): ?int
-    {
-        $best = null;
-        foreach (array_keys($codes) as $code) {
-            $parent = EmailMessage::query()
-                ->whereNotNull('related_request_id')
-                ->where('id', '!=', $msg->id)
-                ->where(function ($q) use ($code) {
-                    $needle = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $code) . '%';
-                    $q->where('subject', 'ilike', $needle)
-                        ->orWhere('body_plain', 'ilike', $needle);
-                })
-                ->orderBy('id')
-                ->first(['id', 'related_request_id']);
-
-            if ($parent === null) {
-                continue;
-            }
-            if ($best === null || $parent->id < $best->id) {
-                $best = $parent;
-            }
-        }
-
-        return $best?->related_request_id;
     }
 
     /**
