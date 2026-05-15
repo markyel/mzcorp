@@ -48,6 +48,22 @@ class MailFolderRouter
         $shortName = $this->cyrillicToLatin($shortName);
         $shortName = mb_substr($shortName, 0, 40);
 
+        // Fallback safety: после транслитерации должна остаться хотя бы
+        // одна латинская буква. Иначе папка получится «MZ|3» (числовой
+        // suffix из имени типа «РОП 3») — это не identifies user в Yandex
+        // web UI. Берём local-part email'а.
+        if ($manager && ! preg_match('/[A-Za-z]/', $shortName)) {
+            $local = (string) strstr((string) $manager->email, '@', true);
+            if ($local === '') {
+                $local = (string) $manager->email;
+            }
+            $shortName = preg_replace('/[^A-Za-z0-9._-]+/', '', $local) ?? $local;
+            $shortName = mb_substr($shortName, 0, 40);
+            if ($shortName === '') {
+                $shortName = 'user' . $manager->id;
+            }
+        }
+
         $client = null;
         try {
             $client = $this->connector->imapClient($mailbox);

@@ -3,29 +3,28 @@
 namespace App\Services\Request;
 
 use App\Enums\RequestStatus;
+use App\Jobs\Mail\RouteMailToManagerJob;
 use App\Models\Request as RequestModel;
 use App\Models\RequestAssignment;
 use App\Models\User;
-use App\Services\Mail\MailFolderRouter;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 /**
  * Ручное переподчинение заявки другому менеджеру.
  *
  * Триггер — РОП/директор из карточки заявки. Пишет audit-запись в
- * `request_assignments` и (если есть привязанное письмо) перекладывает
- * оригинал в IMAP-подпапку нового менеджера через MailFolderRouter.
+ * `request_assignments` и (если есть привязанное письмо) ставит в
+ * очередь IMAP-move оригинала в подпапку нового менеджера.
+ *
+ * IMAP-move async через `RouteMailToManagerJob` — Yandex 360 IMAP COPY
+ * держит соединение 5–10 секунд, синхронный вызов блокировал Livewire
+ * UI и кнопка «зависала».
  *
  * AssignmentService.autoAssign не используем — он содержит sticky/round-robin
  * логику для НОВЫХ заявок и пропустит ручной выбор оператора.
  */
 class ReassignService
 {
-    public function __construct(
-        private readonly MailFolderRouter $folderRouter,
-    ) {}
-
     public function reassign(
         RequestModel $request,
         User $newAssignee,
@@ -52,20 +51,11 @@ class ReassignService
             ]);
         });
 
-        // Перекладывание оригинала в IMAP-папку нового менеджера — best-effort.
-        // IMAP-сбой (Yandex недоступен, токен протух) не должен валить
-        // транзакцию переподчинения; реассайн в БД важнее.
+        // IMAP-move async: ReassignService возвращает управление сразу,
+        // воркер сделает COPY в Yandex 360 в фоне.
         $email = $request->emailMessage;
         if ($email) {
-            try {
-                $this->folderRouter->routeToManager($email, $newAssignee);
-            } catch (\Throwable $e) {
-                Log::warning('ReassignService: IMAP folder route failed', [
-                    'request_id' => $request->id,
-                    'new_assignee' => $newAssignee->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+            RouteMailToManagerJob::dispatch($email->id, $newAssignee->id);
         }
 
         return $assignment;

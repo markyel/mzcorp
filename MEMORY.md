@@ -97,6 +97,7 @@ CLI backfill + duplicate-detector (mail:reassign-by-external-code + mail:detect-
 ReplyParseGate (signal-based отрезание пустых reply'ев от парсера) + confidence-based suggestion для item-create из reply (auto/suggest/skip, pending UI плашка, Activity audit) + переименование «слияние дубликата» → «объединение заявок» — **закрыт 2026-05-22.**
 Activity-расширение (все письма треда + новые типы events: merge_from/merged_into / items_parsed_from_reply / suggestion_applied/rejected) + placeholder safety net в ClarificationPanel + расширенный blockquote-selector в collapseQuotedBlocks (Gmail/Yahoo/fallback any blockquote) — **закрыт 2026-05-22.**
 InternalSenderDetector + Empty-content guard + РОП = full request-handler (Role::requestHandlerRoles в AssignmentService/ManagerUnavailabilityService/ReassignDialog/Dashboard/cron) — **закрыт 2026-05-15.**
+RouteMailToManagerJob (IMAP-move в очередь, reassign в UI мгновенный вместо 5–10s sync wait) + shortName fallback на email local-part когда транслитерация без латинских букв (фикс «MZ|3» для РОП'а с именем типа «РОП 3») — **закрыт 2026-05-15.**
 Экспорт в 1С, KB curator UI, PriceRefreshService — **за пределами текущей фазы.**
 
 ## Открытые вопросы / TODO
