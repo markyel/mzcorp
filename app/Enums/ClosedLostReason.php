@@ -22,6 +22,7 @@ enum ClosedLostReason: string
     case InvoiceUnpaid = 'invoice_unpaid';
     case InvoiceCancelled = 'invoice_cancelled';
     case ManualOther = 'manual_other';
+    case Duplicate = 'duplicate';
 
     public function label(): string
     {
@@ -37,6 +38,7 @@ enum ClosedLostReason: string
             self::InvoiceUnpaid => 'Счёт не оплачен в срок',
             self::InvoiceCancelled => 'Счёт отменён',
             self::ManualOther => 'Закрыто РОПом вручную',
+            self::Duplicate => 'Дубликат — слита с другой заявкой',
         };
     }
 

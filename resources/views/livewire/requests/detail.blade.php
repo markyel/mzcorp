@@ -265,6 +265,16 @@
                                 <span class="opacity-75 normal-case font-normal">· {{ $daysSinceReanimate }} дн.</span>
                             </span>
                         @endif
+
+                        {{-- Слияние: эта заявка — winner (получила дубликаты). --}}
+                        @php $mergedFromCount = $req->mergedFrom()->count(); @endphp
+                        @if($mergedFromCount > 0)
+                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-sky-50 text-sky-700 text-[10.5px] font-semibold uppercase tracking-wider"
+                                  title="В эту заявку слиты дубликаты — {{ $mergedFromCount }} шт.">
+                                ⊌ слитые дубликаты
+                                <span class="opacity-75">×{{ $mergedFromCount }}</span>
+                            </span>
+                        @endif
                     </span>
                 </div>
                 <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle">
@@ -505,6 +515,19 @@
                         @if($req->closed_lost_comment)
                             <div class="text-fg-2 text-[11.5px] mt-1 whitespace-pre-wrap">{{ $req->closed_lost_comment }}</div>
                         @endif
+                        @if($req->merged_into_id)
+                            @php $mergedInto = \App\Models\Request::find($req->merged_into_id); @endphp
+                            @if($mergedInto)
+                                <div class="mt-2 pt-2 border-t border-red-300/40 text-[12px]">
+                                    <span class="text-fg-3">Слита в:</span>
+                                    <a href="{{ route('requests.show', $mergedInto) }}" wire:navigate
+                                       class="mono text-[var(--accent)] hover:underline">{{ $mergedInto->internal_code }}</a>
+                                    @if($req->merged_at)
+                                        <span class="text-fg-4 text-[11px]">· {{ $req->merged_at->format('d.m.Y H:i') }}</span>
+                                    @endif
+                                </div>
+                            @endif
+                        @endif
                     @endif
                 </div>
                 @if($canReassign)
@@ -644,6 +667,12 @@
                 {{-- Disabled buttons (для напоминания — Phase 2/3). --}}
                 <button class="btn btn-sm" disabled title="Доступно в Phase 2">🧾 Сформировать КП</button>
                 <button class="btn btn-sm" disabled title="Доступно в Phase 3">🔄 Refresh цен (поставщики)</button>
+            @endif
+
+            {{-- Слияние дубликата (Phase merge). Owner/acting/privileged.
+                 Кнопка показывается только когда заявка active (есть с чем сливать). --}}
+            @if(($canManage || $canReassign) && ! in_array($req->status, [$RS::Paused, $RS::ClosedWon, $RS::ClosedLost, $RS::Pending, $RS::Paid], true))
+                <livewire:requests.merge-dialog :request="$req" wire:key="merge-{{ $req->id }}" />
             @endif
 
             {{-- Модальные диалоги (single-instance per Detail). --}}

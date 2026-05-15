@@ -55,6 +55,9 @@ class Request extends Model
         // Pool re-sort: denormalized timestamp + тип последнего события.
         'last_activity_at',
         'last_activity_type',
+        // Слияние заявок (RequestMergeService).
+        'merged_into_id',
+        'merged_at',
     ];
 
     protected function casts(): array
@@ -73,7 +76,27 @@ class Request extends Model
             'attention_manual_by_user_id' => 'integer',
             'last_activity_at' => 'datetime',
             'last_activity_type' => \App\Enums\RequestActivityType::class,
+            'merged_into_id' => 'integer',
+            'merged_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Заявка, в которую эту слили (если эта — loser слияния).
+     */
+    public function mergedInto(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'merged_into_id');
+    }
+
+    /**
+     * Заявки, которые слили в эту (если эта — winner слияния).
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany
+     */
+    public function mergedFrom()
+    {
+        return $this->hasMany(self::class, 'merged_into_id');
     }
 
     public function emailMessage(): BelongsTo
