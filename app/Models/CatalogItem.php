@@ -22,12 +22,19 @@ class CatalogItem extends Model
         'name',
         'name_en',
         'unit_name',
+        // Полный список «Узлы» из MDB (`;`-split). Скалярный unit_name = первый non-empty.
+        'units',
+        'placement',
         'part_type',
         'brand',
         'brand_article',
         // Нормализованная форма (uppercase + удалены [\s\-_./]) для быстрого
         // article-match в use-case B (см. миграцию add_brand_article_normalized).
         'brand_article_normalized',
+        // Полные списки «Бренды» и «Артикулы» (1:1 по индексу). brand/brand_article =
+        // primary-OEM-выбор из этих списков (см. CatalogImportService::pickPrimaryOem).
+        'brands',
+        'articles',
         'form_factor',
         'size_a',
         'size_b',
@@ -37,7 +44,16 @@ class CatalogItem extends Model
         'size_f',
         'weight',
         'price',
+        // «ЦенаМин» — минимальная отпускная (со скидкой).
+        'price_min',
+        // «Актуальность» из MDB: можно ли транслировать цену клиенту.
+        'is_price_actual',
         'stock_available',
+        // «СрокПоставки» в днях.
+        'lead_time_days',
+        'photo_url',
+        'description',
+        'comment',
         'source_hash',
         'is_active',
         'last_imported_at',
@@ -48,6 +64,10 @@ class CatalogItem extends Model
     {
         return [
             'is_active' => 'boolean',
+            'is_price_actual' => 'boolean',
+            'brands' => 'array',
+            'articles' => 'array',
+            'units' => 'array',
             'last_imported_at' => 'datetime',
             'size_a' => 'decimal:3',
             'size_b' => 'decimal:3',
@@ -57,7 +77,9 @@ class CatalogItem extends Model
             'size_f' => 'decimal:3',
             'weight' => 'decimal:3',
             'price' => 'decimal:2',
+            'price_min' => 'decimal:2',
             'stock_available' => 'integer',
+            'lead_time_days' => 'integer',
         ];
     }
 

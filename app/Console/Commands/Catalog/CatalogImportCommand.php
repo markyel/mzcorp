@@ -37,31 +37,48 @@ class CatalogImportCommand extends Command
 
     protected $description = 'Phase 2: загрузить snapshot каталога из локального CSV/JSON.';
 
-    /** @var array<string, string> Маппинг русских заголовков MDB → канонические ключи API */
+    /**
+     * Маппинг русских заголовков MDB → канонические ключи payload'а.
+     *
+     * Ключи с суффиксом `_raw` несут сырую строку из CSV и парсятся уже в
+     * CatalogImportService (мультиполя `;`-split, размеры «A=240;B=55;C=18»,
+     * «Да»/«Нет»). Это держит CSV-парсер дурацки-простым (cell-in/cell-out)
+     * и переносит всю доменную нормализацию в одно место.
+     *
+     * Колонки «Ссылка» и «CRC» из MDB сознательно НЕ маппим — нет потребителя.
+     *
+     * @var array<string, string>
+     */
     private const HEADER_MAPPING = [
         'Артикул' => 'sku',
         'Наименование' => 'name',
         'НаименованиеENG' => 'name_en',
-        'Узел' => 'unit_name',
+        'Бренды' => 'brands_raw',
+        'Артикулы' => 'articles_raw',
+        'Узлы' => 'units_raw',
+        'Размещение' => 'placement',
         'ТипЗапчасти' => 'part_type',
-        'Бренд' => 'brand',
-        'БрендАртикул' => 'brand_article',
         'ФормФактор' => 'form_factor',
-        'РазмерA' => 'size_a',
-        'РазмерB' => 'size_b',
-        'РазмерC' => 'size_c',
-        'РазмерD' => 'size_d',
-        'РазмерE' => 'size_e',
-        'РазмерF' => 'size_f',
+        'Размеры' => 'sizes_raw',
         'Вес' => 'weight',
         'Цена' => 'price',
-        'ЗапасыНаСкладеСвободныйОстаток' => 'stock_available',
+        'ЦенаМин' => 'price_min',
+        'Актуальность' => 'is_price_actual_raw',
+        'СвободныйОстаток' => 'stock_available',
+        'СрокПоставки' => 'lead_time_days',
+        'Фото' => 'photo_url',
+        'Комментарий' => 'comment',
+        'Описание' => 'description',
     ];
 
-    /** @var array<string> Поля, где русская запятая (12,5) должна заменяться на точку */
+    /** @var array<string> Скалярные numeric поля: русская запятая (12,5) → точка, удаление NBSP/пробелов */
     private const NUMERIC_KEYS = [
-        'size_a', 'size_b', 'size_c', 'size_d', 'size_e', 'size_f',
-        'weight', 'price',
+        'weight', 'price', 'price_min',
+    ];
+
+    /** @var array<string> Целочисленные поля: только удаление пробелов/NBSP */
+    private const INTEGER_KEYS = [
+        'stock_available', 'lead_time_days',
     ];
 
     public function handle(CatalogImportService $service): int
@@ -244,9 +261,11 @@ class CatalogImportCommand extends Command
                     $val = str_replace([',', "\xC2\xA0"], ['.', ''], $val);
                     // Уберём пробелы-разделители тысяч.
                     $val = preg_replace('/\s+/', '', $val);
-                } elseif ($key === 'stock_available') {
+                } elseif (in_array($key, self::INTEGER_KEYS, true)) {
                     $val = preg_replace('/\s+/', '', $val);
                 }
+                // Для `_raw` полей (multi-value/sizes) и текстовых — ничего
+                // не трогаем, пускай сервис нормализует.
                 $row[$key] = $val;
             }
             if (! empty($row['sku']) && ! empty($row['name'])) {

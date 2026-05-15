@@ -11,24 +11,51 @@ use Illuminate\Support\Facades\Log;
 /**
  * Приёмник snapshot'ов каталога из MDB (push с офисной машины).
  *
- * Контракт входа (см. `POST /api/catalog/import`):
+ * Контракт входа (см. `POST /api/catalog/import` и `php artisan catalog:import`):
  *   {
  *     "mode":   "full",
  *     "source": "office-pc-01",          // опц., source-tag
  *     "items":  [
  *       {
- *         "sku":              "M02016",   // обяз.
- *         "name":             "...",      // обяз.
- *         "name_en":          "...",      // опц.
- *         "unit_name":        "...",      // опц.
- *         "part_type":        "...",
- *         "brand":            "Siemens",
- *         "brand_article":    "3RT2016-2GG22",
- *         "form_factor":      "...",
- *         "size_a..f":        12.5,
- *         "weight":           0.350,
- *         "price":            1234.50,
- *         "stock_available":  5
+ *         "sku":                 "M02016",                 // обяз.
+ *         "name":                "...",                    // обяз.
+ *         "name_en":             "...",                    // опц.
+ *
+ *         // Мульти-поля. Принимаются ИЛИ как сырая строка `*_raw`
+ *         // («;»-список из MDB / CSV), ИЛИ как готовый массив для JSON-клиентов.
+ *         // brand/brand_article в payload игнорируются — primary OEM
+ *         // вычисляем из brands/articles (см. pickPrimaryOem).
+ *         "brands_raw":          "ZIEHL-ABEGG;KLEEMANN;Мой ЗиП",
+ *         "articles_raw":        ";6F31-04-12018;M15862",
+ *         "units_raw":           "Главный привод, лебёдка лифта…",
+ *         // или
+ *         "brands":              ["ZIEHL-ABEGG", "KLEEMANN", "Мой ЗиП"],
+ *         "articles":            [null, "6F31-04-12018", "M15862"],
+ *         "units":               ["..."],
+ *
+ *         "placement":           "Лифт",
+ *         "part_type":           "...",
+ *         "form_factor":         "...",
+ *
+ *         // Размеры. Сырой строкой «A=240;B=55;C=18» (-' = пропуск),
+ *         // ИЛИ старые size_a..size_f скаляры (для обратной совместимости).
+ *         "sizes_raw":           "A=240;B=55;C=18",
+ *         "weight":              0.350,
+ *
+ *         "price":               1234.50,
+ *         "price_min":           1099.00,
+ *
+ *         // «Актуальность» — валидна ли цена для трансляции клиенту.
+ *         // Принимаем «Да»/«Нет»/bool/0/1. Дефолт true, если поле отсутствует.
+ *         "is_price_actual_raw": "Да",
+ *         // или
+ *         "is_price_actual":     true,
+ *
+ *         "stock_available":     5,
+ *         "lead_time_days":      14,
+ *         "photo_url":           "https://...",
+ *         "description":         "...",
+ *         "comment":             "..."
  *       },
  *       ...
  *     ]
@@ -36,15 +63,19 @@ use Illuminate\Support\Facades\Log;
  *
  * Логика:
  *  1. Валидируем mode = full (delta пока не поддержан).
- *  2. По каждой row: нормализуем + считаем source_hash.
- *  3. Apsert одним батчем (PostgreSQL ON CONFLICT по sku) — Eloquent
- *     по одной строке был бы O(N) запросов, мы делаем upsert чанками.
+ *  2. По каждой row: нормализуем (split multi-полей, parse размеров,
+ *     primary-OEM-выбор) + считаем source_hash.
+ *  3. Upsert по sku: existing — UPDATE, new — bulk INSERT чанками по 500.
  *  4. После апсёрта soft-delete: всё, чего нет в snapshot'е, → is_active=false.
  *  5. Пишем CatalogImport-запись (аудит) с counter'ами и errors[].
  *
  * Идемпотентность: при повторной выгрузке того же снапшота все строки
  * выявятся как unchanged (source_hash совпадёт), 0 updates, 0 created,
  * 0 soft_deleted — никаких side-effects.
+ *
+ * NB: после расширения схемы (миграция 2026_05_15_130000) первый импорт
+ * с офисной машины пометит все строки как rows_updated, потому что
+ * hashRow расширен новыми полями. Это ожидаемо.
  */
 class CatalogImportService
 {
@@ -214,32 +245,265 @@ class CatalogImportService
             return null;
         }
 
+        // --- Мульти-поля: brands/articles/units. Принимаем массив (JSON)
+        //     или сырую `;`-строку (`*_raw`). Brands и articles ВЫРОВНЕНЫ
+        //     1:1 по индексу — допустимы внутренние `null` слоты.
+        $brands = $this->coerceMultiList($row['brands'] ?? null, $row['brands_raw'] ?? null);
+        $articles = $this->coerceMultiList($row['articles'] ?? null, $row['articles_raw'] ?? null);
+        $units = $this->coerceMultiList($row['units'] ?? null, $row['units_raw'] ?? $row['unit_name'] ?? null);
+
+        // Выровнять длины brands/articles для 1:1 пар (пустые слоты — null).
+        $pairLen = max(count($brands), count($articles));
+        while (count($brands) < $pairLen) {
+            $brands[] = null;
+        }
+        while (count($articles) < $pairLen) {
+            $articles[] = null;
+        }
+
+        // --- Скалярные brand/brand_article: primary OEM из мульти-списков.
+        [$primaryBrand, $primaryArticle] = $this->pickPrimaryOem($brands, $articles);
+
+        // --- Скалярный unit_name: первый non-empty из units.
+        $primaryUnit = null;
+        foreach ($units as $u) {
+            if ($u !== null && $u !== '') {
+                $primaryUnit = $u;
+                break;
+            }
+        }
+
+        // --- Размеры: парсим «A=240;B=55;C=18», либо забираем legacy size_a..f.
+        $sizes = $this->resolveSizes($row);
+
+        // --- Актуальность цены: дефолт true, когда поле отсутствует.
+        $rawActual = $row['is_price_actual_raw'] ?? $row['is_price_actual'] ?? null;
+        $isPriceActual = $rawActual === null ? true : $this->yesNoBool($rawActual);
+
+        // jsonb-колонки. Eloquent cast применяется только в Model::save(),
+        // а мы делаем raw Query Builder insert/update — encoding делаем здесь.
         $data = [
             'sku' => mb_substr($sku, 0, 64),
             'name' => mb_substr($name, 0, 500),
             'name_en' => $this->trimOrNull($row['name_en'] ?? null, 500),
-            'unit_name' => $this->trimOrNull($row['unit_name'] ?? null, 128),
+            'unit_name' => $primaryUnit !== null ? mb_substr($primaryUnit, 0, 128) : null,
+            'units' => $this->jsonOrNull($units),
+            'placement' => $this->trimOrNull($row['placement'] ?? null, 64),
             'part_type' => $this->trimOrNull($row['part_type'] ?? null, 128),
-            'brand' => $this->trimOrNull($row['brand'] ?? null, 128),
-            'brand_article' => $this->trimOrNull($row['brand_article'] ?? null, 128),
+            'brand' => $primaryBrand !== null ? mb_substr($primaryBrand, 0, 128) : null,
+            'brand_article' => $primaryArticle !== null ? mb_substr($primaryArticle, 0, 128) : null,
             // Use-case B: префакомпилированная форма артикула для article-match
             // против `parsed_article` позиций. См. CatalogResolutionService.
-            'brand_article_normalized' => $this->normalizeArticle($row['brand_article'] ?? null),
+            'brand_article_normalized' => $this->normalizeArticle($primaryArticle),
+            'brands' => $this->jsonOrNull($brands),
+            'articles' => $this->jsonOrNull($articles),
             'form_factor' => $this->trimOrNull($row['form_factor'] ?? null, 64),
-            'size_a' => $this->decimalOrNull($row['size_a'] ?? null),
-            'size_b' => $this->decimalOrNull($row['size_b'] ?? null),
-            'size_c' => $this->decimalOrNull($row['size_c'] ?? null),
-            'size_d' => $this->decimalOrNull($row['size_d'] ?? null),
-            'size_e' => $this->decimalOrNull($row['size_e'] ?? null),
-            'size_f' => $this->decimalOrNull($row['size_f'] ?? null),
+            'size_a' => $this->decimalOrNull($sizes['a'] ?? null),
+            'size_b' => $this->decimalOrNull($sizes['b'] ?? null),
+            'size_c' => $this->decimalOrNull($sizes['c'] ?? null),
+            'size_d' => $this->decimalOrNull($sizes['d'] ?? null),
+            'size_e' => $this->decimalOrNull($sizes['e'] ?? null),
+            'size_f' => $this->decimalOrNull($sizes['f'] ?? null),
             'weight' => $this->decimalOrNull($row['weight'] ?? null),
             'price' => $this->decimalOrNull($row['price'] ?? null),
+            'price_min' => $this->decimalOrNull($row['price_min'] ?? null),
+            'is_price_actual' => $isPriceActual,
             'stock_available' => $this->intOrNull($row['stock_available'] ?? null),
+            'lead_time_days' => $this->intOrNull($row['lead_time_days'] ?? null),
+            'photo_url' => $this->trimOrNull($row['photo_url'] ?? null, 500),
+            'description' => $this->textOrNull($row['description'] ?? null),
+            'comment' => $this->textOrNull($row['comment'] ?? null),
         ];
 
         $data['source_hash'] = $this->hashRow($data);
 
         return $data;
+    }
+
+    /**
+     * Свести multi-поле к массиву строк/null. Принимает либо массив (JSON-клиент),
+     * либо сырую `;`-строку (CSV из MDB). Trailing `null`-слоты обрезаются
+     * — внутренние сохраняются для 1:1 выравнивания с парным списком.
+     *
+     * @return list<?string>
+     */
+    private function coerceMultiList(mixed $array, mixed $raw): array
+    {
+        if (is_array($array)) {
+            $items = $array;
+        } elseif ($raw === null) {
+            return [];
+        } else {
+            $rawStr = trim((string) $raw);
+            if ($rawStr === '') {
+                return [];
+            }
+            $items = explode(';', $rawStr);
+        }
+
+        $out = [];
+        foreach ($items as $v) {
+            if ($v === null) {
+                $out[] = null;
+                continue;
+            }
+            $s = trim((string) $v);
+            $out[] = $s === '' ? null : mb_substr($s, 0, 128);
+        }
+        while (! empty($out) && end($out) === null) {
+            array_pop($out);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Выбрать primary-OEM-пару (brand, brand_article) из 1:1-выровненных
+     * списков. Логика:
+     *  1) Первая пара, где brand не «Мой ЗиП» И есть непустой article.
+     *  2) Первая пара, где brand не «Мой ЗиП» (даже если article пуст).
+     *  3) Любая первая пара с непустым brand (включая «Мой ЗиП»).
+     *
+     * «Мой ЗиП» — это компанейский тег, в article-слоте у него обычно
+     * лежит наш же M-SKU. Для матчинга по артикулу нам нужен OEM (Otis/
+     * Kone/ZIEHL-ABEGG), потому пропускаем его в первую очередь.
+     *
+     * @param  list<?string> $brands
+     * @param  list<?string> $articles
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function pickPrimaryOem(array $brands, array $articles): array
+    {
+        $count = max(count($brands), count($articles));
+
+        $isSelfTag = static fn (?string $b): bool => $b !== null
+            && mb_stripos($b, 'Мой ЗиП') !== false;
+
+        // Pass 1: OEM brand с непустым article.
+        for ($i = 0; $i < $count; $i++) {
+            $b = $brands[$i] ?? null;
+            $a = $articles[$i] ?? null;
+            if ($b !== null && $b !== '' && ! $isSelfTag($b)
+                && $a !== null && $a !== '') {
+                return [$b, $a];
+            }
+        }
+        // Pass 2: любой не-«Мой ЗиП» brand (даже с пустым article).
+        for ($i = 0; $i < $count; $i++) {
+            $b = $brands[$i] ?? null;
+            if ($b !== null && $b !== '' && ! $isSelfTag($b)) {
+                return [$b, $articles[$i] ?? null];
+            }
+        }
+        // Pass 3: fallback — первый непустой brand (даже «Мой ЗиП»).
+        for ($i = 0; $i < $count; $i++) {
+            $b = $brands[$i] ?? null;
+            if ($b !== null && $b !== '') {
+                return [$b, $articles[$i] ?? null];
+            }
+        }
+
+        return [null, null];
+    }
+
+    /**
+     * Распарсить «Размеры» вида «A=240;B=55;C=18» в массив a..f → строковое
+     * представление числа. `-` или пустое значение → пропуск (null).
+     *
+     * Fallback: если sizes_raw не передан, читаем legacy скаляры size_a..size_f.
+     *
+     * @return array<string, ?string>
+     */
+    private function resolveSizes(array $row): array
+    {
+        if (isset($row['sizes_raw']) && trim((string) $row['sizes_raw']) !== '') {
+            $out = [];
+            foreach (explode(';', (string) $row['sizes_raw']) as $part) {
+                $part = trim($part);
+                if (! preg_match('/^([A-Fa-f])\s*=\s*(.*)$/u', $part, $m)) {
+                    continue;
+                }
+                $key = strtolower($m[1]);
+                $val = trim($m[2]);
+                if ($val === '' || $val === '-') {
+                    continue;
+                }
+                // Русская десятичная запятая → точка, удалить NBSP/пробелы.
+                $val = str_replace([',', "\xC2\xA0"], ['.', ''], $val);
+                $val = preg_replace('/\s+/', '', $val);
+                $out[$key] = $val;
+            }
+
+            return $out;
+        }
+
+        // Legacy: отдельные ключи size_a..size_f.
+        $out = [];
+        foreach (['a', 'b', 'c', 'd', 'e', 'f'] as $k) {
+            if (isset($row["size_{$k}"])) {
+                $out[$k] = $row["size_{$k}"];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * «Да»/«Нет»/«Yes»/«No»/«1»/«0»/bool → bool.
+     */
+    private function yesNoBool(mixed $v): bool
+    {
+        if (is_bool($v)) {
+            return $v;
+        }
+        if (is_int($v)) {
+            return $v !== 0;
+        }
+        if ($v === null) {
+            return false;
+        }
+        $s = mb_strtolower(trim((string) $v));
+
+        return in_array($s, ['да', 'yes', 'y', 'true', '1', 'актуально', 'актуальна'], true);
+    }
+
+    /**
+     * Сериализовать массив в JSON для прямого raw INSERT/UPDATE в jsonb-колонку
+     * (Eloquent-cast 'array' срабатывает только в Model::save()).
+     * Пустые/null-only → NULL.
+     *
+     * @param  array<int, mixed>|null $value
+     */
+    private function jsonOrNull(?array $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $hasMeaning = false;
+        foreach ($value as $v) {
+            if ($v !== null && $v !== '') {
+                $hasMeaning = true;
+                break;
+            }
+        }
+        if (! $hasMeaning) {
+            return null;
+        }
+
+        return json_encode($value, JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * trim + null-empty, без обрезания длины (для TEXT-полей description/comment).
+     */
+    private function textOrNull(mixed $v): ?string
+    {
+        if ($v === null) {
+            return null;
+        }
+        $s = trim((string) $v);
+
+        return $s === '' ? null : $s;
     }
 
     /**
@@ -324,19 +588,30 @@ class CatalogImportService
 
     /**
      * sha256 по «нормализованной» конкатенации значимых полей. NULL → '',
-     * порядок фиксирован — нельзя менять без миграции hash'ей всех строк.
+     * bool → '0'/'1', JSON-строки — как есть. Порядок фиксирован — нельзя
+     * менять без полной перепрогонки snapshot'а (что и так пройдёт само на
+     * следующем импорте — все строки попадут в rows_updated).
      */
     private function hashRow(array $data): string
     {
         $order = [
-            'sku', 'name', 'name_en', 'unit_name', 'part_type', 'brand',
-            'brand_article', 'form_factor',
+            'sku', 'name', 'name_en', 'unit_name', 'units', 'placement',
+            'part_type', 'brand', 'brand_article',
+            'brands', 'articles', 'form_factor',
             'size_a', 'size_b', 'size_c', 'size_d', 'size_e', 'size_f',
-            'weight', 'price', 'stock_available',
+            'weight', 'price', 'price_min', 'is_price_actual',
+            'stock_available', 'lead_time_days',
+            'photo_url', 'description', 'comment',
         ];
         $parts = [];
         foreach ($order as $k) {
-            $parts[] = $k . '=' . ($data[$k] ?? '');
+            $v = $data[$k] ?? null;
+            if ($v === null) {
+                $v = '';
+            } elseif (is_bool($v)) {
+                $v = $v ? '1' : '0';
+            }
+            $parts[] = $k . '=' . $v;
         }
 
         return hash('sha256', implode('|', $parts));

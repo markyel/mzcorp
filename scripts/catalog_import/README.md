@@ -94,29 +94,54 @@ Body:
   "source": "office-pc-01",
   "items": [
     {
-      "sku":              "M02016",
-      "name":             "Контактор Siemens 3RT2016-2GG22",
-      "name_en":          null,
-      "unit_name":        "Привод дверей",
-      "part_type":        "Контактор",
-      "brand":            "Siemens",
-      "brand_article":    "3RT2016-2GG22",
-      "form_factor":      null,
-      "size_a":           45.0,
-      "size_b":           90.0,
-      "size_c":           null,
-      "size_d":           null,
-      "size_e":           null,
-      "size_f":           null,
-      "weight":           0.35,
-      "price":            1234.50,
-      "stock_available":  5
+      "sku":                 "M15862",
+      "name":                "КВШ лебедки ZIEHL-ABEGG ...",
+      "name_en":             "Traction Sheave for ...",
+
+      "brands_raw":          "ZIEHL-ABEGG;KLEEMANN;Мой ЗиП",
+      "articles_raw":        ";6F31-04-12018;M15862",
+      "units_raw":           "Главный привод, лебёдка лифта, ...",
+
+      "placement":           "Лифт",
+      "part_type":           "Канатоведуший шкив (КВШ)",
+      "form_factor":         "8",
+
+      "sizes_raw":           "A=240;B=11;C=6.5",
+      "weight":              0,
+
+      "price":               261722.50,
+      "price_min":           256488.05,
+      "is_price_actual_raw": "Нет",
+
+      "stock_available":     0,
+      "lead_time_days":      70,
+      "photo_url":           "https://mylift.ru/photo.php?id=...",
+      "description":         "...",
+      "comment":             "..."
     }
   ]
 }
 ```
 
 Required: `sku`, `name`. Остальные nullable.
+
+**Мульти-поля** (`brands_raw`/`articles_raw`/`units_raw`) — `;`-разделённые строки
+из MDB. `brands_raw` и `articles_raw` выровнены 1:1 по индексу (пустой слот
+обозначает «у этого бренда нашего соответствия артикула нет»). Альтернатива
+для JSON-клиентов — передать готовые массивы `brands`/`articles`/`units`.
+
+**`sizes_raw`** — формат `A=240;B=11;C=6.5` (как в MDB-поле «Размеры»);
+`-` или пусто означает «размер не указан». Парсится в колонки `size_a..size_f`.
+
+**`is_price_actual_raw`** — «Да»/«Нет» из MDB-поля «Актуальность». Семантика:
+можно ли транслировать цену клиенту без запроса поставщику. По умолчанию
+`true`, если поле отсутствует.
+
+**Скалярные `brand`/`brand_article`** — НЕ передавайте напрямую. Сервис
+сам выбирает primary OEM из мульти-списков (первая не-«Мой ЗиП» пара),
+чтобы матчинг по артикулу против запросов клиентов попадал в OEM-артикул.
+
+**Поля MDB «Ссылка» и «CRC»** — сознательно игнорируются (нет потребителя).
 
 Response 200:
 ```json
