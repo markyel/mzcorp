@@ -134,8 +134,24 @@ class MailRouter
         // идемпотентен: дубликаты по article+name пропускает, новые
         // добавляет к существующей Request. category-гейт в persister'е
         // не блокирует thread_reply если related_request_id уже есть.
+        //
+        // ReplyParseGate отрезает «спасибо, фото прилагаю» — короткие
+        // сопроводительные reply'и где Vision на attachments мог бы
+        // ложно сгенерировать дубликаты позиций (см. M-2026-0759 кейс).
         if ($linkedRequest !== null) {
-            \App\Jobs\Mail\ParseRequestItemsJob::dispatch($message->id, true);
+            $shouldParse = true;
+            try {
+                $shouldParse = app(\App\Services\Mail\ReplyParseGate::class)
+                    ->shouldParse($message);
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: ReplyParseGate failed (default to parse)', [
+                    'email_message_id' => $message->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+            if ($shouldParse) {
+                \App\Jobs\Mail\ParseRequestItemsJob::dispatch($message->id, true);
+            }
 
             // Attention «📨 Ответ от клиента» — пометить заявку «есть новости»
             // на любом не-терминальном статусе. onClientReplied сам пропустит
