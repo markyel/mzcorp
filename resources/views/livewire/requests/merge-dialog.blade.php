@@ -74,9 +74,40 @@
                                 @if($c->subject)
                                     <div class="text-[11.5px] text-fg-3 mt-0.5 truncate">{{ $c->subject }}</div>
                                 @endif
-                                @if($c->assignedUser)
-                                    <div class="text-[10.5px] text-fg-4 mt-0.5">менеджер: {{ $c->assignedUser->name }}</div>
+
+                                {{-- Топ-5 позиций для self-check'а менеджера. --}}
+                                @if($c->items->isNotEmpty())
+                                    <ul class="mt-1 space-y-0.5 text-[11px] text-fg-2">
+                                        @foreach($c->items->take(5) as $it)
+                                            <li class="flex items-baseline gap-1.5 truncate">
+                                                <span class="text-fg-4 mono w-4 text-right shrink-0">{{ $it->position }}.</span>
+                                                <span class="truncate">
+                                                    @if($it->parsed_article)
+                                                        <span class="mono text-fg-3">{{ $it->parsed_article }}</span> ·
+                                                    @endif
+                                                    @if($it->parsed_brand)
+                                                        <span class="text-fg-3">{{ $it->parsed_brand }}</span> ·
+                                                    @endif
+                                                    {{ $it->parsed_name ?: '—' }}
+                                                    @if($it->parsed_qty)
+                                                        <span class="text-fg-4">· {{ rtrim(rtrim((string) $it->parsed_qty, '0'), '.') }} шт</span>
+                                                    @endif
+                                                </span>
+                                            </li>
+                                        @endforeach
+                                        @if($c->items_count > $c->items->count())
+                                            <li class="text-[10.5px] text-fg-4 pl-5">+ ещё {{ $c->items_count - $c->items->count() }} поз.</li>
+                                        @endif
+                                    </ul>
                                 @endif
+
+                                <div class="text-[10.5px] text-fg-4 mt-1 flex items-center gap-1.5 flex-wrap">
+                                    @if($c->assignedUser)
+                                        <span>менеджер: {{ $c->assignedUser->name }}</span>
+                                        <span>·</span>
+                                    @endif
+                                    <span class="mono">{{ $c->client_email }}</span>
+                                </div>
                             </button>
                         @endforeach
                     </div>

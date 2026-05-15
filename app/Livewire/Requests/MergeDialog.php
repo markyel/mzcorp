@@ -128,7 +128,15 @@ class MergeDialog extends Component
             ->whereRaw('LOWER(client_email) = ?', [mb_strtolower(trim($winner->client_email))])
             ->whereIn('status', $activeValues)
             ->withCount(['items' => fn ($q) => $q->where('is_active', true)])
-            ->with('assignedUser:id,name')
+            ->with([
+                'assignedUser:id,name',
+                // Топ-5 active позиций — для preview в карточке кандидата.
+                'items' => fn ($q) => $q
+                    ->where('is_active', true)
+                    ->orderBy('position')
+                    ->limit(5)
+                    ->select(['id', 'request_id', 'position', 'parsed_name', 'parsed_brand', 'parsed_article', 'parsed_qty']),
+            ])
             ->orderByDesc('created_at')
             ->limit(50);
 
