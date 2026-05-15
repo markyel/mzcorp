@@ -2,6 +2,40 @@
 
 > Этот файл — рабочая память между сессиями. Перед началом работы — прочитай его целиком. После значимых изменений — обнови.
 
+## Архитектурные принципы (обновлено 2026-05-15)
+
+**Implicit-state** — статус заявки выводится из активности менеджера, а не выставляется вручную:
+
+| Действие менеджера | Триггер | Статус |
+|---|---|---|
+| Открыл карточку (owner/acting) | `Detail::mount` → `transitionTo` | `Assigned/New → InProgress` |
+| Отправил batch уточнений | `ComposeForm::applyPostSendHooks` | `* → AwaitingClientClarification` |
+| Выслал КП (PDF/XLSX или body-keyword) | `OutboundDocumentDetector` + LLM-fallback → `AiDecisionService` | `* → Quoted` (semi-auto через AI-плашку) |
+| Поставил флаг внимания | `AttentionService::setManual` | attention.reason=`Manual` |
+| Поставил на паузу | `RequestPauseService` | `* → Paused` |
+
+**Inbound события клиента**:
+- Клиент ответил в треде → `MailRouter::route` inbound → `AttentionService::onClientReplied` (info-flag «есть ответ») + `InboundIntentClassifier` (gpt-4o-mini, 6 интентов) → AiDecision (under_review / postponement / invoice_request / decline / clarification_response / unclear)
+
+**Кнопки в action-panel убраны**: «▶ Начать работу», «📨 КП отправлено», «❓ Жду уточнение клиента». Остались semi-manual: «↩ Вернуться к работе», «✓ Клиент ответил» (override), inbound intent кнопки, «❌ Закрыть как потеря», pause/resume.
+
+**Mail-pipeline для нового inbound**:
+1. `InternalSenderDetector` (наш домен / Mailbox / User → category=irrelevant, без LLM)
+2. `TrustedPartnerOverride` (Liftway-saas → category=client_request, без LLM)
+3. `MailCategoryClassifier` (gpt-4o → client_request / thread_reply / irrelevant)
+4. `InboundReplyLinker` (5 уровней: In-Reply-To / References / subject `M-2026-NNNN` / external `LZ-REQ-NNNN` / from_email+open / AI)
+5. `IncomingMailProcessor::processIfRequest` (если category=client_request И не linked И не empty-body → Request::create)
+6. `AssignmentService::autoAssign` (sticky + round-robin, role=manager OR head_of_sales)
+7. `MailFolderRouter::routeToManager` (IMAP COPY в `MZ|<Фамилия>` общего ящика — для секретаря)
+8. `DeliverToManagerInboxJob` (IMAP APPEND полного RFC822 в INBOX личного ящика менеджера — для рабочего потока)
+9. `ParseRequestItemsJob` (Vision + text парсер позиций, KB resolve, catalog match A/B/C)
+
+**Mail-pipeline для outbound** (менеджер ответил через Yandex web UI):
+1. `OutgoingMailLinker` (5 уровней, аналогично inbound) → линкует к Request
+2. `OutboundDocumentDetector` rule-based (filename regex / keyword) → AiDecision
+3. Если null → `OutboundDocumentClassifier` LLM (gpt-4o-mini, 4 типа) → AiDecision
+4. `RequestActivityService::touch` → `ManagerReplied` (silences ClientReplied / FreshAssignment)
+
 ## Текущая фаза
 
 **Фаза 1 (MVP) — чтение и классификация писем.** Стартовала после полного развёртывания инфраструктуры.
@@ -102,15 +136,29 @@ ReassignDialog event-flow (request-state-changed dispatch вместо $this->re
 MailDeliverToManagerService + DeliverToManagerInboxJob (IMAP APPEND оригинала .eml в INBOX личного ящика assigned-менеджера; идемпотентен через detected_artifacts.inbox_deliveries[]) + триггеры в AssignmentService::autoAssign и ReassignService::reassign + CLI mail:deliver-backfill для существующих заявок — **закрыт 2026-05-15.**
 MailDeliverToManagerService::fetchFullRfc822 (re-fetch полного RFC822 headers+body из source IMAP вместо body-only raw_source — фикс «Без отправителя/темы» при APPEND) — **закрыт 2026-05-15.**
 OutboundDocumentClassifier (LLM gpt-4o-mini) как fallback после rule-based OutboundDocumentDetector + ClassifyOutboundDocumentPrompt (4 типа: quotation/invoice/clarification/other) + MessagePersister::decodeMimeHeader robust к рваным encoded-word'ам (regex fallback) + filename `... pdf` → `...pdf` нормализация + CLI mail:redecode-attachment-names для backfill старых битых filename'ов. Кейс: PDF «Предложение МЗ-355319.pdf» с body=«КП» через Liftway portal — раньше detector видел «=?UTF-8?B?...?= pdf» и body=0chars, теперь декодит filename и LLM-fallback классифицирует — **закрыт 2026-05-15.**
+AttentionService onManagerOpened/onManagerHandled теперь СНАЧАЛА обнуляет sticky reason (forceFill) и потом recompute(fresh) — раньше recompute exit'ил рано через isStickyReason и info-флаги залипали навсегда. Pool blade: новый $isInfoFlag (ClientReplied|FreshAssignment|Manual|SupplierReplied) — info-флаги не подсвечиваются красным «просрочено N», вместо этого амбер с человечным текстом («новая» / «есть ответ» / «ответ поставщика» / «🚩 пометка») — **закрыт 2026-05-15.**
+RequestStatus::allowedTransitions расширены — New/Assigned/AwaitingClientClarification → Quoted напрямую (раньше требовался промежуточный InProgress). UI: «📦 «<catalog name>»» в _position-card и _item-row после M-SKU ссылки на mylift.ru (название из catalog_items.name, было до Phase 1.10p1 редизайна) — **закрыт 2026-05-15.**
+Implicit-state — auto-transition Assigned/New → InProgress в Detail::mount когда viewer=ответственный менеджер или acting (isAccessibleBy). РОП/директор/секретарь НЕ триггерят. Event=auto_first_open. Кнопка «▶ Начать работу» убрана из action-panel для Assigned/New (теперь implicit) — **закрыт 2026-05-15.**
+Semi-auto переходы — убраны кнопки «📨 КП отправлено» и «❓ Жду уточнение клиента». Quoted ставится через OutboundDocumentDetector + LLM-fallback (AI-плашка «Применить» одним кликом). AwaitingClientClarification ставится через ClarificationPanel post-send hook. Implicit-state матрица: открыл → InProgress, отправил batch → AwaitingClientClarification, выслал КП → Quoted, получил «принимаем» → AwaitingInvoice, поставил флаг → Manual attention — **закрыт 2026-05-15.**
+collapseQuotedBlocks теперь сворачивает не только blockquote, но и attribution-headers ПЕРЕД blockquote (Yandex-формат «Кому:/Тема:/От:/Дата:/«DD.MM.YYYY, NAME wrote:»»). Новый helper looksLikeQuoteAttribution с 10 RU/EN regex-якорями. Кейс: reply через Yandex web UI оставлял attribution видимым над «показать цитату» — **закрыт 2026-05-15.**
 Экспорт в 1С, KB curator UI, PriceRefreshService — **за пределами текущей фазы.**
 
 ## Открытые вопросы / TODO
 
+### Закрыто 2026-05-15
+- ✅ **Filename `=?UTF-8?B?...` corruption** — фикснут через regex-fallback decode в `MessagePersister::decodeMimeHeader` + CLI `mail:redecode-attachment-names` для backfill.
+- ✅ **Quotation в compose ломается** — частично: `collapseQuotedBlocks` теперь сворачивает Yandex-attribution (Кому/Тема/Дата) вместе с blockquote. Если ещё ломается на каких-то клиентах — диагностика по конкретному эталону.
+
+### Текущие открытые вопросы
+
 - **AttentionReason taxonomy review** — пользователь считает что валидных причин внимания только две: `PostponedResume` и `SlaBreach`. Остальные (`AwaitingClient`, `AwaitingSupplier`, `QuoteFollowupDue`, `InvoiceFollowupDue`, `PartialQuoteOverdue`) — не повод подсвечивать заявку красным, скорее informational. Требует обсуждения дизайна перед изменением enum + AttentionService.
-- **{position_number} placeholder leaked literal** — в письме клиенту по заявке M-2026-0710 строка «По позиции №{position_number}» появилась как литерал. Авто-фикс в ClarificationPanel.php: full strtr-map для всех плейсхолдеров ({position_number}, {item_name}, {name}, {item}, {brand}, {category_name}). Нужна верификация на следующей живой отправке.
-- **Quotation в compose ломается** — в письме клиенту цитата отображается «продолжением», thread tab не сворачивает блок. Требует диагностики (Apple-Mail RU цитата vs `<blockquote class="gmail_quote">`).
-- **Filename `=?UTF-8?B?...` corruption** — PAUSED (отдельный тикет, не во всех заявках воспроизводится). Encoded-word декодинг не сработал на каком-то edge-case.
-- **ClientReplied attention reason** — обсуждаемая идея новой причины, когда клиент ответил в треде на ClarificationBatch — менеджер должен среагировать. Не реализовано, ждёт дизайн-discussion по taxonomy review выше.
+- **{position_number} placeholder leaked literal** — strtr-safety net стоит в ClarificationPanel.php. Нужна верификация на следующей живой отправке.
+- **ClientReplied attention reason** — обсуждаемая идея новой причины, когда клиент ответил в треде на ClarificationBatch. Уже сделано (AttentionReason::ClientReplied + onClientReplied hook в MailRouter). Можно закрывать.
+- **«Предложенные уточнения» от outbound** — на M-2026-0759 показывалась плашка enrichment_suggestions после отправки КП менеджером. Tinker показал пустой `enrichment_suggestions[]` — возможно уже applied/dismissed. Диагностику отложили. Идея на будущее: после отправки КП auto-dismiss'ить pending enrichment-suggestions (менеджер зафиксировал состав в коммерческом).
+- **Парсинг M-артикулов из исходящего КП/счёта** — обсуждалось как отдельная фича. Менеджер прикладывает PDF с КП → distill M-SKU из контента и привязывать к позициям. Не реализовано, требует Vision/PDF-extract.
+- **Manual override для semi-auto статусов** — после удаления кнопок «📨 КП отправлено» / «❓ Жду уточнение клиента» нет ручного fallback'а если detector промахнулся. Можно добавить «⋮ Изменить статус → ...» dropdown как safety net. Пока ждём оценки real-world precision detector'а.
+- **InboundIntentClassifier auto-apply кнопок в action-panel** — кнопки «📑 Клиент на согласовании», «⏰ Клиент отложил», «💵 Запросил счёт» сейчас остались manual. По логике semi-auto их тоже можно убрать — IntentClassifier уже их детектит через AiDecision-плашку. Если detector надёжен — убираем.
+- **«Оплачено»/«Счёт отправлен» автодетекция** — `OutboundDocumentDetector` ловит invoice по filename/keyword (рудиментарно). Нет inbound-детектора оплаты (банковская выписка / клиент пишет «оплатили»). Пока manual.
 
 ## Что готово (инфраструктура — Фаза 0)
 
