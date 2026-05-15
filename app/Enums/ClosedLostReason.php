@@ -38,7 +38,7 @@ enum ClosedLostReason: string
             self::InvoiceUnpaid => 'Счёт не оплачен в срок',
             self::InvoiceCancelled => 'Счёт отменён',
             self::ManualOther => 'Закрыто РОПом вручную',
-            self::Duplicate => 'Дубликат — слита с другой заявкой',
+            self::Duplicate => 'Объединена с другой заявкой',
         };
     }
 

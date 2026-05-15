@@ -231,7 +231,7 @@ class MergeDialog extends Component
         }
 
         session()->flash('status', sprintf(
-            'Заявка %s слита в эту. Перенесено: позиций +%d (пропущено %d), писем %d, уточнений %d.',
+            'Заявка %s объединена с этой. Перенесено: позиций +%d (пропущено %d), писем %d, уточнений %d.',
             $loser->internal_code,
             $stats['items_added'],
             $stats['items_skipped'],

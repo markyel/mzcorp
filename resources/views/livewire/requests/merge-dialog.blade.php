@@ -7,16 +7,18 @@
 <div class="flex-1">
     <button type="button"
             wire:click="show"
-            class="btn btn-sm w-full">⊌ Слить дубликат</button>
+            class="btn btn-sm w-full">⊌ Объединить заявки</button>
 
     @if($open)
         <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 24px;"
              wire:click.self="close">
             <div class="ds-card p-5 w-full max-w-[640px]" wire:click.stop>
-                <h3 class="text-[15px] font-semibold text-fg-1 mb-1">Слияние дубликата</h3>
+                <h3 class="text-[15px] font-semibold text-fg-1 mb-1">Объединение заявок</h3>
                 <div class="text-[12px] text-fg-3 mb-3">
-                    Выберите active-заявку этого же клиента — её контент (письма, позиции,
-                    уточнения) перенесётся сюда, а сама заявка закроется как duplicate.
+                    Используйте, когда одна заявка клиента «расплылась» по нескольким письмам
+                    и стала отдельными Request. Выберите active-заявку этого же клиента —
+                    её письма, уточнения и уникальные позиции перенесутся сюда, сама
+                    заявка закроется (объединена). Одинаковые позиции пропускаются.
                 </div>
 
                 @if(! empty($winnerCodes))
@@ -148,10 +150,10 @@
                 <div class="flex items-center gap-2 pt-2 border-t border-border-subtle">
                     <button type="button"
                             wire:click="confirmMerge"
-                            wire:confirm="Слить заявки? Loser будет закрыт как duplicate, отменить нельзя."
+                            wire:confirm="Объединить заявки? Выбранная заявка будет закрыта, отменить нельзя."
                             class="btn btn-primary"
                             @disabled($selectedLoserId === null || ($stats && !empty($stats['conflicts'])))>
-                        ⊌ Слить
+                        ⊌ Объединить
                     </button>
                     <button type="button" wire:click="close" class="btn">Отмена</button>
                 </div>

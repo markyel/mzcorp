@@ -266,12 +266,12 @@
                             </span>
                         @endif
 
-                        {{-- Слияние: эта заявка — winner (получила дубликаты). --}}
+                        {{-- Объединение: эта заявка — winner (приняла другие). --}}
                         @php $mergedFromCount = $req->mergedFrom()->count(); @endphp
                         @if($mergedFromCount > 0)
                             <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-sky-50 text-sky-700 text-[10.5px] font-semibold uppercase tracking-wider"
-                                  title="В эту заявку слиты дубликаты — {{ $mergedFromCount }} шт.">
-                                ⊌ слитые дубликаты
+                                  title="С этой заявкой объединены — {{ $mergedFromCount }} шт.">
+                                ⊌ объединённые
                                 <span class="opacity-75">×{{ $mergedFromCount }}</span>
                             </span>
                         @endif
@@ -519,7 +519,7 @@
                             @php $mergedInto = \App\Models\Request::find($req->merged_into_id); @endphp
                             @if($mergedInto)
                                 <div class="mt-2 pt-2 border-t border-red-300/40 text-[12px]">
-                                    <span class="text-fg-3">Слита в:</span>
+                                    <span class="text-fg-3">Объединена с:</span>
                                     <a href="{{ route('requests.show', $mergedInto) }}" wire:navigate
                                        class="mono text-[var(--accent)] hover:underline">{{ $mergedInto->internal_code }}</a>
                                     @if($req->merged_at)

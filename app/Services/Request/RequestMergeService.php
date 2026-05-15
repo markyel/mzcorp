@@ -92,7 +92,7 @@ class RequestMergeService
                 'to_status' => $winner->status->value,
                 'by_user_id' => $by->id,
                 'event' => 'merge_from',
-                'comment' => sprintf('Слита заявка-дубликат %s', $loser->internal_code),
+                'comment' => sprintf('Объединена заявка %s', $loser->internal_code),
                 'payload' => array_merge($stats, [
                     'merged_from_id' => $loser->id,
                     'merged_from_internal_code' => $loser->internal_code,
@@ -105,7 +105,7 @@ class RequestMergeService
                 'to_status' => RequestStatus::ClosedLost->value,
                 'by_user_id' => $by->id,
                 'event' => 'merged_into',
-                'comment' => sprintf('Слита с %s', $winner->internal_code),
+                'comment' => sprintf('Объединена с %s', $winner->internal_code),
                 'payload' => array_merge($stats, [
                     'merged_into_id' => $winner->id,
                     'merged_into_internal_code' => $winner->internal_code,
@@ -117,7 +117,7 @@ class RequestMergeService
             $loser->status = RequestStatus::ClosedLost;
             $loser->closed_at = now();
             $loser->closed_lost_reason = ClosedLostReason::Duplicate->value;
-            $loser->closed_lost_comment = sprintf('Слита с %s', $winner->internal_code);
+            $loser->closed_lost_comment = sprintf('Объединена с %s', $winner->internal_code);
             $loser->merged_into_id = $winner->id;
             $loser->merged_at = now();
             $loser->save();
