@@ -4,6 +4,7 @@
        $selectedId — ?int (id выбранной строки для подсветки) --}}
 <table class="w-full text-[12px]" style="table-layout: auto;">
     <colgroup>
+        <col style="width: 56px">
         <col style="width: 90px">
         <col style="width: 160px">
         <col>
@@ -15,6 +16,7 @@
     </colgroup>
     <thead class="bg-surface-2 text-fg-3 uppercase tracking-wider text-[10.5px] sticky top-0">
         <tr>
+            <th class="px-2 py-1.5"></th>
             <th class="px-2 py-1.5 text-left">SKU</th>
             <th class="px-2 py-1.5 text-left">Бренд / артикул</th>
             <th class="px-2 py-1.5 text-left">Название</th>
@@ -34,6 +36,26 @@
             <tr wire:key="cat-{{ $cat->id }}"
                 wire:click="selectCatalog({{ $cat->id }})"
                 class="cursor-pointer border-b border-border-subtle last:border-b-0 {{ $selectedId === $cat->id ? 'bg-sky-50' : 'hover:bg-surface-2' }} {{ $cat->is_active ? '' : 'opacity-60' }}">
+                {{-- Photo preview (MDB-поле «Фото» → photo_url). Внешняя
+                     ссылка с mylift.ru, lazy-load + onerror fallback на
+                     заглушку, click открывает оригинал в новой вкладке. --}}
+                <td class="px-2 py-1.5 align-top">
+                    @if($cat->photo_url)
+                        <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
+                           x-on:click.stop
+                           class="block w-10 h-10 rounded overflow-hidden bg-surface-2 border border-border-subtle"
+                           title="Открыть фото в новой вкладке">
+                            <img src="{{ $cat->photo_url }}"
+                                 alt=""
+                                 loading="lazy"
+                                 referrerpolicy="no-referrer"
+                                 class="w-full h-full object-cover"
+                                 onerror="this.style.display='none'; this.parentElement.classList.add('flex','items-center','justify-center'); this.parentElement.innerHTML += '<span class=\'text-fg-3 text-[9px]\'>нет</span>';">
+                        </a>
+                    @else
+                        <div class="w-10 h-10 rounded bg-surface-2 border border-border-subtle flex items-center justify-center text-fg-3 text-[9px]">нет</div>
+                    @endif
+                </td>
                 <td class="px-2 py-1.5 mono text-fg-1 align-top whitespace-nowrap">
                     <div class="flex items-center gap-1">
                         <span>{{ $cat->sku }}</span>

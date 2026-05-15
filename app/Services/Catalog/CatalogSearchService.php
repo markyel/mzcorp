@@ -44,7 +44,7 @@ class CatalogSearchService
             ->select([
                 'id', 'sku', 'name', 'brand', 'brand_article',
                 'brand_article_normalized', 'unit_name', 'part_type',
-                'price', 'stock_available', 'is_active',
+                'price', 'stock_available', 'is_active', 'photo_url',
             ])
             ->where(function ($q) use ($like, $normalizedLike, $lower, $normalized) {
                 $q->whereRaw('LOWER(sku) LIKE ?', [$like])
