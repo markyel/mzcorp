@@ -111,6 +111,14 @@ class MessagePersister
             $rawName = $disposition . '-' . Str::random(8) . '.' . $ext;
         }
         $decodedFilename = $this->decodeMimeHeader($rawName);
+        // Yandex кейс: после регекс-fallback'а может остаться хвост вида
+        // «... pdf» (пробел вместо точки перед расширением — encoded-word
+        // обрезался не на границе). Нормализуем на популярных расширениях.
+        $decodedFilename = preg_replace(
+            '/\s+(pdf|docx?|xlsx?|pptx?|zip|rar|7z|jpe?g|png|gif|tiff?|heic|webp)\s*$/i',
+            '.$1',
+            $decodedFilename,
+        ) ?? $decodedFilename;
         // varchar(255), плюс защита от ультра-длинных имён (Yandex иногда
         // возвращает MIME-encoded имя из 10+ кусков).
         $filename = $this->truncate($decodedFilename, 255);
@@ -137,7 +145,21 @@ class MessagePersister
     }
 
     /**
-     * Декодировать MIME-encoded заголовок (`=?utf-8?Q?...?=`) в обычный UTF-8.
+     * Декодировать MIME-encoded заголовок (`=?utf-8?Q?...?=` / `=?utf-8?B?...?=`)
+     * в обычный UTF-8.
+     *
+     * Робастная цепочка:
+     *   1) `iconv_mime_decode` — стандартный путь;
+     *   2) `mb_decode_mimeheader` — fallback;
+     *   3) ручной regex-парсинг по `=?charset?enc?text?=` токенам — на случай
+     *      рваных encoded-word'ов (Yandex иногда отдаёт filename'ы со сломанным
+     *      форматированием, где между токенами вставлен пробел или хвост
+     *      `?= pdf`).
+     *
+     * Кейс LZ-REQ-1315: PDF приходил с filename
+     *   `=?UTF-8?B?...?= pdf`
+     * (пробел перед `pdf` вместо точки) — iconv/mb роняли строку как есть,
+     * regex-fallback декодирует encoded-word и оставляет хвост ` pdf` как есть.
      */
     private function decodeMimeHeader(string $value): string
     {
@@ -146,16 +168,36 @@ class MessagePersister
         }
 
         $decoded = @iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
-        if ($decoded !== false && $decoded !== '') {
+        if (is_string($decoded) && $decoded !== '' && ! str_contains($decoded, '=?')) {
             return $decoded;
         }
 
         $decoded = @mb_decode_mimeheader($value);
-        if ($decoded !== false && $decoded !== '') {
+        if (is_string($decoded) && $decoded !== '' && ! str_contains($decoded, '=?')) {
             return $decoded;
         }
 
-        return $value;
+        // Regex-fallback: декодируем все вхождения `=?charset?enc?text?=` руками.
+        $result = preg_replace_callback(
+            '/=\?([A-Za-z0-9_\-]+)\?([qQbB])\?([^?]*)\?=/',
+            function (array $m): string {
+                $charset = $m[1];
+                $encoding = strtoupper($m[2]);
+                $text = $m[3];
+                $bytes = $encoding === 'B'
+                    ? base64_decode($text, true)
+                    : quoted_printable_decode(str_replace('_', ' ', $text));
+                if ($bytes === false || $bytes === '') {
+                    return $m[0];
+                }
+                $utf8 = @mb_convert_encoding($bytes, 'UTF-8', $charset);
+
+                return is_string($utf8) && $utf8 !== '' ? $utf8 : $bytes;
+            },
+            $value,
+        );
+
+        return is_string($result) && $result !== '' ? $result : $value;
     }
 
     private function extractMessageId(Message $msg): ?string

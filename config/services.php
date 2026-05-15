@@ -84,6 +84,9 @@ return [
         // Phase 1.9: 5-й уровень thread linking (ThreadClarificationAi).
         // Простая задача multi-choice над списком из 2-5 заявок — mini хватает.
         'clarification_model' => env('OPENAI_CLARIFICATION_MODEL', 'gpt-4o-mini'),
+        // Phase 4 outbound LLM-classifier (fallback после rule-based детектора).
+        // Простая 4-way классификация — mini достаточно.
+        'outbound_classifier_model' => env('OPENAI_OUTBOUND_CLASSIFIER_MODEL', 'gpt-4o-mini'),
         // Phase 2 use-case C: размер батча на /v1/embeddings (OpenAI лимит 2048).
         // 100 — компромисс между latency на запрос и количеством HTTP-вызовов.
         'embedding_batch_size' => (int) env('OPENAI_EMBEDDING_BATCH_SIZE', 100),

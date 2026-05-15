@@ -10,6 +10,7 @@ use App\Models\MailRoutingRule;
 use App\Models\RoutedMail;
 use App\Services\DocumentDetector\AiDecisionService;
 use App\Services\DocumentDetector\InboundIntentClassifier;
+use App\Services\DocumentDetector\OutboundDocumentClassifier;
 use App\Services\DocumentDetector\OutboundDocumentDetector;
 use Illuminate\Support\Facades\Log;
 
@@ -36,6 +37,7 @@ class MailRouter
         private readonly InboundReplyLinker $replyLinker,
         private readonly OutgoingMailLinker $outgoingLinker,
         private readonly OutboundDocumentDetector $outboundDetector,
+        private readonly OutboundDocumentClassifier $outboundLlmClassifier,
         private readonly InboundIntentClassifier $inboundClassifier,
         private readonly AiDecisionService $aiDecisions,
         private readonly \App\Services\Request\AttentionService $attention,
@@ -64,7 +66,14 @@ class MailRouter
             // клиентом по другим заявкам, маркетинг и т.п.).
             if ($linkedRequest !== null) {
                 try {
+                    // Two-tier: rule-based (быстрое, ловит явные КП/счёт по
+                    // filename/keyword) → LLM fallback (gpt-4o-mini, добивает
+                    // edge-cases типа «Предложение МЗ-355319.pdf» / body=«КП»
+                    // / HTML-only через portal).
                     $detected = $this->outboundDetector->analyze($message->fresh(), $linkedRequest);
+                    if ($detected === null) {
+                        $detected = $this->outboundLlmClassifier->classify($message->fresh(), $linkedRequest);
+                    }
                     if ($detected !== null) {
                         $this->aiDecisions->recordSuggestion(
                             $detected['type'],
