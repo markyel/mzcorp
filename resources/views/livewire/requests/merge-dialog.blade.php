@@ -1,6 +1,7 @@
 @php
     $candidates = $this->candidates;
     $stats = $this->previewStats;
+    $winnerCodes = $this->winnerCodes;
 @endphp
 
 <div class="flex-1">
@@ -13,38 +14,60 @@
              wire:click.self="close">
             <div class="ds-card p-5 w-full max-w-[640px]" wire:click.stop>
                 <h3 class="text-[15px] font-semibold text-fg-1 mb-1">Слияние дубликата</h3>
-                <div class="text-[12px] text-fg-3 mb-4">
+                <div class="text-[12px] text-fg-3 mb-3">
                     Выберите active-заявку этого же клиента — её контент (письма, позиции,
                     уточнения) перенесётся сюда, а сама заявка закроется как duplicate.
                 </div>
 
+                @if(! empty($winnerCodes))
+                    <div class="text-[11.5px] text-fg-3 mb-3 flex items-center gap-1.5 flex-wrap">
+                        <span class="uppercase tracking-wider font-semibold text-[10.5px]">Фильтр по общему маркеру:</span>
+                        @foreach($winnerCodes as $code)
+                            <span class="mono px-1.5 py-0.5 rounded-sm bg-[var(--sky-50)] text-[var(--sky-700)] text-[10.5px] font-semibold">{{ $code }}</span>
+                        @endforeach
+                    </div>
+                @endif
+
                 @if($candidates->isEmpty())
                     <div class="text-amber-700 text-[12px] mb-4">
-                        Не нашлось других active-заявок с этим client_email.
+                        @if(! empty($winnerCodes))
+                            Не нашлось других active-заявок с тем же external-маркером.
+                            Если хотите слить заявку с другим маркером — поищите вручную:
+                        @else
+                            Не нашлось других active-заявок с этим client_email.
+                        @endif
                     </div>
-                @else
-                    <div class="mb-3">
-                        <input type="search"
-                               wire:model.live.debounce.300ms="search"
-                               placeholder="Поиск по коду / теме…"
-                               class="w-full h-[30px] px-2.5 border border-border rounded-md text-[12.5px] outline-none focus:border-[var(--sky-500)]">
-                    </div>
+                @endif
 
+                <div class="mb-3">
+                    <input type="search"
+                           wire:model.live.debounce.300ms="search"
+                           placeholder="Поиск по коду / теме…"
+                           class="w-full h-[30px] px-2.5 border border-border rounded-md text-[12.5px] outline-none focus:border-[var(--sky-500)]">
+                </div>
+
+                @if($candidates->isNotEmpty())
                     <div class="space-y-1.5 max-h-[280px] overflow-y-auto mb-3">
                         @foreach($candidates as $c)
-                            @php $on = $selectedLoserId === $c->id; @endphp
+                            @php
+                                $on = $selectedLoserId === $c->id;
+                                $codes = (array) ($c->ext_codes ?? []);
+                            @endphp
                             <button type="button"
                                     wire:click="selectLoser({{ $c->id }})"
                                     class="w-full text-left p-2.5 rounded border transition-colors
                                            {{ $on
                                                ? 'border-[var(--sky-500)] bg-[var(--sky-50)]'
                                                : 'border-border bg-[var(--bg-surface)] hover:border-[var(--border-strong)]' }}">
-                                <div class="flex items-center gap-2 text-[12.5px]">
+                                <div class="flex items-center gap-2 text-[12.5px] flex-wrap">
                                     <span class="mono font-medium text-fg-1">{{ $c->internal_code }}</span>
                                     <span class="chip {{ $c->status->chipClass() }} text-[10.5px]">
                                         <span class="dot"></span>{{ $c->status->label() }}
                                     </span>
                                     <span class="mono text-fg-4 text-[11px]">· {{ $c->items_count }} поз.</span>
+                                    @foreach($codes as $code)
+                                        <span class="mono px-1.5 py-0.5 rounded-sm bg-[var(--sky-50)] text-[var(--sky-700)] text-[10px] font-semibold">{{ $code }}</span>
+                                    @endforeach
                                     <span class="flex-1"></span>
                                     <span class="text-fg-3 text-[11px]">{{ $c->created_at?->format('d.m.Y') }}</span>
                                 </div>

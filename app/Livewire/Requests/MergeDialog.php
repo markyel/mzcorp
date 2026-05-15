@@ -3,6 +3,7 @@
 namespace App\Livewire\Requests;
 
 use App\Enums\RequestStatus;
+use App\Models\EmailMessage;
 use App\Models\Request as RequestModel;
 use App\Services\Request\RequestMergeService;
 use Livewire\Attributes\Computed;
@@ -12,14 +13,20 @@ use Livewire\Component;
 /**
  * Modal-диалог для слияния заявки-дубликата (loser) в текущую (winner).
  *
- * Открывается из action-panel кнопкой «⊌ Слить с дубликатом» — слушает
+ * Открывается из action-panel кнопкой «⊌ Слить дубликат» — слушает
  * `open-merge-dialog`. Mounted в Detail (winner = $this->request).
  *
- * Поведение:
- *  - Поиск кандидатов: все active Request с тем же client_email (case-i),
- *    исключая winner. Показываем code + создание + items_count + сводку.
- *  - Выбор кандидата → preview статистики (items_to_add/skip, emails, batches).
- *  - Кнопка «Слить» → RequestMergeService::merge → flash + navigate в winner.
+ * Кандидаты:
+ *  - Все active Request с тем же client_email (case-i), исключая winner.
+ *  - ЕСЛИ у winner есть external-маркеры (LZ-REQ-NNNN) в любом из её писем:
+ *    кандидаты сужаются до тех, у кого есть хотя бы один общий маркер.
+ *    Это резко уменьшает шум для системных партнёров (Liftway-saas), где
+ *    один client_email обслуживает десятки независимых LZ-REQ-заявок.
+ *  - Если у winner нет внешних маркеров — фильтр не применяется, показываем
+ *    всех active кандидатов клиента (обычный кейс).
+ *
+ * Выбор кандидата → preview статистики (items_to_add/skip, emails, batches).
+ * Кнопка «Слить» → RequestMergeService::merge → flash + reload.
  */
 class MergeDialog extends Component
 {
@@ -66,7 +73,45 @@ class MergeDialog extends Component
     }
 
     /**
-     * Кандидаты на слияние: active Request с тем же client_email.
+     * External-маркеры из писем winner-а (LZ-REQ-NNNN и др.).
+     *
+     * @return array<int, string>
+     */
+    #[Computed]
+    public function winnerCodes(): array
+    {
+        $winner = $this->winner();
+        if ($winner === null) {
+            return [];
+        }
+        $patterns = (array) config('services.mail.external_codes', []);
+        if (empty($patterns)) {
+            return [];
+        }
+
+        $codes = [];
+        EmailMessage::query()
+            ->where('related_request_id', $winner->id)
+            ->orderBy('id')
+            ->chunkById(50, function ($messages) use (&$codes, $patterns) {
+                foreach ($messages as $m) {
+                    $h = (string) $m->subject . "\n" . (string) $m->body_plain;
+                    foreach ($patterns as $p) {
+                        if (preg_match_all($p, $h, $mm)) {
+                            foreach ($mm[0] as $c) {
+                                $codes[$c] = true;
+                            }
+                        }
+                    }
+                }
+            });
+
+        return array_keys($codes);
+    }
+
+    /**
+     * Кандидаты на слияние: active Request с тем же client_email
+     * И (если у winner есть LZ-REQ-коды) с хотя бы одним общим маркером.
      */
     #[Computed]
     public function candidates()
@@ -85,7 +130,25 @@ class MergeDialog extends Component
             ->withCount(['items' => fn ($q) => $q->where('is_active', true)])
             ->with('assignedUser:id,name')
             ->orderByDesc('created_at')
-            ->limit(20);
+            ->limit(50);
+
+        // Если у winner есть LZ-REQ-маркеры — фильтруем кандидатов на тех,
+        // у кого в любом из их писем есть хотя бы один общий маркер.
+        $codes = $this->winnerCodes;
+        if (! empty($codes)) {
+            $q->whereExists(function ($sub) use ($codes) {
+                $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                    ->from('email_messages')
+                    ->whereColumn('email_messages.related_request_id', 'requests.id')
+                    ->where(function ($w) use ($codes) {
+                        foreach ($codes as $code) {
+                            $needle = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $code) . '%';
+                            $w->orWhere('subject', 'ilike', $needle)
+                                ->orWhere('body_plain', 'ilike', $needle);
+                        }
+                    });
+            });
+        }
 
         if ($this->search !== '') {
             $needle = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $this->search) . '%';
@@ -95,7 +158,32 @@ class MergeDialog extends Component
             });
         }
 
-        return $q->get(['id', 'internal_code', 'subject', 'status', 'assigned_user_id', 'created_at', 'client_email']);
+        $candidates = $q->get(['id', 'internal_code', 'subject', 'status', 'assigned_user_id', 'created_at', 'client_email']);
+
+        // Бонус: для каждого кандидата извлечь его external-маркеры — отобразим в UI.
+        $patterns = (array) config('services.mail.external_codes', []);
+        if (! empty($patterns) && $candidates->isNotEmpty()) {
+            $ids = $candidates->pluck('id')->all();
+            $msgs = EmailMessage::query()
+                ->whereIn('related_request_id', $ids)
+                ->get(['related_request_id', 'subject', 'body_plain']);
+            $codesByReq = [];
+            foreach ($msgs as $m) {
+                $h = (string) $m->subject . "\n" . (string) $m->body_plain;
+                foreach ($patterns as $p) {
+                    if (preg_match_all($p, $h, $mm)) {
+                        foreach ($mm[0] as $c) {
+                            $codesByReq[$m->related_request_id][$c] = true;
+                        }
+                    }
+                }
+            }
+            foreach ($candidates as $c) {
+                $c->setAttribute('ext_codes', array_keys($codesByReq[$c->id] ?? []));
+            }
+        }
+
+        return $candidates;
     }
 
     /**
