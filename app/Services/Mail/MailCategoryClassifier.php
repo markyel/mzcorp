@@ -33,6 +33,7 @@ class MailCategoryClassifier
         private readonly OpenAIChatService $openai,
         private readonly CategorizeIncomingPrompt $prompt,
         private readonly TrustedPartnerOverride $partnerOverride,
+        private readonly InternalSenderDetector $internalSender,
     ) {
     }
 
@@ -47,6 +48,36 @@ class MailCategoryClassifier
                 'confidence' => $message->category_confidence !== null ? (float) $message->category_confidence : null,
                 'intent' => $message->category_intent,
                 'reasoning' => $message->category_reasoning,
+            ];
+        }
+
+        // Internal-sender short-circuit: письма от наших же сотрудников
+        // (домен myzip.ru / совпадает с Mailbox.email или User.email) —
+        // это внутренняя переписка, не клиентская заявка. Детерминированно
+        // ставим `irrelevant`, минуя LLM. Кейс M-2026-0161.
+        $internalReason = $this->internalSender->detect($message);
+        if ($internalReason !== null) {
+            $category = EmailCategory::Irrelevant;
+            $reasoning = 'Internal sender: ' . $internalReason;
+            $message->forceFill([
+                'category' => $category->value,
+                'category_confidence' => 1.0,
+                'category_intent' => null,
+                'category_reasoning' => $reasoning,
+                'categorized_at' => now(),
+            ])->save();
+
+            Log::info('MailCategoryClassifier: internal sender override', [
+                'email_message_id' => $message->id,
+                'from_email' => $message->from_email,
+                'reason' => $internalReason,
+            ]);
+
+            return [
+                'category' => $category,
+                'confidence' => 1.0,
+                'intent' => null,
+                'reasoning' => $reasoning,
             ];
         }
 

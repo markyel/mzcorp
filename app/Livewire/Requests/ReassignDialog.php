@@ -67,7 +67,7 @@ class ReassignDialog extends Component
         }
 
         $newAssignee = User::query()
-            ->role(RoleEnum::Manager->value)
+            ->role(RoleEnum::requestHandlerRoles())
             ->active()
             ->whereKey($this->newAssigneeId)
             ->first();
@@ -121,7 +121,7 @@ class ReassignDialog extends Component
     public function managers()
     {
         return User::query()
-            ->role(RoleEnum::Manager->value)
+            ->role(RoleEnum::requestHandlerRoles())
             ->active()
             ->orderBy('name')
             ->get(['id', 'name', 'email']);

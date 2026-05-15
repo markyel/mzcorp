@@ -149,7 +149,7 @@ class Index extends Component
             return [];
         }
 
-        $managers = User::role(RoleEnum::Manager->value)->get();
+        $managers = User::role(RoleEnum::requestHandlerRoles())->get();
         if ($managers->isEmpty()) {
             return [];
         }

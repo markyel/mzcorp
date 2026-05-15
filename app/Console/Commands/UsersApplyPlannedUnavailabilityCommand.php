@@ -38,7 +38,7 @@ class UsersApplyPlannedUnavailabilityCommand extends Command
     {
         $dryRun = (bool) $this->option('dry-run');
 
-        $users = User::role(RoleEnum::Manager->value)
+        $users = User::role(RoleEnum::requestHandlerRoles())
             ->whereNotNull('unavailable_from')
             ->where('unavailable_from', '<=', now())
             ->whereNotNull('unavailable_until')

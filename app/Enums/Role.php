@@ -37,4 +37,20 @@ enum Role: string
     {
         return array_map(fn (self $r) => $r->value, self::cases());
     }
+
+    /**
+     * Роли, которые являются владельцами заявок (request-handler).
+     *
+     * РОП ведёт заявки наравне с менеджером:
+     *  - попадает в round-robin auto-assign,
+     *  - доступен в ReassignDialog,
+     *  - учитывается в sticky-pool и delegation fallback,
+     *  - виден в Dashboard manager-load.
+     *
+     * @return array<int, string>
+     */
+    public static function requestHandlerRoles(): array
+    {
+        return [self::Manager->value, self::HeadOfSales->value];
+    }
 }

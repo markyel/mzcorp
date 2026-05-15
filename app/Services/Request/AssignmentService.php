@@ -43,7 +43,10 @@ class AssignmentService
         //  - archived_at IS NULL (Phase 1.13)
         //  - unavailable_until IS NULL ИЛИ <= now (Foundation Фаза 2)
         // Менеджеры в отпуске/командировке не получают новых заявок.
-        $managers = User::role(RoleEnum::Manager->value)->available()->get();
+        //
+        // requestHandlerRoles = manager + head_of_sales. РОП ведёт заявки
+        // наравне с менеджером — попадает в round-robin и sticky-резолвер.
+        $managers = User::role(RoleEnum::requestHandlerRoles())->available()->get();
         if ($managers->isEmpty()) {
             return null;
         }

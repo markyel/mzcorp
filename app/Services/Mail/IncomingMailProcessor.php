@@ -33,6 +33,7 @@ class IncomingMailProcessor
         private readonly AssignmentService $assignment,
         private readonly MailFolderRouter $folders,
         private readonly RequestActivityService $activity,
+        private readonly EmailTextCleanerService $cleaner,
     ) {
     }
 
@@ -47,6 +48,27 @@ class IncomingMailProcessor
         // Идемпотентность: уже привязали Request к этому письму.
         if ($message->related_request_id) {
             return Request::find($message->related_request_id);
+        }
+
+        // Empty-content guard: если очищенное тело короче порога И нет
+        // attachment'ов — это «А вложения и не было )» / односложный ответ,
+        // парсер позиций отработает в ноль. Создавать Request бессмысленно.
+        // Переписываем category на irrelevant с пометкой, чтобы письмо
+        // попало в /dashboard/mail-review (РОП может «↻ Это заявка» если
+        // ошибочно).
+        if ($this->isContentEmpty($message)) {
+            $message->forceFill([
+                'category' => EmailCategory::Irrelevant->value,
+                'category_reasoning' => 'Empty body, no attachments — not actionable (auto-guard)',
+            ])->save();
+
+            Log::info('IncomingMailProcessor: skip empty content (auto-guard)', [
+                'email_message_id' => $message->id,
+                'from_email' => $message->from_email,
+                'subject' => mb_substr((string) $message->subject, 0, 80),
+            ]);
+
+            return null;
         }
 
         $request = DB::transaction(function () use ($message) {
@@ -81,5 +103,42 @@ class IncomingMailProcessor
         ]);
 
         return $request->fresh();
+    }
+
+    /**
+     * Тело письма пустое для создания заявки?
+     *
+     * Считает «пустым» когда:
+     *   - нет attachments, И
+     *   - очищенное тело (dequote + removeSignature + удаление external-маркеров)
+     *     короче `config('services.mail.empty_body_guard_min_chars')` символов.
+     *
+     * Порог 40 символов — типичные «А вложения не было», «Спасибо!»,
+     * «Получили». Реальные заявки даже в одну строку длиннее.
+     */
+    private function isContentEmpty(EmailMessage $message): bool
+    {
+        if ($message->attachments()->count() > 0) {
+            return false;
+        }
+
+        $threshold = (int) config('services.mail.empty_body_guard_min_chars', 40);
+        if ($threshold <= 0) {
+            return false; // guard выключен
+        }
+
+        $plain = (string) $message->body_plain;
+        if ($plain === '' || $this->cleaner->bodyPlainLooksBroken($plain)) {
+            $plain = $this->cleaner->htmlToText((string) $message->body_html);
+        }
+        $cleaned = $this->cleaner->cleanInboundReferenceText($plain);
+
+        // Срезаем external-маркеры (LZ-REQ-NNNN и т.п.) — они header, не контент.
+        $patterns = (array) config('services.mail.external_codes', []);
+        foreach ($patterns as $p) {
+            $cleaned = (string) preg_replace($p, '', $cleaned);
+        }
+
+        return mb_strlen(trim($cleaned)) < $threshold;
     }
 }

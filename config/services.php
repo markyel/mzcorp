@@ -186,6 +186,33 @@ return [
     | копий одного письма, рассылаемого на несколько внутренних адресов.
     */
     'mail' => [
+        /*
+        | Внутренние домены (наши). Используются InternalSenderDetector
+        | в MailCategoryClassifier — если from_email относится к нам,
+        | категория принудительно `irrelevant` без LLM-вызова. Кейс
+        | M-2026-0161: наш сотрудник прислал короткий комментарий
+        | в общий ящик, gpt-4o посчитал его за client_request.
+        |
+        | Список через запятую: MAIL_INTERNAL_DOMAINS=myzip.ru,mzcorp.ru
+        | Дополнительно проверяются совпадения с Mailbox.email и User.email.
+        */
+        'internal_domains' => array_filter(array_map(
+            'trim',
+            explode(',', (string) env('MAIL_INTERNAL_DOMAINS', 'myzip.ru'))
+        )),
+
+        /*
+        | Empty-content guard в IncomingMailProcessor. Если очищенное тело
+        | inbound-письма короче порога И нет attachments — Request не
+        | создаётся (письмо переписывается в category=irrelevant). Кейс:
+        | «А вложения и не было )» от клиента в reply без header-threading
+        | проскакивал как client_request → парсер 0 позиций → пустая
+        | заявка назначена менеджеру.
+        |
+        | 0 = guard выключен.
+        */
+        'empty_body_guard_min_chars' => (int) env('MAIL_EMPTY_BODY_MIN_CHARS', 40),
+
         'external_codes' => [
             // Liftway-saas: LZ-REQ-NNNN — общий маркер запроса в их системе.
             '/\bLZ-REQ-\d+\b/u',

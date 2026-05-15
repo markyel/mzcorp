@@ -63,7 +63,7 @@ class ManagerUnavailabilityService
         ?User $byUser = null,
         bool $autoDelegate = false,
     ): User {
-        if (! $user->hasRole(RoleEnum::Manager->value)) {
+        if (! $user->hasAnyRole(RoleEnum::requestHandlerRoles())) {
             throw new \DomainException('Помечать «недоступен» можно только менеджеров.');
         }
         if ($until->isPast()) {
@@ -149,7 +149,8 @@ class ManagerUnavailabilityService
         $skipped = 0;
 
         // Доступные менеджеры (без самого недоступного) для round-robin.
-        $available = User::role(RoleEnum::Manager->value)
+        // РОП включён в pool (requestHandlerRoles).
+        $available = User::role(RoleEnum::requestHandlerRoles())
             ->available()
             ->where('id', '!=', $unavailable->id)
             ->get();
