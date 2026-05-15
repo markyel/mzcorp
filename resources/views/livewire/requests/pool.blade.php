@@ -16,7 +16,8 @@
     $statusLabel = [
         RequestStatus::Pending->value  => 'В обработке',
         RequestStatus::New->value      => 'Нераспределена',
-        RequestStatus::Assigned->value => 'В работе',
+        // Assigned не появляется как group-key (объединён с InProgress
+        // в Pool::render). Override больше не нужен.
     ];
 
     $disabledTitle = 'Доступно в Phase 2';

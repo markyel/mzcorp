@@ -247,15 +247,27 @@ class Pool extends Component
         $page = $query->paginate(25);
 
         // Группировка текущей страницы по статусу — для sticky group-headers
-        // в стиле 03-requests.html. Порядок групп: Assigned → New → Pending.
+        // в стиле 03-requests.html.
+        //
+        // UX-bucket: Assigned объединён с InProgress в одной группе «В работе».
+        // Assigned — эфемерный статус (auto-transition в InProgress при первом
+        // открытии менеджером, см. Detail::mount implicit-state), поэтому
+        // два визуально одинаковых header'а «В РАБОТЕ · N» путали оператора.
+        // Чип в строке всё ещё показывает реальный статус (Назначена / В работе).
         /** @var Collection<string, Collection<int, Request>> $grouped */
         $grouped = collect($page->items())
-            ->groupBy(fn (Request $r) => $r->status->value);
+            ->groupBy(function (Request $r): string {
+                if ($r->status === RequestStatus::Assigned) {
+                    return RequestStatus::InProgress->value;
+                }
+
+                return $r->status->value;
+            });
 
         // Порядок групп — от свежих к завершённым (Foundation §5.2 lifecycle).
+        // Assigned убран — слит с InProgress (см. groupBy выше).
         $groupOrder = [
             RequestStatus::New->value,
-            RequestStatus::Assigned->value,
             RequestStatus::InProgress->value,
             RequestStatus::AwaitingClientClarification->value,
             RequestStatus::Quoted->value,
