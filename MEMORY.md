@@ -20,15 +20,18 @@
 **Кнопки в action-panel убраны**: «▶ Начать работу», «📨 КП отправлено», «❓ Жду уточнение клиента». Остались semi-manual: «↩ Вернуться к работе», «✓ Клиент ответил» (override), inbound intent кнопки, «❌ Закрыть как потеря», pause/resume.
 
 **Mail-pipeline для нового inbound**:
-1. `InternalSenderDetector` (наш домен / Mailbox / User → category=irrelevant, без LLM)
-2. `TrustedPartnerOverride` (Liftway-saas → category=client_request, без LLM)
-3. `MailCategoryClassifier` (gpt-4o → client_request / thread_reply / irrelevant)
-4. `InboundReplyLinker` (5 уровней: In-Reply-To / References / subject `M-2026-NNNN` / external `LZ-REQ-NNNN` / from_email+open / AI)
-5. `IncomingMailProcessor::processIfRequest` (если category=client_request И не linked И не empty-body → Request::create)
-6. `AssignmentService::autoAssign` (sticky + round-robin, role=manager OR head_of_sales)
-7. `MailFolderRouter::routeToManager` (IMAP COPY в `MZ|<Фамилия>` общего ящика — для секретаря)
-8. `DeliverToManagerInboxJob` (IMAP APPEND полного RFC822 в INBOX личного ящика менеджера — для рабочего потока)
-9. `ParseRequestItemsJob` (Vision + text парсер позиций, KB resolve, catalog match A/B/C)
+1. `MailRouter::route` — cross-mailbox дедуп ДО LLM: если message_id уже у нас в БД с related_request_id → наследуем категорию + Request, выходим (защита L2)
+2. `InternalSenderDetector` (наш домен / Mailbox / User → category=irrelevant, без LLM)
+3. `TrustedPartnerOverride` (Liftway-saas → category=client_request, без LLM)
+4. `MailCategoryClassifier` (gpt-4o → client_request / thread_reply / irrelevant)
+5. `InboundReplyLinker` — Level 0: same message_id linked (защита L3) → Level 1-5: In-Reply-To / References / subject `M-2026-NNNN` / external `LZ-REQ-NNNN` / from_email+open / AI
+6. `IncomingMailProcessor::processIfRequest` (если category=client_request И не linked И не empty-body → Request::create)
+7. `AssignmentService::autoAssign` (sticky + round-robin, role=manager OR head_of_sales)
+8. `MailFolderRouter::routeToManager` (IMAP COPY в `MZ|<Фамилия>` общего ящика — для секретаря)
+9. `DeliverToManagerInboxJob` (IMAP APPEND полного RFC822 в INBOX личного ящика менеджера + pre-create EmailMessage row с cross_mailbox_copy_of marker — защита L1 от sync-дублей)
+10. `ParseRequestItemsJob` (Vision + text парсер позиций, KB resolve, catalog match A/B/C)
+
+**Cross-mailbox copy маркер**: `email_messages.detected_artifacts.cross_mailbox_copy_of` = id оригинальной записи. UI thread (Detail::mount) фильтрует такие row'ы — показывается только оригинал. MessagePersister при sync обновляет imap_uid+flags+raw_source у pre-created row, MailRouter не запускается.
 
 **Mail-pipeline для outbound** (менеджер ответил через Yandex web UI):
 1. `OutgoingMailLinker` (5 уровней, аналогично inbound) → линкует к Request
@@ -141,6 +144,8 @@ RequestStatus::allowedTransitions расширены — New/Assigned/AwaitingCl
 Implicit-state — auto-transition Assigned/New → InProgress в Detail::mount когда viewer=ответственный менеджер или acting (isAccessibleBy). РОП/директор/секретарь НЕ триггерят. Event=auto_first_open. Кнопка «▶ Начать работу» убрана из action-panel для Assigned/New (теперь implicit) — **закрыт 2026-05-15.**
 Semi-auto переходы — убраны кнопки «📨 КП отправлено» и «❓ Жду уточнение клиента». Quoted ставится через OutboundDocumentDetector + LLM-fallback (AI-плашка «Применить» одним кликом). AwaitingClientClarification ставится через ClarificationPanel post-send hook. Implicit-state матрица: открыл → InProgress, отправил batch → AwaitingClientClarification, выслал КП → Quoted, получил «принимаем» → AwaitingInvoice, поставил флаг → Manual attention — **закрыт 2026-05-15.**
 collapseQuotedBlocks теперь сворачивает не только blockquote, но и attribution-headers ПЕРЕД blockquote (Yandex-формат «Кому:/Тема:/От:/Дата:/«DD.MM.YYYY, NAME wrote:»»). Новый helper looksLikeQuoteAttribution с 10 RU/EN regex-якорями. Кейс: reply через Yandex web UI оставлял attribution видимым над «показать цитату» — **закрыт 2026-05-15.**
+Pool group bucket merge: Assigned + InProgress объединены в один header «В РАБОТЕ» (Assigned эфемерный из-за implicit-state). groupBy в Pool::render маппит Assigned → InProgress bucket-key, $statusLabel override убран. Чип в строке всё ещё показывает реальный enum status — **закрыт 2026-05-15.**
+Cross-mailbox дедуп — 3 защитных слоя против Request-дублей при IMAP APPEND в личный ящик менеджера. **L1 (главный, pre-create):** `MailDeliverToManagerService::deliver` сразу после `appendMessage` пишет placeholder-row в `email_messages` для целевого ящика (mailbox_id=manager, folder=INBOX, message_id, related_request_id, direction=inbound, imap_uid=null, detected_artifacts.cross_mailbox_copy_of=original.id). Sync личного ящика через MessagePersister находит existing → только заполняет imap_uid+flags+raw_source → return null → MailRouter НЕ вызывается → 0 LLM-вызовов. **L2 (MailRouter pre-check):** в начале inbound-ветки проверка по message_id — если existing с related_request_id, наследуем category, выходим. **L3 (InboundReplyLinker Level 0):** last-resort match по message_id перед всеми остальными уровнями. UI: Detail::mount thread query фильтрует cross-mailbox копии (WHERE detected_artifacts->>'cross_mailbox_copy_of' IS NULL) — показывает только оригинал. Кейс: M-2026-0911 + M-2026-0912 дубль (sync личного ящика подобрал APPEND'нутую копию как новое inbound) — **закрыт 2026-05-15.**
 Экспорт в 1С, KB curator UI, PriceRefreshService — **за пределами текущей фазы.**
 
 ## Открытые вопросы / TODO
