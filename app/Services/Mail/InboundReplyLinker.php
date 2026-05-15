@@ -81,6 +81,41 @@ class InboundReplyLinker
             return Request::find($message->related_request_id);
         }
 
+        // Level 0: cross-mailbox дедуп по Message-ID. Одно и то же физическое
+        // письмо может появиться в двух Mailbox'ах — например, мы APPEND'ули
+        // оригинал в личный ящик менеджера (DeliverToManagerInboxJob),
+        // и IMAP sync личного ящика создал новый EmailMessage с тем же
+        // message_id, но другим mailbox_id. Уникальность БД
+        // (mailbox_id, folder, message_id) разрешает оба row'а, но это —
+        // ОДИН клиентский запрос, не два. Если у нас уже есть запись с
+        // тем же message_id и related_request_id — линкуем эту копию туда
+        // же, не создаём дубль Request.
+        if ($message->message_id) {
+            $sameIdLinked = EmailMessage::query()
+                ->where('message_id', $message->message_id)
+                ->where('id', '!=', $message->id)
+                ->whereNotNull('related_request_id')
+                ->orderBy('id') // самая ранняя — родительская запись
+                ->first();
+            if ($sameIdLinked) {
+                $request = Request::find($sameIdLinked->related_request_id);
+                if ($request) {
+                    $message->forceFill([
+                        'related_request_id' => $request->id,
+                    ])->save();
+
+                    Log::info('InboundReplyLinker: linked by same message_id (cross-mailbox dedup)', [
+                        'email_message_id' => $message->id,
+                        'parent_email_message_id' => $sameIdLinked->id,
+                        'request_id' => $request->id,
+                        'message_id' => $message->message_id,
+                    ]);
+
+                    return $request;
+                }
+            }
+        }
+
         $candidateIds = $this->collectCandidateMessageIds($message);
         $matched = null;
         $matchedBy = null;
