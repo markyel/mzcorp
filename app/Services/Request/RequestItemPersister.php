@@ -101,8 +101,51 @@ class RequestItemPersister
         $existingItems = $existing->items()->get();
         $filtered = $this->parser->filterNewItems($items, $existingItems);
 
+        // Phase reply-suggestion: для reply-контекста (не initial email
+        // Request'а) считаем confidence и решаем — auto-apply / suggest / skip.
+        $isReplyContext = $existing->email_message_id !== $message->id;
+        $autoThreshold = (float) config('services.parser.reply_auto_apply_threshold', 0.95);
+        $suggestThreshold = (float) config('services.parser.reply_suggest_threshold', 0.70);
+
         $maxPosition = (int) ($existingItems->max('position') ?? 0);
+        $newCountActive = 0;
+        $newCountPending = 0;
+        $newCountSkipped = 0;
+
         foreach ($filtered['new'] as $item) {
+            $suggestionStatus = null;
+            $finalConfidence = null;
+
+            if ($isReplyContext) {
+                $vision = (float) ($item['confidence'] ?? 1.0);
+                $sim = $this->bestArticleSimilarity(
+                    (string) ($item['article'] ?? ''),
+                    $existingItems,
+                );
+                // penalty 0..1: 0 при sim<0.4, 1 при sim≈1.0.
+                $penalty = max(0.0, min(1.0, ($sim - 0.4) * 1.7));
+                $finalConfidence = $vision * (1.0 - $penalty);
+
+                if ($finalConfidence < $suggestThreshold) {
+                    $newCountSkipped++;
+                    Log::info('RequestItemPersister: reply item skipped (low confidence)', [
+                        'email_message_id' => $message->id,
+                        'article' => $item['article'] ?? null,
+                        'confidence' => $finalConfidence,
+                        'similarity_to_existing' => $sim,
+                    ]);
+                    continue;
+                }
+                if ($finalConfidence < $autoThreshold) {
+                    $suggestionStatus = 'pending';
+                    $newCountPending++;
+                } else {
+                    $newCountActive++;
+                }
+            } else {
+                $newCountActive++;
+            }
+
             $maxPosition++;
             RequestItem::create([
                 'request_id' => $existing->id,
@@ -112,17 +155,48 @@ class RequestItemPersister
                 'parsed_article' => $item['article'] ?? null,
                 'parsed_qty' => $item['qty'] ?? 1,
                 'parsed_unit' => $item['unit'] ?? 'шт.',
-                // Phase 2.0+ coarse-категория от парсера. CategoryRefinementService
-                // через `whereHas('coarseCategories')` фильтрует fine-кандидатов
-                // и при 2+ кандидатах активирует LLM-pathway (refineWithLlm).
                 'category' => $item['category'] ?? null,
                 'supplier_note' => $item['note'] ?? null,
                 'data_source' => 'inbound_message',
-                // Phase 2: привязка к фото-вложению (только для vision-items;
-                // у text/документ items это поле null).
                 'image_attachment_id' => $item['email_attachment_id'] ?? null,
                 'status' => 'parsed',
+                // Pending suggestion → не активна, ждёт apply/reject менеджера.
+                'is_active' => $suggestionStatus !== 'pending',
+                'suggestion_status' => $suggestionStatus,
+                'suggestion_confidence' => $finalConfidence,
+                'suggestion_source_email_id' => $suggestionStatus !== null ? $message->id : null,
             ]);
+        }
+
+        // Audit для reply-парсинга: state_change с подсчётами, чтобы менеджер
+        // видел в Activity «парсер из reply добавил/предложил/отклонил позиции».
+        if ($isReplyContext && ($newCountActive + $newCountPending + $newCountSkipped) > 0) {
+            try {
+                \App\Models\RequestStateChange::create([
+                    'request_id' => $existing->id,
+                    'from_status' => $existing->status->value,
+                    'to_status' => $existing->status->value,
+                    'by_user_id' => null,
+                    'event' => 'items_parsed_from_reply',
+                    'comment' => sprintf(
+                        'Парсер из ответа клиента: +%d, предложений %d, пропущено %d',
+                        $newCountActive,
+                        $newCountPending,
+                        $newCountSkipped,
+                    ),
+                    'payload' => [
+                        'email_message_id' => $message->id,
+                        'items_added_active' => $newCountActive,
+                        'items_added_pending' => $newCountPending,
+                        'items_skipped_low_confidence' => $newCountSkipped,
+                    ],
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('RequestItemPersister: failed to record reply-parse audit', [
+                    'request_id' => $existing->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         // MOVE в INBOX/MZ/{Lastname} — при первом создании ИЛИ если письмо
@@ -208,5 +282,46 @@ class RequestItemPersister
             'just_created' => $justCreated,
             'clarifications' => $clarStoredCount,
         ];
+    }
+
+    /**
+     * Максимальная похожесть нового article на articles существующих
+     * активных позиций (Levenshtein normalized 0..1).
+     */
+    private function bestArticleSimilarity(string $newArticle, \Illuminate\Support\Collection $existingItems): float
+    {
+        $a = mb_strtolower(trim($newArticle));
+        if ($a === '') {
+            return 0.0;
+        }
+
+        $best = 0.0;
+        foreach ($existingItems as $ex) {
+            if (! $ex->is_active) {
+                continue;
+            }
+            $b = mb_strtolower(trim((string) $ex->parsed_article));
+            if ($b === '') {
+                continue;
+            }
+            $len = max(mb_strlen($a), mb_strlen($b));
+            if ($len === 0) {
+                continue;
+            }
+            // levenshtein — ASCII-only; для не-ASCII (кириллица в article)
+            // graceful fallback на substring-match через similar_text.
+            if (preg_match('/^[\x20-\x7E]+$/', $a . $b)) {
+                $dist = levenshtein($a, $b);
+                $sim = 1.0 - ($dist / $len);
+            } else {
+                similar_text($a, $b, $pct);
+                $sim = $pct / 100.0;
+            }
+            if ($sim > $best) {
+                $best = $sim;
+            }
+        }
+
+        return $best;
     }
 }

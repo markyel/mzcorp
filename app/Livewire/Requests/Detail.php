@@ -1028,6 +1028,100 @@ class Detail extends Component
     }
 
     /**
+     * Phase reply-suggestion: подтвердить pending-позицию от парсера.
+     * Делает is_active=true, suggestion_status='applied'. Audit в Activity.
+     */
+    public function applyPositionSuggestion(int $itemId): void
+    {
+        $user = auth()->user();
+        if ($user === null) {
+            abort(403);
+        }
+        if (! $this->request->isAccessibleBy($user) && ! $user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value])) {
+            abort(403);
+        }
+
+        $item = \App\Models\RequestItem::query()
+            ->where('request_id', $this->request->id)
+            ->whereKey($itemId)
+            ->where('suggestion_status', 'pending')
+            ->first();
+        if (! $item) {
+            return;
+        }
+
+        $item->forceFill([
+            'is_active' => true,
+            'suggestion_status' => 'applied',
+        ])->save();
+
+        \App\Models\RequestStateChange::create([
+            'request_id' => $this->request->id,
+            'from_status' => $this->request->status->value,
+            'to_status' => $this->request->status->value,
+            'by_user_id' => $user->id,
+            'event' => 'suggestion_applied',
+            'comment' => sprintf('Подтверждена pending-позиция #%d %s', $item->position, $item->parsed_name),
+            'payload' => [
+                'item_id' => $item->id,
+                'article' => $item->parsed_article,
+                'confidence' => $item->suggestion_confidence,
+                'source_email_id' => $item->suggestion_source_email_id,
+            ],
+        ]);
+
+        $this->reloadRequest();
+        session()->flash('status', 'Позиция подтверждена и добавлена в заявку.');
+    }
+
+    /**
+     * Phase reply-suggestion: отклонить pending-позицию.
+     * is_active=false (уже), suggestion_status='rejected'. Audit.
+     */
+    public function rejectPositionSuggestion(int $itemId): void
+    {
+        $user = auth()->user();
+        if ($user === null) {
+            abort(403);
+        }
+        if (! $this->request->isAccessibleBy($user) && ! $user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value])) {
+            abort(403);
+        }
+
+        $item = \App\Models\RequestItem::query()
+            ->where('request_id', $this->request->id)
+            ->whereKey($itemId)
+            ->where('suggestion_status', 'pending')
+            ->first();
+        if (! $item) {
+            return;
+        }
+
+        $item->forceFill([
+            'is_active' => false,
+            'suggestion_status' => 'rejected',
+        ])->save();
+
+        \App\Models\RequestStateChange::create([
+            'request_id' => $this->request->id,
+            'from_status' => $this->request->status->value,
+            'to_status' => $this->request->status->value,
+            'by_user_id' => $user->id,
+            'event' => 'suggestion_rejected',
+            'comment' => sprintf('Отклонена pending-позиция #%d %s', $item->position, $item->parsed_name),
+            'payload' => [
+                'item_id' => $item->id,
+                'article' => $item->parsed_article,
+                'confidence' => $item->suggestion_confidence,
+                'source_email_id' => $item->suggestion_source_email_id,
+            ],
+        ]);
+
+        $this->reloadRequest();
+        session()->flash('status', 'Предложенная позиция отклонена.');
+    }
+
+    /**
      * Снять с паузы вручную (не дожидаясь cron).
      */
     public function resumeFromPause(RequestPauseService $service): void

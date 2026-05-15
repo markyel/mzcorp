@@ -201,6 +201,11 @@ return [
         | в очищенном теле. Если ни один regex не сработал — пропускаем.
         */
         'parser' => [
+            // Phase reply-suggestion: пороги для reply-парсинга позиций.
+            // confidence = vision_confidence * (1 - fuzzy_penalty_по_артикулу)
+            // >= auto → активная позиция; >= suggest → pending; < suggest → skip.
+            'reply_auto_apply_threshold' => (float) env('REPLY_AUTO_APPLY_THRESHOLD', 0.95),
+            'reply_suggest_threshold' => (float) env('REPLY_SUGGEST_THRESHOLD', 0.70),
             'reply_signals' => [
                 // M-SKU (внутренний код каталога).
                 '/\bm\d{4,}\b/u',

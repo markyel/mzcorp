@@ -45,6 +45,11 @@ class RequestItem extends Model
         'equipment_unit_id',
         'quality_assessment_status',
         'quality_assessment_payload',
+        // Phase reply-suggestion: позиция предложена парсером из reply'я,
+        // ждёт подтверждения менеджера (см. RequestItemPersister).
+        'suggestion_status',
+        'suggestion_confidence',
+        'suggestion_source_email_id',
     ];
 
     protected function casts(): array
@@ -53,7 +58,17 @@ class RequestItem extends Model
             'parsed_qty' => 'decimal:3',
             'is_active' => 'boolean',
             'quality_assessment_payload' => 'array',
+            'suggestion_confidence' => 'float',
+            'suggestion_source_email_id' => 'integer',
         ];
+    }
+
+    /**
+     * Pending = создана парсером из reply, ждёт подтверждения.
+     */
+    public function isPendingSuggestion(): bool
+    {
+        return $this->suggestion_status === 'pending';
     }
 
     public function request(): BelongsTo

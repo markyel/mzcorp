@@ -420,6 +420,60 @@
                  Phase E.2: inbound_clarification_response теперь показывается
                  отдельным баннером вверху страницы (детализированно с diff/bar),
                  поэтому здесь отфильтровываем — не дублируем. --}}
+            {{-- Phase reply-suggestion: pending-позиции от парсера из reply'ев.
+                 Vision увидел позицию в ответе клиента, но confidence ниже
+                 auto-apply порога (или fuzzy-похожесть с существующей). Менеджер
+                 должен apply/reject. --}}
+            @php
+                $pendingPositions = \App\Models\RequestItem::query()
+                    ->where('request_id', $req->id)
+                    ->where('suggestion_status', 'pending')
+                    ->orderBy('position')
+                    ->get();
+            @endphp
+            @if($pendingPositions->isNotEmpty() && ($canManage || $canReassign))
+                <div class="ds-card p-3 text-[12px] mb-2"
+                     style="background: var(--amber-50); border-color: var(--amber-700);">
+                    <div class="font-semibold text-[var(--amber-800)] mb-2 flex items-center gap-1.5">
+                        💡 Парсер увидел в ответе клиента {{ $pendingPositions->count() }}
+                        {{ trans_choice('новую позицию|новые позиции|новых позиций', $pendingPositions->count()) }}
+                    </div>
+                    <div class="space-y-2">
+                        @foreach($pendingPositions as $pp)
+                            <div class="p-2 rounded bg-white border border-[var(--amber-700)]/30">
+                                <div class="flex items-baseline gap-2 text-[12px] flex-wrap">
+                                    @if($pp->parsed_article)
+                                        <span class="mono font-medium text-fg-1">{{ $pp->parsed_article }}</span>
+                                    @endif
+                                    @if($pp->parsed_brand)
+                                        <span class="text-fg-2">{{ $pp->parsed_brand }}</span>
+                                    @endif
+                                    <span class="text-fg-1">{{ $pp->parsed_name ?: '—' }}</span>
+                                    @if($pp->parsed_qty)
+                                        <span class="text-fg-3">· {{ rtrim(rtrim((string) $pp->parsed_qty, '0'), '.') }} шт</span>
+                                    @endif
+                                    <span class="flex-1"></span>
+                                    @if($pp->suggestion_confidence !== null)
+                                        <span class="mono text-[10.5px] px-1.5 py-0.5 rounded-sm bg-[var(--amber-100)] text-[var(--amber-800)]"
+                                              title="Уверенность парсера">
+                                            {{ (int) round($pp->suggestion_confidence * 100) }}%
+                                        </span>
+                                    @endif
+                                </div>
+                                <div class="flex items-center gap-1.5 mt-2">
+                                    <button type="button"
+                                            wire:click="applyPositionSuggestion({{ $pp->id }})"
+                                            class="btn btn-sm btn-primary text-[11px]">✓ Подтвердить</button>
+                                    <button type="button"
+                                            wire:click="rejectPositionSuggestion({{ $pp->id }})"
+                                            class="btn btn-sm text-[11px]">✕ Отклонить</button>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
+
             @php
                 $aiSuggestions = $this->pendingAiDecisions
                     ->reject(fn ($s) => ($s->detector_type->value ?? null) === 'inbound_clarification_response');
