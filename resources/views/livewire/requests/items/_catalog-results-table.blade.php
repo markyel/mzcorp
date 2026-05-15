@@ -43,11 +43,29 @@
                      Click открывает оригинал в новой вкладке. --}}
                 <td class="px-2 py-1.5 align-top">
                     @if($cat->photo_url)
-                        <div x-data="{ show: false, t: null }"
-                             x-on:mouseenter="t = setTimeout(() => show = true, 1000)"
-                             x-on:mouseleave="clearTimeout(t); show = false"
-                             class="relative">
-                            <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
+                        {{-- Position: fixed (а не absolute) — превью якорится
+                             к viewport, минует overflow:hidden модального окна.
+                             Координаты считаем по getBoundingClientRect миниатюры
+                             на mouseenter; если справа места нет — флип влево;
+                             top клампится в [8 .. viewport-408]. --}}
+                        <div x-data="{
+                                show: false, t: null, top: 0, left: 0,
+                                place(el) {
+                                    const r = el.getBoundingClientRect();
+                                    const W = 400, H = 400, gap = 8;
+                                    this.left = (r.right + gap + W > window.innerWidth)
+                                        ? Math.max(8, r.left - gap - W)
+                                        : r.right + gap;
+                                    this.top = Math.min(
+                                        window.innerHeight - H - 8,
+                                        Math.max(8, r.top)
+                                    );
+                                }
+                             }"
+                             x-on:mouseenter="place($refs.thumb); t = setTimeout(() => show = true, 1000)"
+                             x-on:mouseleave="clearTimeout(t); show = false">
+                            <a x-ref="thumb"
+                               href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
                                x-on:click.stop
                                class="block w-10 h-10 rounded overflow-hidden bg-surface-2 border border-border-subtle"
                                title="Открыть фото в новой вкладке">
@@ -58,15 +76,8 @@
                                      class="w-full h-full object-cover"
                                      onerror="this.style.display='none'; this.parentElement.classList.add('flex','items-center','justify-center'); this.parentElement.innerHTML += '<span class=\'text-fg-3 text-[9px]\'>нет</span>';">
                             </a>
-                            {{-- Preview: inline-стили вместо Tailwind w-96/h-96
-                                 — гарантируем 400×400 даже если CSS-сборка
-                                 не подхватила эти классы. object-cover, чтобы
-                                 маленькая исходная картинка с mylift.ru
-                                 заполняла бокс целиком (а не показывалась
-                                 размером с миниатюру). Точную картинку
-                                 без кропа оператор видит кликом → новая вкладка. --}}
                             <div x-show="show" x-cloak x-transition.opacity
-                                 style="position: absolute; left: 48px; top: 0; width: 400px; height: 400px; z-index: 50; pointer-events: none;"
+                                 :style="`position: fixed; left: ${left}px; top: ${top}px; width: 400px; height: 400px; z-index: 9999; pointer-events: none;`"
                                  class="rounded-lg shadow-xl border border-border-subtle bg-white p-1">
                                 <img src="{{ $cat->photo_url }}"
                                      alt=""
