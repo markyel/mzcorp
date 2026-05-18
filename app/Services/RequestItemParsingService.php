@@ -807,6 +807,20 @@ PROMPT;
             }
         }
 
+        // Диагностика для multi-invoice кейсов: какой путь набрал какие items.
+        Log::warning('parseItemsFromInboundContent: pipeline summary', [
+            'source' => $sourceTag,
+            'subject_preview' => mb_substr($subject, 0, 60),
+            'images_count' => $imageAttachments->count(),
+            'structured_count' => $structuredAttachments->count(),
+            'tried_text' => $shouldTryText,
+            'items_before_dedup' => count($items),
+            'items_articles' => array_map(
+                fn ($it) => ($it['article'] ?? '?') . '/q' . ($it['qty'] ?? '?') . '/inv' . ($it['invoice_index'] ?? '?'),
+                $items,
+            ),
+        ]);
+
         // 4) Дедуп с уважением к invoice_index. Ключ = article + qty +
         //    invoice_index. Multi-invoice кейсы (M33374 в счёте 1 и счёте 2
         //    оба с qty=2) сохраняются — разные invoice_index. Реальные
