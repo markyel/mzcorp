@@ -156,6 +156,27 @@
                     <span class="text-fg-2 truncate max-w-[440px]"
                           title="Название из каталога MyLift: {{ $ci->name }}">📦 «{{ $ci->name }}»</span>
                 @endif
+
+                {{-- Phase 7: chip «📨 в КП» — сумма позиции в исходящих КП.
+                     Несколько строк КП на одну позицию = split delivery. --}}
+                @php
+                    $quoteItems = $item->relationLoaded('outboundQuoteItems') ? $item->outboundQuoteItems : collect();
+                    $quoteSum = (float) $quoteItems->sum(fn ($qi) => (float) ($qi->line_total ?? 0));
+                    $quoteLines = $quoteItems->count();
+                @endphp
+                @if($quoteLines > 0)
+                    <span class="text-border-strong">·</span>
+                    <button type="button"
+                            wire:click="setTab('quotes')"
+                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 transition-colors text-[11px]"
+                            title="Открыть таб «КП»{{ $quoteLines > 1 ? ' (split delivery: ' . $quoteLines . ' строк)' : '' }}">
+                        📨 в КП:
+                        <span class="mono font-semibold">{{ number_format($quoteSum, 2, '.', ' ') }} ₽</span>
+                        @if($quoteLines > 1)
+                            <span class="text-fg-3">×{{ $quoteLines }}</span>
+                        @endif
+                    </button>
+                @endif
             </div>
         </div>
 

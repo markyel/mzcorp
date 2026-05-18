@@ -120,6 +120,12 @@ class Detail extends Component
             'outboundQuotes.items.catalogItem:id,sku,name,brand,brand_article,price',
             'outboundQuotes.items.requestItem:id,position,parsed_name,parsed_article,parsed_qty,is_active',
             'outboundQuotes.attachment:id,email_message_id,filename,mime_type,size_bytes,disk,file_path',
+            // Reverse-side: для chip «📨 в КП» в каждой строке таба «Позиции».
+            // Берём только из matched quote'ов (failed/parsing скрываем).
+            'items.outboundQuoteItems' => fn ($q) => $q->whereHas(
+                'quote',
+                fn ($qq) => $qq->where('status', \App\Models\OutboundQuote::STATUS_MATCHED)
+            ),
         ]);
 
         // Полный тред: все письма прицепленные к заявке (trigger + reply'и),
