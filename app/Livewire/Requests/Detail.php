@@ -441,6 +441,15 @@ class Detail extends Component
             fn (int $carry, EmailMessage $msg) => $carry + $msg->attachments->count(),
             0,
         );
+        // Phase 7: учесть attachment'ы OutboundQuote'ов, которые могли не попасть
+        // в $thread (если письмо с PDF не привязано к заявке как related_request_id).
+        $threadAttIds = $this->thread->flatMap(fn ($m) => $m->attachments)->pluck('id')->all();
+        $extraQuoteAtts = $this->request->outboundQuotes
+            ->pluck('attachment')
+            ->filter()
+            ->reject(fn ($a) => in_array($a->id, $threadAttIds, true))
+            ->count();
+        $files += $extraQuoteAtts;
         // Phase 1.10 + расширение: activity = assignments + stateChanges
         // + ВСЕ письма треда (не только initial).
         $activity = $this->request->assignments->count()

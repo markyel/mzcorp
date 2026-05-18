@@ -2280,7 +2280,25 @@
             @case('files')
                 @php
                     // Все вложения треда: trigger-email + reply'и.
-                    $allAttachments = $thread->flatMap(fn ($m) => $m->attachments)->values();
+                    $threadAtts = $thread->flatMap(fn ($m) => $m->attachments);
+                    // Phase 7: карта attachment_id → OutboundQuote (для chip «📨 КП №NNN»).
+                    // Берём из уже eager-loaded outboundQuotes (matched), один attachment
+                    // может быть source только для одного OutboundQuote (UNIQUE constraint).
+                    $quoteByAttachment = $req->outboundQuotes
+                        ->filter(fn ($q) => $q->email_attachment_id !== null)
+                        ->keyBy('email_attachment_id');
+
+                    // Phase 7: если PDF КП пришёл через письмо НЕ привязанное к этой
+                    // заявке (related_request_id != req.id — например письмо в Sent с
+                    // ослабленной link-цепочкой), его не будет в $thread. Добавляем
+                    // такие attachment'ы явно из outboundQuotes->attachment, чтобы они
+                    // не пропали в табе «Файлы» (источник критичен для аудита).
+                    $threadAttIds = $threadAtts->pluck('id')->all();
+                    $extraQuoteAtts = $req->outboundQuotes
+                        ->pluck('attachment')
+                        ->filter()
+                        ->reject(fn ($a) => in_array($a->id, $threadAttIds, true));
+                    $allAttachments = $threadAtts->concat($extraQuoteAtts)->unique('id')->values();
                 @endphp
                 <div class="ds-card">
                     <div class="ds-card-header">
@@ -2313,7 +2331,21 @@
                                         <span class="inline-block w-7 h-9 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[8.5px] font-bold text-center leading-9 shrink-0">{{ $ext }}</span>
                                     @endif
                                     <div class="flex-1 min-w-0">
-                                        <div class="text-fg-1 truncate text-sm">{{ $att->filename }}</div>
+                                        <div class="text-fg-1 truncate text-sm flex items-center gap-2 flex-wrap">
+                                            <span class="truncate">{{ $att->filename }}</span>
+                                            @php $attQuote = $quoteByAttachment->get($att->id); @endphp
+                                            @if($attQuote)
+                                                @php $isInvoice = $attQuote->document_type?->value === 'outbound_invoice'; @endphp
+                                                <button type="button" wire:click="setTab('quotes')"
+                                                        class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 transition-colors text-[11px] whitespace-nowrap"
+                                                        title="{{ $attQuote->total_amount !== null ? number_format((float) $attQuote->total_amount, 2, '.', ' ') . ' ₽ · сматчено ' . $attQuote->matchedCount() . '/' . $attQuote->items->count() : '' }}">
+                                                    📨 {{ $isInvoice ? 'Счёт' : 'КП' }}
+                                                    @if($attQuote->document_number)
+                                                        <span class="mono">№{{ $attQuote->document_number }}</span>
+                                                    @endif
+                                                </button>
+                                            @endif
+                                        </div>
                                         <div class="text-[11.5px] text-fg-3 mt-0.5">
                                             {{ $att->mime_type ?: '—' }}
                                             @if($att->size_bytes) · {{ number_format($att->size_bytes / 1024, 0, '.', ' ') }} KB @endif
