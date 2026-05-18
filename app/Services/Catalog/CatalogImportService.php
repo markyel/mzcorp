@@ -140,7 +140,7 @@ class CatalogImportService
             return $import;
         }
 
-        $counts = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'soft_deleted' => 0];
+        $counts = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'soft_deleted' => 0, 'marked_unavailable' => 0];
 
         DB::transaction(function () use ($normalized, $import, &$counts) {
             // Шаг A: достаём существующие записи по sku одним запросом.
@@ -196,20 +196,37 @@ class CatalogImportService
                 }
             }
 
-            // Шаг C: soft-delete всего, что не пришло в этом snapshot'е.
-            // last_imported_at < $now → not in snapshot. Не трогаем уже
-            // помеченные is_active=false, чтобы updated_at не дёргать зря.
-            $softDeleted = CatalogItem::query()
-                ->where('is_active', true)
+            // Шаг C: позиции, не пришедшие в snapshot — НЕ архивируются
+            // (каталог = master data, история накапливается). Вместо этого
+            // помечаются как «нет в наличии + цена устарела»:
+            //   stock_available = 0
+            //   is_price_actual = false
+            // is_active остаётся как было (true для авто-импорта, оператор
+            // может вручную выключить дубликат). Это сохраняет привязки
+            // catalog_item_id у заявок, позволяет искать позицию в каталоге
+            // и видеть её статус «недоступна», а при следующем импорте,
+            // где она вернётся, stock и price восстановятся.
+            //
+            // Touch only если правда нужно поменять (stock>0 ИЛИ
+            // price_actual=true) — иначе зачем дёргать updated_at.
+            $markedUnavailable = CatalogItem::query()
                 ->where(function ($q) use ($now) {
                     $q->whereNull('last_imported_at')
                         ->orWhere('last_imported_at', '<', $now);
                 })
+                ->where(function ($q) {
+                    $q->where('stock_available', '>', 0)
+                        ->orWhere('is_price_actual', true);
+                })
                 ->update([
-                    'is_active' => false,
+                    'stock_available' => 0,
+                    'is_price_actual' => false,
                     'updated_at' => $now,
                 ]);
-            $counts['soft_deleted'] = (int) $softDeleted;
+            $counts['marked_unavailable'] = (int) $markedUnavailable;
+            // Legacy ключ для finalize() — оставлено как 0 для обратной
+            // совместимости с CatalogImport-моделью (counts_soft_deleted).
+            $counts['soft_deleted'] = 0;
         });
 
         $this->finalize($import, $startedAt, [
