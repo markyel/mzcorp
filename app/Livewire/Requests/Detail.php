@@ -36,7 +36,7 @@ use Livewire\Component;
  */
 class Detail extends Component
 {
-    public const TABS = ['overview', 'thread', 'items', 'suppliers', 'activity', 'files', 'related'];
+    public const TABS = ['overview', 'thread', 'items', 'quotes', 'suppliers', 'activity', 'files', 'related'];
 
     public Request $request;
 
