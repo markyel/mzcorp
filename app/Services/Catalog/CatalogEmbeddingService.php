@@ -290,41 +290,64 @@ class CatalogEmbeddingService
     private function trigramTopN(string $queryText, int $limit): array
     {
         $lower = mb_strtolower($queryText);
+        // Дефис/пробел-очищенный lower — для случая «Плата ПКЛ-32» против
+        // «Плата контроллера лифта типа ПКЛ32-04»: word_similarity на raw
+        // даёт ~0.1 из-за разных триграмм вокруг дефиса, на nosep — ~0.8.
+        $lowerNoSep = (string) preg_replace('/[\s\-_.\/]/u', '', $lower);
         // normalizeArticle: uppercase + strip [\s\-_./]. Совместимо с тем
         // как мы импортируем brand_article_normalized в CatalogImportService.
         $norm = (string) (\App\Services\Catalog\CatalogImportService::normalizeArticle($queryText) ?? '');
 
         try {
-            // word_similarity для name: query короткая («ПКЛ32-04»), name
-            // длинная («Плата контроллера лифта типа ПКЛ32-04 без ПЗУ») —
-            // обычный similarity() даст ~0.15 (доля общих триграмм во всей
-            // длинной строке). word_similarity находит лучший подстрочный
-            // word-extent в target и даёт ~1.0 если query там есть как
-            // подслово. Это и есть то поведение, которое нужно UI-поиску.
+            // 4 слота:
+            //   1) word_similarity по raw lower(name) — «ПКЛ32-04» в «...ПКЛ32-04...»;
+            //   2) word_similarity по dehyphenated lower(name) — «Плата ПКЛ-32»
+            //      против «ПлатаПКЛ32»;
+            //   3) similarity по brand_article_normalized — primary OEM;
+            //   4) MAX similarity по любому элементу articles[] (jsonb) —
+            //      multi-OEM позиции типа M16660 у которых нужный артикул
+            //      сидит во втором/третьем элементе массива.
             //
-            // brand_article_normalized — короткое поле, обычный similarity
-            // тут нормально работает.
-            //
-            // `<%` оператор использует pg_trgm.word_similarity_threshold
-            // (default 0.6), GIN-индекс по gin_trgm_ops это умеет.
-            $rows = DB::select(
-                <<<'SQL'
+            // similarity() default threshold 0.3, word_similarity() — 0.6.
+            // GIN-индексы по lower(name), regexp_replace(lower(name),...),
+            // brand_article_normalized ускоряют 1-3. Слот 4 — seq+jsonb_array,
+            // но на 35K элементов это <500мс, и тригерим его только когда
+            // $norm непуст и >=4 символов (article-like запрос).
+            $useArticles = $norm !== '' && mb_strlen($norm) >= 4;
+
+            $sql = "
                 SELECT id AS catalog_id,
                        GREATEST(
                            word_similarity(?, lower(name)),
+                           word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./]', '', 'g')),
                            CASE WHEN ? <> '' THEN similarity(brand_article_normalized, ?) ELSE 0 END
+                           " . ($useArticles ? ",
+                           COALESCE((
+                               SELECT MAX(similarity(upper(regexp_replace(coalesce(a, ''), '[\\s\\-_./]', '', 'g')), ?))
+                               FROM jsonb_array_elements_text(articles) AS a
+                           ), 0)" : "") . "
                        ) AS s
                 FROM catalog_items
                 WHERE is_active = true
                   AND (
                        ? <% lower(name)
+                       OR ? <% regexp_replace(lower(name), '[\\s\\-_./]', '', 'g')
                        OR (? <> '' AND brand_article_normalized % ?)
+                       " . ($useArticles ? "
+                       OR EXISTS (
+                           SELECT 1 FROM jsonb_array_elements_text(articles) AS a
+                           WHERE upper(regexp_replace(coalesce(a, ''), '[\\s\\-_./]', '', 'g')) % ?
+                       )" : "") . "
                   )
                 ORDER BY s DESC
                 LIMIT ?
-                SQL,
-                [$lower, $norm, $norm, $lower, $norm, $norm, $limit],
-            );
+            ";
+
+            $bindings = $useArticles
+                ? [$lower, $lowerNoSep, $norm, $norm, $norm, $lower, $lowerNoSep, $norm, $norm, $norm, $limit]
+                : [$lower, $lowerNoSep, $norm, $norm, $lower, $lowerNoSep, $norm, $norm, $limit];
+
+            $rows = DB::select($sql, $bindings);
         } catch (\Throwable $e) {
             // pg_trgm нет / индексы не созданы / синтаксис не поддерживается —
             // тихо отдаём пустой массив, hybrid fallback'нется в pure vector.
