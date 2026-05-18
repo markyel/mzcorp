@@ -1643,7 +1643,7 @@
                                     }
                                 }
                             @endphp
-                            <div class="p-[8px] bg-app" x-data="{ items: @js($positionsGallery) }">
+                            <div class="p-[8px] bg-app">
                             @foreach($items as $item)
                                 @php $slots = $slotResolver->resolve($item); @endphp
                                 @include('livewire.requests.items._position-card', [
@@ -1654,6 +1654,7 @@
                                     'items' => $items,
                                     'expanded' => (bool) ($expandedPositions[$item->id] ?? false),
                                     'galleryIndex' => $positionsImgIndex[$item->id] ?? null,
+                                    'galleryItems' => $positionsGallery,
                                 ])
                             @endforeach
                             </div>
