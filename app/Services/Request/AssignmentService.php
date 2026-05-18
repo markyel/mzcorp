@@ -34,8 +34,11 @@ use Illuminate\Support\Facades\DB;
  *
  *     Sticky всегда побеждает балансировку (per оператор).
  *
- *  2) Round-robin — наименее загруженный менеджер (count of new+assigned).
- *     При равенстве — у кого assigned_at давнее.
+ *  2) Round-robin — weighted random по нагрузке. У отстающего менеджера
+ *     (низкий load) выше вероятность получить новую заявку, но не 100% —
+ *     остальные продолжают получать заявки пропорционально (max-load -
+ *     load + 1). Это плавно подтягивает новичков без рывков 0→all.
+ *     См. `pickWeightedLeastLoadedManager`.
  */
 class AssignmentService
 {
@@ -77,8 +80,17 @@ class AssignmentService
                 JSON_UNESCAPED_UNICODE,
             );
         } else {
-            $manager = $this->pickLeastLoadedManager($managers);
-            $reason = 'auto_round_robin';
+            $rr = $this->pickWeightedLeastLoadedManager($managers);
+            $manager = $rr['user'] ?? null;
+            // Сохраняем веса и нагрузки в reason — РОПу видно почему
+            // именно этому менеджеру досталась заявка (вероятностно).
+            // Формат: auto_round_robin:{"loads":{1:5,2:8},"weights":{1:4,2:1}}
+            $reason = $rr
+                ? 'auto_round_robin:' . json_encode(
+                    ['loads' => $rr['loads'], 'weights' => $rr['weights']],
+                    JSON_UNESCAPED_UNICODE,
+                )
+                : 'auto_round_robin';
         }
 
         if (! $manager) {
@@ -340,12 +352,33 @@ class AssignmentService
     }
 
     /**
-     * Менеджер с наименьшим текущим load (count of assigned requests).
-     * При равенстве — у кого assigned_at последней заявки давнее.
+     * Round-robin с приоритетом для отстающих по нагрузке (weighted random).
+     *
+     * **Зачем не «strict least-loaded»**: если ввести нового менеджера с
+     * нагрузкой 0, классический «least-loaded first» отдаст ему ВСЕ новые
+     * заявки подряд, пока он не догонит остальных. Реально это плохо —
+     * нагрузка прыгает рывками, клиенты одного менеджера получают разные
+     * стили общения, нет плавного onboarding.
+     *
+     * **Алгоритм**: каждому кандидату назначаем вес
+     *   `weight = (max_load - manager_load + 1)`
+     * и выбираем случайно с вероятностью пропорциональной весу.
+     *
+     * Пример нагрузок `[0, 5, 8, 10]` (max=10):
+     *   weights = [11, 6, 3, 1]   sum = 21
+     *   вероятности: 52% / 29% / 14% / 5%
+     *
+     * Новичок получает большинство (но не 100%) → плавно догоняет.
+     * Перегруженный всё-таки получает редкие заявки → не «забывают».
+     *
+     * Tiebreak при равных весах: чей `last_assigned_at` старее (LRU),
+     * NULL (никогда не получал) — первым в очереди.
      *
      * @param  Collection<int, User>  $managers  Активные менеджеры.
+     * @return array{user: User, weights: array<int, int>, loads: array<int, int>}|null
+     *         user — выбранный, weights/loads — для audit в reason.
      */
-    private function pickLeastLoadedManager(Collection $managers): ?User
+    private function pickWeightedLeastLoadedManager(Collection $managers): ?array
     {
         if ($managers->isEmpty()) {
             return null;
@@ -372,14 +405,66 @@ class AssignmentService
                 'load' => (int) ($row->load_count ?? 0),
                 'last_assigned_at' => $row->last_assigned_at ?? null,
             ];
+        })->values();
+
+        $maxLoad = (int) $candidates->max('load');
+        // Веса: (max - load + 1). +1 чтобы у самого загруженного был
+        // ненулевой шанс (иначе при разнице в 1-2 заявки эффект почти
+        // как у strict least-loaded).
+        $weighted = $candidates->map(function (array $c) use ($maxLoad) {
+            $c['weight'] = $maxLoad - $c['load'] + 1;
+
+            return $c;
         });
 
+        $totalWeight = (int) $weighted->sum('weight');
+        if ($totalWeight <= 0) {
+            // Защита от вырожденного случая (все weights = 0 — теоретически
+            // невозможно при +1). Берём первого LRU чтобы хоть что-то отдать.
+            $fallback = $this->pickByLruTiebreak($candidates);
+
+            return [
+                'user' => $fallback,
+                'weights' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => (int) $c['weight']])->all(),
+                'loads' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => (int) $c['load']])->all(),
+            ];
+        }
+
+        // mt_rand даёт равномерное [1..totalWeight], выбираем bucket по
+        // префиксной сумме весов. Стабильный seed не нужен — рандом часть
+        // дизайна (плавная балансировка по большой серии заявок).
+        $roll = random_int(1, $totalWeight);
+        $accum = 0;
+        $chosen = null;
+        foreach ($weighted as $c) {
+            $accum += (int) $c['weight'];
+            if ($roll <= $accum) {
+                $chosen = $c;
+                break;
+            }
+        }
+        // Inhouse-страховка от floating-edge'а.
+        $chosen ??= $weighted->last();
+
+        return [
+            'user' => $chosen['user'],
+            'weights' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => (int) $c['weight']])->all(),
+            'loads' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => (int) $c['load']])->all(),
+        ];
+    }
+
+    /**
+     * Tiebreak helper: при равных весах берём того, кому давнее назначали
+     * (NULL — никогда не получал — первым в очереди).
+     *
+     * @param  Collection<int, array{user: User, load: int, last_assigned_at: ?string}>  $candidates
+     */
+    private function pickByLruTiebreak(Collection $candidates): ?User
+    {
         $sorted = $candidates->sort(function ($a, $b) {
-            // 1) меньше нагрузка — раньше
             if ($a['load'] !== $b['load']) {
                 return $a['load'] <=> $b['load'];
             }
-            // 2) кому давнее назначали — раньше (NULL первым)
             if ($a['last_assigned_at'] === null) {
                 return -1;
             }
