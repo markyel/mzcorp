@@ -152,6 +152,19 @@ class RequestItemParsingService
         $parsed = json_decode($result['content'], true);
         $items = $parsed['items'] ?? [];
 
+        // invoice_analysis — диагностический CoT-блок промпта про несколько
+        // счетов. Не валидируется (LLM может промахнуться), но логируется:
+        // если invoices ≥ 2, а items.length мало — это сигнал что схлопнул.
+        $ia = $parsed['invoice_analysis'] ?? null;
+        if (is_array($ia)) {
+            Log::info('parseItemsFromInbound: invoice_analysis', [
+                'subject_preview' => mb_substr((string) $subject, 0, 60),
+                'client_requested_invoices' => $ia['client_requested_invoices'] ?? null,
+                'blocks_found' => $ia['blocks_found'] ?? [],
+                'items_count' => count($items),
+            ]);
+        }
+
         return array_map(fn(array $item) => $this->normalizeParsedItem($item), $items);
     }
 
