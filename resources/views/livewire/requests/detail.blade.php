@@ -2046,6 +2046,217 @@
                 </div>
                 @break
 
+            {{-- ───── КП ─────
+                 Phase 7: snapshot'ы отправленных КП/счетов. Заполняет
+                 ParseOutboundQuoteJob после OutboundDocumentDetector. Таб
+                 показывается только если есть хотя бы один matched OutboundQuote. --}}
+            @case('quotes')
+                @php
+                    $quotes = $req->outboundQuotes; // загружены в Detail::mount с items + relations
+                    $sourceLabels = [
+                        \App\Models\OutboundQuoteItem::MATCH_SOURCE_SKU_EXACT => ['M-SKU', 'emerald'],
+                        \App\Models\OutboundQuoteItem::MATCH_SOURCE_CATALOG_TO_REQUEST => ['SKU→каталог→заявка', 'emerald'],
+                        \App\Models\OutboundQuoteItem::MATCH_SOURCE_SKU_TO_REQUEST => ['SKU→заявка', 'emerald'],
+                        \App\Models\OutboundQuoteItem::MATCH_SOURCE_CATALOG_NAME_TO_REQUEST => ['по названию каталога', 'sky'],
+                        \App\Models\OutboundQuoteItem::MATCH_SOURCE_FUZZY_ARTICLE => ['fuzzy article', 'sky'],
+                        \App\Models\OutboundQuoteItem::MATCH_SOURCE_FUZZY_NAME => ['fuzzy name', 'sky'],
+                        \App\Models\OutboundQuoteItem::MATCH_SOURCE_LLM => ['AI', 'amber'],
+                        \App\Models\OutboundQuoteItem::MATCH_SOURCE_MANUAL => ['вручную', 'violet'],
+                        \App\Models\OutboundQuoteItem::MATCH_SOURCE_UNMATCHED => ['не сматчено', 'neutral'],
+                    ];
+                    $sourceColors = [
+                        'emerald' => 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                        'sky'     => 'bg-sky-50 text-sky-700 border-sky-200',
+                        'amber'   => 'bg-amber-50 text-amber-700 border-amber-200',
+                        'violet'  => 'bg-violet-50 text-violet-700 border-violet-200',
+                        'neutral' => 'bg-neutral-100 text-fg-3 border-border-subtle',
+                    ];
+                @endphp
+                @if($quotes->isEmpty())
+                    <div class="ds-card p-8 text-center text-fg-3">
+                        <div class="text-fg-1 font-medium mb-1">Пока не отправлено ни одного КП/счёта</div>
+                        <div class="text-sm">Как только менеджер пришлёт клиенту PDF/XLSX через тред — он появится здесь автоматически.</div>
+                    </div>
+                @else
+                    <div class="space-y-3">
+                        @foreach($quotes as $idx => $quote)
+                            @php
+                                $matched = $quote->items->whereNotNull('matched_request_item_id')->count();
+                                $totalLines = $quote->items->count();
+                                $matchedPct = $totalLines > 0 ? (int) round($matched / $totalLines * 100) : 0;
+                                $isInvoice = $quote->document_type?->value === 'outbound_invoice';
+                                $att = $quote->attachment;
+                                $hasFile = $att !== null && $att->id !== null;
+                                $downloadUrl = $hasFile ? route('attachments.download', $att) : null;
+                                // Сумма позиций до общей скидки (если в КП Liftway применил скидку в подвале,
+                                // line_total строк не равна total_amount). Показываем расхождение, если есть.
+                                $linesSum = (float) $quote->items->sum(fn ($i) => (float) ($i->line_total ?? 0));
+                                $hasDiscount = $quote->total_amount !== null
+                                    && $linesSum > 0
+                                    && abs($linesSum - (float) $quote->total_amount) > 1.0;
+                            @endphp
+                            <details class="ds-card" {{ $idx === 0 ? 'open' : '' }}>
+                                <summary class="ds-card-header cursor-pointer select-none">
+                                    <h3>
+                                        {{ $isInvoice ? 'Счёт' : 'КП' }}
+                                        @if($quote->document_number)
+                                            <span class="mono">№{{ $quote->document_number }}</span>
+                                        @endif
+                                        @if($quote->document_date)
+                                            <span class="text-fg-3 font-normal">от {{ $quote->document_date->format('d.m.Y') }}</span>
+                                        @endif
+                                    </h3>
+                                    <span class="flex-1"></span>
+                                    <span class="text-fg-1 font-semibold mono">
+                                        {{ $quote->total_amount !== null ? number_format((float) $quote->total_amount, 2, '.', ' ') . ' ₽' : '—' }}
+                                    </span>
+                                    <span class="text-[11.5px] text-fg-3">·</span>
+                                    <span class="text-[11.5px] {{ $matched === $totalLines ? 'text-emerald-700' : 'text-fg-3' }}">
+                                        сматчено {{ $matched }}/{{ $totalLines }} ({{ $matchedPct }}%)
+                                    </span>
+                                </summary>
+                                <div class="ds-card-body p-0">
+                                    {{-- Meta-row: VAT, prices_include_vat, source, download. --}}
+                                    <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-[18px] py-2.5 border-b border-[var(--border-subtle)] text-[12px]">
+                                        @if($quote->vat_amount !== null)
+                                            <span class="text-fg-2">
+                                                НДС {{ $quote->vat_rate !== null ? rtrim(rtrim(number_format((float) $quote->vat_rate, 2, '.', ' '), '0'), '.') . '%' : '' }}
+                                                {{ $quote->prices_include_vat ? '(в т.ч.)' : '(сверху)' }}
+                                                <span class="mono ml-0.5">{{ number_format((float) $quote->vat_amount, 2, '.', ' ') }} ₽</span>
+                                            </span>
+                                        @endif
+                                        @if($hasDiscount)
+                                            <span class="text-amber-700" title="Сумма построчно (до общей скидки) — {{ number_format($linesSum, 2, '.', ' ') }} ₽; в КП применена общая скидка в подвале.">
+                                                подытог: <span class="mono">{{ number_format($linesSum, 2, '.', ' ') }} ₽</span>
+                                                <span class="text-fg-3">·</span>
+                                                скидка <span class="mono">{{ number_format($linesSum - (float) $quote->total_amount, 2, '.', ' ') }} ₽</span>
+                                            </span>
+                                        @endif
+                                        @if($hasFile)
+                                            <span class="flex-1"></span>
+                                            <a href="{{ $downloadUrl }}" class="text-sky-700 hover:underline inline-flex items-center gap-1">
+                                                📎 {{ Str::limit($att->filename, 60, '…') ?: 'Без имени' }}
+                                                <span class="text-fg-3">({{ number_format((int) ($att->size_bytes ?? 0) / 1024, 0, '.', ' ') }} KB)</span>
+                                                <span class="text-fg-2">— скачать →</span>
+                                            </a>
+                                        @endif
+                                    </div>
+
+                                    {{-- Таблица строк КП. --}}
+                                    @if($quote->items->isEmpty())
+                                        <div class="px-[18px] py-6 text-center text-fg-3 text-sm">Парсер не извлёк ни одной строки.</div>
+                                    @else
+                                        <table class="w-full text-[12.5px]">
+                                            <thead class="text-[10.5px] uppercase tracking-wider text-fg-3 bg-neutral-50">
+                                                <tr>
+                                                    <th class="text-left px-[18px] py-1.5 font-semibold">#</th>
+                                                    <th class="text-left py-1.5 font-semibold">Наименование</th>
+                                                    <th class="text-right py-1.5 font-semibold">Кол-во</th>
+                                                    <th class="text-right py-1.5 font-semibold">Цена</th>
+                                                    <th class="text-right py-1.5 font-semibold">Сумма</th>
+                                                    <th class="text-left py-1.5 font-semibold whitespace-nowrap">Срок</th>
+                                                    <th class="text-left py-1.5 px-[18px] font-semibold">Заявка</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y divide-[var(--border-subtle)]">
+                                                @foreach($quote->items as $qi)
+                                                    @php
+                                                        [$srcLabel, $srcColor] = $sourceLabels[$qi->match_source] ?? ['—', 'neutral'];
+                                                        $srcCss = $sourceColors[$srcColor];
+                                                        $ri = $qi->requestItem;
+                                                        $cat = $qi->catalogItem;
+                                                    @endphp
+                                                    <tr class="{{ $qi->matched_request_item_id === null ? 'bg-amber-50/30' : '' }} align-top">
+                                                        <td class="px-[18px] py-2 text-fg-3 mono">{{ $qi->position }}</td>
+                                                        <td class="py-2 pr-3">
+                                                            <div class="text-fg-1">{{ $qi->raw_name ?: '—' }}</div>
+                                                            <div class="text-[11px] text-fg-3 mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+                                                                @if($qi->raw_article)
+                                                                    <span class="mono">{{ $qi->raw_article }}</span>
+                                                                @endif
+                                                                @if($qi->raw_brand)
+                                                                    <span>{{ $qi->raw_brand }}</span>
+                                                                @endif
+                                                                @if($cat)
+                                                                    <a href="https://mylift.ru/search?q={{ urlencode($cat->sku) }}" target="_blank" rel="noopener"
+                                                                       class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200 hover:underline"
+                                                                       title="{{ $cat->name }}">
+                                                                        📦 каталог: <span class="mono">{{ $cat->sku }}</span>
+                                                                    </a>
+                                                                @elseif($qi->matched_catalog_item_id)
+                                                                    <span class="text-fg-3">catalog#{{ $qi->matched_catalog_item_id }}</span>
+                                                                @endif
+                                                                @if($qi->is_analog)
+                                                                    <span class="px-1.5 py-0.5 rounded border bg-sky-50 text-sky-700 border-sky-200">аналог</span>
+                                                                @endif
+                                                            </div>
+                                                            @if($qi->notes)
+                                                                <div class="text-[11px] text-fg-3 mt-0.5 italic">{{ Str::limit($qi->notes, 120) }}</div>
+                                                            @endif
+                                                        </td>
+                                                        <td class="py-2 text-right text-fg-1 mono whitespace-nowrap">
+                                                            {{ $qi->quantity !== null ? rtrim(rtrim(number_format((float) $qi->quantity, 3, '.', ' '), '0'), '.') : '—' }}
+                                                            <span class="text-fg-3 text-[10.5px]">{{ $qi->unit_measure ?: '' }}</span>
+                                                        </td>
+                                                        <td class="py-2 text-right text-fg-1 mono whitespace-nowrap">
+                                                            {{ $qi->unit_price !== null ? number_format((float) $qi->unit_price, 2, '.', ' ') : '—' }}
+                                                        </td>
+                                                        <td class="py-2 text-right text-fg-1 mono font-semibold whitespace-nowrap">
+                                                            {{ $qi->line_total !== null ? number_format((float) $qi->line_total, 2, '.', ' ') : '—' }}
+                                                        </td>
+                                                        <td class="py-2 text-fg-2 whitespace-nowrap">
+                                                            @if($qi->delivery_days === null)
+                                                                <span class="text-fg-3">—</span>
+                                                            @elseif($qi->delivery_days === 0)
+                                                                <span class="text-emerald-700">в наличии</span>
+                                                            @else
+                                                                {{ $qi->delivery_days }} раб. дн.
+                                                            @endif
+                                                        </td>
+                                                        <td class="py-2 px-[18px]">
+                                                            @if($ri)
+                                                                <a href="#" wire:click.prevent="setTab('items')" class="text-sky-700 hover:underline text-[12px]"
+                                                                   title="{{ $ri->parsed_name }}">
+                                                                    поз. №{{ $ri->position ?? '?' }}
+                                                                </a>
+                                                                <div class="text-[10.5px] mt-0.5">
+                                                                    <span class="inline-block px-1.5 py-0.5 rounded border {{ $srcCss }}">{{ $srcLabel }}</span>
+                                                                    @if($qi->match_score)
+                                                                        <span class="text-fg-3 mono ml-0.5">{{ number_format($qi->match_score * 100, 0) }}%</span>
+                                                                    @endif
+                                                                </div>
+                                                            @else
+                                                                <span class="inline-block px-1.5 py-0.5 rounded border {{ $sourceColors['neutral'] }} text-[10.5px]">
+                                                                    не сматчено
+                                                                </span>
+                                                                @if($qi->matched_catalog_item_id)
+                                                                    <div class="text-[10.5px] text-fg-3 mt-0.5">в каталоге есть, в заявке нет</div>
+                                                                @endif
+                                                            @endif
+                                                        </td>
+                                                    </tr>
+                                                @endforeach
+                                            </tbody>
+                                            <tfoot>
+                                                <tr class="border-t border-[var(--border-subtle)] bg-neutral-50/60">
+                                                    <td colspan="4" class="px-[18px] py-2 text-fg-3 text-[11.5px]">
+                                                        Источник: {{ $quote->source === 'attachment' ? '📎 вложение' : 'тело письма' }}
+                                                        · парсер: {{ $quote->parsed_at?->format('d.m.Y H:i') ?? '—' }}
+                                                    </td>
+                                                    <td class="py-2 text-right text-fg-1 font-semibold mono whitespace-nowrap" colspan="3">
+                                                        Итого по КП: {{ $quote->total_amount !== null ? number_format((float) $quote->total_amount, 2, '.', ' ') . ' ₽' : '—' }}
+                                                    </td>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    @endif
+                                </div>
+                            </details>
+                        @endforeach
+                    </div>
+                @endif
+                @break
+
             {{-- ───── ФАЙЛЫ ───── --}}
             @case('files')
                 @php

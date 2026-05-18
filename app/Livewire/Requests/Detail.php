@@ -112,12 +112,14 @@ class Detail extends Component
             // Phase 1.10 — state-changes для таба «Активность».
             'stateChanges' => fn ($q) => $q->orderByDesc('created_at'),
             'stateChanges.byUser:id,name',
-            // Phase 7 — snapshot'ы отправленных КП/счетов для Hero-чипа
-            // («📨 КП: 156 230 ₽ · 12/15»). Загружаем только matched
-            // (parsed-без-matcher не показываем, failed скрываем).
+            // Phase 7 — snapshot'ы отправленных КП/счетов. В таб «КП»
+            // загружаем полные item'ы + catalog/request relations для drill-down.
             'outboundQuotes' => fn ($q) => $q->where('status', \App\Models\OutboundQuote::STATUS_MATCHED)
                 ->orderByDesc('id'),
-            'outboundQuotes.items:id,outbound_quote_id,matched_request_item_id,line_total,quantity',
+            'outboundQuotes.items' => fn ($q) => $q->orderBy('position'),
+            'outboundQuotes.items.catalogItem:id,sku,name,brand,brand_article,price',
+            'outboundQuotes.items.requestItem:id,position,parsed_name,parsed_article,parsed_qty,is_active',
+            'outboundQuotes.attachment:id,email_message_id,filename,mime_type,size_bytes,disk,file_path',
         ]);
 
         // Полный тред: все письма прицепленные к заявке (trigger + reply'и),
@@ -439,15 +441,27 @@ class Detail extends Component
             + $this->request->stateChanges->count()
             + $this->thread->count();
 
-        return [
+        // Snapshot'ы исходящих КП/счетов (Foundation §7 расширение). Counter — число
+        // отправленных коммерческих документов (matched + parsed); тaб скрываем
+        // вообще когда их нет, чтобы не плодить пустые tabs в UI.
+        $quotesCount = $this->request->outboundQuotes->count();
+
+        $tabs = [
             'overview'  => ['label' => 'Обзор',      'count' => null,         'disabled' => false],
             'thread'    => ['label' => 'Переписка',  'count' => $threadCount, 'disabled' => false],
             'items'     => ['label' => 'Позиции',    'count' => $items,       'disabled' => false],
+        ];
+        if ($quotesCount > 0) {
+            $tabs['quotes'] = ['label' => 'КП', 'count' => $quotesCount, 'disabled' => false];
+        }
+        $tabs += [
             'suppliers' => ['label' => 'Поставщики', 'count' => null,         'disabled' => true],
             'activity'  => ['label' => 'Активность', 'count' => $activity,    'disabled' => false],
             'files'     => ['label' => 'Файлы',      'count' => $files,       'disabled' => false],
             'related'   => ['label' => 'Связанные',  'count' => null,         'disabled' => true],
         ];
+
+        return $tabs;
     }
 
     /**
