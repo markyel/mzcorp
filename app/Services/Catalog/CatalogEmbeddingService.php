@@ -350,12 +350,13 @@ class CatalogEmbeddingService
         $lowerArr = $mkPgArr(array_map(mb_strtolower(...), $tokens));
 
         try {
-            // ВАЖНО: expression в WHERE для name точно совпадает с GIN trgm
-            // индексом catalog_items_name_nosep_trgm_idx
-            // (regexp_replace(lower(name), '[\s\-_./]', '', 'g')) — без этого
-            // совпадения PG не использует индекс и делает seq scan на 35K.
-            // jsonb_array_elements_text не индексируется → выносим в OR,
-            // PG умеет bitmap-OR по indexed + non-indexed.
+            // WHERE expression для name ТОЧНО совпадает с GIN trgm индексом
+            // catalog_items_name_nosep_trgm_idx — критично для скорости.
+            //
+            // articles[] EXISTS (multi-OEM) ТУТ НЕ дёргается — это seq scan
+            // c jsonb_array_elements_text на 35K rows ~500мс. Multi-OEM
+            // покрывается trigramTopN, где articles[] <% $norm работает
+            // для article-like запросов длиной ≥4 символов.
             $rows = DB::select(
                 "
                 SELECT id AS catalog_id
@@ -364,16 +365,10 @@ class CatalogEmbeddingService
                   AND (
                        regexp_replace(lower(name), '[\\s\\-_./]', '', 'g') ILIKE ANY (?::text[])
                        OR brand_article_normalized ILIKE ANY (?::text[])
-                       OR EXISTS (
-                           SELECT 1
-                           FROM jsonb_array_elements_text(articles) AS a
-                           WHERE a IS NOT NULL AND a <> ''
-                             AND upper(regexp_replace(a, '[\\s\\-_./]', '', 'g')) ILIKE ANY (?::text[])
-                       )
                   )
                 LIMIT ?
                 ",
-                [$lowerArr, $upperArr, $upperArr, $limit],
+                [$lowerArr, $upperArr, $limit],
             );
         } catch (\Throwable $e) {
             Log::info('CatalogEmbeddingService: code-token search failed', [
@@ -419,10 +414,13 @@ class CatalogEmbeddingService
             //
             // similarity() default threshold 0.3, word_similarity() — 0.6.
             // GIN-индексы по lower(name), regexp_replace(lower(name),...),
-            // brand_article_normalized ускоряют 1-3. Слот 4 — seq+jsonb_array,
-            // но на 35K элементов это <500мс, и тригерим его только когда
-            // $norm непуст и >=4 символов (article-like запрос).
-            $useArticles = $norm !== '' && mb_strlen($norm) >= 4;
+            // brand_article_normalized ускоряют 1-3. Слот 4 — seq+jsonb_array
+            // ~500мс на 35K, поэтому тригерим только когда query действительно
+            // похож на артикул: ≥4 символа И ≥6 цифр в нормализованном виде.
+            // Это отрезает «Плата ПКЛ-32» (всего 2 цифры) от articles[]-scan,
+            // оставляя его только для «ЕИЛА.687255.008-04» и подобных.
+            $digitCount = mb_strlen((string) preg_replace('/\D/u', '', $norm));
+            $useArticles = $norm !== '' && mb_strlen($norm) >= 4 && $digitCount >= 6;
 
             // word_similarity ассиметрична: «находит первый аргумент как
             // подстроку во втором». Для слотов «артикул каталога vs

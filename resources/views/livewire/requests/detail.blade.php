@@ -1084,7 +1084,19 @@
                                         @endif
 
                                         @if($msg->attachments->isNotEmpty())
-                                            <div class="mt-3 flex flex-wrap gap-2">
+                                            @php
+                                                // Галерея картинок этого письма для листания в лайтбоксе:
+                                                // ← / → переключают между картинками одного письма.
+                                                $msgImgs = $msg->attachments->filter(fn ($a) => $isImageAttachment($a))->values();
+                                                $msgGallery = $msgImgs->map(fn ($a) => [
+                                                    'src' => route('attachments.preview', $a),
+                                                    'name' => $a->filename,
+                                                    'dl' => route('attachments.download', $a),
+                                                ])->all();
+                                                $msgImgIdx = 0;
+                                            @endphp
+                                            <div class="mt-3 flex flex-wrap gap-2"
+                                                 x-data="{ items: @js($msgGallery) }">
                                                 @foreach($msg->attachments as $att)
                                                     @php
                                                         $isImg = $isImageAttachment($att);
@@ -1092,9 +1104,10 @@
                                                         $downloadUrl = route('attachments.download', $att);
                                                     @endphp
                                                     @if($isImg)
-                                                        {{-- Image thumbnail → клик открывает лайтбокс. --}}
+                                                        {{-- Image thumbnail → клик открывает лайтбокс с
+                                                             пролистыванием всех картинок этого письма. --}}
                                                         <button type="button"
-                                                                x-on:click="$dispatch('open-image', { src: @js($previewUrl), name: @js($att->filename), dl: @js($downloadUrl) })"
+                                                                x-on:click="$dispatch('open-image', { items: items, index: {{ $msgImgIdx }} })"
                                                                 class="block border border-border rounded-md overflow-hidden bg-surface hover:border-border-strong transition-colors text-left"
                                                                 title="{{ $att->filename }}">
                                                             <img src="{{ $previewUrl }}"
@@ -1108,6 +1121,7 @@
                                                                 @endif
                                                             </div>
                                                         </button>
+                                                        @php $msgImgIdx++; @endphp
                                                     @else
                                                         <a href="{{ $downloadUrl }}"
                                                            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover">
@@ -2414,7 +2428,21 @@
                         ->reject(fn ($a) => in_array($a->id, $threadAttIds, true));
                     $allAttachments = $threadAtts->concat($extraQuoteAtts)->unique('id')->values();
                 @endphp
-                <div class="ds-card">
+                @php
+                    // Галерея ВСЕХ image-вложений треда для листания
+                    // в лайтбоксе из вкладки «Файлы».
+                    $filesGallery = $allAttachments
+                        ->filter(fn ($a) => $isImageAttachment($a))
+                        ->values()
+                        ->map(fn ($a) => [
+                            'src' => route('attachments.preview', $a),
+                            'name' => $a->filename,
+                            'dl' => route('attachments.download', $a),
+                        ])
+                        ->all();
+                    $filesImgIdx = 0;
+                @endphp
+                <div class="ds-card" x-data="{ items: @js($filesGallery) }">
                     <div class="ds-card-header">
                         <h3>Файлы</h3>
                         <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $allAttachments->count() }}</span>
@@ -2429,11 +2457,13 @@
                                     $isImg = $isImageAttachment($att);
                                     $previewUrl = route('attachments.preview', $att);
                                     $downloadUrl = route('attachments.download', $att);
+                                    $thisImgIdx = $isImg ? $filesImgIdx : null;
+                                    if ($isImg) { $filesImgIdx++; }
                                 @endphp
                                 <div class="flex items-center gap-3 px-[18px] py-2.5 hover:bg-hover transition-colors">
                                     @if($isImg)
                                         <button type="button"
-                                                x-on:click="$dispatch('open-image', { src: @js($previewUrl), name: @js($att->filename), dl: @js($downloadUrl) })"
+                                                x-on:click="$dispatch('open-image', { items: items, index: {{ $thisImgIdx }} })"
                                                 class="shrink-0 block border border-border rounded-sm overflow-hidden bg-app"
                                                 title="{{ $att->filename }}">
                                             <img src="{{ $previewUrl }}"
@@ -2476,7 +2506,7 @@
                                     </div>
                                     @if($isImg)
                                         <button type="button"
-                                                x-on:click="$dispatch('open-image', { src: @js($previewUrl), name: @js($att->filename), dl: @js($downloadUrl) })"
+                                                x-on:click="$dispatch('open-image', { items: items, index: {{ $thisImgIdx }} })"
                                                 class="text-sky-700 text-xs hover:underline">просмотр →</button>
                                     @endif
                                     <a href="{{ $downloadUrl }}" class="text-sky-700 text-xs hover:underline">скачать →</a>
