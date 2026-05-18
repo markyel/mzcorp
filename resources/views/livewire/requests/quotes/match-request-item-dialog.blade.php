@@ -56,7 +56,7 @@
                                     @php $isSelected = $selectedRequestItemId === $ri['id']; @endphp
                                     <label class="flex items-start gap-3 px-3 py-2.5 cursor-pointer transition-colors {{ $isSelected ? 'bg-sky-50' : 'hover:bg-hover' }}">
                                         <input type="radio"
-                                               wire:model="selectedRequestItemId"
+                                               wire:model.live="selectedRequestItemId"
                                                value="{{ $ri['id'] }}"
                                                class="mt-1 shrink-0 cursor-pointer">
                                         <div class="flex-1 min-w-0">
