@@ -39,6 +39,8 @@ class OutboundQuoteItem extends Model
         'unit_measure',
         'unit_quantity',
         'unit_price',
+        'base_unit_price',
+        'discount_percent',
         'line_price',
         'line_total',
         'delivery_days',
@@ -58,6 +60,8 @@ class OutboundQuoteItem extends Model
             'quantity' => 'decimal:3',
             'unit_quantity' => 'decimal:3',
             'unit_price' => 'decimal:4',
+            'base_unit_price' => 'decimal:4',
+            'discount_percent' => 'decimal:2',
             'line_price' => 'decimal:2',
             'line_total' => 'decimal:2',
             'is_analog' => 'boolean',
@@ -85,5 +89,52 @@ class OutboundQuoteItem extends Model
     {
         return $this->matched_request_item_id !== null
             || $this->matched_catalog_item_id !== null;
+    }
+
+    /**
+     * Есть ли в этой строке партнёрская скидка от розницы.
+     *
+     * Скидка считается «есть», если базовая цена (`base_unit_price`) известна
+     * и заметно (>0.01 ₽) выше финальной `unit_price`, либо в документе явно
+     * указан ненулевой `discount_percent`. Используется UI для решения,
+     * показывать ли зачёркнутую розницу и шильдик «-X%».
+     */
+    public function hasDiscount(): bool
+    {
+        if ($this->discount_percent !== null && (float) $this->discount_percent > 0.001) {
+            return true;
+        }
+
+        if ($this->base_unit_price === null || $this->unit_price === null) {
+            return false;
+        }
+
+        return (float) $this->base_unit_price - (float) $this->unit_price > 0.01;
+    }
+
+    /**
+     * Процент скидки для отображения. Приоритет — явное значение из документа
+     * (`discount_percent`); fallback — вычисление из `base_unit_price`
+     * / `unit_price` (на случай если в документе колонки «% Скидка» не было,
+     * но видна разница между «Цена» и «Цена со скидкой»).
+     *
+     * Возвращает null если скидки нет или нечем считать.
+     */
+    public function effectiveDiscountPercent(): ?float
+    {
+        if ($this->discount_percent !== null && (float) $this->discount_percent > 0.001) {
+            return (float) $this->discount_percent;
+        }
+
+        if (! $this->hasDiscount()) {
+            return null;
+        }
+
+        $base = (float) $this->base_unit_price;
+        if ($base <= 0) {
+            return null;
+        }
+
+        return round((1 - (float) $this->unit_price / $base) * 100, 2);
     }
 }

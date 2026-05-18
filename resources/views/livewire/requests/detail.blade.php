@@ -2147,6 +2147,39 @@
                                                 скидка <span class="mono">{{ number_format($linesSum - (float) $quote->total_amount, 2, '.', ' ') }} ₽</span>
                                             </span>
                                         @endif
+                                        @php
+                                            // Партнёрская скидка от розницы (рассчитывается по строкам). Полезно
+                                            // когда в КП Liftway/MyZip действует %-скидка по прайс-листу. Берём
+                                            // Σ(base × qty) - Σ(unit_price × qty) только по строкам, где обе цены
+                                            // известны, чтобы не путать с подвальной (которая уже учтена в line_total).
+                                            $partnerBase = 0.0;
+                                            $partnerNet = 0.0;
+                                            $partnerCount = 0;
+                                            foreach ($quote->items as $pi) {
+                                                if ($pi->base_unit_price === null || $pi->unit_price === null || $pi->quantity === null) {
+                                                    continue;
+                                                }
+                                                $qmul = (float) $pi->quantity;
+                                                if ($pi->unit_quantity !== null && (float) $pi->unit_quantity > 0) {
+                                                    $qmul *= (float) $pi->unit_quantity;
+                                                }
+                                                if ($qmul <= 0) {
+                                                    continue;
+                                                }
+                                                $partnerBase += (float) $pi->base_unit_price * $qmul;
+                                                $partnerNet  += (float) $pi->unit_price * $qmul;
+                                                $partnerCount++;
+                                            }
+                                            $partnerPct = ($partnerBase > 0 && $partnerBase > $partnerNet)
+                                                ? round((1 - $partnerNet / $partnerBase) * 100, 1)
+                                                : null;
+                                        @endphp
+                                        @if($partnerCount > 0 && $partnerPct !== null && $partnerPct > 0.1)
+                                            <span class="px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200"
+                                                  title="Σ розничных цен по строкам = {{ number_format($partnerBase, 2, '.', ' ') }} ₽; Σ цен со скидкой = {{ number_format($partnerNet, 2, '.', ' ') }} ₽">
+                                                партнёрская скидка ≈ −{{ rtrim(rtrim(number_format($partnerPct, 1, '.', ''), '0'), '.') }}%
+                                            </span>
+                                        @endif
                                         @if($hasFile)
                                             @php
                                                 $shownName = \App\Models\OutboundQuote::filenameLooksGarbled($att->filename)
@@ -2242,7 +2275,28 @@
                                                             <span class="text-fg-3 text-[10.5px]">{{ $qi->unit_measure ?: '' }}</span>
                                                         </td>
                                                         <td class="py-2 text-right text-fg-1 mono whitespace-nowrap">
-                                                            {{ $qi->unit_price !== null ? number_format((float) $qi->unit_price, 2, '.', ' ') : '—' }}
+                                                            @php
+                                                                // Партнёрская скидка: показываем розницу зачёркнутой над финальной
+                                                                // ценой и шильдик «-X%». Источник истины — поля документа
+                                                                // (`base_unit_price`, `discount_percent`); если документ скидку
+                                                                // не разделил, fallback на вычисление по двум ценам.
+                                                                $hasDiscount = $qi->hasDiscount();
+                                                                $discountPct = $hasDiscount ? $qi->effectiveDiscountPercent() : null;
+                                                            @endphp
+                                                            @if($hasDiscount && $qi->base_unit_price !== null)
+                                                                <div class="text-fg-3 line-through text-[11px]" title="Розничная цена (до скидки)">
+                                                                    {{ number_format((float) $qi->base_unit_price, 2, '.', ' ') }}
+                                                                </div>
+                                                            @endif
+                                                            <div class="{{ $hasDiscount ? 'font-semibold' : '' }}">
+                                                                {{ $qi->unit_price !== null ? number_format((float) $qi->unit_price, 2, '.', ' ') : '—' }}
+                                                            </div>
+                                                            @if($hasDiscount && $discountPct !== null)
+                                                                <div class="text-[10.5px] text-emerald-700 mt-0.5"
+                                                                     title="Скидка от розницы">
+                                                                    −{{ rtrim(rtrim(number_format($discountPct, 2, '.', ''), '0'), '.') }}%
+                                                                </div>
+                                                            @endif
                                                         </td>
                                                         <td class="py-2 text-right text-fg-1 mono font-semibold whitespace-nowrap">
                                                             {{ $qi->line_total !== null ? number_format((float) $qi->line_total, 2, '.', ' ') : '—' }}

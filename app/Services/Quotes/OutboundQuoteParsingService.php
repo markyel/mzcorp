@@ -667,7 +667,9 @@ class OutboundQuoteParsingService
         $vatPercent = round(($factor - 1) * 100, 2);
 
         foreach ($items as &$item) {
-            foreach (['unit_price', 'price', 'total'] as $field) {
+            // base_unit_price тоже нормализуем, чтобы он и unit_price оставались
+            // в одной системе (обе с НДС), иначе UI «-X%» неверно посчитает скидку.
+            foreach (['unit_price', 'base_unit_price', 'price', 'total'] as $field) {
                 if (isset($item[$field]) && is_numeric($item[$field])) {
                     $item[$field] = round(((float) $item[$field]) * $factor, 2);
                 }
@@ -814,6 +816,11 @@ class OutboundQuoteParsingService
    «Цена» | «% Скидка» | «Цена со скидкой» | «Сумма» | «НДС в т.ч.»
 Правила выбора значений:
 - `unit_price` = значение из колонки «Цена со скидкой» (НЕ из «Цена» — это базовая до скидки).
+- `base_unit_price` = значение из колонки «Цена» (розничная/базовая, ДО скидки), если такая
+  колонка есть. Если колонки «Цена» нет (скидка не применялась) — null.
+- `discount_percent` = значение из колонки «% Скидка» как число (например 45.24, не "45,24%"
+  и не 0.4524). Если колонка отсутствует — null.
+- Инвариант: если оба известны, `base_unit_price * (1 - discount_percent/100) ≈ unit_price` (±1%).
 - `total` = значение из колонки «Сумма» (это per-row итог = Цена со скидкой × Кол-во).
 - НИКОГДА не складывай «Сумму» строки со скидкой из подвала документа: подвальная скидка
   («Скидка %X: -Y руб») уже встроена в построчные «Цена со скидкой» / «Сумма»; она там
@@ -873,6 +880,8 @@ class OutboundQuoteParsingService
       "unit_quantity": null,
       "unit_measure": "шт.",
       "unit_price": 9630.31,
+      "base_unit_price": 12037.89,
+      "discount_percent": 20.00,
       "price": 9630.31,
       "total": 105933.41,
       "delivery_days": 0,

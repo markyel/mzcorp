@@ -218,6 +218,10 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
                             ? (string) $raw['unit_quantity'] : null,
                         'unit_price' => isset($raw['unit_price']) && is_numeric($raw['unit_price'])
                             ? (string) $raw['unit_price'] : null,
+                        'base_unit_price' => isset($raw['base_unit_price']) && is_numeric($raw['base_unit_price'])
+                            ? (string) $raw['base_unit_price'] : null,
+                        'discount_percent' => isset($raw['discount_percent']) && is_numeric($raw['discount_percent'])
+                            ? (string) $raw['discount_percent'] : null,
                         'line_price' => isset($raw['price']) && is_numeric($raw['price'])
                             ? (string) $raw['price'] : null,
                         'line_total' => isset($raw['total']) && is_numeric($raw['total'])
@@ -257,17 +261,22 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
             // Validation warnings от парсера (см. validateLineTotals): row arithmetic
             // mismatch и Σ items.total vs document.total_amount mismatch. Сохраняем
             // в payload для UI badge в табе «КП».
+            //
+            // КРИТИЧНО: при force-reparse'е (когда autoFixRowArithmetic починил
+            // прежние warnings) старые ключи в payload должны быть СБРОШЕНЫ, иначе
+            // в UI висит stale «расхождение 5608.30» поверх свежей правильной таблицы.
+            // Поэтому всегда пишем `null`, а не «skip key when empty».
             $parserWarnings = data_get($document, '_warnings');
-            if (is_array($parserWarnings) && ! empty($parserWarnings)) {
-                $payloadPatch['warnings'] = $parserWarnings;
-            }
+            $payloadPatch['warnings'] = is_array($parserWarnings) && ! empty($parserWarnings)
+                ? $parserWarnings
+                : null;
             // Retry telemetry: если парсер делал второй проход с feedback'ом
             // (см. parseWithGPT::buildRetryFeedbackPrompt), сохраняем delta'ы
             // обеих попыток и какая выбрана — для аудита качества Vision'а.
             $attempts = data_get($document, '_attempts');
-            if (is_array($attempts) && ! empty($attempts)) {
-                $payloadPatch['attempts'] = $attempts;
-            }
+            $payloadPatch['attempts'] = is_array($attempts) && ! empty($attempts)
+                ? $attempts
+                : null;
             $quote->payload = array_merge(
                 is_array($quote->payload) ? $quote->payload : [],
                 $payloadPatch
