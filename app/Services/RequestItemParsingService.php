@@ -1032,14 +1032,30 @@ PROMPT;
      */
     private function dedupeWithinList(array $items): array
     {
+        // Защита от пересечений photo+PDF+text-парсинга — одна и та же позиция
+        // могла быть извлечена дважды из разных источников. Ключ дедупа:
+        //   normalizeArticle(article) + qty
+        // (если article пуст — lower(name) + qty).
+        //
+        // Раньше ключ был ТОЛЬКО по article — это ломало multi-invoice кейс
+        // (M-2026-1032): клиент просит 2 счёта, в каждом по 2 общих позиции
+        // (M06476: счёт1=4шт, счёт2=2шт). LLM правильно возвращал 9 items, но
+        // дедуп по article схлопывал в 7. Включение qty в ключ оставляет
+        // multi-invoice позиции раздельными (разные qty = разные счета) и
+        // продолжает резать настоящие дубли (одна позиция, одинаковая qty).
         $seen = [];
         $result = [];
         foreach ($items as $item) {
-            $key = $this->normalizeArticle($item['article'] ?? null);
-            if ($key === '') {
-                $key = mb_strtolower(trim($item['name'] ?? ''));
+            $base = $this->normalizeArticle($item['article'] ?? null);
+            if ($base === '') {
+                $base = mb_strtolower(trim($item['name'] ?? ''));
             }
-            if ($key === '' || isset($seen[$key])) {
+            if ($base === '') {
+                continue;
+            }
+            $qty = (string) ($item['qty'] ?? '');
+            $key = $base . '|qty=' . $qty;
+            if (isset($seen[$key])) {
                 continue;
             }
             $seen[$key] = true;
