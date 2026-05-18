@@ -121,8 +121,30 @@
                             $tone = $sim >= 0.85
                                 ? 'text-emerald-700'
                                 : ($sim >= 0.75 ? 'text-amber-700' : 'text-fg-3');
+                            $method = $row['method'] ?? null;
+                            $trgmScore = $row['trgm_score'] ?? null;
+                            $vecScore = $row['vector_score'] ?? null;
+                            $methodIcon = match ($method) {
+                                'both' => '🔀',
+                                'trgm' => '🔤',
+                                'vector' => '✨',
+                                default => null,
+                            };
+                            $methodTitle = match ($method) {
+                                'both' => 'Найдено и текстом, и семантикой'
+                                    . ($trgmScore !== null ? ' (trgm '.round($trgmScore*100).'%' : '')
+                                    . ($vecScore !== null ? ', vec '.round($vecScore*100).'%)' : ($trgmScore !== null ? ')' : '')),
+                                'trgm' => 'Текстовое совпадение (pg_trgm)',
+                                'vector' => 'Семантическая похожесть (vector)',
+                                default => '',
+                            };
                         @endphp
-                        <span class="{{ $tone }} font-semibold">{{ $pct }}%</span>
+                        <div class="flex items-center justify-end gap-1">
+                            @if($methodIcon)
+                                <span class="text-[11px]" title="{{ $methodTitle }}">{{ $methodIcon }}</span>
+                            @endif
+                            <span class="{{ $tone }} font-semibold">{{ $pct }}%</span>
+                        </div>
                     </td>
                 @endif
             </tr>

@@ -183,10 +183,174 @@ class CatalogEmbeddingService
      */
     public function topNByQueryText(string $queryText, int $n = 10, ?int $requestItemId = null): array
     {
-        if (mb_strlen(trim($queryText)) < 2) {
+        $queryText = trim($queryText);
+        if (mb_strlen($queryText) < 2) {
             return [];
         }
 
+        $limit = max(1, min($n, 50));
+        $poolLimit = max($limit, 20);
+
+        // 1) Trigram (pg_trgm) — лоулевел текстовый поиск по name и
+        //    brand_article_normalized. Точные/нечёткие подстроки типа
+        //    «ПКЛ32-04» ловятся за десятки мс через GIN-индекс.
+        $trgmRows = $this->trigramTopN($queryText, $poolLimit);
+
+        // 2) Vector — семантика. embed-вызов в OpenAI — fail-soft.
+        $vectorRows = $this->vectorTopN($queryText, $poolLimit, $requestItemId);
+
+        if ($trgmRows === [] && $vectorRows === []) {
+            return [];
+        }
+
+        // 3) Merge по catalog_id. Score:
+        //    - оба → max(trgm*1.10, vector), method='both';
+        //    - только trgm → score=trgm, method='trgm';
+        //    - только vector → score=vector, method='vector'.
+        //    *1.10 — лёгкий boost trigram: точное вхождение текста важнее
+        //    семантически близкого вектора.
+        $merged = [];
+        foreach ($trgmRows as $r) {
+            $cid = (int) $r['catalog_id'];
+            $merged[$cid] = [
+                'catalog_id' => $cid,
+                'trgm' => (float) $r['similarity'],
+                'vector' => null,
+            ];
+        }
+        foreach ($vectorRows as $r) {
+            $cid = (int) $r['catalog_id'];
+            if (isset($merged[$cid])) {
+                $merged[$cid]['vector'] = (float) $r['similarity'];
+            } else {
+                $merged[$cid] = [
+                    'catalog_id' => $cid,
+                    'trgm' => null,
+                    'vector' => (float) $r['similarity'],
+                ];
+            }
+        }
+
+        $scored = [];
+        foreach ($merged as $cid => $m) {
+            $trgm = $m['trgm'];
+            $vec = $m['vector'];
+            if ($trgm !== null && $vec !== null) {
+                $score = max($trgm * 1.10, $vec);
+                $method = 'both';
+            } elseif ($trgm !== null) {
+                $score = $trgm * 1.10;
+                $method = 'trgm';
+            } else {
+                $score = (float) $vec;
+                $method = 'vector';
+            }
+            // clamp в [0..1] — boost мог вытянуть >1, в UI это выглядело бы
+            // как «110%» — отрезаем.
+            $score = max(0.0, min(1.0, $score));
+            $scored[] = [
+                'catalog_id' => $cid,
+                'score' => $score,
+                'method' => $method,
+                'trgm' => $trgm,
+                'vector' => $vec,
+            ];
+        }
+
+        usort($scored, fn ($a, $b) => $b['score'] <=> $a['score']);
+        $scored = array_slice($scored, 0, $limit);
+
+        $ids = array_map(fn ($r) => $r['catalog_id'], $scored);
+        $catalogs = CatalogItem::query()->whereIn('id', $ids)->get()->keyBy('id');
+
+        $out = [];
+        foreach ($scored as $r) {
+            $cat = $catalogs->get($r['catalog_id']);
+            if ($cat === null) {
+                continue;
+            }
+            $out[] = [
+                'catalog' => $cat,
+                'similarity' => $r['score'],
+                'method' => $r['method'], // trgm | vector | both
+                'trgm_score' => $r['trgm'],
+                'vector_score' => $r['vector'],
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Trigram-поиск (pg_trgm) по lower(name) и brand_article_normalized.
+     * Fail-soft если расширение/индексы не доступны — пустой массив.
+     *
+     * @return list<array{catalog_id: int, similarity: float}>
+     */
+    private function trigramTopN(string $queryText, int $limit): array
+    {
+        $lower = mb_strtolower($queryText);
+        // normalizeArticle: uppercase + strip [\s\-_./]. Совместимо с тем
+        // как мы импортируем brand_article_normalized в CatalogImportService.
+        $norm = (string) (\App\Services\Catalog\CatalogImportService::normalizeArticle($queryText) ?? '');
+
+        try {
+            // word_similarity для name: query короткая («ПКЛ32-04»), name
+            // длинная («Плата контроллера лифта типа ПКЛ32-04 без ПЗУ») —
+            // обычный similarity() даст ~0.15 (доля общих триграмм во всей
+            // длинной строке). word_similarity находит лучший подстрочный
+            // word-extent в target и даёт ~1.0 если query там есть как
+            // подслово. Это и есть то поведение, которое нужно UI-поиску.
+            //
+            // brand_article_normalized — короткое поле, обычный similarity
+            // тут нормально работает.
+            //
+            // `<%` оператор использует pg_trgm.word_similarity_threshold
+            // (default 0.6), GIN-индекс по gin_trgm_ops это умеет.
+            $rows = DB::select(
+                <<<'SQL'
+                SELECT id AS catalog_id,
+                       GREATEST(
+                           word_similarity(?, lower(name)),
+                           CASE WHEN ? <> '' THEN similarity(brand_article_normalized, ?) ELSE 0 END
+                       ) AS s
+                FROM catalog_items
+                WHERE is_active = true
+                  AND (
+                       ? <% lower(name)
+                       OR (? <> '' AND brand_article_normalized % ?)
+                  )
+                ORDER BY s DESC
+                LIMIT ?
+                SQL,
+                [$lower, $norm, $norm, $lower, $norm, $norm, $limit],
+            );
+        } catch (\Throwable $e) {
+            // pg_trgm нет / индексы не созданы / синтаксис не поддерживается —
+            // тихо отдаём пустой массив, hybrid fallback'нется в pure vector.
+            Log::info('CatalogEmbeddingService: trigram unavailable, vector-only fallback', [
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $r) {
+            $out[] = [
+                'catalog_id' => (int) $r->catalog_id,
+                'similarity' => (float) $r->s,
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Vector-поиск (старая ветка) — возвращает raw rows без модели.
+     *
+     * @return list<array{catalog_id: int, similarity: float}>
+     */
+    private function vectorTopN(string $queryText, int $limit, ?int $requestItemId): array
+    {
         try {
             $result = $this->embedder->embed($queryText);
         } catch (\Throwable $e) {
@@ -207,38 +371,34 @@ class CatalogEmbeddingService
             $queryVector
         )) . ']';
 
-        $rows = DB::select(
-            <<<'SQL'
-            SELECT ci.id AS catalog_id,
-                   1 - (e.embedding <=> ?::vector) AS similarity
-            FROM catalog_item_embeddings e
-            JOIN catalog_items ci ON ci.id = e.catalog_item_id
-            WHERE ci.is_active = true
-            ORDER BY e.embedding <=> ?::vector
-            LIMIT ?
-            SQL,
-            [$vectorLiteral, $vectorLiteral, max(1, min($n, 50))],
-        );
-
-        if (empty($rows)) {
+        try {
+            $rows = DB::select(
+                <<<'SQL'
+                SELECT ci.id AS catalog_id,
+                       1 - (e.embedding <=> ?::vector) AS similarity
+                FROM catalog_item_embeddings e
+                JOIN catalog_items ci ON ci.id = e.catalog_item_id
+                WHERE ci.is_active = true
+                ORDER BY e.embedding <=> ?::vector
+                LIMIT ?
+                SQL,
+                [$vectorLiteral, $vectorLiteral, $limit],
+            );
+        } catch (\Throwable $e) {
+            Log::warning('CatalogEmbeddingService: vector select failed', [
+                'request_item_id' => $requestItemId,
+                'error' => $e->getMessage(),
+            ]);
             return [];
         }
 
-        $ids = array_map(fn ($r) => (int) $r->catalog_id, $rows);
-        $catalogs = CatalogItem::query()->whereIn('id', $ids)->get()->keyBy('id');
-
         $out = [];
         foreach ($rows as $r) {
-            $cat = $catalogs->get((int) $r->catalog_id);
-            if ($cat === null) {
-                continue;
-            }
             $out[] = [
-                'catalog' => $cat,
+                'catalog_id' => (int) $r->catalog_id,
                 'similarity' => (float) $r->similarity,
             ];
         }
-
         return $out;
     }
 
