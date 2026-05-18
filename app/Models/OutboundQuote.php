@@ -92,4 +92,78 @@ class OutboundQuote extends Model
     {
         return $this->items->whereNotNull('matched_request_item_id')->count();
     }
+
+    /**
+     * Синтезированное имя файла для UI: «КП №355534 от 18.05.2026.pdf».
+     *
+     * Реальный `email_attachments.filename` может быть битым: Yandex для
+     * некоторых писем отдаёт filename в нестандартной MIME-форме, decoder
+     * получает мусор (cyrillic «Д» + ASCII gibberish с кучей `?`). CLI
+     * `mail:redecode-attachment-names` помогает только когда в filename
+     * всё ещё есть raw `=?UTF-8?B?...?=` паттерн — для уже-decoded-в-мусор
+     * пересохранить оригинал нельзя (raw bytes потеряны).
+     *
+     * Этот helper возвращает синтезированное имя на основе распарсенных
+     * метаданных документа. Используется в табах «КП» и «Файлы».
+     */
+    public function displayFilename(): string
+    {
+        $isInvoice = $this->document_type === \App\Enums\DetectorType::OutboundInvoice;
+        $label = $isInvoice ? 'Счёт' : 'КП';
+
+        $parts = [$label];
+        if ($this->document_number !== null && $this->document_number !== '') {
+            $parts[] = '№'.$this->document_number;
+        }
+        if ($this->document_date !== null) {
+            $parts[] = 'от '.$this->document_date->format('d.m.Y');
+        }
+
+        $ext = $this->guessExtension();
+
+        return implode(' ', $parts).($ext !== null ? '.'.$ext : '');
+    }
+
+    /**
+     * Расширение файла из file_path или mime_type. Используется в displayFilename().
+     */
+    private function guessExtension(): ?string
+    {
+        $att = $this->relationLoaded('attachment') ? $this->attachment : null;
+        if ($att !== null && $att->file_path) {
+            $ext = strtolower((string) pathinfo($att->file_path, PATHINFO_EXTENSION));
+            if ($ext !== '' && in_array($ext, ['pdf', 'xlsx', 'xls', 'docx', 'doc'], true)) {
+                return $ext;
+            }
+        }
+        $mime = $att?->mime_type;
+        if ($mime) {
+            return match (true) {
+                str_contains($mime, 'pdf') => 'pdf',
+                str_contains($mime, 'spreadsheetml') || str_contains($mime, 'excel') => 'xlsx',
+                str_contains($mime, 'wordprocessingml') || str_contains($mime, 'msword') => 'docx',
+                default => null,
+            };
+        }
+
+        return null;
+    }
+
+    /**
+     * Heuristic «filename выглядит как mojibake»: считаем долю `?`, backtick'ов
+     * и control-chars. Чистое имя обычно их почти не содержит.
+     */
+    public static function filenameLooksGarbled(?string $filename): bool
+    {
+        if ($filename === null || $filename === '') {
+            return true;
+        }
+        $len = mb_strlen($filename);
+        if ($len < 4) {
+            return true;
+        }
+        $suspicious = preg_match_all('/[?`\x00-\x1F]/u', $filename) ?: 0;
+
+        return $suspicious / max(1, $len) > 0.20;
+    }
 }

@@ -2135,9 +2135,15 @@
                                             </span>
                                         @endif
                                         @if($hasFile)
+                                            @php
+                                                $shownName = \App\Models\OutboundQuote::filenameLooksGarbled($att->filename)
+                                                    ? $quote->displayFilename()
+                                                    : $att->filename;
+                                            @endphp
                                             <span class="flex-1"></span>
-                                            <a href="{{ $downloadUrl }}" class="text-sky-700 hover:underline inline-flex items-center gap-1">
-                                                📎 {{ Str::limit($att->filename, 60, '…') ?: 'Без имени' }}
+                                            <a href="{{ $downloadUrl }}" class="text-sky-700 hover:underline inline-flex items-center gap-1"
+                                               title="{{ $att->filename }}">
+                                                📎 {{ Str::limit($shownName, 60, '…') }}
                                                 <span class="text-fg-3">({{ number_format((int) ($att->size_bytes ?? 0) / 1024, 0, '.', ' ') }} KB)</span>
                                                 <span class="text-fg-2">— скачать →</span>
                                             </a>
@@ -2331,11 +2337,19 @@
                                         <span class="inline-block w-7 h-9 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[8.5px] font-bold text-center leading-9 shrink-0">{{ $ext }}</span>
                                     @endif
                                     <div class="flex-1 min-w-0">
+                                        @php
+                                            $attQuote = $quoteByAttachment->get($att->id);
+                                            // Если filename выглядит мусором — заменяем на синтезированное
+                                            // имя из OutboundQuote (если он привязан). Реальный filename
+                                            // остаётся в tooltip и при скачивании.
+                                            $shownName = ($attQuote && \App\Models\OutboundQuote::filenameLooksGarbled($att->filename))
+                                                ? $attQuote->displayFilename()
+                                                : ($att->filename ?: 'Без имени');
+                                        @endphp
                                         <div class="text-fg-1 truncate text-sm flex items-center gap-2 flex-wrap">
-                                            <span class="truncate">{{ $att->filename }}</span>
-                                            @php $attQuote = $quoteByAttachment->get($att->id); @endphp
+                                            <span class="truncate" title="{{ $att->filename }}">{{ $shownName }}</span>
                                             @if($attQuote)
-                                                @php $isInvoice = $attQuote->document_type?->value === 'outbound_invoice'; @endphp
+                                                @php $isInvoice = $attQuote->document_type === \App\Enums\DetectorType::OutboundInvoice; @endphp
                                                 <button type="button" wire:click="setTab('quotes')"
                                                         class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 transition-colors text-[11px] whitespace-nowrap"
                                                         title="{{ $attQuote->total_amount !== null ? number_format((float) $attQuote->total_amount, 2, '.', ' ') . ' ₽ · сматчено ' . $attQuote->matchedCount() . '/' . $attQuote->items->count() : '' }}">
