@@ -70,27 +70,36 @@ class OutboundQuoteItemMatcher
         $stats = ['total' => $items->count()] + $this->emptyStats();
 
         // Step 1+2: M-SKU exact + catalog→request link.
-        $this->matchBySkuAndCatalog($items, $request, $stats);
+        $this->matchBySkuAndCatalog($items, $request);
 
         // Step 3: Fuzzy для тех, у кого ещё нет matched_request_item_id.
-        $this->matchByFuzzy($items, $request, $stats);
+        $this->matchByFuzzy($items, $request);
 
-        // Step 4: LLM-fallback на оставшихся.
+        // Step 4: LLM-fallback ТОЛЬКО для item'ов без resolved catalog. Если
+        // matched_catalog_item_id уже найден через Step 1 — значит позиция
+        // КП валидно резолвится в catalog_items, и LLM не должен переписывать
+        // источник: либо в заявке клиента есть RequestItem с тем же catalog_item_id
+        // (Step 2 уже подцепил), либо клиент описал позицию без M-SKU настолько
+        // иначе, что Step 2/3 не нашли — это валидное «catalog hit без request match»,
+        // не повод задействовать LLM с риском неправильно сопоставить с
+        // другой похожей позицией.
         $stillUnmatched = $items->filter(
             fn (OutboundQuoteItem $it) => $it->matched_request_item_id === null
+                && $it->matched_catalog_item_id === null
         );
         if ($stillUnmatched->isNotEmpty()) {
-            $this->matchByLlm($stillUnmatched, $request, $stats);
+            $this->matchByLlm($stillUnmatched, $request);
         }
 
-        // Финальный учёт unmatched.
+        // Финальный учёт. by_source считаем по фактическому match_source КАЖДОГО
+        // item'а — это даёт корректную картину даже если шаги перезаписывали
+        // источник (например catalog→request переписал sku_exact на catalog_to_request).
         foreach ($items as $it) {
             if ($it->match_source === null) {
                 $it->match_source = OutboundQuoteItem::MATCH_SOURCE_UNMATCHED;
                 $it->save();
-                $stats['by_source'][OutboundQuoteItem::MATCH_SOURCE_UNMATCHED] =
-                    ($stats['by_source'][OutboundQuoteItem::MATCH_SOURCE_UNMATCHED] ?? 0) + 1;
             }
+            $stats['by_source'][$it->match_source] = ($stats['by_source'][$it->match_source] ?? 0) + 1;
             if ($it->matched_catalog_item_id !== null) {
                 $stats['matched_catalog']++;
             }
@@ -108,7 +117,7 @@ class OutboundQuoteItemMatcher
      *
      * @param  Collection<int, OutboundQuoteItem>  $items
      */
-    private function matchBySkuAndCatalog(Collection $items, Request $request, array &$stats): void
+    private function matchBySkuAndCatalog(Collection $items, Request $request): void
     {
         $skuToItem = [];
         foreach ($items as $item) {
@@ -155,7 +164,6 @@ class OutboundQuoteItemMatcher
                 }
 
                 $qi->save();
-                $stats['by_source'][$qi->match_source] = ($stats['by_source'][$qi->match_source] ?? 0) + 1;
             }
         }
     }
@@ -165,7 +173,7 @@ class OutboundQuoteItemMatcher
      *
      * @param  Collection<int, OutboundQuoteItem>  $items
      */
-    private function matchByFuzzy(Collection $items, Request $request, array &$stats): void
+    private function matchByFuzzy(Collection $items, Request $request): void
     {
         $activeReqItems = $request->items->where('is_active', true)->values();
         if ($activeReqItems->isEmpty()) {
@@ -217,17 +225,16 @@ class OutboundQuoteItemMatcher
                 $qi->match_source = $bestSource;
                 $qi->match_reason = $bestReason;
                 $qi->save();
-                $stats['by_source'][$bestSource] = ($stats['by_source'][$bestSource] ?? 0) + 1;
             }
         }
     }
 
     /**
-     * Step 4. LLM-fallback на unmatched.
+     * Step 4. LLM-fallback на unmatched (без catalog_item_id).
      *
      * @param  Collection<int, OutboundQuoteItem>  $unmatched
      */
-    private function matchByLlm(Collection $unmatched, Request $request, array &$stats): void
+    private function matchByLlm(Collection $unmatched, Request $request): void
     {
         if (! config('services.openai.api_key')) {
             return;
@@ -293,8 +300,6 @@ class OutboundQuoteItemMatcher
             $qi->match_source = OutboundQuoteItem::MATCH_SOURCE_LLM;
             $qi->match_reason = $reason ?: ('LLM '.$conf);
             $qi->save();
-            $stats['by_source'][OutboundQuoteItem::MATCH_SOURCE_LLM] =
-                ($stats['by_source'][OutboundQuoteItem::MATCH_SOURCE_LLM] ?? 0) + 1;
         }
     }
 
