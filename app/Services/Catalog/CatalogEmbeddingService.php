@@ -315,16 +315,27 @@ class CatalogEmbeddingService
             // $norm непуст и >=4 символов (article-like запрос).
             $useArticles = $norm !== '' && mb_strlen($norm) >= 4;
 
+            // word_similarity ассиметрична: «находит первый аргумент как
+            // подстроку во втором». Для слотов «артикул каталога vs
+            // пользовательский запрос» — артикул короткий, запрос может
+            // быть длинным (verbose «Плата управления ПКЛ-32 с ПЗУ
+            // ЕИЛА.687255.008-04»). Обычный similarity('ЕИЛА687255008-04',
+            // long_query) ≈ 0.32 (теряется в длине union). word_similarity
+            // (catalog_article, user_query) находит подстроку и даёт ~1.0.
+            //
+            // Для name (длинная сторона target) — query короткая или
+            // верхожая, word_similarity(query, name) → находит query в name.
             $sql = "
                 SELECT id AS catalog_id,
                        GREATEST(
                            word_similarity(?, lower(name)),
                            word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./]', '', 'g')),
-                           CASE WHEN ? <> '' THEN similarity(brand_article_normalized, ?) ELSE 0 END
+                           CASE WHEN ? <> '' THEN word_similarity(brand_article_normalized, ?) ELSE 0 END
                            " . ($useArticles ? ",
                            COALESCE((
-                               SELECT MAX(similarity(upper(regexp_replace(coalesce(a, ''), '[\\s\\-_./]', '', 'g')), ?))
+                               SELECT MAX(word_similarity(upper(regexp_replace(a, '[\\s\\-_./]', '', 'g')), ?))
                                FROM jsonb_array_elements_text(articles) AS a
+                               WHERE a IS NOT NULL AND a <> ''
                            ), 0)" : "") . "
                        ) AS s
                 FROM catalog_items
@@ -332,11 +343,12 @@ class CatalogEmbeddingService
                   AND (
                        ? <% lower(name)
                        OR ? <% regexp_replace(lower(name), '[\\s\\-_./]', '', 'g')
-                       OR (? <> '' AND brand_article_normalized % ?)
+                       OR (? <> '' AND brand_article_normalized <% ?)
                        " . ($useArticles ? "
                        OR EXISTS (
                            SELECT 1 FROM jsonb_array_elements_text(articles) AS a
-                           WHERE upper(regexp_replace(coalesce(a, ''), '[\\s\\-_./]', '', 'g')) % ?
+                           WHERE a IS NOT NULL AND a <> ''
+                             AND upper(regexp_replace(a, '[\\s\\-_./]', '', 'g')) <% ?
                        )" : "") . "
                   )
                 ORDER BY s DESC
