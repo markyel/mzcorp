@@ -24,8 +24,10 @@
             this.show = false;
         }
      }">
+@php $compareIdsList = $compareIds ?? []; @endphp
 <table class="w-full text-[12px]" style="table-layout: auto;">
     <colgroup>
+        <col style="width: 32px">
         <col style="width: 56px">
         <col style="width: 90px">
         <col style="width: 160px">
@@ -38,6 +40,7 @@
     </colgroup>
     <thead class="bg-surface-2 text-fg-3 uppercase tracking-wider text-[10.5px] sticky top-0">
         <tr>
+            <th class="px-2 py-1.5" title="Выберите 1-3 позиции для сравнения с заявкой">⚖️</th>
             <th class="px-2 py-1.5"></th>
             <th class="px-2 py-1.5 text-left">SKU</th>
             <th class="px-2 py-1.5 text-left">Бренд / артикул</th>
@@ -54,10 +57,18 @@
             @php
                 $cat = $row['catalog'];
                 $sim = $row['similarity'] ?? null;
+                $inCompare = in_array($cat->id, $compareIdsList, true);
             @endphp
             <tr wire:key="cat-{{ $cat->id }}"
                 wire:click="selectCatalog({{ $cat->id }})"
-                class="cursor-pointer border-b border-border-subtle last:border-b-0 {{ $selectedId === $cat->id ? 'bg-sky-50' : 'hover:bg-surface-2' }} {{ $cat->is_active ? '' : 'opacity-60' }}">
+                class="cursor-pointer border-b border-border-subtle last:border-b-0 {{ $selectedId === $cat->id ? 'bg-sky-50' : ($inCompare ? 'bg-amber-50' : 'hover:bg-surface-2') }} {{ $cat->is_active ? '' : 'opacity-60' }}">
+                <td class="px-2 py-1.5 align-top text-center" wire:click.stop>
+                    <input type="checkbox"
+                           wire:click="toggleCompare({{ $cat->id }})"
+                           @if($inCompare) checked @endif
+                           class="cursor-pointer"
+                           title="{{ $inCompare ? 'Убрать из сравнения' : 'Добавить в сравнение с позицией заявки' }}">
+                </td>
                 {{-- Photo preview (MDB-поле «Фото» → photo_url).
                      Миниатюра 40×40, lazy-load + onerror fallback.
                      Hover ≥1 сек → большой предпросмотр справа (~288×288),

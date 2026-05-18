@@ -2,7 +2,7 @@
     @if($open)
         <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: flex-start; justify-content: center; padding: 60px 24px 24px;"
              wire:click.self="close">
-            <div class="ds-card p-5 w-full max-w-[760px] max-h-[80vh] flex flex-col" wire:click.stop>
+            <div class="ds-card p-5 w-full {{ $comparing ? 'max-w-[1200px]' : 'max-w-[760px]' }} max-h-[80vh] flex flex-col" wire:click.stop>
                 <h3 class="text-[15px] font-semibold text-fg-1 mb-1">
                     Привязать позицию к каталогу
                 </h3>
@@ -148,6 +148,7 @@
                     </div>
                 @endif
 
+                @if(! $comparing)
                 {{-- Tabs --}}
                 <div class="flex gap-1 mb-3 border-b border-border-subtle">
                     <button type="button" wire:click="setMode('text')"
@@ -158,6 +159,20 @@
                             class="px-3 py-1.5 text-[12px] font-medium border-b-2 {{ $mode === 'similar' ? 'border-[var(--accent)] text-fg-1' : 'border-transparent text-fg-3 hover:text-fg-1' }}">
                         ✨ Похожие из каталога
                     </button>
+                    <span class="flex-1"></span>
+                    {{-- Compare-toolbar справа. Активен когда выбраны 1-3 позиций. --}}
+                    @if(count($compareIds) > 0)
+                        <button type="button" wire:click="enterCompare"
+                                class="btn btn-sm self-center"
+                                title="Открыть сравнение: позиция заявки vs выбранные каталожные кандидаты">
+                            ⚖️ Сравнить ({{ count($compareIds) }})
+                        </button>
+                        <button type="button" wire:click="clearCompare"
+                                class="btn btn-sm self-center"
+                                title="Снять все галочки">
+                            ✕
+                        </button>
+                    @endif
                 </div>
 
                 @if($mode === 'text')
@@ -183,6 +198,7 @@
                             @include('livewire.requests.items._catalog-results-table', [
                                 'rows' => $results->map(fn ($c) => ['catalog' => $c, 'similarity' => null]),
                                 'selectedId' => $selectedCatalogId,
+                                'compareIds' => $compareIds,
                             ])
                         @endif
                     </div>
@@ -230,8 +246,153 @@
                             @include('livewire.requests.items._catalog-results-table', [
                                 'rows' => collect($simResults),
                                 'selectedId' => $selectedCatalogId,
+                                'compareIds' => $compareIds,
                             ])
                         @endif
+                    </div>
+                @endif
+                @else
+                    {{-- ─────────── Compare-панель ───────────
+                         Левая колонка: subject (позиция заявки).
+                         Правые: catalog-кандидаты в порядке выбора. --}}
+                    @php
+                        $cmp = $this->compareItems;
+                        $cols = $cmp->count() + 1; // +1 за subject-колонку
+                    @endphp
+                    <div class="flex items-center gap-2 mb-3">
+                        <button type="button" wire:click="exitCompare" class="btn btn-sm">← К списку</button>
+                        <span class="text-[12px] text-fg-3">Сравнение: позиция заявки vs {{ $cmp->count() }} {{ $cmp->count() === 1 ? 'кандидат' : ($cmp->count() < 5 ? 'кандидата' : 'кандидатов') }}</span>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto overflow-x-auto">
+                        <div class="grid gap-3" style="grid-template-columns: repeat({{ $cols }}, minmax(240px, 1fr));">
+                            {{-- ── Subject column (позиция заявки) ── --}}
+                            <div class="border border-sky-300 rounded-md bg-sky-50/40 p-3 flex flex-col gap-2">
+                                <div class="text-[10.5px] uppercase tracking-wider text-sky-700 font-semibold">Позиция заявки</div>
+                                @if($subject)
+                                    @if($subjImgIsImage)
+                                        <button type="button"
+                                                x-on:click="$dispatch('open-image', { src: @js(route('attachments.preview', $subjImg)), name: @js($subjImg->filename), dl: @js(route('attachments.download', $subjImg)) })"
+                                                class="block w-full aspect-square rounded-sm overflow-hidden bg-app border border-border">
+                                            <img src="{{ route('attachments.preview', $subjImg) }}" class="w-full h-full object-cover" loading="lazy">
+                                        </button>
+                                    @else
+                                        <div class="w-full aspect-square rounded-sm bg-app border border-border flex items-center justify-center text-[10px] text-fg-3">нет фото</div>
+                                    @endif
+                                    <div class="font-medium text-[13px] text-fg-1 leading-tight">{{ $subject->parsed_name ?: '(без названия)' }}</div>
+                                    <dl class="text-[11.5px] grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+                                        <dt class="text-fg-3">Бренд:</dt>
+                                        <dd class="text-fg-1">{{ $subject->brand?->name ?: $subject->parsed_brand ?: '—' }}</dd>
+                                        <dt class="text-fg-3">Артикул:</dt>
+                                        <dd class="mono text-fg-1 break-all">{{ $subject->parsed_article ?: '—' }}</dd>
+                                        <dt class="text-fg-3">Категория:</dt>
+                                        <dd class="text-fg-1">{{ $subject->kbCategory?->name ?: '—' }}</dd>
+                                        <dt class="text-fg-3">Кол-во:</dt>
+                                        <dd class="text-fg-1">{{ $subject->parsed_qty ? rtrim(rtrim((string) $subject->parsed_qty, '0'), '.') . ' ' . $subject->parsed_unit : '—' }}</dd>
+                                        @if($subject->supplier_note)
+                                            <dt class="text-fg-3">Примечание:</dt>
+                                            <dd class="text-amber-800">{{ $subject->supplier_note }}</dd>
+                                        @endif
+                                    </dl>
+                                    @if(! empty($subjExtracted))
+                                        <div class="border-t border-border-subtle pt-1.5 mt-1 text-[11px]">
+                                            <div class="text-fg-3 uppercase tracking-wider text-[10px] mb-0.5">KB-параметры</div>
+                                            @foreach($subjExtracted as $slug => $value)
+                                                <div class="mono"><span class="text-fg-3">{{ $slug }}:</span> <span class="text-fg-1">{{ is_scalar($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE) }}</span></div>
+                                            @endforeach
+                                        </div>
+                                    @endif
+                                @endif
+                            </div>
+
+                            {{-- ── Catalog columns ── --}}
+                            @foreach($cmp as $c)
+                                <div class="border border-border rounded-md bg-surface p-3 flex flex-col gap-2 {{ $selectedCatalogId === $c->id ? 'ring-2 ring-emerald-400' : '' }}">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">Каталог</span>
+                                        <button type="button" wire:click="toggleCompare({{ $c->id }})"
+                                                class="text-fg-3 hover:text-red-700 text-[12px]" title="Убрать">✕</button>
+                                    </div>
+                                    @if($c->photo_url)
+                                        <a href="{{ $c->photo_url }}" target="_blank" rel="noopener noreferrer"
+                                           class="block w-full aspect-square rounded-sm overflow-hidden bg-app border border-border">
+                                            <img src="{{ $c->photo_url }}" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer">
+                                        </a>
+                                    @else
+                                        <div class="w-full aspect-square rounded-sm bg-app border border-border flex items-center justify-center text-[10px] text-fg-3">нет фото</div>
+                                    @endif
+                                    <div class="font-medium text-[13px] text-fg-1 leading-tight">{{ $c->name }}</div>
+                                    <dl class="text-[11.5px] grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+                                        <dt class="text-fg-3">SKU:</dt>
+                                        <dd class="mono text-fg-1">{{ $c->sku }}</dd>
+                                        <dt class="text-fg-3">Бренд:</dt>
+                                        <dd class="text-fg-1">{{ $c->brand ?: '—' }}</dd>
+                                        <dt class="text-fg-3">Артикул:</dt>
+                                        <dd class="mono text-fg-1 break-all">{{ $c->brand_article ?: '—' }}</dd>
+                                        @php $articles = is_array($c->articles) ? array_filter($c->articles) : []; @endphp
+                                        @if(count($articles) > 1)
+                                            <dt class="text-fg-3">Все OEM:</dt>
+                                            <dd class="mono text-fg-2 break-all text-[10.5px]">{{ implode(' · ', $articles) }}</dd>
+                                        @endif
+                                        @if($c->unit_name)
+                                            <dt class="text-fg-3">Узел:</dt>
+                                            <dd class="text-fg-1">{{ $c->unit_name }}</dd>
+                                        @endif
+                                        @if($c->part_type)
+                                            <dt class="text-fg-3">Тип:</dt>
+                                            <dd class="text-fg-1">{{ $c->part_type }}</dd>
+                                        @endif
+                                        @if($c->form_factor)
+                                            <dt class="text-fg-3">Форм-фактор:</dt>
+                                            <dd class="text-fg-1">{{ $c->form_factor }}</dd>
+                                        @endif
+                                        <dt class="text-fg-3">Цена:</dt>
+                                        <dd class="mono text-fg-1">{{ $c->price !== null ? number_format((float) $c->price, 2, '.', ' ') . ' ₽' : '—' }}</dd>
+                                        <dt class="text-fg-3">Наличие:</dt>
+                                        <dd>
+                                            @if($c->stock_available === null)
+                                                <span class="text-fg-3">—</span>
+                                            @elseif($c->stock_available > 0)
+                                                <span class="text-emerald-700">{{ $c->stock_available }} шт</span>
+                                            @else
+                                                <span class="text-amber-700">нет</span>
+                                            @endif
+                                        </dd>
+                                        @if($c->weight !== null)
+                                            <dt class="text-fg-3">Вес:</dt>
+                                            <dd class="text-fg-1">{{ rtrim(rtrim((string) $c->weight, '0'), '.') }} кг</dd>
+                                        @endif
+                                        @php
+                                            $dims = array_filter([
+                                                'A' => $c->size_a, 'B' => $c->size_b, 'C' => $c->size_c,
+                                                'D' => $c->size_d, 'E' => $c->size_e, 'F' => $c->size_f,
+                                            ], fn ($v) => $v !== null);
+                                        @endphp
+                                        @if(! empty($dims))
+                                            <dt class="text-fg-3">Размеры:</dt>
+                                            <dd class="text-fg-1 text-[10.5px]">
+                                                @foreach($dims as $k => $v)
+                                                    {{ $k }}={{ rtrim(rtrim((string) $v, '0'), '.') }}@if(! $loop->last) · @endif
+                                                @endforeach
+                                            </dd>
+                                        @endif
+                                        @if(! $c->is_active)
+                                            <dt class="text-fg-3">Статус:</dt>
+                                            <dd class="text-fg-3 uppercase text-[10px]">архив</dd>
+                                        @endif
+                                    </dl>
+                                    <div class="pt-1.5 mt-auto border-t border-border-subtle flex gap-1.5">
+                                        <button type="button" wire:click="selectCatalog({{ $c->id }})"
+                                                class="btn btn-sm flex-1 {{ $selectedCatalogId === $c->id ? 'btn-primary' : '' }}">
+                                            {{ $selectedCatalogId === $c->id ? '✓ Выбрано' : 'Выбрать' }}
+                                        </button>
+                                        <a href="https://mylift.ru/?text={{ urlencode($c->sku) }}&fn=find"
+                                           target="_blank" rel="noopener noreferrer"
+                                           class="btn btn-sm" title="Открыть на mylift.ru">↗</a>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
                     </div>
                 @endif
 

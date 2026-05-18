@@ -44,6 +44,13 @@ class ItemCatalogLinkDialog extends Component
     public string $similarQueryActive = '';
     public ?int $selectedCatalogId = null;
 
+    /** Список catalog_item_id для side-by-side сравнения (max 3). */
+    public array $compareIds = [];
+    /** Когда true — modal показывает compare-панель вместо списка. */
+    public bool $comparing = false;
+
+    public const COMPARE_MAX = 3;
+
     public function mount(int $requestId): void
     {
         $this->requestId = $requestId;
@@ -102,6 +109,43 @@ class ItemCatalogLinkDialog extends Component
         $this->similarQuery = '';
         $this->similarQueryActive = '';
         $this->selectedCatalogId = null;
+        $this->compareIds = [];
+        $this->comparing = false;
+    }
+
+    /**
+     * Toggle catalog id в списке для сравнения. Максимум COMPARE_MAX штук.
+     */
+    public function toggleCompare(int $catalogId): void
+    {
+        $idx = array_search($catalogId, $this->compareIds, true);
+        if ($idx !== false) {
+            array_splice($this->compareIds, $idx, 1);
+        } elseif (count($this->compareIds) < self::COMPARE_MAX) {
+            $this->compareIds[] = $catalogId;
+        }
+    }
+
+    public function clearCompare(): void
+    {
+        $this->compareIds = [];
+    }
+
+    /**
+     * Войти в режим сравнения. Левая колонка — subject-позиция заявки,
+     * правые — выбранные catalog-кандидаты (1..COMPARE_MAX). Требует
+     * ≥1 выбранного каталога.
+     */
+    public function enterCompare(): void
+    {
+        if (count($this->compareIds) >= 1) {
+            $this->comparing = true;
+        }
+    }
+
+    public function exitCompare(): void
+    {
+        $this->comparing = false;
     }
 
     /**
@@ -132,6 +176,32 @@ class ItemCatalogLinkDialog extends Component
     public function selectCatalog(int $catalogId): void
     {
         $this->selectedCatalogId = $catalogId;
+    }
+
+    /**
+     * Полные данные каталожных позиций для compare-панели.
+     * Сохраняет порядок добавления в $compareIds.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, CatalogItem>
+     */
+    #[Computed]
+    public function compareItems()
+    {
+        if (empty($this->compareIds)) {
+            return new EloquentCollection();
+        }
+        $items = CatalogItem::query()
+            ->whereIn('id', $this->compareIds)
+            ->get()
+            ->keyBy('id');
+        // Сохранить порядок выбора менеджером.
+        $ordered = new EloquentCollection();
+        foreach ($this->compareIds as $id) {
+            if ($items->has($id)) {
+                $ordered->push($items->get($id));
+            }
+        }
+        return $ordered;
     }
 
     /**
