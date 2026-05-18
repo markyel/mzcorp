@@ -201,8 +201,12 @@ class CatalogEmbeddingService
         // 2) Trigram (pg_trgm) — для fuzzy-матча целой фразы.
         $trgmRows = $this->trigramTopN($queryText, $poolLimit);
 
-        // 3) Vector — семантика. embed-вызов в OpenAI — fail-soft.
-        $vectorRows = $this->vectorTopN($queryText, $poolLimit, $requestItemId);
+        // 3) Vector — семантика. embed-вызов в OpenAI ~500-2000мс. Дёргаем
+        //    только если faster-источники не дали достаточно результатов —
+        //    типичный кейс «Плата ПКЛ-32» / «Башмак кабины OTIS» закрывается
+        //    code+trgm без vector. Это срезает 1-2 секунды с UI-отклика.
+        $fastEnough = (count($codeRows) + count($trgmRows)) >= $limit;
+        $vectorRows = $fastEnough ? [] : $this->vectorTopN($queryText, $poolLimit, $requestItemId);
 
         if ($codeRows === [] && $trgmRows === [] && $vectorRows === []) {
             return [];
@@ -332,32 +336,44 @@ class CatalogEmbeddingService
             return [];
         }
 
-        // PG-array literal: '{"%TOK1%","%TOK2%"}'. Экранируем " и \ внутри.
-        $likeTokens = array_map(
-            fn ($t) => '%' . str_replace(['\\', '"'], ['\\\\', '\\"'], $t) . '%',
-            $tokens,
-        );
-        $pgArray = '{' . implode(',', array_map(fn ($s) => '"' . $s . '"', $likeTokens)) . '}';
+        // Два варианта токенов: lower (для lower(name)/lower(article) индексов)
+        // и uppercase (для brand_article_normalized и articles[]).
+        // PG-array literals: '{"%tok1%","%tok2%"}'.
+        $mkPgArr = function (array $toks) {
+            $like = array_map(
+                fn ($t) => '%' . str_replace(['\\', '"'], ['\\\\', '\\"'], $t) . '%',
+                $toks,
+            );
+            return '{' . implode(',', array_map(fn ($s) => '"' . $s . '"', $like)) . '}';
+        };
+        $upperArr = $mkPgArr($tokens);
+        $lowerArr = $mkPgArr(array_map(mb_strtolower(...), $tokens));
 
         try {
+            // ВАЖНО: expression в WHERE для name точно совпадает с GIN trgm
+            // индексом catalog_items_name_nosep_trgm_idx
+            // (regexp_replace(lower(name), '[\s\-_./]', '', 'g')) — без этого
+            // совпадения PG не использует индекс и делает seq scan на 35K.
+            // jsonb_array_elements_text не индексируется → выносим в OR,
+            // PG умеет bitmap-OR по indexed + non-indexed.
             $rows = DB::select(
                 "
                 SELECT id AS catalog_id
                 FROM catalog_items
                 WHERE is_active = true
                   AND (
-                       upper(regexp_replace(coalesce(name, ''), '[\\s\\-_./]', '', 'g')) ILIKE ANY (?::text[])
-                       OR coalesce(brand_article_normalized, '') ILIKE ANY (?::text[])
+                       regexp_replace(lower(name), '[\\s\\-_./]', '', 'g') ILIKE ANY (?::text[])
+                       OR brand_article_normalized ILIKE ANY (?::text[])
                        OR EXISTS (
                            SELECT 1
-                           FROM jsonb_array_elements_text(coalesce(articles, '[]'::jsonb)) AS a
+                           FROM jsonb_array_elements_text(articles) AS a
                            WHERE a IS NOT NULL AND a <> ''
                              AND upper(regexp_replace(a, '[\\s\\-_./]', '', 'g')) ILIKE ANY (?::text[])
                        )
                   )
                 LIMIT ?
                 ",
-                [$pgArray, $pgArray, $pgArray, $limit],
+                [$lowerArr, $upperArr, $upperArr, $limit],
             );
         } catch (\Throwable $e) {
             Log::info('CatalogEmbeddingService: code-token search failed', [
