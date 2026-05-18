@@ -168,7 +168,22 @@ class CatalogEmbeddingService
     public function topNByRequestItem(RequestItem $item, int $n = 10): array
     {
         $queryText = $this->buildQueryText($item);
-        if (mb_strlen(trim($queryText)) < 5) {
+        return $this->topNByQueryText($queryText, $n, $item->id);
+    }
+
+    /**
+     * Top-N похожих позиций каталога по произвольному тексту запроса —
+     * используется в UI «Похожие из каталога», когда менеджер вводит
+     * свой запрос (напр. «Плата ПКЛ-32») вместо опоры на parsed_name.
+     *
+     * Без threshold/safety-фильтров: возвращаем все, что нашлось, оператор
+     * сам выбирает. requestItemId — только для логов (можно null).
+     *
+     * @return array<int, array{catalog: CatalogItem, similarity: float}>
+     */
+    public function topNByQueryText(string $queryText, int $n = 10, ?int $requestItemId = null): array
+    {
+        if (mb_strlen(trim($queryText)) < 2) {
             return [];
         }
 
@@ -176,7 +191,8 @@ class CatalogEmbeddingService
             $result = $this->embedder->embed($queryText);
         } catch (\Throwable $e) {
             Log::warning('CatalogEmbeddingService: topN embed failed', [
-                'request_item_id' => $item->id,
+                'request_item_id' => $requestItemId,
+                'query_preview' => mb_substr($queryText, 0, 80),
                 'error' => $e->getMessage(),
             ]);
             return [];

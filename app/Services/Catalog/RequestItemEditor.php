@@ -65,6 +65,22 @@ class RequestItemEditor
     }
 
     /**
+     * То же, что findSimilar, но по произвольному тексту запроса оператора.
+     * Используется в UI «Похожие из каталога» когда parsed_* плохо отражает
+     * товар (OCR-галлюцинация, обрезанное название) и менеджер хочет ввести
+     * свой запрос вручную.
+     *
+     * Authorization — та же, что для findSimilar.
+     *
+     * @return array<int, array{catalog: CatalogItem, similarity: float}>
+     */
+    public function findSimilarByQuery(RequestItem $item, string $queryText, User $author, int $limit = 10): array
+    {
+        $this->ensureCanEdit($item, $author);
+        return $this->embedder->topNByQueryText($queryText, $limit, $item->id);
+    }
+
+    /**
      * Bulk re-match всех позиций заявки. Для каждой active-позиции:
      *  - не трогаем `internal_catalog_not_found` (оператор подтвердил, что
      *    SKU не появится — bulk не должен пересматривать без явного refresh);

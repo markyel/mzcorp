@@ -33,6 +33,13 @@ class ItemCatalogLinkDialog extends Component
     /** Активная вкладка: text | similar. */
     public string $mode = 'text';
     public string $query = '';
+    /**
+     * Свой запрос менеджера для vector-поиска (вкладка similar).
+     * По-умолчанию = parsed_name + parsed_article. Менеджер может перетереть.
+     */
+    public string $similarQuery = '';
+    /** Отметка submitted-запроса — то, по чему сейчас отрисованы результаты. */
+    public string $similarQueryActive = '';
     public ?int $selectedCatalogId = null;
 
     public function mount(int $requestId): void
@@ -67,6 +74,10 @@ class ItemCatalogLinkDialog extends Component
         // Pre-fill query — для text-режима полезно, для similar используется
         // напрямую RequestItem-данные через embedder.
         $this->query = (string) ($item->parsed_article ?: $item->parsed_name ?: '');
+        $this->similarQuery = trim(($item->parsed_name ?? '') . ' ' . ($item->parsed_article ?? ''));
+        // Активная отметка пуста → similarResults использует «исходный»
+        // путь (parsed_*) до первого ручного «Искать».
+        $this->similarQueryActive = '';
         $this->selectedCatalogId = $item->catalog_item_id;
         $this->resetErrorBag();
         $this->open = true;
@@ -86,7 +97,34 @@ class ItemCatalogLinkDialog extends Component
         $this->requestItemId = null;
         $this->mode = 'text';
         $this->query = '';
+        $this->similarQuery = '';
+        $this->similarQueryActive = '';
         $this->selectedCatalogId = null;
+    }
+
+    /**
+     * Применить пользовательский запрос для vector-поиска. Дёргается из
+     * UI: Enter в input или клик по «🔍 Искать».
+     */
+    public function applySimilarQuery(): void
+    {
+        $trimmed = trim($this->similarQuery);
+        $this->similarQuery = $trimmed;
+        $this->similarQueryActive = $trimmed;
+        $this->selectedCatalogId = null;
+        unset($this->similarResults);
+    }
+
+    /**
+     * Сброс ручного запроса → similarResults снова показывает дефолтную
+     * подборку по parsed_name / parsed_article позиции.
+     */
+    public function resetSimilarQuery(): void
+    {
+        $this->similarQuery = '';
+        $this->similarQueryActive = '';
+        $this->selectedCatalogId = null;
+        unset($this->similarResults);
     }
 
     public function selectCatalog(int $catalogId): void
@@ -152,7 +190,14 @@ class ItemCatalogLinkDialog extends Component
             return [];
         }
         @set_time_limit(60);
-        return app(RequestItemEditor::class)->findSimilar($item, auth()->user(), 10);
+        $editor = app(RequestItemEditor::class);
+
+        // Если менеджер применил ручной запрос («Плата ПКЛ-32») — ищем по
+        // нему. Иначе — дефолтный путь через parsed_name/parsed_article.
+        if ($this->similarQueryActive !== '') {
+            return $editor->findSimilarByQuery($item, $this->similarQueryActive, auth()->user(), 10);
+        }
+        return $editor->findSimilar($item, auth()->user(), 10);
     }
 
     public function save(RequestItemEditor $editor): void

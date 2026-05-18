@@ -144,9 +144,33 @@
                     </div>
                 @else
                     {{-- similar mode --}}
+                    <div class="flex gap-1.5 mb-2">
+                        <input type="text"
+                               wire:model="similarQuery"
+                               wire:keydown.enter="applySimilarQuery"
+                               placeholder="например: Плата ПКЛ-32, или ролик уравновешивания"
+                               class="flex-1 h-[36px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)]" />
+                        <button type="button" wire:click="applySimilarQuery"
+                                class="btn"
+                                wire:loading.attr="disabled" wire:target="applySimilarQuery,similarResults">
+                            🔍 Искать
+                        </button>
+                        @if($similarQueryActive !== '')
+                            <button type="button" wire:click="resetSimilarQuery"
+                                    class="btn"
+                                    title="Вернуться к подбору по исходным данным позиции">
+                                ↺ Сбросить
+                            </button>
+                        @endif
+                    </div>
                     <div class="text-[11.5px] text-fg-3 mb-2 flex items-center gap-2">
-                        <span>Vector-поиск по KB-эмбеддингам, top-10 по убыванию похожести.</span>
-                        <span wire:loading wire:target="similarResults,setMode" class="text-amber-700">⏳ ищем…</span>
+                        @if($similarQueryActive !== '')
+                            <span>Поиск по запросу: <span class="mono text-fg-2">«{{ $similarQueryActive }}»</span> · top-10.</span>
+                        @else
+                            <span>Vector-поиск по KB-эмбеддингам исходных данных позиции, top-10 по убыванию похожести.
+                                Можно ввести свой запрос выше и нажать «Искать».</span>
+                        @endif
+                        <span wire:loading wire:target="similarResults,setMode,applySimilarQuery,resetSimilarQuery" class="text-amber-700">⏳ ищем…</span>
                     </div>
 
                     @php $simResults = $this->similarResults; @endphp
