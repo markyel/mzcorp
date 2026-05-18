@@ -234,72 +234,42 @@ class OutboundQuoteParsingService
         // на следующую строку («M0943\n1» вместо «M09431»). Лечим ДО инжекта
         // в промпт, чтобы и Vision и text-fallback видели единый артикул.
         $repairedText = $text !== null ? $this->repairBrokenMSkus($text) : null;
-        $prompt = $this->buildParsingPrompt($repairedText, $request);
+        $basePrompt = $this->buildParsingPrompt($repairedText, $request);
 
         $model = (string) config('services.openai.quote_parser_model', 'gpt-4o');
-        $options = [
-            'temperature' => 0,
-            'max_tokens' => 16384,
-            'response_format' => ['type' => 'json_object'],
-        ];
 
         try {
-            if (! empty($images)) {
-                $result = $this->chatService->analyzeMultipleImages($prompt, $images, $model, $options);
-            } else {
-                $result = $this->chatService->chat(
-                    [['role' => 'user', 'content' => $prompt]],
-                    $model,
-                    $options
-                );
+            // Первый проход.
+            $first = $this->runOnePass($basePrompt, $images, $model, $request, $repairedText);
+
+            // Если есть warning «Σ items.total != document.total_amount» > 5% —
+            // делаем второй проход с feedback'ом. Vision иногда галлюцинирует на
+            // одной из строк (см. quote_id=2 МЗ-355534: row 1 завышен ровно на
+            // 6 986.80 ₽ = подвальная скидка). Второй проход с явной указкой на
+            // расхождение и подсказкой «не складывай подвальную скидку с per-row»
+            // даёт LLM шанс самостоятельно исправить.
+            $needRetry = $this->shouldRetry($first['document'], $first['items']);
+            if (! $needRetry) {
+                return $first;
             }
 
-            $finishReason = $result['raw']['choices'][0]['finish_reason'] ?? null;
-            if ($finishReason === 'length') {
-                Log::warning('OutboundQuoteParser: GPT response truncated', [
-                    'request_id' => $request->id,
-                    'usage' => $result['usage'] ?? [],
-                ]);
-            }
+            $feedbackPrompt = $this->buildRetryFeedbackPrompt(
+                $basePrompt,
+                $first['items'],
+                $first['document'],
+                $repairedText
+            );
+            $second = $this->runOnePass($feedbackPrompt, $images, $model, $request, $repairedText);
 
-            $json = $this->extractJSON((string) $result['content']);
-            if ($json === null) {
-                throw new RuntimeException('No JSON in GPT response');
-            }
-
-            $parsed = json_decode($json, true);
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                throw new RuntimeException('Invalid JSON: '.json_last_error_msg());
-            }
-
-            $document = is_array($parsed['document'] ?? null) ? $parsed['document'] : [];
-            $items = is_array($parsed['items'] ?? null) ? $parsed['items'] : [];
-
-            $items = $this->reclassifyMisparsedDimensional($items, $request);
-            $items = $this->normalizeItemsVat($items, $document, $request);
-            // Post-process: если LLM вернул короткий артикул вида M+4цифры,
-            // а в исходном тексте есть удлинённый вариант (M+5+цифр) с тем же
-            // префиксом — заменяем (страховка на случай если хинт в промпте
-            // не помог и Vision тоже урезал артикул).
-            $items = $this->repairItemArticles($items, $repairedText, $request);
-
-            // Кросс-валидатор: Σ items.total vs document.total_amount.
-            // Vision иногда галлюцинирует на отдельных строках (см. quote_id=2:
-            // первая строка прилетела на 6 986.80 ₽ выше реальной — Vision
-            // прибавил подвальную скидку к row total). Здесь мы такие случаи
-            // ДЕТЕКТИМ и записываем в document['_warnings'] для UI badge.
-            // Сам пересчёт не делаем — Vision мог быть прав, и расхождение
-            // объясняется подвальной скидкой; решение за оператором.
-            $warnings = $this->validateLineTotals($items, $document, $request);
-            if (! empty($warnings)) {
-                $document['_warnings'] = $warnings;
-            }
-
-            return [
-                'document' => $document,
-                'items' => $items,
-                'raw' => $result['raw'],
+            // Выбираем лучший проход — у кого |Σ items.total - total_amount| меньше.
+            $best = $this->pickBest($first, $second);
+            $best['document']['_attempts'] = [
+                'first_sum_delta' => $this->sumDelta($first['document'], $first['items']),
+                'second_sum_delta' => $this->sumDelta($second['document'], $second['items']),
+                'chosen' => $best === $first ? 'first' : 'second',
             ];
+
+            return $best;
         } catch (\Exception $e) {
             Log::error('OutboundQuoteParser: GPT parsing failed', [
                 'error' => $e->getMessage(),
@@ -307,6 +277,185 @@ class OutboundQuoteParsingService
             ]);
             throw new RuntimeException('Failed to parse outbound quote: '.$e->getMessage());
         }
+    }
+
+    /**
+     * Один проход LLM: чат → JSON → post-process → валидация.
+     */
+    private function runOnePass(string $prompt, array $images, string $model, Request $request, ?string $repairedText): array
+    {
+        $options = [
+            'temperature' => 0,
+            'max_tokens' => 16384,
+            'response_format' => ['type' => 'json_object'],
+        ];
+
+        $result = ! empty($images)
+            ? $this->chatService->analyzeMultipleImages($prompt, $images, $model, $options)
+            : $this->chatService->chat([['role' => 'user', 'content' => $prompt]], $model, $options);
+
+        $finishReason = $result['raw']['choices'][0]['finish_reason'] ?? null;
+        if ($finishReason === 'length') {
+            Log::warning('OutboundQuoteParser: GPT response truncated', [
+                'request_id' => $request->id,
+                'usage' => $result['usage'] ?? [],
+            ]);
+        }
+
+        $json = $this->extractJSON((string) $result['content']);
+        if ($json === null) {
+            throw new RuntimeException('No JSON in GPT response');
+        }
+
+        $parsed = json_decode($json, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new RuntimeException('Invalid JSON: '.json_last_error_msg());
+        }
+
+        $document = is_array($parsed['document'] ?? null) ? $parsed['document'] : [];
+        $items = is_array($parsed['items'] ?? null) ? $parsed['items'] : [];
+
+        $items = $this->reclassifyMisparsedDimensional($items, $request);
+        $items = $this->normalizeItemsVat($items, $document, $request);
+        $items = $this->repairItemArticles($items, $repairedText, $request);
+
+        $warnings = $this->validateLineTotals($items, $document, $request);
+        if (! empty($warnings)) {
+            $document['_warnings'] = $warnings;
+        }
+
+        return [
+            'document' => $document,
+            'items' => $items,
+            'raw' => $result['raw'],
+        ];
+    }
+
+    /**
+     * Нужен ли второй проход с retry-feedback'ом? Срабатывает только на крупное
+     * расхождение Σ items.total vs document.total_amount (> 5%), когда
+     * prices_include_vat=true. Per-row arithmetic mismatch не триггерит retry —
+     * с ним post-process справится / оператор сам поправит.
+     */
+    private function shouldRetry(array $document, array $items): bool
+    {
+        if (($document['prices_include_vat'] ?? null) !== true) {
+            return false;
+        }
+        $totalAmount = isset($document['total_amount']) && is_numeric($document['total_amount'])
+            ? (float) $document['total_amount'] : null;
+        if ($totalAmount === null || $totalAmount <= 0) {
+            return false;
+        }
+        $sumTotals = 0.0;
+        foreach ($items as $item) {
+            if (isset($item['total']) && is_numeric($item['total'])) {
+                $sumTotals += (float) $item['total'];
+            }
+        }
+        if ($sumTotals <= 0) {
+            return false;
+        }
+
+        return abs($sumTotals - $totalAmount) / $totalAmount > 0.05;
+    }
+
+    /**
+     * Строит retry-промпт: базовый + явный feedback о расхождении первой попытки
+     * + ПОЛНЫЙ raw-text PDF (без 8000-лимита basePrompt'а) с инструкцией
+     * «сверь свои числа с этим текстом, ищи каждое поле».
+     *
+     * Vision на первом проходе мог проигнорировать text-слой PDF и галлюцинировать
+     * по image. На retry'е мы вставляем text повторно, в начале feedback'а — там
+     * Vision уделит ему больше внимания.
+     */
+    private function buildRetryFeedbackPrompt(string $basePrompt, array $items, array $document, ?string $repairedText): string
+    {
+        $sumTotals = 0.0;
+        $rows = [];
+        foreach ($items as $idx => $item) {
+            $tot = isset($item['total']) && is_numeric($item['total']) ? (float) $item['total'] : 0.0;
+            $sumTotals += $tot;
+            $rows[] = sprintf(
+                '%d) %s: qty=%s × unit_price=%s = total=%s',
+                $idx + 1,
+                mb_substr((string) ($item['name'] ?? ''), 0, 50),
+                $item['quantity'] ?? '?',
+                $item['unit_price'] ?? '?',
+                $item['total'] ?? '?'
+            );
+        }
+        $totalAmount = (float) ($document['total_amount'] ?? 0);
+        $diff = $sumTotals - $totalAmount;
+
+        $feedback = "\n\n═══ ПОВТОРНЫЙ ПРОХОД — ИСПРАВЬ АРИФМЕТИКУ ═══\n"
+            ."Прошлый раз ты вернул вот это:\n"
+            .implode("\n", $rows)
+            ."\n"
+            .sprintf("Σ items.total = %.2f\n", $sumTotals)
+            .sprintf("document.total_amount = %.2f\n", $totalAmount)
+            .sprintf("РАСХОЖДЕНИЕ = %.2f (%.1f%%) — это НЕДОПУСТИМО при prices_include_vat=true\n", $diff, abs($diff) / max($totalAmount, 1) * 100)
+            ."\n"
+            ."Типичный паттерн ошибки: ты прибавил подвальную общую скидку (если она есть) "
+            ."к одной из строк (обычно первой). В шаблоне Liftway-PDF подвальная «Скидка %X: -Y₽» "
+            ."уже встроена в построчные «Цена со скидкой» — её НЕЛЬЗЯ добавлять повторно к row total.\n"
+            ."\n"
+            ."ОБЯЗАТЕЛЬНО: пересмотри КАЖДУЮ строку. unit_price это строго колонка "
+            ."«Цена со скидкой» из таблицы (НЕ «Цена», НЕ «Цена + скидка»). total это строго "
+            ."колонка «Сумма» из таблицы (НЕ «Сумма + НДС», НЕ «Сумма + общая скидка»).\n"
+            ."После пересчёта Σ items.total ОБЯЗАТЕЛЬНО ≈ document.total_amount.\n";
+
+        // Также: для retry даём ПОЛНЫЙ raw-text без 8000-лимита basePrompt'а.
+        // Vision получит ground truth для сверки своих cifr.
+        if ($repairedText !== null && $repairedText !== '') {
+            // Жёстче лимит чтобы не вылететь из max_tokens (16384 = ~50k chars input).
+            $textForRetry = mb_substr($repairedText, 0, 24000);
+            $feedback .= "\n═══ ТЕКСТОВЫЙ СЛОЙ PDF (используй для сверки) ═══\n"
+                ."Ниже — текст, извлечённый из PDF через pdfparser. Каждое число которое ты "
+                ."возвращаешь должно встречаться в этом тексте. Если ты НЕ ВИДИШЬ число в "
+                ."тексте — значит ты его выдумал, перепиши.\n"
+                ."\n"
+                ."------- BEGIN RAW PDF TEXT -------\n"
+                .$textForRetry."\n"
+                ."------- END RAW PDF TEXT -------\n";
+        }
+
+        return $basePrompt.$feedback;
+    }
+
+    /**
+     * Какая попытка ближе к Σ items.total ≈ total_amount? Возвращает её result.
+     */
+    private function pickBest(array $first, array $second): array
+    {
+        $d1 = $this->sumDelta($first['document'], $first['items']);
+        $d2 = $this->sumDelta($second['document'], $second['items']);
+        // Если первая лучше или равна (при равенстве предпочтение первой как «default»).
+        if ($d1 !== null && $d2 !== null) {
+            return $d1 <= $d2 ? $first : $second;
+        }
+
+        return $d2 !== null ? $second : $first;
+    }
+
+    /**
+     * |Σ items.total - document.total_amount|. null если нет данных.
+     */
+    private function sumDelta(array $document, array $items): ?float
+    {
+        $total = isset($document['total_amount']) && is_numeric($document['total_amount'])
+            ? (float) $document['total_amount'] : null;
+        if ($total === null) {
+            return null;
+        }
+        $sum = 0.0;
+        foreach ($items as $item) {
+            if (isset($item['total']) && is_numeric($item['total'])) {
+                $sum += (float) $item['total'];
+            }
+        }
+
+        return abs($sum - $total);
     }
 
     /**
@@ -487,6 +636,15 @@ class OutboundQuoteParsingService
 отправляет клиенту. Документ — наш исходящий КП или счёт. Тебе нужно извлечь из
 него позиции с ценами/количествами и метаданные документа.
 Сегодняшняя дата: {$today}
+
+**У тебя есть ДВА источника данных:**
+1. Изображение PDF-страницы (приложено как image).
+2. Извлечённый текстовый слой PDF (в конце этого промпта, секция «Извлечённый текст»).
+
+КАЖДОЕ число которое ты возвращаешь в JSON ОБЯЗАТЕЛЬНО должно встречаться в текстовом
+слое (как fallback на случай если ты неверно прочитал image). Если в твоём ответе есть
+цена/сумма которой нет в тексте — значит ты её ВЫДУМАЛ, перечитай оба источника. Image
+полезен для понимания структуры таблицы (какая колонка где), text — для надёжных цифр.
 
 **Контекст заявки клиента:**
 Код заявки: M-{$request->code}

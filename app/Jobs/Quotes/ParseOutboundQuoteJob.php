@@ -261,6 +261,13 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
             if (is_array($parserWarnings) && ! empty($parserWarnings)) {
                 $payloadPatch['warnings'] = $parserWarnings;
             }
+            // Retry telemetry: если парсер делал второй проход с feedback'ом
+            // (см. parseWithGPT::buildRetryFeedbackPrompt), сохраняем delta'ы
+            // обеих попыток и какая выбрана — для аудита качества Vision'а.
+            $attempts = data_get($document, '_attempts');
+            if (is_array($attempts) && ! empty($attempts)) {
+                $payloadPatch['attempts'] = $attempts;
+            }
             $quote->payload = array_merge(
                 is_array($quote->payload) ? $quote->payload : [],
                 $payloadPatch
