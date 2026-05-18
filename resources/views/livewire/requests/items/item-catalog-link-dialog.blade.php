@@ -38,14 +38,24 @@
                              Click открывает полноразмерный лайтбокс через
                              dispatch('open-image') — тот же глобальный
                              listener, что в Detail. --}}
-                        @php $imgs = $this->emailImages; @endphp
+                        @php
+                            $imgs = $this->emailImages;
+                            // Полный список картинок в JS — для листания в лайтбоксе
+                            // через стрелки. Index клика передаётся в event detail.
+                            $galleryItems = $imgs->map(fn ($i) => [
+                                'src' => route('attachments.preview', $i),
+                                'name' => $i->filename,
+                                'dl' => route('attachments.download', $i),
+                            ])->values()->all();
+                        @endphp
                         @if($imgs->isNotEmpty())
-                            <div class="shrink-0 flex flex-col gap-1" style="max-width: 108px;">
+                            <div class="shrink-0 flex flex-col gap-1" style="max-width: 108px;"
+                                 x-data="{ items: @js($galleryItems) }">
                                 <div class="grid grid-cols-2 gap-1">
-                                    @foreach($imgs->take(6) as $img)
+                                    @foreach($imgs->take(6) as $idx => $img)
                                         @php $isLinked = $subject && $subject->image_attachment_id === $img->id; @endphp
                                         <button type="button"
-                                                x-on:click="$dispatch('open-image', { src: @js(route('attachments.preview', $img)), name: @js($img->filename), dl: @js(route('attachments.download', $img)) })"
+                                                x-on:click="$dispatch('open-image', { items: items, index: {{ $idx }} })"
                                                 class="w-12 h-12 rounded-sm overflow-hidden bg-app block {{ $isLinked ? 'ring-2 ring-sky-500 border-0' : 'border border-border' }}"
                                                 title="{{ $img->filename }}{{ $isLinked ? ' · привязано к этой позиции' : '' }}">
                                             <img src="{{ route('attachments.preview', $img) }}"
@@ -56,7 +66,12 @@
                                     @endforeach
                                 </div>
                                 @if($imgs->count() > 6)
-                                    <div class="text-[10px] text-fg-3 text-center">+{{ $imgs->count() - 6 }} ещё</div>
+                                    <button type="button"
+                                            x-on:click="$dispatch('open-image', { items: items, index: 6 })"
+                                            class="text-[10px] text-sky-700 hover:text-sky-900 text-center"
+                                            title="Открыть в просмотрщике с пролистыванием">
+                                        +{{ $imgs->count() - 6 }} ещё →
+                                    </button>
                                 @endif
                             </div>
                         @elseif($subjImgIsImage)
