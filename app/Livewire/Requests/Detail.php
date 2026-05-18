@@ -112,6 +112,12 @@ class Detail extends Component
             // Phase 1.10 — state-changes для таба «Активность».
             'stateChanges' => fn ($q) => $q->orderByDesc('created_at'),
             'stateChanges.byUser:id,name',
+            // Phase 7 — snapshot'ы отправленных КП/счетов для Hero-чипа
+            // («📨 КП: 156 230 ₽ · 12/15»). Загружаем только matched
+            // (parsed-без-matcher не показываем, failed скрываем).
+            'outboundQuotes' => fn ($q) => $q->where('status', \App\Models\OutboundQuote::STATUS_MATCHED)
+                ->orderByDesc('id'),
+            'outboundQuotes.items:id,outbound_quote_id,matched_request_item_id,line_total,quantity',
         ]);
 
         // Полный тред: все письма прицепленные к заявке (trigger + reply'и),

@@ -367,6 +367,34 @@
                         </span>
                     @endif
                 </div>
+                @php
+                    // Phase 7 — Hero chip «📨 КП». Берём последний matched
+                    // OutboundQuote (если КП было отправлено несколько раз —
+                    // показываем самый свежий). null → chip не рисуется.
+                    $latestQuote = $req->outboundQuotes->first();
+                    $quoteMatchedCnt = null;
+                    if ($latestQuote) {
+                        $quoteMatchedCnt = $latestQuote->items
+                            ->whereNotNull('matched_request_item_id')->count();
+                    }
+                @endphp
+                @if($latestQuote)
+                    <div class="flex flex-col gap-1 pl-4 border-l border-border-subtle">
+                        <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">
+                            {{ $latestQuote->document_type?->value === 'outbound_invoice' ? 'Счёт' : 'КП' }}
+                        </span>
+                        <span class="text-fg-1 mono"
+                              title="{{ $latestQuote->document_type?->label() }}{{ $latestQuote->document_number ? ' №' . $latestQuote->document_number : '' }}{{ $latestQuote->document_date ? ' от ' . $latestQuote->document_date->format('d.m.Y') : '' }} · сматчено {{ $quoteMatchedCnt }}/{{ $latestQuote->items->count() }} с позициями заявки">
+                            @if($latestQuote->total_amount !== null)
+                                {{ number_format((float) $latestQuote->total_amount, 2, '.', ' ') }} ₽
+                            @else
+                                <span class="text-fg-3">—</span>
+                            @endif
+                            <span class="text-fg-3 text-[11.5px]">·
+                                {{ $quoteMatchedCnt }}/{{ $latestQuote->items->count() }}</span>
+                        </span>
+                    </div>
+                @endif
             </div>
         </div>
 

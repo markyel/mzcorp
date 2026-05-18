@@ -2,9 +2,11 @@
 
 namespace App\Services\Mail;
 
+use App\Enums\DetectorType;
 use App\Enums\EmailCategory;
 use App\Enums\MailDirection;
 use App\Enums\MailRuleActionType;
+use App\Jobs\Quotes\ParseOutboundQuoteJob;
 use App\Models\EmailMessage;
 use App\Models\MailRoutingRule;
 use App\Models\RoutedMail;
@@ -82,6 +84,12 @@ class MailRouter
                             (float) $detected['confidence'],
                             ['signals' => $detected['signals']],
                         );
+
+                        // Парсер исходящего КП/счёта — distill позиций+цен из PDF/XLSX/DOCX
+                        // вложений (Foundation §7, расширение DocumentDetector). Dispatch
+                        // async-job на каждое подходящее вложение; ShouldBeUnique по
+                        // attachment_id гасит дубли.
+                        $this->dispatchOutboundQuoteParsing($message, $detected['type']);
                     }
                 } catch (\Throwable $e) {
                     Log::warning('MailRouter: outbound document detector failed (non-fatal)', [
@@ -400,5 +408,43 @@ class MailRouter
         }
 
         return false;
+    }
+
+    /**
+     * Триггер парсера исходящих КП/счетов (Foundation §7, расширение).
+     *
+     * Отбор: тип события — quotation/invoice (clarification и прочие игнорируем),
+     * расширение вложения — из `services.quotes.parseable_extensions`. Размер +
+     * наличие файла проверяет уже сам job (Guard'ы в handle()).
+     *
+     * Идемпотентность гарантируется `ParseOutboundQuoteJob::uniqueId()` по
+     * attachment_id — повторный запуск через MailRouter (sync пересортировка)
+     * не плодит дубли.
+     */
+    private function dispatchOutboundQuoteParsing(EmailMessage $message, DetectorType $type): void
+    {
+        // Парсим только КП и счёт. Clarification и outbound_quotation_partial
+        // (partial — пока зарезервирован, не используется детектором) — пропускаем.
+        if (! in_array($type, [DetectorType::OutboundQuotationFull, DetectorType::OutboundInvoice], true)) {
+            return;
+        }
+
+        $parseable = (array) config('services.quotes.parseable_extensions', ['pdf', 'xlsx', 'xls', 'docx']);
+
+        foreach ($message->attachments as $att) {
+            $ext = strtolower((string) pathinfo((string) $att->filename, PATHINFO_EXTENSION));
+            if (! in_array($ext, $parseable, true)) {
+                continue;
+            }
+            try {
+                ParseOutboundQuoteJob::dispatch($att->id, $type->value, false);
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: dispatch outbound quote parser failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'attachment_id' => $att->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 }
