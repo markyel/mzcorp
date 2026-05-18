@@ -304,10 +304,29 @@
                 </div>
                 <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle min-w-0">
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Sticky</span>
-                    @php $sticky = $this->sticky; @endphp
+                    @php
+                        $sticky = $this->sticky;
+                        // Иконка + tooltip по типу sticky (catalog/client/text).
+                        // Старые записи без kind рендерятся нейтрально.
+                        $stickyKindLabel = match ($sticky['kind'] ?? null) {
+                            'catalog' => '📦 каталог',
+                            'client' => '👤 клиент',
+                            'text' => '🔤 текст',
+                            default => null,
+                        };
+                        $stickyHoverTitle = match ($sticky['kind'] ?? null) {
+                            'catalog' => 'Sticky сработал по совпадению catalog_item_id — тот же товар каталога уже у этого менеджера',
+                            'client' => 'Sticky сработал по client_email — у менеджера есть открытая заявка от того же клиента',
+                            'text' => 'Sticky сработал по парсеному артикулу/названию позиции',
+                            default => 'Заявки, по которым AssignmentService прицепил эту через sticky',
+                        };
+                    @endphp
                     @if($sticky['links']->isNotEmpty())
                         <span class="flex items-center gap-1.5 flex-wrap"
-                              title="Заявки, по которым AssignmentService прицепил эту через совпадение артикула или названия позиции">
+                              title="{{ $stickyHoverTitle }}">
+                            @if($stickyKindLabel)
+                                <span class="inline-flex items-center text-[10.5px] font-semibold px-1.5 py-0.5 rounded-[3px] bg-violet-50 text-violet-700">{{ $stickyKindLabel }}</span>
+                            @endif
                             @foreach($sticky['links'] as $linked)
                                 {{-- Без wire:navigate — после SPA-перехода между
                                      двумя Detail-страницами Livewire не пересоздаёт
@@ -319,7 +338,7 @@
                         </span>
                     @elseif($sticky['legacy'])
                         <span class="text-fg-2 text-[12px]"
-                              title="Старая запись (до Phase 2 sticky visibility) — детали привязки не сохранены">sticky</span>
+                              title="Старая запись sticky — детали привязки не сохранены">{{ $stickyKindLabel ?? 'sticky' }}</span>
                     @else
                         <span class="text-fg-3">—</span>
                     @endif

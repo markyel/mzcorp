@@ -388,12 +388,12 @@ class Detail extends Component
      * Самый свежий `request_assignments` с reason, начинающимся на
      * `auto_sticky` (свежий — на случай ручного переподчинения через
      * ReassignService, чтобы исторический sticky-snapshot не терялся).
-     * Парсим payload: `auto_sticky:{"linked":[id1,id2,...]}`.
+     * Парсим payload: `auto_sticky:{"kind":"catalog|client|text","linked":[id1,...]}`.
      *
      * Старые backfilled-записи имеют просто `auto_sticky` (без `:`-payload) —
-     * legacy=true, links пустой; UI покажет общий чип без deep-links.
+     * legacy=true, links пустой, kind=null; UI покажет общий чип без deep-links.
      *
-     * @return array{links: \Illuminate\Support\Collection, legacy: bool}
+     * @return array{links: \Illuminate\Support\Collection, legacy: bool, kind: ?string}
      */
     #[Computed]
     public function sticky(): array
@@ -402,21 +402,25 @@ class Detail extends Component
             ->first(fn ($a) => str_starts_with((string) $a->reason, 'auto_sticky'));
 
         if (! $assignment) {
-            return ['links' => collect(), 'legacy' => false];
+            return ['links' => collect(), 'legacy' => false, 'kind' => null];
         }
 
         $reason = (string) $assignment->reason;
         $colonAt = strpos($reason, ':');
         if ($colonAt === false) {
             // legacy: 'auto_sticky' без payload (165 backfill).
-            return ['links' => collect(), 'legacy' => true];
+            return ['links' => collect(), 'legacy' => true, 'kind' => null];
         }
 
         $payload = substr($reason, $colonAt + 1);
         $data = json_decode($payload, true);
+        $kind = is_array($data) ? ($data['kind'] ?? null) : null;
         $ids = is_array($data['linked'] ?? null) ? $data['linked'] : [];
         if (empty($ids)) {
-            return ['links' => collect(), 'legacy' => true];
+            // Payload есть, но linked пустой (раньше mы такого писали при
+            // некоторых corner-case'ах). Считаем legacy, но kind сохраняем
+            // если он там был.
+            return ['links' => collect(), 'legacy' => true, 'kind' => $kind];
         }
 
         $links = \App\Models\Request::query()
@@ -424,7 +428,7 @@ class Detail extends Component
             ->orderByDesc('created_at')
             ->get(['id', 'internal_code', 'subject', 'status', 'client_name']);
 
-        return ['links' => $links, 'legacy' => false];
+        return ['links' => $links, 'legacy' => false, 'kind' => $kind];
     }
 
     /**

@@ -436,7 +436,39 @@
                             }
                             $titleT2 = implode(' · ', $titleT2parts);
 
-                            $isSticky = $req->latestAssignment?->reason === 'auto_sticky';
+                            // Sticky-шильдик. AssignmentService пишет reason'ы двух форматов:
+                            //   - plain 'auto_sticky' (старые 165 backfill-записей)
+                            //   - 'auto_sticky:{"kind":"catalog|client|text","linked":[...]}'
+                            // Сравнение по str_starts_with покрывает оба варианта, kind вытаскиваем
+                            // из JSON-suffix для tooltip'а и иконки.
+                            $stickyReason = $req->latestAssignment?->reason ?? '';
+                            $isSticky = str_starts_with($stickyReason, 'auto_sticky');
+                            $stickyKind = null;
+                            $stickyLinked = [];
+                            if ($isSticky && str_contains($stickyReason, ':')) {
+                                $stickyPayload = json_decode(substr($stickyReason, strlen('auto_sticky:')), true);
+                                if (is_array($stickyPayload)) {
+                                    $stickyKind = $stickyPayload['kind'] ?? null;
+                                    $stickyLinked = is_array($stickyPayload['linked'] ?? null) ? $stickyPayload['linked'] : [];
+                                }
+                            }
+                            // Иконка + tooltip по типу sticky. Старые plain-reason'ы без kind
+                            // рендерятся нейтрально как «sticky».
+                            $stickyIcon = match ($stickyKind) {
+                                'catalog' => '📦',
+                                'client' => '👤',
+                                'text' => '🔤',
+                                default => '',
+                            };
+                            $stickyTitle = match ($stickyKind) {
+                                'catalog' => 'Sticky по каталогу: тот же товар уже у этого менеджера',
+                                'client' => 'Sticky по клиенту: у менеджера открыта заявка от того же email',
+                                'text' => 'Sticky по тексту: совпало название/артикул позиции',
+                                default => 'Sticky-привязка к менеджеру',
+                            };
+                            if (! empty($stickyLinked)) {
+                                $stickyTitle .= ' · ' . count($stickyLinked) . ' связ. заяв.';
+                            }
                             $attachCount = $req->emailMessage?->attachments_count ?? 0;
 
                             // Phase 1.11 + minimize 2026-05-21:
@@ -504,7 +536,8 @@
                                 <div class="font-medium text-[var(--fg-1)] truncate flex items-center gap-1.5">
                                     <span class="truncate">{{ $titleT1 }}</span>
                                     @if($isSticky)
-                                        <span class="inline-flex items-center gap-0.5 font-semibold text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-[3px] bg-[var(--violet-50)] text-[var(--violet-700)] flex-shrink-0">sticky</span>
+                                        <span class="inline-flex items-center gap-0.5 font-semibold text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-[3px] bg-[var(--violet-50)] text-[var(--violet-700)] flex-shrink-0"
+                                              title="{{ $stickyTitle }}">{{ $stickyIcon }} sticky</span>
                                     @endif
                                     @if($attachCount > 0)
                                         <span class="inline-flex items-center gap-0.5 font-semibold text-[10px] px-1.5 py-0.5 rounded-[3px] bg-[var(--neutral-100)] text-[var(--fg-2)] flex-shrink-0">📎 {{ $attachCount }}</span>

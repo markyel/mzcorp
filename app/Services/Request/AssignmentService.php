@@ -14,17 +14,28 @@ use Illuminate\Support\Facades\DB;
  * Phase 1 sticky + round-robin.
  *
  * Порядок выбора менеджера:
- *  1) Sticky by item — если хоть одна позиция новой заявки совпадает по
- *     `parsed_article` (TRIM) ИЛИ нормализованному `parsed_name`
- *     (LOWER+TRIM) с позицией другой ОТКРЫТОЙ заявки (status in (new,
- *     assigned)) с уже назначенным менеджером — отдаём её тому менеджеру,
- *     у которого больше всего матчей. Tiebreak — самая свежая Request.
+ *  1) Sticky — трёхуровневый поиск менеджера, который уже работал с тем же
+ *     товаром / клиентом. Уровни проверяются по убыванию надёжности сигнала,
+ *     первый сработавший побеждает (early-return):
+ *
+ *     1a) **catalog_item_id** — у любой позиции новой заявки уже
+ *         резолвлен `request_items.catalog_item_id` (через C-step или
+ *         OutboundQuoteCatalogEnricher), и тот же catalog_item_id есть в
+ *         открытой заявке у менеджера. Самый сильный сигнал — «тот же
+ *         товар каталога». reason kind=`catalog`.
+ *
+ *     1b) **client_email** — у менеджера есть открытая заявка от того же
+ *         `client_email` что и новая. Базовая CRM-логика «один клиент —
+ *         один менеджер», даже если товары разные. reason kind=`client`.
+ *
+ *     1c) **parsed_article / parsed_name** — fallback на сырые поля без
+ *         каталога (Phase 1 текстовый матч), TRIM по article и
+ *         LOWER+TRIM по name. reason kind=`text`.
+ *
  *     Sticky всегда побеждает балансировку (per оператор).
+ *
  *  2) Round-robin — наименее загруженный менеджер (count of new+assigned).
  *     При равенстве — у кого assigned_at давнее.
- *
- * Полный sticky-алгоритм по catalog_item_id (когда появится каталог) —
- * Phase 2 (Foundation §3). Сейчас матчим по сырым parsed_*-полям.
  */
 class AssignmentService
 {
@@ -56,11 +67,13 @@ class AssignmentService
             $manager = $sticky['user'];
             // Snapshot тех Request, по которым произошёл match — выводим в
             // карточке заявки (Phase 2 sticky visibility). Формат:
-            //   auto_sticky:{"linked":[id1,id2,...]}
-            // Старые записи (165 backfill) останутся как plain `auto_sticky`
-            // — UI это обрабатывает, показывая чип без deep-links.
+            //   auto_sticky:{"kind":"catalog|client|text","linked":[id1,...]}
+            // `kind` показывает по какому сигналу сработал sticky — в UI
+            // рендерим разной иконкой / tooltip'ом. Старые записи (165
+            // backfill) останутся как plain `auto_sticky` без kind — UI
+            // делает graceful fallback.
             $reason = 'auto_sticky:' . json_encode(
-                ['linked' => $sticky['linked']],
+                ['kind' => $sticky['kind'], 'linked' => $sticky['linked']],
                 JSON_UNESCAPED_UNICODE,
             );
         } else {
@@ -116,15 +129,148 @@ class AssignmentService
     }
 
     /**
-     * Sticky-маршрутизация: ищем менеджера, у которого в открытых заявках
-     * уже есть позиции с тем же артикулом или именем что и в новой заявке.
+     * Sticky-маршрутизация трёх уровней (см. doc-блок класса).
      *
      * @param  Collection<int, User>  $managers  Активные менеджеры.
-     * @return array{user: User, linked: array<int>}|null
-     *         user — кому отдать заявку, linked — конкретные Request.id, по
-     *         которым сработал match (для UI/audit).
+     * @return array{user: User, linked: array<int>, kind: 'catalog'|'client'|'text'}|null
      */
     private function pickStickyManager(Request $request, Collection $managers): ?array
+    {
+        $managerIds = $managers->pluck('id')->all();
+        // Открытые статусы для пула sticky-кандидатов.
+        $openStatuses = array_map(
+            fn (RequestStatus $s) => $s->value,
+            array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+        );
+
+        // Level 1: catalog_item_id — самый сильный сигнал.
+        $byCatalog = $this->pickStickyByCatalog($request, $managers, $managerIds, $openStatuses);
+        if ($byCatalog) {
+            return $byCatalog;
+        }
+
+        // Level 2: client_email — «один клиент = один менеджер».
+        $byClient = $this->pickStickyByClientEmail($request, $managers, $managerIds, $openStatuses);
+        if ($byClient) {
+            return $byClient;
+        }
+
+        // Level 3: parsed_article / parsed_name (текстовый матч).
+        return $this->pickStickyByText($request, $managers, $managerIds, $openStatuses);
+    }
+
+    /**
+     * Level 1: совпадение по `request_items.catalog_item_id`.
+     *
+     * @param  array<int, int>  $managerIds
+     * @param  array<int, string>  $openStatuses
+     * @return array{user: User, linked: array<int>, kind: 'catalog'}|null
+     */
+    private function pickStickyByCatalog(Request $request, Collection $managers, array $managerIds, array $openStatuses): ?array
+    {
+        $catalogIds = $request->items()
+            ->whereNotNull('catalog_item_id')
+            ->pluck('catalog_item_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+        if (empty($catalogIds)) {
+            return null;
+        }
+
+        $row = DB::table('request_items')
+            ->join('requests', 'request_items.request_id', '=', 'requests.id')
+            ->whereIn('requests.assigned_user_id', $managerIds)
+            ->where('requests.id', '!=', $request->id)
+            ->whereIn('requests.status', $openStatuses)
+            ->whereIn('request_items.catalog_item_id', $catalogIds)
+            ->groupBy('requests.assigned_user_id')
+            ->selectRaw('requests.assigned_user_id, COUNT(*) AS hits, MAX(requests.created_at) AS latest_created')
+            ->orderByDesc('hits')
+            ->orderByDesc('latest_created')
+            ->first();
+
+        if (! $row) {
+            return null;
+        }
+
+        $manager = $managers->firstWhere('id', (int) $row->assigned_user_id);
+        if (! $manager) {
+            return null;
+        }
+
+        $linkedIds = DB::table('request_items')
+            ->join('requests', 'request_items.request_id', '=', 'requests.id')
+            ->where('requests.assigned_user_id', $manager->id)
+            ->where('requests.id', '!=', $request->id)
+            ->whereIn('requests.status', $openStatuses)
+            ->whereIn('request_items.catalog_item_id', $catalogIds)
+            ->distinct()
+            ->pluck('requests.id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        return ['user' => $manager, 'linked' => $linkedIds, 'kind' => 'catalog'];
+    }
+
+    /**
+     * Level 2: совпадение по `client_email`. Открытая заявка от того же
+     * клиента — даже с другим товаром — должна остаться у того же менеджера.
+     *
+     * @param  array<int, int>  $managerIds
+     * @param  array<int, string>  $openStatuses
+     * @return array{user: User, linked: array<int>, kind: 'client'}|null
+     */
+    private function pickStickyByClientEmail(Request $request, Collection $managers, array $managerIds, array $openStatuses): ?array
+    {
+        $clientEmail = mb_strtolower(trim((string) $request->client_email));
+        if ($clientEmail === '') {
+            return null;
+        }
+
+        $row = DB::table('requests')
+            ->whereIn('assigned_user_id', $managerIds)
+            ->where('id', '!=', $request->id)
+            ->whereIn('status', $openStatuses)
+            ->whereRaw('LOWER(client_email) = ?', [$clientEmail])
+            ->groupBy('assigned_user_id')
+            ->selectRaw('assigned_user_id, COUNT(*) AS hits, MAX(created_at) AS latest_created')
+            ->orderByDesc('hits')
+            ->orderByDesc('latest_created')
+            ->first();
+
+        if (! $row) {
+            return null;
+        }
+
+        $manager = $managers->firstWhere('id', (int) $row->assigned_user_id);
+        if (! $manager) {
+            return null;
+        }
+
+        $linkedIds = DB::table('requests')
+            ->where('assigned_user_id', $manager->id)
+            ->where('id', '!=', $request->id)
+            ->whereIn('status', $openStatuses)
+            ->whereRaw('LOWER(client_email) = ?', [$clientEmail])
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        return ['user' => $manager, 'linked' => $linkedIds, 'kind' => 'client'];
+    }
+
+    /**
+     * Level 3: fallback по `parsed_article` (TRIM) / `parsed_name`
+     * (LOWER+TRIM). Используется когда catalog_item_id ещё не резолвлен
+     * и клиент пишет с нового email-адреса.
+     *
+     * @param  array<int, int>  $managerIds
+     * @param  array<int, string>  $openStatuses
+     * @return array{user: User, linked: array<int>, kind: 'text'}|null
+     */
+    private function pickStickyByText(Request $request, Collection $managers, array $managerIds, array $openStatuses): ?array
     {
         $items = $request->items()->get(['parsed_article', 'parsed_name']);
         if ($items->isEmpty()) {
@@ -149,12 +295,6 @@ class AssignmentService
             return null;
         }
 
-        // Phase 1.10: открытые статусы — всё не-terminal и не-paused.
-        $openStatuses = array_map(
-            fn (RequestStatus $s) => $s->value,
-            array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
-        );
-
         $matchClosure = function ($q) use ($articles, $names) {
             if (! empty($articles)) {
                 $q->orWhereIn(DB::raw('TRIM(request_items.parsed_article)'), $articles);
@@ -166,7 +306,7 @@ class AssignmentService
 
         $row = DB::table('request_items')
             ->join('requests', 'request_items.request_id', '=', 'requests.id')
-            ->whereIn('requests.assigned_user_id', $managers->pluck('id')->all())
+            ->whereIn('requests.assigned_user_id', $managerIds)
             ->where('requests.id', '!=', $request->id)
             ->whereIn('requests.status', $openStatuses)
             ->where($matchClosure)
@@ -185,9 +325,6 @@ class AssignmentService
             return null;
         }
 
-        // Snapshot конкретных Request.id, по которым произошёл match. Один
-        // запрос — забираем уникальные id заявок этого менеджера, у которых
-        // хотя бы одна позиция совпала с нашей по article/name.
         $linkedIds = DB::table('request_items')
             ->join('requests', 'request_items.request_id', '=', 'requests.id')
             ->where('requests.assigned_user_id', $manager->id)
@@ -199,10 +336,7 @@ class AssignmentService
             ->map(fn ($id) => (int) $id)
             ->all();
 
-        return [
-            'user' => $manager,
-            'linked' => $linkedIds,
-        ];
+        return ['user' => $manager, 'linked' => $linkedIds, 'kind' => 'text'];
     }
 
     /**
