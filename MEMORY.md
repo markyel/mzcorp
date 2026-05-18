@@ -1072,6 +1072,110 @@ sudo systemctl restart php8.3-fpm
 sudo -u www-data php artisan schedule:list | grep resume-paused
 ```
 
+### Сессия 2026-05-18 (часть 3) — multi-invoice parsing + hybrid search refinements
+
+Дебаг M-2026-1032 (клиент Мария Зайцева, METEOR Лифт Москва): письмо
+с подзаголовками «1 счет :» и «2 счет:», 9 строк по двум счетам, в UI
+показывалось 7-8 вместо 9. Долгая итерация.
+
+**Коммиты:** `ac09380` … `1c1d604` (≈14 коммитов).
+
+**1. Hybrid search — фильтр шумовых code-токенов** (`ac09380`).
+`extractCodeTokens` в `CatalogEmbeddingService` сейчас требует ≥5 raw
+chars, ≥5 norm chars, ≥2 цифр. Раньше ≥3 симв. ловил «5ММ», «3МС» из
+запросов типа «канат 6-6,5мм, 1,3м/с» → 95% 🎯 code-match по
+случайным позициям. После — реальные артикулы (M04557, ПКЛ32,
+ЕИЛА68725500804, 12067R1) проходят, шум режется.
+
+**2. Multi-source бонус в ранжировании** (`4c243cd`). Tiebreaker за
+дополнительные источники поднят с +0.001 до +0.05 (`multi/2 = +0.05,
+multi/3 = +0.10`). Multi-source подтверждение теперь реально бьёт
+single-source code 0.95.
+
+**3. Парсер позиций — multi-invoice case** (`bebc230`, `38e5708`,
+`5aaaf87`, `1199a83`, `1c1d604`). Корневой баг: парсер дедуплицировал
+дубли артикулов между разными счетами, теряя позиции второго счёта.
+Цепочка фиксов:
+- В `ParseItemsPrompt` добавлен top-level раздел «КРИТИЧЕСКОЕ ПРАВИЛО:
+  НЕСКОЛЬКО СЧЕТОВ В ОДНОМ ПИСЬМЕ» + Пример 4c. CoT через обязательное
+  поле `invoice_analysis: {client_requested_invoices, blocks_found}`
+  в JSON-выходе → LLM сначала считает счета, потом извлекает items.
+- В items добавлено обязательное поле `invoice_index` (1-based, к
+  какому счёту относится позиция).
+- В Vision-промпт (`parseItemsFromPhotoMarkings`, inline в
+  `RequestItemParsingService`) добавлены ТЕ ЖЕ правила про
+  multi-invoice + invoice_index. Это закрыло main bug — у MZaytseva в
+  письме был CID-attached screenshot таблицы (`image003.png`, 14KB),
+  Vision видел всю таблицу, выдавал 9 items с invoice_index=1 у всех.
+- Vision-промпт также теперь знает про OEM + M-SKU дубль-артикул
+  (правило раньше было только в text-промпте, Пример 4b): «если рядом
+  с OEM виден `M\d{4,6}` — оба в article через запятую».
+- `dedupeWithinList` ключ перешёл с `article` на
+  `article + qty + invoice_index`. Multi-invoice позиции с разным
+  invoice_index сохраняются, реальные дубли (photo+text) режутся.
+- `normalizeParsedItem` читает `invoice_index` из LLM-ответа,
+  default=1. Поле transient (не сохраняется в БД), используется
+  только в pipeline дедупа.
+
+**4. Новые команды**:
+- `requests:reparse-items {internal_code+} --apply` — точечный re-parse
+  заявки по internal_code. Внутри: items()->delete() + persist в
+  транзакции. Без `--apply` — dry-run.
+- `mail:debug-parser-input {email_id}` — показывает что cleaned body
+  выглядит до LLM: body_plain vs htmlToText → cleanInboundReferenceText
+  → эвристики (счёт-вхождения, M-SKU). Не дёргает LLM (бесплатно).
+
+**5. Диагностические Log::warning** (`5770e35`, `3a41b30`, `6b59b00`):
+- `parseItemsFromInbound: LLM response` — raw items_brief (article/qty/
+  invoice_index) после text-парсера.
+- `parseItemsFromInboundContent: pipeline summary` — какой путь набрал
+  какие items (images_count / structured_count / tried_text /
+  items_before_dedup / items_articles).
+- Поставлены на warning (а не info), потому что на проде LOG_LEVEL=info,
+  но Log::info в текущей пилотной фазе теряется. Переключить на info
+  когда устаканится.
+
+**6. Регрессия sticky 3-level** (`b6cd653`). Миграция
+`request_assignments.reason` varchar(64) → varchar(512). Sticky-фикс
+коммита `de32270` стал писать в reason JSON `auto_sticky:{"kind":...,
+"linked":[989,900,...]}` — для клиента с историей превышало 64 симв.,
+INSERT падал, валил ParseRequestItemsJob, ResolveKbJob не дёргался.
+~52 заявок за 3 дня стояли с qa_status=not_assessed без catalog match.
+
+**7. Каталог = master data** (`5a58b0b`). По указанию заказчика
+переписана семантика import'а: позиции из каталога НИКОГДА не
+soft-deletаются, даже если их нет в новой выгрузке MDB. Если позиция
+не пришла — `stock_available=0` + `is_price_actual=false`. 768 ранее
+soft-deletаных каталог-позиций восстановлены через миграцию
+`2026_05_18_180000_reframe_soft_delete_to_unavailability`.
+
+**Восстановленные кейсы**:
+- M-2026-1064 (M04557): добавлен name-as-article fallback в
+  `CatalogResolutionService::matchByArticle` (`a00acb4`).
+- M-2026-1063 (M00468): был не сматчен из-за sticky-варчар-регрессии.
+  После миграции и re-parse — норм.
+- M-2026-1032: long journey, итог — 9 позиций по двум счетам, все с
+  правильными OEM + M-SKU артикулами.
+
+**Грабли сессии**:
+- **`dedupeWithinList` как «невидимый» фильтр**: я долго бил по
+  промпту, не подозревая что post-process на стороне PHP схлопывает
+  правильные 9 items в 7. Урок: при парсер-багах первым делом
+  логировать raw LLM response до пост-обработки.
+- **`Log::info` на проде теряется**: даже при `LOG_LEVEL=info`. Для
+  диагностики стартового запуска лучше `Log::warning`, потом понизить.
+- **Промпт Vision и text — РАЗНЫЕ**: `ParseItemsPrompt` (text-only) и
+  inline-промпт в `parseItemsFromPhotoMarkings` — два разных файла.
+  Любое правило про items надо дублировать в обоих, иначе разные ветки
+  парсера дают разные результаты.
+- **CID-attached screenshot Outlook'а**: image003.png 14KB — не всегда
+  лого. Outlook генерирует CID-image копии таблиц для рендеринга,
+  Vision их видит как полноценный screenshot. `image_attachments`
+  filter ловит ВСЁ, включая такие.
+- **LLM нестабилен при temperature=0**: на одном и том же промпте мог
+  выдать то 7, то 8 позиций. Промпт-only фиксы по такому случаю
+  непредсказуемы.
+
 ### Сессия 2026-05-18 — Catalog UI, hybrid search, lightbox gallery, compare
 
 Шесть UX/perf-улучшений диалога «Привязать позицию к каталогу» и связанных UI. Все на проде.
