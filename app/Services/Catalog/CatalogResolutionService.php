@@ -116,65 +116,18 @@ class CatalogResolutionService
                         ->orWhere('brand_article_normalized', $norm);
                 })
                 ->first();
-            if ($catalog !== null) {
-                $this->applyCatalogToItem($item, $catalog, promoteStatus: false, matchMethod: 'B_brand_article');
-
-                Log::info('CatalogResolutionService: item matched (B:brand-article)', [
-                    'request_item_id' => $item->id,
-                    'matched_token' => $tok,
-                    'normalized' => $norm,
-                    'catalog_item_id' => $catalog->id,
-                    'catalog_sku' => $catalog->sku,
-                ]);
-
-                return true;
-            }
-
-            // Fallback B2: digit-only signature.
-            //
-            // Кейс M-2026-0921: артикул вида `ЕИЛA.687255.008-04` (микс
-            // кириллицы и латиницы). Vision на фото галлюцинирует буквы —
-            // вместо «ИЛA» читает «MMA» и сохраняет `EMMA.687255.008-04`.
-            // Cyrillic-fold не помогает: кириллические «И»/«Л» не имеют
-            // латинских lookalike в маппинге (только А/В/Е/К/М/Н/О/Р/С/Т/Х).
-            //
-            // Но **цифровая часть** артикула (`687255008004`) — это
-            // уникальный код товара, который Vision читает корректно
-            // (цифры однозначны). Используем её как fallback.
-            //
-            // Условия применения:
-            //  - в normalized токене ≥6 цифр (защита от ложных совпадений
-            //    на коротких числовых обрывках типа «GAA638»);
-            //  - в каталоге РОВНО ОДНА позиция с такой же digit-signature
-            //    (если найдено несколько — отказываемся, риск перепутать
-            //    разные серии товара одного производителя).
-            $digitSig = preg_replace('/\D/', '', $norm) ?? '';
-            if (strlen($digitSig) < 6) {
-                continue;
-            }
-            $byDigits = CatalogItem::query()
-                ->where('is_active', true)
-                ->whereRaw("regexp_replace(brand_article_normalized, '\\D', '', 'g') = ?", [$digitSig])
-                ->limit(2)
-                ->get();
-            if ($byDigits->count() !== 1) {
-                // 0 — каталог реально не содержит этого товара;
-                // 2+ — неоднозначность, оставляем оператору (vector-stage может уточнить).
+            if ($catalog === null) {
                 continue;
             }
 
-            $catalog = $byDigits->first();
-            $this->applyCatalogToItem($item, $catalog, promoteStatus: false, matchMethod: 'B_digit_signature');
+            $this->applyCatalogToItem($item, $catalog, promoteStatus: false, matchMethod: 'B_brand_article');
 
-            Log::info('CatalogResolutionService: item matched (B:digit-signature fallback)', [
+            Log::info('CatalogResolutionService: item matched (B:brand-article)', [
                 'request_item_id' => $item->id,
                 'matched_token' => $tok,
                 'normalized' => $norm,
-                'digit_signature' => $digitSig,
                 'catalog_item_id' => $catalog->id,
                 'catalog_sku' => $catalog->sku,
-                'catalog_brand_article' => $catalog->brand_article,
-                'note' => 'буквенная часть артикула расходится — Vision вероятно ошибся, но цифровая сигнатура уникальна',
             ]);
 
             return true;
