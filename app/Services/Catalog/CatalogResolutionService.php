@@ -108,12 +108,53 @@ class CatalogResolutionService
             }
 
             // Сначала пробуем как sku (на случай если клиент написал точный
-            // M-SKU, например «M02016»), потом как brand_article_normalized.
+            // M-SKU, например «M02016»), потом как brand_article_normalized
+            // (primary OEM-артикул). Если и это не нашло — лезем в массив
+            // `articles[]`: у multi-OEM позиций там лежат ВСЕ артикулы
+            // совместимых исполнений, а `brand_article` хранит только первый.
+            //
+            // Кейс M-2026-0921 (M16660 «Плата ПКЛ32-04»):
+            //   brand_article = "ЕИЛА.758727.772-04"   ← primary
+            //   articles      = ["ЕИЛА.758727.772-04", "ЕИЛА.687255.008-04"]
+            // Клиент написал второй артикул — без поиска по articles[] match
+            // не находил, хотя товар в каталоге явно есть.
+            //
+            // Normalize применяем на каждом элементе jsonb-массива на стороне
+            // Postgres: pattern такой же как в normalizeArticle (cyrillic-fold
+            // делать в SQL не нужно — на стороне Postgres сравниваем raw vs
+            // raw, fold уже отработал в clientskй $norm и при импорте).
+            // Digit-only signature — устойчивый сигнал для multi-OEM поиска
+            // когда буквы не совпадают (cyrillic vs Latin или Vision OCR ошибки).
+            // Применяем только когда цифр ≥8 (защита от ложных совпадений
+            // на коротких числовых обрывках типа «GAA638»).
+            $digitSig = preg_replace('/\D/', '', $norm) ?? '';
+            $useDigitSig = strlen($digitSig) >= 8;
+
             $catalog = CatalogItem::query()
                 ->where('is_active', true)
-                ->where(function ($q) use ($norm) {
+                ->where(function ($q) use ($norm, $digitSig, $useDigitSig) {
                     $q->where('sku', $norm)
-                        ->orWhere('brand_article_normalized', $norm);
+                        ->orWhere('brand_article_normalized', $norm)
+                        // EXISTS по массиву articles[] — точное совпадение
+                        // полной normalized-формы любого из артикулов товара.
+                        ->orWhereRaw(
+                            "EXISTS (SELECT 1 FROM jsonb_array_elements_text(articles) AS a
+                                     WHERE upper(regexp_replace(a, '[\\s\\-_./]', '', 'g')) = ?)",
+                            [$norm]
+                        );
+                    if ($useDigitSig) {
+                        // EXISTS по digit-only сигнатуре. Это «спасает» case'ы
+                        // когда буквенная часть отличается: Vision OCR
+                        // «EMMA.687255.008-04» vs catalog «ЕИЛА.687255.008-04»
+                        // (галлюцинация букв), или Latin-vs-Cyrillic letters
+                        // где cyrillic-fold не покрывает (И, Л, Я и т.п.).
+                        // Цифровая часть однозначна.
+                        $q->orWhereRaw(
+                            "EXISTS (SELECT 1 FROM jsonb_array_elements_text(articles) AS a
+                                     WHERE regexp_replace(a, '\\D', '', 'g') = ?)",
+                            [$digitSig]
+                        );
+                    }
                 })
                 ->first();
             if ($catalog === null) {
@@ -128,6 +169,7 @@ class CatalogResolutionService
                 'normalized' => $norm,
                 'catalog_item_id' => $catalog->id,
                 'catalog_sku' => $catalog->sku,
+                'catalog_primary_article' => $catalog->brand_article,
             ]);
 
             return true;
