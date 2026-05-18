@@ -33,6 +33,10 @@ class OutboundQuoteItemMatcher
 {
     private const FUZZY_ARTICLE_THRESHOLD = 0.85;
     private const FUZZY_NAME_THRESHOLD = 0.70;
+    // Step 2.5: catalog.name → request.parsed_name. Порог ниже, чем для blind
+    // fuzzy_name, потому что M-SKU уже найден в каталоге — сильный сигнал
+    // правильности target'а; имя только подтверждает «та же позиция».
+    private const CATALOG_NAME_THRESHOLD = 0.50;
     private const LLM_CONFIDENCE_SCORES = [
         'high' => 0.85,
         'medium' => 0.65,
@@ -69,8 +73,15 @@ class OutboundQuoteItemMatcher
 
         $stats = ['total' => $items->count()] + $this->emptyStats();
 
-        // Step 1+2: M-SKU exact + catalog→request link.
+        // Step 1+2: M-SKU exact + catalog→request link (через request_item.catalog_item_id
+        // ИЛИ через M-SKU извлечённый из request_item.parsed_article/name — клиент сам
+        // написал SKU в заявке).
         $this->matchBySkuAndCatalog($items, $request);
+
+        // Step 2.5: для quote_item с matched_catalog_item_id, но без matched_request_item_id —
+        // попытка связать через name similarity между catalog_items.name и
+        // request_items.parsed_name. Сильный сигнал каталога позволяет понизить порог.
+        $this->matchByCatalogName($items, $request);
 
         // Step 3: Fuzzy для тех, у кого ещё нет matched_request_item_id.
         $this->matchByFuzzy($items, $request);
@@ -113,12 +124,22 @@ class OutboundQuoteItemMatcher
     }
 
     /**
-     * Step 1 + Step 2.
+     * Step 1 + Step 1.5 + Step 2.
+     *
+     * Step 1   — извлечь M-SKU из quote_item.raw_article/raw_name → найти catalog_item.
+     * Step 1.5 — извлечь M-SKU из request_item.parsed_article/parsed_name → построить
+     *            карту sku_in_request → request_item (для случая когда клиент сам
+     *            написал M-SKU в заявке, а CatalogResolutionService ещё не успел
+     *            проставить catalog_item_id на RequestItem).
+     * Step 2   — связать quote_item ↔ request_item по двум путям приоритета:
+     *            (a) request_item.catalog_item_id == quote_item.matched_catalog_item_id;
+     *            (b) M-SKU(request_item) == M-SKU(quote_item).
      *
      * @param  Collection<int, OutboundQuoteItem>  $items
      */
     private function matchBySkuAndCatalog(Collection $items, Request $request): void
     {
+        // Step 1 — карта M-SKU → quote_item'ы.
         $skuToItem = [];
         foreach ($items as $item) {
             $sku = $this->extractMSku($item->raw_article)
@@ -131,11 +152,24 @@ class OutboundQuoteItemMatcher
             return;
         }
 
-        // Bulk lookup catalog_items.sku (нормализованных).
+        // Bulk lookup catalog_items.sku.
         $skus = array_keys($skuToItem);
         $catalog = CatalogItem::whereIn('sku', $skus)->where('is_active', true)->get()->keyBy('sku');
 
-        // Карта catalog_item_id → RequestItem (only active) для Step 2.
+        // Step 1.5 — карта M-SKU → request_item. Извлекаем M-SKU из parsed_article и
+        // parsed_name каждого active RequestItem. Если несколько RequestItem'ов
+        // имеют один и тот же M-SKU (редкий кейс, например клиент дублировал) —
+        // оставляем первый (lowest id, request_items упорядочены by id).
+        $requestSkuMap = [];
+        foreach ($request->items->where('is_active', true) as $ri) {
+            $riSku = $this->extractMSku($ri->parsed_article)
+                ?? $this->extractMSku($ri->parsed_name);
+            if ($riSku !== null && ! isset($requestSkuMap[$riSku])) {
+                $requestSkuMap[$riSku] = $ri;
+            }
+        }
+
+        // Step 2 — карта catalog_item_id → RequestItem (для основного пути).
         $requestItemsByCatalogId = $request->items
             ->where('is_active', true)
             ->whereNotNull('catalog_item_id')
@@ -153,6 +187,7 @@ class OutboundQuoteItemMatcher
                 $qi->match_source = OutboundQuoteItem::MATCH_SOURCE_SKU_EXACT;
                 $qi->match_reason = 'M-SKU exact: '.$sku;
 
+                // Step 2(a) — RequestItem.catalog_item_id уже резолвлен в тот же товар.
                 $reqItem = $requestItemsByCatalogId->get($catalogItem->id);
                 if ($reqItem !== null) {
                     $qi->matched_request_item_id = $reqItem->id;
@@ -161,8 +196,95 @@ class OutboundQuoteItemMatcher
                         'M-SKU %s → catalog#%d → request_item#%d',
                         $sku, $catalogItem->id, $reqItem->id
                     );
+                } elseif (isset($requestSkuMap[$sku])) {
+                    // Step 2(b) — клиент написал тот же M-SKU в заявке, RequestItem.catalog_item_id
+                    // не проставлен (Use-case A не отработал, либо нашего товара ещё не было).
+                    $reqItem = $requestSkuMap[$sku];
+                    $qi->matched_request_item_id = $reqItem->id;
+                    $qi->match_source = OutboundQuoteItem::MATCH_SOURCE_SKU_TO_REQUEST;
+                    $qi->match_reason = sprintf(
+                        'M-SKU %s найден в request_item#%d (parsed_article/name)',
+                        $sku, $reqItem->id
+                    );
                 }
 
+                $qi->save();
+            }
+        }
+    }
+
+    /**
+     * Step 2.5. Для quote_item с найденным matched_catalog_item_id но без
+     * matched_request_item_id — попытка связать через name similarity между
+     * catalog_items.name и request_items.parsed_name (плюс quote_item.raw_name
+     * как secondary signal). Порог понижен до 0.50 потому что M-SKU уже
+     * найден в каталоге — это сильный сигнал, что цель найдена правильно,
+     * имя только подтверждает «та же позиция в заявке».
+     *
+     * @param  Collection<int, OutboundQuoteItem>  $items
+     */
+    private function matchByCatalogName(Collection $items, Request $request): void
+    {
+        // Берём только quote_item'ы с catalog'ом но без request match.
+        $candidates = $items->filter(
+            fn (OutboundQuoteItem $it) => $it->matched_catalog_item_id !== null
+                && $it->matched_request_item_id === null
+        );
+        if ($candidates->isEmpty()) {
+            return;
+        }
+
+        // Bulk-load catalog_items для всех candidate'ов (имя нужно).
+        $catalogIds = $candidates->pluck('matched_catalog_item_id')->unique()->all();
+        $catalogById = CatalogItem::whereIn('id', $catalogIds)->get()->keyBy('id');
+
+        $activeReqItems = $request->items->where('is_active', true)->values();
+        if ($activeReqItems->isEmpty()) {
+            return;
+        }
+
+        foreach ($candidates as $qi) {
+            $catalogItem = $catalogById->get($qi->matched_catalog_item_id);
+            $catalogName = $catalogItem?->name;
+            $rawName = (string) $qi->raw_name;
+
+            $bestRiId = null;
+            $bestScore = 0.0;
+            $bestNameSource = null; // 'catalog' | 'raw'
+
+            foreach ($activeReqItems as $ri) {
+                $reqName = (string) $ri->parsed_name;
+                if ($reqName === '') {
+                    continue;
+                }
+                // Сильнее: catalog.name vs request — это «каноничное имя нашего товара».
+                if ($catalogName !== null && $catalogName !== '') {
+                    $score = $this->nameSimilarity($catalogName, $reqName);
+                    if ($score > $bestScore) {
+                        $bestRiId = $ri->id;
+                        $bestScore = $score;
+                        $bestNameSource = 'catalog';
+                    }
+                }
+                // Также: raw_name КП vs request — даёт сигнал на нестандартные описания.
+                $rawScore = $this->nameSimilarity($rawName, $reqName);
+                if ($rawScore > $bestScore) {
+                    $bestRiId = $ri->id;
+                    $bestScore = $rawScore;
+                    $bestNameSource = 'raw';
+                }
+            }
+
+            if ($bestRiId !== null && $bestScore >= self::CATALOG_NAME_THRESHOLD) {
+                $qi->matched_request_item_id = $bestRiId;
+                $qi->match_score = round($bestScore, 4);
+                $qi->match_source = OutboundQuoteItem::MATCH_SOURCE_CATALOG_NAME_TO_REQUEST;
+                $qi->match_reason = sprintf(
+                    '%s.name ≈ request_item#%d.parsed_name (%.2f)',
+                    $bestNameSource === 'catalog' ? 'catalog' : 'raw',
+                    $bestRiId,
+                    $bestScore
+                );
                 $qi->save();
             }
         }

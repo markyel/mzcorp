@@ -15,10 +15,19 @@ class OutboundQuoteItem extends Model
 {
     public const MATCH_SOURCE_SKU_EXACT = 'sku_exact';
     public const MATCH_SOURCE_CATALOG_TO_REQUEST = 'catalog_to_request';
+    // M-SKU из quote_item совпал с M-SKU извлечённым из RequestItem.parsed_article/name
+    // (клиент сам написал M-SKU в заявке, RequestItem.catalog_item_id ещё null).
+    public const MATCH_SOURCE_SKU_TO_REQUEST = 'sku_to_request';
+    // catalog_items.name похож на RequestItem.parsed_name (catalog был найден через
+    // M-SKU, но request не имеет catalog_item_id). Сильный сигнал каталога позволяет
+    // понизить порог fuzzy до 0.50.
+    public const MATCH_SOURCE_CATALOG_NAME_TO_REQUEST = 'catalog_name_to_request';
     public const MATCH_SOURCE_FUZZY_ARTICLE = 'fuzzy_article';
     public const MATCH_SOURCE_FUZZY_NAME = 'fuzzy_name';
     public const MATCH_SOURCE_LLM = 'llm';
     public const MATCH_SOURCE_UNMATCHED = 'unmatched';
+    // Ручная привязка оператором через UI (Phase следующая — таб «КП»).
+    public const MATCH_SOURCE_MANUAL = 'manual';
 
     protected $fillable = [
         'outbound_quote_id',
