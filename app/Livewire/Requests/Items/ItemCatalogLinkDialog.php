@@ -3,9 +3,11 @@
 namespace App\Livewire\Requests\Items;
 
 use App\Models\CatalogItem;
+use App\Models\EmailAttachment;
 use App\Models\RequestItem;
 use App\Services\Catalog\CatalogSearchService;
 use App\Services\Catalog\RequestItemEditor;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -144,7 +146,7 @@ class ItemCatalogLinkDialog extends Component
         }
         return RequestItem::query()
             ->with([
-                'request:id,internal_code,client_name,client_email',
+                'request:id,internal_code,client_name,client_email,email_message_id',
                 'brand:id,name',
                 'kbCategory:id,name,slug',
                 'imageAttachment:id,email_message_id,filename,mime_type,disk,file_path,size_bytes',
@@ -153,6 +155,35 @@ class ItemCatalogLinkDialog extends Component
             ->where('request_id', $this->requestId)
             ->whereKey($this->requestItemId)
             ->first();
+    }
+
+    /**
+     * Все image-вложения письма, к которому привязана заявка. Используется
+     * как галерея в шапке modal'а: менеджер может посмотреть все фото из
+     * письма, а не только то, которое Vision привязал к этой позиции.
+     *
+     * Возвращает пустую коллекцию если у заявки нет письма (manual request)
+     * или у письма нет картинок.
+     *
+     * @return EloquentCollection<int, EmailAttachment>
+     */
+    #[Computed]
+    public function emailImages(): EloquentCollection
+    {
+        if (! $this->requestItemId) {
+            return new EloquentCollection();
+        }
+        $subject = $this->subjectItem;
+        $emailMessageId = $subject?->request?->email_message_id;
+        if (! $emailMessageId) {
+            return new EloquentCollection();
+        }
+        return EmailAttachment::query()
+            ->select(['id', 'email_message_id', 'filename', 'mime_type', 'disk', 'file_path', 'size_bytes'])
+            ->where('email_message_id', $emailMessageId)
+            ->where('mime_type', 'like', 'image/%')
+            ->orderBy('id')
+            ->get();
     }
 
     /**

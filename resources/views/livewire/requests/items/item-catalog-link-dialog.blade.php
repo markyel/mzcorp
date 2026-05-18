@@ -31,8 +31,37 @@
                         $subjImgIsImage = $subjImg && str_starts_with((string) $subjImg->mime_type, 'image/');
                     @endphp
                     <div class="border border-border rounded-md bg-surface-2 px-3 py-2.5 mb-3 flex gap-3 items-start">
-                        {{-- Vision thumbnail если есть. --}}
-                        @if($subjImgIsImage)
+                        {{-- Галерея всех image-вложений письма. Linked
+                             (тот, что Vision привязал к этой позиции) — c
+                             sky-ring, чтобы оператор сразу видел, какое
+                             фото уже привязано, и мог сравнить с остальными.
+                             Click открывает полноразмерный лайтбокс через
+                             dispatch('open-image') — тот же глобальный
+                             listener, что в Detail. --}}
+                        @php $imgs = $this->emailImages; @endphp
+                        @if($imgs->isNotEmpty())
+                            <div class="shrink-0 flex flex-col gap-1" style="max-width: 108px;">
+                                <div class="grid grid-cols-2 gap-1">
+                                    @foreach($imgs->take(6) as $img)
+                                        @php $isLinked = $subject && $subject->image_attachment_id === $img->id; @endphp
+                                        <button type="button"
+                                                x-on:click="$dispatch('open-image', { src: @js(route('attachments.preview', $img)), name: @js($img->filename), dl: @js(route('attachments.download', $img)) })"
+                                                class="w-12 h-12 rounded-sm overflow-hidden bg-app block {{ $isLinked ? 'ring-2 ring-sky-500 border-0' : 'border border-border' }}"
+                                                title="{{ $img->filename }}{{ $isLinked ? ' · привязано к этой позиции' : '' }}">
+                                            <img src="{{ route('attachments.preview', $img) }}"
+                                                 alt="{{ $img->filename }}"
+                                                 loading="lazy"
+                                                 class="w-12 h-12 object-cover block">
+                                        </button>
+                                    @endforeach
+                                </div>
+                                @if($imgs->count() > 6)
+                                    <div class="text-[10px] text-fg-3 text-center">+{{ $imgs->count() - 6 }} ещё</div>
+                                @endif
+                            </div>
+                        @elseif($subjImgIsImage)
+                            {{-- Fallback: у заявки нет email_message_id (manual),
+                                 но у позиции стоит привязанное фото. --}}
                             <button type="button"
                                     x-on:click="$dispatch('open-image', { src: @js(route('attachments.preview', $subjImg)), name: @js($subjImg->filename), dl: @js(route('attachments.download', $subjImg)) })"
                                     class="w-12 h-12 border border-border rounded-sm overflow-hidden bg-app block shrink-0"
