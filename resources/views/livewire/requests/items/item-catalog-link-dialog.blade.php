@@ -270,7 +270,45 @@
                             <div class="border border-sky-300 rounded-md bg-sky-50/40 p-3 flex flex-col gap-2">
                                 <div class="text-[10.5px] uppercase tracking-wider text-sky-700 font-semibold">Позиция заявки</div>
                                 @if($subject)
-                                    @if($subjImgIsImage)
+                                    @php
+                                        // Стартовый индекс — то фото, что привязано к позиции
+                                        // (image_attachment_id). Если не в списке — 0.
+                                        $startIdx = 0;
+                                        foreach ($galleryItems as $i => $g) {
+                                            if (($imgs[$i] ?? null) && $imgs[$i]->id === ($subject->image_attachment_id ?? null)) {
+                                                $startIdx = $i;
+                                                break;
+                                            }
+                                        }
+                                    @endphp
+                                    @if(! empty($galleryItems))
+                                        <div x-data="{ idx: {{ $startIdx }}, items: @js($galleryItems) }"
+                                             class="relative w-full">
+                                            {{-- Текущее фото, кликабельно → лайтбокс с галереей. --}}
+                                            <button type="button"
+                                                    x-on:click="$dispatch('open-image', { items: items, index: idx })"
+                                                    class="block w-full aspect-square rounded-sm overflow-hidden bg-app border border-border">
+                                                <img :src="items[idx].src" :alt="items[idx].name" class="w-full h-full object-cover" loading="lazy">
+                                            </button>
+                                            {{-- ‹ › prev/next по фото письма. Скрыты если фото 1. --}}
+                                            <template x-if="items.length > 1">
+                                                <div>
+                                                    <button type="button"
+                                                            x-on:click.stop="idx = (idx - 1 + items.length) % items.length"
+                                                            title="Предыдущее фото"
+                                                            style="position: absolute; left: 4px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; border-radius: 50%; border: none; background: rgba(0,0,0,0.55); color: white; font-size: 16px; cursor: pointer;">‹</button>
+                                                    <button type="button"
+                                                            x-on:click.stop="idx = (idx + 1) % items.length"
+                                                            title="Следующее фото"
+                                                            style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; border-radius: 50%; border: none; background: rgba(0,0,0,0.55); color: white; font-size: 16px; cursor: pointer;">›</button>
+                                                    <div style="position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.55); color: white; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-family: var(--font-mono);">
+                                                        <span x-text="idx + 1"></span>/<span x-text="items.length"></span>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    @elseif($subjImgIsImage)
+                                        {{-- Fallback: один image_attachment, нет emailImages. --}}
                                         <button type="button"
                                                 x-on:click="$dispatch('open-image', { src: @js(route('attachments.preview', $subjImg)), name: @js($subjImg->filename), dl: @js(route('attachments.download', $subjImg)) })"
                                                 class="block w-full aspect-square rounded-sm overflow-hidden bg-app border border-border">
