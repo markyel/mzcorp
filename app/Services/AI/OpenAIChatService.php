@@ -86,4 +86,45 @@ class OpenAIChatService
             throw new RuntimeException('Failed to complete chat: ' . $e->getMessage());
         }
     }
+
+    /**
+     * Vision-вызов с одним изображением (Source: LazyLift @ 1ea8147d).
+     *
+     * @param  string  $imageBase64  data:image/png;base64,XXXX или URL
+     * @return array{content: string, usage: array, raw: array}
+     */
+    public function analyzeImage(string $prompt, string $imageBase64, string $model = 'gpt-4o', array $options = []): array
+    {
+        $messages = [
+            [
+                'role' => 'user',
+                'content' => [
+                    ['type' => 'text', 'text' => $prompt],
+                    ['type' => 'image_url', 'image_url' => ['url' => $imageBase64]],
+                ],
+            ],
+        ];
+
+        return $this->chat($messages, $model, $options);
+    }
+
+    /**
+     * Vision-вызов с несколькими изображениями (Source: LazyLift @ 1ea8147d).
+     *
+     * @param  array<int, string>  $imagesBase64
+     * @return array{content: string, usage: array, raw: array}
+     */
+    public function analyzeMultipleImages(string $prompt, array $imagesBase64, string $model = 'gpt-4o', array $options = []): array
+    {
+        $content = [['type' => 'text', 'text' => $prompt]];
+
+        foreach ($imagesBase64 as $imageBase64) {
+            $content[] = [
+                'type' => 'image_url',
+                'image_url' => ['url' => $imageBase64],
+            ];
+        }
+
+        return $this->chat([['role' => 'user', 'content' => $content]], $model, $options);
+    }
 }

@@ -1,0 +1,711 @@
+<?php
+
+namespace App\Services\Quotes;
+
+use App\Models\Request;
+use App\Services\AI\OpenAIChatService;
+use App\Services\Catalog\CatalogImportService;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use RuntimeException;
+
+/**
+ * Парсер исходящих КП/счетов (Foundation §7, расширение DocumentDetector'а).
+ *
+ * Source: LazyLift @ 1ea8147d, app/Services/QuoteParsingService.php — drop-in
+ * движка extractContent + parseWithGPT + reclassifyMisparsedDimensional +
+ * normalizeItemsVat + extractJSON. Modifications:
+ *  - parsed_quantity → parsed_qty (MyLift schema)
+ *  - убрана piece-логика (effectivePiece() в MyLift RequestItem нет; в кейсах
+ *    разные единицы измерения встречаются крайне редко, fallback на 'м')
+ *  - промпт адаптирован под наш кейс «КП/счёт ОТ нас клиенту»: убран supplier-
+ *    контекст, добавлена подсказка про M-артикулы из нашего каталога
+ *  - возврат сужен до {document, items, raw} (supplier секция игнорируется)
+ *
+ * Никакой записи в БД — это чистая трансформация (PDF/XLSX → JSON-структура).
+ * Результат потребляется ParseOutboundQuoteJob, который пишет outbound_quotes
+ * + outbound_quote_items и потом отдаёт matcher'у.
+ */
+class OutboundQuoteParsingService
+{
+    public function __construct(
+        private readonly OpenAIChatService $chatService
+    ) {
+    }
+
+    /**
+     * Извлечение текста + изображений из файла (по расширению).
+     *
+     * @param  string  $filePath  относительный путь в storage (для Storage::path)
+     *                            или абсолютный (тогда $isAbsolute=true).
+     * @return array{text: ?string, images: array<int, string>}
+     *
+     * @throws RuntimeException
+     */
+    public function extractContent(string $filePath, string $fileType, bool $isAbsolute = false): array
+    {
+        $fullPath = $isAbsolute ? $filePath : Storage::path($filePath);
+
+        return match ($fileType) {
+            'pdf' => $this->extractFromPdf($fullPath),
+            'xlsx', 'xls' => $this->extractFromExcel($fullPath),
+            'docx', 'doc' => $this->extractFromWord($fullPath),
+            'image', 'png', 'jpg', 'jpeg' => $this->extractFromImage($fullPath),
+            default => throw new RuntimeException('Unsupported file type: '.$fileType),
+        };
+    }
+
+    /**
+     * PDF → текст (smalot/pdfparser) + страницы в PNG (pdftoppm → Vision).
+     */
+    private function extractFromPdf(string $path): array
+    {
+        $text = null;
+        $images = [];
+
+        try {
+            $parser = new \Smalot\PdfParser\Parser();
+            $pdf = $parser->parseFile($path);
+            $text = $pdf->getText();
+        } catch (\Exception $e) {
+            Log::warning('OutboundQuoteParser: PDF text extraction failed', ['error' => $e->getMessage()]);
+        }
+
+        // Конвертируем в PNG всегда — Vision на колоночных таблицах КП точнее текстового слоя.
+        try {
+            $tempDir = storage_path('app/temp');
+            if (! is_dir($tempDir)) {
+                mkdir($tempDir, 0755, true);
+            }
+
+            $outputPrefix = $tempDir.'/outbound_quote_'.uniqid();
+            $command = sprintf(
+                'pdftoppm -png -r 150 %s %s 2>&1',
+                escapeshellarg($path),
+                escapeshellarg($outputPrefix)
+            );
+
+            exec($command, $output, $returnVar);
+
+            if ($returnVar === 0) {
+                $files = glob($outputPrefix.'-*.png') ?: [];
+                foreach ($files as $file) {
+                    $imageData = file_get_contents($file);
+                    if ($imageData !== false) {
+                        $images[] = 'data:image/png;base64,'.base64_encode($imageData);
+                    }
+                    @unlink($file);
+                }
+            } else {
+                Log::warning('OutboundQuoteParser: pdftoppm failed', [
+                    'path' => $path,
+                    'return_code' => $returnVar,
+                    'output' => implode("\n", $output),
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::warning('OutboundQuoteParser: PDF→PNG conversion failed', ['error' => $e->getMessage()]);
+        }
+
+        return ['text' => $text, 'images' => $images];
+    }
+
+    private function extractFromExcel(string $path): array
+    {
+        try {
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($path);
+            $text = '';
+
+            foreach ($spreadsheet->getAllSheets() as $sheet) {
+                foreach ($sheet->getRowIterator() as $row) {
+                    $rowData = [];
+                    foreach ($row->getCellIterator() as $cell) {
+                        $rowData[] = $cell->getValue();
+                    }
+                    $text .= implode("\t", $rowData)."\n";
+                }
+            }
+
+            return ['text' => $text, 'images' => []];
+        } catch (\Exception $e) {
+            Log::error('OutboundQuoteParser: Excel extraction failed', ['error' => $e->getMessage()]);
+            throw new RuntimeException('Failed to extract Excel content: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Word → текст (antiword → catdoc fallback, для DOCX можно phpword).
+     */
+    private function extractFromWord(string $path): array
+    {
+        $text = '';
+        $ext = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+
+        // DOCX — через phpword (без системных утилит).
+        if ($ext === 'docx') {
+            try {
+                $phpWord = \PhpOffice\PhpWord\IOFactory::load($path);
+                $parts = [];
+                foreach ($phpWord->getSections() as $section) {
+                    foreach ($section->getElements() as $element) {
+                        $parts[] = $this->extractWordElementText($element);
+                    }
+                }
+                $text = trim(implode("\n", array_filter($parts, static fn ($s) => $s !== '')));
+            } catch (\Throwable $e) {
+                Log::warning('OutboundQuoteParser: phpword extraction failed', ['error' => $e->getMessage()]);
+            }
+        }
+
+        // .doc (старый) — antiword → catdoc.
+        if ($text === '' && in_array($ext, ['doc', 'docx'], true)) {
+            try {
+                $output = shell_exec('antiword -m UTF-8.txt '.escapeshellarg($path));
+                if (! empty($output)) {
+                    $text = $output;
+                }
+            } catch (\Exception $e) {
+                Log::warning('OutboundQuoteParser: antiword failed', ['error' => $e->getMessage()]);
+            }
+        }
+        if ($text === '') {
+            try {
+                $output = shell_exec('catdoc '.escapeshellarg($path));
+                if (! empty($output)) {
+                    $text = $output;
+                }
+            } catch (\Exception $e) {
+                Log::warning('OutboundQuoteParser: catdoc failed', ['error' => $e->getMessage()]);
+            }
+        }
+
+        if ($text === '') {
+            throw new RuntimeException('Failed to extract Word content from: '.$path);
+        }
+
+        return ['text' => $text, 'images' => []];
+    }
+
+    private function extractWordElementText(object $element): string
+    {
+        if (method_exists($element, 'getText')) {
+            $value = $element->getText();
+            if (is_string($value)) {
+                return $value;
+            }
+        }
+        if (method_exists($element, 'getElements')) {
+            $parts = [];
+            foreach ($element->getElements() as $child) {
+                $parts[] = $this->extractWordElementText($child);
+            }
+
+            return implode(' ', array_filter($parts, static fn ($s) => $s !== ''));
+        }
+
+        return '';
+    }
+
+    private function extractFromImage(string $path): array
+    {
+        $imageData = file_get_contents($path);
+        if ($imageData === false) {
+            throw new RuntimeException('Failed to read image file: '.$path);
+        }
+        $mimeType = function_exists('mime_content_type') ? (mime_content_type($path) ?: 'image/png') : 'image/png';
+
+        return [
+            'text' => null,
+            'images' => ['data:'.$mimeType.';base64,'.base64_encode($imageData)],
+        ];
+    }
+
+    /**
+     * Парсинг контента через GPT-4o (text + Vision).
+     *
+     * @return array{document: array, items: array<int, array>, raw: array}
+     *
+     * @throws RuntimeException
+     */
+    public function parseWithGPT(?string $text, array $images, Request $request): array
+    {
+        // M-артикулы регулярно «съезжают» в PDF КП — в шаблоне МЗ-NNNNNN
+        // колонка наименования узкая и последний символ артикула попадает
+        // на следующую строку («M0943\n1» вместо «M09431»). Лечим ДО инжекта
+        // в промпт, чтобы и Vision и text-fallback видели единый артикул.
+        $repairedText = $text !== null ? $this->repairBrokenMSkus($text) : null;
+        $prompt = $this->buildParsingPrompt($repairedText, $request);
+
+        $model = (string) config('services.openai.quote_parser_model', 'gpt-4o');
+        $options = [
+            'temperature' => 0,
+            'max_tokens' => 16384,
+            'response_format' => ['type' => 'json_object'],
+        ];
+
+        try {
+            if (! empty($images)) {
+                $result = $this->chatService->analyzeMultipleImages($prompt, $images, $model, $options);
+            } else {
+                $result = $this->chatService->chat(
+                    [['role' => 'user', 'content' => $prompt]],
+                    $model,
+                    $options
+                );
+            }
+
+            $finishReason = $result['raw']['choices'][0]['finish_reason'] ?? null;
+            if ($finishReason === 'length') {
+                Log::warning('OutboundQuoteParser: GPT response truncated', [
+                    'request_id' => $request->id,
+                    'usage' => $result['usage'] ?? [],
+                ]);
+            }
+
+            $json = $this->extractJSON((string) $result['content']);
+            if ($json === null) {
+                throw new RuntimeException('No JSON in GPT response');
+            }
+
+            $parsed = json_decode($json, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new RuntimeException('Invalid JSON: '.json_last_error_msg());
+            }
+
+            $document = is_array($parsed['document'] ?? null) ? $parsed['document'] : [];
+            $items = is_array($parsed['items'] ?? null) ? $parsed['items'] : [];
+
+            $items = $this->reclassifyMisparsedDimensional($items, $request);
+            $items = $this->normalizeItemsVat($items, $document, $request);
+            // Post-process: если LLM вернул короткий артикул вида M+4цифры,
+            // а в исходном тексте есть удлинённый вариант (M+5+цифр) с тем же
+            // префиксом — заменяем (страховка на случай если хинт в промпте
+            // не помог и Vision тоже урезал артикул).
+            $items = $this->repairItemArticles($items, $repairedText, $request);
+
+            return [
+                'document' => $document,
+                'items' => $items,
+                'raw' => $result['raw'],
+            ];
+        } catch (\Exception $e) {
+            Log::error('OutboundQuoteParser: GPT parsing failed', [
+                'error' => $e->getMessage(),
+                'request_id' => $request->id,
+            ]);
+            throw new RuntimeException('Failed to parse outbound quote: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Sanity-проверка размерных позиций: GPT иногда ошибочно помечает штучный
+     * товар как мерный или наоборот. Проверяем арифметику unit_price × ... ≈ total.
+     *
+     * Адаптация из LazyLift (Source: 1ea8147d): убрана зависимость от piece-логики
+     * (effectivePiece()) — в MyLift размерные позиции редки, fallback на 'м'.
+     */
+    private function reclassifyMisparsedDimensional(array $items, Request $request): array
+    {
+        foreach ($items as &$item) {
+            $unitQuantity = $item['unit_quantity'] ?? null;
+            $unitPrice = $item['unit_price'] ?? null;
+            $quantity = $item['quantity'] ?? null;
+            $total = $item['total'] ?? null;
+            $unitMeasure = trim((string) ($item['unit_measure'] ?? ''));
+
+            if ($unitQuantity === null || $unitPrice === null || $quantity === null || $total === null) {
+                continue;
+            }
+
+            $unitQuantity = (float) $unitQuantity;
+            $unitPrice = (float) $unitPrice;
+            $quantity = (float) $quantity;
+            $total = (float) $total;
+
+            if ($unitQuantity <= 0 || $unitPrice <= 0 || $quantity <= 0 || $total <= 0) {
+                continue;
+            }
+
+            $expectedDimensional = $unitPrice * $unitQuantity * $quantity;
+            $expectedPerPiece = $unitPrice * $quantity;
+            $tol = max(1.0, $total * 0.02);
+
+            $matchesDimensional = abs($expectedDimensional - $total) <= $tol;
+            $matchesPerPiece = abs($expectedPerPiece - $total) <= $tol;
+
+            $isPieceLabeled = in_array($unitMeasure, ['шт.', 'шт'], true);
+
+            // A: помечен мерным, но арифметика штучная → переключаем в шт.
+            if (! $isPieceLabeled && ! $matchesDimensional && $matchesPerPiece) {
+                Log::info('OutboundQuoteParser: reclassified dim→piece', [
+                    'request_id' => $request->id,
+                    'name' => $item['name'] ?? null,
+                ]);
+                $item['unit_quantity'] = null;
+                $item['unit_measure'] = 'шт.';
+                $item['price'] = $unitPrice;
+
+                continue;
+            }
+
+            // B: помечен штучным, но unit_quantity>1 и арифметика мерная → переключаем в мерный.
+            if ($isPieceLabeled && $unitQuantity > 1 && $matchesDimensional && ! $matchesPerPiece) {
+                Log::info('OutboundQuoteParser: reclassified piece→dim', [
+                    'request_id' => $request->id,
+                    'name' => $item['name'] ?? null,
+                ]);
+                $item['unit_measure'] = 'м'; // fallback для MyLift (нет piece-метаданных)
+                $item['price'] = round($unitPrice * $unitQuantity, 2);
+            }
+        }
+        unset($item);
+
+        return $items;
+    }
+
+    /**
+     * Привести цены к виду «с НДС», если документ показывает их без НДС.
+     * Source: LazyLift @ 1ea8147d normalizeItemsVat (без изменений).
+     */
+    private function normalizeItemsVat(array $items, array &$document, Request $request): array
+    {
+        $pricesIncludeVat = $document['prices_include_vat'] ?? null;
+        if ($pricesIncludeVat !== false) {
+            return $items;
+        }
+
+        $subtotal = isset($document['subtotal']) && is_numeric($document['subtotal'])
+            ? (float) $document['subtotal'] : null;
+        $vatAmount = isset($document['vat_amount']) && is_numeric($document['vat_amount'])
+            ? (float) $document['vat_amount'] : null;
+        $totalAmount = isset($document['total_amount']) && is_numeric($document['total_amount'])
+            ? (float) $document['total_amount'] : null;
+        $vatRate = isset($document['vat_rate']) && is_numeric($document['vat_rate'])
+            ? (float) $document['vat_rate'] : null;
+
+        $factor = null;
+        $factorSource = null;
+
+        if ($subtotal !== null && $subtotal > 0 && $totalAmount !== null && $totalAmount > $subtotal) {
+            $factor = $totalAmount / $subtotal;
+            $factorSource = 'total/subtotal';
+        } elseif ($subtotal !== null && $subtotal > 0 && $vatAmount !== null && $vatAmount > 0) {
+            $factor = 1 + ($vatAmount / $subtotal);
+            $factorSource = 'vat_amount/subtotal';
+        } elseif ($vatRate !== null && $vatRate > 0) {
+            $factor = 1 + ($vatRate / 100);
+            $factorSource = 'vat_rate';
+        }
+
+        if ($factor === null || $factor <= 1.0001) {
+            Log::warning('OutboundQuoteParser: VAT normalization skipped (no factor)', [
+                'request_id' => $request->id,
+                'document' => array_intersect_key($document, array_flip(['subtotal', 'vat_amount', 'total_amount', 'vat_rate'])),
+            ]);
+
+            return $items;
+        }
+
+        // НДС в РФ с 2026 — 22%. Защита от мусорных множителей.
+        if ($factor > 1.30) {
+            Log::warning('OutboundQuoteParser: VAT factor clamped to 22%', [
+                'request_id' => $request->id,
+                'factor_before' => $factor,
+                'source' => $factorSource,
+            ]);
+            $factor = 1.22;
+            $factorSource .= ' (clamped)';
+        }
+
+        $vatPercent = round(($factor - 1) * 100, 2);
+
+        foreach ($items as &$item) {
+            foreach (['unit_price', 'price', 'total'] as $field) {
+                if (isset($item[$field]) && is_numeric($item[$field])) {
+                    $item[$field] = round(((float) $item[$field]) * $factor, 2);
+                }
+            }
+            $existing = trim((string) ($item['notes'] ?? ''));
+            $marker = "НДС {$vatPercent}% добавлен при парсинге";
+            $item['notes'] = $existing !== '' ? $existing.'; '.$marker : $marker;
+            $item['vat_applied'] = true;
+        }
+        unset($item);
+
+        $document['prices_include_vat'] = true;
+        $document['vat_normalized'] = true;
+        $document['vat_rate'] = $vatPercent;
+
+        Log::info('OutboundQuoteParser: VAT normalized', [
+            'request_id' => $request->id,
+            'factor' => $factor,
+            'factor_source' => $factorSource,
+            'vat_percent' => $vatPercent,
+            'items_count' => count($items),
+            'total_amount' => $document['total_amount'] ?? null,
+        ]);
+
+        return $items;
+    }
+
+    /**
+     * Промпт парсера. Адаптирован под наш кейс «КП/счёт ОТ нас клиенту»:
+     *  - убраны supplier-извлечение и аналог-логика;
+     *  - подсказка: M-артикулы (M\d{4,}) — это наши SKU из catalog_items;
+     *  - всё остальное (количества штучные/мерные, НДС, split delivery) — как в LazyLift.
+     */
+    private function buildParsingPrompt(?string $text, Request $request): string
+    {
+        $itemsContext = $request->items
+            ->where('is_active', true)
+            ->map(function ($item) {
+                return sprintf(
+                    '- %s (бренд: %s, артикул: %s, кол-во: %s)',
+                    $item->parsed_name,
+                    $item->parsed_brand ?? 'не указан',
+                    $item->parsed_article ?? 'не указан',
+                    $item->parsed_qty !== null ? (string) $item->parsed_qty : '1'
+                );
+            })->join("\n");
+
+        $today = now()->format('Y-m-d');
+
+        $prompt = <<<PROMPT
+Ты — парсер коммерческих предложений и счетов, которые НАША компания (MyZip / Лифт-ZIP)
+отправляет клиенту. Документ — наш исходящий КП или счёт. Тебе нужно извлечь из
+него позиции с ценами/количествами и метаданные документа.
+Сегодняшняя дата: {$today}
+
+**Контекст заявки клиента:**
+Код заявки: M-{$request->code}
+Позиции заявки клиента (как они пришли от клиента):
+{$itemsContext}
+
+**M-артикулы (M\d{5,})** в документе — это НАШИ внутренние SKU из корпоративного каталога,
+а не артикулы поставщика. Сохраняй их в поле `article` как есть. Пример: M07014, M02016, M09431.
+
+КРИТИЧЕСКИ ВАЖНО — РАЗРЫВЫ M-АРТИКУЛОВ:
+В шаблоне нашего PDF КП колонка наименования узкая, и M-артикул часто переносится:
+последние одна-две цифры съезжают на следующую строку. Если видишь в ячейке/строке
+наименования что-то вида:
+   «Втулка ступени для оси цепи Kone 13KV (L=90 мм)   M0943»
+   «D=12,8 мм X=57,8 мм с тремя отверстиями             1»
+— это ОДИН артикул `M09431`, а не `M0943` без последней цифры. M-артикул всегда
+имеет 5+ цифр после буквы M, без пробелов и переносов в финальном виде. При парсинге
+склеивай разорванный артикул в одну строку. Это критично — `M0943` в каталоге может
+не существовать, тогда как `M09431` — реальный товар.
+
+**Твоя задача:**
+1. Извлечь метаданные документа (тип: quote/invoice, номер, дата, итоговая сумма, НДС).
+2. Извлечь все позиции (название, артикул, бренд, цена, количество, сумма, срок поставки).
+Поле `supplier` в ответе можно оставить пустым объектом (это наш собственный документ).
+
+**ВАЖНЫЕ ПРАВИЛА:**
+
+Количество (quantity) — КРИТИЧЕСКИ ВАЖНО:
+- quantity: ФАКТИЧЕСКОЕ количество товара из колонки "Кол-во" документа.
+- Для штучного товара: если в колонке Кол-во указано "2,00 шт" → quantity: 2.
+- Для мерного товара (м, кг): quantity = число СТРОК (после агрегации одинаковых), а unit_quantity = значение из колонки Кол-во.
+- Агрегация: если несколько ИДЕНТИЧНЫХ строк (одинаковое название, артикул, цена) — объедини в одну и суммируй количество.
+- ПРОВЕРКА: price × quantity должно быть ≈ total. Если не сходится — ты неправильно определил quantity.
+
+**АЛГОРИТМ ОПРЕДЕЛЕНИЯ ШТУЧНЫЙ/МЕРНЫЙ:**
+
+Шаг 1. Смотри на колонку "Кол-во":
+- "X шт" / "X штук" / число без единиц → ШТУЧНЫЙ.
+- "X м" / "X кг" / "X компл." / "X п.м." → МЕРНЫЙ.
+
+Шаг 2. ШТУЧНЫЙ:
+- unit_measure = "шт.", unit_quantity = null.
+- unit_price = цена из колонки "Цена" (за 1 штуку).
+- price = unit_price, total = unit_price × quantity.
+
+Шаг 3. МЕРНЫЙ:
+- unit_measure = единица из "Кол-во" ("м"/"кг"/...), unit_quantity = число.
+- unit_price = цена за 1 единицу.
+- price = unit_price × unit_quantity, total = price × quantity.
+
+Шаг 4. Финальная арифметика — ОБЯЗАТЕЛЬНО:
+- Штучный: unit_price × quantity ≈ total.
+- Мерный: unit_price × unit_quantity × quantity ≈ total.
+
+Шаг 5. Инвариант штучного: unit_measure='шт.' → unit_quantity ОБЯЗАТЕЛЬНО = null.
+
+**Цена (price / unit_price):**
+- Бери ФИНАЛЬНУЮ цену (со скидкой, если есть колонка «Цена со скидкой»).
+- Передавай РОВНО как в документе — без самостоятельного добавления/вычитания НДС.
+
+**НДС — извлеки три суммы раздельно:**
+- subtotal: "Итого" / "Итого без НДС" / "Сумма без НДС". null если нет.
+- vat_amount: "Сумма НДС" / "НДС" / "В том числе НДС". null если не выделен.
+- total_amount: "Всего к оплате" / "К оплате" / "Итого с НДС". Если есть и "Итого" и "Всего к оплате" — бери "Всего к оплате".
+- vat_rate: процент только если явно написан ("НДС 22%"). Иначе null. С 2026 в РФ стандартная ставка — 22%, но полагайся на документ.
+- prices_include_vat: true/false/null. false если над таблицей "Цены без НДС" или субтотал+vat_amount < total. true если "в т.ч. НДС" или цены сразу с НДС.
+
+**Срок поставки (delivery_days) — в РАБОЧИХ днях:**
+- "В наличии" → 0
+- "Под заказ X нед." → X × 5
+- "X дней" → ceil(X × 5 / 7)
+- Дата "ДД.ММ.ГГГГ" — разница с {$today} в рабочих днях.
+- null если не указано.
+
+**Формат ответа (строго JSON):**
+```json
+{
+  "supplier": {},
+  "document": {
+    "type": "quote|invoice",
+    "number": "Номер документа",
+    "date": "YYYY-MM-DD",
+    "subtotal": 130000,
+    "vat_amount": 28600,
+    "total_amount": 158600,
+    "vat_rate": null,
+    "prices_include_vat": false
+  },
+  "items": [
+    {
+      "name": "Ролик направляющий ARO",
+      "article": "M07014",
+      "brand": "ARO",
+      "quantity": 11,
+      "unit_quantity": null,
+      "unit_measure": "шт.",
+      "unit_price": 9630.31,
+      "price": 9630.31,
+      "total": 105933.41,
+      "delivery_days": 0,
+      "notes": "Скидка 20%",
+      "is_analog": false,
+      "qty_available": 11
+    }
+  ]
+}
+```
+
+**SPLIT DELIVERY** — если для одной позиции указано «X шт в наличии, Y шт под заказ» —
+создавай ДВЕ записи (quantity=X, delivery_days=0 + quantity=Y, delivery_days=срок).
+
+**Правила формата:**
+- Только валидный JSON (без markdown, без комментариев).
+- Не найдено — `null`.
+- Цены и суммы — числа, не строки.
+- Дата — YYYY-MM-DD.
+
+PROMPT;
+
+        if (! empty($text)) {
+            $prompt .= "\n\n**Извлечённый текст:**\n".mb_substr($text, 0, 8000);
+        }
+
+        return $prompt;
+    }
+
+    /**
+     * Склеить разорванные переносом M-артикулы в raw тексте.
+     *
+     * Паттерн PDF МЗ-NNNNNN: M-артикул может разорваться на колонку наименования,
+     * последние 1-2 цифры съезжают на следующую строку. После cyrillic-fold
+     * («М» → «M») мы ищем `M\d{4,6}` за которым через optional whitespace +
+     * перенос идёт 1-2 цифры, и слепляем их. Не трогаем артикул если за
+     * символом-цифрой не следует word-boundary — иначе можно случайно склеить
+     * с цифрой из соседней колонки.
+     *
+     * Идемпотентно — повторное применение к уже склеенному не меняет результат.
+     */
+    private function repairBrokenMSkus(string $text): string
+    {
+        if ($text === '') {
+            return $text;
+        }
+        $folded = CatalogImportService::cyrillicLookalikeFold($text);
+        // До 3 итераций — на случай если артикул разорван дважды (очень редко,
+        // но дёшево перестраховаться). Останавливаемся когда нет изменений.
+        for ($i = 0; $i < 3; $i++) {
+            $new = preg_replace(
+                '/(M\d{4,6})[ \t\xC2\xA0]*\r?\n[ \t\xC2\xA0]*(\d{1,2})(?=[^0-9A-Za-zА-Яа-я]|$)/u',
+                '$1$2',
+                $folded
+            );
+            if ($new === null || $new === $folded) {
+                break;
+            }
+            $folded = $new;
+        }
+
+        return $folded;
+    }
+
+    /**
+     * Если LLM вернул article в виде «M+4 цифры», а в исходном (отремонтированном)
+     * тексте есть удлинённый вариант с тем же префиксом (`M\d{5,}` начинающийся
+     * с возвращённой строки) — заменяем. Безопасная страховка на случай если
+     * хинт в промпте не сработал.
+     */
+    private function repairItemArticles(array $items, ?string $text, Request $request): array
+    {
+        if ($text === null || $text === '') {
+            return $items;
+        }
+
+        foreach ($items as &$item) {
+            $art = isset($item['article']) ? (string) $item['article'] : '';
+            if ($art === '') {
+                continue;
+            }
+            $folded = CatalogImportService::cyrillicLookalikeFold($art);
+            if (preg_match('/^M\d{4}$/u', $folded) !== 1) {
+                continue;
+            }
+            // Ищем M{folded}\d+ в исходном тексте.
+            $pattern = '/(?<![0-9A-Za-zА-Яа-я])'.preg_quote($folded, '/').'(\d{1,3})(?![0-9A-Za-zА-Яа-я])/u';
+            if (preg_match($pattern, $text, $m) === 1) {
+                $extended = $folded.$m[1];
+                Log::info('OutboundQuoteParser: extended truncated M-SKU from raw text', [
+                    'request_id' => $request->id,
+                    'before' => $art,
+                    'after' => $extended,
+                ]);
+                $item['article'] = $extended;
+            }
+        }
+        unset($item);
+
+        return $items;
+    }
+
+    /**
+     * Извлечение JSON из ответа LLM (response_format=json_object обычно возвращает чистый JSON,
+     * но иногда модель оборачивает в ```json блок).
+     * Source: LazyLift @ 1ea8147d extractJSON (без изменений).
+     */
+    private function extractJSON(string $content): ?string
+    {
+        $trimmed = trim($content);
+        if (str_starts_with($trimmed, '{') && str_ends_with($trimmed, '}')) {
+            return $trimmed;
+        }
+
+        if (preg_match('/```(?:json)?\s*(\{.*?\})\s*```/s', $content, $matches)) {
+            return $matches[1];
+        }
+
+        $start = strpos($content, '{');
+        if ($start !== false) {
+            $depth = 0;
+            $len = strlen($content);
+            for ($i = $start; $i < $len; $i++) {
+                if ($content[$i] === '{') {
+                    $depth++;
+                } elseif ($content[$i] === '}') {
+                    $depth--;
+                }
+                if ($depth === 0) {
+                    return substr($content, $start, $i - $start + 1);
+                }
+            }
+        }
+
+        return null;
+    }
+}

@@ -128,4 +128,15 @@ class RequestItem extends Model
     {
         return $this->hasMany(ClarificationQuestion::class);
     }
+
+    /**
+     * Строки исходящих КП/счетов, привязанные к этой позиции
+     * (через OutboundQuoteItemMatcher). Может быть несколько — позиция
+     * могла переотправляться в разных КП, либо одна позиция заявки
+     * раскладывается на несколько строк КП (split delivery / аналоги).
+     */
+    public function outboundQuoteItems(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(OutboundQuoteItem::class, 'matched_request_item_id');
+    }
 }

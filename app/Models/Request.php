@@ -183,6 +183,17 @@ class Request extends Model
     }
 
     /**
+     * Snapshot'ы исходящих КП/счетов (Foundation §7, расширение).
+     * Заполняется ParseOutboundQuoteJob — один snapshot на каждое
+     * вложение PDF/XLSX/DOCX отправленного клиенту коммерческого
+     * документа.
+     */
+    public function outboundQuotes(): HasMany
+    {
+        return $this->hasMany(OutboundQuote::class)->orderByDesc('id');
+    }
+
+    /**
      * Активные делегации (ended_at IS NULL) — обычно 0 или 1 одновременно,
      * но schema допускает несколько (теоретически несколько оригиналов
      * для одной заявки никогда не будет, но запас).

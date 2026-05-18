@@ -87,9 +87,29 @@ return [
         // Phase 4 outbound LLM-classifier (fallback после rule-based детектора).
         // Простая 4-way классификация — mini достаточно.
         'outbound_classifier_model' => env('OPENAI_OUTBOUND_CLASSIFIER_MODEL', 'gpt-4o-mini'),
+        // Парсер исходящих КП/счетов (OutboundQuoteParsingService). Vision+text,
+        // сложный длинный промпт со схемой JSON — gpt-4o, не -mini.
+        'quote_parser_model' => env('OPENAI_QUOTE_PARSER_MODEL', 'gpt-4o'),
+        // Matcher позиций КП → RequestItem fallback (OutboundQuoteItemMatcher).
+        // Применяется только на unmatched после детерминированных шагов — mini.
+        'quote_matcher_model' => env('OPENAI_QUOTE_MATCHER_MODEL', 'gpt-4o-mini'),
         // Phase 2 use-case C: размер батча на /v1/embeddings (OpenAI лимит 2048).
         // 100 — компромисс между latency на запрос и количеством HTTP-вызовов.
         'embedding_batch_size' => (int) env('OPENAI_EMBEDDING_BATCH_SIZE', 100),
+    ],
+
+    /*
+    | Парсер исходящих КП/счетов (Foundation §7, расширение DocumentDetector'а).
+    | См. app/Services/Quotes/OutboundQuoteParsingService.php + OutboundQuoteItemMatcher.
+    */
+    'quotes' => [
+        // Порог при котором LLM-fallback matcher'а считает позицию сматченной
+        // (см. LLM_CONFIDENCE_SCORES в OutboundQuoteItemMatcher). Ниже — игнор.
+        'match_score_threshold' => (float) env('QUOTE_MATCH_SCORE_THRESHOLD', 0.6),
+        // Максимальный размер вложения для парсинга (PDF/XLSX/DOCX).
+        'max_attachment_bytes' => (int) env('QUOTE_MAX_ATTACHMENT_BYTES', 15 * 1024 * 1024),
+        // Расширения, на которых триггерится ParseOutboundQuoteJob.
+        'parseable_extensions' => ['pdf', 'xlsx', 'xls', 'docx'],
     ],
 
     /*
