@@ -117,6 +117,18 @@ class Index extends Component
                 'max' => 50,
             ],
 
+            // ─── Распределение заявок ────────────────────────────────────
+            'assignment.newbie_boost' => [
+                'group' => 'Распределение заявок',
+                'label' => 'Скорость догона отстающих (X)',
+                'help' => 'Во сколько раз больше заявок получает самый отстающий менеджер по сравнению с самым загруженным. 1 = плоская раздача (равенство), 2 = ×2 (рекомендуем), 5 = агрессивный onboarding. Промежуточные коэффициенты считаются линейно. Sticky-привязки (по каталогу/клиенту/тексту) идут отдельно и приоритетнее этой балансировки.',
+                'type' => AppSetting::TYPE_FLOAT,
+                'default' => 2.0,
+                'step' => 0.5,
+                'min' => 1.0,
+                'max' => 10.0,
+            ],
+
             // ─── Attention — дедлайны (Foundation §5.5) ──────────────────
             // Раб. часы = Пн-Пт 9-18 Europe/Moscow. Раб. дни — Пн-Пт.
             'attention.new_hours' => [
@@ -308,6 +320,7 @@ class Index extends Component
             'catalog.name_match.llm_fail_action' => 'services.catalog_name_match.llm_fail_action',
             'catalog.import.min_full_rows' => 'services.catalog_import.min_full_rows',
             'tax.vat_percent' => 'services.tax.vat_percent',
+            'assignment.newbie_boost' => 'services.assignment.newbie_boost',
         ];
 
         return $configMap[$key] ?? '';

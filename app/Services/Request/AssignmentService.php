@@ -34,11 +34,12 @@ use Illuminate\Support\Facades\DB;
  *
  *     Sticky всегда побеждает балансировку (per оператор).
  *
- *  2) Round-robin — weighted random по нагрузке. У отстающего менеджера
- *     (низкий load) выше вероятность получить новую заявку, но не 100% —
- *     остальные продолжают получать заявки пропорционально (max-load -
- *     load + 1). Это плавно подтягивает новичков без рывков 0→all.
- *     См. `pickWeightedLeastLoadedManager`.
+ *  2) Round-robin — weighted random с линейной интерполяцией коэффициента
+ *     удачи между 1 (самый загруженный) и X (самый отстающий). X —
+ *     параметр настройки `assignment.newbie_boost`, который РОП крутит
+ *     через UI «Настройки». Смысл — «во сколько раз больше заявок получит
+ *     самый отстающий менеджер чем самый загруженный». Рекомендуемый
+ *     диапазон 1.5..3.0 (плавный onboarding). См. `pickWeightedLeastLoadedManager`.
  */
 class AssignmentService
 {
@@ -82,12 +83,16 @@ class AssignmentService
         } else {
             $rr = $this->pickWeightedLeastLoadedManager($managers);
             $manager = $rr['user'] ?? null;
-            // Сохраняем веса и нагрузки в reason — РОПу видно почему
+            // Сохраняем веса/нагрузки/boost в reason — РОПу видно почему
             // именно этому менеджеру досталась заявка (вероятностно).
-            // Формат: auto_round_robin:{"loads":{1:5,2:8},"weights":{1:4,2:1}}
+            // Формат: auto_round_robin:{"boost":2,"loads":{1:5,2:8},"weights":{1:1.5,2:1.0}}
             $reason = $rr
                 ? 'auto_round_robin:' . json_encode(
-                    ['loads' => $rr['loads'], 'weights' => $rr['weights']],
+                    [
+                        'boost' => $rr['boost'],
+                        'loads' => $rr['loads'],
+                        'weights' => $rr['weights'],
+                    ],
                     JSON_UNESCAPED_UNICODE,
                 )
                 : 'auto_round_robin';
@@ -360,29 +365,43 @@ class AssignmentService
      * нагрузка прыгает рывками, клиенты одного менеджера получают разные
      * стили общения, нет плавного onboarding.
      *
-     * **Алгоритм**: каждому кандидату назначаем вес
-     *   `weight = (max_load - manager_load + 1)`
-     * и выбираем случайно с вероятностью пропорциональной весу.
+     * **Алгоритм**: «коэффициент удачи» линейно интерполируется между 1
+     * (для самого загруженного) и `X` (для самого отстающего). `X` —
+     * параметр из настроек `assignment.newbie_boost`, который РОП может
+     * крутить через UI «Настройки». Семантика X — «скорость догона»:
+     *   - X=1   — плоская раздача (равные коэффициенты для всех)
+     *   - X=2   — новичок получает ×2 от самого загруженного
+     *   - X=5   — ×5 (агрессивный догон, новичок почти всю серию забирает)
      *
-     * Пример нагрузок `[0, 5, 8, 10]` (max=10):
-     *   weights = [11, 6, 3, 1]   sum = 21
-     *   вероятности: 52% / 29% / 14% / 5%
+     * Формула:
+     *   coef = 1 + (X − 1) × (max_load − load) / max(max_load − min_load, 1)
      *
-     * Новичок получает большинство (но не 100%) → плавно догоняет.
-     * Перегруженный всё-таки получает редкие заявки → не «забывают».
+     * Пример (X=2, нагрузки [100, 100, 100, 100, 50, 0]):
+     *   max=100, min=0
+     *   coef для load=100: 1 + 1×(0/100) = 1.0
+     *   coef для load=50:  1 + 1×(50/100) = 1.5
+     *   coef для load=0:   1 + 1×(100/100) = 2.0
      *
-     * Tiebreak при равных весах: чей `last_assigned_at` старее (LRU),
-     * NULL (никогда не получал) — первым в очереди.
+     * Чтобы это превратить в int-веса для random_int, домножаем на 1000.
+     *
+     * Tiebreak при равных весах (все load одинаковые) — LRU (старее
+     * last_assigned_at первым).
      *
      * @param  Collection<int, User>  $managers  Активные менеджеры.
-     * @return array{user: User, weights: array<int, int>, loads: array<int, int>}|null
-     *         user — выбранный, weights/loads — для audit в reason.
+     * @return array{user: User, weights: array<int, float>, loads: array<int, int>, boost: float}|null
      */
     private function pickWeightedLeastLoadedManager(Collection $managers): ?array
     {
         if ($managers->isEmpty()) {
             return null;
         }
+
+        // Скорость догона. Не меньше 1 — иначе формула даст обратный эффект
+        // (отстающие получают меньше). Дробные значения (1.5, 2.5) допустимы.
+        $boost = max(1.0, (float) app_setting(
+            'assignment.newbie_boost',
+            config('services.assignment.newbie_boost', 2.0),
+        ));
 
         // Phase 1.10: load = все open-статусы (не-terminal, не-paused).
         $openStatusValues = array_map(
@@ -408,48 +427,53 @@ class AssignmentService
         })->values();
 
         $maxLoad = (int) $candidates->max('load');
-        // Веса: (max - load + 1). +1 чтобы у самого загруженного был
-        // ненулевой шанс (иначе при разнице в 1-2 заявки эффект почти
-        // как у strict least-loaded).
-        $weighted = $candidates->map(function (array $c) use ($maxLoad) {
-            $c['weight'] = $maxLoad - $c['load'] + 1;
+        $minLoad = (int) $candidates->min('load');
+        $spread = max($maxLoad - $minLoad, 1); // защита от деления на 0
+        // Коэффициент: 1.0 для самого загруженного, X для самого отстающего,
+        // линейно для промежуточных. Если все нагрузки одинаковые — spread=1
+        // и (max-load)=0 → coef=1 для всех (равная раздача, tiebreak LRU).
+        $weighted = $candidates->map(function (array $c) use ($maxLoad, $spread, $boost) {
+            $c['coef'] = 1.0 + ($boost - 1.0) * ($maxLoad - $c['load']) / $spread;
 
             return $c;
         });
 
-        $totalWeight = (int) $weighted->sum('weight');
-        if ($totalWeight <= 0) {
-            // Защита от вырожденного случая (все weights = 0 — теоретически
-            // невозможно при +1). Берём первого LRU чтобы хоть что-то отдать.
-            $fallback = $this->pickByLruTiebreak($candidates);
+        // Если все coef равны 1.0 (загрузка одинаковая) — выбираем по LRU,
+        // чтобы не было «случайностей» при равенстве. Случай новых
+        // менеджеров с 0 нагрузок попадёт сюда тоже.
+        $allEqual = $weighted->every(fn ($c) => abs($c['coef'] - 1.0) < 0.0001);
+        if ($allEqual) {
+            $manager = $this->pickByLruTiebreak($candidates);
 
-            return [
-                'user' => $fallback,
-                'weights' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => (int) $c['weight']])->all(),
+            return $manager ? [
+                'user' => $manager,
+                'weights' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => round($c['coef'], 3)])->all(),
                 'loads' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => (int) $c['load']])->all(),
-            ];
+                'boost' => $boost,
+            ] : null;
         }
 
-        // mt_rand даёт равномерное [1..totalWeight], выбираем bucket по
-        // префиксной сумме весов. Стабильный seed не нужен — рандом часть
-        // дизайна (плавная балансировка по большой серии заявок).
+        // random_int не работает с float — масштабируем coef × 1000 в int.
+        $intWeights = $weighted->map(fn ($c) => max(1, (int) round($c['coef'] * 1000)));
+        $totalWeight = (int) $intWeights->sum();
+
         $roll = random_int(1, $totalWeight);
         $accum = 0;
         $chosen = null;
-        foreach ($weighted as $c) {
-            $accum += (int) $c['weight'];
+        foreach ($weighted as $idx => $c) {
+            $accum += $intWeights[$idx];
             if ($roll <= $accum) {
                 $chosen = $c;
                 break;
             }
         }
-        // Inhouse-страховка от floating-edge'а.
         $chosen ??= $weighted->last();
 
         return [
             'user' => $chosen['user'],
-            'weights' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => (int) $c['weight']])->all(),
+            'weights' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => round($c['coef'], 3)])->all(),
             'loads' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => (int) $c['load']])->all(),
+            'boost' => $boost,
         ];
     }
 
