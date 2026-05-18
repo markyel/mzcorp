@@ -1627,19 +1627,32 @@
                             @endif
 
                             @php
-                                // Галерея image-вложений всех позиций — для
-                                // листания в лайтбоксе (← / → между позициями).
+                                // Галерея ВСЕХ image-вложений письма заявки —
+                                // для листания в лайтбоксе (← / →).
+                                // Используем все картинки письма, а не только
+                                // привязанные к позициям image_attachment_id,
+                                // чтобы менеджер мог пролистать весь набор фото
+                                // даже если Vision привязал только одно.
                                 $positionsGallery = [];
-                                $positionsImgIndex = [];
-                                foreach ($items as $_pos) {
-                                    $_img = $_pos->imageAttachment;
-                                    if ($_img && $isImageAttachment($_img)) {
-                                        $positionsImgIndex[$_pos->id] = count($positionsGallery);
+                                $positionsImgIndex = []; // image_attachment_id → idx
+                                if ($email) {
+                                    foreach ($email->attachments as $_att) {
+                                        if (! $isImageAttachment($_att)) continue;
+                                        $positionsImgIndex[$_att->id] = count($positionsGallery);
                                         $positionsGallery[] = [
-                                            'src' => route('attachments.preview', $_img),
-                                            'name' => $_img->filename,
-                                            'dl' => route('attachments.download', $_img),
+                                            'src' => route('attachments.preview', $_att),
+                                            'name' => $_att->filename,
+                                            'dl' => route('attachments.download', $_att),
                                         ];
+                                    }
+                                }
+                                // Карта item.id → idx в галерее (через
+                                // image_attachment_id, если есть).
+                                $positionsItemIdx = [];
+                                foreach ($items as $_pos) {
+                                    $aid = $_pos->image_attachment_id;
+                                    if ($aid !== null && isset($positionsImgIndex[$aid])) {
+                                        $positionsItemIdx[$_pos->id] = $positionsImgIndex[$aid];
                                     }
                                 }
                             @endphp
@@ -1653,7 +1666,7 @@
                                     'canEditItems' => $canEditItems,
                                     'items' => $items,
                                     'expanded' => (bool) ($expandedPositions[$item->id] ?? false),
-                                    'galleryIndex' => $positionsImgIndex[$item->id] ?? null,
+                                    'galleryIndex' => $positionsItemIdx[$item->id] ?? null,
                                     'galleryItems' => $positionsGallery,
                                 ])
                             @endforeach
