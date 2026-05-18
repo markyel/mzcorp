@@ -40,29 +40,29 @@ class CatalogSearchService
         $like = '%' . $this->escapeLike($lower) . '%';
         $normalizedLike = $normalized !== '' ? '%' . $this->escapeLike($normalized) . '%' : null;
 
+        // Используем индексы:
+        //   - GIN trgm на lower(name) → ILIKE по name
+        //   - GIN trgm на brand_article_normalized → ILIKE по brand_article_normalized
+        //   - sku — короткая колонка, обычный ILIKE без полного сканирования
+        //     дорогих text-полей
+        // Старый вариант (LOWER(sku/brand_article/name) ILIKE + ORDER BY CASE)
+        // делал full table scan по 35K строкам — модал открывался 1-2 сек.
         return CatalogItem::query()
             ->select([
                 'id', 'sku', 'name', 'brand', 'brand_article',
                 'brand_article_normalized', 'unit_name', 'part_type',
                 'price', 'stock_available', 'is_active', 'photo_url',
             ])
-            ->where(function ($q) use ($like, $normalizedLike, $lower, $normalized) {
-                $q->whereRaw('LOWER(sku) LIKE ?', [$like])
-                    ->orWhereRaw('LOWER(brand_article) LIKE ?', [$like])
-                    ->orWhereRaw('LOWER(name) LIKE ?', [$like]);
+            ->where(function ($q) use ($like, $normalizedLike) {
+                // lower(name) ILIKE → GIN trgm index
+                $q->whereRaw('lower(name) LIKE ?', [$like]);
+                // brand_article_normalized — uppercase no-sep — GIN trgm index
                 if ($normalizedLike !== null) {
-                    $q->orWhere('brand_article_normalized', 'LIKE', $normalizedLike);
+                    $q->orWhere('brand_article_normalized', 'ILIKE', $normalizedLike);
                 }
-                // exact для приоритизации
-                $q->orWhereRaw('LOWER(sku) = ?', [$lower])
-                    ->orWhereRaw('LOWER(brand_article) = ?', [$lower]);
-                if ($normalized !== '') {
-                    $q->orWhere('brand_article_normalized', '=', $normalized);
-                }
+                // sku — короткая, B-tree index достаточно
+                $q->orWhereRaw('sku ILIKE ?', [$like]);
             })
-            ->orderByRaw('CASE WHEN LOWER(sku) = ? THEN 0 ELSE 1 END', [$lower])
-            ->orderByRaw('CASE WHEN LOWER(sku) LIKE ? THEN 0 ELSE 1 END', [$this->escapeLike($lower) . '%'])
-            ->orderByRaw('CASE WHEN brand_article_normalized = ? THEN 0 ELSE 1 END', [$normalized])
             ->orderByDesc('is_active')
             ->orderBy('sku')
             ->limit($limit)
