@@ -94,6 +94,26 @@ class CatalogResolutionService
             return false;
         }
         $article = (string) ($item->parsed_article ?? '');
+
+        // Fallback: parsed_article пуст, но parsed_name выглядит как
+        // одиночный код (например, Vision положил «M04557» в name,
+        // а article остался пустым). Считаем name SKU-подобным если:
+        // нет пробелов, есть и буква, и цифра, длина 3..32. Это отсекает
+        // обычные названия вроде «Плата ПКЛ-32» (есть пробел) и пустые
+        // паттерны типа «AAAA» / «32» (нет смеси букв+цифр).
+        if ($article === '') {
+            $name = trim((string) ($item->parsed_name ?? ''));
+            $isSkuLikeName = $name !== ''
+                && mb_strlen($name) >= 3
+                && mb_strlen($name) <= 32
+                && ! preg_match('/\s/u', $name)
+                && preg_match('/\p{L}/u', $name)
+                && preg_match('/\d/u', $name);
+            if ($isSkuLikeName) {
+                $article = $name;
+            }
+        }
+
         if ($article === '') {
             return false;
         }
