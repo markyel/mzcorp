@@ -309,13 +309,20 @@ class CatalogEmbeddingService
         $out = [];
         foreach ($tokens as $tok) {
             $tok = trim($tok);
-            if (mb_strlen($tok) < 3) continue;
-            // Должен иметь и буквы, и цифры — иначе «Плата» / «32» пройдут
-            // и зашумят результаты.
+            if (mb_strlen($tok) < 5) continue; // отсекает «5мм», «3м/с», «2кВт»
+            // Должен иметь и буквы, и цифры — иначе «Плата» / «32» пройдут.
             if (! preg_match('/\p{L}/u', $tok)) continue;
             if (! preg_match('/\d/u', $tok)) continue;
             $norm = preg_replace('/[\s\-_.\/]/u', '', mb_strtoupper($tok)) ?? '';
-            if (mb_strlen($norm) >= 3 && ! in_array($norm, $out, true)) {
+            // Норма ≥5 симв. И минимум 2 цифры — отсекает короткие
+            // размерности типа «5ММ» (3 симв.) и фразы с одной цифрой
+            // («ВКЛ1» — false-positive под любые «1» в каталоге). Реальные
+            // артикулы (M04557, ПКЛ32, ЕИЛА68725500804, 12067R1, GAA638JR1)
+            // легко проходят.
+            if (mb_strlen($norm) < 5) continue;
+            $digitCount = mb_strlen((string) preg_replace('/\D/u', '', $norm));
+            if ($digitCount < 2) continue;
+            if (! in_array($norm, $out, true)) {
                 $out[] = $norm;
             }
         }
