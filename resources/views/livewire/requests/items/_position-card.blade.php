@@ -93,10 +93,17 @@
         {{-- Position number --}}
         <div class="text-fg-3 font-semibold text-[13px] text-right mono">{{ $item->position }}</div>
 
-        {{-- Image --}}
+        {{-- Image. Если есть x-data с items[] на родительском контейнере
+             (Positions-таб) и индекс этой позиции в галерее — dispatch'им
+             items+index, чтобы лайтбокс показал стрелки. Иначе — legacy
+             single-image. --}}
         @if($itemImgIsImage)
             <button type="button"
-                    x-on:click="$dispatch('open-image', { src: @js($itemPreviewUrl), name: @js($itemImg->filename), dl: @js($itemDownloadUrl) })"
+                    @if(($galleryIndex ?? null) !== null)
+                        x-on:click="$dispatch('open-image', { items: items, index: {{ $galleryIndex }} })"
+                    @else
+                        x-on:click="$dispatch('open-image', { src: @js($itemPreviewUrl), name: @js($itemImg->filename), dl: @js($itemDownloadUrl) })"
+                    @endif
                     class="w-10 h-10 border border-border rounded-[6px] overflow-hidden bg-app block shrink-0"
                     title="{{ $itemImg->filename }} — открыть">
                 <img src="{{ $itemPreviewUrl }}"

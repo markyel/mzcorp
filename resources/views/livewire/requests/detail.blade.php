@@ -1626,7 +1626,24 @@
                                 </div>
                             @endif
 
-                            <div class="p-[8px] bg-app">
+                            @php
+                                // Галерея image-вложений всех позиций — для
+                                // листания в лайтбоксе (← / → между позициями).
+                                $positionsGallery = [];
+                                $positionsImgIndex = [];
+                                foreach ($items as $_pos) {
+                                    $_img = $_pos->imageAttachment;
+                                    if ($_img && $isImageAttachment($_img)) {
+                                        $positionsImgIndex[$_pos->id] = count($positionsGallery);
+                                        $positionsGallery[] = [
+                                            'src' => route('attachments.preview', $_img),
+                                            'name' => $_img->filename,
+                                            'dl' => route('attachments.download', $_img),
+                                        ];
+                                    }
+                                }
+                            @endphp
+                            <div class="p-[8px] bg-app" x-data="{ items: @js($positionsGallery) }">
                             @foreach($items as $item)
                                 @php $slots = $slotResolver->resolve($item); @endphp
                                 @include('livewire.requests.items._position-card', [
@@ -1636,6 +1653,7 @@
                                     'canEditItems' => $canEditItems,
                                     'items' => $items,
                                     'expanded' => (bool) ($expandedPositions[$item->id] ?? false),
+                                    'galleryIndex' => $positionsImgIndex[$item->id] ?? null,
                                 ])
                             @endforeach
                             </div>
