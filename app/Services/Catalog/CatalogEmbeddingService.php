@@ -198,8 +198,11 @@ class CatalogEmbeddingService
         //    рассеивается на длинных фразах, ILIKE же ловит «ПКЛ32» прямо.
         $codeRows = $this->codeTokenTopN($queryText, $poolLimit);
 
-        // 2) Trigram (pg_trgm) — для fuzzy-матча целой фразы.
-        $trgmRows = $this->trigramTopN($queryText, $poolLimit);
+        // 2) Trigram (pg_trgm) — для fuzzy-матча целой фразы. Дороже code:
+        //    GREATEST(word_similarity × N) считается для каждой WHERE-row,
+        //    поэтому скипаем если code уже даёт ≥ $limit результатов.
+        $skipTrgm = count($codeRows) >= $limit;
+        $trgmRows = $skipTrgm ? [] : $this->trigramTopN($queryText, $poolLimit);
 
         // 3) Vector — семантика. embed-вызов в OpenAI ~500-2000мс. Дёргаем
         //    только если faster-источники не дали достаточно результатов —
@@ -432,12 +435,15 @@ class CatalogEmbeddingService
             //
             // Для name (длинная сторона target) — query короткая или
             // верхожая, word_similarity(query, name) → находит query в name.
+            // Минимум слотов: dehyphenated name + (опционально) articles[].
+            // raw lower(name) и brand_article_normalized дублируют — code-token
+            // уже их покрывает через ILIKE, не нужно тут ещё раз через
+            // word_similarity. Меньше слотов → быстрее SELECT GREATEST() на
+            // candidate-rows.
             $sql = "
                 SELECT id AS catalog_id,
                        GREATEST(
-                           word_similarity(?, lower(name)),
-                           word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./]', '', 'g')),
-                           CASE WHEN ? <> '' THEN word_similarity(brand_article_normalized, ?) ELSE 0 END
+                           word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./]', '', 'g'))
                            " . ($useArticles ? ",
                            COALESCE((
                                SELECT MAX(word_similarity(upper(regexp_replace(a, '[\\s\\-_./]', '', 'g')), ?))
@@ -448,9 +454,7 @@ class CatalogEmbeddingService
                 FROM catalog_items
                 WHERE is_active = true
                   AND (
-                       ? <% lower(name)
-                       OR ? <% regexp_replace(lower(name), '[\\s\\-_./]', '', 'g')
-                       OR (? <> '' AND brand_article_normalized <% ?)
+                       ? <% regexp_replace(lower(name), '[\\s\\-_./]', '', 'g')
                        " . ($useArticles ? "
                        OR EXISTS (
                            SELECT 1 FROM jsonb_array_elements_text(articles) AS a
@@ -463,8 +467,8 @@ class CatalogEmbeddingService
             ";
 
             $bindings = $useArticles
-                ? [$lower, $lowerNoSep, $norm, $norm, $norm, $lower, $lowerNoSep, $norm, $norm, $norm, $limit]
-                : [$lower, $lowerNoSep, $norm, $norm, $lower, $lowerNoSep, $norm, $norm, $limit];
+                ? [$lowerNoSep, $norm, $lowerNoSep, $norm, $limit]
+                : [$lowerNoSep, $lowerNoSep, $limit];
 
             $rows = DB::select($sql, $bindings);
         } catch (\Throwable $e) {
