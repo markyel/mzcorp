@@ -191,67 +191,69 @@ class CatalogEmbeddingService
         $limit = max(1, min($n, 50));
         $poolLimit = max($limit, 20);
 
-        // 1) Trigram (pg_trgm) — лоулевел текстовый поиск по name и
-        //    brand_article_normalized. Точные/нечёткие подстроки типа
-        //    «ПКЛ32-04» ловятся за десятки мс через GIN-индекс.
+        // 1) Code-token ILIKE — извлекаем из запроса токены вида ПКЛ32 /
+        //    ЕИЛА.687255.008-04 (буквы+цифры, ≥3 симв.) и ищем их как
+        //    подстроки в normalized name, brand_article_normalized и
+        //    articles[]. Это решает кейс «Плата ПКЛ-32»: word_similarity
+        //    рассеивается на длинных фразах, ILIKE же ловит «ПКЛ32» прямо.
+        $codeRows = $this->codeTokenTopN($queryText, $poolLimit);
+
+        // 2) Trigram (pg_trgm) — для fuzzy-матча целой фразы.
         $trgmRows = $this->trigramTopN($queryText, $poolLimit);
 
-        // 2) Vector — семантика. embed-вызов в OpenAI — fail-soft.
+        // 3) Vector — семантика. embed-вызов в OpenAI — fail-soft.
         $vectorRows = $this->vectorTopN($queryText, $poolLimit, $requestItemId);
 
-        if ($trgmRows === [] && $vectorRows === []) {
+        if ($codeRows === [] && $trgmRows === [] && $vectorRows === []) {
             return [];
         }
 
-        // 3) Merge по catalog_id. Score:
-        //    - оба → max(trgm*1.10, vector), method='both';
-        //    - только trgm → score=trgm, method='trgm';
-        //    - только vector → score=vector, method='vector'.
-        //    *1.10 — лёгкий boost trigram: точное вхождение текста важнее
-        //    семантически близкого вектора.
+        // 4) Merge по catalog_id. Score = MAX:
+        //    - code = 0.95 (твёрдое substring-вхождение токена в name/article);
+        //    - trgm * 1.10 (точное word-extent matching);
+        //    - vector (семантика).
+        //    Method для UI — лучший источник; если несколько → 'multi'.
         $merged = [];
+        foreach ($codeRows as $r) {
+            $cid = (int) $r['catalog_id'];
+            $merged[$cid] = ['catalog_id' => $cid, 'code' => (float) $r['similarity'], 'trgm' => null, 'vector' => null];
+        }
         foreach ($trgmRows as $r) {
             $cid = (int) $r['catalog_id'];
-            $merged[$cid] = [
-                'catalog_id' => $cid,
-                'trgm' => (float) $r['similarity'],
-                'vector' => null,
-            ];
+            $merged[$cid] ??= ['catalog_id' => $cid, 'code' => null, 'trgm' => null, 'vector' => null];
+            $merged[$cid]['trgm'] = (float) $r['similarity'];
         }
         foreach ($vectorRows as $r) {
             $cid = (int) $r['catalog_id'];
-            if (isset($merged[$cid])) {
-                $merged[$cid]['vector'] = (float) $r['similarity'];
-            } else {
-                $merged[$cid] = [
-                    'catalog_id' => $cid,
-                    'trgm' => null,
-                    'vector' => (float) $r['similarity'],
-                ];
-            }
+            $merged[$cid] ??= ['catalog_id' => $cid, 'code' => null, 'trgm' => null, 'vector' => null];
+            $merged[$cid]['vector'] = (float) $r['similarity'];
         }
 
         $scored = [];
         foreach ($merged as $cid => $m) {
+            $code = $m['code'];
             $trgm = $m['trgm'];
             $vec = $m['vector'];
-            if ($trgm !== null && $vec !== null) {
-                $score = max($trgm * 1.10, $vec);
-                $method = 'both';
-            } elseif ($trgm !== null) {
-                $score = $trgm * 1.10;
-                $method = 'trgm';
-            } else {
-                $score = (float) $vec;
-                $method = 'vector';
-            }
-            // clamp в [0..1] — boost мог вытянуть >1, в UI это выглядело бы
-            // как «110%» — отрезаем.
-            $score = max(0.0, min(1.0, $score));
+
+            $candidates = [];
+            if ($code !== null) $candidates['code'] = $code;
+            if ($trgm !== null) $candidates['trgm'] = $trgm * 1.10;
+            if ($vec !== null) $candidates['vector'] = (float) $vec;
+            $bestSource = array_keys($candidates, max($candidates), true)[0];
+            $score = max(0.0, min(1.0, max($candidates)));
+
+            // Tiebreaker: +0.001 за каждый дополнительный источник, чтобы
+            // multi-source поднимался над одинаково оценённым single-source.
+            $score += 0.001 * (count($candidates) - 1);
+            $score = min(1.0, $score);
+
+            $method = count($candidates) >= 2 ? 'multi' : $bestSource;
+
             $scored[] = [
                 'catalog_id' => $cid,
                 'score' => $score,
                 'method' => $method,
+                'code' => $code,
                 'trgm' => $trgm,
                 'vector' => $vec,
             ];
@@ -272,12 +274,103 @@ class CatalogEmbeddingService
             $out[] = [
                 'catalog' => $cat,
                 'similarity' => $r['score'],
-                'method' => $r['method'], // trgm | vector | both
+                'method' => $r['method'], // code | trgm | vector | multi
+                'code_score' => $r['code'],
                 'trgm_score' => $r['trgm'],
                 'vector_score' => $r['vector'],
             ];
         }
 
+        return $out;
+    }
+
+    /**
+     * Извлечь из произвольной строки токены вида ПКЛ32, ЕИЛА.687255.008-04 —
+     * последовательности символов с минимум одной буквой И одной цифрой,
+     * длина ≥3 после очистки разделителей. Используется для прямого
+     * ILIKE-substring-поиска (см. codeTokenTopN).
+     *
+     * Дублируется нормализация (uppercase + strip [\s\-_./]) — совместима
+     * с тем как импортируется brand_article_normalized и как мы потом
+     * нормализуем articles[] элементы в SQL.
+     *
+     * @return list<string>
+     */
+    private function extractCodeTokens(string $queryText): array
+    {
+        $tokens = preg_split('/[\s,;]+/u', $queryText) ?: [];
+        $out = [];
+        foreach ($tokens as $tok) {
+            $tok = trim($tok);
+            if (mb_strlen($tok) < 3) continue;
+            // Должен иметь и буквы, и цифры — иначе «Плата» / «32» пройдут
+            // и зашумят результаты.
+            if (! preg_match('/\p{L}/u', $tok)) continue;
+            if (! preg_match('/\d/u', $tok)) continue;
+            $norm = preg_replace('/[\s\-_.\/]/u', '', mb_strtoupper($tok)) ?? '';
+            if (mb_strlen($norm) >= 3 && ! in_array($norm, $out, true)) {
+                $out[] = $norm;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * ILIKE substring match по нормализованным name/brand_article/articles[]
+     * для каждого code-token. Возвращает все catalog_items, где хотя бы один
+     * токен встречается. Score = 0.95 (твёрдое substring-вхождение).
+     *
+     * Дешевле trigram'а на коротких токенах, но менее устойчив к опечаткам.
+     * Trigram остаётся для fuzzy-кейсов.
+     *
+     * @return list<array{catalog_id: int, similarity: float}>
+     */
+    private function codeTokenTopN(string $queryText, int $limit): array
+    {
+        $tokens = $this->extractCodeTokens($queryText);
+        if ($tokens === []) {
+            return [];
+        }
+
+        // PG-array literal: '{"%TOK1%","%TOK2%"}'. Экранируем " и \ внутри.
+        $likeTokens = array_map(
+            fn ($t) => '%' . str_replace(['\\', '"'], ['\\\\', '\\"'], $t) . '%',
+            $tokens,
+        );
+        $pgArray = '{' . implode(',', array_map(fn ($s) => '"' . $s . '"', $likeTokens)) . '}';
+
+        try {
+            $rows = DB::select(
+                "
+                SELECT id AS catalog_id
+                FROM catalog_items
+                WHERE is_active = true
+                  AND (
+                       upper(regexp_replace(coalesce(name, ''), '[\\s\\-_./]', '', 'g')) ILIKE ANY (?::text[])
+                       OR coalesce(brand_article_normalized, '') ILIKE ANY (?::text[])
+                       OR EXISTS (
+                           SELECT 1
+                           FROM jsonb_array_elements_text(coalesce(articles, '[]'::jsonb)) AS a
+                           WHERE a IS NOT NULL AND a <> ''
+                             AND upper(regexp_replace(a, '[\\s\\-_./]', '', 'g')) ILIKE ANY (?::text[])
+                       )
+                  )
+                LIMIT ?
+                ",
+                [$pgArray, $pgArray, $pgArray, $limit],
+            );
+        } catch (\Throwable $e) {
+            Log::info('CatalogEmbeddingService: code-token search failed', [
+                'error' => $e->getMessage(),
+                'tokens' => $tokens,
+            ]);
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $r) {
+            $out[] = ['catalog_id' => (int) $r->catalog_id, 'similarity' => 0.95];
+        }
         return $out;
     }
 

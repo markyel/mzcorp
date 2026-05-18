@@ -122,20 +122,27 @@
                                 ? 'text-emerald-700'
                                 : ($sim >= 0.75 ? 'text-amber-700' : 'text-fg-3');
                             $method = $row['method'] ?? null;
+                            $codeScore = $row['code_score'] ?? null;
                             $trgmScore = $row['trgm_score'] ?? null;
                             $vecScore = $row['vector_score'] ?? null;
                             $methodIcon = match ($method) {
-                                'both' => '🔀',
+                                'multi' => '🔀',
+                                'code' => '🎯',
                                 'trgm' => '🔤',
                                 'vector' => '✨',
+                                'both' => '🔀',  // back-compat если придёт старое значение
                                 default => null,
                             };
+                            $parts = [];
+                            if ($codeScore !== null) $parts[] = 'code-token';
+                            if ($trgmScore !== null) $parts[] = 'trgm ' . round($trgmScore * 100) . '%';
+                            if ($vecScore !== null) $parts[] = 'vec ' . round($vecScore * 100) . '%';
                             $methodTitle = match ($method) {
-                                'both' => 'Найдено и текстом, и семантикой'
-                                    . ($trgmScore !== null ? ' (trgm '.round($trgmScore*100).'%' : '')
-                                    . ($vecScore !== null ? ', vec '.round($vecScore*100).'%)' : ($trgmScore !== null ? ')' : '')),
+                                'multi' => 'Найдено несколькими способами: ' . implode(', ', $parts),
+                                'code' => 'Точное вхождение кода (ILIKE)',
                                 'trgm' => 'Текстовое совпадение (pg_trgm)',
                                 'vector' => 'Семантическая похожесть (vector)',
+                                'both' => 'Найдено текстом и семантикой: ' . implode(', ', $parts),
                                 default => '',
                             };
                         @endphp
