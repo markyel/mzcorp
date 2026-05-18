@@ -249,9 +249,13 @@ class CatalogEmbeddingService
             $bestSource = array_keys($candidates, max($candidates), true)[0];
             $score = max(0.0, min(1.0, max($candidates)));
 
-            // Tiebreaker: +0.001 за каждый дополнительный источник, чтобы
-            // multi-source поднимался над одинаково оценённым single-source.
-            $score += 0.001 * (count($candidates) - 1);
+            // Multi-source бонус: подтверждение разными способами =
+            // существенно надёжнее одиночного. +0.05 за каждый
+            // дополнительный источник (multi/2 → +0.05, multi/3 → +0.10).
+            // Это поднимает multi над «жёстким» code=0.95 single-source:
+            // code=0.7 + trgm=0.88 + vec=0.85 (max 0.88, +0.10 = 0.98)
+            // встаёт выше «code-only 0.95».
+            $score += 0.05 * (count($candidates) - 1);
             $score = min(1.0, $score);
 
             $method = count($candidates) >= 2 ? 'multi' : $bestSource;
