@@ -767,6 +767,8 @@
             <livewire:requests.pause-dialog :request="$req" wire:key="pause-{{ $req->id }}" />
             <livewire:requests.postpone-dialog :request="$req" wire:key="postpone-{{ $req->id }}" />
             <livewire:requests.close-lost-dialog :request="$req" wire:key="close-lost-{{ $req->id }}" />
+            {{-- Phase 7: ручной доматчинг строк КП к позициям заявки. --}}
+            <livewire:requests.quotes.match-request-item-dialog :request="$req" wire:key="quote-match-{{ $req->id }}" />
         </div>
     </div>
 
@@ -2219,16 +2221,33 @@
                                                                    title="{{ $ri->parsed_name }}">
                                                                     поз. №{{ $ri->position ?? '?' }}
                                                                 </a>
-                                                                <div class="text-[10.5px] mt-0.5">
+                                                                <div class="text-[10.5px] mt-0.5 flex items-center gap-1.5 flex-wrap">
                                                                     <span class="inline-block px-1.5 py-0.5 rounded border {{ $srcCss }}">{{ $srcLabel }}</span>
                                                                     @if($qi->match_score)
-                                                                        <span class="text-fg-3 mono ml-0.5">{{ number_format($qi->match_score * 100, 0) }}%</span>
+                                                                        <span class="text-fg-3 mono">{{ number_format($qi->match_score * 100, 0) }}%</span>
+                                                                    @endif
+                                                                    @if($canManage || $canReassign)
+                                                                        <button type="button"
+                                                                                x-on:click="$dispatch('open-quote-match', { quoteItemId: {{ $qi->id }} })"
+                                                                                class="text-sky-700 hover:underline"
+                                                                                title="Изменить привязку или отвязать">
+                                                                            🔄
+                                                                        </button>
                                                                     @endif
                                                                 </div>
                                                             @else
-                                                                <span class="inline-block px-1.5 py-0.5 rounded border {{ $sourceColors['neutral'] }} text-[10.5px]">
-                                                                    не сматчено
-                                                                </span>
+                                                                <div class="flex items-center gap-1.5 flex-wrap">
+                                                                    <span class="inline-block px-1.5 py-0.5 rounded border {{ $sourceColors['neutral'] }} text-[10.5px]">
+                                                                        не сматчено
+                                                                    </span>
+                                                                    @if($canManage || $canReassign)
+                                                                        <button type="button"
+                                                                                x-on:click="$dispatch('open-quote-match', { quoteItemId: {{ $qi->id }} })"
+                                                                                class="text-[10.5px] text-sky-700 hover:underline">
+                                                                            🔗 Привязать
+                                                                        </button>
+                                                                    @endif
+                                                                </div>
                                                                 @if($qi->matched_catalog_item_id)
                                                                     <div class="text-[10.5px] text-fg-3 mt-0.5">в каталоге есть, в заявке нет</div>
                                                                 @endif
