@@ -283,6 +283,18 @@ class OutboundQuoteParsingService
             // не помог и Vision тоже урезал артикул).
             $items = $this->repairItemArticles($items, $repairedText, $request);
 
+            // Кросс-валидатор: Σ items.total vs document.total_amount.
+            // Vision иногда галлюцинирует на отдельных строках (см. quote_id=2:
+            // первая строка прилетела на 6 986.80 ₽ выше реальной — Vision
+            // прибавил подвальную скидку к row total). Здесь мы такие случаи
+            // ДЕТЕКТИМ и записываем в document['_warnings'] для UI badge.
+            // Сам пересчёт не делаем — Vision мог быть прав, и расхождение
+            // объясняется подвальной скидкой; решение за оператором.
+            $warnings = $this->validateLineTotals($items, $document, $request);
+            if (! empty($warnings)) {
+                $document['_warnings'] = $warnings;
+            }
+
             return [
                 'document' => $document,
                 'items' => $items,
@@ -535,6 +547,33 @@ class OutboundQuoteParsingService
 - Бери ФИНАЛЬНУЮ цену (со скидкой, если есть колонка «Цена со скидкой»).
 - Передавай РОВНО как в документе — без самостоятельного добавления/вычитания НДС.
 
+**ТИПОВОЙ ШАБЛОН КП Liftway / партнёрских PDF — ВНИМАНИЕ:**
+В таблице позиций часто 5+ числовых колонок подряд:
+   «Цена» | «% Скидка» | «Цена со скидкой» | «Сумма» | «НДС в т.ч.»
+Правила выбора значений:
+- `unit_price` = значение из колонки «Цена со скидкой» (НЕ из «Цена» — это базовая до скидки).
+- `total` = значение из колонки «Сумма» (это per-row итог = Цена со скидкой × Кол-во).
+- НИКОГДА не складывай «Сумму» строки со скидкой из подвала документа: подвальная скидка
+  («Скидка %X: -Y руб») уже встроена в построчные «Цена со скидкой» / «Сумма»; она там
+  только для информации и не должна добавляться повторно. Если в подвале есть строка
+  «Скидка: -6 986.80» и одновременно построчные «Цена со скидкой» — `total` строк это
+  «Сумма», не «Сумма + скидка».
+- НИКОГДА не складывай «Сумму» строки с её «НДС в т.ч.»: НДС уже включён в Сумму
+  (если prices_include_vat=true).
+
+**КРОСС-ПРОВЕРКА АРИФМЕТИКИ — ОБЯЗАТЕЛЬНО:**
+После выбора всех `unit_price`/`total` для items проверь:
+   Σ items[*].total ≈ document.total_amount   (с допуском 2%)
+если prices_include_vat=true. Если расхождение БОЛЬШЕ 5% — где-то ошибка:
+- проверь, не прибавил ли ты подвальную скидку к одной из строк (типичный hallucination
+  pattern: первая строка завышена ровно на величину подвальной скидки);
+- проверь, не взял ли ты «Цена» (базовая) вместо «Цена со скидкой» в какой-то строке;
+- переиграй цены и проверь снова.
+
+Если в документе есть подвальная общая скидка («Скидка: -X руб») И построчные «Цена со
+скидкой» — это означает что построчная скидка УЖЕ применена, подвальная строка чисто
+информационная (показывает совокупную сумму скидки по всем строкам).
+
 **НДС — извлеки три суммы раздельно:**
 - subtotal: "Итого" / "Итого без НДС" / "Сумма без НДС". null если нет.
 - vat_amount: "Сумма НДС" / "НДС" / "В том числе НДС". null если не выделен.
@@ -672,6 +711,102 @@ PROMPT;
         unset($item);
 
         return $items;
+    }
+
+    /**
+     * Кросс-валидатор арифметики: Σ items[].total vs document.total_amount.
+     *
+     * Кейс quote_id=2 (МЗ-355534): Vision прилетел с row 1 завышенным ровно на
+     * величину подвальной общей скидки. Σ items.total = 47 181.70, document.total
+     * = 40 194.90, расхождение 6 986.80 = ровно подвальная скидка. Это надёжный
+     * сигнал «Vision переложил подвальную скидку на одну из строк».
+     *
+     * Здесь мы только ДЕТЕКТИМ — не правим. Решение за оператором (ручной
+     * доматчинг + correction в Phase следующая, либо reparse).
+     *
+     * @return list<array{type: string, message: string, expected?: float, got?: float, diff?: float, diff_pct?: float, suspect_item_index?: int}>
+     */
+    private function validateLineTotals(array $items, array $document, Request $request): array
+    {
+        $warnings = [];
+
+        $totalAmount = isset($document['total_amount']) && is_numeric($document['total_amount'])
+            ? (float) $document['total_amount'] : null;
+        $pricesIncludeVat = $document['prices_include_vat'] ?? null;
+
+        // 1) Per-row check: |unit_price × quantity - total| ≤ 2%.
+        foreach ($items as $idx => $item) {
+            $up = isset($item['unit_price']) && is_numeric($item['unit_price']) ? (float) $item['unit_price'] : null;
+            $qty = isset($item['quantity']) && is_numeric($item['quantity']) ? (float) $item['quantity'] : null;
+            $tot = isset($item['total']) && is_numeric($item['total']) ? (float) $item['total'] : null;
+            // Мерный товар считается по unit_price × unit_quantity × quantity.
+            $uq = isset($item['unit_quantity']) && is_numeric($item['unit_quantity']) ? (float) $item['unit_quantity'] : null;
+
+            if ($up === null || $qty === null || $tot === null || $up <= 0 || $qty <= 0) {
+                continue;
+            }
+            $expected = $uq !== null && $uq > 0 ? $up * $uq * $qty : $up * $qty;
+            if ($tot <= 0) {
+                continue;
+            }
+            $diff = abs($expected - $tot);
+            if ($diff / max($tot, 1.0) > 0.02) {
+                $warnings[] = [
+                    'type' => 'row_arithmetic_mismatch',
+                    'message' => sprintf(
+                        'Поз %d (%s): unit_price × qty = %.2f, total = %.2f, расхождение %.2f',
+                        $idx + 1,
+                        mb_substr((string) ($item['name'] ?? ''), 0, 40),
+                        $expected,
+                        $tot,
+                        $diff
+                    ),
+                    'suspect_item_index' => $idx,
+                    'expected' => round($expected, 2),
+                    'got' => round($tot, 2),
+                    'diff' => round($diff, 2),
+                ];
+            }
+        }
+
+        // 2) Document check: Σ items.total ≈ document.total_amount (если prices_include_vat=true).
+        if ($totalAmount !== null && $totalAmount > 0 && $pricesIncludeVat === true) {
+            $sumTotals = 0.0;
+            foreach ($items as $item) {
+                if (isset($item['total']) && is_numeric($item['total'])) {
+                    $sumTotals += (float) $item['total'];
+                }
+            }
+            if ($sumTotals > 0) {
+                $diff = $sumTotals - $totalAmount;
+                $diffPct = abs($diff) / $totalAmount;
+                if ($diffPct > 0.02) {
+                    $warnings[] = [
+                        'type' => 'sum_vs_total_mismatch',
+                        'message' => sprintf(
+                            'Σ items.total (%.2f) ≠ document.total_amount (%.2f); расхождение %.2f (%.1f%%)',
+                            $sumTotals,
+                            $totalAmount,
+                            $diff,
+                            $diffPct * 100
+                        ),
+                        'expected' => round($totalAmount, 2),
+                        'got' => round($sumTotals, 2),
+                        'diff' => round($diff, 2),
+                        'diff_pct' => round($diffPct * 100, 1),
+                    ];
+                }
+            }
+        }
+
+        if (! empty($warnings)) {
+            Log::warning('OutboundQuoteParser: validation warnings', [
+                'request_id' => $request->id,
+                'warnings' => $warnings,
+            ]);
+        }
+
+        return $warnings;
     }
 
     /**

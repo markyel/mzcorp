@@ -253,9 +253,17 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
             $quote->refresh();
             $quote->status = OutboundQuote::STATUS_MATCHED;
             $quote->matched_at = now();
+            $payloadPatch = ['match_stats' => $matchStats];
+            // Validation warnings от парсера (см. validateLineTotals): row arithmetic
+            // mismatch и Σ items.total vs document.total_amount mismatch. Сохраняем
+            // в payload для UI badge в табе «КП».
+            $parserWarnings = data_get($document, '_warnings');
+            if (is_array($parserWarnings) && ! empty($parserWarnings)) {
+                $payloadPatch['warnings'] = $parserWarnings;
+            }
             $quote->payload = array_merge(
                 is_array($quote->payload) ? $quote->payload : [],
-                ['match_stats' => $matchStats]
+                $payloadPatch
             );
             $quote->save();
 

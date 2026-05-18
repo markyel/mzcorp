@@ -2096,6 +2096,13 @@
                                 $hasDiscount = $quote->total_amount !== null
                                     && $linesSum > 0
                                     && abs($linesSum - (float) $quote->total_amount) > 1.0;
+                                // Validation warnings от парсера (validateLineTotals).
+                                $parseWarnings = data_get($quote->payload, 'warnings', []);
+                                $hasWarnings = is_array($parseWarnings) && count($parseWarnings) > 0;
+                                $suspectIndexes = collect($parseWarnings)
+                                    ->pluck('suspect_item_index')
+                                    ->filter(fn ($v) => is_int($v))
+                                    ->flip();
                             @endphp
                             <details class="ds-card" {{ $idx === 0 ? 'open' : '' }}>
                                 <summary class="ds-card-header cursor-pointer select-none">
@@ -2108,6 +2115,12 @@
                                             <span class="text-fg-3 font-normal">от {{ $quote->document_date->format('d.m.Y') }}</span>
                                         @endif
                                     </h3>
+                                    @if($hasWarnings)
+                                        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-200 text-[11px]"
+                                              title="Парсер обнаружил расхождение арифметики. Раскройте карточку — детали под meta-row.">
+                                            ⚠ проверь цифры
+                                        </span>
+                                    @endif
                                     <span class="flex-1"></span>
                                     <span class="text-fg-1 font-semibold mono">
                                         {{ $quote->total_amount !== null ? number_format((float) $quote->total_amount, 2, '.', ' ') . ' ₽' : '—' }}
@@ -2150,6 +2163,24 @@
                                         @endif
                                     </div>
 
+                                    {{-- Phase 7: warnings от парсера. Раскрытый список расхождений
+                                         (row arithmetic, Σ items vs total). --}}
+                                    @if($hasWarnings)
+                                        <div class="px-[18px] py-2.5 border-b border-[var(--border-subtle)] bg-amber-50/40">
+                                            <div class="text-[12px] font-semibold text-amber-800 mb-1">⚠ Парсер обнаружил расхождение арифметики</div>
+                                            <ul class="text-[11.5px] text-amber-800 space-y-0.5 list-disc pl-4">
+                                                @foreach($parseWarnings as $w)
+                                                    <li>{{ $w['message'] ?? '—' }}</li>
+                                                @endforeach
+                                            </ul>
+                                            <div class="text-[11px] text-fg-3 mt-1.5">
+                                                Возможные причины: Vision галлюцинировал на одной из строк (прибавил подвальную скидку),
+                                                либо в PDF действительно есть структура «Σ строк ≠ Итого». Проверь подозрительные строки
+                                                в таблице ниже (помечены амбер-фоном) или перепарси с <code>quotes:parse-outbound --apply --reset --quote={{ $quote->id }}</code>.
+                                            </div>
+                                        </div>
+                                    @endif
+
                                     {{-- Таблица строк КП. --}}
                                     @if($quote->items->isEmpty())
                                         <div class="px-[18px] py-6 text-center text-fg-3 text-sm">Парсер не извлёк ни одной строки.</div>
@@ -2167,14 +2198,18 @@
                                                 </tr>
                                             </thead>
                                             <tbody class="divide-y divide-[var(--border-subtle)]">
-                                                @foreach($quote->items as $qi)
+                                                @foreach($quote->items as $qiLoopIdx => $qi)
                                                     @php
                                                         [$srcLabel, $srcColor] = $sourceLabels[$qi->match_source] ?? ['—', 'neutral'];
                                                         $srcCss = $sourceColors[$srcColor];
                                                         $ri = $qi->requestItem;
                                                         $cat = $qi->catalogItem;
+                                                        $isSuspect = $suspectIndexes->has($qiLoopIdx);
+                                                        $rowClass = $isSuspect
+                                                            ? 'bg-amber-100/60'  // суспект арифметики — ярче
+                                                            : ($qi->matched_request_item_id === null ? 'bg-amber-50/30' : '');
                                                     @endphp
-                                                    <tr class="{{ $qi->matched_request_item_id === null ? 'bg-amber-50/30' : '' }} align-top">
+                                                    <tr class="{{ $rowClass }} align-top" title="{{ $isSuspect ? 'Подозрительная арифметика — см. warnings выше' : '' }}">
                                                         <td class="px-[18px] py-2 text-fg-3 mono">{{ $qi->position }}</td>
                                                         <td class="py-2 pr-3">
                                                             <div class="text-fg-1">{{ $qi->raw_name ?: '—' }}</div>
