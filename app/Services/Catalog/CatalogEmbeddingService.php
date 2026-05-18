@@ -435,32 +435,32 @@ class CatalogEmbeddingService
             //
             // Для name (длинная сторона target) — query короткая или
             // верхожая, word_similarity(query, name) → находит query в name.
-            // Минимум слотов: dehyphenated name + (опционально) articles[].
+            // Минимум слотов: dehyphenated name + (опционально) articles_search.
             // raw lower(name) и brand_article_normalized дублируют — code-token
-            // уже их покрывает через ILIKE, не нужно тут ещё раз через
-            // word_similarity. Меньше слотов → быстрее SELECT GREATEST() на
-            // candidate-rows.
+            // уже их покрывает через ILIKE.
+            //
+            // articles_search — денормализованный text-столбец (миграция
+            // 2026_05_18_160000_add_articles_search_column_to_catalog_items)
+            // с GIN trgm индексом, обновляемый PG-триггером. Заменяет
+            // jsonb_array_elements_text seq scan (~1500мс) на индексный
+            // word_similarity lookup (~десятки мс).
             $sql = "
                 SELECT id AS catalog_id,
                        GREATEST(
                            word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./]', '', 'g'))
                            " . ($useArticles ? ",
-                           COALESCE((
-                               SELECT MAX(word_similarity(upper(regexp_replace(a, '[\\s\\-_./]', '', 'g')), ?))
-                               FROM jsonb_array_elements_text(articles) AS a
-                               WHERE a IS NOT NULL AND a <> ''
-                           ), 0)" : "") . "
+                           CASE
+                               WHEN articles_search IS NOT NULL AND articles_search <> ''
+                               THEN word_similarity(?, articles_search)
+                               ELSE 0
+                           END" : "") . "
                        ) AS s
                 FROM catalog_items
                 WHERE is_active = true
                   AND (
                        ? <% regexp_replace(lower(name), '[\\s\\-_./]', '', 'g')
                        " . ($useArticles ? "
-                       OR EXISTS (
-                           SELECT 1 FROM jsonb_array_elements_text(articles) AS a
-                           WHERE a IS NOT NULL AND a <> ''
-                             AND upper(regexp_replace(a, '[\\s\\-_./]', '', 'g')) <% ?
-                       )" : "") . "
+                       OR (articles_search IS NOT NULL AND ? <% articles_search)" : "") . "
                   )
                 ORDER BY s DESC
                 LIMIT ?
