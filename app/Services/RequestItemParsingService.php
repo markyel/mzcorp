@@ -164,7 +164,10 @@ class RequestItemParsingService
                 'invoice_index' => $it['invoice_index'] ?? null,
             ];
         }, $items);
-        Log::info('parseItemsFromInbound: LLM response', [
+        // warning, а не info — на проде LOG_LEVEL может быть выше info
+        // (warning/error), и info-сообщения теряются. Это временная
+        // диагностика multi-invoice парсинга, потом можно вернуть на info.
+        Log::warning('parseItemsFromInbound: LLM response', [
             'subject_preview' => mb_substr((string) $subject, 0, 60),
             'invoice_analysis' => $ia,
             'items_count' => count($items),
