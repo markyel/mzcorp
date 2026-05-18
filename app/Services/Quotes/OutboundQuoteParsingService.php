@@ -319,6 +319,12 @@ class OutboundQuoteParsingService
         $items = $this->normalizeItemsVat($items, $document, $request);
         $items = $this->repairItemArticles($items, $repairedText, $request);
 
+        // Auto-fix per-row arithmetic: если |unit_price × qty − total| > 2%,
+        // доверяем unit_price × qty. Vision чаще правильно читает per-unit
+        // цену из колонки «Цена со скидкой», но путает агрегаты (например
+        // в split-delivery дублирует общий total в каждую из split-строк).
+        $items = $this->autoFixRowArithmetic($items, $request);
+
         $warnings = $this->validateLineTotals($items, $document, $request);
         if (! empty($warnings)) {
             $document['_warnings'] = $warnings;
@@ -329,6 +335,74 @@ class OutboundQuoteParsingService
             'items' => $items,
             'raw' => $result['raw'],
         ];
+    }
+
+    /**
+     * Авто-фикс per-row арифметики. Если в строке `|unit_price × qty − total| > 2%`,
+     * пересчитываем `total = unit_price × qty` (или `unit_price × unit_quantity × qty`
+     * для мерных). Audit пишем в item['_corrections'] чтобы UI/log могли показать.
+     *
+     * Когда применять fix:
+     *  • unit_price > 0 (мы доверяем per-unit цене больше чем агрегату);
+     *  • quantity > 0;
+     *  • расхождение > 2% (мелкая копеечная неточность не трогаем).
+     *
+     * Кейс split-delivery: Vision дублирует общий total в каждую split-строку
+     * (Поз 4 и 5 = 5 шт × 560.83 = 2804.15 каждая, но Vision вернул total=5608.30
+     * в обе). Trust `unit_price × qty` чинит обе → Σ items.total сходится с
+     * document.total_amount.
+     */
+    private function autoFixRowArithmetic(array $items, Request $request): array
+    {
+        foreach ($items as $idx => &$item) {
+            $up = isset($item['unit_price']) && is_numeric($item['unit_price']) ? (float) $item['unit_price'] : null;
+            $qty = isset($item['quantity']) && is_numeric($item['quantity']) ? (float) $item['quantity'] : null;
+            $tot = isset($item['total']) && is_numeric($item['total']) ? (float) $item['total'] : null;
+            $uq = isset($item['unit_quantity']) && is_numeric($item['unit_quantity']) ? (float) $item['unit_quantity'] : null;
+
+            if ($up === null || $qty === null || $tot === null || $up <= 0 || $qty <= 0 || $tot <= 0) {
+                continue;
+            }
+
+            $expected = $uq !== null && $uq > 0 ? $up * $uq * $qty : $up * $qty;
+            if (abs($expected - $tot) / max($tot, 1.0) <= 0.02) {
+                continue;
+            }
+
+            // Корректируем. Сохраняем оригинальный total в _corrections для аудита.
+            $corrections = is_array($item['_corrections'] ?? null) ? $item['_corrections'] : [];
+            $corrections[] = [
+                'field' => 'total',
+                'reason' => 'row_arithmetic_mismatch',
+                'before' => $tot,
+                'after' => round($expected, 2),
+                'formula' => $uq !== null && $uq > 0
+                    ? sprintf('%.2f × %.3f × %.3f', $up, $uq, $qty)
+                    : sprintf('%.2f × %.3f', $up, $qty),
+            ];
+            $item['_corrections'] = $corrections;
+            $item['total'] = round($expected, 2);
+            // price для штучного = unit_price; для мерного = unit_price × unit_quantity.
+            // Обновляем чтобы Job записал согласованные line_price/line_total.
+            if ($uq !== null && $uq > 0) {
+                $item['price'] = round($up * $uq, 2);
+            } else {
+                $item['price'] = $up;
+            }
+
+            Log::info('OutboundQuoteParser: auto-fixed row arithmetic', [
+                'request_id' => $request->id,
+                'item_index' => $idx,
+                'name' => mb_substr((string) ($item['name'] ?? ''), 0, 60),
+                'before_total' => $tot,
+                'after_total' => round($expected, 2),
+                'unit_price' => $up,
+                'quantity' => $qty,
+            ]);
+        }
+        unset($item);
+
+        return $items;
     }
 
     /**
