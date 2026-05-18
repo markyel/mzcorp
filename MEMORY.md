@@ -1072,7 +1072,61 @@ sudo systemctl restart php8.3-fpm
 sudo -u www-data php artisan schedule:list | grep resume-paused
 ```
 
-## План на следующую сессию
+### Сессия 2026-05-18 — Catalog UI, hybrid search, lightbox gallery, compare
+
+Шесть UX/perf-улучшений диалога «Привязать позицию к каталогу» и связанных UI. Все на проде.
+
+**Коммиты:** `d1f58ea` … `a0000c6` (≈20 коммитов).
+
+**1. Custom-query в «Похожие из каталога» (#5)** — менеджер пишет свой запрос («Плата ПКЛ-32») вместо опоры на `parsed_name`, нажимает 🔍 → vector-поиск идёт по этому тексту. Кнопка «↺ Сбросить» возвращает дефолт.
+- `CatalogEmbeddingService::topNByQueryText(query, n)` — отрефакторено из `topNByRequestItem`, параметризовано на text.
+- `RequestItemEditor::findSimilarByQuery` — auth-checked wrapper.
+- `ItemCatalogLinkDialog`: `$similarQuery`, `$similarQueryActive`, `applySimilarQuery()` / `resetSimilarQuery()`.
+
+**2. Hybrid search (`code+trgm+vector`)** — pure vector рассеивался на длинных фразах. Сейчас три источника, merge по `catalog_id`, score=MAX, метод в UI помечен иконкой (🎯 code / 🔤 trgm / ✨ vector / 🔀 multi):
+- **code-token ILIKE**: `extractCodeTokens(query)` тащит буквы+цифры ≥3 симв., ищет substring через `regexp_replace(lower(name), '[\s\-_./]', '', 'g') ILIKE ANY ?::text[]` + `brand_article_normalized ILIKE ANY`. Использует GIN trgm индекс.
+- **trigram pg_trgm**: `word_similarity` на dehyphenated name + (опц.) `articles_search`. $useArticles требует ≥6 цифр в нормализованной форме.
+- **vector**: OpenAI embed → pgvector. Deferred — дёргается только если code+trgm < limit.
+- `*1.10` boost trigram над vector. Tiebreaker +0.001 за каждый дополнительный источник для multi-source.
+
+**3. pg_trgm + GIN индексы (миграции)**:
+- `2026_05_18_140000_enable_pgtrgm_and_index_catalog_items.php` — `CREATE EXTENSION IF NOT EXISTS pg_trgm` (fail-soft) + GIN на `lower(name)` и `brand_article_normalized`.
+- `2026_05_18_150000_add_dehyphenated_name_trgm_index.php` — функциональный GIN на `regexp_replace(lower(name), '[\s\-_./]', '', 'g')`.
+- `2026_05_18_160000_add_articles_search_column_to_catalog_items.php` — text-столбец `articles_search` = upper-concat нормализованных `articles[]` через `|`, PG trigger `BEFORE INSERT OR UPDATE OF articles` пересчитывает, backfill 35K строк, GIN trgm индекс. Закрыло EMMA-кейс: 1300мс → 12мс (290× быстрее) для verbose article-query.
+- Beget Cloud DB — pg_trgm whitelisted, индексы созданы.
+
+**4. Перф итог (тинкер на 35K каталоге)**:
+- «Плата ПКЛ-32» — 48 мс (code-token)
+- «Башмак кабины OTIS» — 11 мс (trgm)
+- «EMMA.687255.008-04» — 495 мс (articles_search + trgm)
+- «Плата управления ПКЛ-32 с ПЗУ ЕИЛА.687255.008-04» — 12 мс (multi-source)
+
+Также `CatalogSearchService::search` (текстовый таб): убран `LOWER(sku/brand_article/name) ILIKE + ORDER BY CASE` full-scan, заменён на `lower(name) LIKE` через GIN trgm + sku ILIKE + brand_article_normalized.
+
+**5. Lightbox с навигацией (gallery-mode)** — `resources/views/livewire/requests/detail.blade.php` лайтбокс расширен: принимает `{items: [{src,name,dl},...], index: N}`, рисует ‹ › кнопки (фон rgba(0,0,0,0.55)), счётчик «N/M», keydown.left/right.window. Legacy формат `{src,name,dl}` поддерживается — wrapped в 1-item gallery без стрелок.
+
+Применено в:
+- Диалог «Привязать позицию к каталогу» — мини-галерея 2×3 в шапке (subject); компактная карусель ‹›/counter в compare-режиме.
+- Detail.blade tab «Переписка» — gallery per-message.
+- Detail.blade tab «Файлы» — gallery всех image-вложений треда.
+- Detail.blade tab «Позиции» — galleryItems = все image-вложения письма заявки (`$email->attachments`), index по `image_attachment_id → idx`. Передаётся в `_position-card.blade.php` явно через @include params (не через x-data inheritance — Alpine reactivity ломалась через Livewire morph).
+
+**6. Compare-режим (#6)** — в результатах диалога чекбокс-колонка «⚖️», менеджер выбирает 1-3 каталога, «⚖️ Сравнить (N)» в тулбаре. Модал расширяется до `max-w-[1200px]`, рисуется grid: subject (sky-фон, мини-карусель фото) + 1-3 catalog-колонки. Полные поля: фото 1:1, SKU, brand, brand_article, все `articles[]` (multi-OEM), unit/part_type/form_factor, цена, наличие, вес, размеры A..F, статус. Кнопка «Выбрать»/«✓ Выбрано» в каждой → `selectCatalogId`. «← К списку» возврат.
+- State: `$compareIds: array<int>` (max 3), `$comparing: bool`, `compareItems` Computed.
+
+**Грабли сессии**:
+- **Alpine `get` getters в x-data + Livewire morph**: `:src="lbCur.src"` через getter не обновлялся при `prev/next` — Alpine reactivity не трекала зависимости через computed getter. Решение: плоские поля `lbSrc/lbName/lbDl` + метод `sync()` который их обновляет после mutate `lbIdx`.
+- **x-data scope через @include + wire:morph**: дочерний blade не всегда видел `items` из родительского x-data контейнера. Решение: передавать массив `'galleryItems' => $arr` параметром @include и инлайнить через `@js($galleryItems)` в каждой кнопке.
+- **GIN индекс не используется**: expression в WHERE должно ТОЧНО совпадать с миграционным. `upper(regexp_replace(coalesce(name, ''), ...))` ≠ `regexp_replace(lower(name), ...)`. После выравнивания — индекс используется, perf падает в 10×.
+- **word_similarity ассиметрична**: для случая «короткий артикул каталога vs длинный verbose query» порядок аргументов критичен. `word_similarity(catalog_article, user_query)` находит подстроку catalog_article в user_query, даёт ~1.0. Обратный порядок — теряется в длине union.
+- **articles[] EXISTS = seq scan**: без денормализации `jsonb_array_elements_text(articles)` сканит 35K строк + парсит jsonb. Решение — `articles_search` text-столбец + PG trigger + GIN trgm.
+
+**Ещё в этой сессии (мелочи)**:
+- Sticky 3-level: `catalog_item_id → client_email → parsed_article/name` + UI fix `str_starts_with` в Pool.
+- Configurable newbie boost X через AppSetting (`assignment.newbie_boost`, 1.0..10.0, formula `coef = 1 + (X−1) × (max−load)/(max−min)`).
+- Outbound quotes — `base_unit_price`/`discount_percent`, всегда overwrite warnings на null при autofix (fix stale).
+
+
 
 Phase 1.9 (UI-переписка), Priority 1 (ручное управление позициями), Phase 1.10 (state-machine), Phase 1.11 (Attention-механизм) — закрыты. На очереди — auto-переходы и реанимация.
 
