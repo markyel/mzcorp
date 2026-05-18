@@ -69,6 +69,13 @@ class ParseItemsPrompt
 нескольких блоках — это НЕ повтор для схлопывания (правило 6 ниже к
 этому случаю НЕ применяется). Не сливай между блоками, не суммируй qty.
 
+В КАЖДОМ item проставляй ОБЯЗАТЕЛЬНОЕ поле `invoice_index` (int, 1-based) —
+к какому счёту относится позиция:
+  - Один счёт (обычное письмо) → invoice_index=1 у всех items.
+  - Multi-invoice → invoice_index=1 для позиций счёта 1, =2 для счёта 2 и т.д.
+Это критично для backend-дедупа: позиции с разным invoice_index не
+схлопнутся друг с другом, даже если совпадают article+qty.
+
 Это правило ПЕРЕВЕШИВАЕТ правило #6 «повторяющиеся позиции — не
 дублируй». Правило 6 для случая когда ОДНА позиция написана подряд
 несколько раз ВНУТРИ ОДНОГО блока (см. «Ремень 113м» × 3). Здесь же —
@@ -256,13 +263,13 @@ class ParseItemsPrompt
        "blocks_found": ["1 счет :", "2 счет:"]
      }
      items: [
-       {name: "Цепь роликовая балюстрады", article: "XAA332DS2, M06476", qty: 4, unit: "шт.", note: null},
-       {name: "Ограничитель скорости 1,0м/c", article: "RUS0538058, M33374", qty: 2, unit: "шт.", note: null},
-       {name: "Цепь роликовая балюстрады", article: "XAA332DS2, M06476", qty: 2, unit: "шт.", note: null},
-       {name: "Ограничитель скорости 1,0м/c", article: "RUS0538058, M33374", qty: 2, unit: "шт.", note: null}
+       {name: "Цепь роликовая балюстрады", article: "XAA332DS2, M06476", qty: 4, unit: "шт.", invoice_index: 1, note: null},
+       {name: "Ограничитель скорости 1,0м/c", article: "RUS0538058, M33374", qty: 2, unit: "шт.", invoice_index: 1, note: null},
+       {name: "Цепь роликовая балюстрады", article: "XAA332DS2, M06476", qty: 2, unit: "шт.", invoice_index: 2, note: null},
+       {name: "Ограничитель скорости 1,0м/c", article: "RUS0538058, M33374", qty: 2, unit: "шт.", invoice_index: 2, note: null}
      ]
    ✓ 4 items на выходе (по 2 из каждого счёта), включая ПОВТОРЯЮЩИЕСЯ
-     артикулы между блоками.
+     артикулы между блоками. invoice_index 1/2 различает счета.
    ❌ НЕЛЬЗЯ: схлопнуть 4 строки в 2 «уникальных» позиции — клиент потеряет
    разделение по счетам.
    ❌ НЕЛЬЗЯ: суммировать qty (M06476 = 6) — это разные счета.
@@ -521,15 +528,17 @@ items: [] — только когда позиций реально нет ни 
       "qty": 1,
       "unit": "шт.",
       "category": "одна из 19 значений выше",
+      "invoice_index": 1,
       "note": "вторая размерность или null"
     }
   ]
 }
 
-Поле invoice_analysis обязательное. Для обычного письма (один список
-позиций) — client_requested_invoices=1, blocks_found=[]. Для письма с
-N счетами — client_requested_invoices=N, blocks_found=["заголовок1",
-"заголовок2", ...].
+Поля invoice_analysis и invoice_index ОБЯЗАТЕЛЬНЫЕ.
+  - Обычное письмо (один список позиций): client_requested_invoices=1,
+    blocks_found=[], у всех items invoice_index=1.
+  - Письмо с N счетами: client_requested_invoices=N, blocks_found=[...],
+    items.invoice_index=1/2/.../N по принадлежности к счёту.
 PROMPT;
     }
 }

@@ -278,6 +278,16 @@ class RequestItemParsingService
             $category = null;
         }
 
+        // invoice_index — 1-based индекс счёта/КП к которому относится позиция,
+        // когда клиент в одном письме просит несколько счетов (см. multi-invoice
+        // секцию в ParseItemsPrompt). LLM проставляет 1/2/3... для каждой
+        // позиции внутри своего блока. Default = 1 (один счёт).
+        // Используется в dedupeWithinList: дубль article+qty с разным
+        // invoice_index сохраняется, с одинаковым — режется.
+        $invoiceIndex = isset($item['invoice_index']) && is_numeric($item['invoice_index'])
+            ? max(1, (int) $item['invoice_index'])
+            : 1;
+
         return [
             'name' => mb_substr(trim($item['name'] ?? ''), 0, 250),
             'brand' => !empty($item['brand']) ? trim($item['brand']) : null,
@@ -286,6 +296,7 @@ class RequestItemParsingService
             'unit' => trim($item['unit'] ?? 'шт.'),
             'category' => $category,
             'note' => !empty($item['note']) ? trim($item['note']) : null,
+            'invoice_index' => $invoiceIndex,
             // Phase 2: для не-vision источников (text/документ) остаётся null;
             // parseItemsFromPhotoMarkings выставит позже через mapping
             // image_index → email_attachments.id.
@@ -787,17 +798,12 @@ PROMPT;
             }
         }
 
-        // 4) Возвращаем как есть. Финального дедупа НЕТ:
-        //    - LLM сам контролирует уникальность через промпт (правило #6
-        //      «повторяющиеся позиции — не дублируй»);
-        //    - дедуп по (article) или даже (article+qty) ломал multi-invoice
-        //      кейс M-2026-1032: M33374 встречается в счёте 1 и счёте 2 с
-        //      одинаковой qty=2 — это РАЗНЫЕ позиции для двух разных счетов,
-        //      терять нельзя.
-        //    Если в редком кейсе photo + text дадут одну позицию дважды —
-        //    менеджер увидит дубль в UI карточки и удалит руками. Это
-        //    несоизмеримо безопаснее, чем терять реальные позиции клиента.
-        return $items;
+        // 4) Дедуп с уважением к invoice_index. Ключ = article + qty +
+        //    invoice_index. Multi-invoice кейсы (M33374 в счёте 1 и счёте 2
+        //    оба с qty=2) сохраняются — разные invoice_index. Реальные
+        //    дубли (photo+text дают одну позицию) — режутся (одинаковый
+        //    invoice_index, дефолт 1).
+        return $this->dedupeWithinList($items);
     }
 
     /**
@@ -1042,16 +1048,18 @@ PROMPT;
     private function dedupeWithinList(array $items): array
     {
         // Защита от пересечений photo+PDF+text-парсинга — одна и та же позиция
-        // могла быть извлечена дважды из разных источников. Ключ дедупа:
-        //   normalizeArticle(article) + qty
-        // (если article пуст — lower(name) + qty).
+        // могла быть извлечена дважды из разных источников.
         //
-        // Раньше ключ был ТОЛЬКО по article — это ломало multi-invoice кейс
-        // (M-2026-1032): клиент просит 2 счёта, в каждом по 2 общих позиции
-        // (M06476: счёт1=4шт, счёт2=2шт). LLM правильно возвращал 9 items, но
-        // дедуп по article схлопывал в 7. Включение qty в ключ оставляет
-        // multi-invoice позиции раздельными (разные qty = разные счета) и
-        // продолжает резать настоящие дубли (одна позиция, одинаковая qty).
+        // Ключ дедупа: normalizeArticle(article) + qty + invoice_index
+        // (если article пуст — lower(name) + qty + invoice_index).
+        //
+        // invoice_index приходит от LLM (см. ParseItemsPrompt секция «Несколько
+        // счетов в одном письме»). Default = 1.
+        //  - Обычное письмо: все items имеют invoice_index=1 → ключ совпадает
+        //    при настоящих дублях (photo+text) → схлопывается;
+        //  - Multi-invoice (M-2026-1032): items из счёта 1 имеют invoice_index=1,
+        //    из счёта 2 — invoice_index=2 → ключи разные → НЕ схлопываются
+        //    даже если совпадают article и qty (M33374 qty=2 в обоих счетах).
         $seen = [];
         $result = [];
         foreach ($items as $item) {
@@ -1063,7 +1071,8 @@ PROMPT;
                 continue;
             }
             $qty = (string) ($item['qty'] ?? '');
-            $key = $base . '|qty=' . $qty;
+            $invoiceIndex = (int) ($item['invoice_index'] ?? 1);
+            $key = $base . '|qty=' . $qty . '|inv=' . $invoiceIndex;
             if (isset($seen[$key])) {
                 continue;
             }
