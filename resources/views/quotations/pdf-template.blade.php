@@ -151,15 +151,37 @@ html, body { margin: 0; padding: 0; background: #fff; font-family: DejaVu Sans, 
       <span class="val"><b>{{ $company['legal_name'] }}</b>, ИНН <span class="mono">{{ $company['inn'] }}</span>, КПП <span class="mono">{{ $company['kpp'] }}</span>. {{ $company['postal_code'] }}, {{ $company['address'] }}. Тел.: <span class="mono">{{ $company['phone'] }}</span>, {{ $company['email'] }}</span>
     </div>
     @if($q->recipient_name)
+      @php
+          $recipientLine = '';
+          if ($q->recipient_inn) {
+              $recipientLine .= ', ИНН <span class="mono">' . e($q->recipient_inn) . '</span>';
+          }
+          if ($q->recipient_address) {
+              $recipientLine .= '. ' . e($q->recipient_address);
+          }
+      @endphp
       <div class="p">
         <span class="lbl">Заказчик</span>
-        <span class="val"><b>{{ $q->recipient_name }}</b>@if($q->recipient_inn), ИНН <span class="mono">{{ $q->recipient_inn }}</span>@endif@if($q->recipient_address). {{ $q->recipient_address }}@endif</span>
+        <span class="val"><b>{{ $q->recipient_name }}</b>{!! $recipientLine !!}</span>
       </div>
     @endif
     @if($q->responsibleUser)
+      @php
+          $resp = $q->responsibleUser;
+          $respLine = '';
+          if ($resp->phone) {
+              $respLine .= ', тел. <span class="mono">' . e($resp->phone) . '</span>';
+              if ($resp->phone_extension) {
+                  $respLine .= ' доб. ' . e($resp->phone_extension);
+              }
+          }
+          if ($resp->email) {
+              $respLine .= ', ' . e($resp->email);
+          }
+      @endphp
       <div class="p">
         <span class="lbl">Ответственный</span>
-        <span class="val"><b>{{ $q->responsibleUser->name }}</b>@if($q->responsibleUser->phone), тел. <span class="mono">{{ $q->responsibleUser->phone }}</span>@if($q->responsibleUser->phone_extension) доб. {{ $q->responsibleUser->phone_extension }}@endif@endif@if($q->responsibleUser->email), {{ $q->responsibleUser->email }}@endif</span>
+        <span class="val"><b>{{ $resp->name }}</b>{!! $respLine !!}</span>
       </div>
     @endif
   </div>
