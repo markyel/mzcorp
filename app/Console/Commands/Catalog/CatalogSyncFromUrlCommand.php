@@ -202,7 +202,11 @@ class CatalogSyncFromUrlCommand extends Command
         $csvAbs = $disk->path($csvRel);
         $this->info("mdb-export → {$csvRel}");
 
-        $process = new Process(['mdb-export', '-d', ',', '-Q', $disk->path($snapshotRel), $table]);
+        // ВАЖНО: без -Q. Флаг -Q в mdb-export означает «НЕ wrap text в кавычки»,
+        // что ломает CSV-парсер при значениях с запятой/переносом строки
+        // (одна позиция «съезжает» по колонкам, начинается мисаллайнмент).
+        // Default mdb-export quote'ит текст стандартными double-quote'ами.
+        $process = new Process(['mdb-export', '-d', ',', $disk->path($snapshotRel), $table]);
         $process->setTimeout(120);
         $fh = fopen($csvAbs, 'wb');
         if (! $fh) {
