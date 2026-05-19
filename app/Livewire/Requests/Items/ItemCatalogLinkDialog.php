@@ -64,15 +64,9 @@ class ItemCatalogLinkDialog extends Component
 
     /**
      * Compare-toolbar toggle state.
-     *   compareView      — 'compare' (grid) | 'list' (текущий простой список)
-     *   showOnlyDiff     — скрыть строки где все ячейки match/empty/plain
-     *   showHighlight    — подсвечивать совпадения зелёным
-     *   showPriceStock   — показать секцию "Цена и наличие"
+     *   compareView — 'compare' (grid) | 'list' (текущий простой список)
      */
     public string $compareView = 'compare';
-    public bool $showOnlyDiff = false;
-    public bool $showHighlight = true;
-    public bool $showPriceStock = true;
 
     public const COMPARE_MAX = 8;
 
@@ -144,9 +138,6 @@ class ItemCatalogLinkDialog extends Component
         $this->filterDims = false;
         $this->filterUnit = null;
         $this->compareView = 'compare';
-        $this->showOnlyDiff = false;
-        $this->showHighlight = true;
-        $this->showPriceStock = true;
     }
 
     public function toggleBrandFilter(): void
@@ -178,21 +169,6 @@ class ItemCatalogLinkDialog extends Component
         if (in_array($view, ['compare', 'list'], true)) {
             $this->compareView = $view;
         }
-    }
-
-    public function toggleOnlyDiff(): void
-    {
-        $this->showOnlyDiff = ! $this->showOnlyDiff;
-    }
-
-    public function toggleHighlight(): void
-    {
-        $this->showHighlight = ! $this->showHighlight;
-    }
-
-    public function togglePriceStock(): void
-    {
-        $this->showPriceStock = ! $this->showPriceStock;
     }
 
     /**

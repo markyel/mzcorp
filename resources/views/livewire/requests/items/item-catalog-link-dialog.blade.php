@@ -376,25 +376,6 @@
                         <span class="text-[12px] text-fg-3">выровнено по KB-параметрам · различия подсвечены</span>
                     </div>
 
-                    {{-- TOOLBAR: view-switcher + чекбоксы --}}
-                    <div class="flex items-center gap-3 mb-3 flex-wrap text-[12px]">
-                        <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">Показывать:</span>
-                        <label class="inline-flex items-center gap-1.5 cursor-pointer">
-                            <input type="checkbox" wire:click="toggleOnlyDiff" @checked($showOnlyDiff) class="w-3.5 h-3.5 accent-[var(--accent)]">
-                            <span>только различия</span>
-                        </label>
-                        <label class="inline-flex items-center gap-1.5 cursor-pointer">
-                            <input type="checkbox" wire:click="toggleHighlight" @checked($showHighlight) class="w-3.5 h-3.5 accent-[var(--accent)]">
-                            <span>подсветка совпадений</span>
-                        </label>
-                        <label class="inline-flex items-center gap-1.5 cursor-pointer">
-                            <input type="checkbox" wire:click="togglePriceStock" @checked($showPriceStock) class="w-3.5 h-3.5 accent-[var(--accent)]">
-                            <span>цены и наличие</span>
-                        </label>
-                        <span class="flex-1"></span>
-                        <span class="text-fg-3 mono">{{ count($candidates) }} кандидат(ов)</span>
-                    </div>
-
                     {{-- COMPARE GRID --}}
                     <div class="flex-1 min-h-0 overflow-auto border border-border rounded-md bg-app"
                          style="min-height: 0">
@@ -531,11 +512,6 @@
 
                             {{-- ─── SECTIONS ─── --}}
                             @foreach($sections as $section)
-                                {{-- skip "Цена и наличие" section if toggle off --}}
-                                @if(! $showPriceStock && $section['title'] === 'Цена и наличие')
-                                    @continue
-                                @endif
-
                                 {{-- section header row spans all columns; subject sticky-left:0
                                      полностью непрозрачным фоном — иначе кандидаты
                                      протекают под subject при горизонтальном scroll. --}}
@@ -548,11 +524,6 @@
                                 @endfor
 
                                 @foreach($section['rows'] as $row)
-                                    {{-- skip rows where everything matches if showOnlyDiff --}}
-                                    @if($showOnlyDiff && $row['allMatch'])
-                                        @continue
-                                    @endif
-
                                     {{-- subject cell (sticky-left:0) — лейбл uppercase
                                          ВНУТРИ ячейки над значением (раньше был
                                          в отдельной params-col, убрали). --}}
@@ -582,7 +553,7 @@
                                         <div class="px-3 py-2 border-b border-r border-border bg-surface text-[12.5px] relative">
                                             @php
                                                 $classes = match ($cell['status']) {
-                                                    'match' => $showHighlight ? 'text-fg-1' : 'text-fg-1',
+                                                    'match' => 'text-fg-1',
                                                     'diff' => 'text-amber-700',
                                                     'bad' => 'text-red-700',
                                                     'empty' => 'text-fg-3 italic font-normal',
@@ -591,11 +562,12 @@
                                                 $monoClass = ! empty($cell['mono']) ? ' mono' : '';
                                                 $boldClass = ! empty($cell['bold']) ? ' font-semibold' : '';
                                                 $smallClass = ! empty($cell['small']) ? ' text-[11px]' : '';
+                                                $isMatch = $cell['status'] === 'match';
                                             @endphp
-                                            @if($cell['status'] === 'match' && $showHighlight)
+                                            @if($isMatch)
                                                 <span class="absolute left-1 top-2 text-emerald-700 font-bold text-[11px]">✓</span>
                                             @endif
-                                            <span class="{{ $classes }}{{ $monoClass }}{{ $boldClass }}{{ $smallClass }} {{ $cell['status'] === 'match' && $showHighlight ? 'ml-3' : '' }}">{{ $cell['value'] }}</span>
+                                            <span class="{{ $classes }}{{ $monoClass }}{{ $boldClass }}{{ $smallClass }} {{ $isMatch ? 'ml-3' : '' }}">{{ $cell['value'] }}</span>
                                             @if(! empty($cell['sub']))
                                                 <small class="block text-[10.5px] text-fg-3 mt-0.5 italic">{{ $cell['sub'] }}</small>
                                             @endif
