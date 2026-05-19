@@ -363,10 +363,14 @@ class ItemCatalogLinkDialog extends Component
         }
         $dims = [];
 
-        // Pattern: 62×40×10 — серия чисел через ×/x/X/х/Х/*
-        if (preg_match_all('/(\d{1,5}(?:[.,]\d+)?(?:[\x{00D7}xXхХ*]\d{1,5}(?:[.,]\d+)?)+)/u', $text, $matches)) {
+        // Pattern: 62x40x10 - series via U+00D7 (multiplication) / x / X /
+        // U+0425 (cyrillic capital HA) / U+0445 (cyrillic small HA) / asterisk.
+        // Cyrillic letters encoded as \x{NNNN} to avoid any non-ASCII bytes
+        // inside the PHP source (prod ParseError on cyrillic literal here).
+        $sepClass = '[\x{00D7}xX\x{0425}\x{0445}*]';
+        if (preg_match_all('/(\d{1,5}(?:[.,]\d+)?(?:' . $sepClass . '\d{1,5}(?:[.,]\d+)?)+)/u', $text, $matches)) {
             foreach ($matches[1] as $series) {
-                foreach (preg_split('/[\x{00D7}xXхХ*]/u', $series) as $n) {
+                foreach (preg_split('/' . $sepClass . '/u', $series) as $n) {
                     $val = (int) round((float) str_replace(',', '.', trim($n)));
                     if ($val > 0 && $val < 100000) {
                         $dims[] = $val;
@@ -375,8 +379,8 @@ class ItemCatalogLinkDialog extends Component
             }
         }
 
-        // Pattern: 1700 мм / 1141.5 мм
-        if (preg_match_all('/(\d{2,5}(?:[.,]\d+)?)\s*мм\b/u', $text, $matches)) {
+        // Pattern: 1700 mm / 1141.5 mm (mm = U+043C U+043C cyrillic).
+        if (preg_match_all('/(\d{2,5}(?:[.,]\d+)?)\s*\x{043C}\x{043C}\b/u', $text, $matches)) {
             foreach ($matches[1] as $n) {
                 $val = (int) round((float) str_replace(',', '.', $n));
                 if ($val > 0 && $val < 100000) {
@@ -385,8 +389,9 @@ class ItemCatalogLinkDialog extends Component
             }
         }
 
-        // Pattern: L=1141 / W=200 / H=80
-        if (preg_match_all('/\b[LWHЛДВШГlwh]\s*=\s*(\d{2,5}(?:[.,]\d+)?)/u', $text, $matches)) {
+        // Pattern: L=1141 / W=200 / H=80 (Latin + cyrillic prefixes).
+        // U+041B = L, U+0414 = D, U+0412 = V, U+0428 = SHA, U+0413 = G.
+        if (preg_match_all('/\b[LWHlwh\x{041B}\x{0414}\x{0412}\x{0428}\x{0413}]\s*=\s*(\d{2,5}(?:[.,]\d+)?)/u', $text, $matches)) {
             foreach ($matches[1] as $n) {
                 $val = (int) round((float) str_replace(',', '.', $n));
                 if ($val > 0 && $val < 100000) {
