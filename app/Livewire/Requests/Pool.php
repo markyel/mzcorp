@@ -78,6 +78,20 @@ class Pool extends Component
      */
     public function mount(): void
     {
+        // Default scope = 'mine' (свои заявки). Но Director / Secretary НЕ
+        // обрабатывают заявки сами (нет ни одной с assigned_user_id=them),
+        // поэтому им бессмысленно открывать пустой «Мои». Если scope не
+        // задан явно в URL → переключаем на 'all' для этих ролей.
+        $user = auth()->user();
+        $isViewerOnly = $user?->hasAnyRole([
+            Role::Director->value,
+            Role::Secretary->value,
+        ]) && ! $user->hasRole(Role::HeadOfSales->value)
+            && ! $user->hasRole(Role::Manager->value);
+        if ($isViewerOnly && request()->query('scope') === null) {
+            $this->scope = 'all';
+        }
+
         if ($this->status !== '' && ! in_array($this->status, $this->statusesForBucket(), true)) {
             $this->status = '';
         }
