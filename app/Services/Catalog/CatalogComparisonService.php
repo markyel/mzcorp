@@ -415,11 +415,13 @@ class CatalogComparisonService
             return null;
         }
         // Большие буквы + цифры (например FT 732, OP700, EMOD EM112L).
-        if (preg_match('/\b([A-Z]{2,}\s?\d{2,}[A-Z0-9/-]*)\b/u', $text, $m)) {
+        // Используем # как разделитель — иначе / внутри character class
+        // ломает регулярку (Unknown modifier '-').
+        if (preg_match('#\b([A-Z]{2,}\s?\d{2,}[A-Z0-9/-]*)\b#u', $text, $m)) {
             return trim($m[1]);
         }
         // Имя серии типа Velino, Synergy и т.д. — заглавное слово.
-        if (preg_match('/\b([A-Z][a-zA-Z]{4,}(?:\s?\d+°?)?)\b/u', $text, $m)) {
+        if (preg_match('#\b([A-Z][a-zA-Z]{4,}(?:\s?\d+°?)?)\b#u', $text, $m)) {
             return trim($m[1]);
         }
         return null;
