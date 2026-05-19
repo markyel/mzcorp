@@ -57,7 +57,7 @@
                              Click открывает полноразмерный лайтбокс через
                              dispatch('open-image') — тот же глобальный
                              listener, что в Detail.
-                             $imgs / $galleryItems определены в outer @php
+                             imgs / galleryItems определены в outer php-блоке
                              (line 27+) чтобы быть доступными и в compare-режиме. --}}
                         @if($imgs->isNotEmpty())
                             <div class="shrink-0 flex flex-col gap-1" style="max-width: 108px;"
