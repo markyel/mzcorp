@@ -219,7 +219,10 @@ html, body { margin: 0; padding: 0; background: #fff; font-family: DejaVu Sans, 
           <td class="qty">{{ rtrim(rtrim((string) $item->qty, '0'), '.') }} <small>{{ $item->unit }}</small></td>
           <td class="pricebox">
             <span class="now">{{ number_format((float) $item->final_unit_price, 2, ',', "\u{00A0}") }}&nbsp;₽</span>
-            @if($effDisc > 0 && (float) $item->catalog_unit_price > (float) $item->final_unit_price)
+            @php
+                $showWasDisc = $effDisc > 0 && (float) $item->catalog_unit_price > (float) $item->final_unit_price;
+            @endphp
+            @if($showWasDisc)
               <span class="was">{{ number_format((float) $item->catalog_unit_price, 2, ',', "\u{00A0}") }}&nbsp;₽</span>
               <span class="disc">скидка −{{ rtrim(rtrim(number_format($effDisc, 2, ',', ''), '0'), ',') }} %</span>
             @endif
@@ -246,7 +249,8 @@ html, body { margin: 0; padding: 0; background: #fff; font-family: DejaVu Sans, 
       <div class="right">
         <table>
           <tr><td>Итого</td><td>{{ number_format((float) $q->subtotal, 2, ',', "\u{00A0}") }}&nbsp;₽</td></tr>
-          @if((float) $q->discount_amount > 0)
+          @php $hasDisc = (float) $q->discount_amount > 0; @endphp
+          @if($hasDisc)
             <tr class="disc"><td>Скидка {{ rtrim(rtrim(number_format((float) $q->discount_percent, 2, ',', ''), '0'), ',') }} %</td><td>−&nbsp;{{ number_format((float) $q->discount_amount, 2, ',', "\u{00A0}") }}&nbsp;₽</td></tr>
             <tr><td>Итого со скидкой</td><td>{{ number_format((float) $q->total, 2, ',', "\u{00A0}") }}&nbsp;₽</td></tr>
           @endif
