@@ -37,6 +37,14 @@ class Pool extends Component
     public string $status = ''; // '' = все доступные роли, либо конкретный enum-value
 
     /**
+     * Фильтр «только неназначенные» (assigned_user_id IS NULL) — для
+     * пункта левой навигации «Нераспределённые». Привязан к URL ?unassigned=1.
+     * Совместим с bucket=active и поиском.
+     */
+    #[Url(as: 'unassigned', except: false)]
+    public bool $unassignedOnly = false;
+
+    /**
      * Phase 1.10 — bucket-фильтр (группировка статусов для UI-chip'ов).
      *   active — все open + paused исключены, видны рабочие
      *   paused — на паузе (явно)
@@ -148,10 +156,16 @@ class Pool extends Component
      * Через `wire:click="$set(...);$set(...)"` Livewire 4 не парсит
      * compound-выражение — нужен явный action.
      */
-    public function applyView(string $scope, string $status): void
+    public function applyView(string $scope, string $status, bool $unassigned = false): void
     {
         $this->scope = in_array($scope, ['mine', 'all'], true) ? $scope : 'mine';
         $this->status = $status;
+        $this->unassignedOnly = $unassigned;
+        // Для «Нераспределённые» — сбрасываем bucket в 'all' (иначе active
+        // отрежет paused/closed нераспределённые, что не очевидно UX'ом).
+        if ($unassigned) {
+            $this->bucket = 'all';
+        }
         $this->resetPage();
     }
 
@@ -246,6 +260,12 @@ class Pool extends Component
         $validStatus = $this->status !== '' && in_array($this->status, $bucketStatuses, true);
         if ($validStatus) {
             $query->where('status', $this->status);
+        }
+
+        // Фильтр «нераспределённые» — assigned_user_id IS NULL. Работает
+        // независимо от scope/status, для пункта навигации «Нераспределённые».
+        if ($this->unassignedOnly) {
+            $query->whereNull('assigned_user_id');
         }
 
         if ($this->search !== '') {

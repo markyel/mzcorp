@@ -96,13 +96,19 @@
             ];
             $teamQueries = [];
             if ($this->canSeeAll) {
-                $teamQueries[] = ['label' => 'Нераспределённые', 'count' => $totals['unassigned'], 'scope' => 'all', 'status' => RequestStatus::New->value, 'pill' => false];
-                $teamQueries[] = ['label' => 'Все открытые',     'count' => $totals['all_open'],   'scope' => 'all', 'status' => '',                              'pill' => false];
+                // 'unassigned' — спец-флаг: applyView применит whereNull('assigned_user_id')
+                // + сбросит bucket='all' (чтобы paused/closed unassigned тоже показались).
+                $teamQueries[] = ['label' => 'Нераспределённые', 'count' => $totals['unassigned'], 'scope' => 'all', 'status' => '', 'unassigned' => true, 'pill' => false];
+                $teamQueries[] = ['label' => 'Все открытые',     'count' => $totals['all_open'],   'scope' => 'all', 'status' => '', 'unassigned' => false, 'pill' => false];
             }
 
-            // Detect active query — точное совпадение scope+status.
+            // Detect active query — точное совпадение scope+status+unassigned.
             $isActive = function (array $q) use ($effectiveScope, $status) {
-                return $q['scope'] === $effectiveScope && $q['status'] === $status;
+                $unassignedActive = (bool) ($this->unassignedOnly ?? false);
+                $unassignedThis = (bool) ($q['unassigned'] ?? false);
+                return $q['scope'] === $effectiveScope
+                    && $q['status'] === $status
+                    && $unassignedActive === $unassignedThis;
             };
         @endphp
 
@@ -155,8 +161,11 @@
                     Команда
                 </div>
                 @foreach($teamQueries as $q)
-                    @php $active = $isActive($q); @endphp
-                    <a href="#" wire:click.prevent="applyView('{{ $q['scope'] }}', '{{ $q['status'] }}')"
+                    @php
+                        $active = $isActive($q);
+                        $unassignedArg = ($q['unassigned'] ?? false) ? 'true' : 'false';
+                    @endphp
+                    <a href="#" wire:click.prevent="applyView('{{ $q['scope'] }}', '{{ $q['status'] }}', {{ $unassignedArg }})"
                        class="{{ $renderQuery($q, $active) }}">
                         <span class="w-3.5 text-center text-[var(--fg-3)]">⊕</span>
                         <span class="flex-1">{{ $q['label'] }}</span>
