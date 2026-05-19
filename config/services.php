@@ -334,6 +334,28 @@ return [
         'auto_threshold' => (int) env('DEALER_AUTO_THRESHOLD', 8),
     ],
 
+    'company' => [
+        // Реквизиты исполнителя в шапке КП и других исходящих документов.
+        // Snapshot пишется в `quotations.snapshot_company` jsonb при отправке
+        // — исторические КП immutable даже если потом config поменяется.
+        'legal_name' => 'ООО "Мой Лифт"',
+        'short_name' => 'Мой ЗиП',
+        'inn' => '7715802492',
+        'kpp' => '770101001',
+        'postal_code' => '105082',
+        'address' => 'Город Москва, вн.тер.г. муниципальный округ Басманный, ул. Большая Почтовая, д. № 26В, стр. 1, помещ. 1П',
+        'phone' => '+7 (800) 333-64-72',
+        'email' => 'info@mylift.ru',
+        'edo_id' => '2BM-7715802492-771501001-201508280716279716524',
+        'director_name' => 'Боев А. И.',
+        'director_title' => 'Генеральный директор',
+        // Логотип/бренд-блок справа в шапке PDF.
+        'brand_tagline' => 'Запасные части и принадлежности для лифтов и эскалаторов',
+        'brand_address' => '127549, Москва, ул. Бибиревская, д.2, кор.1, офис 104',
+        'brand_phone' => '+7 (495) 565 37 72',
+        'brand_email' => 'info@myZiP.ru',
+    ],
+
     'catalog_sync' => [
         // Public URL до .mdb (mylift.ru/getxfile.php?id=...). Команда
         // catalog:sync-from-url HEAD-проверяет Last-Modified и SHA-256,
