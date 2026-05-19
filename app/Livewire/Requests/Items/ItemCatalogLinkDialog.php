@@ -442,9 +442,19 @@ class ItemCatalogLinkDialog extends Component
             $brand = $subject->brand?->name ?: $subject->parsed_brand;
             if ($brand) {
                 $needle = mb_strtolower(trim($brand));
+                // Bidirectional substring match: subject brand may be short
+                // ("ThyssenKrupp") while catalog has long form with
+                // subsidiary suffix ("ThyssenKrupp Elevator (TKE)"), or
+                // vice versa. Treat any inclusion as a match.
                 $rows = array_filter($rows, function ($row) use ($needle) {
                     $b = $row['catalog']->brand;
-                    return $b && mb_strtolower(trim($b)) === $needle;
+                    if (! $b) {
+                        return false;
+                    }
+                    $b = mb_strtolower(trim($b));
+                    return $b === $needle
+                        || mb_strpos($b, $needle) !== false
+                        || mb_strpos($needle, $b) !== false;
                 });
             }
         }
