@@ -29,6 +29,17 @@
                             : [];
                         $subjImg = $subject->imageAttachment;
                         $subjImgIsImage = $subjImg && str_starts_with((string) $subjImg->mime_type, 'image/');
+                        // $imgs / $galleryItems нужны в обоих режимах (visual
+                        // subject-плашка + compare-row). Раньше определялись
+                        // внутри visual-блока — после оборачивания visual в
+                        // @if(! $comparing) compare-режим падал с
+                        // ErrorException "Undefined variable $galleryItems".
+                        $imgs = $this->emailImages;
+                        $galleryItems = $imgs->map(fn ($i) => [
+                            'src' => route('attachments.preview', $i),
+                            'name' => $i->filename,
+                            'dl' => route('attachments.download', $i),
+                        ])->values()->all();
                     @endphp
                     {{-- Visual subject-плашка только в обычном режиме. В compare
                          subject и так рендерится первой строкой compare-стека —
@@ -42,17 +53,9 @@
                              фото уже привязано, и мог сравнить с остальными.
                              Click открывает полноразмерный лайтбокс через
                              dispatch('open-image') — тот же глобальный
-                             listener, что в Detail. --}}
-                        @php
-                            $imgs = $this->emailImages;
-                            // Полный список картинок в JS — для листания в лайтбоксе
-                            // через стрелки. Index клика передаётся в event detail.
-                            $galleryItems = $imgs->map(fn ($i) => [
-                                'src' => route('attachments.preview', $i),
-                                'name' => $i->filename,
-                                'dl' => route('attachments.download', $i),
-                            ])->values()->all();
-                        @endphp
+                             listener, что в Detail.
+                             $imgs / $galleryItems определены в outer @php
+                             (line 27+) чтобы быть доступными и в compare-режиме. --}}
                         @if($imgs->isNotEmpty())
                             <div class="shrink-0 flex flex-col gap-1" style="max-width: 108px;"
                                  x-data="{ items: @js($galleryItems) }">
