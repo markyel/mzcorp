@@ -6,8 +6,11 @@
 <style>
 * { box-sizing: border-box; }
 @page { margin: 14mm 12mm 12mm; }
-html, body { margin: 0; padding: 0; background: #fff; font-family: 'DejaVu Sans', sans-serif; color: #0f1419; font-size: 9.5pt; line-height: 1.4; }
-.sheet { font-size: 9.5pt; line-height: 1.4; color: #0f1419; }
+html, body { margin: 0; padding: 0; background: #fff; font-family: 'DejaVu Sans', sans-serif; color: #0f1419; font-size: 9pt; line-height: 1.4; }
+/* Контент шириной A4 минус поля @page (210 − 24 = 186мм).
+   Без явного width dompdf масштабирует контент под viewport
+   → текст выглядит как 14pt вместо 9pt. */
+.sheet { width: 186mm; font-size: 9pt; line-height: 1.4; color: #0f1419; }
 
 /* Top notice */
 .notice { font: 8pt/1.4 'DejaVu Sans', sans-serif; color: #5c6470; padding-bottom: 3mm; border-bottom: 0.4pt solid #c0c4ca; margin-bottom: 6mm; }
