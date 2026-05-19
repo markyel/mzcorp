@@ -467,15 +467,14 @@ class Detail extends Component
         $quotationsCount = $this->request->quotations()->whereNotIn('status', ['cancelled'])->count();
         $quotesCount = $outboundQuotesCount + $quotationsCount;
 
+        // Таб «КП» всегда виден — без него менеджер не может создать первый
+        // черновик КП через QuotationEditor. Counter null при нуле (чтобы
+        // не показывать «КП 0»).
         $tabs = [
             'overview'  => ['label' => 'Обзор',      'count' => null,         'disabled' => false],
             'thread'    => ['label' => 'Переписка',  'count' => $threadCount, 'disabled' => false],
             'items'     => ['label' => 'Позиции',    'count' => $items,       'disabled' => false],
-        ];
-        if ($quotesCount > 0) {
-            $tabs['quotes'] = ['label' => 'КП', 'count' => $quotesCount, 'disabled' => false];
-        }
-        $tabs += [
+            'quotes'    => ['label' => 'КП',         'count' => $quotesCount > 0 ? $quotesCount : null, 'disabled' => false],
             'suppliers' => ['label' => 'Поставщики', 'count' => null,         'disabled' => true],
             'activity'  => ['label' => 'Активность', 'count' => $activity,    'disabled' => false],
             'files'     => ['label' => 'Файлы',      'count' => $files,       'disabled' => false],
