@@ -53,10 +53,14 @@ class ItemCatalogLinkDialog extends Component
      * Post-fetch chip-фильтры над результатами поиска (text + similar).
      * Применяются в applyChipFilters(). Default OFF — оператор включает
      * руками, чтобы новый UI не «прятал» результаты молча.
+     *
+     * $filterUnit — exclusive single-select по catalog.unit_name из
+     * available list. null = фильтр не применён.
      */
     public bool $filterBrand = false;
     public bool $filterCategory = false;
     public bool $filterDims = false;
+    public ?string $filterUnit = null;
 
     public const COMPARE_MAX = 3;
 
@@ -126,6 +130,7 @@ class ItemCatalogLinkDialog extends Component
         $this->filterBrand = false;
         $this->filterCategory = false;
         $this->filterDims = false;
+        $this->filterUnit = null;
     }
 
     public function toggleBrandFilter(): void
@@ -141,6 +146,15 @@ class ItemCatalogLinkDialog extends Component
     public function toggleDimsFilter(): void
     {
         $this->filterDims = ! $this->filterDims;
+    }
+
+    /**
+     * Exclusive toggle. Кликнул на уже выбранный узел → снять фильтр.
+     * Кликнул на другой → перевыбрать (не aggregating multi).
+     */
+    public function toggleUnitFilter(string $unit): void
+    {
+        $this->filterUnit = ($this->filterUnit === $unit) ? null : $unit;
     }
 
     /**
@@ -287,34 +301,40 @@ class ItemCatalogLinkDialog extends Component
     }
 
     /**
-     * Результаты текстового поиска (вкладка `text`). Возвращается в том же
-     * формате, что similarResults — массив `{catalog, similarity:null}`,
-     * чтобы один partial _catalog-results-table рендерил оба и applyChipFilters
-     * работал единообразно.
+     * Raw text-search results — without any chip filters applied.
+     * Used as a single source for both filtered textResults and availableUnits.
+     *
+     * @return array<int, array{catalog: CatalogItem, similarity: null}>
+     */
+    #[Computed]
+    public function textResultsBase(): array
+    {
+        if ($this->mode !== 'text' || mb_strlen(trim($this->query)) < 2) {
+            return [];
+        }
+        return app(CatalogSearchService::class)->search($this->query)
+            ->map(fn (CatalogItem $c) => ['catalog' => $c, 'similarity' => null])
+            ->all();
+    }
+
+    /**
+     * Filtered text-search results — passed to UI table.
      *
      * @return array<int, array{catalog: CatalogItem, similarity: null}>
      */
     #[Computed]
     public function textResults(): array
     {
-        if ($this->mode !== 'text' || mb_strlen(trim($this->query)) < 2) {
-            return [];
-        }
-        $rows = app(CatalogSearchService::class)->search($this->query)
-            ->map(fn (CatalogItem $c) => ['catalog' => $c, 'similarity' => null])
-            ->all();
-
-        return $this->applyChipFilters($rows);
+        return $this->applyChipFilters($this->textResultsBase);
     }
 
     /**
-     * Top-10 vector-similarity (вкладка `similar`). Поднимает таймаут —
-     * embed-запрос к OpenAI может занимать 2-5 сек.
+     * Raw similar (vector) results — without chip filters.
      *
      * @return array<int, array{catalog: CatalogItem, similarity: float}>
      */
     #[Computed]
-    public function similarResults(): array
+    public function similarResultsBase(): array
     {
         if ($this->mode !== 'similar' || ! $this->requestItemId) {
             return [];
@@ -332,11 +352,45 @@ class ItemCatalogLinkDialog extends Component
 
         // Если менеджер применил ручной запрос («Плата ПКЛ-32») — ищем по
         // нему. Иначе — дефолтный путь через parsed_name/parsed_article.
-        $rows = $this->similarQueryActive !== ''
+        return $this->similarQueryActive !== ''
             ? $editor->findSimilarByQuery($item, $this->similarQueryActive, auth()->user(), 10)
             : $editor->findSimilar($item, auth()->user(), 10);
+    }
 
-        return $this->applyChipFilters($rows);
+    /**
+     * Top-10 vector-similarity (вкладка `similar`). Поднимает таймаут —
+     * embed-запрос к OpenAI может занимать 2-5 сек.
+     *
+     * @return array<int, array{catalog: CatalogItem, similarity: float}>
+     */
+    #[Computed]
+    public function similarResults(): array
+    {
+        return $this->applyChipFilters($this->similarResultsBase);
+    }
+
+    /**
+     * Distinct unit_name values present in current search results AFTER
+     * brand/category/dims filters (but BEFORE unit filter). Top-8 by count desc.
+     * Used by UI to render "Узел: <name> (count)" chip-row.
+     *
+     * @return array<string, int>  unit_name => count, sorted desc
+     */
+    #[Computed]
+    public function availableUnits(): array
+    {
+        $rows = $this->mode === 'text' ? $this->textResultsBase : $this->similarResultsBase;
+        $rows = $this->applyBaseChipFilters($rows);
+        $counts = [];
+        foreach ($rows as $row) {
+            $u = $row['catalog']->unit_name;
+            if ($u !== null && $u !== '') {
+                $key = trim((string) $u);
+                $counts[$key] = ($counts[$key] ?? 0) + 1;
+            }
+        }
+        arsort($counts);
+        return array_slice($counts, 0, 8, true);
     }
 
     /**
@@ -422,13 +476,38 @@ class ItemCatalogLinkDialog extends Component
     }
 
     /**
-     * Apply chip filters (brand / KB category / dims) to a list of
+     * Apply chip filters (brand / KB category / dims / unit) to a list of
      * {catalog, similarity} rows. Reindex via array_values.
      *
      * @param  array<int, array{catalog: CatalogItem, similarity: float|null}>  $rows
      * @return array<int, array{catalog: CatalogItem, similarity: float|null}>
      */
     private function applyChipFilters(array $rows): array
+    {
+        $rows = $this->applyBaseChipFilters($rows);
+
+        // Unit filter applied LAST so availableUnits computed (which uses
+        // base-filtered rows) reflects the choice scope correctly.
+        if ($this->filterUnit !== null && $this->filterUnit !== '') {
+            $needle = mb_strtolower(trim($this->filterUnit));
+            $rows = array_filter($rows, function ($row) use ($needle) {
+                $u = $row['catalog']->unit_name;
+                return $u !== null && mb_strtolower(trim((string) $u)) === $needle;
+            });
+        }
+
+        return array_values($rows);
+    }
+
+    /**
+     * Subset of chip filters that DO NOT include the exclusive unit-name
+     * filter. Used both by applyChipFilters (then unit-filter is layered on
+     * top) and by availableUnits computed (to figure out the choice scope).
+     *
+     * @param  array<int, array{catalog: CatalogItem, similarity: float|null}>  $rows
+     * @return array<int, array{catalog: CatalogItem, similarity: float|null}>
+     */
+    private function applyBaseChipFilters(array $rows): array
     {
         if ($rows === []) {
             return $rows;
@@ -500,7 +579,7 @@ class ItemCatalogLinkDialog extends Component
             }
         }
 
-        return array_values($rows);
+        return $rows;
     }
 
     public function save(RequestItemEditor $editor): void

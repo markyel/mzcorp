@@ -219,6 +219,32 @@
                     </div>
                 @endif
 
+                {{-- Chip-row «узел» — fallback когда KB-категория не определена.
+                     Distinct unit_name из текущих результатов с counts (top-8).
+                     Exclusive single-select: кликнул → оставляем только этот
+                     узел; кликнул снова → снимаем фильтр. --}}
+                @php $availableUnits = $this->availableUnits; @endphp
+                @if(! empty($availableUnits))
+                    <div class="flex flex-wrap items-center gap-1.5 mb-2 text-[11.5px]">
+                        <span class="text-fg-3 uppercase tracking-wider text-[10px] font-semibold mr-1">Узел:</span>
+                        @foreach($availableUnits as $unitName => $unitCount)
+                            <button type="button"
+                                    wire:click="toggleUnitFilter(@js($unitName))"
+                                    class="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border {{ $filterUnit === $unitName ? 'bg-violet-100 border-violet-300 text-violet-900' : 'bg-surface-2 border-border text-fg-2 hover:bg-surface' }}"
+                                    title="Показывать только каталог где unit_name = «{{ $unitName }}»">
+                                <span class="text-[10px]">{{ $filterUnit === $unitName ? '✓' : '+' }}</span>
+                                <span>{{ $unitName }}</span>
+                                <span class="text-fg-3">({{ $unitCount }})</span>
+                            </button>
+                        @endforeach
+                        @if($filterUnit !== null)
+                            <button type="button" wire:click="toggleUnitFilter(@js($filterUnit))"
+                                    class="text-fg-3 hover:text-red-700 text-[12px] ml-1"
+                                    title="Снять фильтр узла">✕</button>
+                        @endif
+                    </div>
+                @endif
+
                 @if($mode === 'text')
                     <input type="text" wire:model.live.debounce.300ms="query"
                            autofocus
@@ -236,7 +262,7 @@
                             </div>
                         @elseif(empty($results))
                             <div class="px-3 py-6 text-center text-fg-3 text-[12px]">
-                                @if($filterBrand || $filterCategory || $filterDims)
+                                @if($filterBrand || $filterCategory || $filterDims || $filterUnit !== null)
                                     Все кандидаты отфильтрованы chip'ами выше — снимите хотя бы один.
                                 @else
                                     Ничего не найдено. Попробуйте «Похожие из каталога».
@@ -287,7 +313,7 @@
                         @if(empty($simResults))
                             <div class="px-3 py-6 text-center text-fg-3 text-[12px]"
                                  wire:loading.remove wire:target="similarResults,setMode">
-                                @if($filterBrand || $filterCategory || $filterDims)
+                                @if($filterBrand || $filterCategory || $filterDims || $filterUnit !== null)
                                     Все кандидаты отфильтрованы chip'ами выше — снимите хотя бы один.
                                 @else
                                     Не удалось получить похожие позиции (возможно, у позиции пусто название/бренд, либо
