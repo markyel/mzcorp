@@ -65,9 +65,10 @@ class QuotationPdfService
         $options->set('isRemoteEnabled', false);
         $options->set('isHtml5ParserEnabled', true);
         $options->set('isFontSubsettingEnabled', true);
-        // dpi 96 — стандарт CSS-px; default dompdf тоже 96, но фиксируем
-        // явно чтобы не зависеть от глобальной конфигурации хоста.
-        $options->set('dpi', 96);
+        // dpi 72 — 1pt становится равен 1 device-px, шрифты-в-pt не
+        // масштабируются 1.33× как при default 96. Сравнимо с поведением
+        // Browsershot (px-units) в LazyLift, но для нашего pt-шаблона.
+        $options->set('dpi', 72);
         $options->set('chroot', [resource_path(), public_path()]);
 
         // Writable font cache в storage — иначе dompdf пытается писать в
