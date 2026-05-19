@@ -120,14 +120,17 @@
                 </div>
             </div>
 
-            {{-- ───────── Бар «общая скидка» с пресетами ───────── --}}
+            {{-- ───────── Бар «общая скидка» с пресетами ─────────
+                 Доступные варианты по требованию заказчика:
+                   — (без скидки) / 5 / 10 / 15 / 17 / 20 %.
+                 Manual-input оставлен для нестандартных значений. --}}
             <div class="mb-3 flex items-center gap-2 text-[12px] flex-wrap">
                 <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">Общая скидка:</span>
-                @foreach([0, 3, 5, 7, 10, 15, 20] as $preset)
+                @foreach([0, 5, 10, 15, 17, 20] as $preset)
                     <button type="button" wire:click="updateQuotationField('discount_percent', {{ $preset }})"
                             class="px-2 py-1 rounded border text-[12px] {{ (float)$q->discount_percent === (float)$preset ? 'border-sky-500 bg-sky-50 text-sky-800 font-semibold' : 'border-border bg-surface text-fg-2 hover:bg-surface-2' }}"
                             @if(!$editable) disabled @endif>
-                        {{ $preset }}%
+                        {{ $preset === 0 ? '— без скидки' : $preset . '%' }}
                     </button>
                 @endforeach
                 <span class="text-fg-3 mx-1">или</span>
