@@ -5,10 +5,12 @@
 <title>{{ $company['legal_name'] }} · КП {{ $q->internal_code }}</title>
 <style>
 * { box-sizing: border-box; }
-@page { margin: 10mm 10mm 10mm; }
-html, body { margin: 0; padding: 0; background: #fff; font-family: 'DejaVu Sans', sans-serif; color: #0f1419; font-size: 7pt; line-height: 1.3; }
-/* Контент шириной A4 минус поля @page (210 − 20 = 190мм).
-   Без явного width dompdf масштабирует контент под viewport. */
+/* dompdf поддерживает @page margin криво (особенно 3-значный shorthand),
+   поля задаём через padding на body — это работает железно. */
+@page { margin: 0; size: A4 portrait; }
+html { margin: 0; padding: 0; }
+body { margin: 0; padding: 12mm 10mm 10mm 10mm; background: #fff; font-family: 'DejaVu Sans', sans-serif; color: #0f1419; font-size: 7pt; line-height: 1.3; }
+/* width 190mm = A4 210mm − 2×10mm padding. */
 .sheet { width: 190mm; font-size: 7pt; line-height: 1.3; color: #0f1419; }
 
 /* Top notice */
