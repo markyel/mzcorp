@@ -362,8 +362,12 @@
                                     @endphp
                                     @if(! empty($galleryItems))
                                         <div x-data="{ idx: {{ $startIdx }}, items: @js($galleryItems) }"
-                                             class="relative w-full">
-                                            {{-- Текущее фото, кликабельно → лайтбокс с галереей. --}}
+                                             class="relative w-full max-w-[220px] mx-auto">
+                                            {{-- Текущее фото, кликабельно → лайтбокс с галереей.
+                                                 max-w-[220px] — cap для случаев когда выбран
+                                                 1-2 кандидата и колонка модала шириной 500+px:
+                                                 без ограничения фото становилось 500×500 и
+                                                 пускало шапку модала за пределы экрана. --}}
                                             <button type="button"
                                                     x-on:click="$dispatch('open-image', { items: items, index: idx })"
                                                     class="block w-full aspect-square rounded-sm overflow-hidden bg-app border border-border">
@@ -390,11 +394,11 @@
                                         {{-- Fallback: один image_attachment, нет emailImages. --}}
                                         <button type="button"
                                                 x-on:click="$dispatch('open-image', { src: @js(route('attachments.preview', $subjImg)), name: @js($subjImg->filename), dl: @js(route('attachments.download', $subjImg)) })"
-                                                class="block w-full aspect-square rounded-sm overflow-hidden bg-app border border-border">
+                                                class="block w-full max-w-[220px] mx-auto aspect-square rounded-sm overflow-hidden bg-app border border-border">
                                             <img src="{{ route('attachments.preview', $subjImg) }}" class="w-full h-full object-cover" loading="lazy">
                                         </button>
                                     @else
-                                        <div class="w-full aspect-square rounded-sm bg-app border border-border flex items-center justify-center text-[10px] text-fg-3">нет фото</div>
+                                        <div class="w-full max-w-[220px] mx-auto aspect-square rounded-sm bg-app border border-border flex items-center justify-center text-[10px] text-fg-3">нет фото</div>
                                     @endif
                                     <div class="font-medium text-[13px] text-fg-1 leading-tight">{{ $subject->parsed_name ?: '(без названия)' }}</div>
                                     <dl class="text-[11.5px] grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
@@ -432,11 +436,11 @@
                                     </div>
                                     @if($c->photo_url)
                                         <a href="{{ $c->photo_url }}" target="_blank" rel="noopener noreferrer"
-                                           class="block w-full aspect-square rounded-sm overflow-hidden bg-app border border-border">
+                                           class="block w-full max-w-[220px] mx-auto aspect-square rounded-sm overflow-hidden bg-app border border-border">
                                             <img src="{{ $c->photo_url }}" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer">
                                         </a>
                                     @else
-                                        <div class="w-full aspect-square rounded-sm bg-app border border-border flex items-center justify-center text-[10px] text-fg-3">нет фото</div>
+                                        <div class="w-full max-w-[220px] mx-auto aspect-square rounded-sm bg-app border border-border flex items-center justify-center text-[10px] text-fg-3">нет фото</div>
                                     @endif
                                     <div class="font-medium text-[13px] text-fg-1 leading-tight">{{ $c->name }}</div>
                                     <dl class="text-[11.5px] grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
