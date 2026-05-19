@@ -268,7 +268,7 @@
 
                     @php $results = $this->textResults; @endphp
 
-                    <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden border border-border-subtle rounded-md">
+                    <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden border border-border-subtle rounded-md" style="min-height: 0">
                         @if(mb_strlen(trim($query)) < 2)
                             <div class="px-3 py-6 text-center text-fg-3 text-[12px]">
                                 Введите минимум 2 символа для поиска.
@@ -322,7 +322,7 @@
 
                     @php $simResults = $this->similarResults; @endphp
 
-                    <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden border border-border-subtle rounded-md">
+                    <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden border border-border-subtle rounded-md" style="min-height: 0">
                         @if(empty($simResults))
                             <div class="px-3 py-6 text-center text-fg-3 text-[12px]"
                                  wire:loading.remove wire:target="similarResults,setMode">
@@ -364,7 +364,10 @@
                         <span class="text-[12px] text-fg-3">Сравнение: позиция заявки vs {{ $cmp->count() }} {{ $cmp->count() === 1 ? 'кандидат' : ($cmp->count() < 5 ? 'кандидата' : 'кандидатов') }}</span>
                     </div>
 
-                    <div class="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
+                    {{-- inline style="min-height:0" дублирует Tailwind-класс min-h-0
+                         на случай если CSS не пересобран после деплоя
+                         (Tailwind 4 JIT генерирует классы только при npm run build). --}}
+                    <div class="flex-1 min-h-0 overflow-y-auto overflow-x-auto" style="min-height: 0">
                         <div class="grid gap-3" style="grid-template-columns: repeat({{ $cols }}, minmax(280px, 1fr));">
                             {{-- ── Subject column (позиция заявки) ── --}}
                             <div class="border border-sky-300 rounded-md bg-sky-50/40 p-3 flex flex-col gap-2">
