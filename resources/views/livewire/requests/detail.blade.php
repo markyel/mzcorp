@@ -2103,10 +2103,11 @@
                 @break
 
             {{-- ───── КП ─────
-                 Phase 7: snapshot'ы отправленных КП/счетов. Заполняет
-                 ParseOutboundQuoteJob после OutboundDocumentDetector. Таб
-                 показывается только если есть хотя бы один matched OutboundQuote. --}}
+                 Сверху — наш QuotationEditor (исходящие КП, создаваемые менеджером).
+                 Ниже — snapshot'ы OutboundQuote: исторически уже отправленные клиенту
+                 КП/счета, заполнено ParseOutboundQuoteJob после OutboundDocumentDetector. --}}
             @case('quotes')
+                <livewire:requests.quotations.editor :request-id="$req->id" :key="'quot-editor-'.$req->id" />
                 @php
                     $quotes = $req->outboundQuotes; // загружены в Detail::mount с items + relations
                     $sourceLabels = [
@@ -2128,12 +2129,10 @@
                         'neutral' => 'bg-neutral-100 text-fg-3 border-border-subtle',
                     ];
                 @endphp
-                @if($quotes->isEmpty())
-                    <div class="ds-card p-8 text-center text-fg-3">
-                        <div class="text-fg-1 font-medium mb-1">Пока не отправлено ни одного КП/счёта</div>
-                        <div class="text-sm">Как только менеджер пришлёт клиенту PDF/XLSX через тред — он появится здесь автоматически.</div>
+                @if($quotes->isNotEmpty())
+                    <div class="mt-4 mb-2 text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">
+                        Исторические PDF/XLSX отправленные ранее (auto-detected)
                     </div>
-                @else
                     <div class="space-y-3">
                         @foreach($quotes as $idx => $quote)
                             @php

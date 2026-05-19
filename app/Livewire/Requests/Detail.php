@@ -460,10 +460,12 @@ class Detail extends Component
             + $this->request->stateChanges->count()
             + $this->thread->count();
 
-        // Snapshot'ы исходящих КП/счетов (Foundation §7 расширение). Counter — число
-        // отправленных коммерческих документов (matched + parsed); тaб скрываем
-        // вообще когда их нет, чтобы не плодить пустые tabs в UI.
-        $quotesCount = $this->request->outboundQuotes->count();
+        // Snapshot'ы исходящих КП/счетов (Foundation §7 расширение) + наши
+        // КП (Quotation, исходящие созданные через QuotationEditor). Counter —
+        // суммарное число; таб виден если есть хоть один источник.
+        $outboundQuotesCount = $this->request->outboundQuotes->count();
+        $quotationsCount = $this->request->quotations()->whereNotIn('status', ['cancelled'])->count();
+        $quotesCount = $outboundQuotesCount + $quotationsCount;
 
         $tabs = [
             'overview'  => ['label' => 'Обзор',      'count' => null,         'disabled' => false],

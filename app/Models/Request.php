@@ -194,6 +194,15 @@ class Request extends Model
     }
 
     /**
+     * Наши КП клиенту (Quotation), Hybrid versioning: одна active draft +
+     * исторические закреплённые/sent версии. Отсортировано версией убыв.
+     */
+    public function quotations(): HasMany
+    {
+        return $this->hasMany(Quotation::class)->orderByDesc('version');
+    }
+
+    /**
      * Активные делегации (ended_at IS NULL) — обычно 0 или 1 одновременно,
      * но schema допускает несколько (теоретически несколько оригиналов
      * для одной заявки никогда не будет, но запас).
