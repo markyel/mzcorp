@@ -2,7 +2,7 @@
     @if($open)
         <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: flex-start; justify-content: center; padding: 60px 24px 24px;"
              wire:click.self="close">
-            <div class="ds-card p-5 w-full {{ $comparing ? 'max-w-[1200px]' : 'max-w-[1040px]' }} max-h-[80vh] flex flex-col" wire:click.stop>
+            <div class="ds-card p-5 w-full {{ $comparing ? 'max-w-[1200px]' : 'max-w-[1040px]' }} max-h-[90vh] flex flex-col" wire:click.stop>
                 <h3 class="text-[15px] font-semibold text-fg-1 mb-1">
                     Привязать позицию к каталогу
                 </h3>
@@ -52,7 +52,7 @@
                             <div class="shrink-0 flex flex-col gap-1" style="max-width: 108px;"
                                  x-data="{ items: @js($galleryItems) }">
                                 <div class="grid grid-cols-2 gap-1">
-                                    @foreach($imgs->take(6) as $idx => $img)
+                                    @foreach($imgs->take(2) as $idx => $img)
                                         @php $isLinked = $subject && $subject->image_attachment_id === $img->id; @endphp
                                         <button type="button"
                                                 x-on:click="$dispatch('open-image', { items: items, index: {{ $idx }} })"
@@ -65,12 +65,12 @@
                                         </button>
                                     @endforeach
                                 </div>
-                                @if($imgs->count() > 6)
+                                @if($imgs->count() > 2)
                                     <button type="button"
-                                            x-on:click="$dispatch('open-image', { items: items, index: 6 })"
+                                            x-on:click="$dispatch('open-image', { items: items, index: 2 })"
                                             class="text-[10px] text-sky-700 hover:text-sky-900 text-center"
                                             title="Открыть в просмотрщике с пролистыванием">
-                                        +{{ $imgs->count() - 6 }} ещё →
+                                        +{{ $imgs->count() - 2 }} ещё →
                                     </button>
                                 @endif
                             </div>
@@ -120,17 +120,18 @@
                                         {{ \Illuminate\Support\Str::limit($subject->supplier_note, 60) }}
                                     </span>
                                 @endif
-                            </div>
-                            @if(! empty($subjExtracted))
-                                <div class="text-[11px] text-fg-3 mt-1 flex flex-wrap gap-x-2 gap-y-0.5 mono">
+                                {{-- KB extracted_parameters inline в той же строке —
+                                     раньше были отдельным блоком, занимали лишнюю
+                                     высоту шапки. --}}
+                                @if(! empty($subjExtracted))
                                     @foreach(array_slice($subjExtracted, 0, 6, true) as $slug => $value)
-                                        <span><span class="text-fg-3">{{ $slug }}:</span> <span class="text-fg-2">{{ is_scalar($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE) }}</span></span>
+                                        <span class="mono"><span class="text-fg-3">{{ $slug }}:</span> <span class="text-fg-2">{{ is_scalar($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE) }}</span></span>
                                     @endforeach
                                     @if(count($subjExtracted) > 6)
-                                        <span class="text-fg-3">… +{{ count($subjExtracted) - 6 }}</span>
+                                        <span class="text-fg-3 mono">… +{{ count($subjExtracted) - 6 }}</span>
                                     @endif
-                                </div>
-                            @endif
+                                @endif
+                            </div>
                             @if($subject->catalogItem)
                                 <div class="text-[11.5px] text-fg-3 mt-1.5 pt-1.5 border-t border-border-subtle">
                                     Сейчас привязана:
