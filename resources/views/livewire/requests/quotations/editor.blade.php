@@ -282,11 +282,18 @@
                     <button type="button" wire:click="cancelDraft"
                             wire:confirm="Отменить черновик {{ $q->internal_code }}?"
                             class="btn btn-sm text-red-700">Отменить черновик</button>
-                    <button type="button" class="btn btn-sm" disabled title="Фаза 3 — Превью PDF">👁 Превью PDF</button>
+                    <a href="{{ route('quotations.preview', $q) }}" target="_blank" rel="noopener"
+                       class="btn btn-sm">👁 Превью PDF</a>
+                    <a href="{{ route('quotations.download', $q) }}"
+                       class="btn btn-sm" title="Скачать PDF на диск">⤓ PDF</a>
                     <button type="button" class="btn btn-primary btn-sm" disabled title="Фаза 4 — отправка через ComposeForm">📨 Отправить КП</button>
                 @else
                     <div class="text-[11.5px] text-fg-3">Просмотр read-only.</div>
                     <span class="flex-1"></span>
+                    <a href="{{ route('quotations.preview', $q) }}" target="_blank" rel="noopener"
+                       class="btn btn-sm">👁 PDF</a>
+                    <a href="{{ route('quotations.download', $q) }}"
+                       class="btn btn-sm">⤓ Скачать</a>
                     <button type="button" wire:click="createDraft"
                             @if(! $canEdit) disabled @endif
                             class="btn btn-sm">＋ Создать новую версию КП</button>

@@ -42,6 +42,15 @@ Route::middleware('auth')->group(function () {
         Route::get('/attachments/cid/{emailMessage}/{contentId}', [AttachmentController::class, 'inline'])
             ->where('contentId', '.*')
             ->name('attachments.inline');
+
+        // КП (наши исходящие) — preview + download PDF. Permission проверяется
+        // в контроллере (owner/acting/privileged).
+        Route::get('/dashboard/quotations/{quotation}/preview',
+            [\App\Http\Controllers\QuotationPdfController::class, 'preview'])
+            ->name('quotations.preview');
+        Route::get('/dashboard/quotations/{quotation}/download',
+            [\App\Http\Controllers\QuotationPdfController::class, 'download'])
+            ->name('quotations.download');
     });
 
     // Mail routing rules — управление правилами для РОП и директора.
