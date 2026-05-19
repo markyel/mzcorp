@@ -237,10 +237,40 @@ class Pool extends Component
         if ($this->search !== '') {
             $like = '%' . $this->search . '%';
             $query->where(function ($q) use ($like) {
+                // Базовые поля заявки.
                 $q->where('internal_code', 'ilike', $like)
                     ->orWhere('subject', 'ilike', $like)
                     ->orWhere('client_email', 'ilike', $like)
-                    ->orWhere('client_name', 'ilike', $like);
+                    ->orWhere('client_name', 'ilike', $like)
+                    // Позиции заявки — артикул / название (parsed_*).
+                    // EXISTS-subquery вместо JOIN, чтобы не дублировать
+                    // строки и не ломать пагинацию.
+                    ->orWhereExists(function ($sub) use ($like) {
+                        $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                            ->from('request_items')
+                            ->whereColumn('request_items.request_id', 'requests.id')
+                            ->where('request_items.is_active', true)
+                            ->where(function ($w) use ($like) {
+                                $w->where('request_items.parsed_article', 'ilike', $like)
+                                    ->orWhere('request_items.parsed_name', 'ilike', $like);
+                            });
+                    })
+                    // M-SKU каталога через linked catalog_item_id.
+                    ->orWhereExists(function ($sub) use ($like) {
+                        $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                            ->from('request_items')
+                            ->join('catalog_items', 'catalog_items.id', '=', 'request_items.catalog_item_id')
+                            ->whereColumn('request_items.request_id', 'requests.id')
+                            ->where('request_items.is_active', true)
+                            ->where('catalog_items.sku', 'ilike', $like);
+                    })
+                    // КП-коды (наши Quotation, КП-2026-NNNN).
+                    ->orWhereExists(function ($sub) use ($like) {
+                        $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                            ->from('quotations')
+                            ->whereColumn('quotations.request_id', 'requests.id')
+                            ->where('quotations.internal_code', 'ilike', $like);
+                    });
             });
         }
 
