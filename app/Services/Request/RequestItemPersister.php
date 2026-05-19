@@ -251,17 +251,32 @@ class RequestItemPersister
             \App\Jobs\Kb\ResolveKbJob::dispatch($existing->id);
         }
 
-        // Phase 2: складываем LLM-предположения по уточнениям в очередь
-        // pending_clarifications (jsonb на Request). Применяет оператор
-        // вручную через UI (applyClarification/rejectClarification).
+        // Phase 2 + 2026-05-19: clarifications от LLM делятся по confidence:
+        //   high → применяем АВТОМАТИЧЕСКИ (parsed_article append + brand
+        //          fill if empty) — без участия менеджера, тихо в фоне.
+        //   low  → складываем в pending_clarifications (jsonb на Request),
+        //          менеджер решит через UI (applyClarification / reject).
+        // Правило безопасности: пустое / невалидное confidence = low.
         $clarStoredCount = 0;
+        $clarAutoApplied = 0;
         if (! empty($clarifications)) {
-            $existingClar = is_array($existing->pending_clarifications)
-                ? $existing->pending_clarifications
-                : [];
-            $merged = array_merge($existingClar, $clarifications);
-            $existing->forceFill(['pending_clarifications' => $merged])->save();
-            $clarStoredCount = count($clarifications);
+            $existing->load('items');
+            [$autoList, $pendingList] = $this->splitClarificationsByConfidence($clarifications);
+
+            foreach ($autoList as $entry) {
+                if ($this->applyClarificationToItems($existing, $entry)) {
+                    $clarAutoApplied++;
+                }
+            }
+
+            if (! empty($pendingList)) {
+                $existingClar = is_array($existing->pending_clarifications)
+                    ? $existing->pending_clarifications
+                    : [];
+                $merged = array_merge($existingClar, $pendingList);
+                $existing->forceFill(['pending_clarifications' => $merged])->save();
+                $clarStoredCount = count($pendingList);
+            }
         }
 
         Log::info('RequestItemPersister: items persisted', [
@@ -271,7 +286,8 @@ class RequestItemPersister
             'items_total' => count($items),
             'items_new' => count($filtered['new']),
             'items_dup' => $filtered['duplicates'],
-            'clarifications_added' => $clarStoredCount,
+            'clarifications_auto_applied' => $clarAutoApplied,
+            'clarifications_pending' => $clarStoredCount,
             'just_created' => $justCreated,
         ]);
 
@@ -323,5 +339,109 @@ class RequestItemPersister
         }
 
         return $best;
+    }
+
+    /**
+     * Split clarifications array by `confidence` field into two lists:
+     * [highConfidenceList, lowConfidenceList]. Невалидное / отсутствующее
+     * поле трактуется как 'low' (безопаснее).
+     *
+     * @param  list<array<string, mixed>>  $clarifications
+     * @return array{0: list<array<string, mixed>>, 1: list<array<string, mixed>>}
+     */
+    private function splitClarificationsByConfidence(array $clarifications): array
+    {
+        $high = [];
+        $low = [];
+        foreach ($clarifications as $c) {
+            if (($c['confidence'] ?? null) === 'high') {
+                $high[] = $c;
+            } else {
+                $low[] = $c;
+            }
+        }
+
+        return [$high, $low];
+    }
+
+    /**
+     * Тихое авто-применение high-confidence clarification к существующему
+     * item: дописать additional_article в parsed_article (через запятую,
+     * с проверкой дубля) + (опц.) заполнить parsed_brand если он пуст.
+     *
+     * Логика повторяет Detail::mutateClarification(apply: true), но без
+     * UI / auth / redirect — это серверный фоновый процесс при парсинге
+     * reply'я.
+     *
+     * @return bool true если item реально изменился (что-то добавили).
+     */
+    private function applyClarificationToItems(Request $request, array $entry): bool
+    {
+        $targetPos = (int) ($entry['target_position'] ?? 0);
+        if ($targetPos <= 0) {
+            return false;
+        }
+        $item = $request->items->firstWhere('position', $targetPos);
+        if ($item === null) {
+            Log::warning('RequestItemPersister: auto-clarification skipped — target position missing', [
+                'request_id' => $request->id,
+                'target_position' => $targetPos,
+            ]);
+
+            return false;
+        }
+
+        $addArt = $entry['additional_article'] ?? null;
+        $addBrand = $entry['additional_brand'] ?? null;
+        $dirty = false;
+
+        if (is_string($addArt) && $addArt !== '') {
+            $existingArt = (string) ($item->parsed_article ?? '');
+            if (! $this->articleAlreadyPresent($existingArt, $addArt)) {
+                $item->parsed_article = $existingArt === ''
+                    ? $addArt
+                    : $existingArt . ', ' . $addArt;
+                $dirty = true;
+            }
+        }
+        if (is_string($addBrand) && $addBrand !== '' && empty($item->parsed_brand)) {
+            $item->parsed_brand = $addBrand;
+            $dirty = true;
+        }
+        if ($dirty) {
+            $item->save();
+            Log::info('RequestItemPersister: clarification auto-applied', [
+                'request_id' => $request->id,
+                'item_id' => $item->id,
+                'target_position' => $targetPos,
+                'added_article' => $addArt,
+                'added_brand' => $addBrand,
+                'source_email_message_id' => $entry['source_email_message_id'] ?? null,
+                'reasoning' => $entry['reasoning'] ?? null,
+            ]);
+        }
+
+        return $dirty;
+    }
+
+    /**
+     * Дублирует логику Detail::articleAlreadyPresent один-в-один: норм =
+     * UPPERCASE + удалить пробелы/-/_/./slash, сравнение поэлементное
+     * через запятую. Нужно чтобы auto- и manual-применение не расходились.
+     */
+    private function articleAlreadyPresent(string $existing, string $candidate): bool
+    {
+        $norm = fn (string $s) => preg_replace('/[\s\-_.\/]/', '', mb_strtoupper(trim($s)));
+        $candidateNorm = $norm($candidate);
+        if ($candidateNorm === '') {
+            return true;
+        }
+        foreach (preg_split('/\s*,\s*/', $existing) as $part) {
+            if ($norm((string) $part) === $candidateNorm) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

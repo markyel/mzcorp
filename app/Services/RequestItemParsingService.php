@@ -1173,10 +1173,15 @@ PROMPT;
      *     target_position: int,
      *     additional_article: ?string,
      *     additional_brand: ?string,
+     *     confidence: 'high'|'low',
      *     reasoning: string,
      *     created_at: string
      *   }>
      * }
+     *
+     * Поле `confidence`: high → RequestItemPersister применяет автоматически
+     * (без ручного review), low → идёт в pending_clarifications. Невалидное
+     * / пустое значение → 'low' (безопасная сторона).
      */
     public function decideClarifications(
         array $newItems,
@@ -1270,6 +1275,11 @@ PROMPT;
                 continue; // безопасно — пусть item уйдёт как new
             }
 
+            // Безопасное приведение confidence: только явный 'high' открывает
+            // авто-применение, любое другое значение (включая отсутствие поля,
+            // опечатки, null) → 'low' и ручной review.
+            $confidence = ($d['confidence'] ?? null) === 'high' ? 'high' : 'low';
+
             $consumedAsClar[$idx] = true;
             $clarifications[] = [
                 'id' => 'clr_' . substr(bin2hex(random_bytes(8)), 0, 12),
@@ -1281,6 +1291,7 @@ PROMPT;
                 'additional_brand' => isset($newItems[$idx]['brand']) && $newItems[$idx]['brand'] !== ''
                     ? (string) $newItems[$idx]['brand']
                     : null,
+                'confidence' => $confidence,
                 'reasoning' => isset($d['reasoning']) && is_string($d['reasoning'])
                     ? mb_substr($d['reasoning'], 0, 500)
                     : '',

@@ -31,6 +31,13 @@ namespace App\Prompts\Mail;
  *
  * При сомнении — НОВАЯ позиция (это безопаснее: дубль виден сразу,
  * слипшаяся неправильно — нет).
+ *
+ * 2026-05-19 (часть 3): добавлен `confidence: high|low` для каждой
+ * clarification. high → RequestItemPersister применяет автоматически
+ * (без ручного review менеджером), low → кладётся в pending_clarifications
+ * и менеджер решает через UI. Правило: high только когда qty+unit
+ * совпадают точно, name та же сущность, additional_article — настоящий
+ * код товара, нет конфликтующих сигналов в reply.
  */
 class DecideClarificationsPrompt
 {
@@ -48,6 +55,29 @@ class DecideClarificationsPrompt
                        в другой системе кодов; либо клиент в reply
                        прямо ссылается на номер существующей позиции).
 
+Для каждого "clarification" ОБЯЗАТЕЛЬНО проставляй уровень уверенности:
+
+  - "high" — нет сомнений. Будет применено АВТОМАТИЧЕСКИ, без участия
+             менеджера. Требования:
+             • qty + unit СОВПАДАЮТ с existing_items[target_position] точно;
+             • parsed_name явно про ту же сущность (одно изделие,
+               не «контактор» vs «контактная группа»);
+             • additional_article выглядит как осмысленный код товара
+               (M-prefix, LW-prefix, артикул производителя — НЕ слово,
+               не описание);
+             • НЕТ конфликтующих сигналов (reply не намекает на «ещё»,
+               «дополнительно», «вместо»).
+
+  - "low"  — есть сомнения. Уйдёт в очередь pending_clarifications,
+             менеджер посмотрит и решит. Используй когда:
+             • qty/unit немного отличаются (например, было 1 шт, в reply 2);
+             • name похож, но не точное соответствие;
+             • reply неоднозначен («тот товар» без указания позиции);
+             • additional_article пустой или выглядит как часть описания.
+
+  При сомнении между high/low — ВСЕГДА low. False-auto-apply правит
+  данные молча, это хуже чем лишний клик менеджера.
+
 ПРАВИЛА:
 1. Сильные сигналы для CLARIFICATION:
    • qty + unit совпадают с одной из existing_items;
@@ -60,8 +90,8 @@ class DecideClarificationsPrompt
    • parsed_name другой сущности;
    • reply говорит «добавьте ещё», «забыл указать», «+ нужно ещё».
 
-3. При СОМНЕНИИ — отдавай "new" (false-clarification сливает разные товары,
-   это хуже чем дубль).
+3. При СОМНЕНИИ между clarification и new — отдавай "new"
+   (false-clarification сливает разные товары, это хуже чем дубль).
 
 4. Если existing_items пусто — все new должны быть "new" (clarifications
    физически не к чему привязать). Этот случай не должен прийти, но если
@@ -79,22 +109,33 @@ class DecideClarificationsPrompt
       "new_item_index": 0,
       "verdict": "clarification",
       "target_position": 1,
-      "reasoning": "оба «Вкладыш 9мм», qty=24 шт совпадает, reply говорит «выставите счёт на позиции»"
+      "confidence": "high",
+      "reasoning": "оба «Вкладыш 9мм», qty=24 шт совпадает, M21595 — артикул производителя, reply явно «выставите счёт»"
     },
     {
       "new_item_index": 1,
+      "verdict": "clarification",
+      "target_position": 2,
+      "confidence": "low",
+      "reasoning": "name похож но qty другой (2 vs 5), нужен глаз менеджера"
+    },
+    {
+      "new_item_index": 2,
       "verdict": "new",
       "target_position": null,
-      "reasoning": "qty=10 шт в new, в existing такого нет"
+      "confidence": "high",
+      "reasoning": "qty=10 шт в new, в existing такого нет; для verdict=new confidence всегда high"
     }
   ]
 }
 
 new_item_index — 0-based индекс в массиве new_items.
 target_position — поле position у existing_items (НЕ массивный index), null если verdict=new.
+confidence — "high"|"low". Для verdict=new ставь "high" (это не используется,
+            но поле обязательное).
 reasoning — короткое объяснение (1-2 предложения, для аудита).
 
-Если не уверен — verdict="new", target_position=null.
+Если не уверен — verdict="new", target_position=null, confidence="high".
 PROMPT;
     }
 
