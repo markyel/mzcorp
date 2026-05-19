@@ -23,6 +23,11 @@ enum ClosedLostReason: string
     case InvoiceCancelled = 'invoice_cancelled';
     case ManualOther = 'manual_other';
     case Duplicate = 'duplicate';
+    // Автоматическое закрытие cron'ом `requests:recover-unassigned`:
+    // парсер не извлёк ни одной позиции за threshold-окно (по умолчанию 2ч).
+    // Письмо остаётся в IMAP /MZ/, заявка уходит из активных пулов с явной
+    // причиной — для аналитики «доля unparseable-входящих».
+    case ParserNoContent = 'parser_no_content';
 
     public function label(): string
     {
@@ -39,6 +44,7 @@ enum ClosedLostReason: string
             self::InvoiceCancelled => 'Счёт отменён',
             self::ManualOther => 'Закрыто РОПом вручную',
             self::Duplicate => 'Объединена с другой заявкой',
+            self::ParserNoContent => 'Парсер не нашёл позиций (авто)',
         };
     }
 

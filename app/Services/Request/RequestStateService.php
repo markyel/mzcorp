@@ -237,6 +237,62 @@ class RequestStateService
     }
 
     /**
+     * Системное закрытие заявки в closed_lost (без author-гейта). Для cron-recovery:
+     * `RequestsRecoverUnassignedCommand` находит Pending-заявки без menager
+     * и без items старше threshold и закрывает их с causal-reason
+     * (`ParserNoContent` по умолчанию).
+     *
+     * Отличия от transitionTo():
+     *  - не требует author (cron не имеет User);
+     *  - не проверяет allowedTransitions (Pending→ClosedLost разрешён, но
+     *    нужно работать и в edge-кейсах, например New без items);
+     *  - не записывает RequestActivity (заявка никогда не была активной для
+     *    менеджеров — нечего показывать в Pool «Событие»).
+     *
+     * НЕ для ручного UI — менеджеры/РОП используют transitionTo().
+     */
+    public function systemCloseLost(
+        Request $request,
+        ClosedLostReason $reason,
+        string $comment,
+    ): Request {
+        if ($request->status->isTerminal()) {
+            return $request; // идемпотентность
+        }
+
+        $from = $request->status;
+
+        DB::transaction(function () use ($request, $from, $reason, $comment) {
+            $request->status = RequestStatus::ClosedLost;
+            $request->closed_at = now();
+            $request->closed_lost_reason = $reason->value;
+            $request->closed_lost_comment = $comment;
+            $request->save();
+
+            RequestStateChange::create([
+                'request_id' => $request->id,
+                'from_status' => $from->value,
+                'to_status' => RequestStatus::ClosedLost->value,
+                'by_user_id' => null,
+                'event' => 'system_close_lost',
+                'comment' => $comment,
+                'payload' => ['closed_lost_reason' => $reason->value],
+            ]);
+
+            $this->attention->recompute($request);
+        });
+
+        Log::info('RequestStateService: system close_lost', [
+            'request_id' => $request->id,
+            'internal_code' => $request->internal_code,
+            'from' => $from->value,
+            'reason' => $reason->value,
+        ]);
+
+        return $request;
+    }
+
+    /**
      * Записать «initial» audit-event при создании заявки (без status-update).
      * Вызывается из ParseRequestItemsJob после autoAssign.
      */

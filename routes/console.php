@@ -46,6 +46,16 @@ Schedule::command('users:apply-planned-unavailability')
     ->withoutOverlapping()
     ->onOneServer();
 
+// Recovery нераспределённых заявок. Если в окне деплоя AssignmentService
+// pipeline persist() упал между сохранением items и autoAssign'ом — Request
+// остаётся Pending+unassigned, в пулах не виден. Hourly прогон находит такие
+// зомби и: (a) запускает autoAssign если items есть, (b) закрывает как
+// ParserNoContent если пусто >2ч. См. RequestsRecoverUnassignedCommand.
+Schedule::command('requests:recover-unassigned')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer();
+
 // Регулярный pull MDB-каталога с public URL (mylift.ru/getxfile.php).
 // Источник обновляется ~2 раза в день. Расписание заказчика: первый
 // pull в 11:00, дальше каждые 4 часа → 11, 15, 19, 23, 03, 07 MSK.
