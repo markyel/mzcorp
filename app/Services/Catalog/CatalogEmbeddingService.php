@@ -364,13 +364,21 @@ class CatalogEmbeddingService
         $lowerArr = $mkPgArr(array_map(mb_strtolower(...), $tokens));
 
         try {
-            // WHERE expression для name ТОЧНО совпадает с GIN trgm индексом
-            // catalog_items_name_nosep_trgm_idx — критично для скорости.
+            // WHERE expressions точно совпадают с GIN trgm индексами:
+            //   - catalog_items_name_nosep_trgm_idx — для name (lower nosep)
+            //   - catalog_items_articles_search_trgm_idx — для articles_search
+            //   - catalog_items_brands_search_trgm_idx — для brands_search
+            // ILIKE ANY (array) идёт по индексу за десятки мс на 35K rows.
             //
-            // articles[] EXISTS (multi-OEM) ТУТ НЕ дёргается — это seq scan
-            // c jsonb_array_elements_text на 35K rows ~500мс. Multi-OEM
-            // покрывается trigramTopN, где articles[] <% $norm работает
-            // для article-like запросов длиной ≥4 символов.
+            // articles_search (миграция 2026_05_18_160000) — денормализованное
+            // text-поле со всеми OEM-артикулами через `|`. Раньше тут не
+            // дёргалось (комментарий ссылался на медленный jsonb_array_elements
+            // seq scan), но с GIN trgm индексом — быстро. Это критично:
+            // вторичные артикулы (Otis F0380CP3 при brand_article=L-8 у M01231)
+            // не ловятся trigramTopN при ≤5 цифрах И не лежат в name.
+            //
+            // brands_search (миграция 2026_05_19_180000) — UPPER(BRAND1|...).
+            // Покрывает поиск по бренду в SIMILAR-режиме (OEM-кроссы аналогов).
             $rows = DB::select(
                 "
                 SELECT id AS catalog_id
@@ -379,10 +387,12 @@ class CatalogEmbeddingService
                   AND (
                        regexp_replace(lower(name), '[\\s\\-_./]', '', 'g') ILIKE ANY (?::text[])
                        OR brand_article_normalized ILIKE ANY (?::text[])
+                       OR (articles_search IS NOT NULL AND articles_search ILIKE ANY (?::text[]))
+                       OR (brands_search IS NOT NULL AND brands_search ILIKE ANY (?::text[]))
                   )
                 LIMIT ?
                 ",
-                [$lowerArr, $upperArr, $limit],
+                [$lowerArr, $upperArr, $upperArr, $upperArr, $limit],
             );
         } catch (\Throwable $e) {
             Log::info('CatalogEmbeddingService: code-token search failed', [
@@ -430,11 +440,12 @@ class CatalogEmbeddingService
             // GIN-индексы по lower(name), regexp_replace(lower(name),...),
             // brand_article_normalized ускоряют 1-3. Слот 4 — seq+jsonb_array
             // ~500мс на 35K, поэтому тригерим только когда query действительно
-            // похож на артикул: ≥4 символа И ≥6 цифр в нормализованном виде.
+            // похож на артикул: ≥4 символа И ≥5 цифр в нормализованном виде.
             // Это отрезает «Плата ПКЛ-32» (всего 2 цифры) от articles[]-scan,
-            // оставляя его только для «ЕИЛА.687255.008-04» и подобных.
+            // оставляя его для «ЕИЛА.687255.008-04», «F0380CP3» (Otis-OEM с
+            // 5 цифрами), «LW-0001163» (7 цифр) и подобных.
             $digitCount = mb_strlen((string) preg_replace('/\D/u', '', $norm));
-            $useArticles = $norm !== '' && mb_strlen($norm) >= 4 && $digitCount >= 6;
+            $useArticles = $norm !== '' && mb_strlen($norm) >= 4 && $digitCount >= 5;
 
             // word_similarity ассиметрична: «находит первый аргумент как
             // подстроку во втором». Для слотов «артикул каталога vs

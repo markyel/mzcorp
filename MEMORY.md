@@ -1392,6 +1392,27 @@ print_r(\App\Models\InboundUrlFetch::query()->selectRaw("status, count(*) as c")
 
 **Окно «риска» теперь ≤1 час вместо «навсегда».**
 
+### Сессия 2026-05-19 (часть 4) — Multi-brand / OEM-кросс в каталоге
+
+**Контекст**: M-2026-0983, позиция «Вкладыш кабины Otis F0380CP3/T0380Y3». Менеджер искал M01231 (`brand_article=L-8`, `articles=[L-8,F0380CP3,FO380CP3,FAA380CP3,DAA380E5]`, `brand=Руспромаппаратура`, `brands=[Руспромаппаратура,OTIS,OTIS,OTIS,OTIS]`) и не находил.
+
+**Две системные проблемы**:
+1. **Вторичный артикул** — `CatalogSearchService` смотрел `name/brand_article_normalized/sku`, но не `articles_search` (где лежат все OEM). Фикс: `+OR articles_search ILIKE` (commit `7884ce6`).
+2. **Вторичный бренд** — нигде в коде не читался jsonb `brands[]`, только скалярный primary `brand` (выбранный `pickPrimaryOem`). Аналоги хранят производителя в `brand=Руспромаппаратура`, а OEM-кроссы — в `brands[]`. chip Brand=Otis отсекал, similarity gate reject'ил, compare-таблица рисовала «другой бренд».
+
+**Реализовано** (commit `6712e61`):
+- Migration `2026_05_19_180000_add_brands_search_column_to_catalog_items`: text `brands_search` (UPPER(B1|B2|...)) + PG-триггер refresh при INSERT/UPDATE OF brands + GIN trgm индекс + backfill
+- `CatalogSearchService`: +OR `brands_search ILIKE UPPER(query)`
+- `ItemCatalogLinkDialog::applyBaseChipFilters`: chip Brand проверяет primary `brand` + jsonb `brands[]`
+- `CatalogEmbeddingService` brand-gate: match если subject brand содержится в `brand` ИЛИ любом из `brands[]`
+- `CatalogComparisonService::brandCell`: match-status по всем брендам; если не на primary — sub-надпись «OEM-кросс: <бренд>»
+
+**Нормализация ТОЛЬКО UPPER** (без strip-separators как у articles): бренды — слова с пробелами/дефисами («ThyssenKrupp Elevator»), strip сольёт в кашу.
+
+**Масштаб**: 19334 / ~35K позиций (≈55%) — multi-brand. До фикса все они теряли вторичные бренды во всех чтениях.
+
+**Проверка boundary**: `Otis` → 6068 матчей (нормально, нужно сужать чипами / артикулом). `F0380CP3` → точечно находит M01231.
+
 ## Известные грабли (накопленные за Phase 1.4)
 
 - **App passwords в Yandex 360 для бизнеса часто отключены** — путь сразу через OAuth.
