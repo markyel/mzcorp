@@ -17,7 +17,7 @@
 **Inbound события клиента**:
 - Клиент ответил в треде → `MailRouter::route` inbound → `AttentionService::onClientReplied` (info-flag «есть ответ») + `InboundIntentClassifier` (gpt-4o-mini, 6 интентов) → AiDecision (under_review / postponement / invoice_request / decline / clarification_response / unclear)
 
-**Кнопки в action-panel убраны**: «▶ Начать работу», «📨 КП отправлено», «❓ Жду уточнение клиента». Остались semi-manual: «↩ Вернуться к работе», «✓ Клиент ответил» (override), inbound intent кнопки, «❌ Закрыть как потеря», pause/resume.
+**Кнопки в action-panel убраны**: «▶ Начать работу», «📨 КП отправлено», «❓ Жду уточнение клиента», «📑 Клиент на согласовании», «⏰ Клиент отложил», «💵 Запросил счёт». Остались semi-manual: «↩ Вернуться к работе», «✓ Клиент ответил» (override), «💴 Счёт отправлен» / «💰 Оплачено» / «✓ Закрыть как успех» (outbound события менеджера/бухгалтерии — не intent), «❌ Закрыть как потеря» (с reason-taxonomy), pause/resume. Все inbound intent-переходы (UnderReview / PostponedUntil / AwaitingInvoice / ClosedLost suggestion) идут через `InboundIntentClassifier` → AiDecision-плашку. PostponeDialog оставлен как dead-UI компонент (никто не диспатчит `open-postpone-dialog`) — на случай будущего «Manual override для semi-auto статусов».
 
 **Mail-pipeline для нового inbound**:
 1. `MailRouter::route` — cross-mailbox дедуп ДО LLM: если message_id уже у нас в БД с related_request_id → наследуем категорию + Request, выходим (защита L2)
@@ -162,7 +162,7 @@ Cross-mailbox дедуп — 3 защитных слоя против Request-д
 - **«Предложенные уточнения» от outbound** — на M-2026-0759 показывалась плашка enrichment_suggestions после отправки КП менеджером. Tinker показал пустой `enrichment_suggestions[]` — возможно уже applied/dismissed. Диагностику отложили. Идея на будущее: после отправки КП auto-dismiss'ить pending enrichment-suggestions (менеджер зафиксировал состав в коммерческом).
 - **Парсинг M-артикулов из исходящего КП/счёта** — обсуждалось как отдельная фича. Менеджер прикладывает PDF с КП → distill M-SKU из контента и привязывать к позициям. Не реализовано, требует Vision/PDF-extract.
 - **Manual override для semi-auto статусов** — после удаления кнопок «📨 КП отправлено» / «❓ Жду уточнение клиента» нет ручного fallback'а если detector промахнулся. Можно добавить «⋮ Изменить статус → ...» dropdown как safety net. Пока ждём оценки real-world precision detector'а.
-- **InboundIntentClassifier auto-apply кнопок в action-panel** — кнопки «📑 Клиент на согласовании», «⏰ Клиент отложил», «💵 Запросил счёт» сейчас остались manual. По логике semi-auto их тоже можно убрать — IntentClassifier уже их детектит через AiDecision-плашку. Если detector надёжен — убираем.
+- ✅ **InboundIntentClassifier auto-apply кнопок в action-panel** — закрыт 2026-05-19. Три кнопки («📑 Клиент на согласовании», «⏰ Клиент отложил», «💵 Запросил счёт») удалены из `resources/views/livewire/requests/detail.blade.php` (бывшие строки 700-716). Все три intent-перехода идут через AiDecision-плашку. PostponedUntil ставится с `suggested_resume_date` из payload без UI-диалога (`AiDecisionService::apply` line 155-161). ClosedLost оставлен как manual safety-net (требует reason из taxonomy, AI вытаскивает `suggested_closed_lost_reason` для one-click apply). Если AI промахнётся (under_review/postponed/invoice misclassified) — менеджер ждёт следующего письма от клиента / обращается к РОПу. **Потенциальный fallback** — пункт TODO «Manual override для semi-auto статусов» (dropdown «⋮ Изменить статус → …») если real-world precision окажется ниже ожиданий.
 - **«Оплачено»/«Счёт отправлен» автодетекция** — `OutboundDocumentDetector` ловит invoice по filename/keyword (рудиментарно). Нет inbound-детектора оплаты (банковская выписка / клиент пишет «оплатили»). Пока manual.
 
 ## Что готово (инфраструктура — Фаза 0)
@@ -1071,6 +1071,69 @@ sudo systemctl restart php8.3-fpm
 # Cron для resume-paused — проверить:
 sudo -u www-data php artisan schedule:list | grep resume-paused
 ```
+
+### Сессия 2026-05-19 (часть 2) — ItemCatalogLinkDialog UX: ширина + фильтры + hover
+
+UX-доработки диалога «Привязать позицию к каталогу» по живому фидбэку оператора.
+
+**1. Ширина колонки «Название»** — `max-w-[760px]` → `max-w-[1040px]` модала (compare-mode остался 1200). Colgroup сжат: compare 32→28, photo 56→44, sku 90→80, brand/article 160→120, price 90→84, stock 80→72, similarity 80→72. Освобождает ~270px под name (с ~150px до ~420px). `table-layout: auto` → `fixed` чтобы width-инструкции работали жёстко.
+
+**2. Hover-preview фото каталога** (`_catalog-results-table.blade.php`):
+- Delay 1000ms → **700ms** (стандарт tooltip).
+- На входе `openPreview` сразу `this.show = false` — предыдущее превью не висит с прошлым url до срабатывания нового таймера.
+- Позиционирование привязано к **`el.closest('.ds-card')` — самому модалу**, а не миниатюре. Превью открывается слева от модала (если ≥400+12px), иначе справа от модала. Никогда не накрывает чекбокс comparison, колонку SKU и прочий контент таблицы. Fallback на старое поведение (relative к миниатюре) — только если окно ýже модала+400px.
+- Pointer-events: none на превью — оставлено (мышь сквозь превью видит чекбокс/строки).
+
+**3. Diagnostic chip-теги под названием** (показывают, *почему* позиция в выдаче):
+- `unit_name` (sky chip), `part_type`, `form_factor` (neutral chips).
+- Размеры `size_a..f` собраны в mono-chip типа `«62×40×10 мм»` (amber).
+- Multi-OEM: если `articles[]` содержит больше одного артикула (помимо `brand_article`) — `+N OEM` chip.
+- `CatalogSearchService::search` SELECT расширен полями `form_factor`, `articles`, `size_a..f` (раньше тащил только базовые — chips на text-вкладке были бы пустыми). Для similar-вкладки embedder уже возвращал full Eloquent models (`whereIn('id', $ids)->get()` без select-маски) — не трогали.
+
+**4. Три chip-фильтра над таблицей** (между tabs и search-input):
+- 🏷️ **Бренд: <subject.brand>** — sky-tone, exact match `lower(trim(catalog.brand)) === lower(trim(subject.brand))`.
+- 🎯 **Категория: <subject.kbCategory.name>** — emerald-tone. Хрупкая эвристика (catalog не хранит structured category): первое слово KB-name ≥4 симв (избегаем «без»/«для»/«над») → substring в `lower(catalog.name + unit_name + part_type)`. Точный structured-фильтр потребует мапинг-таблицы или новой колонки `catalog_items.category_id` — отложено.
+- 📏 **Размер: <a · b · c>** — amber-tone, исходит из `subjectDimensions` (regex по `parsed_name + parsed_article`). Покрывает форматы `62×40×10`, `1700 мм`, `L=1141.5`. Match: хотя бы один из subject-dims попадает в любой `size_a..f` каталога с допуском **±5 мм**.
+
+Реализация: все фильтры **post-fetch** в `applyChipFilters(array $rows): array` — применяются к уже полученному топ-N. Включение бренда может схлопнуть 10 кандидатов в 2-3; UI показывает «Все кандидаты отфильтрованы chip'ами выше — снимите хотя бы один». Backend-side фильтрация (передача WHERE в pgvector / CatalogSearchService) — следующая итерация, потребует трогать `topNByQueryText` и trigram-search SQL.
+
+Default OFF для всех трёх — оператор включает руками. Не сюрприз «куда делись результаты».
+
+**5. Унификация формата результатов**. `textResults` теперь возвращает `array<{catalog, similarity:null}>` вместо `Collection<CatalogItem>` — чтобы `applyChipFilters` работал единообразно с `similarResults`. Партиал `_catalog-results-table` принимает `collect($results)` — поведение без изменений.
+
+**Грабли сессии**:
+- **Computed property → метод**: `subjectDimensions` сделан `#[Computed]` чтобы (1) показывать в chip без перерасчёта (2) использовать в `applyChipFilters` через `$this->subjectDimensions` (property access). Перерасчёт regex'ов кешируется на render. `subjectCategoryKeyword()` оставлен private method — internal helper.
+- **`->isEmpty()` vs `empty()`**: после смены `textResults` на array — blade-проверка изменена с `$results->isEmpty()` на `empty($results)`.
+
+**После деплоя нужно**: `php artisan view:clear` (blade-кеш) — иначе старый hover-delay (1000ms) может временно остаться видимым.
+
+**Что НЕ сделано из наброска оператора** (отложено): tabs «По артикулу» / «По фото», бюджет / SLA в шапке, +N% к бюджету в цене, multi-select привязки, фильтр по серии, фильтр по длине L=X±5% (нет канонической оси), цветовая легенда похожести.
+
+### Сессия 2026-05-19 — semi-auto cleanup: удалены manual inbound intent кнопки
+
+Закрыт open question «InboundIntentClassifier auto-apply кнопок в action-panel».
+
+**Что удалено** (resources/views/livewire/requests/detail.blade.php):
+- 📑 «Клиент на согласовании» (`transitionStatus('under_review')`)
+- ⏰ «Клиент отложил» (`$dispatch('open-postpone-dialog')`)
+- 💵 «Запросил счёт» (`transitionStatus('awaiting_invoice')`)
+
+Все три перехода теперь идут только через `InboundIntentClassifier` (gpt-4o-mini, 6 intent'ов) → `AiDecisionService::recordSuggestion` → AI-плашка в action-panel с кнопками «✓ Применить» / «✕ Dismiss». `apply()` для `PostponedUntil` вытаскивает `suggested_resume_date` из payload → пробрасывает в `context['payload']['postponed_until']` без UI-диалога (`AiDecisionService.php:155-161`).
+
+**Что оставлено как safety net**:
+- ⊘ «Закрыть как потеря» (CloseLostDialog с reason-taxonomy) — AI вытаскивает `suggested_closed_lost_reason` для apply, но manual вход с reason'ом важен для ClosedLostReason precision.
+- ↩ «Вернуться к работе» / ✓ «Клиент ответил» (override) — implicit-state не покрывает все сценарии.
+- 💴 «Счёт отправлен» / 💰 «Оплачено» / ✓ «Закрыть как успех» — outbound события менеджера/бухгалтерии, не inbound intent.
+
+**Dead-UI**: `<livewire:requests.postpone-dialog>` тег и сам компонент `PostponeDialog` оставлены в репо. После удаления manual-кнопки никто не диспатчит `open-postpone-dialog`. По абсолютному правилу #1 («не удалять без явного запроса») файл сохранён — может пригодиться для будущей фичи «Manual override для semi-auto статусов» (dropdown «⋮ Изменить статус → …») в open questions.
+
+**Слепые зоны после удаления**:
+- Если confidence < 0.6 → downgrade в `InboundUnclear` → apply-disabled, manual fallback отсутствует. Менеджер ждёт следующего письма / эскалирует РОПу.
+- Если клиент пишет «оплатим в среду» без явного «отложим до…» — AI может не сматчить точно postpone-intent → менеджер не сможет руками открыть диалог отсрочки.
+
+Если real-world precision окажется ниже ожиданий — открываем TODO «Manual override для semi-auto статусов».
+
+**Также** в архитектурном блоке шапки MEMORY обновлена строка «Кнопки в action-panel убраны» — добавлены три удалённые кнопки в список.
 
 ### Сессия 2026-05-18 (часть 3) — multi-invoice parsing + hybrid search refinements
 
