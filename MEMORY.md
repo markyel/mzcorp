@@ -132,6 +132,7 @@ CLI backfill + duplicate-detector (mail:reassign-by-external-code + mail:detect-
 Багфикс pingpong'а в mail:reassign + защиты (--keep-outbound/--keep-active/--only-if-newer/--code) + TrustedPartnerOverride для категоризатора — **закрыт 2026-05-22.**
 Слияние заявок-дубликатов (RequestMergeService + MergeDialog UI + ClosedLostReason::Duplicate) — **закрыт 2026-05-22.**
 ReplyParseGate (signal-based отрезание пустых reply'ев от парсера) + confidence-based suggestion для item-create из reply (auto/suggest/skip, pending UI плашка, Activity audit) + переименование «слияние дубликата» → «объединение заявок» — **закрыт 2026-05-22.**
+ItemCatalogLinkDialog UX-волна (chip-фильтры по бренду/категории/размеру/узлу, hover-preview миниатюр, compare-modal redesign по макету 05b с inverted grid, sticky-left subject, ✓ confidence на cell-уровне) + дилер-флаг автомат (`dealer_emails` таблица + DealerEmailService + skip client-sticky 1b) + Дашборд РОПа v1 (period switcher 7/30/90, funnel received→quoted→won/lost, conversion%, heatmap inflow-by-hour DOW×HOUR Europe/Moscow, sparklines per менеджер 14-дн SVG) + clarifications confidence high/low (auto-apply без ручного review для high) + **Приоритет 4 — регулярный sync MDB → прод** (catalog:sync-from-url: public HTTP pull + HEAD/SHA-256 change-detect + mdb-export → CSV → catalog:import, scheduler `0 3,7,11,15,19,23 * * *` MSK, mdbtools на проде) — **закрыт 2026-05-19.**
 Activity-расширение (все письма треда + новые типы events: merge_from/merged_into / items_parsed_from_reply / suggestion_applied/rejected) + placeholder safety net в ClarificationPanel + расширенный blockquote-selector в collapseQuotedBlocks (Gmail/Yahoo/fallback any blockquote) — **закрыт 2026-05-22.**
 InternalSenderDetector + Empty-content guard + РОП = full request-handler (Role::requestHandlerRoles в AssignmentService/ManagerUnavailabilityService/ReassignDialog/Dashboard/cron) — **закрыт 2026-05-15.**
 RouteMailToManagerJob (IMAP-move в очередь, reassign в UI мгновенный вместо 5–10s sync wait) + shortName fallback на email local-part когда транслитерация без латинских букв (фикс «MZ|3» для РОП'а с именем типа «РОП 3») — **закрыт 2026-05-15.**
@@ -1310,14 +1311,15 @@ Phase 1.9 (UI-переписка), Priority 1 (ручное управление
 
 Реализован в Phase 5.2 (`6e51dc4`). См. таблицу декомпозиции выше.
 
-### Приоритет 4 — Регулярный sync MDB → прод
+### ~~Приоритет 4 — Регулярный sync MDB → прод~~ ✅ закрыт 2026-05-19
 
-Старый план (Python-скрипт готов, на офисной машине поставить Task Scheduler).
+Реализован вместо Python-скрипта на office Task Scheduler — HTTP pull по public URL `mylift.ru/getxfile.php?id=...` напрямую с VPS. `CatalogSyncFromUrlCommand` + scheduler `0 3,7,11,15,19,23 * * *` MSK + mdbtools для конвертации .mdb → CSV → `catalog:import --apply`. State в `storage/app/private/catalog/.last_sync.json` (sha256, last_modified, last_pull_at, last_import_at, last_error). Ротация snapshots — keep последние 7 серий.
 
-### Приоритет 5 — Дашборд РОПа v1
+**Известный артефакт:** в исходной MDB колонка `Узлы` использует запятую как разделитель (`"Главный привод, лебедка лифта, гидравлическая станция и гидро бак"`), а `CatalogImportService::units_raw` парсер ждёт `;`. На выходе один длинный «unit» вместо трёх. Если станет проблемой — расширить split на `/[,;]/` в `CatalogImportService`.
 
-- Sticky group-headers в Pool уже есть. Добавить heatmap inflow-by-hour, sparklines per менеджер, funnel (received → quoted → closed_won).
-- В дашборде — counter open/quoted/closed_won/closed_lost за период, conversion rate.
+### ~~Приоритет 5 — Дашборд РОПа v1~~ ✅ закрыт 2026-05-19
+
+Реализован в `7c5e590..ea1a15a`: period switcher 7/30/90 (`#[Url(as: 'period')]`), funnel received→quoted→won/lost + quote_rate + conversion (`request_state_changes` distinct request_id per to_status в окне), inflow heatmap 7×24 (ISODOW × HOUR Europe/Moscow с 5-уровневой sky-палитрой), sparklines per менеджер (14-дн поток назначений из `request_assignments.assigned_at` + текущий load через inline SVG polyline, общий max-scale).
 
 ### Бэклог низкого приоритета
 
