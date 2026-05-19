@@ -2,7 +2,7 @@
     @if($open)
         <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: flex-start; justify-content: center; padding: 60px 24px 24px;"
              wire:click.self="close">
-            <div class="ds-card p-5 w-full {{ $comparing ? 'max-w-[1200px]' : 'max-w-[760px]' }} max-h-[80vh] flex flex-col" wire:click.stop>
+            <div class="ds-card p-5 w-full {{ $comparing ? 'max-w-[1200px]' : 'max-w-[1040px]' }} max-h-[80vh] flex flex-col" wire:click.stop>
                 <h3 class="text-[15px] font-semibold text-fg-1 mb-1">
                     Привязать позицию к каталогу
                 </h3>
@@ -175,6 +175,50 @@
                     @endif
                 </div>
 
+                {{-- Chip-row фильтров (общий для text + similar). Применяются
+                     к results post-fetch в applyChipFilters. Default OFF —
+                     toggle'ом меняется без перезагрузки. Каждый chip показывает
+                     значение которое будет применено (бренд subject'а,
+                     keyword KB-категории, размеры из parsed_name). --}}
+                @php
+                    $subjBrand = $subject?->brand?->name ?: $subject?->parsed_brand;
+                    $subjCategoryName = $subject?->kbCategory?->name;
+                    $subjDims = $this->subjectDimensions;
+                @endphp
+                @if($subjBrand || $subjCategoryName || ! empty($subjDims))
+                    <div class="flex flex-wrap items-center gap-1.5 mb-2 text-[11.5px]">
+                        <span class="text-fg-3 uppercase tracking-wider text-[10px] font-semibold mr-1">Фильтры:</span>
+                        @if($subjBrand)
+                            <button type="button" wire:click="toggleBrandFilter"
+                                    class="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border {{ $filterBrand ? 'bg-sky-100 border-sky-300 text-sky-900' : 'bg-surface-2 border-border text-fg-2 hover:bg-surface' }}"
+                                    title="Показывать только позиции каталога с brand = «{{ $subjBrand }}»">
+                                <span class="text-[10px]">{{ $filterBrand ? '✓' : '+' }}</span>
+                                <span>бренд:</span>
+                                <span class="font-semibold">{{ $subjBrand }}</span>
+                            </button>
+                        @endif
+                        @if($subjCategoryName)
+                            <button type="button" wire:click="toggleCategoryFilter"
+                                    class="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border {{ $filterCategory ? 'bg-emerald-100 border-emerald-300 text-emerald-900' : 'bg-surface-2 border-border text-fg-2 hover:bg-surface' }}"
+                                    title="Показывать каталог где name / unit_name / part_type содержит ключевое слово категории">
+                                <span class="text-[10px]">{{ $filterCategory ? '✓' : '+' }}</span>
+                                <span>категория:</span>
+                                <span class="font-semibold">{{ $subjCategoryName }}</span>
+                            </button>
+                        @endif
+                        @if(! empty($subjDims))
+                            <button type="button" wire:click="toggleDimsFilter"
+                                    class="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border {{ $filterDims ? 'bg-amber-100 border-amber-300 text-amber-900' : 'bg-surface-2 border-border text-fg-2 hover:bg-surface' }}"
+                                    title="Показывать каталог где хотя бы один размер (size_a..f) совпадает с одним из {{ implode(', ', $subjDims) }} ±5 мм">
+                                <span class="text-[10px]">{{ $filterDims ? '✓' : '+' }}</span>
+                                <span>размер:</span>
+                                <span class="font-semibold mono">{{ implode(' · ', $subjDims) }}</span>
+                                <span class="text-[10px] text-fg-3">мм ±5</span>
+                            </button>
+                        @endif
+                    </div>
+                @endif
+
                 @if($mode === 'text')
                     <input type="text" wire:model.live.debounce.300ms="query"
                            autofocus
@@ -190,13 +234,17 @@
                             <div class="px-3 py-6 text-center text-fg-3 text-[12px]">
                                 Введите минимум 2 символа для поиска.
                             </div>
-                        @elseif($results->isEmpty())
+                        @elseif(empty($results))
                             <div class="px-3 py-6 text-center text-fg-3 text-[12px]">
-                                Ничего не найдено. Попробуйте «Похожие из каталога».
+                                @if($filterBrand || $filterCategory || $filterDims)
+                                    Все кандидаты отфильтрованы chip'ами выше — снимите хотя бы один.
+                                @else
+                                    Ничего не найдено. Попробуйте «Похожие из каталога».
+                                @endif
                             </div>
                         @else
                             @include('livewire.requests.items._catalog-results-table', [
-                                'rows' => $results->map(fn ($c) => ['catalog' => $c, 'similarity' => null]),
+                                'rows' => collect($results),
                                 'selectedId' => $selectedCatalogId,
                                 'compareIds' => $compareIds,
                             ])
@@ -239,8 +287,12 @@
                         @if(empty($simResults))
                             <div class="px-3 py-6 text-center text-fg-3 text-[12px]"
                                  wire:loading.remove wire:target="similarResults,setMode">
-                                Не удалось получить похожие позиции (возможно, у позиции пусто название/бренд, либо
-                                эмбеддинг-сервис недоступен).
+                                @if($filterBrand || $filterCategory || $filterDims)
+                                    Все кандидаты отфильтрованы chip'ами выше — снимите хотя бы один.
+                                @else
+                                    Не удалось получить похожие позиции (возможно, у позиции пусто название/бренд, либо
+                                    эмбеддинг-сервис недоступен).
+                                @endif
                             </div>
                         @else
                             @include('livewire.requests.items._catalog-results-table', [

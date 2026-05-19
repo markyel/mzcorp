@@ -10,14 +10,27 @@
         show: false, url: '', t: null, top: 0, left: 0,
         openPreview(el, photoUrl) {
             clearTimeout(this.t);
+            // Сразу прячем старое превью — иначе при быстром mouseenter на
+            // следующую строку оператор видит старый url пока 700мс таймер
+            // не сработает с новым.
+            this.show = false;
+            // Позиционируем относительно МОДАЛА, а не миниатюры —
+            // не перекрываем чекбокс, SKU, никакой контент таблицы.
+            const modal = el.closest('.ds-card');
+            const modalRect = modal ? modal.getBoundingClientRect() : el.getBoundingClientRect();
             const r = el.getBoundingClientRect();
-            const W = 400, H = 400, gap = 8;
-            this.left = (r.left - gap - W >= 8)
-                ? r.left - gap - W
-                : Math.min(window.innerWidth - W - 8, r.right + gap);
+            const W = 400, H = 400, gap = 12;
+            if (modalRect.left - gap - W >= 8) {
+                this.left = modalRect.left - gap - W;
+            } else if (modalRect.right + gap + W <= window.innerWidth - 8) {
+                this.left = modalRect.right + gap;
+            } else {
+                // Fallback: окно слишком узкое для модала + 400px превью.
+                this.left = Math.min(window.innerWidth - W - 8, r.right + gap);
+            }
             this.top = Math.min(window.innerHeight - H - 8, Math.max(8, r.top));
             this.url = photoUrl;
-            this.t = setTimeout(() => { this.show = true; }, 1000);
+            this.t = setTimeout(() => { this.show = true; }, 700);
         },
         closePreview() {
             clearTimeout(this.t);
@@ -25,17 +38,17 @@
         }
      }">
 @php $compareIdsList = $compareIds ?? []; @endphp
-<table class="w-full text-[12px]" style="table-layout: auto;">
+<table class="w-full text-[12px]" style="table-layout: fixed;">
     <colgroup>
-        <col style="width: 32px">
-        <col style="width: 56px">
-        <col style="width: 90px">
-        <col style="width: 160px">
-        <col>
-        <col style="width: 90px">
+        <col style="width: 28px">
+        <col style="width: 44px">
         <col style="width: 80px">
+        <col style="width: 120px">
+        <col>
+        <col style="width: 84px">
+        <col style="width: 72px">
         @if($rows->first()['similarity'] ?? null !== null)
-            <col style="width: 80px">
+            <col style="width: 72px">
         @endif
     </colgroup>
     <thead class="bg-surface-2 text-fg-3 uppercase tracking-wider text-[10.5px] sticky top-0">
@@ -109,7 +122,48 @@
                         <div class="mono text-fg-3 text-[11px] break-all">{{ $cat->brand_article }}</div>
                     @endif
                 </td>
-                <td class="px-2 py-1.5 text-fg-1 align-top leading-snug break-words">{{ $cat->name }}</td>
+                <td class="px-2 py-1.5 text-fg-1 align-top leading-snug break-words">
+                    <div>{{ $cat->name }}</div>
+                    @php
+                        // Диагностические chip-теги — почему позиция в выдаче,
+                        // какие у неё атрибуты, как они соотносятся с subject.
+                        $catDims = array_values(array_filter([
+                            'A' => $cat->size_a, 'B' => $cat->size_b, 'C' => $cat->size_c,
+                            'D' => $cat->size_d, 'E' => $cat->size_e, 'F' => $cat->size_f,
+                        ], fn ($v) => $v !== null));
+                        $extraArticles = is_array($cat->articles) ? array_values(array_filter($cat->articles)) : [];
+                        // brand_article уже в отдельной колонке — не дублируем в Все OEM.
+                        $extraArticles = array_values(array_filter(
+                            $extraArticles,
+                            fn ($a) => mb_strtolower(trim($a)) !== mb_strtolower(trim((string) $cat->brand_article))
+                        ));
+                    @endphp
+                    @if($cat->unit_name || $cat->part_type || $cat->form_factor || ! empty($catDims) || ! empty($extraArticles))
+                        <div class="mt-1 flex flex-wrap gap-x-1.5 gap-y-0.5 text-[10.5px]">
+                            @if($cat->unit_name)
+                                <span class="inline-flex items-center px-1.5 rounded-sm bg-sky-50 text-sky-800">{{ $cat->unit_name }}</span>
+                            @endif
+                            @if($cat->part_type)
+                                <span class="inline-flex items-center px-1.5 rounded-sm bg-surface-2 text-fg-2">{{ $cat->part_type }}</span>
+                            @endif
+                            @if($cat->form_factor)
+                                <span class="inline-flex items-center px-1.5 rounded-sm bg-surface-2 text-fg-2">{{ $cat->form_factor }}</span>
+                            @endif
+                            @if(! empty($catDims))
+                                <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-50 text-amber-800 mono"
+                                      title="Размеры из каталога">
+                                    {{ implode('×', array_map(fn ($v) => rtrim(rtrim((string) $v, '0'), '.'), $catDims)) }} мм
+                                </span>
+                            @endif
+                            @if(! empty($extraArticles))
+                                <span class="inline-flex items-center px-1.5 rounded-sm bg-surface-2 text-fg-3 mono"
+                                      title="Дополнительные OEM-артикулы">
+                                    +{{ count($extraArticles) }} OEM
+                                </span>
+                            @endif
+                        </div>
+                    @endif
+                </td>
                 <td class="px-2 py-1.5 mono text-right text-fg-1 align-top whitespace-nowrap">
                     {{ $cat->price !== null ? number_format((float) $cat->price, 2, '.', ' ') . ' ₽' : '—' }}
                 </td>

@@ -51,6 +51,8 @@ class CatalogSearchService
             ->select([
                 'id', 'sku', 'name', 'brand', 'brand_article',
                 'brand_article_normalized', 'unit_name', 'part_type',
+                'form_factor', 'articles',
+                'size_a', 'size_b', 'size_c', 'size_d', 'size_e', 'size_f',
                 'price', 'stock_available', 'is_active', 'photo_url',
             ])
             ->where(function ($q) use ($like, $normalizedLike) {
