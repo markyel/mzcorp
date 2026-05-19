@@ -340,15 +340,20 @@ class ItemCatalogLinkDialog extends Component
     }
 
     /**
-     * Извлечь набор числовых размеров (мм) из parsed_name + parsed_article
-     * subject-позиции. Используется фильтром `filterDims`.
+     * Extract numeric dimensions (mm) from subject.parsed_name + parsed_article.
+     * Used by filterDims chip.
      *
-     * Покрывает форматы:
-     *  - «62×40×10 мм» / «62x40x10» / «62*40*10» / «62Х40Х10» — серия чисел через ×/x/*/Х
-     *  - «1700 мм» / «1141.5 мм» — одиночное число с постфиксом мм/mm
-     *  - «L=1141.5» — после префикса L=, ширина W=, высота H=
+     * Covers:
+     *  - 62x40x10 / 62*40*10 / 62-Cyr-40-Cyr-10 (series via U+00D7 / x / X /
+     *    U+0425 / U+0445 / asterisk)
+     *  - 1700 + mm postfix (mm = U+043C U+043C cyrillic, or "mm" latin)
+     *  - L=1141 / W=200 / H=80 (latin or cyrillic prefix)
      *
-     * @return array<int, int>  отсортированный набор уникальных целых mm
+     * Comments and regex bodies kept ASCII-only to avoid PHP parser breakage
+     * on non-ASCII byte sequences in source (prod ParseError on cyrillic
+     * literal inside char class).
+     *
+     * @return array<int, int>  sorted unique integer mm
      */
     #[Computed]
     public function subjectDimensions(): array
@@ -363,10 +368,6 @@ class ItemCatalogLinkDialog extends Component
         }
         $dims = [];
 
-        // Pattern: 62x40x10 - series via U+00D7 (multiplication) / x / X /
-        // U+0425 (cyrillic capital HA) / U+0445 (cyrillic small HA) / asterisk.
-        // Cyrillic letters encoded as \x{NNNN} to avoid any non-ASCII bytes
-        // inside the PHP source (prod ParseError on cyrillic literal here).
         $sepClass = '[\x{00D7}xX\x{0425}\x{0445}*]';
         if (preg_match_all('/(\d{1,5}(?:[.,]\d+)?(?:' . $sepClass . '\d{1,5}(?:[.,]\d+)?)+)/u', $text, $matches)) {
             foreach ($matches[1] as $series) {
@@ -379,8 +380,7 @@ class ItemCatalogLinkDialog extends Component
             }
         }
 
-        // Pattern: 1700 mm / 1141.5 mm (mm = U+043C U+043C cyrillic).
-        if (preg_match_all('/(\d{2,5}(?:[.,]\d+)?)\s*\x{043C}\x{043C}\b/u', $text, $matches)) {
+        if (preg_match_all('/(\d{2,5}(?:[.,]\d+)?)\s*(?:\x{043C}\x{043C}|mm)\b/u', $text, $matches)) {
             foreach ($matches[1] as $n) {
                 $val = (int) round((float) str_replace(',', '.', $n));
                 if ($val > 0 && $val < 100000) {
@@ -389,8 +389,6 @@ class ItemCatalogLinkDialog extends Component
             }
         }
 
-        // Pattern: L=1141 / W=200 / H=80 (Latin + cyrillic prefixes).
-        // U+041B = L, U+0414 = D, U+0412 = V, U+0428 = SHA, U+0413 = G.
         if (preg_match_all('/\b[LWHlwh\x{041B}\x{0414}\x{0412}\x{0428}\x{0413}]\s*=\s*(\d{2,5}(?:[.,]\d+)?)/u', $text, $matches)) {
             foreach ($matches[1] as $n) {
                 $val = (int) round((float) str_replace(',', '.', $n));
@@ -407,9 +405,8 @@ class ItemCatalogLinkDialog extends Component
     }
 
     /**
-     * Главное keyword KB-категории subject — первое слово ≥4 символов,
-     * lowercase, без окончания. Используется substring-фильтром по
-     * `catalog.name + unit_name + part_type`.
+     * KB category keyword for subject: first word >= 4 chars, lowercase.
+     * Used as a substring filter against catalog.name + unit_name + part_type.
      */
     private function subjectCategoryKeyword(): ?string
     {
@@ -418,7 +415,6 @@ class ItemCatalogLinkDialog extends Component
         if (! $name) {
             return null;
         }
-        // Первое слово ≥4 символов (избегаем предлогов «без», «для», «над»).
         if (preg_match('/[\p{L}]{4,}/u', $name, $m)) {
             return mb_strtolower($m[0]);
         }
@@ -426,9 +422,8 @@ class ItemCatalogLinkDialog extends Component
     }
 
     /**
-     * Применить chip-фильтры (бренд / KB-категория / размеры) к набору
-     * результатов поиска. Принимает list-of-{catalog, similarity, ...},
-     * возвращает отфильтрованный list. Reindex через array_values.
+     * Apply chip filters (brand / KB category / dims) to a list of
+     * {catalog, similarity} rows. Reindex via array_values.
      *
      * @param  array<int, array{catalog: CatalogItem, similarity: float|null}>  $rows
      * @return array<int, array{catalog: CatalogItem, similarity: float|null}>
@@ -443,7 +438,6 @@ class ItemCatalogLinkDialog extends Component
             return $rows;
         }
 
-        // Brand: exact match (case-insensitive trim).
         if ($this->filterBrand) {
             $brand = $subject->brand?->name ?: $subject->parsed_brand;
             if ($brand) {
@@ -455,9 +449,6 @@ class ItemCatalogLinkDialog extends Component
             }
         }
 
-        // Category: substring keyword из subject.kbCategory.name по
-        // catalog.name / unit_name / part_type. Эвристика — каталог не
-        // хранит structured-category, поэтому матчим по тексту.
         if ($this->filterCategory) {
             $keyword = $this->subjectCategoryKeyword();
             if ($keyword !== null) {
@@ -473,8 +464,6 @@ class ItemCatalogLinkDialog extends Component
             }
         }
 
-        // Dims: хотя бы один из subject-dims попадает в любой size_a..f
-        // каталога с допуском ±DIM_TOLERANCE_MM.
         if ($this->filterDims) {
             $dims = $this->subjectDimensions;
             if (! empty($dims)) {
