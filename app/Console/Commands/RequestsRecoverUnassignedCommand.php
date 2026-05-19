@@ -110,7 +110,9 @@ class RequestsRecoverUnassignedCommand extends Command
                     $r->internal_code,
                     $r->client_email,
                     $r->created_at?->format('Y-m-d H:i'),
-                    (int) now()->diffInHours($r->created_at),
+                    // diffInHours в Carbon ≥3 возвращает signed (отрицательный
+                    // для прошлого) — берём abs для отображения возраста.
+                    (int) abs(now()->diffInHours($r->created_at)),
                 ])->all(),
             );
         }
