@@ -3,9 +3,27 @@
     $coverage = $this->categoryCoverage;
     $breakdown = $this->categoryBreakdown;
     $maxBreakdown = !empty($breakdown) ? max(array_column($breakdown, 'count')) : 0;
+    $periodDays = $this->periodDays;
 @endphp
 
 <div class="space-y-4">
+
+    {{-- ───────── Period switcher (для funnel / heatmap / sparklines) ─────────
+         Сохраняется в URL ?period=N через #[Url]. --}}
+    @if($this->isPrivileged)
+        <div class="flex items-center gap-2 text-[12px]">
+            <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">Период:</span>
+            @foreach([7 => '7 дн.', 30 => '30 дн.', 90 => '90 дн.'] as $d => $label)
+                <button type="button" wire:click="setPeriod({{ $d }})"
+                        class="px-2.5 py-1 rounded border text-[12px] transition-colors
+                               {{ $periodDays === $d
+                                   ? 'border-sky-500 bg-sky-50 text-sky-800 font-semibold'
+                                   : 'border-border bg-surface text-fg-2 hover:bg-surface-2' }}">
+                    {{ $label }}
+                </button>
+            @endforeach
+        </div>
+    @endif
 
     {{-- ───────── Attention strip (Phase 1.11, Foundation §5.3) ───────── --}}
     @php
@@ -82,6 +100,66 @@
         </div>
     </div>
 
+    {{-- ───────── Funnel + conversion (за период) ─────────
+         received → quoted → won/lost.
+         quote_rate = quoted/received, conversion = won/(won+lost). --}}
+    @if($this->isPrivileged)
+        @php
+            $f = $this->funnel;
+            $maxStage = max($f['received'], $f['quoted'], $f['won'] + $f['lost'], 1);
+            // ширина «бара» в процентах относительно received (worst case 100%)
+            $w = fn ($v) => $maxStage > 0 ? max(2, round($v * 100 / $maxStage)) : 0;
+        @endphp
+        <div class="ds-card">
+            <div class="ds-card-header">
+                <h3>Воронка · {{ $periodDays }} дн.</h3>
+                <span class="flex-1"></span>
+                <span class="text-[11.5px] text-fg-3">
+                    quote-rate
+                    <span class="mono tnum font-semibold {{ $f['quote_rate'] === null ? 'text-fg-3' : ($f['quote_rate'] >= 50 ? 'text-emerald-700' : ($f['quote_rate'] >= 25 ? 'text-amber-700' : 'text-red-700')) }}">{{ $f['quote_rate'] !== null ? $f['quote_rate'] . '%' : '—' }}</span>
+                    · conversion
+                    <span class="mono tnum font-semibold {{ $f['conversion'] === null ? 'text-fg-3' : ($f['conversion'] >= 60 ? 'text-emerald-700' : ($f['conversion'] >= 30 ? 'text-amber-700' : 'text-red-700')) }}">{{ $f['conversion'] !== null ? $f['conversion'] . '%' : '—' }}</span>
+                </span>
+            </div>
+            <div class="ds-card-body">
+                <div class="space-y-2 text-[12.5px]">
+                    {{-- Received --}}
+                    <div class="flex items-center gap-3">
+                        <div class="w-28 shrink-0 text-fg-2 uppercase text-[10.5px] tracking-wider">Получено</div>
+                        <div class="flex-1 h-7 rounded bg-neutral-100 relative overflow-hidden">
+                            <div class="h-full bg-sky-200" style="width: {{ $w($f['received']) }}%"></div>
+                        </div>
+                        <div class="w-16 text-right mono tnum text-fg-1 font-semibold">{{ $f['received'] }}</div>
+                    </div>
+                    {{-- Quoted --}}
+                    <div class="flex items-center gap-3">
+                        <div class="w-28 shrink-0 text-fg-2 uppercase text-[10.5px] tracking-wider">КП отправлено</div>
+                        <div class="flex-1 h-7 rounded bg-neutral-100 relative overflow-hidden">
+                            <div class="h-full bg-sky-500" style="width: {{ $w($f['quoted']) }}%"></div>
+                        </div>
+                        <div class="w-16 text-right mono tnum text-fg-1 font-semibold">{{ $f['quoted'] }}</div>
+                    </div>
+                    {{-- Won / Lost — две полосы рядом --}}
+                    <div class="flex items-center gap-3">
+                        <div class="w-28 shrink-0 text-fg-2 uppercase text-[10.5px] tracking-wider">Закрыто</div>
+                        <div class="flex-1 h-7 rounded bg-neutral-100 relative overflow-hidden flex">
+                            <div class="h-full bg-emerald-500" style="width: {{ $w($f['won']) }}%" title="Закрыто-выиграно"></div>
+                            <div class="h-full bg-red-400" style="width: {{ $w($f['lost']) }}%" title="Закрыто-проиграно"></div>
+                        </div>
+                        <div class="w-16 text-right mono tnum text-fg-1 font-semibold">
+                            <span class="text-emerald-700">{{ $f['won'] }}</span>
+                            <span class="text-fg-3">/</span>
+                            <span class="text-red-700">{{ $f['lost'] }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-[10.5px] text-fg-4 mt-3">
+                    Получено = заявки, у которых created_at в окне. Quoted/Won/Lost = переходы в этот статус (request_state_changes) в окне. quote-rate = Quoted/Получено. conversion = Won/(Won+Lost).
+                </div>
+            </div>
+        </div>
+    @endif
+
     {{-- ───────── Two-col content ───────── --}}
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
@@ -89,6 +167,72 @@
         <div class="lg:col-span-2 space-y-4">
 
             @if($this->isPrivileged)
+                {{-- ───────── Heatmap inflow-by-hour (weekday × hour) ─────────
+                     7 строк (Пн..Вс) × 24 колонки (часы Europe/Moscow).
+                     Интенсивность фона = count/max в палитре sky.
+                     0 → bg-neutral-50, max → bg-sky-700. --}}
+                @php
+                    $hm = $this->inflowHeatmap;
+                    $hmMatrix = $hm['matrix'];
+                    $hmMax = $hm['max'];
+                    $hmTotal = $hm['total'];
+                    $weekdays = [1=>'Пн', 2=>'Вт', 3=>'Ср', 4=>'Чт', 5=>'Пт', 6=>'Сб', 7=>'Вс'];
+                    // палитра sky: 0,1..10 → bg-class + text-color
+                    $heatCell = function (int $v, int $max) {
+                        if ($v === 0 || $max === 0) {
+                            return ['bg' => 'background:#f5f6f8', 'text' => '#c5cad3'];
+                        }
+                        // линейная шкала, 5 уровней + max
+                        $ratio = $v / $max;
+                        if ($ratio < 0.10)  return ['bg' => 'background:#e0f2fe', 'text' => '#0c4a6e'];
+                        if ($ratio < 0.25)  return ['bg' => 'background:#bae6fd', 'text' => '#0c4a6e'];
+                        if ($ratio < 0.50)  return ['bg' => 'background:#7dd3fc', 'text' => '#0c4a6e'];
+                        if ($ratio < 0.75)  return ['bg' => 'background:#38bdf8', 'text' => 'white'];
+                        return ['bg' => 'background:#0284c7', 'text' => 'white'];
+                    };
+                @endphp
+                <div class="ds-card">
+                    <div class="ds-card-header">
+                        <h3>Поток заявок · {{ $periodDays }} дн.</h3>
+                        <span class="flex-1"></span>
+                        <span class="text-[11.5px] text-fg-3">всего <span class="mono tnum text-fg-1 font-semibold">{{ $hmTotal }}</span> · максимум <span class="mono tnum text-fg-1 font-semibold">{{ $hmMax }}</span>/час</span>
+                    </div>
+                    <div class="ds-card-body overflow-x-auto">
+                        <table class="border-collapse text-[10px] mono" style="table-layout: fixed;">
+                            <thead>
+                                <tr>
+                                    <th class="w-7"></th>
+                                    @for($h = 0; $h < 24; $h++)
+                                        <th class="text-fg-3 font-normal" style="width: 22px; padding: 0;">
+                                            {{ $h % 3 === 0 ? sprintf('%02d', $h) : '' }}
+                                        </th>
+                                    @endfor
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach($weekdays as $d => $label)
+                                    <tr>
+                                        <td class="text-fg-3 pr-1 text-right">{{ $label }}</td>
+                                        @for($h = 0; $h < 24; $h++)
+                                            @php
+                                                $v = $hmMatrix[$d][$h] ?? 0;
+                                                $style = $heatCell($v, $hmMax);
+                                            @endphp
+                                            <td class="text-center" style="width: 22px; height: 20px; {{ $style['bg'] }}; color: {{ $style['text'] }}; border: 1px solid white;"
+                                                title="{{ $label }} {{ sprintf('%02d:00', $h) }} — {{ $v }} заявок">
+                                                {{ $v > 0 ? $v : '' }}
+                                            </td>
+                                        @endfor
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                        <div class="text-[10.5px] text-fg-4 mt-2">
+                            Часы Europe/Moscow. Темнее = больше заявок в это время. Помогает планировать дежурства и нагрузку.
+                        </div>
+                    </div>
+                </div>
+
                 {{-- AI-категории писем --}}
                 <div class="ds-card">
                     <div class="ds-card-header">
@@ -119,30 +263,73 @@
                     </div>
                 </div>
 
-                {{-- Менеджеры — нагрузка --}}
+                {{-- ───────── Менеджеры: текущая нагрузка + 14-дн sparkline ─────────
+                     sum14 = сколько назначено за последние 14 дней (request_assignments).
+                     points → inline SVG polyline (no Chart.js).
+                     Sparkline даёт визуальный паттерн: ровный поток, спайки, тишина. --}}
+                @php
+                    $sparks = $this->managerSparklines;
+                    // Общий max по всем менеджерам для согласованного масштаба
+                    // — иначе у самого нагруженного «потолок», у новичка тоже
+                    // «потолок», и спайки выглядят одинаково высокими.
+                    $sparkMax = 0;
+                    foreach ($sparks as $row) {
+                        foreach ($row['points'] as $p) {
+                            if ($p > $sparkMax) $sparkMax = $p;
+                        }
+                    }
+                    $sparkMax = max(1, $sparkMax);
+                    // Renderer: 14 точек, ширина 84px, высота 18px, padding 1px.
+                    $renderSpark = function (array $points) use ($sparkMax): string {
+                        $W = 84; $H = 18; $pad = 1;
+                        $n = count($points);
+                        if ($n < 2) return '';
+                        $stepX = ($W - 2 * $pad) / ($n - 1);
+                        $coords = [];
+                        foreach ($points as $i => $v) {
+                            $x = $pad + $i * $stepX;
+                            $y = $H - $pad - ($v / $sparkMax) * ($H - 2 * $pad);
+                            $coords[] = round($x, 1) . ',' . round($y, 1);
+                        }
+                        $line = implode(' ', $coords);
+                        // last point — bullet (где мы сейчас)
+                        $lastX = $pad + ($n - 1) * $stepX;
+                        $lastY = $H - $pad - (end($points) / $sparkMax) * ($H - 2 * $pad);
+                        return '<svg width="' . $W . '" height="' . $H . '" style="display:block">'
+                            . '<polyline fill="none" stroke="#0284c7" stroke-width="1.4" points="' . $line . '"/>'
+                            . '<circle cx="' . round($lastX, 1) . '" cy="' . round($lastY, 1) . '" r="2" fill="#0284c7"/>'
+                            . '</svg>';
+                    };
+                @endphp
                 <div class="ds-card">
-                    <div class="ds-card-header"><h3>Нагрузка менеджеров</h3></div>
+                    <div class="ds-card-header">
+                        <h3>Менеджеры · нагрузка + 14-дн поток</h3>
+                        <span class="flex-1"></span>
+                        <span class="text-[11.5px] text-fg-3">текущая · sparkline = назначения/день</span>
+                    </div>
                     <div class="ds-card-body p-0">
-                        @if(empty($this->managersLoad))
+                        @if(empty($sparks))
                             <div class="px-[18px] py-4 text-sm text-fg-3">В системе нет пользователей с ролью «менеджер».</div>
                         @else
                             <table class="w-full text-[12.5px] border-collapse">
                                 <thead>
                                     <tr class="text-[10.5px] uppercase tracking-wider font-semibold text-fg-3 border-b border-border-subtle">
-                                        <th class="text-left px-[18px] py-2 font-semibold">Менеджер</th>
-                                        <th class="text-right px-[18px] py-2 font-semibold">Всего</th>
-                                        <th class="text-right px-[18px] py-2 font-semibold">Новых</th>
+                                        <th class="text-left px-[18px] py-2">Менеджер</th>
+                                        <th class="text-right px-2 py-2" title="Открытых заявок прямо сейчас">сейчас</th>
+                                        <th class="text-right px-2 py-2" title="Назначений за 14 дней">14дн</th>
+                                        <th class="text-left px-[18px] py-2">поток</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach($this->managersLoad as $m)
-                                        <tr class="border-b border-border-subtle">
-                                            <td class="px-[18px] py-2.5">
+                                    @foreach($sparks as $m)
+                                        <tr class="border-b border-border-subtle last:border-b-0">
+                                            <td class="px-[18px] py-2">
                                                 <div class="text-fg-1">{{ $m['name'] }}</div>
                                                 <div class="text-[11.5px] text-fg-3 mono">{{ $m['email'] }}</div>
                                             </td>
-                                            <td class="px-[18px] py-2.5 text-right mono tnum text-fg-1">{{ $m['total'] }}</td>
-                                            <td class="px-[18px] py-2.5 text-right mono tnum {{ $m['new'] > 0 ? 'text-amber-700 font-semibold' : 'text-fg-3' }}">{{ $m['new'] }}</td>
+                                            <td class="px-2 py-2 text-right mono tnum {{ $m['total'] > 0 ? 'text-fg-1 font-semibold' : 'text-fg-3' }}">{{ $m['total'] }}</td>
+                                            <td class="px-2 py-2 text-right mono tnum {{ $m['sum14'] > 0 ? 'text-fg-2' : 'text-fg-3' }}">{{ $m['sum14'] }}</td>
+                                            <td class="px-[18px] py-2">{!! $renderSpark($m['points']) !!}</td>
                                         </tr>
                                     @endforeach
                                 </tbody>

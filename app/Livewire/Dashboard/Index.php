@@ -11,10 +11,13 @@ use App\Models\AiDecision;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use App\Models\Request;
+use App\Models\RequestStateChange;
 use App\Models\RoutedMail;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 
 /**
@@ -28,6 +31,29 @@ use Livewire\Component;
  */
 class Index extends Component
 {
+    /**
+     * Период (в днях) для funnel, conversion, heatmap, sparklines.
+     * Переключается чипами 7/30/90 в шапке dashboard.
+     */
+    #[Url(as: 'period', except: 30)]
+    public int $periodDays = 30;
+
+    public function setPeriod(int $days): void
+    {
+        if (in_array($days, [7, 30, 90], true)) {
+            $this->periodDays = $days;
+        }
+    }
+
+    /**
+     * Начало периода в moscow-tz (timestamps пишутся в UTC, но мы
+     * группируем по локальному календарю РОПа для heatmap/funnel).
+     */
+    private function periodStart(): CarbonImmutable
+    {
+        return CarbonImmutable::now()->subDays($this->periodDays);
+    }
+
     #[Computed]
     public function isPrivileged(): bool
     {
@@ -280,6 +306,193 @@ class Index extends Component
         }
 
         return $q->get();
+    }
+
+    /**
+     * Воронка за выбранный период: received → quoted → won/lost + conversion.
+     *
+     * received = заявки с created_at в периоде (новые письма / ручные).
+     * quoted/won/lost = уникальные request_id в request_state_changes,
+     *   где to_status попал в нужный статус в периоде (события «случились»
+     *   в окне, а не «заявка стартовала в окне»).
+     *
+     * quote_rate = quoted / received  (сколько начатых дошло до КП).
+     * conversion = won / (won + lost)  (winrate среди закрытых).
+     *
+     * @return array{received:int, quoted:int, won:int, lost:int, quote_rate:?float, conversion:?float}
+     */
+    #[Computed]
+    public function funnel(): array
+    {
+        if (! $this->isPrivileged) {
+            return ['received' => 0, 'quoted' => 0, 'won' => 0, 'lost' => 0,
+                    'quote_rate' => null, 'conversion' => null];
+        }
+        $since = $this->periodStart();
+
+        $received = Request::query()
+            ->where('created_at', '>=', $since)
+            ->count();
+
+        // distinct request_id — заявка могла переходить в Quoted несколько
+        // раз (например, через ClientReplied → Quoted снова). Нас интересует
+        // «попала ли вообще в КП за период».
+        $countByStatus = function (string $status) use ($since): int {
+            return RequestStateChange::query()
+                ->where('to_status', $status)
+                ->where('created_at', '>=', $since)
+                ->distinct('request_id')
+                ->count('request_id');
+        };
+
+        $quoted = $countByStatus(RequestStatus::Quoted->value);
+        $won = $countByStatus(RequestStatus::ClosedWon->value);
+        $lost = $countByStatus(RequestStatus::ClosedLost->value);
+
+        $quoteRate = $received > 0 ? round($quoted * 100 / $received, 1) : null;
+        $closed = $won + $lost;
+        $conversion = $closed > 0 ? round($won * 100 / $closed, 1) : null;
+
+        return [
+            'received' => $received,
+            'quoted' => $quoted,
+            'won' => $won,
+            'lost' => $lost,
+            'quote_rate' => $quoteRate,
+            'conversion' => $conversion,
+        ];
+    }
+
+    /**
+     * Inflow heatmap: 7 (Mon-Sun) × 24 (hours, Europe/Moscow) ячеек со
+     * счётчиком заявок (requests.created_at) за выбранный период.
+     *
+     * Используется РОПом увидеть, в какие часы / дни недели приходит
+     * больше всего работы — планировать дежурства, нагрузку.
+     *
+     * @return array{matrix: array<int, array<int, int>>, max: int, total: int}
+     */
+    #[Computed]
+    public function inflowHeatmap(): array
+    {
+        if (! $this->isPrivileged) {
+            return ['matrix' => [], 'max' => 0, 'total' => 0];
+        }
+        $since = $this->periodStart();
+
+        // Postgres ISODOW: 1=Mon ... 7=Sun. Удобно для русского weekly view.
+        $rows = DB::table('requests')
+            ->where('created_at', '>=', $since)
+            ->selectRaw("
+                EXTRACT(ISODOW FROM (created_at AT TIME ZONE 'Europe/Moscow'))::int AS dow,
+                EXTRACT(HOUR    FROM (created_at AT TIME ZONE 'Europe/Moscow'))::int AS hr,
+                COUNT(*) AS c
+            ")
+            ->groupBy('dow', 'hr')
+            ->get();
+
+        // Инициализируем нулями: 7 строк (Пн..Вс) × 24 колонки (0..23).
+        $matrix = [];
+        for ($d = 1; $d <= 7; $d++) {
+            $matrix[$d] = array_fill(0, 24, 0);
+        }
+        $max = 0;
+        $total = 0;
+        foreach ($rows as $r) {
+            $d = (int) $r->dow;
+            $h = (int) $r->hr;
+            $c = (int) $r->c;
+            if (! isset($matrix[$d][$h])) {
+                continue;
+            }
+            $matrix[$d][$h] = $c;
+            $total += $c;
+            if ($c > $max) {
+                $max = $c;
+            }
+        }
+
+        return ['matrix' => $matrix, 'max' => $max, 'total' => $total];
+    }
+
+    /**
+     * Sparklines per менеджер: ежедневное число НАЗНАЧЕНИЙ за последние
+     * 14 дней (всегда 14, независимо от $periodDays — sparkline это «недавняя
+     * динамика», период не имеет смысла растягивать).
+     *
+     * Источник — `request_assignments.created_at` (audit-таблица), а не
+     * `requests.assigned_user_id` — последняя показывает только текущий
+     * snapshot, а нам нужен поток назначений во времени.
+     *
+     * @return array<int, array{name: string, email: string, total: int, points: array<int, int>, sum14: int}>
+     */
+    #[Computed]
+    public function managerSparklines(): array
+    {
+        if (! $this->isPrivileged) {
+            return [];
+        }
+        $managers = User::role(RoleEnum::requestHandlerRoles())->get();
+        if ($managers->isEmpty()) {
+            return [];
+        }
+
+        $days = 14;
+        // Boundary: «сегодня по Москве» — последняя ячейка sparkline.
+        $startMsk = CarbonImmutable::now('Europe/Moscow')->startOfDay()->subDays($days - 1);
+
+        $rows = DB::table('request_assignments')
+            ->whereIn('user_id', $managers->pluck('id'))
+            ->where('assigned_at', '>=', $startMsk->utc())
+            ->selectRaw("
+                user_id,
+                DATE(assigned_at AT TIME ZONE 'Europe/Moscow') AS day,
+                COUNT(*) AS c
+            ")
+            ->groupBy('user_id', 'day')
+            ->get();
+
+        // user_id → 'Y-m-d' → count
+        $byUser = [];
+        foreach ($rows as $r) {
+            $byUser[(int) $r->user_id][(string) $r->day] = (int) $r->c;
+        }
+
+        // current load (для сортировки + чтобы рядом со sparkline видеть)
+        $currentLoad = Request::query()
+            ->whereIn('assigned_user_id', $managers->pluck('id'))
+            ->whereIn('status', array_map(
+                fn (RequestStatus $s) => $s->value,
+                array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+            ))
+            ->groupBy('assigned_user_id')
+            ->selectRaw('assigned_user_id, COUNT(*) AS c')
+            ->pluck('c', 'assigned_user_id')
+            ->all();
+
+        $result = [];
+        foreach ($managers as $u) {
+            $points = [];
+            $sum = 0;
+            for ($i = 0; $i < $days; $i++) {
+                $d = $startMsk->addDays($i)->format('Y-m-d');
+                $v = (int) ($byUser[$u->id][$d] ?? 0);
+                $points[] = $v;
+                $sum += $v;
+            }
+            $result[] = [
+                'name' => $u->name,
+                'email' => $u->email,
+                'total' => (int) ($currentLoad[$u->id] ?? 0),
+                'sum14' => $sum,
+                'points' => $points,
+            ];
+        }
+
+        // Сортируем по текущей нагрузке убыв., затем по sum14.
+        usort($result, fn ($a, $b) => ($b['total'] <=> $a['total']) ?: ($b['sum14'] <=> $a['sum14']));
+
+        return $result;
     }
 
     public function render()
