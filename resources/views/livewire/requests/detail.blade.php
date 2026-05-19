@@ -686,34 +686,23 @@
                     </button>
                 @endif
 
-                {{-- Убраны кнопки «📨 КП отправлено» и «❓ Жду уточнение клиента» —
-                     эти статусы ставятся в semi-auto режиме:
-                       • Quoted        — через OutboundDocumentDetector + LLM-fallback
-                                         (AI-плашка «Применить» в action-panel сверху).
-                       • AwaitingClientClarification — через ClarificationPanel
-                                         post-send hook (отправка batch вопросов
-                                         сама переводит статус).
-                     Если detector промахнулся в редком кейсе — менеджер
-                     либо отправит исправленный КП (detector подхватит),
+                {{-- Убраны semi-auto кнопки:
+                       • «📨 КП отправлено» / «❓ Жду уточнение клиента» —
+                                         Quoted и AwaitingClientClarification ставятся
+                                         через OutboundDocumentDetector / ClarificationPanel
+                                         post-send hook.
+                       • «📑 Клиент на согласовании» / «⏰ Клиент отложил» /
+                         «💵 Запросил счёт» — UnderReview, PostponedUntil,
+                                         AwaitingInvoice ставятся через
+                                         InboundIntentClassifier (gpt-4o-mini, 6 intent'ов)
+                                         → AI-плашка «Применить» в action-panel сверху.
+                                         Для PostponedUntil AI вытаскивает
+                                         suggested_resume_date из текста, для ClosedLost
+                                         AI вытаскивает suggested_closed_lost_reason.
+                     Если detector промахнулся в редком кейсе — менеджер либо
+                     отправит исправленный КП (detector подхватит), либо
+                     закроет через «⊘ Закрыть как потеря» с reason'ом,
                      либо обратится к РОПу. --}}
-
-                @if($allow($RS::UnderReview))
-                    <button type="button" wire:click="transitionStatus('under_review')"
-                            class="btn btn-sm"
-                            @disabled(! $canManage)>📑 Клиент на согласовании</button>
-                @endif
-
-                @if($allow($RS::PostponedUntil))
-                    <button type="button" wire:click="$dispatch('open-postpone-dialog')"
-                            class="btn btn-sm"
-                            @disabled(! $canManage)>⏰ Клиент отложил</button>
-                @endif
-
-                @if($allow($RS::AwaitingInvoice))
-                    <button type="button" wire:click="transitionStatus('awaiting_invoice')"
-                            class="btn btn-sm"
-                            @disabled(! $canManage)>💵 Запросил счёт</button>
-                @endif
 
                 @if($allow($RS::Invoiced))
                     <button type="button" wire:click="transitionStatus('invoiced')"
