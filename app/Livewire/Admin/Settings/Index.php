@@ -128,6 +128,16 @@ class Index extends Component
                 'min' => 1.0,
                 'max' => 10.0,
             ],
+            'dealer.auto_threshold' => [
+                'group' => 'Распределение заявок',
+                'label' => 'Порог автопометки дилера (открытых заявок)',
+                'help' => 'Если у одного client_email суммарно открыто столько заявок или больше — email автоматически помечается «дилерским», и client-sticky (1b) для него отключается (заявки уходят через round-robin, а не липнут к одному менеджеру). Catalog/text-sticky продолжают работать. 0 = выключить автопометку.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 8,
+                'step' => 1,
+                'min' => 0,
+                'max' => 100,
+            ],
 
             // ─── Attention — дедлайны (Foundation §5.5) ──────────────────
             // Раб. часы = Пн-Пт 9-18 Europe/Moscow. Раб. дни — Пн-Пт.
@@ -321,6 +331,7 @@ class Index extends Component
             'catalog.import.min_full_rows' => 'services.catalog_import.min_full_rows',
             'tax.vat_percent' => 'services.tax.vat_percent',
             'assignment.newbie_boost' => 'services.assignment.newbie_boost',
+            'dealer.auto_threshold' => 'services.dealer.auto_threshold',
         ];
 
         return $configMap[$key] ?? '';

@@ -27,6 +27,10 @@ use Illuminate\Support\Facades\DB;
  *     1b) **client_email** — у менеджера есть открытая заявка от того же
  *         `client_email` что и новая. Базовая CRM-логика «один клиент —
  *         один менеджер», даже если товары разные. reason kind=`client`.
+ *         **Исключение:** «дилерские» email'ы (≥ N открытых заявок в
+ *         системе, порог `dealer.auto_threshold`) этот уровень пропускают —
+ *         см. DealerEmailService. Дилерский поток распределяется
+ *         через round-robin, чтобы не топить одного менеджера.
  *
  *     1c) **parsed_article / parsed_name** — fallback на сырые поля без
  *         каталога (Phase 1 текстовый матч), TRIM по article и
@@ -46,6 +50,7 @@ class AssignmentService
     public function __construct(
         private readonly AttentionService $attention,
         private readonly RequestActivityService $activity,
+        private readonly DealerEmailService $dealers,
     ) {
     }
 
@@ -243,6 +248,16 @@ class AssignmentService
     {
         $clientEmail = mb_strtolower(trim((string) $request->client_email));
         if ($clientEmail === '') {
+            return null;
+        }
+
+        // Авто-пометка дилерских email'ов: если у этого client_email уже
+        // ≥ N открытых заявок (порог из настроек), фиксируем его как
+        // дилерский и пропускаем client-sticky. Поток дилера распределяется
+        // через round-robin, а не липнет к одному менеджеру.
+        // Catalog (1a) и text (1c) sticky продолжают работать.
+        $this->dealers->autoMarkIfNeeded($clientEmail);
+        if ($this->dealers->isDealer($clientEmail)) {
             return null;
         }
 

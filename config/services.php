@@ -326,4 +326,12 @@ return [
         'newbie_boost' => (float) env('ASSIGNMENT_NEWBIE_BOOST', 2.0),
     ],
 
+    'dealer' => [
+        // Порог авто-пометки «дилерского» email. Если у одного client_email
+        // открыто столько заявок или больше — он автоматически помечается
+        // и client-sticky (1b) для него отключается. Catalog/text-sticky
+        // продолжают работать. 0 — выключить автопометку.
+        'auto_threshold' => (int) env('DEALER_AUTO_THRESHOLD', 8),
+    ],
+
 ];
