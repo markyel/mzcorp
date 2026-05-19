@@ -1370,6 +1370,28 @@ print_r(\App\Models\InboundUrlFetch::query()->selectRaw("status, count(*) as c")
 
 <!-- legacy планы 2026-05-06/07 (Phase 1.8d/1.8b) — выполнены, удалены 2026-05-07 (вечер 2). -->
 
+### Сессия 2026-05-19 (часть 3) — Recovery нераспределённых заявок
+
+**Контекст**: User обратил внимание, что меню «Нераспределённые» открывает пустой список. Разбирались — оказалось 49 Pending без assigned_user_id, из них 16 С items (включая M-2026-1061 от 18 мая 17:02).
+
+**Диагностика**:
+- Все 16 заявок с items созданы в окне **18 мая 14:56–17:02** — ровно в окно деплоя коммитов `de32270` (three-level sticky) → `7076195` (weighted round-robin) → `5ef9c3e` (newbie boost). Дилер-флаг (`42bfacc`) приехал на следующий день, не виноват.
+- 33 заявки без items — старше 2ч, в основном мусор (internal myzip.ru-адреса: `noreply@`, `dmitry.rumiantsev@`, `ilya.kurzaev@` ×2, `Ilya.Yurkov@`, `info@`; служебные `info@partleader.ru` ×2, `support@liftway.ru`; адреса из периода до InternalSenderDetector).
+- Root cause гипотеза: в окне деплоя AssignmentService persist() сохранил items, но autoAssign() упал тихо (несовместимость кода в worker vs FPM). ParseRequestItemsJob поймал в catch, Request остался Pending forever. Логи 18 мая ротированы — окончательно не доказать.
+
+**Реализовано** (commits `c245dee`, `fe872b7`):
+- `ClosedLostReason::ParserNoContent` — новая причина для авто-закрытия пустых
+- `RequestStateService::systemCloseLost()` — cron-safe close без author-гейта (writes `request_state_changes.event='system_close_lost'`)
+- `RequestsRecoverUnassignedCommand` — hourly cron:
+  - items есть → `autoAssign()` + audit `request_state_changes.event='auto_recovery'`
+  - items нет AND `created_at < now() - threshold` (default 2ч) → `systemCloseLost(ParserNoContent)`
+  - `--dry-run`, `--threshold=N` опции
+- `routes/console.php` → `Schedule::command('requests:recover-unassigned')->hourly()`
+
+**Результат прогона 19 мая (16:xx MSK)**: assign ok=15 / close ok=33 / fail=0. Распределение: Морозов 5, Иванов 4, РОП Сидоров 3, Менеджер 2 — 2, Менеджер 3 — 1. `order@liftway.store` (5 заявок) раскидался между 3 разными менеджерами — dealer-flag работает.
+
+**Окно «риска» теперь ≤1 час вместо «навсегда».**
+
 ## Известные грабли (накопленные за Phase 1.4)
 
 - **App passwords в Yandex 360 для бизнеса часто отключены** — путь сразу через OAuth.
@@ -1391,3 +1413,5 @@ print_r(\App\Models\InboundUrlFetch::query()->selectRaw("status, count(*) as c")
 - **AI vs Rule счётчики не равны** — это нормально: AI смотрит subject+body+from, rule только subject. Если хотим симметрию — переключаем правило на `match_mode=ai_classified`.
 - **Loop-копии раздувают AI-метрики** — каждая дублирующая копия классифицируется как accounting, накручивая счётчик. После hot-fix дубли больше не создаются, но 8+ существующих в БД остаются (решено не чистить).
 - **Webklex 6.x авторизация SMTP** — Symfony Mailer поддерживает XOAUTH2 через `addAuthenticator(new XOAuth2Authenticator())` и `setPassword($accessToken)`. Это уже завязано в `MailForwarder`.
+- **После деплоя `app/Services/Request/Assignment*` ОБЯЗАТЕЛЬНО `sudo supervisorctl restart all`.** PHP-FPM подхватывает новый код мгновенно, queue worker крутится со старым байт-кодом. В окне расхождения `RequestItemPersister::persist()` сохраняет items, autoAssign падает на несовместимости — Request остаётся Pending+unassigned forever (см. M-2026-1031..1061 от 18 мая). Recovery-cron теперь подбирает hourly (`requests:recover-unassigned`), но лучше избегать первоначально.
+- **Carbon ≥3 `diffInHours()` возвращает signed value** — для прошедшего времени отрицательное. Если нужен «возраст» — `abs(now()->diffInHours($created_at))` или `$created_at->diffInHours()` без аргумента.
