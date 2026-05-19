@@ -334,4 +334,21 @@ return [
         'auto_threshold' => (int) env('DEALER_AUTO_THRESHOLD', 8),
     ],
 
+    'catalog_sync' => [
+        // Public URL до .mdb (mylift.ru/getxfile.php?id=...). Команда
+        // catalog:sync-from-url HEAD-проверяет Last-Modified и SHA-256,
+        // pull'ит при изменении, конвертит mdb-export → CSV, дёргает
+        // catalog:import --apply --encoding=utf-8.
+        'url' => env('CATALOG_SYNC_URL'),
+        // Имя таблицы в MDB, которую забираем (mdb-export <file> <table>).
+        // Узнать у источника или через `mdb-tables file.mdb`.
+        'table' => env('CATALOG_SYNC_TABLE', 'Каталог'),
+        // Сколько последних снапшотов (mdb+csv) хранить в storage. Старые
+        // удаляет ротация после каждого успешного pull'а.
+        'keep_snapshots' => (int) env('CATALOG_SYNC_KEEP', 7),
+        // SLA для healthcheck: алертим если последний успешный pull был
+        // позже чем N часов назад (default 18ч = пропущены оба daily-обновления).
+        'alert_stale_hours' => (int) env('CATALOG_SYNC_ALERT_HOURS', 18),
+    ],
+
 ];

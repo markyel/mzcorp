@@ -45,3 +45,15 @@ Schedule::command('users:apply-planned-unavailability')
     ->hourly()
     ->withoutOverlapping()
     ->onOneServer();
+
+// Регулярный pull MDB-каталога с public URL (mylift.ru/getxfile.php).
+// Источник обновляется ~2 раза в день. Расписание заказчика: первый
+// pull в 11:00, дальше каждые 4 часа → 11, 15, 19, 23, 03, 07 MSK.
+// Команда сама HEAD-checks Last-Modified + SHA-256 — при unchanged-snapshot
+// выходит rapid'но без import'а, не нагружает БД на каждый прогон.
+Schedule::command('catalog:sync-from-url')
+    ->cron('0 3,7,11,15,19,23 * * *')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
