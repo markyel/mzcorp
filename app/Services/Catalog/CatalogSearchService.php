@@ -9,16 +9,20 @@ use Illuminate\Database\Eloquent\Collection;
  * Поиск по каталогу для UI-autocomplete в modal'е manual link
  * (Priority 1, ItemCatalogLinkDialog).
  *
- * SQL ILIKE по sku / brand_article / brand_article_normalized / name.
+ * SQL ILIKE по sku / brand_article_normalized / articles_search / name.
  * Без векторов — оператор обычно ищет точный SKU/артикул, который видел
  * у клиента или в КП поставщика.
  *
+ * `articles_search` — денормализованное поле (NORM1|NORM2|...) со всеми
+ * OEM-артикулами позиции (см. миграцию 2026_05_18_160000). Это покрывает
+ * случай «вторичный OEM-артикул не в brand_article», например M01231 имеет
+ * brand_article=L-8, но в articles ещё F0380CP3, FO380CP3, FAA380CP3,
+ * DAA380E5. Без поиска по articles_search оператор не находит позицию
+ * по любому артикулу кроме первичного.
+ *
  * Сортировка:
- *  1. exact match по sku (highest);
- *  2. префикс sku;
- *  3. exact match по brand_article_normalized;
- *  4. is_active=true первыми (soft-deleted — в самом конце);
- *  5. sku ASC.
+ *  1. is_active=true первыми (soft-deleted — в самом конце);
+ *  2. sku ASC.
  */
 class CatalogSearchService
 {
@@ -61,6 +65,10 @@ class CatalogSearchService
                 // brand_article_normalized — uppercase no-sep — GIN trgm index
                 if ($normalizedLike !== null) {
                     $q->orWhere('brand_article_normalized', 'ILIKE', $normalizedLike);
+                    // articles_search — все OEM-артикулы NORM|NORM|... — GIN trgm index
+                    // (catalog_items_articles_search_trgm_idx). Покрывает вторичные
+                    // артикулы вроде F0380CP3 при brand_article=L-8.
+                    $q->orWhere('articles_search', 'ILIKE', $normalizedLike);
                 }
                 // sku — короткая, B-tree index достаточно
                 $q->orWhereRaw('sku ILIKE ?', [$like]);
