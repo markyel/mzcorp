@@ -575,15 +575,38 @@ class ItemCatalogLinkDialog extends Component
                 // ("ThyssenKrupp") while catalog has long form with
                 // subsidiary suffix ("ThyssenKrupp Elevator (TKE)"), or
                 // vice versa. Treat any inclusion as a match.
+                //
+                // Помимо primary `brand` проверяем jsonb-массив `brands` —
+                // аналоги хранят производителя в `brand` (напр.
+                // «Руспромаппаратура»), а совместимые OEM-бренды (OTIS,
+                // KONE, ...) — в `brands[]`. Без этого subject brand=Otis
+                // отсекает аналоги. См. миграцию 2026_05_19_180000.
                 $rows = array_filter($rows, function ($row) use ($needle) {
-                    $b = $row['catalog']->brand;
-                    if (! $b) {
-                        return false;
+                    $catalog = $row['catalog'];
+                    $candidates = [];
+                    if ($catalog->brand !== null && $catalog->brand !== '') {
+                        $candidates[] = $catalog->brand;
                     }
-                    $b = mb_strtolower(trim($b));
-                    return $b === $needle
-                        || mb_strpos($b, $needle) !== false
-                        || mb_strpos($needle, $b) !== false;
+                    if (is_array($catalog->brands)) {
+                        foreach ($catalog->brands as $b) {
+                            if (is_string($b) && $b !== '') {
+                                $candidates[] = $b;
+                            }
+                        }
+                    }
+                    foreach ($candidates as $b) {
+                        $b = mb_strtolower(trim((string) $b));
+                        if ($b === '') {
+                            continue;
+                        }
+                        if ($b === $needle
+                            || mb_strpos($b, $needle) !== false
+                            || mb_strpos($needle, $b) !== false
+                        ) {
+                            return true;
+                        }
+                    }
+                    return false;
                 });
             }
         }

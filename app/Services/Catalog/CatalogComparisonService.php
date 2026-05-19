@@ -90,7 +90,7 @@ class CatalogComparisonService
         $rows[] = $this->row(
             'Бренд', null,
             $this->reqCell($subjBrand),
-            $candidates->map(fn (CatalogItem $c) => $this->brandCell($c->brand, $subjBrand))->all(),
+            $candidates->map(fn (CatalogItem $c) => $this->brandCell($c, $subjBrand))->all(),
         );
 
         $rows[] = $this->row(
@@ -358,18 +358,45 @@ class CatalogComparisonService
 
     // ---------- Comparators ----------
 
-    private function brandCell(?string $catBrand, ?string $subjBrand): array
+    /**
+     * Бренд каталожной позиции в compare-таблице. В ячейке показываем
+     * primary `brand` (как было раньше), но статус match/diff считаем по
+     * ВСЕМ брендам (`brand` + `brands[]`): аналоги хранят производителя в
+     * `brand`, а OEM-кроссы — в `brands[]`. Subject brand=Otis должен
+     * считаться match для позиции brand=Руспромаппаратура / brands=[Otis,…].
+     * См. миграцию 2026_05_19_180000.
+     */
+    private function brandCell(CatalogItem $catalog, ?string $subjBrand): array
     {
+        $catBrand = $catalog->brand;
         if (! $catBrand) {
             return $this->emptyCell();
         }
         if (! $subjBrand) {
             return $this->plainCell($catBrand);
         }
-        $a = mb_strtolower(trim($catBrand));
-        $b = mb_strtolower(trim($subjBrand));
-        if ($a === $b || mb_strpos($a, $b) !== false || mb_strpos($b, $a) !== false) {
-            return $this->matchCell($catBrand);
+        $needle = mb_strtolower(trim($subjBrand));
+        $candidates = [$catBrand];
+        if (is_array($catalog->brands)) {
+            foreach ($catalog->brands as $b) {
+                if (is_string($b) && $b !== '') {
+                    $candidates[] = $b;
+                }
+            }
+        }
+        foreach ($candidates as $b) {
+            $a = mb_strtolower(trim((string) $b));
+            if ($a === '') {
+                continue;
+            }
+            if ($a === $needle || mb_strpos($a, $needle) !== false || mb_strpos($needle, $a) !== false) {
+                // Если match не на primary brand — добавляем sub-надпись
+                // «OEM-кросс», чтобы было видно «зачем тут разный бренд».
+                if (mb_strtolower(trim($catBrand)) !== $a) {
+                    return $this->matchCell($catBrand, 'OEM-кросс: ' . $b);
+                }
+                return $this->matchCell($catBrand);
+            }
         }
         return $this->diffCell($catBrand, 'другой бренд');
     }

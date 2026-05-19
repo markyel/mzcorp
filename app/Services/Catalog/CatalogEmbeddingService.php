@@ -618,14 +618,29 @@ class CatalogEmbeddingService
             return null;
         }
 
-        // Бренд safety-check.
+        // Бренд safety-check. Проверяем item brand против ВСЕХ брендов
+        // каталожной позиции — `brand` (primary) и `brands[]` (вторичные).
+        // Аналоги: primary brand=Руспромаппаратура, а в brands[] OEM-кроссы
+        // (OTIS, KONE, ...). Subject brand=Otis должен мэтчиться. См.
+        // миграцию 2026_05_19_180000.
         $itemBrand = $this->normalizeBrand($item->brand?->name ?: $item->parsed_brand);
-        $catalogBrand = $this->normalizeBrand($catalog->brand);
-        if ($itemBrand !== '' && $catalogBrand !== '' && $itemBrand !== $catalogBrand) {
+        $catalogBrands = [];
+        if ($catalog->brand !== null && $catalog->brand !== '') {
+            $catalogBrands[] = $this->normalizeBrand($catalog->brand);
+        }
+        if (is_array($catalog->brands)) {
+            foreach ($catalog->brands as $b) {
+                if (is_string($b) && $b !== '') {
+                    $catalogBrands[] = $this->normalizeBrand($b);
+                }
+            }
+        }
+        $catalogBrands = array_values(array_unique(array_filter($catalogBrands, fn ($b) => $b !== '')));
+        if ($itemBrand !== '' && ! empty($catalogBrands) && ! in_array($itemBrand, $catalogBrands, true)) {
             Log::info('CatalogEmbeddingService: brand mismatch — match rejected', [
                 'request_item_id' => $item->id,
                 'item_brand' => $itemBrand,
-                'catalog_brand' => $catalogBrand,
+                'catalog_brands' => $catalogBrands,
                 'catalog_id' => $catalog->id,
                 'similarity' => $similarity,
             ]);
