@@ -448,7 +448,11 @@
                                         : ($score >= 0.85 ? 'bg-emerald-50 text-emerald-700' : ($score >= 0.70 ? 'bg-amber-50 text-amber-700' : 'bg-neutral-100 text-fg-3'));
                                     $isSelected = $selectedCatalogId === $c->id;
                                 @endphp
-                                <div class="p-3 border-b border-r border-border {{ $isSelected ? 'bg-emerald-50/30' : 'bg-surface' }}"
+                                {{-- ВАЖНО: фон ПОЛНОСТЬЮ непрозрачный.
+                                     bg-emerald-50/30 (30% opacity) для isSelected
+                                     даёт «протекание» контента под sticky-top
+                                     при вертикальном scroll. --}}
+                                <div class="p-3 border-b border-r border-border {{ $isSelected ? 'bg-emerald-50' : 'bg-surface' }}"
                                      style="position: sticky; top: 0; z-index: 3;">
                                     <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-2 flex items-center gap-1.5">
                                         <span class="w-1.5 h-1.5 rounded-full {{ $score && $score >= 0.85 ? 'bg-emerald-600' : ($score && $score >= 0.70 ? 'bg-amber-600' : 'bg-neutral-400') }}"></span>
