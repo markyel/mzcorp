@@ -70,28 +70,24 @@ class QuotationService
     }
 
     /**
-     * Зафиксировать текущий draft в immutable-версию (Hybrid versioning
-     * шаг «Закрепить версию»). После freeze:
-     *  - текущий draft остаётся в статусе draft, version инкрементируется
-     *  - создаётся snapshot-копия со статусом... нет, не так.
+     * Создать новую версию КП на основе текущего draft'а (Hybrid versioning,
+     * семантика «второй вариант»).
      *
-     * UX-семантика, которую заказчик выбрал (пункт 5 = hybrid):
-     *  - drafts in-place editing (правки идут в текущий draft, version не растёт)
-     *  - явная кнопка «Закрепить версию» → текущий draft становится
-     *    замороженным (status остаётся draft, но запись становится
-     *    immutable; новые правки требуют клона как v+1)
-     *  - автомат при отправке (markSent создаёт snapshot если нужно)
+     * UX-сценарий: менеджер хочет предложить клиенту второй вариант
+     * комплектации (например, дороже-быстрее vs дешевле-долго). Клонирует
+     * текущий draft в v+1 — обе версии становятся в timeline'е КП:
+     *  - старая v1 → cancelled (frozen snapshot, видна для просмотра)
+     *  - новая v2 → draft, активна для редактирования
      *
-     * РЕАЛИЗАЦИЯ: freezeVersion клонирует текущий quotation как новую
-     * запись с version+1, status=draft. Текущий — переводится в статус
-     * Cancelled (исторический snapshot, отмеченный для UI как «версия N,
-     * не отправлена, заменена на N+1»). При markSent — то же, но
-     * замораживаемая версия становится Sent.
+     * Правки внутри одной версии идут in-place через wire:blur (auto-save),
+     * НЕ требуют явного «сохранить». Эта кнопка — только для развилки
+     * «начать новый вариант».
      *
-     * Альтернатива: отдельная таблица quotation_versions для immutable
-     * snapshot'ов — отложено, MVP делаем через cloning records.
+     * При markSent (Фаза 4) — то же самое, только новая версия не создаётся
+     * автоматически; sent → immutable, чтобы редактировать дальше — менеджер
+     * жмёт «Создать новый вариант» снова.
      */
-    public function freezeVersion(Quotation $current, User $byUser, ?string $reason = null): Quotation
+    public function createNextVersion(Quotation $current, User $byUser, ?string $reason = null): Quotation
     {
         if (! $current->status->isEditable()) {
             throw new \DomainException("Quotation {$current->internal_code} not editable (status={$current->status->value})");
@@ -115,13 +111,13 @@ class QuotationService
                 'status' => QuotationStatus::Cancelled->value,
                 'cancelled_at' => now(),
                 'notes' => trim(($current->notes ? $current->notes . "\n" : '')
-                    . 'Закреплено как версия #' . $clone->version
+                    . 'Заморожена при создании v' . $clone->version
                     . ($reason ? ': ' . $reason : '')),
             ])->save();
 
-            Log::info('QuotationService: version frozen', [
+            Log::info('QuotationService: next version created', [
                 'request_id' => $current->request_id,
-                'frozen_quotation_id' => $current->id,
+                'previous_quotation_id' => $current->id,
                 'new_quotation_id' => $clone->id,
                 'new_version' => $clone->version,
                 'by_user_id' => $byUser->id,

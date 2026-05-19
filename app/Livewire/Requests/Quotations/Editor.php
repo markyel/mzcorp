@@ -150,17 +150,23 @@ class Editor extends Component
         $this->dispatch('toast', message: $msg, type: 'success');
     }
 
-    public function freezeVersion(QuotationService $svc): void
+    /**
+     * Создать новый вариант (v+1) на основе текущего draft'а. Менеджер
+     * жмёт когда хочет предложить клиенту альтернативную комплектацию.
+     * Правки внутри одной версии — in-place auto-save, отдельной кнопки
+     * «сохранить» нет (всё пишется через wire:blur).
+     */
+    public function createNextVersion(QuotationService $svc): void
     {
         $this->ensureCanEdit();
         $current = $this->activeQuotation;
         if (! $current || ! $current->status->isEditable()) {
             return;
         }
-        $new = $svc->freezeVersion($current, auth()->user());
+        $new = $svc->createNextVersion($current, auth()->user());
         $this->viewQuotationId = $new->id;
         unset($this->versions, $this->activeQuotation);
-        $this->dispatch('toast', message: "Версия #{$current->version} закреплена, начат draft v{$new->version}", type: 'success');
+        $this->dispatch('toast', message: "Создан новый вариант v{$new->version} (на основе v{$current->version})", type: 'success');
     }
 
     public function cancelDraft(QuotationService $svc): void

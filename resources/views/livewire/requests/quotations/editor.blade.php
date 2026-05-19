@@ -265,15 +265,18 @@
             {{-- ───────── Действия ───────── --}}
             <div class="mt-4 flex items-center gap-2 pt-3 border-t border-border-subtle">
                 @if($editable)
+                    <span class="text-[11.5px] text-fg-3 mr-2">
+                        Правки сохраняются автоматически при выходе из поля.
+                    </span>
                     <button type="button" wire:click="refreshPrices"
                             wire:loading.attr="disabled" wire:target="refreshPrices"
                             class="btn btn-sm" title="Пере-snapshot catalog в текущий draft">
                         ↻ Обновить цены из каталога
                     </button>
-                    <button type="button" wire:click="freezeVersion"
-                            wire:confirm="Закрепить текущий черновик как v{{ $q->version }} (immutable) и начать v{{ $q->version + 1 }}?"
-                            class="btn btn-sm">
-                        🔒 Закрепить версию
+                    <button type="button" wire:click="createNextVersion"
+                            wire:confirm="Создать новый вариант v{{ $q->version + 1 }} на основе текущего? Текущий v{{ $q->version }} будет заморожен (доступен только для просмотра)."
+                            class="btn btn-sm" title="Клонировать текущий КП в v+1 для альтернативного варианта">
+                        📋 Создать новый вариант (v{{ $q->version + 1 }})
                     </button>
                     <span class="flex-1"></span>
                     <button type="button" wire:click="cancelDraft"
