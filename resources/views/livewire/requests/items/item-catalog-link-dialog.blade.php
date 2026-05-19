@@ -29,11 +29,14 @@
                             : [];
                         $subjImg = $subject->imageAttachment;
                         $subjImgIsImage = $subjImg && str_starts_with((string) $subjImg->mime_type, 'image/');
-                        // $imgs / $galleryItems нужны в обоих режимах (visual
+                        // imgs / galleryItems нужны в обоих режимах (visual
                         // subject-плашка + compare-row). Раньше определялись
                         // внутри visual-блока — после оборачивания visual в
-                        // @if(! $comparing) compare-режим падал с
-                        // ErrorException "Undefined variable $galleryItems".
+                        // if(!comparing) compare-режим падал с
+                        // ErrorException "Undefined variable galleryItems".
+                        // (без @-токенов в комментарии — Blade pre-processor
+                        // парсит @if внутри @php блока как реальную директиву
+                        // и добавляет лишний open-if без парного @endif.)
                         $imgs = $this->emailImages;
                         $galleryItems = $imgs->map(fn ($i) => [
                             'src' => route('attachments.preview', $i),
