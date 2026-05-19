@@ -358,8 +358,11 @@
                         $candidates = $compData['candidates'] ?? [];
                         $sections = $compData['sections'] ?? [];
                         $subjQty = $compData['subjectQty'] ?? 0;
-                        // Колонки grid: params(220px) + subject(280px) + N×280px
-                        $gridCols = '220px 280px ' . str_repeat('280px ', count($candidates));
+                        // Колонки grid: subject(280px sticky-left) + N×280px кандидатов.
+                        // Раньше была отдельная params-col (220px) с лейблами —
+                        // убрали по требованию заказчика, лейблы переехали внутрь
+                        // subject-ячейки (uppercase подпись над значением).
+                        $gridCols = '280px ' . str_repeat('280px ', count($candidates));
                     @endphp
 
                     {{-- HEAD bar: back + count + hint --}}
@@ -397,20 +400,20 @@
                          style="min-height: 0">
                         <div class="grid" style="grid-template-columns: {{ $gridCols }}; width: max-content; min-width: 100%;">
                             {{-- ─── HEADER ROW (sticky top) ─── --}}
-                            {{-- corner cell (sticky left+top) --}}
-                            <div class="bg-surface-2 border-b border-r border-border"
-                                 style="position: sticky; top: 0; left: 0; z-index: 5;"></div>
-
-                            {{-- subject column header — sticky-left (закреплено)
-                                 + sticky-top одновременно (corner-like). --}}
-                            <div class="p-3 border-b bg-sky-50"
-                                 style="position: sticky; top: 0; left: 220px; z-index: 4; border-right: 2px solid var(--sky-500); box-shadow: 1px 0 0 var(--border), 8px 0 12px -10px rgba(15,18,23,0.20);">
-                                <div class="text-[10.5px] uppercase tracking-wider text-sky-700 font-semibold mb-2 flex items-center gap-1.5">
+                            {{-- subject column header — sticky-left:0 (закреплено)
+                                 + sticky-top одновременно (corner-like).
+                                 ВАЖНО: bg-sky-50 ПОЛНОСТЬЮ непрозрачный — иначе
+                                 при горизонтальном scroll контент кандидатов
+                                 «протекает» под subject. --}}
+                            <div class="border-b bg-sky-50"
+                                 style="position: sticky; top: 0; left: 0; z-index: 5; border-right: 2px solid var(--sky-500); box-shadow: 1px 0 0 var(--border), 8px 0 12px -10px rgba(15,18,23,0.20);">
+                                <div class="px-3 pt-3 text-[10.5px] uppercase tracking-wider text-sky-700 font-semibold mb-2 flex items-center gap-1.5">
                                     <span class="w-1.5 h-1.5 rounded-full bg-sky-600"></span>
                                     Позиция заявки
                                     <span class="ml-auto inline-flex items-center gap-1 text-[10px] normal-case font-normal bg-surface border border-border px-1.5 py-0.5 rounded text-fg-3" title="Колонка закреплена слева при горизонтальной прокрутке">📌 закреплено</span>
                                 </div>
-                                <div class="aspect-[1.6/1] rounded-md bg-app border border-border overflow-hidden mb-2 relative">
+                                {{-- Photo carousel — edge-to-edge (без отступа слева). --}}
+                                <div class="aspect-[1.6/1] bg-app border-y border-border overflow-hidden mb-2 relative">
                                     @if(! empty($galleryItems))
                                         <div x-data="{ idx: 0, items: @js($galleryItems) }" class="w-full h-full">
                                             <button type="button"
@@ -433,23 +436,25 @@
                                         <div class="w-full h-full flex items-center justify-center text-[10px] text-fg-3">нет фото</div>
                                     @endif
                                 </div>
-                                <div class="font-semibold text-[13.5px] text-sky-700 leading-tight mb-1.5"
-                                     style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">
-                                    {{ $subject->parsed_name ?: '(без названия)' }}
-                                </div>
-                                <div class="flex items-center gap-2 text-[11.5px] text-fg-3 flex-wrap">
-                                    @if($subject->brand?->name ?? $subject->parsed_brand)
-                                        <span class="font-semibold text-[10.5px] bg-neutral-100 text-neutral-700 px-1.5 py-0.5 rounded uppercase">{{ $subject->brand?->name ?? $subject->parsed_brand }}</span>
-                                    @endif
-                                    @if($subject->parsed_article)
-                                        <span class="mono text-fg-2">{{ $subject->parsed_article }}</span>
-                                    @endif
-                                </div>
-                                @if($subjQty > 0)
-                                    <div class="mt-2">
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11.5px] bg-sky-50 text-sky-700">{{ $subjQty }} шт.</span>
+                                <div class="px-3 pb-3">
+                                    <div class="font-semibold text-[13.5px] text-sky-700 leading-tight mb-1.5"
+                                         style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">
+                                        {{ $subject->parsed_name ?: '(без названия)' }}
                                     </div>
-                                @endif
+                                    <div class="flex items-center gap-2 text-[11.5px] text-fg-3 flex-wrap">
+                                        @if($subject->brand?->name ?? $subject->parsed_brand)
+                                            <span class="font-semibold text-[10.5px] bg-neutral-100 text-neutral-700 px-1.5 py-0.5 rounded uppercase">{{ $subject->brand?->name ?? $subject->parsed_brand }}</span>
+                                        @endif
+                                        @if($subject->parsed_article)
+                                            <span class="mono text-fg-2">{{ $subject->parsed_article }}</span>
+                                        @endif
+                                    </div>
+                                    @if($subjQty > 0)
+                                        <div class="mt-2">
+                                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11.5px] bg-sky-50 text-sky-700">{{ $subjQty }} шт.</span>
+                                        </div>
+                                    @endif
+                                </div>
                             </div>
 
                             {{-- candidate columns header --}}
@@ -531,15 +536,13 @@
                                     @continue
                                 @endif
 
-                                {{-- section header row spans all columns; params-col sticky-left,
-                                     subject-col тоже sticky-left чтобы цельная section-полоса
-                                     не рвалась при горизонтальном scroll. --}}
-                                <div class="px-3 py-1.5 bg-neutral-100 border-b border-r border-border text-[11px] font-bold text-fg-1 uppercase tracking-wider"
-                                     style="position: sticky; left: 0; z-index: 2;">
+                                {{-- section header row spans all columns; subject sticky-left:0
+                                     полностью непрозрачным фоном — иначе кандидаты
+                                     протекают под subject при горизонтальном scroll. --}}
+                                <div class="px-3 py-1.5 bg-neutral-100 border-b text-[11px] font-bold text-fg-1 uppercase tracking-wider"
+                                     style="position: sticky; left: 0; z-index: 2; border-right: 2px solid var(--sky-500); box-shadow: 1px 0 0 var(--border), 8px 0 12px -10px rgba(15,18,23,0.20);">
                                     {{ $section['title'] }}
                                 </div>
-                                <div class="bg-neutral-100 border-b border-border"
-                                     style="position: sticky; left: 220px; z-index: 1; border-right: 2px solid var(--sky-500);"></div>
                                 @for($i = 0; $i < count($candidates); $i++)
                                     <div class="bg-neutral-100 border-b border-r border-border"></div>
                                 @endfor
@@ -550,21 +553,20 @@
                                         @continue
                                     @endif
 
-                                    {{-- param-name cell (sticky left) --}}
-                                    <div class="px-3 py-2 bg-surface-2 border-b border-r border-border text-[11px] font-semibold text-fg-3 uppercase tracking-wider"
-                                         style="position: sticky; left: 0; z-index: 1;">
-                                        {{ $row['label'] }}
-                                        @if($row['sublabel'])
-                                            <small class="block normal-case font-normal text-[10.5px] text-fg-3 mt-0.5" style="letter-spacing:0">{{ $row['sublabel'] }}</small>
-                                        @endif
-                                    </div>
-
-                                    {{-- subject cell — sticky-left (после params-col 220px) --}}
+                                    {{-- subject cell (sticky-left:0) — лейбл uppercase
+                                         ВНУТРИ ячейки над значением (раньше был
+                                         в отдельной params-col, убрали). --}}
                                     @php $s = $row['subject']; @endphp
-                                    <div class="px-3 py-2 border-b bg-sky-50/40 text-[12.5px]"
-                                         style="position: sticky; left: 220px; z-index: 1; border-right: 2px solid var(--sky-500); box-shadow: 1px 0 0 var(--border), 8px 0 12px -10px rgba(15,18,23,0.20);">
+                                    <div class="px-3 py-2 border-b bg-sky-50 text-[12.5px]"
+                                         style="position: sticky; left: 0; z-index: 2; border-right: 2px solid var(--sky-500); box-shadow: 1px 0 0 var(--border), 8px 0 12px -10px rgba(15,18,23,0.20);">
+                                        <div class="text-[10px] uppercase tracking-wider text-sky-700/70 font-semibold mb-0.5 flex items-baseline gap-1">
+                                            <span>{{ $row['label'] }}</span>
+                                            @if($row['sublabel'])
+                                                <span class="normal-case font-normal text-fg-3" style="letter-spacing:0">{{ $row['sublabel'] }}</span>
+                                            @endif
+                                        </div>
                                         @if($s['status'] === 'req')
-                                            <span class="inline-block px-2 py-0.5 rounded bg-sky-50 text-sky-700 font-medium {{ $s['mono'] ? 'mono' : '' }}">{{ $s['value'] }}</span>
+                                            <span class="inline-block px-2 py-0.5 rounded bg-sky-100 text-sky-800 font-medium {{ $s['mono'] ? 'mono' : '' }}">{{ $s['value'] }}</span>
                                         @elseif($s['status'] === 'empty')
                                             <span class="text-fg-3 italic">{{ $s['value'] }}</span>
                                         @else
