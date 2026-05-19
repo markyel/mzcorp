@@ -64,7 +64,18 @@ class QuotationPdfService
         $options->set('defaultFont', 'DejaVu Sans');
         $options->set('isRemoteEnabled', false);
         $options->set('isHtml5ParserEnabled', true);
+        $options->set('isFontSubsettingEnabled', true);
         $options->set('chroot', [resource_path(), public_path()]);
+
+        // Writable font cache в storage — иначе dompdf пытается писать в
+        // vendor/dompdf/dompdf/lib/fonts/ (часто read-only, без cache
+        // кириллица рендерится как ????).
+        $fontDir = storage_path('app/dompdf/fonts');
+        if (! is_dir($fontDir)) {
+            @mkdir($fontDir, 0775, true);
+        }
+        $options->set('fontDir', $fontDir);
+        $options->set('fontCache', $fontDir);
 
         $dompdf = new Dompdf($options);
         $dompdf->loadHtml($html, 'UTF-8');
