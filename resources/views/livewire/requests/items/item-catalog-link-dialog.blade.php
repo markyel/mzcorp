@@ -343,190 +343,263 @@
                     </div>
                 @endif
                 @else
-                    {{-- ─────────── Compare-панель (grid columns) ───────────
-                         Колонки: subject + N catalog кандидатов рядом, чтобы
-                         оператор мог визуально сравнить характеристики
-                         столбец-в-столбец.
+                    {{-- ─────────── Compare-панель (rich grid) ───────────
+                         Inverted layout: каждая строка = один параметр,
+                         каждая колонка = один кандидат (+ subject слева).
+                         Sticky-колонка имён параметров + sticky-строка с фото
+                         делают сравнение читаемым при горизонтальной прокрутке.
 
-                         Фото cap 210x210 чтобы не растягивалось на всю
-                         ширину колонки и не выпускало модал за viewport.
-
-                         min-h-0 на flex-1 wrapper — критично: без него
-                         внутренний overflow-y-auto не работает (flex-item
-                         имеет min-height:auto по дефолту, контент пуш-ит
-                         родителя за пределы 90vh, скролл уходит на body). --}}
+                         min-h-0 на flex-1 wrapper — flexbox-gotcha, иначе
+                         scroll уходит на body (flex-item имеет min-height:auto
+                         по дефолту). --}}
                     @php
                         $cmp = $this->compareItems;
-                        $cols = $cmp->count() + 1;
+                        $compData = $this->comparisonData;
+                        $candidates = $compData['candidates'] ?? [];
+                        $sections = $compData['sections'] ?? [];
+                        $subjQty = $compData['subjectQty'] ?? 0;
+                        // Колонки grid: params(220px) + subject(280px) + N×280px
+                        $gridCols = '220px 280px ' . str_repeat('280px ', count($candidates));
                     @endphp
-                    <div class="flex items-center gap-2 mb-3">
+
+                    {{-- HEAD bar: back + count + hint --}}
+                    <div class="flex items-center gap-3 mb-2 flex-wrap">
                         <button type="button" wire:click="exitCompare" class="btn btn-sm">← К списку</button>
-                        <span class="text-[12px] text-fg-3">Сравнение: позиция заявки vs {{ $cmp->count() }} {{ $cmp->count() === 1 ? 'кандидат' : ($cmp->count() < 5 ? 'кандидата' : 'кандидатов') }}</span>
+                        <span class="text-[12px] text-fg-3">
+                            Сравнение: позиция заявки vs <b class="text-fg-1 font-medium">{{ $cmp->count() }}</b>
+                            {{ $cmp->count() === 1 ? 'кандидат' : ($cmp->count() < 5 ? 'кандидата' : 'кандидатов') }}
+                        </span>
+                        <span class="text-fg-3">·</span>
+                        <span class="text-[12px] text-fg-3">выровнено по KB-параметрам · различия подсвечены</span>
                     </div>
 
-                    {{-- inline style="min-height:0" дублирует Tailwind-класс min-h-0
-                         на случай если CSS не пересобран после деплоя
-                         (Tailwind 4 JIT генерирует классы только при npm run build). --}}
-                    <div class="flex-1 min-h-0 overflow-y-auto overflow-x-auto" style="min-height: 0">
-                        <div class="grid gap-3" style="grid-template-columns: repeat({{ $cols }}, minmax(280px, 1fr));">
-                            {{-- ── Subject column (позиция заявки) ── --}}
-                            <div class="border border-sky-300 rounded-md bg-sky-50/40 p-3 flex flex-col gap-2">
-                                <div class="text-[10.5px] uppercase tracking-wider text-sky-700 font-semibold">Позиция заявки</div>
-                                @if($subject)
-                                    @php
-                                        $startIdx = 0;
-                                        foreach ($galleryItems as $i => $g) {
-                                            if (($imgs[$i] ?? null) && $imgs[$i]->id === ($subject->image_attachment_id ?? null)) {
-                                                $startIdx = $i;
-                                                break;
-                                            }
-                                        }
-                                    @endphp
+                    {{-- TOOLBAR: view-switcher + чекбоксы --}}
+                    <div class="flex items-center gap-3 mb-3 flex-wrap text-[12px]">
+                        <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">Показывать:</span>
+                        <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                            <input type="checkbox" wire:click="toggleOnlyDiff" @checked($showOnlyDiff) class="w-3.5 h-3.5 accent-[var(--accent)]">
+                            <span>только различия</span>
+                        </label>
+                        <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                            <input type="checkbox" wire:click="toggleHighlight" @checked($showHighlight) class="w-3.5 h-3.5 accent-[var(--accent)]">
+                            <span>подсветка совпадений</span>
+                        </label>
+                        <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                            <input type="checkbox" wire:click="togglePriceStock" @checked($showPriceStock) class="w-3.5 h-3.5 accent-[var(--accent)]">
+                            <span>цены и наличие</span>
+                        </label>
+                        <span class="flex-1"></span>
+                        <span class="text-fg-3 mono">{{ count($candidates) }} кандидат(ов)</span>
+                    </div>
+
+                    {{-- COMPARE GRID --}}
+                    <div class="flex-1 min-h-0 overflow-auto border border-border rounded-md bg-app"
+                         style="min-height: 0">
+                        <div class="grid" style="grid-template-columns: {{ $gridCols }}; width: max-content; min-width: 100%;">
+                            {{-- ─── HEADER ROW (sticky top) ─── --}}
+                            {{-- corner cell (sticky left+top) --}}
+                            <div class="bg-surface-2 border-b border-r border-border"
+                                 style="position: sticky; top: 0; left: 0; z-index: 5;"></div>
+
+                            {{-- subject column header — sticky-left (закреплено)
+                                 + sticky-top одновременно (corner-like). --}}
+                            <div class="p-3 border-b bg-sky-50"
+                                 style="position: sticky; top: 0; left: 220px; z-index: 4; border-right: 2px solid var(--sky-500); box-shadow: 1px 0 0 var(--border), 8px 0 12px -10px rgba(15,18,23,0.20);">
+                                <div class="text-[10.5px] uppercase tracking-wider text-sky-700 font-semibold mb-2 flex items-center gap-1.5">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-sky-600"></span>
+                                    Позиция заявки
+                                    <span class="ml-auto inline-flex items-center gap-1 text-[10px] normal-case font-normal bg-surface border border-border px-1.5 py-0.5 rounded text-fg-3" title="Колонка закреплена слева при горизонтальной прокрутке">📌 закреплено</span>
+                                </div>
+                                <div class="aspect-[1.6/1] rounded-md bg-app border border-border overflow-hidden mb-2 relative">
                                     @if(! empty($galleryItems))
-                                        <div x-data="{ idx: {{ $startIdx }}, items: @js($galleryItems) }"
-                                             class="relative w-full max-w-[210px] mx-auto">
+                                        <div x-data="{ idx: 0, items: @js($galleryItems) }" class="w-full h-full">
                                             <button type="button"
                                                     x-on:click="$dispatch('open-image', { items: items, index: idx })"
-                                                    class="block w-full aspect-square rounded-sm overflow-hidden bg-app border border-border">
-                                                <img :src="items[idx].src" :alt="items[idx].name" class="w-full h-full object-cover" loading="lazy">
+                                                    class="block w-full h-full">
+                                                <img :src="items[idx].src" :alt="items[idx].name" class="w-full h-full object-cover">
                                             </button>
                                             <template x-if="items.length > 1">
                                                 <div>
-                                                    <button type="button"
-                                                            x-on:click.stop="idx = (idx - 1 + items.length) % items.length"
-                                                            title="Предыдущее фото"
-                                                            style="position: absolute; left: 4px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; border-radius: 50%; border: none; background: rgba(0,0,0,0.55); color: white; font-size: 16px; cursor: pointer;">‹</button>
-                                                    <button type="button"
-                                                            x-on:click.stop="idx = (idx + 1) % items.length"
-                                                            title="Следующее фото"
-                                                            style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; border-radius: 50%; border: none; background: rgba(0,0,0,0.55); color: white; font-size: 16px; cursor: pointer;">›</button>
-                                                    <div style="position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.55); color: white; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-family: var(--font-mono);">
-                                                        <span x-text="idx + 1"></span>/<span x-text="items.length"></span>
-                                                    </div>
+                                                    <button type="button" x-on:click.stop="idx = (idx - 1 + items.length) % items.length"
+                                                            style="position: absolute; left: 6px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; border-radius: 50%; background: rgba(15,18,23,.55); color: white; border: none; cursor: pointer; font-size: 14px;">‹</button>
+                                                    <button type="button" x-on:click.stop="idx = (idx + 1) % items.length"
+                                                            style="position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; border-radius: 50%; background: rgba(15,18,23,.55); color: white; border: none; cursor: pointer; font-size: 14px;">›</button>
+                                                    <div style="position: absolute; bottom: 6px; left: 6px; background: rgba(15,18,23,.65); color: white; font-size: 10.5px; padding: 2px 6px; border-radius: 3px; font-family: var(--font-mono);"
+                                                         x-text="(idx+1)+' / '+items.length"></div>
                                                 </div>
                                             </template>
                                         </div>
-                                    @elseif($subjImgIsImage)
-                                        <button type="button"
-                                                x-on:click="$dispatch('open-image', { src: @js(route('attachments.preview', $subjImg)), name: @js($subjImg->filename), dl: @js(route('attachments.download', $subjImg)) })"
-                                                class="block w-full max-w-[210px] mx-auto aspect-square rounded-sm overflow-hidden bg-app border border-border">
-                                            <img src="{{ route('attachments.preview', $subjImg) }}" class="w-full h-full object-cover" loading="lazy">
-                                        </button>
                                     @else
-                                        <div class="w-full max-w-[210px] mx-auto aspect-square rounded-sm bg-app border border-border flex items-center justify-center text-[10px] text-fg-3">нет фото</div>
+                                        <div class="w-full h-full flex items-center justify-center text-[10px] text-fg-3">нет фото</div>
                                     @endif
-                                    <div class="font-medium text-[13px] text-fg-1 leading-tight">{{ $subject->parsed_name ?: '(без названия)' }}</div>
-                                    <dl class="text-[11.5px] grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
-                                        <dt class="text-fg-3">Бренд:</dt>
-                                        <dd class="text-fg-1">{{ $subject->brand?->name ?: $subject->parsed_brand ?: '—' }}</dd>
-                                        <dt class="text-fg-3">Артикул:</dt>
-                                        <dd class="mono text-fg-1 break-all">{{ $subject->parsed_article ?: '—' }}</dd>
-                                        <dt class="text-fg-3">Категория:</dt>
-                                        <dd class="text-fg-1">{{ $subject->kbCategory?->name ?: '—' }}</dd>
-                                        <dt class="text-fg-3">Кол-во:</dt>
-                                        <dd class="text-fg-1">{{ $subject->parsed_qty ? rtrim(rtrim((string) $subject->parsed_qty, '0'), '.') . ' ' . $subject->parsed_unit : '—' }}</dd>
-                                        @if($subject->supplier_note)
-                                            <dt class="text-fg-3">Примечание:</dt>
-                                            <dd class="text-amber-800">{{ $subject->supplier_note }}</dd>
-                                        @endif
-                                    </dl>
-                                    @if(! empty($subjExtracted))
-                                        <div class="border-t border-border-subtle pt-1.5 mt-1 text-[11px]">
-                                            <div class="text-fg-3 uppercase tracking-wider text-[10px] mb-0.5">KB-параметры</div>
-                                            @foreach($subjExtracted as $slug => $value)
-                                                <div class="mono"><span class="text-fg-3">{{ $slug }}:</span> <span class="text-fg-1">{{ is_scalar($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE) }}</span></div>
-                                            @endforeach
-                                        </div>
+                                </div>
+                                <div class="font-semibold text-[13.5px] text-sky-700 leading-tight mb-1.5"
+                                     style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">
+                                    {{ $subject->parsed_name ?: '(без названия)' }}
+                                </div>
+                                <div class="flex items-center gap-2 text-[11.5px] text-fg-3 flex-wrap">
+                                    @if($subject->brand?->name ?? $subject->parsed_brand)
+                                        <span class="font-semibold text-[10.5px] bg-neutral-100 text-neutral-700 px-1.5 py-0.5 rounded uppercase">{{ $subject->brand?->name ?? $subject->parsed_brand }}</span>
                                     @endif
+                                    @if($subject->parsed_article)
+                                        <span class="mono text-fg-2">{{ $subject->parsed_article }}</span>
+                                    @endif
+                                </div>
+                                @if($subjQty > 0)
+                                    <div class="mt-2">
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11.5px] bg-sky-50 text-sky-700">{{ $subjQty }} шт.</span>
+                                    </div>
                                 @endif
                             </div>
 
-                            {{-- ── Catalog columns ── --}}
-                            @foreach($cmp as $c)
-                                <div class="border border-border rounded-md bg-surface p-3 flex flex-col gap-2 {{ $selectedCatalogId === $c->id ? 'ring-2 ring-emerald-400' : '' }}">
-                                    <div class="flex items-center justify-between">
-                                        <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">Каталог</span>
-                                        <button type="button" wire:click="toggleCompare({{ $c->id }})"
-                                                class="text-fg-3 hover:text-red-700 text-[12px]" title="Убрать">✕</button>
+                            {{-- candidate columns header --}}
+                            @foreach($candidates as $idx => $cm)
+                                @php
+                                    $c = $cm['catalog'];
+                                    $score = $cm['score'];
+                                    $pctClass = $score === null
+                                        ? 'bg-neutral-100 text-fg-3'
+                                        : ($score >= 0.85 ? 'bg-emerald-50 text-emerald-700' : ($score >= 0.70 ? 'bg-amber-50 text-amber-700' : 'bg-neutral-100 text-fg-3'));
+                                    $isSelected = $selectedCatalogId === $c->id;
+                                @endphp
+                                <div class="p-3 border-b border-r border-border {{ $isSelected ? 'bg-emerald-50/30' : 'bg-surface' }}"
+                                     style="position: sticky; top: 0; z-index: 3;">
+                                    <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-2 flex items-center gap-1.5">
+                                        <span class="w-1.5 h-1.5 rounded-full {{ $score && $score >= 0.85 ? 'bg-emerald-600' : ($score && $score >= 0.70 ? 'bg-amber-600' : 'bg-neutral-400') }}"></span>
+                                        Каталог · кандидат {{ $idx + 1 }}
+                                        <span class="ml-auto flex items-center gap-1">
+                                            <span class="text-[10.5px] mono bg-surface border border-border px-1.5 py-0.5 rounded">{{ $c->sku }}</span>
+                                            <button type="button" wire:click="toggleCompare({{ $c->id }})"
+                                                    class="w-[18px] h-[18px] border border-border rounded text-fg-3 hover:text-red-700 flex items-center justify-center text-[12px]"
+                                                    title="Убрать из сравнения">×</button>
+                                        </span>
                                     </div>
-                                    @if($c->photo_url)
-                                        <a href="{{ $c->photo_url }}" target="_blank" rel="noopener noreferrer"
-                                           class="block w-full max-w-[210px] mx-auto aspect-square rounded-sm overflow-hidden bg-app border border-border">
-                                            <img src="{{ $c->photo_url }}" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer">
-                                        </a>
-                                    @else
-                                        <div class="w-full max-w-[210px] mx-auto aspect-square rounded-sm bg-app border border-border flex items-center justify-center text-[10px] text-fg-3">нет фото</div>
-                                    @endif
-                                    <div class="font-medium text-[13px] text-fg-1 leading-tight">{{ $c->name }}</div>
-                                    <dl class="text-[11.5px] grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
-                                        <dt class="text-fg-3">SKU:</dt>
-                                        <dd class="mono text-fg-1">{{ $c->sku }}</dd>
-                                        <dt class="text-fg-3">Бренд:</dt>
-                                        <dd class="text-fg-1">{{ $c->brand ?: '—' }}</dd>
-                                        <dt class="text-fg-3">Артикул:</dt>
-                                        <dd class="mono text-fg-1 break-all">{{ $c->brand_article ?: '—' }}</dd>
-                                        @php $articles = is_array($c->articles) ? array_filter($c->articles) : []; @endphp
-                                        @if(count($articles) > 1)
-                                            <dt class="text-fg-3">Все OEM:</dt>
-                                            <dd class="mono text-fg-2 break-all text-[10.5px]">{{ implode(' · ', $articles) }}</dd>
+                                    <div class="aspect-[1.6/1] rounded-md bg-app border border-border overflow-hidden mb-2">
+                                        @if($c->photo_url)
+                                            <a href="{{ $c->photo_url }}" target="_blank" rel="noopener noreferrer" class="block w-full h-full">
+                                                <img src="{{ $c->photo_url }}" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer">
+                                            </a>
+                                        @else
+                                            <div class="w-full h-full flex items-center justify-center text-[10px] text-fg-3">нет фото</div>
                                         @endif
-                                        @if($c->unit_name)
-                                            <dt class="text-fg-3">Узел:</dt>
-                                            <dd class="text-fg-1">{{ $c->unit_name }}</dd>
+                                    </div>
+                                    <div class="font-semibold text-[13.5px] text-fg-1 leading-tight mb-1.5"
+                                         style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">
+                                        {{ $c->name }}
+                                    </div>
+                                    <div class="flex items-center gap-2 text-[11.5px] text-fg-3 flex-wrap mb-2">
+                                        @if($c->brand)
+                                            <span class="font-semibold text-[10.5px] bg-neutral-100 text-neutral-700 px-1.5 py-0.5 rounded uppercase">{{ \Illuminate\Support\Str::limit($c->brand, 12, '') }}</span>
                                         @endif
-                                        @if($c->part_type)
-                                            <dt class="text-fg-3">Тип:</dt>
-                                            <dd class="text-fg-1">{{ $c->part_type }}</dd>
+                                        @if($c->brand_article)
+                                            <span class="mono text-fg-2">{{ $c->brand_article }}</span>
                                         @endif
-                                        @if($c->form_factor)
-                                            <dt class="text-fg-3">Форм-фактор:</dt>
-                                            <dd class="text-fg-1">{{ $c->form_factor }}</dd>
+                                    </div>
+                                    <div class="flex items-center gap-1.5 flex-wrap mb-2.5">
+                                        @if($score !== null)
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11.5px] font-medium {{ $pctClass }}">{{ (int) round($score * 100) }}%</span>
                                         @endif
-                                        <dt class="text-fg-3">Цена:</dt>
-                                        <dd class="mono text-fg-1">{{ $c->price !== null ? number_format((float) $c->price, 2, '.', ' ') . ' ₽' : '—' }}</dd>
-                                        <dt class="text-fg-3">Наличие:</dt>
-                                        <dd>
-                                            @if($c->stock_available === null)
-                                                <span class="text-fg-3">—</span>
-                                            @elseif($c->stock_available > 0)
-                                                <span class="text-emerald-700">{{ $c->stock_available }} шт</span>
+                                        @if($c->price !== null)
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-[12px] mono bg-surface-2 border border-border text-fg-1 font-semibold">{{ number_format((float) $c->price, 0, '.', ' ') }} ₽</span>
+                                        @endif
+                                        @if($c->stock_available !== null)
+                                            @if($c->stock_available <= 0)
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11.5px] bg-surface-2 text-fg-3">нет</span>
+                                            @elseif($subjQty > 0 && $c->stock_available >= $subjQty)
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11.5px] bg-emerald-50 text-emerald-700">{{ $c->stock_available }} шт</span>
                                             @else
-                                                <span class="text-amber-700">нет</span>
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11.5px] bg-amber-50 text-amber-700">{{ $c->stock_available }} шт</span>
                                             @endif
-                                        </dd>
-                                        @if($c->weight !== null)
-                                            <dt class="text-fg-3">Вес:</dt>
-                                            <dd class="text-fg-1">{{ rtrim(rtrim((string) $c->weight, '0'), '.') }} кг</dd>
                                         @endif
-                                        @php
-                                            $dims = array_filter([
-                                                'A' => $c->size_a, 'B' => $c->size_b, 'C' => $c->size_c,
-                                                'D' => $c->size_d, 'E' => $c->size_e, 'F' => $c->size_f,
-                                            ], fn ($v) => $v !== null);
-                                        @endphp
-                                        @if(! empty($dims))
-                                            <dt class="text-fg-3">Размеры:</dt>
-                                            <dd class="text-fg-1 text-[10.5px]">
-                                                @foreach($dims as $k => $v)
-                                                    {{ $k }}={{ rtrim(rtrim((string) $v, '0'), '.') }}@if(! $loop->last) · @endif
-                                                @endforeach
-                                            </dd>
-                                        @endif
-                                        @if(! $c->is_active)
-                                            <dt class="text-fg-3">Статус:</dt>
-                                            <dd class="text-fg-3 uppercase text-[10px]">архив</dd>
-                                        @endif
-                                    </dl>
-                                    <div class="pt-1.5 mt-auto border-t border-border-subtle flex gap-1.5">
+                                    </div>
+                                    <div class="flex gap-1.5">
                                         <button type="button" wire:click="selectCatalog({{ $c->id }})"
-                                                class="btn btn-sm flex-1 {{ $selectedCatalogId === $c->id ? 'btn-primary' : '' }}">
-                                            {{ $selectedCatalogId === $c->id ? '✓ Выбрано' : 'Выбрать' }}
+                                                class="btn btn-sm flex-1 {{ $isSelected ? 'btn-primary' : '' }}">
+                                            {{ $isSelected ? '✓ Выбрано' : 'Выбрать' }}
                                         </button>
                                         <a href="https://mylift.ru/?text={{ urlencode($c->sku) }}&fn=find"
                                            target="_blank" rel="noopener noreferrer"
                                            class="btn btn-sm" title="Открыть на mylift.ru">↗</a>
                                     </div>
                                 </div>
+                            @endforeach
+
+                            {{-- ─── SECTIONS ─── --}}
+                            @foreach($sections as $section)
+                                {{-- skip "Цена и наличие" section if toggle off --}}
+                                @if(! $showPriceStock && $section['title'] === 'Цена и наличие')
+                                    @continue
+                                @endif
+
+                                {{-- section header row spans all columns; params-col sticky-left,
+                                     subject-col тоже sticky-left чтобы цельная section-полоса
+                                     не рвалась при горизонтальном scroll. --}}
+                                <div class="px-3 py-1.5 bg-neutral-100 border-b border-r border-border text-[11px] font-bold text-fg-1 uppercase tracking-wider"
+                                     style="position: sticky; left: 0; z-index: 2;">
+                                    {{ $section['title'] }}
+                                </div>
+                                <div class="bg-neutral-100 border-b border-border"
+                                     style="position: sticky; left: 220px; z-index: 1; border-right: 2px solid var(--sky-500);"></div>
+                                @for($i = 0; $i < count($candidates); $i++)
+                                    <div class="bg-neutral-100 border-b border-r border-border"></div>
+                                @endfor
+
+                                @foreach($section['rows'] as $row)
+                                    {{-- skip rows where everything matches if showOnlyDiff --}}
+                                    @if($showOnlyDiff && $row['allMatch'])
+                                        @continue
+                                    @endif
+
+                                    {{-- param-name cell (sticky left) --}}
+                                    <div class="px-3 py-2 bg-surface-2 border-b border-r border-border text-[11px] font-semibold text-fg-3 uppercase tracking-wider"
+                                         style="position: sticky; left: 0; z-index: 1;">
+                                        {{ $row['label'] }}
+                                        @if($row['sublabel'])
+                                            <small class="block normal-case font-normal text-[10.5px] text-fg-3 mt-0.5" style="letter-spacing:0">{{ $row['sublabel'] }}</small>
+                                        @endif
+                                    </div>
+
+                                    {{-- subject cell — sticky-left (после params-col 220px) --}}
+                                    @php $s = $row['subject']; @endphp
+                                    <div class="px-3 py-2 border-b bg-sky-50/40 text-[12.5px]"
+                                         style="position: sticky; left: 220px; z-index: 1; border-right: 2px solid var(--sky-500); box-shadow: 1px 0 0 var(--border), 8px 0 12px -10px rgba(15,18,23,0.20);">
+                                        @if($s['status'] === 'req')
+                                            <span class="inline-block px-2 py-0.5 rounded bg-sky-50 text-sky-700 font-medium {{ $s['mono'] ? 'mono' : '' }}">{{ $s['value'] }}</span>
+                                        @elseif($s['status'] === 'empty')
+                                            <span class="text-fg-3 italic">{{ $s['value'] }}</span>
+                                        @else
+                                            <span class="text-fg-1 {{ $s['mono'] ? 'mono' : '' }}">{{ $s['value'] }}</span>
+                                        @endif
+                                        @if(! empty($s['sub']))
+                                            <small class="block text-[10.5px] text-fg-3 mt-0.5 italic">{{ $s['sub'] }}</small>
+                                        @endif
+                                    </div>
+
+                                    {{-- candidate cells --}}
+                                    @foreach($row['cells'] as $cell)
+                                        <div class="px-3 py-2 border-b border-r border-border bg-surface text-[12.5px] relative">
+                                            @php
+                                                $classes = match ($cell['status']) {
+                                                    'match' => $showHighlight ? 'text-fg-1' : 'text-fg-1',
+                                                    'diff' => 'text-amber-700',
+                                                    'bad' => 'text-red-700',
+                                                    'empty' => 'text-fg-3 italic font-normal',
+                                                    default => 'text-fg-1',
+                                                };
+                                                $monoClass = ! empty($cell['mono']) ? ' mono' : '';
+                                                $boldClass = ! empty($cell['bold']) ? ' font-semibold' : '';
+                                                $smallClass = ! empty($cell['small']) ? ' text-[11px]' : '';
+                                            @endphp
+                                            @if($cell['status'] === 'match' && $showHighlight)
+                                                <span class="absolute left-1 top-2 text-emerald-700 font-bold text-[11px]">✓</span>
+                                            @endif
+                                            <span class="{{ $classes }}{{ $monoClass }}{{ $boldClass }}{{ $smallClass }} {{ $cell['status'] === 'match' && $showHighlight ? 'ml-3' : '' }}">{{ $cell['value'] }}</span>
+                                            @if(! empty($cell['sub']))
+                                                <small class="block text-[10.5px] text-fg-3 mt-0.5 italic">{{ $cell['sub'] }}</small>
+                                            @endif
+                                        </div>
+                                    @endforeach
+                                @endforeach
                             @endforeach
                         </div>
                     </div>

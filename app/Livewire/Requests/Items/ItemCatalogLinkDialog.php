@@ -62,7 +62,19 @@ class ItemCatalogLinkDialog extends Component
     public bool $filterDims = false;
     public ?string $filterUnit = null;
 
-    public const COMPARE_MAX = 3;
+    /**
+     * Compare-toolbar toggle state.
+     *   compareView      — 'compare' (grid) | 'list' (текущий простой список)
+     *   showOnlyDiff     — скрыть строки где все ячейки match/empty/plain
+     *   showHighlight    — подсвечивать совпадения зелёным
+     *   showPriceStock   — показать секцию "Цена и наличие"
+     */
+    public string $compareView = 'compare';
+    public bool $showOnlyDiff = false;
+    public bool $showHighlight = true;
+    public bool $showPriceStock = true;
+
+    public const COMPARE_MAX = 8;
 
     /** Допуск ±N мм при сравнении размеров subject vs catalog.size_a..f. */
     private const DIM_TOLERANCE_MM = 5;
@@ -131,6 +143,10 @@ class ItemCatalogLinkDialog extends Component
         $this->filterCategory = false;
         $this->filterDims = false;
         $this->filterUnit = null;
+        $this->compareView = 'compare';
+        $this->showOnlyDiff = false;
+        $this->showHighlight = true;
+        $this->showPriceStock = true;
     }
 
     public function toggleBrandFilter(): void
@@ -155,6 +171,64 @@ class ItemCatalogLinkDialog extends Component
     public function toggleUnitFilter(string $unit): void
     {
         $this->filterUnit = ($this->filterUnit === $unit) ? null : $unit;
+    }
+
+    public function setCompareView(string $view): void
+    {
+        if (in_array($view, ['compare', 'list'], true)) {
+            $this->compareView = $view;
+        }
+    }
+
+    public function toggleOnlyDiff(): void
+    {
+        $this->showOnlyDiff = ! $this->showOnlyDiff;
+    }
+
+    public function toggleHighlight(): void
+    {
+        $this->showHighlight = ! $this->showHighlight;
+    }
+
+    public function togglePriceStock(): void
+    {
+        $this->showPriceStock = ! $this->showPriceStock;
+    }
+
+    /**
+     * Структурированные данные для compare-таблицы (см. CatalogComparisonService::compare).
+     * meta из similarResults используется для % match + источник совпадения.
+     *
+     * @return array{candidates: array, sections: array, subjectQty: int}|null
+     */
+    #[Computed]
+    public function comparisonData(): ?array
+    {
+        if (! $this->comparing || ! $this->requestItemId) {
+            return null;
+        }
+        $subject = $this->subjectItem;
+        if (! $subject) {
+            return null;
+        }
+        // Meta из similarResults (если режим был similar). Для text-режима — пусто,
+        // тогда CatalogComparisonService покажет "— text-match" в строке источника.
+        $similarityMeta = [];
+        foreach ($this->similarResultsBase as $row) {
+            $cat = $row['catalog'] ?? null;
+            if ($cat instanceof \App\Models\CatalogItem) {
+                $similarityMeta[$cat->id] = [
+                    'score' => $row['similarity'] ?? null,
+                    'method' => $row['method'] ?? null,
+                    'code' => $row['code_score'] ?? null,
+                    'trgm' => $row['trgm_score'] ?? null,
+                    'vector' => $row['vector_score'] ?? null,
+                ];
+            }
+        }
+
+        return app(\App\Services\Catalog\CatalogComparisonService::class)
+            ->compare($subject, $this->compareItems, $similarityMeta);
     }
 
     /**
