@@ -58,6 +58,11 @@ class Request extends Model
         // Слияние заявок (RequestMergeService).
         'merged_into_id',
         'merged_at',
+        // Сложность (RequestComplexityService) — snapshot входной нагрузки
+        // на менеджера. Score = Σ MatchPath::weight(items active). Level
+        // выводится по порогам AppSetting `complexity.thresholds`.
+        'complexity_score',
+        'complexity_level',
     ];
 
     protected function casts(): array
@@ -78,6 +83,8 @@ class Request extends Model
             'last_activity_type' => \App\Enums\RequestActivityType::class,
             'merged_into_id' => 'integer',
             'merged_at' => 'datetime',
+            'complexity_score' => 'integer',
+            'complexity_level' => \App\Enums\ComplexityLevel::class,
         ];
     }
 

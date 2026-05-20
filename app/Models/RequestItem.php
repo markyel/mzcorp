@@ -50,6 +50,13 @@ class RequestItem extends Model
         'suggestion_status',
         'suggestion_confidence',
         'suggestion_source_email_id',
+        // Snapshot входной сложности позиции (см. App\Enums\MatchPath).
+        // Присваивается в RequestItemObserver через
+        // RequestComplexityService::detectAndStoreItemPath из
+        // `payload.catalog_match.method` (A/B/C/manual_link). После
+        // ручной правки менеджером значение не меняется — это
+        // характеристика того, как заявка пришла.
+        'match_path',
     ];
 
     protected function casts(): array
@@ -60,6 +67,7 @@ class RequestItem extends Model
             'quality_assessment_payload' => 'array',
             'suggestion_confidence' => 'float',
             'suggestion_source_email_id' => 'integer',
+            'match_path' => \App\Enums\MatchPath::class,
         ];
     }
 
