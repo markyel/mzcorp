@@ -204,18 +204,22 @@ class CatalogEmbeddingService
         //    рассеивается на длинных фразах, ILIKE же ловит «ПКЛ32» прямо.
         $codeRows = $this->codeTokenTopN($queryText, $poolLimit);
 
-        // 2) Trigram (pg_trgm) — для fuzzy-матча целой фразы. Дороже code:
-        //    GREATEST(word_similarity × N) считается для каждой WHERE-row,
-        //    поэтому скипаем если code уже даёт ≥ $limit результатов.
-        $skipTrgm = count($codeRows) >= $limit;
-        $trgmRows = $skipTrgm ? [] : $this->trigramTopN($queryText, $poolLimit);
-
-        // 3) Vector — семантика. embed-вызов в OpenAI ~500-2000мс. Дёргаем
-        //    только если faster-источники не дали достаточно результатов —
-        //    типичный кейс «Плата ПКЛ-32» / «Башмак кабины OTIS» закрывается
-        //    code+trgm без vector. Это срезает 1-2 секунды с UI-отклика.
-        $fastEnough = (count($codeRows) + count($trgmRows)) >= $limit;
-        $vectorRows = $fastEnough ? [] : $this->vectorTopN($queryText, $poolLimit, $requestItemId);
+        // 2) Trigram (pg_trgm) — для fuzzy-матча целой фразы.
+        // 3) Vector — семантика, ~500-2000мс embed.
+        //
+        // Раньше скипали trgm+vector если code давал ≥$limit результатов
+        // («fast enough»). Это создавало баг для запросов типа
+        // «Комплект фотобарьера антенн CENTA DT42 C-PROFILE, L2000 мм»:
+        // code-token «220VAC»/«L2000» захватывал 20+ позиций каталога,
+        // ВСЕ с фиксированным score=0.95 (hardcoded), pool заполнен,
+        // trgm и vector НЕ дёргались вообще — usort при tied score
+        // возвращал случайный top-1, искомый «Комплект фотобарьера»
+        // оказывался не на 1 месте.
+        // Решение: ВСЕГДА запускаем trgm+vector — они дают semantic
+        // ранжирование, разруливающее ties между code-кандидатами.
+        // Расходы: vector embed ~$0.0001 + 500-1500мс на запрос.
+        $trgmRows = $this->trigramTopN($queryText, $poolLimit);
+        $vectorRows = $this->vectorTopN($queryText, $poolLimit, $requestItemId);
 
         if ($codeRows === [] && $trgmRows === [] && $vectorRows === []) {
             return [];
