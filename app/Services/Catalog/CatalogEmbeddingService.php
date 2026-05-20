@@ -246,6 +246,31 @@ class CatalogEmbeddingService
             $merged[$cid]['vector'] = (float) $r['similarity'];
         }
 
+        // Vector backfill: items в code/trgm пуле, не попавшие в vector top-N
+        // (vectorTopN LIMIT 20 — на запросах с генерик-токенами «220VAC»/
+        // «380В»/«24VDC» сотни близких товаров, искомый может выпасть из
+        // top-20). Догружаем их vector_score одним SQL-запросом по конкретным
+        // id, чтобы они стали multi-source (code+vec) и корректно тиебрейкнулись
+        // по семантическому сигналу.
+        // Кейс #2385: CENTA-фотобарьер M28598 имел code=0.95+vec=0.879 (если
+        // бы vec был доступен), но vec=— → blended 0.95 → проигрывал WECO
+        // (multi, blended 1.0). С backfill: M28598 multi 1.0, vector tiebreak
+        // даёт ему 1 место.
+        $missingVecIds = [];
+        foreach ($merged as $cid => $m) {
+            if ($m['vector'] === null && ($m['code'] !== null || $m['trgm'] !== null)) {
+                $missingVecIds[] = $cid;
+            }
+        }
+        if (! empty($missingVecIds)) {
+            $backfilled = $this->vectorScoresForIds($queryText, $missingVecIds, $requestItemId);
+            foreach ($backfilled as $cid => $sim) {
+                if (isset($merged[$cid])) {
+                    $merged[$cid]['vector'] = $sim;
+                }
+            }
+        }
+
         $scored = [];
         foreach ($merged as $cid => $m) {
             $code = $m['code'];
@@ -555,8 +580,19 @@ class CatalogEmbeddingService
      *
      * @return list<array{catalog_id: int, similarity: float}>
      */
-    private function vectorTopN(string $queryText, int $limit, ?int $requestItemId): array
+    /**
+     * Embed query text → pgvector literal `[v1,v2,...]` или null при ошибке.
+     * Кешируется для одного запроса в простой статической мапе по hash
+     * (на случай если хелперы вызовут embed дважды для одного queryText —
+     * вызовов OpenAI всё равно один).
+     */
+    private function embedQueryToVectorLiteral(string $queryText, ?int $requestItemId): ?string
     {
+        static $cache = [];
+        $key = md5($queryText);
+        if (array_key_exists($key, $cache)) {
+            return $cache[$key];
+        }
         try {
             $result = $this->embedder->embed($queryText);
         } catch (\Throwable $e) {
@@ -565,17 +601,66 @@ class CatalogEmbeddingService
                 'query_preview' => mb_substr($queryText, 0, 80),
                 'error' => $e->getMessage(),
             ]);
-            return [];
+            return $cache[$key] = null;
         }
         $queryVector = $result['embedding'] ?? [];
         if (empty($queryVector)) {
+            return $cache[$key] = null;
+        }
+        $literal = '[' . implode(',', array_map(
+            fn ($v) => is_finite($v) ? sprintf('%.7f', $v) : '0',
+            $queryVector,
+        )) . ']';
+        return $cache[$key] = $literal;
+    }
+
+    /**
+     * Догрузить vector_score для конкретных catalog_ids (используется в
+     * topNByQueryText для backfill items из code/trgm пулов, которые не
+     * вошли в vector top-N). Возвращает map catalog_id => similarity.
+     *
+     * @param  list<int>  $catalogIds
+     * @return array<int, float>
+     */
+    private function vectorScoresForIds(string $queryText, array $catalogIds, ?int $requestItemId): array
+    {
+        if (empty($catalogIds)) {
             return [];
         }
+        $vectorLiteral = $this->embedQueryToVectorLiteral($queryText, $requestItemId);
+        if ($vectorLiteral === null) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($catalogIds), '?'));
+        $bindings = array_merge([$vectorLiteral], $catalogIds);
+        try {
+            $rows = DB::select(
+                "SELECT ci.id AS catalog_id, 1 - (e.embedding <=> ?::vector) AS similarity
+                 FROM catalog_item_embeddings e
+                 JOIN catalog_items ci ON ci.id = e.catalog_item_id
+                 WHERE ci.is_active = true AND ci.id IN ($placeholders)",
+                $bindings,
+            );
+        } catch (\Throwable $e) {
+            Log::warning('CatalogEmbeddingService: vector backfill failed', [
+                'request_item_id' => $requestItemId,
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+        $out = [];
+        foreach ($rows as $r) {
+            $out[(int) $r->catalog_id] = (float) $r->similarity;
+        }
+        return $out;
+    }
 
-        $vectorLiteral = '[' . implode(',', array_map(
-            fn ($v) => is_finite($v) ? sprintf('%.7f', $v) : '0',
-            $queryVector
-        )) . ']';
+    private function vectorTopN(string $queryText, int $limit, ?int $requestItemId): array
+    {
+        $vectorLiteral = $this->embedQueryToVectorLiteral($queryText, $requestItemId);
+        if ($vectorLiteral === null) {
+            return [];
+        }
 
         try {
             $rows = DB::select(
