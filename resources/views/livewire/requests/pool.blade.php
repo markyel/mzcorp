@@ -33,52 +33,7 @@
      style="grid-template-columns: 56px 240px 1fr; min-height: calc(100vh - var(--topbar-h));">
 
     {{-- ============== RAIL ============== --}}
-    <aside class="border-r border-[var(--border)] bg-[var(--bg-sidebar)] flex flex-col items-center py-2 gap-0.5">
-        @php
-            // Иконы: Дашборд / Заявки(active) / Почта / Правила / KB / Поставщики / SLA / Поиск / Настройки
-            // Phase 1 active: только «Заявки». Дашборд имеет реальный роут — кликабельный.
-            $rail = [
-                ['icon' => '⌂', 'label' => 'Дашборд',     'href' => route('dashboard'), 'active' => false, 'enabled' => true],
-                ['icon' => '≡', 'label' => 'Заявки',      'href' => route('requests.index'), 'active' => true, 'enabled' => true],
-                ['icon' => '✉', 'label' => 'Почта',       'href' => null, 'active' => false, 'enabled' => false],
-                ['icon' => '⌗', 'label' => 'Правила',     'href' => null, 'active' => false, 'enabled' => false],
-                ['icon' => '▦', 'label' => 'KB',          'href' => null, 'active' => false, 'enabled' => false],
-                ['sep' => true],
-                ['icon' => '◇', 'label' => 'Поставщики',  'href' => null, 'active' => false, 'enabled' => false],
-                ['icon' => '◷', 'label' => 'SLA',         'href' => null, 'active' => false, 'enabled' => false],
-                ['icon' => '⌕', 'label' => 'Поиск ⌘K',    'href' => null, 'active' => false, 'enabled' => false],
-            ];
-        @endphp
-
-        @foreach($rail as $r)
-            @if(isset($r['sep']))
-                <div class="w-6 h-px bg-[var(--border)] my-1.5"></div>
-            @else
-                @php
-                    $base = 'w-10 h-10 rounded-md flex items-center justify-center font-mono text-[13px] font-semibold relative';
-                    $cls = $r['active']
-                        ? "$base text-[var(--accent)] bg-[var(--bg-surface)]"
-                        : ($r['enabled']
-                            ? "$base text-[var(--fg-3)] hover:text-[var(--fg-1)] hover:bg-[var(--bg-hover)]"
-                            : "$base text-[var(--fg-4)] cursor-not-allowed opacity-60");
-                @endphp
-                @if($r['enabled'] && $r['href'])
-                    <a href="{{ $r['href'] }}" class="{{ $cls }}" title="{{ $r['label'] }}">
-                        @if($r['active'])<span class="absolute -left-2 top-2 bottom-2 w-0.5 bg-[var(--accent)] rounded-r"></span>@endif
-                        {{ $r['icon'] }}
-                    </a>
-                @else
-                    <div class="{{ $cls }}" title="{{ $r['label'] }} — {{ $disabledTitle }}">{{ $r['icon'] }}</div>
-                @endif
-            @endif
-        @endforeach
-
-        {{-- Settings внизу --}}
-        <div class="mt-auto"></div>
-        <div class="w-6 h-px bg-[var(--border)] my-1.5"></div>
-        <div class="w-10 h-10 rounded-md flex items-center justify-center font-mono text-[13px] font-semibold text-[var(--fg-4)] cursor-not-allowed opacity-60"
-             title="Настройки — {{ $disabledTitle }}">⚙</div>
-    </aside>
+    <x-left-rail active="requests" />
 
     {{-- ============== LIST NAV ============== --}}
     <aside class="border-r border-[var(--border)] bg-[var(--bg-sidebar)] overflow-y-auto flex flex-col">

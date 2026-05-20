@@ -1,4 +1,11 @@
-<div class="px-4 sm:px-6 py-4">
+{{-- Layout: rail (56px) + main. Без list-nav (240px) как в Pool —
+     для каталога нет saved views / queue navigation. --}}
+<div class="grid"
+     style="grid-template-columns: 56px 1fr; min-height: calc(100vh - var(--topbar-h));">
+
+    <x-left-rail active="catalog" />
+
+    <section class="bg-[var(--bg-surface)] flex flex-col min-w-0 px-4 sm:px-6 py-4">
     {{-- ─── Header ─── --}}
     <div class="flex items-center gap-3 mb-3">
         <h1 class="text-[18px] font-semibold text-fg-1">Поиск по каталогу</h1>
@@ -173,4 +180,5 @@
             @include('livewire.catalog._search-results-table', ['rows' => collect($results)])
         </div>
     @endif
+    </section>
 </div>

@@ -45,7 +45,8 @@
     $navLinks[] = ['route' => 'dashboard', 'label' => 'Дашборд', 'pattern' => 'dashboard'];
     if ($user?->hasAnyRole(['manager', 'head_of_sales', 'director', 'secretary'])) {
         $navLinks[] = ['route' => 'requests.index', 'label' => 'Заявки', 'pattern' => 'requests.*'];
-        $navLinks[] = ['route' => 'catalog.search', 'label' => 'Каталог', 'pattern' => 'catalog.*'];
+        // «Каталог» вынесен в левый rail (resources/views/components/left-rail.blade.php),
+        // в горизонтальный топбар не дублируется.
     }
     if ($user?->hasAnyRole(['head_of_sales', 'director'])) {
         $navLinks[] = ['route' => 'mail-rules.index', 'label' => 'Правила почты', 'pattern' => 'mail-rules.*'];
