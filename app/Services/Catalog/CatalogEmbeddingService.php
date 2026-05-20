@@ -280,7 +280,35 @@ class CatalogEmbeddingService
             ];
         }
 
-        usort($scored, fn ($a, $b) => $b['score'] <=> $a['score']);
+        // Многоуровневая сортировка: главный ключ — blended score, но при
+        // равных значениях (типично: оба capped на 1.0 после multi-source
+        // bonus) разруливаем по семантическим сигналам — vector cosine,
+        // затем trigram, затем catalog_id для детерминизма.
+        //
+        // Без этого PHP usort нестабильный для tied scores, и порядок
+        // top-N зависит от случайного порядка строк из DB. Кейс #2385:
+        // M28598 (искомый CENTA-фотобарьер, vec=0.88) и WECO M21626
+        // (другой бренд, vec=0.73) оба имели blended=1.0 → искомый
+        // случайно проигрывал и не попадал в top-10.
+        usort($scored, function ($a, $b) {
+            $cmp = $b['score'] <=> $a['score'];
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+            $av = $a['vector'] ?? 0.0;
+            $bv = $b['vector'] ?? 0.0;
+            $cmp = $bv <=> $av;
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+            $at = $a['trgm'] ?? 0.0;
+            $bt = $b['trgm'] ?? 0.0;
+            $cmp = $bt <=> $at;
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+            return $a['catalog_id'] <=> $b['catalog_id'];
+        });
         $scored = array_slice($scored, 0, $limit);
 
         $ids = array_map(fn ($r) => $r['catalog_id'], $scored);
