@@ -1413,6 +1413,28 @@ print_r(\App\Models\InboundUrlFetch::query()->selectRaw("status, count(*) as c")
 
 **Проверка boundary**: `Otis` → 6068 матчей (нормально, нужно сужать чипами / артикулом). `F0380CP3` → точечно находит M01231.
 
+### Сессия 2026-05-19 (часть 5) — Code-token catalog match: вторичные OEM в SIMILAR
+
+**Контекст**: после части 4 фикс «Точно» (TEXT-режим) работает, но менеджер пользуется в основном «Похожее» (SIMILAR). Кейс: `T0380Y3` находит M01231 (артикул есть в `name` каталога), `F0380CP3` — нет (нет в `name`, лежит только в `articles[]`). Подтверждение что в SIMILAR мы искали только по primary артикулу.
+
+**Root cause**: `CatalogEmbeddingService::codeTokenTopN` (быстрый ILIKE-путь в hybrid pipeline до vector) намеренно НЕ дёргал `articles[]` — старый комментарий ссылался на медленный `jsonb_array_elements_text` seq scan (~500мс). Multi-OEM кейсы намеренно сбрасывались на `trigramTopN`, но там digit-гейт ≥6 цифр (F0380CP3 = 5 цифр) отрезал короткие OEM-артикулы Otis-стиля.
+
+**Реализовано** (commit `fd25a42`):
+- `codeTokenTopN`: +OR `articles_search ILIKE ANY (upper-tokens)` — теперь все OEM-артикулы, не только primary. GIN trgm индекс (миграция 2026_05_18_160000) делает это быстро.
+- `codeTokenTopN`: +OR `brands_search ILIKE ANY (upper-tokens)` — симметрия с TEXT по бренду в SIMILAR.
+- `trigramTopN`: digit threshold ≥6 → ≥5 цифр, чтобы Otis-OEM (F0380CP3 5 цифр, T0380Y3 5 цифр) проходили fuzzy fallback.
+
+**Итог по сессии 19 мая (части 3+4+5)**:
+- Recovery нераспределённых заявок (hourly cron)
+- TEXT-режим caталог-поиска: вторичные OEM и бренды
+- SIMILAR-режим: вторичные OEM и бренды через code-token + relaxed trigram threshold
+- Multi-brand semantics везде в каталоге (chip, similarity gate, compare)
+
+**Открытые вопросы** для следующих сессий:
+- Меню Pool — пройтись по пунктам, отключить ненужные («Жду клиента», «На паузе», «КП отправлено», «Счёт выставлен», «Просрочено по SLA», «Refresh цен ждут», «Сохранённые виды»)
+- КП Phase 4 — отправка через ComposeForm с PDF-attachment
+- КП Phase 5 — polish (hero chip с КП-кодом, профиль phone/extension)
+
 ## Известные грабли (накопленные за Phase 1.4)
 
 - **App passwords в Yandex 360 для бизнеса часто отключены** — путь сразу через OAuth.
