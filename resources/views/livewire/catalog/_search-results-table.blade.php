@@ -1,14 +1,10 @@
 {{-- Partial: таблица результатов standalone-поиска каталога.
-     Ожидает: $rows — Collection<array{catalog: CatalogItem, similarity: float, method, code_score, trgm_score, vector_score}>.
-     В отличие от requests/items/_catalog-results-table — нет
-     selectCatalog/toggleCompare actions: standalone-поиск не привязан
-     к заявке, единственное действие — открыть на mylift.ru или
-     развернуть детальную карточку (click по строке).
+     Ожидает: $rows — Collection<array{catalog, similarity, method, code_score, trgm_score, vector_score}>.
+     Макет: design/uploads/07-catalog-search.html.
 
-     Layout: каждая позиция = отдельный <tbody> с двумя <tr>'ями
-     (summary + expandable detail). Multiple tbody в одной table
-     разрешён HTML5 и даёт чистый Alpine scope для пары tr — иначе
-     стейт `open` не пробрасывается между sibling-tr в одной tbody. --}}
+     Layout — CSS Grid (не <table>), потому что нужны expandable rows
+     с двухколоночной детальной карточкой внутри. Каждая позиция =
+     2 sibling-блока (summary + expanded) в Alpine x-data{open} scope. --}}
 <div x-data="{
         show: false, url: '', t: null, top: 0, left: 0,
         openPreview(el, photoUrl) {
@@ -34,50 +30,33 @@
      }"
      x-on:catalog-preview-open.window="openPreview($event.detail.el, $event.detail.url)"
      x-on:catalog-preview-close.window="closePreview()"
-     {{-- Safety net: при ЛЮБОМ click в документе закрываем overlay
-          (исключая click на самой миниатюре — она диспатчит свой
-          mouseleave перед click'ом). Решает «overlay висит после
-          клика на row / scroll / переключение фокуса». --}}
      x-on:click.window="closePreview()"
-     {{-- Дополнительно: если mousemove ушёл далеко от триггера и
-          цель не имеет data-cat-preview-trigger — закрываем.
-          Throttle через rAF чтобы не дёргать каждый pixel-move. --}}
      x-on:mousemove.window.throttle.100ms="
         if (show && !$event.target.closest('[data-cat-preview-trigger]')) {
             closePreview();
         }
-     ">
-<table class="w-full text-[12px]" style="table-layout: fixed;">
-    <colgroup>
-        <col style="width: 24px">
-        <col style="width: 84px">
-        <col style="width: 90px">
-        <col style="width: 160px">
-        <col>
-        <col style="width: 96px">
-        <col style="width: 84px">
-        <col style="width: 88px">
-    </colgroup>
-    <thead class="bg-surface-2 text-fg-3 uppercase tracking-wider text-[10.5px] sticky top-0">
-        <tr>
-            <th class="px-2 py-1.5"></th>
-            <th class="px-2 py-1.5"></th>
-            <th class="px-2 py-1.5 text-left">SKU</th>
-            <th class="px-2 py-1.5 text-left">Бренд / артикул</th>
-            <th class="px-2 py-1.5 text-left">Название</th>
-            <th class="px-2 py-1.5 text-right">Цена</th>
-            <th class="px-2 py-1.5 text-right">Наличие</th>
-            <th class="px-2 py-1.5 text-right">Похожесть</th>
-        </tr>
-    </thead>
+     "
+     class="bg-surface border border-border rounded-md overflow-hidden">
+
+    {{-- ─── Table head ─── --}}
+    @php $gridCols = '64px 88px 160px 1fr 120px 88px 96px 36px'; @endphp
+    <div class="grid items-center px-4 bg-surface-2 border-b text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold"
+         style="grid-template-columns: {{ $gridCols }}; column-gap: 14px; height: 34px; border-color: var(--border-strong);">
+        <span></span>
+        <span>SKU</span>
+        <span>Бренд / артикул</span>
+        <span>Название</span>
+        <span class="text-right">Цена</span>
+        <span class="text-right">Наличие</span>
+        <span class="text-right">Похожесть ↓</span>
+        <span></span>
+    </div>
+
     @foreach($rows as $row)
         @php
             $cat = $row['catalog'];
             $sim = $row['similarity'] ?? null;
             $method = $row['method'] ?? null;
-            $codeScore = $row['code_score'] ?? null;
-            $trgmScore = $row['trgm_score'] ?? null;
-            $vecScore  = $row['vector_score'] ?? null;
             $methodIcon = match ($method) {
                 'multi' => '🔀',
                 'code' => '🎯',
@@ -85,58 +64,75 @@
                 'vector' => '✨',
                 default => null,
             };
-            $sourceParts = [];
-            if ($codeScore !== null) $sourceParts[] = 'code-token';
-            if ($trgmScore !== null) $sourceParts[] = 'trgm ' . round($trgmScore * 100) . '%';
-            if ($vecScore !== null)  $sourceParts[] = 'vec '  . round($vecScore  * 100) . '%';
+            $simParts = [];
+            if (($row['code_score'] ?? null) !== null)   $simParts[] = 'code-token';
+            if (($row['trgm_score'] ?? null) !== null)   $simParts[] = 'trgm ' . round($row['trgm_score'] * 100) . '%';
+            if (($row['vector_score'] ?? null) !== null) $simParts[] = 'vec '  . round($row['vector_score']  * 100) . '%';
             $methodTitle = match ($method) {
-                'multi' => 'Найдено несколькими способами: ' . implode(', ', $sourceParts),
-                'code'  => 'Точное вхождение кода (ILIKE)',
-                'trgm'  => 'Текстовое совпадение (pg_trgm)',
-                'vector'=> 'Семантическая похожесть (vector)',
-                default => '',
+                'multi'  => 'Найдено несколькими способами: ' . implode(', ', $simParts),
+                'code'   => 'Точное вхождение кода (ILIKE)',
+                'trgm'   => 'Текстовое совпадение (pg_trgm)',
+                'vector' => 'Семантическая похожесть (vector)',
+                default  => '',
             };
-            $tone = $sim >= 0.85 ? 'text-emerald-700' : ($sim >= 0.75 ? 'text-amber-700' : 'text-fg-3');
+            // Цветовая шкала похожести как в макете: full (sky) для multi
+            // / >=0.85 emerald / >=0.75 amber / иначе серый.
+            $simTone = $sim >= 0.95 ? 'full' : ($sim >= 0.85 ? '' : ($sim >= 0.75 ? 'mid' : 'low'));
+            $simPctClass = match($simTone) {
+                'full' => 'text-sky-700',
+                ''     => 'text-emerald-700',
+                'mid'  => 'text-amber-700',
+                'low'  => 'text-fg-3',
+            };
+            $simBarColor = match($simTone) {
+                'full' => 'var(--sky-500)',
+                ''     => 'var(--emerald-600)',
+                'mid'  => 'var(--amber-600)',
+                'low'  => 'var(--neutral-400)',
+            };
 
-            $catDims = array_values(array_filter([
-                'A' => $cat->size_a, 'B' => $cat->size_b, 'C' => $cat->size_c,
-                'D' => $cat->size_d, 'E' => $cat->size_e, 'F' => $cat->size_f,
-            ], fn ($v) => $v !== null));
-            $catDimsLabeled = [];
-            foreach (['A','B','C','D','E','F'] as $i => $k) {
-                $v = $cat->{'size_' . strtolower($k)};
-                if ($v !== null) $catDimsLabeled[$k] = rtrim(rtrim((string) $v, '0'), '.');
-            }
-            $allArticles = is_array($cat->articles) ? array_values(array_filter($cat->articles, fn ($a) => is_string($a) && trim($a) !== '')) : [];
-            $extraArticles = array_values(array_filter(
-                $allArticles,
-                fn ($a) => mb_strtolower(trim((string) $a)) !== mb_strtolower(trim((string) $cat->brand_article))
-            ));
+            // Multi-OEM
             $allBrands = is_array($cat->brands) ? array_values(array_filter($cat->brands, fn ($b) => is_string($b) && trim($b) !== '')) : [];
             $extraBrands = array_values(array_unique(array_filter(
                 $allBrands,
                 fn ($b) => mb_strtolower(trim($b)) !== mb_strtolower(trim((string) $cat->brand))
             )));
+            $allArticles = is_array($cat->articles) ? array_values(array_filter($cat->articles, fn ($a) => is_string($a) && trim($a) !== '')) : [];
+            $extraArticles = array_values(array_filter(
+                $allArticles,
+                fn ($a) => mb_strtolower(trim((string) $a)) !== mb_strtolower(trim((string) $cat->brand_article))
+            ));
             $allUnits = is_array($cat->units) ? array_values(array_filter($cat->units, fn ($u) => is_string($u) && trim($u) !== '')) : [];
+
+            // Размеры
+            $catDimsLabeled = [];
+            foreach (['A','B','C','D','E','F'] as $k) {
+                $v = $cat->{'size_' . strtolower($k)};
+                if ($v !== null) $catDimsLabeled[$k] = rtrim(rtrim((string) $v, '0'), '.');
+            }
+            $dimSummary = implode(' × ', $catDimsLabeled);
         @endphp
-        <tbody x-data="{ open: false }"
-               wire:key="cat-tbody-{{ $cat->id }}"
-               class="border-b border-border-subtle {{ $cat->is_active ? '' : 'opacity-60' }}">
+
+        <div x-data="{ open: false }"
+             wire:key="cat-tbody-{{ $cat->id }}"
+             class="border-b border-border-subtle last:border-b-0 {{ $cat->is_active ? '' : 'opacity-60' }}">
+
             {{-- ─── Summary row ─── --}}
-            <tr class="hover:bg-surface-2 cursor-pointer"
-                @click="open = !open"
-                :class="open && 'bg-sky-50'"
-                title="Кликните, чтобы развернуть карточку товара">
-                <td class="px-1 py-1.5 align-middle text-center text-fg-3 text-[12px] select-none">
-                    <span x-text="open ? '▾' : '▸'"></span>
-                </td>
-                <td class="px-2 py-1.5 align-top" @click.stop>
+            <div class="grid items-center px-4 py-3 cursor-pointer transition-colors hover:bg-[var(--bg-hover)]"
+                 :class="open && 'bg-[var(--bg-selected)]'"
+                 :style="open && 'box-shadow: inset 3px 0 0 var(--sky-500); cursor: default;'"
+                 style="grid-template-columns: {{ $gridCols }}; column-gap: 14px; min-height: 68px;"
+                 @click="open = !open"
+                 title="Кликните, чтобы развернуть карточку товара">
+
+                {{-- Thumb 56×56 --}}
+                <div @click.stop>
                     @if($cat->photo_url)
                         <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
                            data-cat-preview-trigger
                            x-on:mouseenter="$dispatch('catalog-preview-open', { el: $el, url: '{{ addslashes($cat->photo_url) }}' })"
                            x-on:mouseleave="$dispatch('catalog-preview-close')"
-                           class="block w-[72px] h-[72px] rounded overflow-hidden bg-surface-2 border border-border-subtle"
+                           class="block w-14 h-14 rounded-md overflow-hidden bg-surface-2 border border-border"
                            title="Открыть фото в новой вкладке">
                             <img src="{{ $cat->photo_url }}" alt=""
                                  loading="lazy" referrerpolicy="no-referrer"
@@ -144,303 +140,324 @@
                                  onerror="this.style.display='none'; this.parentElement.classList.add('flex','items-center','justify-center'); this.parentElement.innerHTML += '<span class=\'text-fg-3 text-[10px]\'>нет</span>';">
                         </a>
                     @else
-                        <div class="w-[72px] h-[72px] rounded bg-surface-2 border border-border-subtle flex items-center justify-center text-fg-3 text-[10px]">нет фото</div>
+                        <div class="w-14 h-14 rounded-md bg-surface-2 border border-border flex items-center justify-center text-fg-3 text-[10px] text-center leading-tight">нет<br>фото</div>
                     @endif
-                </td>
-                <td class="px-2 py-1.5 mono text-fg-1 align-top whitespace-nowrap">
-                    <div class="flex items-center gap-1" @click.stop>
-                        <span>{{ $cat->sku }}</span>
-                        <a href="https://mylift.ru/?text={{ urlencode($cat->sku) }}&fn=find"
-                           target="_blank" rel="noopener noreferrer"
-                           class="text-sky-700 hover:text-sky-900 text-[11px]"
-                           title="Открыть на mylift.ru">↗</a>
-                    </div>
-                </td>
-                <td class="px-2 py-1.5 align-top">
-                    <div class="text-fg-1 break-words">{{ $cat->brand ?: '—' }}</div>
+                </div>
+
+                {{-- SKU --}}
+                <div class="mono text-[12.5px] text-fg-2 leading-tight">
+                    <span class="block text-fg-1 font-semibold mb-0.5">{{ $cat->sku }}</span>
+                    <a href="https://mylift.ru/?text={{ urlencode($cat->sku) }}&fn=find"
+                       target="_blank" rel="noopener noreferrer"
+                       @click.stop
+                       class="text-[10.5px] font-medium text-sky-700 hover:text-sky-900 sans"
+                       style="text-decoration: underline dashed; text-underline-offset: 2px;">↗ открыть</a>
+                </div>
+
+                {{-- Brand chip + article + alt brands --}}
+                <div>
+                    @if($cat->brand)
+                        <span class="inline-block text-[10.5px] font-semibold bg-neutral-100 text-neutral-700 px-1.5 py-0.5 rounded uppercase tracking-wider mb-1">{{ $cat->brand }}</span>
+                    @endif
                     @if($cat->brand_article)
-                        <div class="mono text-fg-3 text-[11px] break-all">{{ $cat->brand_article }}</div>
+                        <div class="mono text-[11.5px] text-fg-2 break-all leading-snug">{{ $cat->brand_article }}</div>
                     @endif
                     @if(! empty($extraBrands))
-                        <div class="mt-0.5 text-[10.5px] text-fg-3" title="OEM-кросс брендов: {{ implode(', ', $extraBrands) }}">
-                            +{{ implode(', ', array_slice($extraBrands, 0, 3)) }}{{ count($extraBrands) > 3 ? ' …' : '' }}
+                        <div class="text-[11px] text-fg-3 mt-1 leading-snug" title="OEM-кросс брендов: {{ implode(', ', $extraBrands) }}">
+                            + {{ implode(', ', array_slice($extraBrands, 0, 2)) }}{{ count($extraBrands) > 2 ? ' …' : '' }}
                         </div>
                     @endif
-                </td>
-                <td class="px-2 py-1.5 text-fg-1 align-top leading-snug break-words">
-                    <div>{{ $cat->name }}</div>
-                    @if($cat->unit_name || $cat->part_type || $cat->form_factor || ! empty($catDims) || ! empty($extraArticles))
-                        <div class="mt-1 flex flex-wrap gap-x-1.5 gap-y-0.5 text-[10.5px]">
-                            @if($cat->unit_name)
-                                <span class="inline-flex items-center px-1.5 rounded-sm bg-sky-50 text-sky-800">{{ $cat->unit_name }}</span>
-                            @endif
-                            @if($cat->part_type)
-                                <span class="inline-flex items-center px-1.5 rounded-sm bg-surface-2 text-fg-2">{{ $cat->part_type }}</span>
-                            @endif
-                            @if($cat->form_factor)
-                                <span class="inline-flex items-center px-1.5 rounded-sm bg-surface-2 text-fg-2">{{ $cat->form_factor }}</span>
-                            @endif
-                            @if(! empty($catDims))
-                                <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-50 text-amber-800 mono"
-                                      title="Размеры из каталога">
-                                    {{ implode('×', array_map(fn ($v) => rtrim(rtrim((string) $v, '0'), '.'), $catDims)) }} мм
-                                </span>
-                            @endif
-                            @if(! empty($extraArticles))
-                                <span class="inline-flex items-center px-1.5 rounded-sm bg-surface-2 text-fg-3 mono"
-                                      title="OEM-артикулы: {{ implode(', ', array_slice($extraArticles, 0, 8)) }}">
-                                    +{{ count($extraArticles) }} OEM
-                                </span>
-                            @endif
-                        </div>
-                    @endif
-                </td>
-                <td class="px-2 py-1.5 mono text-right text-fg-1 align-top whitespace-nowrap">
-                    {{ $cat->price !== null ? number_format((float) $cat->price, 2, '.', ' ') . ' ₽' : '—' }}
-                </td>
-                <td class="px-2 py-1.5 text-right align-top whitespace-nowrap">
+                </div>
+
+                {{-- Name + tags --}}
+                <div>
+                    <div class="text-[13.5px] font-medium text-fg-1 leading-snug mb-1.5">{{ $cat->name }}</div>
+                    <div class="flex items-center gap-1.5 flex-wrap text-[11px]">
+                        @if($cat->unit_name)
+                            <span class="inline-flex items-center h-5 px-1.5 rounded bg-surface-2 text-fg-2 text-[10.5px] font-medium border border-border-subtle whitespace-nowrap overflow-hidden text-ellipsis" style="max-width: 280px;">{{ $cat->unit_name }}</span>
+                        @endif
+                        @if($cat->part_type)
+                            <span class="inline-flex items-center h-5 px-1.5 rounded bg-sky-50 text-sky-700 text-[10.5px] font-medium whitespace-nowrap overflow-hidden text-ellipsis" style="max-width: 280px;">{{ $cat->part_type }}</span>
+                        @endif
+                        @if($cat->form_factor)
+                            <span class="inline-flex items-center h-5 px-1.5 rounded bg-surface-2 text-fg-2 text-[10.5px] font-medium border border-border-subtle">{{ $cat->form_factor }}</span>
+                        @endif
+                        @if($dimSummary)
+                            <span class="inline-flex items-center h-5 px-1.5 rounded mono"
+                                  style="background: #fef3c7; color: #92400e;"
+                                  title="Размеры из каталога">{{ $dimSummary }} мм</span>
+                        @endif
+                        @if(! empty($extraArticles))
+                            <span class="inline-flex items-center h-5 px-1.5 rounded font-semibold mono text-[10.5px]"
+                                  style="background: #f1eafe; color: #6d28d9;"
+                                  title="OEM-артикулы: {{ implode(', ', array_slice($extraArticles, 0, 8)) }}">
+                                + {{ count($extraArticles) }} OEM
+                            </span>
+                        @endif
+                    </div>
+                </div>
+
+                {{-- Цена --}}
+                <div class="text-right mono font-semibold text-[13.5px] whitespace-nowrap {{ ($cat->price ?? 0) > 0 ? 'text-fg-1' : 'text-fg-3 font-normal' }}">
+                    {{ $cat->price !== null ? number_format((float) $cat->price, 2, ',', ' ') . ' ₽' : '—' }}
+                </div>
+
+                {{-- Наличие --}}
+                <div class="text-right text-[12.5px] whitespace-nowrap">
                     @if($cat->stock_available === null)
                         <span class="text-fg-3">—</span>
                     @elseif($cat->stock_available > 0)
-                        <span class="text-emerald-700">{{ $cat->stock_available }} шт</span>
+                        <span class="text-emerald-700 font-semibold">{{ $cat->stock_available }} шт</span>
                     @else
-                        <span class="text-amber-700">нет</span>
+                        <span class="text-fg-3">нет</span>
+                    @endif
+                    @if($cat->lead_time_days !== null && $cat->stock_available !== null && $cat->stock_available <= 0)
+                        <small class="block text-fg-3 text-[10.5px] mt-0.5">{{ $cat->lead_time_days }} дн</small>
                     @endif
                     @if(! $cat->is_active)
-                        <span class="ml-1 text-[10px] text-fg-3 uppercase">архив</span>
+                        <small class="block text-fg-3 text-[10px] uppercase mt-0.5">архив</small>
                     @endif
-                </td>
-                <td class="px-2 py-1.5 mono text-right align-top whitespace-nowrap">
-                    <div class="flex items-center justify-end gap-1">
-                        @if($methodIcon)
-                            <span class="text-[11px]" title="{{ $methodTitle }}">{{ $methodIcon }}</span>
-                        @endif
-                        <span class="{{ $tone }} font-semibold">{{ (int) round($sim * 100) }}%</span>
-                    </div>
-                </td>
-            </tr>
+                </div>
 
-            {{-- ─── Detail row (expandable, x-show) ─── --}}
-            <tr x-show="open" x-cloak x-transition.opacity.duration.150ms
-                class="bg-surface-2/40">
-                <td></td>
-                <td colspan="7" class="px-3 py-3">
-                    <div class="grid grid-cols-12 gap-4 items-start">
-                        {{-- Большое фото (250×250) --}}
-                        <div class="col-span-12 sm:col-span-4 md:col-span-3">
-                            @if($cat->photo_url)
-                                <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
-                                   class="block w-full max-w-[260px] rounded-md overflow-hidden bg-app border border-border-subtle"
-                                   style="aspect-ratio: 1 / 1;">
-                                    <img src="{{ $cat->photo_url }}" alt="{{ $cat->name }}"
-                                         loading="lazy" referrerpolicy="no-referrer"
-                                         class="w-full h-full object-cover">
-                                </a>
-                            @else
-                                <div class="w-full max-w-[260px] rounded-md bg-app border border-border-subtle flex items-center justify-center text-fg-3 text-[11px]"
-                                     style="aspect-ratio: 1 / 1;">нет фото</div>
+                {{-- Similarity + bar --}}
+                <div class="flex flex-col items-end gap-1">
+                    <span class="mono font-bold text-[13px] {{ $simPctClass }}" style="font-feature-settings: 'tnum';">
+                        @if($methodIcon)<span class="text-[11px] mr-1" title="{{ $methodTitle }}">{{ $methodIcon }}</span>@endif
+                        {{ (int) round($sim * 100) }}%
+                    </span>
+                    <span class="block rounded-full overflow-hidden" style="width: 64px; height: 4px; background: var(--neutral-100);">
+                        <span class="block h-full" style="width: {{ (int) round($sim * 100) }}%; background: {{ $simBarColor }};"></span>
+                    </span>
+                </div>
+
+                {{-- Toggle indicator --}}
+                <div class="text-center text-fg-3 font-bold cursor-pointer p-1.5 select-none hover:text-fg-1"
+                     style="letter-spacing: 1px;"
+                     :class="open && 'text-sky-700'">
+                    <span x-text="open ? '▴' : '⋯'"></span>
+                </div>
+            </div>
+
+            {{-- ─── Expanded detail (280px + 1fr) ─── --}}
+            <div x-show="open" x-cloak x-transition.opacity.duration.150ms
+                 class="px-4 pb-4"
+                 style="background: var(--bg-selected); box-shadow: inset 3px 0 0 var(--sky-500); border-bottom: 1px solid var(--border-subtle);">
+
+                <div class="grid gap-5 py-2" style="grid-template-columns: 280px 1fr;">
+
+                    {{-- ─── Левая колонка: фото + meta + price panel ─── --}}
+                    <div class="flex flex-col gap-2">
+                        @if($cat->photo_url)
+                            <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
+                               class="block w-full rounded-md overflow-hidden bg-surface border border-border"
+                               style="aspect-ratio: 1/1;">
+                                <img src="{{ $cat->photo_url }}" alt="{{ $cat->name }}"
+                                     loading="lazy" referrerpolicy="no-referrer"
+                                     class="w-full h-full object-cover">
+                            </a>
+                        @else
+                            <div class="w-full rounded-md bg-surface border border-border flex items-center justify-center text-fg-3 text-[11px] mono"
+                                 style="aspect-ratio: 1/1;">нет фото</div>
+                        @endif
+
+                        <div class="text-[11px] mono text-fg-3">
+                            ID: {{ $cat->id }}
+                            @if($cat->last_imported_at)
+                                · импорт: {{ $cat->last_imported_at->format('d.m.Y, H:i') }}
                             @endif
-                            <div class="mt-2 text-[11px] text-fg-3 mono">
-                                ID: {{ $cat->id }}
-                                @if($cat->last_imported_at)
-                                    · импорт: {{ $cat->last_imported_at->format('d.m.Y H:i') }}
-                                @endif
-                            </div>
+                            @if($cat->last_import_id)
+                                · run #{{ $cat->last_import_id }}
+                            @endif
                         </div>
 
-                        {{-- Информация ─── --}}
-                        <div class="col-span-12 sm:col-span-8 md:col-span-9 space-y-3">
-                            {{-- Header --}}
-                            <div>
-                                <div class="text-[14px] font-semibold text-fg-1 leading-snug">{{ $cat->name }}</div>
-                                @if($cat->name_en)
-                                    <div class="text-[12px] text-fg-3 italic mt-0.5">{{ $cat->name_en }}</div>
-                                @endif
-                                @if($cat->description)
-                                    <div class="text-[12px] text-fg-2 mt-1 whitespace-pre-line">{{ $cat->description }}</div>
-                                @endif
-                            </div>
+                        <div class="flex gap-1.5 flex-wrap">
+                            <a href="https://mylift.ru/?text={{ urlencode($cat->sku) }}&fn=find"
+                               target="_blank" rel="noopener noreferrer"
+                               class="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-surface border border-border text-sky-700 text-[11px] font-medium hover:bg-[var(--bg-hover)]">
+                                ↗ Открыть на mylift.ru
+                            </a>
+                            @if($cat->photo_url)
+                                <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
+                                   class="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-surface border border-border text-sky-700 text-[11px] font-medium hover:bg-[var(--bg-hover)]">
+                                    ⛶ Полный размер фото
+                                </a>
+                            @endif
+                        </div>
 
-                            {{-- ─── 4-column data grid ─── --}}
-                            <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2 text-[11.5px]">
-                                {{-- Идентификация --}}
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">SKU</div>
-                                    <div class="mono text-fg-1">{{ $cat->sku }}</div>
-                                </div>
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Primary brand</div>
-                                    <div class="text-fg-1">{{ $cat->brand ?: '—' }}</div>
-                                </div>
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Primary артикул</div>
-                                    <div class="mono text-fg-1 break-all">{{ $cat->brand_article ?: '—' }}</div>
-                                    @if($cat->brand_article_normalized && $cat->brand_article_normalized !== $cat->brand_article)
-                                        <div class="mono text-fg-3 text-[10.5px] break-all" title="Нормализованная форма для match">{{ $cat->brand_article_normalized }}</div>
-                                    @endif
-                                </div>
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Активна</div>
-                                    <div class="text-fg-1">
-                                        {{ $cat->is_active ? 'да' : 'нет (архив)' }}
-                                    </div>
-                                </div>
-
-                                {{-- Классификация --}}
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Узел</div>
-                                    <div class="text-fg-1">{{ $cat->unit_name ?: '—' }}</div>
-                                </div>
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Размещение</div>
-                                    <div class="text-fg-1">{{ $cat->placement ?: '—' }}</div>
-                                </div>
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Тип</div>
-                                    <div class="text-fg-1">{{ $cat->part_type ?: '—' }}</div>
-                                </div>
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Форм-фактор</div>
-                                    <div class="text-fg-1">{{ $cat->form_factor ?: '—' }}</div>
-                                </div>
-
-                                {{-- Цена + наличие --}}
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Цена</div>
-                                    <div class="mono text-fg-1">{{ $cat->price !== null ? number_format((float) $cat->price, 2, '.', ' ') . ' ₽' : '—' }}</div>
-                                    @if($cat->is_price_actual === false)
-                                        <div class="text-[10.5px] text-amber-700">не актуальна</div>
-                                    @endif
-                                </div>
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Цена мин</div>
-                                    <div class="mono text-fg-1">{{ $cat->price_min !== null ? number_format((float) $cat->price_min, 2, '.', ' ') . ' ₽' : '—' }}</div>
-                                </div>
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Наличие</div>
-                                    <div class="text-fg-1">
-                                        @if($cat->stock_available === null)
-                                            —
-                                        @elseif($cat->stock_available > 0)
-                                            <span class="text-emerald-700">{{ $cat->stock_available }} шт</span>
-                                        @else
-                                            <span class="text-amber-700">нет</span>
-                                        @endif
-                                    </div>
-                                </div>
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Срок поставки</div>
-                                    <div class="text-fg-1">{{ $cat->lead_time_days !== null ? $cat->lead_time_days . ' дн' : '—' }}</div>
-                                </div>
-
-                                {{-- Физика --}}
-                                @if(! empty($catDimsLabeled))
-                                    <div class="col-span-2 md:col-span-3">
-                                        <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Размеры (мм)</div>
-                                        <div class="flex flex-wrap gap-1.5">
-                                            @foreach($catDimsLabeled as $k => $v)
-                                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm bg-amber-50 text-amber-800 mono text-[11px]">
-                                                    <span class="text-amber-600">{{ $k }}:</span>{{ $v }}
-                                                </span>
-                                            @endforeach
-                                        </div>
-                                    </div>
-                                @endif
-                                <div>
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Вес</div>
-                                    <div class="mono text-fg-1">{{ $cat->weight !== null ? rtrim(rtrim((string) $cat->weight, '0'), '.') . ' кг' : '—' }}</div>
+                        {{-- Price / stock panel --}}
+                        <div class="bg-surface border border-border rounded-md overflow-hidden mt-1">
+                            <div class="px-3.5 py-2 bg-surface-2 border-b border-border-subtle text-[10px] uppercase tracking-wider text-fg-3 font-semibold">Цена и наличие</div>
+                            <div class="flex justify-between items-baseline px-3.5 py-2 border-b border-border-subtle text-[12.5px]">
+                                <div class="text-fg-3 text-[12px] font-medium">Цена</div>
+                                <div class="mono text-[16px] font-semibold text-fg-1" style="font-feature-settings: 'tnum';">
+                                    {{ $cat->price !== null ? number_format((float) $cat->price, 2, ',', ' ') . ' ₽' : '—' }}
                                 </div>
                             </div>
-
-                            {{-- Multi-OEM brands[] + articles[] --}}
-                            @if(! empty($allBrands) || ! empty($allArticles))
-                                <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-[11.5px]">
-                                    @if(! empty($allBrands))
-                                        <div>
-                                            <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Все бренды ({{ count($allBrands) }})</div>
-                                            <div class="flex flex-wrap gap-1">
-                                                @foreach($allBrands as $i => $b)
-                                                    @php $isPrimary = $i === 0 || (is_string($cat->brand) && mb_strtolower(trim($b)) === mb_strtolower(trim($cat->brand))); @endphp
-                                                    <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] {{ $isPrimary ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'bg-surface-2 text-fg-2 border border-border-subtle' }}">
-                                                        {{ $b }}
-                                                    </span>
-                                                @endforeach
-                                            </div>
-                                        </div>
-                                    @endif
-                                    @if(! empty($allArticles))
-                                        <div>
-                                            <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Все OEM-артикулы ({{ count($allArticles) }})</div>
-                                            <div class="flex flex-wrap gap-1">
-                                                @foreach($allArticles as $a)
-                                                    @php $isPrimary = is_string($cat->brand_article) && mb_strtolower(trim($a)) === mb_strtolower(trim($cat->brand_article)); @endphp
-                                                    <span class="inline-flex items-center px-2 py-0.5 rounded-sm mono text-[11px] {{ $isPrimary ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'bg-surface-2 text-fg-2 border border-border-subtle' }}">
-                                                        {{ $a }}
-                                                    </span>
-                                                @endforeach
-                                            </div>
-                                        </div>
-                                    @endif
+                            <div class="flex justify-between items-baseline px-3.5 py-2 border-b border-border-subtle text-[12.5px]">
+                                <div class="text-fg-3 text-[12px] font-medium">Цена мин.</div>
+                                <div class="mono text-[13px] text-fg-1" style="font-feature-settings: 'tnum';">
+                                    {{ $cat->price_min !== null ? number_format((float) $cat->price_min, 2, ',', ' ') . ' ₽' : '—' }}
+                                </div>
+                            </div>
+                            @if($cat->is_price_actual === false)
+                                <div class="flex justify-between items-baseline px-3.5 py-2 border-b border-border-subtle text-[12.5px]">
+                                    <div class="text-fg-3 text-[12px] font-medium">Актуальность цены</div>
+                                    <div class="text-amber-700 text-[12.5px] font-semibold">не актуальна</div>
                                 </div>
                             @endif
+                            <div class="flex justify-between items-baseline px-3.5 py-2 border-b border-border-subtle text-[12.5px]">
+                                <div class="text-fg-3 text-[12px] font-medium">Наличие</div>
+                                <div class="text-[13px] font-semibold {{ ($cat->stock_available ?? 0) > 0 ? 'text-emerald-700' : 'text-fg-3' }}">
+                                    @if($cat->stock_available === null) — @elseif($cat->stock_available > 0) {{ $cat->stock_available }} шт @else нет @endif
+                                </div>
+                            </div>
+                            <div class="flex justify-between items-baseline px-3.5 py-2 text-[12.5px]">
+                                <div class="text-fg-3 text-[12px] font-medium">Срок поставки</div>
+                                <div class="mono text-[13px] text-fg-1">{{ $cat->lead_time_days !== null ? $cat->lead_time_days . ' дн' : '—' }}</div>
+                            </div>
+                        </div>
+                    </div>
 
-                            {{-- Список узлов («Узлы» из MDB) --}}
-                            @if(count($allUnits) > 1)
-                                <div class="text-[11.5px]">
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Все узлы ({{ count($allUnits) }})</div>
-                                    <div class="flex flex-wrap gap-1">
-                                        @foreach($allUnits as $u)
-                                            <span class="inline-flex items-center px-2 py-0.5 rounded-sm bg-sky-50 text-sky-800 text-[11px]">{{ $u }}</span>
+                    {{-- ─── Правая колонка: name h2 + name_en + kvgrid + descriptions/comments ─── --}}
+                    <div>
+                        <h2 class="m-0 mb-1 text-[16px] font-semibold text-fg-1 leading-snug" style="letter-spacing: -0.005em;">{{ $cat->name }}</h2>
+                        @if($cat->name_en)
+                            <div class="text-[12.5px] text-fg-3 italic mb-3.5">{{ $cat->name_en }}</div>
+                        @else
+                            <div class="mb-3"></div>
+                        @endif
+
+                        {{-- ─── kvgrid (single column, key=160px / value=1fr) ─── --}}
+                        <div class="bg-surface border border-border rounded-md overflow-hidden">
+                            @php
+                                $kvRows = [
+                                    ['SKU', '<span class="mono">' . e($cat->sku) . '</span>'],
+                                    ['Primary бренд', $cat->brand ? e($cat->brand) : '<span class="text-fg-3 italic">— не указан</span>'],
+                                    ['Primary артикул', $cat->brand_article
+                                        ? '<span class="mono">' . e($cat->brand_article) . '</span>'
+                                          . ($cat->brand_article_normalized && $cat->brand_article_normalized !== $cat->brand_article
+                                            ? ' <span class="text-fg-3 text-[11px] mono">(норм: ' . e($cat->brand_article_normalized) . ')</span>'
+                                            : '')
+                                        : '<span class="text-fg-3 italic">— не указан</span>'],
+                                    ['Узел', $cat->unit_name ? e($cat->unit_name) : '<span class="text-fg-3 italic">—</span>'],
+                                    ['Размещение', $cat->placement ? e($cat->placement) : '<span class="text-fg-3 italic">—</span>'],
+                                    ['Тип', $cat->part_type ? e($cat->part_type) : '<span class="text-fg-3 italic">—</span>'],
+                                    ['Форм-фактор', $cat->form_factor ? '<span class="mono">' . e($cat->form_factor) . '</span>' : '<span class="text-fg-3 italic">—</span>'],
+                                    ['Активна', $cat->is_active
+                                        ? '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium text-[11.5px]">да</span>'
+                                        : '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-100 text-fg-3 font-medium text-[11.5px]">нет (архив)</span>'],
+                                ];
+
+                                if (! empty($catDimsLabeled)) {
+                                    $dimHtml = '';
+                                    foreach ($catDimsLabeled as $k => $v) {
+                                        $dimHtml .= '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded mono text-[11.5px] mr-1" style="background: #fef3c7; color: #92400e;">' . $k . ' ' . e($v) . '</span>';
+                                    }
+                                    $kvRows[] = ['Размеры (мм)', $dimHtml];
+                                }
+                                if ($cat->weight !== null) {
+                                    $kvRows[] = ['Вес', '<span class="mono">' . e(rtrim(rtrim((string) $cat->weight, '0'), '.')) . ' кг</span>'];
+                                }
+                            @endphp
+
+                            @foreach($kvRows as [$k, $v])
+                                <div class="grid items-baseline border-b border-border-subtle last:border-b-0"
+                                     style="grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
+                                    <div class="text-[10px] font-semibold uppercase tracking-wider text-fg-3 pt-0.5">{{ $k }}</div>
+                                    <div class="text-[13px] font-medium text-fg-1">{!! $v !!}</div>
+                                </div>
+                            @endforeach
+
+                            {{-- Multi-brand row (если >1) --}}
+                            @if(count($allBrands) > 1)
+                                <div class="grid items-baseline border-b border-border-subtle last:border-b-0"
+                                     style="grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
+                                    <div class="text-[10px] font-semibold uppercase tracking-wider text-fg-3 pt-0.5">Все бренды ({{ count($allBrands) }})</div>
+                                    <div class="text-[13px] font-medium text-fg-1 flex flex-wrap gap-1">
+                                        @foreach($allBrands as $b)
+                                            @php $isPrimary = is_string($cat->brand) && mb_strtolower(trim($b)) === mb_strtolower(trim($cat->brand)); @endphp
+                                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11.5px] {{ $isPrimary ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'bg-neutral-100 text-fg-2' }}">{{ $b }}</span>
                                         @endforeach
                                     </div>
                                 </div>
                             @endif
 
-                            {{-- Комментарий --}}
-                            @if($cat->comment)
-                                <div class="text-[11.5px]">
-                                    <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-0.5">Комментарий</div>
-                                    <div class="text-fg-2 whitespace-pre-line">{{ $cat->comment }}</div>
+                            {{-- All OEM articles --}}
+                            @if(! empty($allArticles))
+                                <div class="grid items-baseline border-b border-border-subtle last:border-b-0"
+                                     style="grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
+                                    <div class="text-[10px] font-semibold uppercase tracking-wider text-fg-3 pt-0.5">OEM-артикулы ({{ count($allArticles) }})</div>
+                                    <div class="text-[13px] font-medium text-fg-1 flex flex-wrap gap-1">
+                                        @foreach($allArticles as $a)
+                                            @php $isPrimary = is_string($cat->brand_article) && mb_strtolower(trim($a)) === mb_strtolower(trim($cat->brand_article)); @endphp
+                                            <span class="inline-flex items-center px-1.5 py-0.5 rounded mono text-[11.5px] {{ $isPrimary ? 'bg-emerald-50 text-emerald-700 font-semibold' : '' }}"
+                                                  @if(! $isPrimary) style="background: #f1eafe; color: #6d28d9;" @endif>{{ $a }}</span>
+                                        @endforeach
+                                    </div>
                                 </div>
                             @endif
 
-                            {{-- Action bar --}}
-                            <div class="flex items-center gap-2 pt-2 border-t border-border-subtle">
-                                <a href="https://mylift.ru/?text={{ urlencode($cat->sku) }}&fn=find"
-                                   target="_blank" rel="noopener noreferrer"
-                                   class="btn btn-sm">
-                                    ↗ Открыть на mylift.ru
-                                </a>
-                                @if($cat->photo_url)
-                                    <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
-                                       class="btn btn-sm">
-                                        🖼 Полный размер фото
-                                    </a>
-                                @endif
-                                <span class="flex-1"></span>
-                                <button type="button" @click="open = false"
-                                        class="text-fg-3 hover:text-fg-1 text-[11.5px]"
-                                        title="Свернуть карточку">
-                                    ▴ свернуть
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </td>
-            </tr>
-        </tbody>
-    @endforeach
-</table>
+                            {{-- All units (если >1) --}}
+                            @if(count($allUnits) > 1)
+                                <div class="grid items-baseline border-b border-border-subtle last:border-b-0"
+                                     style="grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
+                                    <div class="text-[10px] font-semibold uppercase tracking-wider text-fg-3 pt-0.5">Все узлы ({{ count($allUnits) }})</div>
+                                    <div class="text-[13px] font-medium text-fg-1 flex flex-wrap gap-1">
+                                        @foreach($allUnits as $u)
+                                            <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 text-[11.5px]">{{ $u }}</span>
+                                        @endforeach
+                                    </div>
+                                </div>
+                            @endif
 
-{{-- Hover-preview overlay (один на всю таблицу).
-     `pointer-events:none` чтобы overlay не блокировал mouseleave
-     на миниатюре. onerror на img прячет overlay если фото битое
-     (404 / hotlink-protection / etc), иначе висит белый прямоугольник. --}}
-<div x-show="show" x-cloak x-transition.opacity
-     :style="`position: fixed; left: ${left}px; top: ${top}px; width: 480px; height: 480px; z-index: 9999; pointer-events: none;`"
-     class="rounded-lg shadow-xl border border-border-subtle bg-white p-1">
-    <img :src="url" alt="" referrerpolicy="no-referrer"
-         x-on:error="closePreview()"
-         style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">
-</div>
+                            {{-- Description (отдельное поле от comment) --}}
+                            @if($cat->description)
+                                <div class="grid items-baseline border-b border-border-subtle last:border-b-0"
+                                     style="grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
+                                    <div class="text-[10px] font-semibold uppercase tracking-wider text-fg-3 pt-0.5">Описание</div>
+                                    <div class="text-[12.5px] text-fg-2 whitespace-pre-line leading-relaxed">{{ $cat->description }}</div>
+                                </div>
+                            @endif
+
+                            {{-- source_hash (для отладки импорта) --}}
+                            @if($cat->source_hash)
+                                <div class="grid items-baseline"
+                                     style="grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
+                                    <div class="text-[10px] font-semibold uppercase tracking-wider text-fg-3 pt-0.5">Source hash</div>
+                                    <div class="mono text-[11px] text-fg-3 break-all">{{ $cat->source_hash }}</div>
+                                </div>
+                            @endif
+                        </div>
+
+                        {{-- ─── Comments block (catalog_items.comment) ─── --}}
+                        @if($cat->comment)
+                            <div class="bg-surface border border-border rounded-md overflow-hidden mt-3">
+                                <div class="px-3.5 py-2 bg-surface-2 border-b border-border-subtle text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold flex items-center gap-2">
+                                    Комментарии
+                                </div>
+                                <div class="px-3.5 py-2.5 text-[12.5px] text-fg-1 whitespace-pre-line leading-relaxed">{{ $cat->comment }}</div>
+                            </div>
+                        @endif
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endforeach
+
+    {{-- ─── Footer ─── --}}
+    <div class="flex items-center gap-3.5 px-4 bg-surface-2 border-t border-border text-[12px] font-medium text-fg-3"
+         style="height: 42px; font-feature-settings: 'tnum';">
+        <span>Показано <span class="text-fg-1 font-semibold">{{ $rows->count() }}</span> {{ $rows->count() === 1 ? 'позиция' : ($rows->count() < 5 ? 'позиции' : 'позиций') }}</span>
+        <span class="text-[var(--border-strong)]">·</span>
+        <span>top-50 по похожести</span>
+    </div>
+
+    {{-- ─── Hover-preview overlay ─── --}}
+    <div x-show="show" x-cloak x-transition.opacity
+         :style="`position: fixed; left: ${left}px; top: ${top}px; width: 480px; height: 480px; z-index: 9999; pointer-events: none;`"
+         class="rounded-lg shadow-xl border border-border-subtle bg-white p-1">
+        <img :src="url" alt="" referrerpolicy="no-referrer"
+             x-on:error="closePreview()"
+             style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">
+    </div>
 </div>
