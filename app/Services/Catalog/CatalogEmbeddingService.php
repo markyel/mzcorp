@@ -588,92 +588,48 @@ class CatalogEmbeddingService
         }
 
         // Hybrid retrieval (code-token ILIKE + trigram word_similarity +
-        // vector cosine, с multi-source бонусом) — та же логика, что
-        // используется в UI «Похожие из каталога» (topNByQueryText).
-        //
-        // Pure-vector часто промахивается на позициях вроде «БУАД-4-25»:
-        // vector съезжает к LS Electric SV075iG5A-4 из-за общего слова
-        // «преобразователь», хотя в каталоге есть прямое совпадение
-        // подстроки «БУАД4-25» в имени другой позиции. Code-token поиск
-        // ловит такое мгновенно и точно.
-        //
-        // Безопасность сохраняется: для не-vector матчей (code-only/trgm-
-        // only) НИКОГДА не пропускаем LLM-валидацию — substring-match без
-        // семантической проверки ненадёжен (см. ниже LLM-gate).
-        $candidates = $this->topNByQueryText($queryText, 1, $item->id);
-        if ($candidates === []) {
-            return null;
-        }
-        $top = $candidates[0];
-        /** @var CatalogItem $catalog */
-        $catalog = $top['catalog'];
-        $similarity = (float) $top['similarity'];
-        $matchMethod = (string) ($top['method'] ?? 'vector');
-        $codeScore = isset($top['code_score']) ? (float) $top['code_score'] : null;
-        $trgmScore = isset($top['trgm_score']) ? (float) $top['trgm_score'] : null;
-        $vectorScore = isset($top['vector_score']) ? (float) $top['vector_score'] : null;
+        // vector cosine, с multi-source бонусом) — берём top-N кандидатов
+        // (не top-1!), потому что:
+        //   - на запросе «БУАД-4-25» code-token совпадает И с «Устройство
+        //     БУАД 4-25.8» (искомое), И с «Привод ДК 1200мм, буад 4-25,
+        //     двигатель Аир-6» (товар-комплект), оба получают score=0.95;
+        //   - vector/trigram сами по себе не разруливают такой tie.
+        // Отдаём всех LLM-у на rerank: пусть он выберет ту самую позицию
+        // или скажет «никто».
+        $topN = (int) app_setting('catalog.name_match.rerank_top_n', 5);
+        $topN = max(1, min(10, $topN));
 
-        if ($similarity < $threshold) {
+        $allCandidates = $this->topNByQueryText($queryText, $topN, $item->id);
+        if ($allCandidates === []) {
             return null;
         }
 
-        // Бренд safety-check. Проверяем item brand против ВСЕХ брендов
-        // каталожной позиции — `brand` (primary) и `brands[]` (вторичные).
-        // Аналоги: primary brand=Руспромаппаратура, а в brands[] OEM-кроссы
-        // (OTIS, KONE, ...). Subject brand=Otis должен мэтчиться. См.
-        // миграцию 2026_05_19_180000.
-        $itemBrand = $this->normalizeBrand($item->brand?->name ?: $item->parsed_brand);
-        $catalogBrands = [];
-        if ($catalog->brand !== null && $catalog->brand !== '') {
-            $catalogBrands[] = $this->normalizeBrand($catalog->brand);
-        }
-        if (is_array($catalog->brands)) {
-            foreach ($catalog->brands as $b) {
-                if (is_string($b) && $b !== '') {
-                    $catalogBrands[] = $this->normalizeBrand($b);
-                }
+        // Pre-filter всех кандидатов: threshold + brand_safe + article_safe.
+        // Тех, что не прошли — отбрасываем (это «жёсткие» инварианты,
+        // LLM-у нет смысла их предлагать). Остаются 0+ кандидатов.
+        $safe = [];
+        foreach ($allCandidates as $c) {
+            if ((float) $c['similarity'] < $threshold) {
+                continue;
             }
+            if (! $this->isBrandSafe($item, $c['catalog'])) {
+                continue;
+            }
+            if (! $this->isArticleSafe($item->parsed_article, $c['catalog']->brand_article)) {
+                continue;
+            }
+            $safe[] = $c;
         }
-        $catalogBrands = array_values(array_unique(array_filter($catalogBrands, fn ($b) => $b !== '')));
-        if ($itemBrand !== '' && ! empty($catalogBrands) && ! in_array($itemBrand, $catalogBrands, true)) {
-            Log::info('CatalogEmbeddingService: brand mismatch — match rejected', [
+        if ($safe === []) {
+            Log::info('CatalogEmbeddingService: all candidates filtered out by safety', [
                 'request_item_id' => $item->id,
-                'item_brand' => $itemBrand,
-                'catalog_brands' => $catalogBrands,
-                'catalog_id' => $catalog->id,
-                'similarity' => $similarity,
+                'fetched' => count($allCandidates),
+                'top1_catalog_id' => $allCandidates[0]['catalog']->id ?? null,
+                'top1_similarity' => $allCandidates[0]['similarity'] ?? null,
             ]);
-
             return null;
         }
 
-        // Article safety-check (two-stage retrieval, second stage):
-        // если у обоих filled артикулы и они нормализованно различаются —
-        // это разные товары (SC-E2/G vs SC-E02, 22214 vs 22220, MS7001.1 vs MS2),
-        // даже если name семантически близкое. Reject.
-        if (! $this->isArticleSafe($item->parsed_article, $catalog->brand_article)) {
-            Log::info('CatalogEmbeddingService: article mismatch — match rejected', [
-                'request_item_id' => $item->id,
-                'item_article' => $item->parsed_article,
-                'catalog_brand_article' => $catalog->brand_article,
-                'catalog_id' => $catalog->id,
-                'similarity' => $similarity,
-            ]);
-
-            return null;
-        }
-
-        // Third stage: LLM-валидация. Mini-модель отвечает «one and the
-        // same? Y/N» с reasoning. Это убивает «звено цепи vs звезда»,
-        // «поручень vs ролик», разные модификации в одной серии — кейсы,
-        // где retrieval ловит общий контекст, но это РАЗНЫЕ товары.
-        //
-        // High-confidence skip: пропускаем LLM только если ИМЕННО
-        // PURE VECTOR без помощи code/trgm уже даёт vector_score ≥
-        // hc_threshold. Code/trgm — это substring-match без семантики,
-        // им одним доверять нельзя даже при blended score 0.95. Multi
-        // (code+vector высокий) — vector сам по себе перекрывает порог,
-        // skip ок.
         $hcThreshold = (float) app_setting(
             'catalog.name_match.hc_threshold',
             config('services.catalog_name_match.hc_threshold', 0.90),
@@ -686,22 +642,108 @@ class CatalogEmbeddingService
             'catalog.name_match.llm_fail_action',
             config('services.catalog_name_match.llm_fail_action', 'reject'),
         );
+
+        // Single safe candidate → binary LLM verify (или skip-if vector ≥ hc).
+        if (count($safe) === 1) {
+            return $this->finalizeSingleCandidate(
+                $item, $safe[0], $hcThreshold, $llmEnabled, $failAction,
+            );
+        }
+
+        // Multi-candidate. Optimization: если top-1 имеет vector_score >= hc
+        // и явно отрывается от #2 (≥0.05) — pure vector сам уверенно лидирует,
+        // rerank необязателен.
+        $top1 = $safe[0];
+        $top1Vector = isset($top1['vector_score']) ? (float) $top1['vector_score'] : 0.0;
+        if ($top1Vector >= $hcThreshold) {
+            $top2Vector = isset($safe[1]['vector_score']) ? (float) $safe[1]['vector_score'] : 0.0;
+            if (($top1Vector - $top2Vector) >= 0.05) {
+                return $this->buildMatchResult(
+                    $top1, llmValidation: 'skipped_high_confidence', llmReason: null,
+                );
+            }
+        }
+
+        // LLM rerank или fallback к top-1 если LLM выключен.
+        if (! $llmEnabled) {
+            return $this->buildMatchResult(
+                $top1, llmValidation: 'skipped_llm_disabled', llmReason: null,
+            );
+        }
+
+        $rerank = null;
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            $rerank = $this->rerankCandidatesWithLlm($item, $safe);
+            if ($rerank !== null) {
+                break;
+            }
+            sleep(5);
+        }
+
+        if ($rerank === null) {
+            if ($failAction === 'reject') {
+                Log::info('CatalogEmbeddingService: rerank LLM failed — match rejected', [
+                    'request_item_id' => $item->id,
+                    'candidates_count' => count($safe),
+                ]);
+                return null;
+            }
+            return $this->buildMatchResult(
+                $top1, llmValidation: 'skipped_llm_failed', llmReason: null,
+            );
+        }
+
+        if ($rerank['index'] === -1) {
+            Log::info('CatalogEmbeddingService: rerank LLM rejected all candidates', [
+                'request_item_id' => $item->id,
+                'candidates_count' => count($safe),
+                'reason' => $rerank['reason'],
+            ]);
+            return null;
+        }
+
+        $chosen = $safe[$rerank['index']];
+        Log::info('CatalogEmbeddingService: rerank LLM picked candidate', [
+            'request_item_id' => $item->id,
+            'chosen_index' => $rerank['index'],
+            'chosen_catalog_id' => $chosen['catalog']->id,
+            'chosen_sku' => $chosen['catalog']->sku,
+            'candidates_count' => count($safe),
+            'reason' => $rerank['reason'],
+        ]);
+
+        return $this->buildMatchResult(
+            $chosen, llmValidation: 'approved_rerank', llmReason: $rerank['reason'],
+        );
+    }
+
+    /**
+     * Binary-LLM путь для случая «единственный безопасный кандидат».
+     * Skip LLM, если pure vector ≥ hc_threshold; иначе зовём LLM с retry.
+     *
+     * @param  array{catalog: CatalogItem, similarity: float, method?: string, code_score?: ?float, trgm_score?: ?float, vector_score?: ?float}  $top
+     */
+    private function finalizeSingleCandidate(
+        RequestItem $item,
+        array $top,
+        float $hcThreshold,
+        bool $llmEnabled,
+        string $failAction,
+    ): ?array {
+        /** @var CatalogItem $catalog */
+        $catalog = $top['catalog'];
+        $similarity = (float) $top['similarity'];
+        $vectorScore = isset($top['vector_score']) ? (float) $top['vector_score'] : null;
+
         $vectorHighConfidence = ($vectorScore !== null && $vectorScore >= $hcThreshold);
         $llmDecision = null;
         if ($llmEnabled && ! $vectorHighConfidence) {
-            // Внешний retry поверх Http::retry — на случай, если прокси-сервер
-            // (api.openai-proxy) отдаёт 503 серией (мы наблюдали это в bulk-pass'е).
-            // Стандартный Laravel-retry укладывается в ~6 сек; если outage
-            // длиннее — внешняя пауза в 5с даёт прокси время восстановиться.
-            $attempts = 2;
-            for ($attempt = 0; $attempt < $attempts; $attempt++) {
+            for ($attempt = 0; $attempt < 2; $attempt++) {
                 $llmDecision = $this->validateMatchWithLlm($item, $catalog, $similarity);
                 if ($llmDecision !== null) {
                     break;
                 }
-                if ($attempt + 1 < $attempts) {
-                    sleep(5);
-                }
+                sleep(5);
             }
 
             if ($llmDecision !== null && $llmDecision['same'] === false) {
@@ -712,13 +754,8 @@ class CatalogEmbeddingService
                     'similarity' => $similarity,
                     'reason' => $llmDecision['reason'] ?? null,
                 ]);
-
                 return null;
             }
-            // LLM упал после всех retry → действуем по config:
-            //   llm_fail_action=reject (default) — отклоняем match, vector
-            //                                       без подтверждения LLM не доверяем;
-            //   llm_fail_action=accept            — принимаем (старое поведение).
             if ($llmDecision === null && $failAction === 'reject') {
                 Log::info('CatalogEmbeddingService: LLM failed — match rejected by llm_fail_action=reject', [
                     'request_item_id' => $item->id,
@@ -726,24 +763,147 @@ class CatalogEmbeddingService
                     'catalog_sku' => $catalog->sku,
                     'similarity' => $similarity,
                 ]);
-
                 return null;
             }
-            // null + accept → продолжаем, помечаем skipped_llm_failed.
         }
 
-        return [
-            'catalog' => $catalog,
-            'similarity' => $similarity,
-            'method' => $matchMethod,           // code | trgm | vector | multi
-            'code_score' => $codeScore,
-            'trgm_score' => $trgmScore,
-            'vector_score' => $vectorScore,
-            'llm_validation' => $llmDecision === null
+        return $this->buildMatchResult(
+            $top,
+            llmValidation: $llmDecision === null
                 ? ($vectorHighConfidence ? 'skipped_high_confidence' : 'skipped_llm_failed')
                 : 'approved',
-            'llm_reason' => $llmDecision['reason'] ?? null,
+            llmReason: $llmDecision['reason'] ?? null,
+        );
+    }
+
+    /**
+     * Универсальный return-формат C-step. Из top-кандидата извлекает
+     * sub-scores и пакует с финальной LLM-меткой.
+     *
+     * @param  array{catalog: CatalogItem, similarity: float, method?: string, code_score?: ?float, trgm_score?: ?float, vector_score?: ?float}  $top
+     */
+    private function buildMatchResult(array $top, string $llmValidation, ?string $llmReason): array
+    {
+        return [
+            'catalog' => $top['catalog'],
+            'similarity' => (float) $top['similarity'],
+            'method' => (string) ($top['method'] ?? 'vector'),
+            'code_score' => isset($top['code_score']) ? (float) $top['code_score'] : null,
+            'trgm_score' => isset($top['trgm_score']) ? (float) $top['trgm_score'] : null,
+            'vector_score' => isset($top['vector_score']) ? (float) $top['vector_score'] : null,
+            'llm_validation' => $llmValidation,
+            'llm_reason' => $llmReason,
         ];
+    }
+
+    /**
+     * Проверка бренда позиции против всех брендов каталога (primary `brand`
+     * + secondary `brands[]`). Public — используется в diagnose CLI.
+     */
+    public function isBrandSafe(RequestItem $item, CatalogItem $catalog): bool
+    {
+        $itemBrand = $this->normalizeBrand($item->brand?->name ?: $item->parsed_brand);
+        if ($itemBrand === '') {
+            return true;
+        }
+        $catalogBrands = [];
+        if ($catalog->brand !== null && $catalog->brand !== '') {
+            $catalogBrands[] = $this->normalizeBrand($catalog->brand);
+        }
+        if (is_array($catalog->brands)) {
+            foreach ($catalog->brands as $b) {
+                if (is_string($b) && $b !== '') {
+                    $catalogBrands[] = $this->normalizeBrand($b);
+                }
+            }
+        }
+        $catalogBrands = array_values(array_unique(array_filter($catalogBrands, fn ($b) => $b !== '')));
+        if (empty($catalogBrands)) {
+            return true; // в каталоге нет ни одного бренда — не блокируем
+        }
+        return in_array($itemBrand, $catalogBrands, true);
+    }
+
+    /**
+     * Multi-candidate LLM-rerank: даём LLM-у выбрать одного кандидата из
+     * списка или сказать null. Используется в matchByRequestItem когда
+     * pre-filter оставил >1 безопасного кандидата.
+     *
+     * Возвращает:
+     *   - ['index' => N, 'reason' => '...']  — LLM выбрал кандидата N (0-based)
+     *   - ['index' => -1, 'reason' => '...'] — LLM явно сказал «никто не подходит»
+     *   - null                                — LLM упал/вернул мусор (caller решает по failAction)
+     *
+     * @param  list<array{catalog: CatalogItem, similarity: float, method?: string}>  $candidates
+     */
+    public function rerankCandidatesWithLlm(RequestItem $item, array $candidates): ?array
+    {
+        if (empty($candidates)) {
+            return null;
+        }
+
+        $payload = [];
+        foreach ($candidates as $c) {
+            /** @var CatalogItem $cat */
+            $cat = $c['catalog'];
+            $payload[] = [
+                'brand' => $cat->brand,
+                'name' => $cat->name,
+                'brand_article' => $cat->brand_article,
+                'sku' => (string) $cat->sku,
+                'similarity' => (float) $c['similarity'],
+                'method' => (string) ($c['method'] ?? 'vector'),
+            ];
+        }
+
+        try {
+            $result = $this->chat->chat(
+                [
+                    ['role' => 'system', 'content' => \App\Prompts\Catalog\RerankCatalogMatchPrompt::systemMessage()],
+                    ['role' => 'user', 'content' => \App\Prompts\Catalog\RerankCatalogMatchPrompt::userMessage(
+                        $item->brand?->name ?: $item->parsed_brand,
+                        $item->parsed_name,
+                        $item->parsed_article,
+                        $payload,
+                    )],
+                ],
+                config('services.openai.clarification_model', 'gpt-4o-mini'),
+                ['response_format' => ['type' => 'json_object'], 'temperature' => 0, 'max_tokens' => 300],
+            );
+        } catch (\Throwable $e) {
+            Log::warning('CatalogEmbeddingService: rerank LLM call failed (non-fatal)', [
+                'request_item_id' => $item->id,
+                'candidates_count' => count($candidates),
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+
+        $parsed = json_decode((string) ($result['content'] ?? ''), true);
+        if (! is_array($parsed)) {
+            Log::warning('CatalogEmbeddingService: rerank LLM returned non-JSON', [
+                'request_item_id' => $item->id,
+                'content' => mb_substr((string) ($result['content'] ?? ''), 0, 200),
+            ]);
+            return null;
+        }
+
+        $reasonStr = is_string($parsed['reason'] ?? null) ? mb_substr($parsed['reason'], 0, 500) : '';
+        $idx = $parsed['best_index'] ?? null;
+
+        if ($idx === null) {
+            // LLM сказал «никто не подходит» — это валидный ответ, отличный от LLM-сбоя.
+            return ['index' => -1, 'reason' => $reasonStr];
+        }
+        if (! is_int($idx) || $idx < 0 || $idx >= count($candidates)) {
+            Log::warning('CatalogEmbeddingService: rerank LLM returned bad index', [
+                'request_item_id' => $item->id,
+                'index' => $idx,
+                'candidates_count' => count($candidates),
+            ]);
+            return null;
+        }
+        return ['index' => $idx, 'reason' => $reasonStr];
     }
 
     /**
