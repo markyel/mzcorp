@@ -196,13 +196,23 @@ class CatalogEmbeddingService
 
         $limit = max(1, min($n, 50));
         $poolLimit = max($limit, 20);
+        // Code-token pool — расширенный (100 вместо 20). Запросы с
+        // генерик-токенами «220VAC»/«380В»/«24VDC» (электрические юниты
+        // встречаются в сотнях позиций) дают огромный matching set; LIMIT 20
+        // без ORDER BY возвращал случайные 20 строк, искомый специфический
+        // товар выпадал. С 100 покрываем практически все matching items
+        // (≥100 совпадений на одном генерик-токене редко), backfill
+        // подтянет vec для них и tie-break выберет правильного top-1.
+        // Кейс #2385: M28598 (CENTA фотобарьер) не попадал ни в code-20,
+        // ни в vector-20 — с code-100 точно попадёт.
+        $codePoolLimit = max($poolLimit, 100);
 
         // 1) Code-token ILIKE — извлекаем из запроса токены вида ПКЛ32 /
         //    ЕИЛА.687255.008-04 (буквы+цифры, ≥3 симв.) и ищем их как
         //    подстроки в normalized name, brand_article_normalized и
         //    articles[]. Это решает кейс «Плата ПКЛ-32»: word_similarity
         //    рассеивается на длинных фразах, ILIKE же ловит «ПКЛ32» прямо.
-        $codeRows = $this->codeTokenTopN($queryText, $poolLimit);
+        $codeRows = $this->codeTokenTopN($queryText, $codePoolLimit);
 
         // 2) Trigram (pg_trgm) — для fuzzy-матча целой фразы.
         // 3) Vector — семантика, ~500-2000мс embed.
