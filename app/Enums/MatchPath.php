@@ -113,9 +113,9 @@ enum MatchPath: string
         ?string $parsedArticle = null,
         ?string $parsedName = null,
     ): self {
-        // (1a) HARD OVERRIDE: M-SKU pattern в article ИЛИ name. Клиент явно
-        //      прислал M-артикул — это всегда internal_sku, независимо от
-        //      того, как именно автомат потом его сматчил в каталоге.
+        // (1) HARD OVERRIDE: M-SKU pattern в article ИЛИ name. Клиент явно
+        //     прислал M-артикул — это всегда internal_sku, независимо от
+        //     того, как именно автомат потом его сматчил в каталоге.
         if (is_string($parsedArticle) && self::looksLikeInternalSku($parsedArticle)) {
             return self::InternalSku;
         }
@@ -123,24 +123,8 @@ enum MatchPath: string
             return self::InternalSku;
         }
 
-        // (1b) HARD OVERRIDE: catalog matcher нашёл M-SKU через B_brand_article.
-        //      Кейс M-2026-1192: клиент в письме явно написал «M00828 — 60 шт»,
-        //      но парсер ПОДМЕНИЛ parsed_name на каталожное имя
-        //      («Ролик ступени 506 NCE...») при successful match. M-артикул
-        //      из исходного текста стёрся, но catalog matcher через B нашёл
-        //      MyZip-каталожную позицию (cat_sku=M\d+) — клиент явно дал M-арт.
-        //
-        //      НЕ применяется к C_name_vector — там клиент дал описание,
-        //      vector нашёл M-SKU semantic-search'ом, это не «клиент прислал M-арт».
-        $method = $payload['catalog_match']['method'] ?? null;
-        $catalogSku = $payload['catalog_match']['catalog_sku'] ?? null;
-        if ($method === 'B_brand_article'
-            && is_string($catalogSku)
-            && self::looksLikeInternalSku($catalogSku)) {
-            return self::InternalSku;
-        }
-
         // (2) Автомат-резолвер успешно сматчил → берём прямой результат.
+        $method = $payload['catalog_match']['method'] ?? null;
         $matched = match ($method) {
             'A_internal_sku' => self::InternalSku,
             'B_brand_article' => self::BrandArticle,
