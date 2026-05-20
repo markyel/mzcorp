@@ -43,6 +43,7 @@ class RequestComplexityService
             catalogItemId: $item->catalog_item_id,
             status: $item->quality_assessment_status?->value
                 ?? (is_string($item->quality_assessment_status) ? $item->quality_assessment_status : null),
+            parsedArticle: $item->parsed_article,
         );
 
         if ($item->match_path?->value !== $path->value) {
