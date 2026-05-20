@@ -600,7 +600,7 @@ class CatalogEmbeddingService
         //   - vector/trigram сами по себе не разруливают такой tie.
         // Отдаём всех LLM-у на rerank: пусть он выберет ту самую позицию
         // или скажет «никто».
-        $topN = (int) app_setting('catalog.name_match.rerank_top_n', 5);
+        $topN = (int) app_setting('catalog.name_match.rerank_top_n', 7);
         $topN = max(1, min(10, $topN));
 
         $allCandidates = $this->topNByQueryText($queryText, $topN, $item->id);
