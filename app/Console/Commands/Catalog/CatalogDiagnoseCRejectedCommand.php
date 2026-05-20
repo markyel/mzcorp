@@ -2,24 +2,26 @@
 
 namespace App\Console\Commands\Catalog;
 
-use App\Models\CatalogItem;
 use App\Models\RequestItem;
-use App\Services\AI\OpenAIEmbeddingService;
 use App\Services\Catalog\CatalogEmbeddingService;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
 
 /**
- * Диагностика C-step (name_vector + LLM) — почему он мало кого матчит.
+ * Диагностика C-step (hybrid retrieval + LLM) — почему он мало кого матчит.
  *
  * Идёт по items с `catalog_item_id IS NULL` и непустым parsed_name,
  * для каждого:
  *   1) строит query text как CatalogEmbeddingService::buildQueryText;
- *   2) embed → top-1 кандидат по cosine similarity;
- *   3) если similarity >= --min-sim — запускает все 3 safety stage'а:
+ *   2) hybrid top-1 (CatalogEmbeddingService::topNByQueryText):
+ *      code-token ILIKE + trigram word_similarity + vector cosine,
+ *      blended score с multi-source бонусом, method='code|trgm|vector|multi';
+ *   3) если similarity ≥ --min-sim — запускает safety stage'и:
  *       - brand check (item.brand vs catalog.brand + catalog.brands[]);
- *       - article check (CatalogEmbeddingService::isArticleSafe);
+ *       - article check (CatalogEmbeddingService::isArticleSafe — теперь
+ *         игнорирует локальные коды поставщика типа LW-...);
  *       - LLM validation (CatalogEmbeddingService::validateMatchWithLlm).
+ *         Skip только если vector_score сам по себе ≥ hc_threshold (0.90);
+ *         для code/trgm-only LLM всегда дёргается.
  *   4) фиксирует причину отказа и складывает в bucket для отчёта.
  *
  * НИЧЕГО НЕ ПИШЕТ в БД — это read-only диагностика.
@@ -42,7 +44,7 @@ class CatalogDiagnoseCRejectedCommand extends Command
 
     protected $description = 'Diagnose C-step rejections: vector found candidate >= min-sim, но финального match нет.';
 
-    public function handle(CatalogEmbeddingService $svc, OpenAIEmbeddingService $embedder): int
+    public function handle(CatalogEmbeddingService $svc): int
     {
         $limit = (int) $this->option('limit');
         $scanLimit = (int) $this->option('scan-limit');
@@ -114,49 +116,24 @@ class CatalogDiagnoseCRejectedCommand extends Command
                 continue;
             }
 
-            try {
-                $embed = $embedder->embed($queryText);
-            } catch (\Throwable $e) {
-                $buckets['embed_failed']++;
-                continue;
-            }
-            $vec = $embed['embedding'] ?? [];
-            if (empty($vec)) {
-                $buckets['embed_failed']++;
-                continue;
-            }
-
-            $vectorLiteral = '[' . implode(',', array_map(
-                fn ($v) => is_finite($v) ? sprintf('%.7f', $v) : '0',
-                $vec,
-            )) . ']';
-
-            $row = DB::selectOne(
-                <<<'SQL'
-                SELECT ci.id AS catalog_id,
-                       1 - (e.embedding <=> ?::vector) AS similarity
-                FROM catalog_item_embeddings e
-                JOIN catalog_items ci ON ci.id = e.catalog_item_id
-                WHERE ci.is_active = true
-                ORDER BY e.embedding <=> ?::vector
-                LIMIT 1
-                SQL,
-                [$vectorLiteral, $vectorLiteral],
-            );
-            if ($row === null) {
+            // Hybrid retrieval (code+trgm+vector) — та же логика, что и
+            // в matchByRequestItem после рефактора. Видим blended score
+            // и method чтобы понимать, какой источник «вытянул» матч.
+            $top1 = $svc->topNByQueryText($queryText, 1, $item->id);
+            if ($top1 === []) {
                 $buckets['no_candidate']++;
                 continue;
             }
+            $cand = $top1[0];
+            $catalog = $cand['catalog'];
+            $similarity = (float) $cand['similarity'];
+            $matchMethod = (string) ($cand['method'] ?? 'vector');
+            $codeScore = isset($cand['code_score']) ? (float) $cand['code_score'] : null;
+            $trgmScore = isset($cand['trgm_score']) ? (float) $cand['trgm_score'] : null;
+            $vectorScore = isset($cand['vector_score']) ? (float) $cand['vector_score'] : null;
 
-            $similarity = (float) $row->similarity;
             if ($similarity < $minSim) {
                 $buckets['below_min_sim']++;
-                continue;
-            }
-
-            $catalog = CatalogItem::find($row->catalog_id);
-            if ($catalog === null) {
-                $buckets['no_candidate']++;
                 continue;
             }
 
@@ -194,10 +171,12 @@ class CatalogDiagnoseCRejectedCommand extends Command
                 $reason = 'article_mismatch';
                 $buckets['article_mismatch']++;
             } elseif (! $skipLlm) {
-                // hc_threshold default 0.90 — выше него LLM не дёргают,
-                // считаем would_match сразу.
+                // hc_threshold default 0.90: skip LLM ТОЛЬКО если pure
+                // vector сам по себе уже даёт ≥ hc. Для code/trgm-only
+                // матчей LLM всегда дёргаем — substring без семантики.
                 $hcThreshold = (float) app_setting('catalog.name_match.hc_threshold', 0.90);
-                if ($similarity >= $hcThreshold) {
+                $vectorHc = ($vectorScore !== null && $vectorScore >= $hcThreshold);
+                if ($vectorHc) {
                     $reason = 'would_match';
                     $llmVerdict = 'skipped_high_confidence';
                     $buckets['would_match']++;
@@ -231,6 +210,10 @@ class CatalogDiagnoseCRejectedCommand extends Command
                 'item_article' => (string) $item->parsed_article,
                 'src' => $item->image_attachment_id !== null ? 'photo' : 'text',
                 'sim' => $similarity,
+                'method' => $matchMethod,
+                'code_score' => $codeScore,
+                'trgm_score' => $trgmScore,
+                'vector_score' => $vectorScore,
                 'cat_id' => $catalog->id,
                 'cat_sku' => (string) $catalog->sku,
                 'cat_brand' => (string) $catalog->brand,
@@ -275,12 +258,20 @@ class CatalogDiagnoseCRejectedCommand extends Command
         };
 
         $this->line('');
+        $subs = [];
+        if ($r['code_score'] !== null) $subs[] = sprintf('code=%.2f', $r['code_score']);
+        if ($r['trgm_score'] !== null) $subs[] = sprintf('trgm=%.2f', $r['trgm_score']);
+        if ($r['vector_score'] !== null) $subs[] = sprintf('vec=%.2f', $r['vector_score']);
+        $subsStr = $subs === [] ? '' : '  [' . implode(' ', $subs) . ']';
+
         $this->line(sprintf(
-            '<fg=%s>#%d  src=%s  sim=%.3f  reason=%s</>',
+            '<fg=%s>#%d  src=%s  sim=%.3f  via=%s%s  reason=%s</>',
             $color,
             $r['item_id'],
             $r['src'],
             $r['sim'],
+            $r['method'] ?? '?',
+            $subsStr,
             $r['reason'],
         ));
         $this->line(sprintf(

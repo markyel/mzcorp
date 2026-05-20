@@ -83,7 +83,13 @@ class CatalogEmbeddingService
         if ($category) {
             $parts[] = 'Тип запчасти: ' . $category;
         }
-        if (! empty($item->parsed_article)) {
+        // Локальные коды поставщика (LW-..., см. LocalSupplierCodePattern)
+        // — это НЕ настоящий OEM-артикул. В каталоге их нет (там лежит
+        // оригинальный TAA*/GAA*/DAA*-код производителя). Если положить
+        // LW-код в embed-текст, vector ловит шум на «LW0027349» и top-1
+        // съезжает к случайно похожим товарам. Пропускаем такие токены.
+        if (! empty($item->parsed_article)
+            && ! LocalSupplierCodePattern::isAllLocal($item->parsed_article)) {
             $parts[] = 'Артикул производителя: ' . $item->parsed_article;
         }
         if (! empty($item->parsed_name)) {
@@ -581,51 +587,33 @@ class CatalogEmbeddingService
             return null;
         }
 
-        try {
-            $result = $this->embedder->embed($queryText);
-        } catch (\Throwable $e) {
-            Log::warning('CatalogEmbeddingService: query embed failed', [
-                'request_item_id' => $item->id,
-                'error' => $e->getMessage(),
-            ]);
-
+        // Hybrid retrieval (code-token ILIKE + trigram word_similarity +
+        // vector cosine, с multi-source бонусом) — та же логика, что
+        // используется в UI «Похожие из каталога» (topNByQueryText).
+        //
+        // Pure-vector часто промахивается на позициях вроде «БУАД-4-25»:
+        // vector съезжает к LS Electric SV075iG5A-4 из-за общего слова
+        // «преобразователь», хотя в каталоге есть прямое совпадение
+        // подстроки «БУАД4-25» в имени другой позиции. Code-token поиск
+        // ловит такое мгновенно и точно.
+        //
+        // Безопасность сохраняется: для не-vector матчей (code-only/trgm-
+        // only) НИКОГДА не пропускаем LLM-валидацию — substring-match без
+        // семантической проверки ненадёжен (см. ниже LLM-gate).
+        $candidates = $this->topNByQueryText($queryText, 1, $item->id);
+        if ($candidates === []) {
             return null;
         }
-        $queryVector = $result['embedding'] ?? [];
-        if (empty($queryVector)) {
-            return null;
-        }
+        $top = $candidates[0];
+        /** @var CatalogItem $catalog */
+        $catalog = $top['catalog'];
+        $similarity = (float) $top['similarity'];
+        $matchMethod = (string) ($top['method'] ?? 'vector');
+        $codeScore = isset($top['code_score']) ? (float) $top['code_score'] : null;
+        $trgmScore = isset($top['trgm_score']) ? (float) $top['trgm_score'] : null;
+        $vectorScore = isset($top['vector_score']) ? (float) $top['vector_score'] : null;
 
-        // Cosine similarity = 1 - cosine_distance. pgvector `<=>` это
-        // cosine_distance. similarity = 1 - distance.
-        $vectorLiteral = '[' . implode(',', array_map(
-            fn ($v) => is_finite($v) ? sprintf('%.7f', $v) : '0',
-            $queryVector
-        )) . ']';
-
-        $row = DB::selectOne(
-            <<<'SQL'
-            SELECT ci.id AS catalog_id,
-                   1 - (e.embedding <=> ?::vector) AS similarity
-            FROM catalog_item_embeddings e
-            JOIN catalog_items ci ON ci.id = e.catalog_item_id
-            WHERE ci.is_active = true
-            ORDER BY e.embedding <=> ?::vector
-            LIMIT 1
-            SQL,
-            [$vectorLiteral, $vectorLiteral],
-        );
-
-        if ($row === null) {
-            return null;
-        }
-        $similarity = (float) $row->similarity;
         if ($similarity < $threshold) {
-            return null;
-        }
-
-        $catalog = CatalogItem::find($row->catalog_id);
-        if ($catalog === null) {
             return null;
         }
 
@@ -675,11 +663,17 @@ class CatalogEmbeddingService
             return null;
         }
 
-        // Third stage: LLM-валидация для пар с similarity ниже high-confidence
-        // порога. Mini-модель отвечает «one and the same? Y/N» с reasoning.
-        // Это убивает «звено цепи vs звезда», «поручень vs ролик», разные
-        // модификации в одной серии — кейсы, где vector ловит общий контекст,
-        // но это РАЗНЫЕ товары.
+        // Third stage: LLM-валидация. Mini-модель отвечает «one and the
+        // same? Y/N» с reasoning. Это убивает «звено цепи vs звезда»,
+        // «поручень vs ролик», разные модификации в одной серии — кейсы,
+        // где retrieval ловит общий контекст, но это РАЗНЫЕ товары.
+        //
+        // High-confidence skip: пропускаем LLM только если ИМЕННО
+        // PURE VECTOR без помощи code/trgm уже даёт vector_score ≥
+        // hc_threshold. Code/trgm — это substring-match без семантики,
+        // им одним доверять нельзя даже при blended score 0.95. Multi
+        // (code+vector высокий) — vector сам по себе перекрывает порог,
+        // skip ок.
         $hcThreshold = (float) app_setting(
             'catalog.name_match.hc_threshold',
             config('services.catalog_name_match.hc_threshold', 0.90),
@@ -692,8 +686,9 @@ class CatalogEmbeddingService
             'catalog.name_match.llm_fail_action',
             config('services.catalog_name_match.llm_fail_action', 'reject'),
         );
+        $vectorHighConfidence = ($vectorScore !== null && $vectorScore >= $hcThreshold);
         $llmDecision = null;
-        if ($llmEnabled && $similarity < $hcThreshold) {
+        if ($llmEnabled && ! $vectorHighConfidence) {
             // Внешний retry поверх Http::retry — на случай, если прокси-сервер
             // (api.openai-proxy) отдаёт 503 серией (мы наблюдали это в bulk-pass'е).
             // Стандартный Laravel-retry укладывается в ~6 сек; если outage
@@ -740,8 +735,12 @@ class CatalogEmbeddingService
         return [
             'catalog' => $catalog,
             'similarity' => $similarity,
+            'method' => $matchMethod,           // code | trgm | vector | multi
+            'code_score' => $codeScore,
+            'trgm_score' => $trgmScore,
+            'vector_score' => $vectorScore,
             'llm_validation' => $llmDecision === null
-                ? ($similarity >= $hcThreshold ? 'skipped_high_confidence' : 'skipped_llm_failed')
+                ? ($vectorHighConfidence ? 'skipped_high_confidence' : 'skipped_llm_failed')
                 : 'approved',
             'llm_reason' => $llmDecision['reason'] ?? null,
         ];
@@ -813,6 +812,13 @@ class CatalogEmbeddingService
             return true;
         }
         if ($itemArticle === null || trim($itemArticle) === '') {
+            return true;
+        }
+        // Локальные коды поставщика (LW-...) — это не настоящий OEM,
+        // их сравнение с catalog.brand_article (TAA*/GAA*/DAA*) ВСЕГДА
+        // даёт «mismatch» и блокирует валидные name-matches. Считаем
+        // такой артикул «отсутствующим» — пусть LLM решает по name.
+        if (LocalSupplierCodePattern::isAllLocal($itemArticle)) {
             return true;
         }
 

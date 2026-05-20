@@ -122,6 +122,14 @@ class CatalogResolutionService
         // (наш парсер сам тоже так пишет — см. ParseItemsPrompt v5).
         $tokens = preg_split('/\s*[,\/]\s*/', $article) ?: [$article];
         foreach ($tokens as $tok) {
+            // Локальные коды поставщика (LW-..., см. LocalSupplierCodePattern)
+            // в каталоге заведомо отсутствуют (там лежит оригинальный
+            // OEM-артикул вроде DAA332N2 или GAA50AHA1-6M). Пропускаем,
+            // чтобы не тратить DB-запросы и не вводить в заблуждение
+            // последующие шаги — пусть C-step ищет по name.
+            if (LocalSupplierCodePattern::isLocalToken($tok)) {
+                continue;
+            }
             $norm = CatalogImportService::normalizeArticle($tok);
             if ($norm === null || $norm === '') {
                 continue;
@@ -246,7 +254,16 @@ class CatalogResolutionService
         $similarity = (float) $match['similarity'];
 
         $extra = [
+            // Backwards-compat: имя поля «name_vector_similarity», хотя теперь
+            // это blended score (code+trgm+vector). Для UI / диагностики
+            // дополнительно пишем method и sub-scores.
             'name_vector_similarity' => $similarity,
+            'name_match_method' => $match['method'] ?? null,        // code | trgm | vector | multi
+            'name_match_sub_scores' => [
+                'code' => $match['code_score'] ?? null,
+                'trgm' => $match['trgm_score'] ?? null,
+                'vector' => $match['vector_score'] ?? null,
+            ],
             'llm_validation' => $match['llm_validation'] ?? null,
         ];
         if (! empty($match['llm_reason'])) {
@@ -259,6 +276,7 @@ class CatalogResolutionService
             'catalog_item_id' => $catalog->id,
             'catalog_sku' => $catalog->sku,
             'similarity' => $similarity,
+            'method' => $match['method'] ?? null,
             'llm_validation' => $match['llm_validation'] ?? null,
         ]);
 
