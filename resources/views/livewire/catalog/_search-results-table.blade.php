@@ -25,7 +25,7 @@
             }
             this.top = Math.min(window.innerHeight - H - 8, Math.max(8, r.top));
             this.url = photoUrl;
-            this.t = setTimeout(() => { this.show = true; }, 700);
+            this.t = setTimeout(() => { this.show = true; }, 350);
         },
         closePreview() {
             clearTimeout(this.t);
@@ -33,7 +33,20 @@
         }
      }"
      x-on:catalog-preview-open.window="openPreview($event.detail.el, $event.detail.url)"
-     x-on:catalog-preview-close.window="closePreview()">
+     x-on:catalog-preview-close.window="closePreview()"
+     {{-- Safety net: при ЛЮБОМ click в документе закрываем overlay
+          (исключая click на самой миниатюре — она диспатчит свой
+          mouseleave перед click'ом). Решает «overlay висит после
+          клика на row / scroll / переключение фокуса». --}}
+     x-on:click.window="closePreview()"
+     {{-- Дополнительно: если mousemove ушёл далеко от триггера и
+          цель не имеет data-cat-preview-trigger — закрываем.
+          Throttle через rAF чтобы не дёргать каждый pixel-move. --}}
+     x-on:mousemove.window.throttle.100ms="
+        if (show && !$event.target.closest('[data-cat-preview-trigger]')) {
+            closePreview();
+        }
+     ">
 <table class="w-full text-[12px]" style="table-layout: fixed;">
     <colgroup>
         <col style="width: 24px">
@@ -120,6 +133,7 @@
                 <td class="px-2 py-1.5 align-top" @click.stop>
                     @if($cat->photo_url)
                         <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
+                           data-cat-preview-trigger
                            x-on:mouseenter="$dispatch('catalog-preview-open', { el: $el, url: '{{ addslashes($cat->photo_url) }}' })"
                            x-on:mouseleave="$dispatch('catalog-preview-close')"
                            class="block w-[72px] h-[72px] rounded overflow-hidden bg-surface-2 border border-border-subtle"
@@ -418,11 +432,15 @@
     @endforeach
 </table>
 
-{{-- Hover-preview overlay (один на всю таблицу). --}}
+{{-- Hover-preview overlay (один на всю таблицу).
+     `pointer-events:none` чтобы overlay не блокировал mouseleave
+     на миниатюре. onerror на img прячет overlay если фото битое
+     (404 / hotlink-protection / etc), иначе висит белый прямоугольник. --}}
 <div x-show="show" x-cloak x-transition.opacity
      :style="`position: fixed; left: ${left}px; top: ${top}px; width: 480px; height: 480px; z-index: 9999; pointer-events: none;`"
      class="rounded-lg shadow-xl border border-border-subtle bg-white p-1">
     <img :src="url" alt="" referrerpolicy="no-referrer"
+         x-on:error="closePreview()"
          style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">
 </div>
 </div>
