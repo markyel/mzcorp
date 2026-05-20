@@ -242,9 +242,12 @@
 
     <span class="mono text-[12px] text-fg-1 text-right">{{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') ?: '—' }} {{ $item->parsed_unit }}</span>
 
-    <span class="mono text-[12px] {{ $price !== null ? 'text-fg-1' : 'text-fg-3' }} text-right"
-          title="{{ $ci ? 'из каталога, обновлено ' . ($ci->last_imported_at?->format('d.m.Y') ?? '—') : 'нет привязки к каталогу' }}">
+    <span class="mono text-[12px] {{ $price !== null ? 'text-fg-1' : 'text-fg-3' }} text-right whitespace-nowrap"
+          title="{{ $ci ? 'из каталога, обновлено ' . ($ci->last_imported_at?->format('d.m.Y') ?? '—') . ($ci->is_price_actual === false ? ' · ⚠ цена не актуальна' : '') : 'нет привязки к каталогу' }}">
         {{ $price !== null ? number_format((float) $price, 2, '.', ' ') . ' ₽' : '—' }}
+        @if($ci && $ci->is_price_actual === false)
+            <span class="text-amber-700 font-bold" title="цена не актуальна">⚠</span>
+        @endif
     </span>
 
     <span class="text-[12px] {{ $stockTone }}"
@@ -255,6 +258,10 @@
             {{ $stock }} шт
         @else
             нет
+            @if($ci?->lead_time_days !== null)
+                <small class="block text-fg-3 text-[10.5px] mt-0.5"
+                       title="срок поставки под заказ">{{ $ci->lead_time_days }} дн</small>
+            @endif
         @endif
     </span>
 
