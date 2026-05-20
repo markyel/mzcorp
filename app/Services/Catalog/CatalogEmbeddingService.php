@@ -615,7 +615,7 @@ class CatalogEmbeddingService
             if (! $this->isBrandSafe($item, $c['catalog'])) {
                 continue;
             }
-            if (! $this->isArticleSafe($item->parsed_article, $c['catalog']->brand_article)) {
+            if (! $this->isArticleSafe($item->parsed_article, $c['catalog']->brand_article, $c['catalog']->name)) {
                 continue;
             }
             $safe[] = $c;
@@ -1014,10 +1014,11 @@ class CatalogEmbeddingService
      * Если у одной стороны (или обеих) артикул пустой — пропускаем, не
      * блокируем (C-step как раз для таких — name-only matching).
      */
-    public function isArticleSafe(?string $itemArticle, ?string $catalogArticle): bool
+    public function isArticleSafe(?string $itemArticle, ?string $catalogArticle, ?string $catalogName = null): bool
     {
         $catalogNorm = CatalogImportService::normalizeArticle($catalogArticle);
-        if ($catalogNorm === null || $catalogNorm === '') {
+        // Если у каталога артикула нет, проверяем по имени (см. ниже).
+        if (($catalogNorm === null || $catalogNorm === '') && ($catalogName === null || $catalogName === '')) {
             return true;
         }
         if ($itemArticle === null || trim($itemArticle) === '') {
@@ -1029,6 +1030,19 @@ class CatalogEmbeddingService
         // такой артикул «отсутствующим» — пусть LLM решает по name.
         if (LocalSupplierCodePattern::isAllLocal($itemArticle)) {
             return true;
+        }
+
+        // Name-substring fallback. Бывает, что клиент пишет в article
+        // фактически имя серии («БУАД-4-25»), а у каталожной позиции
+        // brand_article хранит OEM-нумерацию («ЕМРЦ.421243.074-25-05 ТУ»),
+        // и эти строки ВООБЩЕ не пересекаются. Но имя в каталоге —
+        // «Устройство БУАД 4-25.8 (без проводов)» — содержит ту же
+        // подстроку. Если нормализованный client article найден внутри
+        // нормализованного catalog name (мин. длина 4) — считаем safe.
+        // LLM-rerank финально подтвердит совпадение.
+        $catalogNameNorm = '';
+        if (is_string($catalogName) && $catalogName !== '') {
+            $catalogNameNorm = (string) preg_replace('/[\s\-_.\/]/u', '', mb_strtoupper($catalogName));
         }
 
         // parsed_article может содержать "GAA638JR1, 3RT2016-2GG22" — тот же
@@ -1049,22 +1063,35 @@ class CatalogEmbeddingService
         //   - «22214» vs «22220» (подшипник) — не префикс ✗.
         // Финальный verify делает LLM-rerank — даже при prefix-safe LLM
         // отклонит если semantically different.
-        $tokens = preg_split('/\s*[,\/]\s*/', $itemArticle) ?: [$itemArticle];
+        // Сначала split по , и /. Но «E10/18» — это ОДИН артикул, где
+        // слэш — sub-identifier модели, не разделитель. Поэтому также
+        // пробуем ИСХОДНУЮ полную строку как один token.
+        $tokens = preg_split('/\s*[,\/]\s*/', $itemArticle) ?: [];
+        $tokens[] = $itemArticle; // полную строку — приоритет на exact match
+
         foreach ($tokens as $tok) {
             $norm = CatalogImportService::normalizeArticle($tok);
             if ($norm === null || $norm === '') {
                 continue;
             }
-            if ($norm === $catalogNorm) {
-                return true;
+            if ($catalogNorm !== null && $catalogNorm !== '') {
+                if ($norm === $catalogNorm) {
+                    return true;
+                }
+                // Prefix relax
+                $iLen = mb_strlen($norm);
+                $cLen = mb_strlen($catalogNorm);
+                $minLen = min($iLen, $cLen);
+                $diff = abs($iLen - $cLen);
+                if ($minLen >= 4 && $diff <= 5) {
+                    if (str_starts_with($catalogNorm, $norm) || str_starts_with($norm, $catalogNorm)) {
+                        return true;
+                    }
+                }
             }
-            // Prefix relax
-            $iLen = mb_strlen($norm);
-            $cLen = mb_strlen($catalogNorm);
-            $minLen = min($iLen, $cLen);
-            $diff = abs($iLen - $cLen);
-            if ($minLen >= 4 && $diff <= 5) {
-                if (str_starts_with($catalogNorm, $norm) || str_starts_with($norm, $catalogNorm)) {
+            // Name-substring fallback (см. выше).
+            if ($catalogNameNorm !== '' && mb_strlen($norm) >= 4) {
+                if (mb_strpos($catalogNameNorm, $norm) !== false) {
                     return true;
                 }
             }

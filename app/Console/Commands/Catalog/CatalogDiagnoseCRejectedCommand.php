@@ -132,7 +132,7 @@ class CatalogDiagnoseCRejectedCommand extends Command
                     $filterReasons['brand']++;
                     continue;
                 }
-                if (! $svc->isArticleSafe($item->parsed_article, $c['catalog']->brand_article)) {
+                if (! $svc->isArticleSafe($item->parsed_article, $c['catalog']->brand_article, $c['catalog']->name)) {
                     $filterReasons['article']++;
                     continue;
                 }
