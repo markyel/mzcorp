@@ -51,6 +51,14 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/quotations/{quotation}/download',
             [\App\Http\Controllers\QuotationPdfController::class, 'download'])
             ->name('quotations.download');
+
+        // Standalone-поиск по каталогу (без привязки к заявке) —
+        // тот же hybrid pipeline (code + trgm + vector), что в
+        // ItemCatalogLinkDialog «Похожие из каталога». Доступен всем
+        // авторизованным ролям как справочник.
+        Route::get('/dashboard/catalog/search', function () {
+            return view('catalog.search');
+        })->name('catalog.search');
     });
 
     // Mail routing rules — управление правилами для РОП и директора.

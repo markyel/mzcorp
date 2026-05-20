@@ -45,6 +45,7 @@
     $navLinks[] = ['route' => 'dashboard', 'label' => 'Дашборд', 'pattern' => 'dashboard'];
     if ($user?->hasAnyRole(['manager', 'head_of_sales', 'director', 'secretary'])) {
         $navLinks[] = ['route' => 'requests.index', 'label' => 'Заявки', 'pattern' => 'requests.*'];
+        $navLinks[] = ['route' => 'catalog.search', 'label' => 'Каталог', 'pattern' => 'catalog.*'];
     }
     if ($user?->hasAnyRole(['head_of_sales', 'director'])) {
         $navLinks[] = ['route' => 'mail-rules.index', 'label' => 'Правила почты', 'pattern' => 'mail-rules.*'];
