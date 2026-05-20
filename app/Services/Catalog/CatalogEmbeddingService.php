@@ -1249,6 +1249,32 @@ class CatalogEmbeddingService
             $variants[] = $words[0];
         }
 
+        // Multi-word бренды (XIZI OTIS, Schneider Electric, Allen Bradley):
+        // intersection по first-word даёт false-negative если client пишет
+        // только одно слово, а catalog — full name. Возвращаем ВСЕ
+        // значимые слова (длина ≥ 4), кроме generic-частей (ELECTRIC,
+        // MOTORS, GROUP — это «суффикс компании», не бренд).
+        //
+        // Пример: «XIZI OTIS» (catalog) ↔ «OTIS» (client) — без этого
+        // intersection ['XIZI'] vs ['OTIS'] был пуст → false brand mismatch,
+        // искомые позиции XIZI OTIS дропались в C-step. С этим расширением
+        // ['XIZI', 'OTIS'] ∩ ['OTIS'] = ['OTIS'] → safe.
+        $genericSuffixes = [
+            // English company-form/category words
+            'ELECTRIC', 'MOTORS', 'GROUP', 'SYSTEMS', 'COMPANY', 'INDUSTRIAL',
+            'PRODUCTS', 'EQUIPMENT', 'TECHNOLOGY', 'CORP', 'CORPORATION',
+            'CHINA', 'TURKEY', 'JAPAN', 'GERMANY', 'EUROPE',
+            // Russian
+            'ЭЛЕКТРИК', 'МОТОР', 'МОТОРС', 'ГРУПП', 'ГРУППА', 'СИСТЕМ', 'СИСТЕМЫ',
+            'ЗАВОД', 'ПРОИЗВОДСТВО', 'ОБОРУДОВАНИЕ', 'ТЕХНОЛОГИЯ',
+            'РОССИЯ', 'УКРАИНА', 'КИТАЙ',
+        ];
+        foreach (array_slice($words, 1) as $w) {
+            if (mb_strlen($w) < 4) continue;
+            if (in_array($w, $genericSuffixes, true)) continue;
+            $variants[] = $w;
+        }
+
         return array_values(array_unique(array_filter($variants, fn ($v) => $v !== '')));
     }
 }
