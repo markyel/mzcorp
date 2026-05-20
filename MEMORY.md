@@ -1435,6 +1435,104 @@ print_r(\App\Models\InboundUrlFetch::query()->selectRaw("status, count(*) as c")
 - КП Phase 4 — отправка через ComposeForm с PDF-attachment
 - КП Phase 5 — polish (hero chip с КП-кодом, профиль phone/extension)
 
+### Сессия 2026-05-20 — Phase 2 use-case C: полная переработка + bulk resolve
+
+**Контекст**: после части 5 (code-token catalog match) сделали диагностику unmatched 1167 items через новый CLI `catalog:diagnose-c-rejected`. Match rate был 0% — все валились в article/brand/llm safety. Сессия посвящена полному переосмыслению C-step pipeline.
+
+**Реализовано** (commits `91bf9d0` → `63b5f24`):
+
+1. **`LocalSupplierCodePattern`** (`app/Services/Catalog/`) — helper для LW-* (внутренние коды поставщика OTIS-запчастей, не настоящие OEM). Интегрирован в `buildQueryText` (не подмешивать в embed), `isArticleSafe` (не блокировать матч), `matchByArticle` (skip), оба LLM prompt'а (санитизация client article).
+
+2. **Hybrid retrieval в `matchByRequestItem`** — переход с pure top-1 vector на `topNByQueryText(top-10)` (code+trgm+vector с multi-source бонусом). Та же логика, что в UI «Похожие из каталога».
+
+3. **Multi-candidate LLM rerank** (`RerankCatalogMatchPrompt` + `rerankCandidatesWithLlm`):
+   - Top-N кандидатов → pre-filter (threshold + brand_safe + article_safe) → если ≥2 safe → LLM выбирает `best_index` или null
+   - Single safe → старый binary `validateMatchWithLlm` (skip-if vector ≥ hc_threshold)
+   - LLM-validation полностью subsumed под rerank — теперь основной decision-point
+   - Новый AppSetting `catalog.name_match.rerank_model` (default mini, можно переключить на gpt-4o)
+   - Новый AppSetting `catalog.name_match.rerank_top_n` (default 10)
+   - В `quality_assessment_payload.catalog_match`: `name_match_method` (code/trgm/vector/multi) + `name_match_sub_scores` + `llm_validation='approved_rerank'`
+
+4. **`normalizeBrand` → `normalizeBrandTokens` (multi-token)**:
+   - Strip org-префиксов (ООО/ОАО/ЗАО/АО/ИП/ПАО/OOO/LLC/LTD/INC/CO/...)
+   - Parse «BRAND (ex OLDBRAND)» — оба бренда (AVIRE ↔ MEMCO)
+   - Multi-word возвращаем все слова ≥4 чарs кроме generic-суффиксов (ELECTRIC, MOTORS, GROUP, COMPANY, ЭЛЕКТРИК, ЗАВОД, ...). Кейс XIZI OTIS ↔ OTIS, Schneider Electric ↔ Schneider.
+   - ASCII Levenshtein fallback (≤1 для 5-7 симв., ≤2 для ≥8) для опечаток вроде Shneider/Schneider. Cyrillic пропускаем — PHP levenshtein byte-level не работает на UTF-8.
+
+5. **`isArticleSafe` 3-уровневый relax**:
+   - Prefix-relax (min ≥4, diff ≤5): «LC1D258» ↔ «LC1D258F7C», «БУАД-4-25» ↔ «БУАД-4-25.8»
+   - Name-substring fallback с **`cyrillicLookalikeFold` для catalogName** (КРИТИЧНО — без fold «БУAД» с латинской A не находился в name каталога с кириллической «БУАД»)
+   - Slash-token: вдобавок к split по `,/`, пробуем полную строку — кейс «E10/18» где / это sub-identifier, не разделитель
+
+6. **Retrieval ranking (4 уровня tie-break)**:
+   - usort: `score DESC → vector DESC → trgm DESC → catalog_id ASC` (детерминизм)
+   - **Vector backfill**: для items в code/trgm пуле без vec_score догружаем bulk SQL `WHERE id IN (...)`. Кейс #2385 CENTA: M28598 имел vec=0.879 но не попадал в vector top-20 (220VAC — генерик-токен лифт-домена)
+   - **`codePoolLimit` 20 → 100**: на генерик-токенах сотни match, M28598 (id=7643) не попадал в первые 20 строк DB index scan
+   - **Vector/trigram всегда дёргаются** (раньше скипались если code-pool полный) — vector — главный semantic tiebreaker
+   - Helper `embedQueryToVectorLiteral` с статическим кешем — один embed-вызов на queryText
+
+7. **Prompt-улучшения** (`RerankCatalogMatchPrompt` + `ValidateCatalogMatchPrompt` симметрично):
+   - «Деталь X для системы Y» ≠ «Система Y целиком, имеющая X внутри» — критично для FP-fix (#2337 Соленоид на ОС vs Ограничитель скорости)
+   - Артикул пустой → опираться на name+размеры (LiftMaterial = дистрибьютор, OEM в каталоге — норма)
+   - Несколько артикулов через запятую — match по любому совпадающему
+   - Минорные суффиксы (-02, R1, M1, F7C) = та же модель
+   - Синонимы лифтового домена: Преобразователь ≈ Устройство ≈ Привод ≈ Блок; Контактор ≈ Магнитный пускатель; Кнопка ≈ Клавиша ≈ Нажимной элемент
+   - Brand-aliases: AVIRE (ex MEMCO), Schneider/Telemecanique, опечатки Shneider/Schneider, организационные ООО
+
+8. **LW-санитизация для LLM prompt** — если client article — все LW-токены, передаём как null. Раньше LW попадал в prompt и LLM требовал его совпадения с каталожным (LW нет в каталоге by design).
+
+9. **Diagnose CLI** `catalog:diagnose-c-rejected` (`app/Console/Commands/Catalog/CatalogDiagnoseCRejectedCommand.php`) — read-only диагностика unmatched items: hybrid top-N → safety filter → rerank/binary LLM → bucket counts + per-item reasons. Опции: `--limit`, `--top-n`, `--min-sim`, `--source=text|photo`, `--item=ID`, `--no-llm`.
+
+**Прогрессия match rate на выборках 40-item:**
+
+| Версия pipeline | rerank_picked + would_match | match% |
+|---|---|---|
+| Pure vector + binary (старт) | 0 / 20 | 0% |
+| Hybrid + binary | 0 / 20 | 0% |
+| Hybrid + rerank | 2 / 20 | 10% |
+| + brand multi-token + article prefix | 5 / 40 | 12% |
+| + slash-split + name-substring + Cyrillic fold | 11 / 40 | 27% |
+| + LW-sanitize + ООО-skip + ex-brand parse | 12 / 40 | 30% |
+| + детaль-vs-целое prompt + top-N=10 | 14 / 40 | 35% |
+| + vector backfill + tie-break + code-pool=100 | **14 / 40** | **35%** |
+
+**Финальный resolve на проде** (commit `63b5f24`, 27 мин, ~$3-5):
+- Проверено: 1256 items
+- B (brand_article): 1
+- C (name_vector): **230**
+- **Итого 231 новых матчей (18%)**
+
+**Известные ограничения** (acceptable trade-off):
+- БУАД-кейс: LLM-mini считает «Преобразователь частотный БУАД-4-25» ≠ «Устройство БУАД 4-25.8» (детaль-vs-целое нюанс, prompt не убеждает). Решается переключением `catalog.name_match.rerank_model` на gpt-4o (+5x cost).
+- Bernstein разные модели (601 vs 608), KONE кнопки с разными KM-кодами — корректно отклоняются LLM, физически разные товары.
+- LW-в-name (без артикула) — клиент пишет «Ролик LW-0007369», LW в name сбивает LLM. Edge case.
+
+**Pipeline state на 2026-05-20:**
+```
+Retrieval:    code-100 + trgm-20 + vec-20 (всегда все три)
+              vector backfill для code/trgm-only кандидатов
+              4-уровневый tie-break (score → vec → trgm → catalog_id)
+Pre-filter:   threshold + isBrandSafe (multi-token + Levenshtein)
+              + isArticleSafe (prefix-relax + name-substring + LW-skip + slash)
+Decision:     1 safe → binary LLM (skip if vec ≥ hc 0.90)
+              ≥2 safe → multi-candidate LLM rerank (gpt-4o-mini)
+              fail-action=reject (consistent с pre-LW политикой)
+```
+
+**Файлы добавленные/изменённые:**
+- new: `app/Services/Catalog/LocalSupplierCodePattern.php`
+- new: `app/Prompts/Catalog/RerankCatalogMatchPrompt.php`
+- new: `app/Console/Commands/Catalog/CatalogDiagnoseCRejectedCommand.php`
+- modified: `app/Services/Catalog/CatalogEmbeddingService.php` (hybrid retrieval + backfill + brand/article safety + rerank)
+- modified: `app/Services/Catalog/CatalogResolutionService.php` (matchByArticle LW-skip + matchByName extended payload)
+- modified: `app/Prompts/Catalog/ValidateCatalogMatchPrompt.php` (synonyms, suffixes, articles)
+
+**Открытые вопросы для следующих сессий:**
+- A/B тест `rerank_model = gpt-4o` vs mini на subset проблемных кейсов (БУАД, спорные суффиксы)
+- Возможно: парсер должен помечать parsed_article=null при detection LW-pattern (сейчас pipeline хорошо обрабатывает, но «грязный» article остаётся в payload)
+- Возможно: cross-references LW→GAA/DAA в `articles[]` каталога — точечно для часто встречающихся LW-кодов (нужна работа со стороны каталог-импорта)
+- requests:recompute-complexity после bulk-resolve (231 items перешли в NameMatch=3 вместо Manual=8) — снизит complexity_score на ~50 заявок
+
 ## Известные грабли (накопленные за Phase 1.4)
 
 - **App passwords в Yandex 360 для бизнеса часто отключены** — путь сразу через OAuth.
