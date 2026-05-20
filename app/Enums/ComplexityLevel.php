@@ -31,6 +31,21 @@ enum ComplexityLevel: string
         };
     }
 
+    /**
+     * Короткая версия label'а для узких UI (chip в Pool колонке 110px).
+     * Только Easy/Normal/Hard остаются как есть, VeryHard → «Оч. сложная»
+     * чтобы вмещаться в одну строку с иконкой и score.
+     */
+    public function shortLabel(): string
+    {
+        return match ($this) {
+            self::Easy => 'Лёгкая',
+            self::Normal => 'Средняя',
+            self::Hard => 'Сложная',
+            self::VeryHard => 'Оч. сложная',
+        };
+    }
+
     public function icon(): string
     {
         return match ($this) {

@@ -631,12 +631,17 @@
                             @endphp
                             <span class="text-right min-w-0 overflow-hidden">
                                 @if($cLevel)
+                                    {{-- shortLabel: «Очень сложная» → «Оч. сложная»
+                                         чтобы вмещаться в 110px колонку одной строкой.
+                                         Раньше `style="white-space: pre-line"` стояло
+                                         ради многострочного tooltip — но pre-line
+                                         работает на content элемента, не на title;
+                                         оно ломало chip на 2 строки и рвало row-height. --}}
                                     <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[3px] border text-[11px] font-medium whitespace-nowrap {{ $cClasses }}"
-                                          style="white-space: pre-line"
                                           title="{{ $cTooltip }}">
-                                        <span>{{ $cLevel->icon() }}</span>
-                                        <span>{{ $cLevel->label() }}</span>
-                                        <span class="font-mono text-[10.5px] opacity-70">{{ $cScore }}</span>
+                                        <span class="shrink-0">{{ $cLevel->icon() }}</span>
+                                        <span class="shrink-0">{{ $cLevel->shortLabel() }}</span>
+                                        <span class="font-mono text-[10.5px] opacity-70 shrink-0">{{ $cScore }}</span>
                                     </span>
                                 @else
                                     <span class="text-[var(--fg-4)] text-[11px]">—</span>
