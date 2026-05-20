@@ -600,8 +600,8 @@ class CatalogEmbeddingService
         //   - vector/trigram сами по себе не разруливают такой tie.
         // Отдаём всех LLM-у на rerank: пусть он выберет ту самую позицию
         // или скажет «никто».
-        $topN = (int) app_setting('catalog.name_match.rerank_top_n', 7);
-        $topN = max(1, min(10, $topN));
+        $topN = (int) app_setting('catalog.name_match.rerank_top_n', 10);
+        $topN = max(1, min(15, $topN));
 
         $allCandidates = $this->topNByQueryText($queryText, $topN, $item->id);
         if ($allCandidates === []) {
@@ -909,6 +909,14 @@ class CatalogEmbeddingService
             ];
         }
 
+        // Модель rerank-stage можно переключать через AppSetting — для
+        // сложных доменных кейсов (БУАД vs «преобразователь / устройство»)
+        // gpt-4o-mini иногда упирается, gpt-4o даёт точнее ответ. Default
+        // — clarification_model (mini), но можно переключить на 'gpt-4o'.
+        $rerankModel = (string) app_setting(
+            'catalog.name_match.rerank_model',
+            config('services.openai.clarification_model', 'gpt-4o-mini'),
+        );
         try {
             $result = $this->chat->chat(
                 [
@@ -920,7 +928,7 @@ class CatalogEmbeddingService
                         $payload,
                     )],
                 ],
-                config('services.openai.clarification_model', 'gpt-4o-mini'),
+                $rerankModel,
                 ['response_format' => ['type' => 'json_object'], 'temperature' => 0, 'max_tokens' => 300],
             );
         } catch (\Throwable $e) {
