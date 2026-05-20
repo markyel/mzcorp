@@ -214,6 +214,102 @@ class MessagePersister
         return is_string($result) && $result !== '' ? $result : $value;
     }
 
+    /**
+     * Парсит filename из multi-line Content-Disposition / Content-Type
+     * header-блока с поддержкой:
+     *   - RFC 2231 continuation (`filename*0*=`, `filename*1*=`, …)
+     *   - RFC 5987 single-shot (`filename*=charset''encoded`)
+     *   - Plain (`filename="..."` / `filename=...`)
+     *   - Альтернатива через `name=...` (Content-Type парам)
+     *
+     * webklex `Attachment::getName()` не собирает continuation parts корректно
+     * и возвращает мусор для filename длиннее одной строки (типичный кейс
+     * длинных русских имён). Этот хелпер парсит из raw header'а правильно.
+     *
+     * Возвращает UTF-8 строку или null если ничего не нашёл.
+     *
+     * @param  string  $headerBlock  Multi-line Content-Disposition или
+     *                                Content-Type блок (как есть из raw_source,
+     *                                с возможными CRLF + WSP fold'ами).
+     */
+    public static function parseRfc2231Filename(string $headerBlock): ?string
+    {
+        // RFC 5322 fold: «CRLF + WSP» → один пробел. После unfolding всё
+        // в одну строку — проще парсить параметры через regex.
+        $unfolded = preg_replace('/\r?\n[ \t]+/', ' ', $headerBlock) ?? $headerBlock;
+
+        // (1) RFC 2231 continuation: filename*N*= или filename*N=
+        // Собираем все индексы по порядку, склеиваем, URL-decode'им
+        // те части где был `*` (encoded form), charset берём из части 0.
+        if (preg_match_all(
+            '/\bfilename\*(\d+)(\*?)=\s*((?:"[^"]*"|[^;\s]+))/i',
+            $unfolded,
+            $matches,
+            PREG_SET_ORDER,
+        )) {
+            $parts = [];
+            $charset = 'UTF-8';
+            foreach ($matches as $m) {
+                $idx = (int) $m[1];
+                $isEncoded = $m[2] === '*';
+                $raw = trim($m[3], '"');
+                if ($idx === 0 && $isEncoded && str_contains($raw, "''")) {
+                    // charset'language'value
+                    [$cs, , $rest] = array_pad(explode("'", $raw, 3), 3, '');
+                    $charset = $cs !== '' ? $cs : 'UTF-8';
+                    $raw = $rest;
+                }
+                $parts[$idx] = $isEncoded ? rawurldecode($raw) : $raw;
+            }
+            ksort($parts);
+            $joined = implode('', $parts);
+            if (strtoupper($charset) !== 'UTF-8') {
+                $converted = @mb_convert_encoding($joined, 'UTF-8', $charset);
+                if (is_string($converted) && $converted !== '') {
+                    return $converted;
+                }
+            }
+            return $joined !== '' ? $joined : null;
+        }
+
+        // (2) RFC 5987 single-shot без continuation: filename*=charset''encoded
+        if (preg_match('/\bfilename\*=\s*((?:"[^"]*"|[^;]+))/i', $unfolded, $m)) {
+            $raw = trim(trim($m[1]), '"');
+            if (str_contains($raw, "''")) {
+                [$cs, , $rest] = array_pad(explode("'", $raw, 3), 3, '');
+                $decoded = rawurldecode($rest);
+                $cs = $cs !== '' ? $cs : 'UTF-8';
+                if (strtoupper($cs) !== 'UTF-8') {
+                    $converted = @mb_convert_encoding($decoded, 'UTF-8', $cs);
+                    if (is_string($converted) && $converted !== '') {
+                        return $converted;
+                    }
+                }
+                return $decoded !== '' ? $decoded : null;
+            }
+            return $raw !== '' ? $raw : null;
+        }
+
+        // (3) Plain filename="..." или filename=...
+        if (preg_match('/\bfilename=\s*"([^"]+)"/i', $unfolded, $m)) {
+            return trim($m[1]) !== '' ? trim($m[1]) : null;
+        }
+        if (preg_match('/\bfilename=\s*([^;\s]+)/i', $unfolded, $m)) {
+            return trim($m[1]) !== '' ? trim($m[1]) : null;
+        }
+
+        // (4) Fallback: name=... в Content-Type (часто content-disposition
+        // отсутствует, имя лежит в Content-Type).
+        if (preg_match('/\bname=\s*"([^"]+)"/i', $unfolded, $m)) {
+            return trim($m[1]) !== '' ? trim($m[1]) : null;
+        }
+        if (preg_match('/\bname=\s*([^;\s]+)/i', $unfolded, $m)) {
+            return trim($m[1]) !== '' ? trim($m[1]) : null;
+        }
+
+        return null;
+    }
+
     private function extractMessageId(Message $msg): ?string
     {
         $raw = trim($this->stringify($msg->getMessageId()), " \t\n\r\0\x0B<>");
