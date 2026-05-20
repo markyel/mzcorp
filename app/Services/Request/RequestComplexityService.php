@@ -44,6 +44,7 @@ class RequestComplexityService
             status: $item->quality_assessment_status?->value
                 ?? (is_string($item->quality_assessment_status) ? $item->quality_assessment_status : null),
             parsedArticle: $item->parsed_article,
+            parsedName: $item->parsed_name,
         );
 
         if ($item->match_path?->value !== $path->value) {

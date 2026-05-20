@@ -83,25 +83,47 @@ enum MatchPath: string
     /**
      * Определить MatchPath по данным позиции.
      *
-     * Принцип «оцениваем что клиент прислал»: смотрим в первую очередь на
-     * результат автомата-резолвера (payload.catalog_match.method), но если
-     * метод не присвоен (товара нет в каталоге → status=internal_catalog_not_found
-     * или ResolveKbJob ещё не отработал) — даём fallback по тому, что
-     * содержится в parsed_article. Клиент с M-артикулом всегда `internal_sku`,
-     * с любым другим артикулом → `brand_article`, без артикула → `manual`.
+     * Принцип «оцениваем что клиент прислал». Priority order:
+     *
+     *   (1) **Override**: если parsed_article ИЛИ parsed_name содержит M-SKU
+     *       pattern (`[MМm]\d{4,}`) — это всегда `internal_sku`, независимо
+     *       от того что записал автомат-резолвер. Покрывает кейс когда
+     *       парсер не вытащил M-артикул в parsed_article, и catalog_match
+     *       сработал через B_brand_article (нашёл по совпадению с brand_article
+     *       в каталоге) — семантически клиент прислал M-артикул.
+     *
+     *   (2) Если автомат-резолвер успешно сматчил (payload.catalog_match.method
+     *       заполнен) — берём прямой результат A/B/C/manual_link.
+     *
+     *   (3) Fallback по статусу: internal_catalog_pending/not_found → internal_sku.
+     *
+     *   (4) Fallback по parsed_article: что-то есть → brand_article;
+     *       пусто → manual.
      *
      * @param  array<string, mixed>|null  $payload  quality_assessment_payload
      * @param  ?int  $catalogItemId  request_items.catalog_item_id
      * @param  ?string  $status  quality_assessment_status (raw enum value)
      * @param  ?string  $parsedArticle  request_items.parsed_article
+     * @param  ?string  $parsedName  request_items.parsed_name
      */
     public static function detect(
         ?array $payload,
         ?int $catalogItemId,
         ?string $status,
         ?string $parsedArticle = null,
+        ?string $parsedName = null,
     ): self {
-        // (1) Автомат-резолвер успешно сматчил → берём прямой результат.
+        // (1) HARD OVERRIDE: M-SKU pattern в article ИЛИ name. Клиент явно
+        //     прислал M-артикул — это всегда internal_sku, независимо от
+        //     того, как именно автомат потом его сматчил в каталоге.
+        if (is_string($parsedArticle) && self::looksLikeInternalSku($parsedArticle)) {
+            return self::InternalSku;
+        }
+        if (is_string($parsedName) && self::looksLikeInternalSku($parsedName)) {
+            return self::InternalSku;
+        }
+
+        // (2) Автомат-резолвер успешно сматчил → берём прямой результат.
         $method = $payload['catalog_match']['method'] ?? null;
         $matched = match ($method) {
             'A_internal_sku' => self::InternalSku,
@@ -114,30 +136,18 @@ enum MatchPath: string
             return $matched;
         }
 
-        // (2) Fallback: автомат не справился → судим «по входу клиента».
-        //
-        // (2a) Статус-маркеры что клиент явно прислал M-SKU. Эти статусы
-        //      ставит QualityAssessmentService::detectInternalCatalogSku
-        //      когда парсер увидел M\d{4,} в parsed_article.
+        // (3) Fallback по статусу: парсер пометил позицию как M-SKU
+        //     (через QualityAssessmentService::detectInternalCatalogSku).
         if ($status === 'internal_catalog_pending'
             || $status === 'internal_catalog_not_found') {
             return self::InternalSku;
         }
 
-        // (2b) parsed_article выглядит как M-SKU (latin M или cyrillic М
-        //      + 4+ цифр). Покрывает кейсы когда статус не успел простаавиться,
-        //      но артикул в виде «M02016» / «М14394» уже распарсен.
-        if (is_string($parsedArticle) && self::looksLikeInternalSku($parsedArticle)) {
-            return self::InternalSku;
-        }
-
-        // (2c) Какой-то article есть → клиент прислал OEM-код. Идентификация
-        //      требует минимальной проверки соответствия.
+        // (4) Fallback по parsed_article.
         if (is_string($parsedArticle) && trim($parsedArticle) !== '') {
             return self::BrandArticle;
         }
 
-        // (2d) Артикула нет вообще → менеджеру нужен ручной разбор.
         return self::Manual;
     }
 
@@ -146,11 +156,11 @@ enum MatchPath: string
      * + минимум 4 цифры, обрамлённые не-буквенными границами.
      * Те же правила что в QualityAssessmentService::detectInternalCatalogSku.
      */
-    private static function looksLikeInternalSku(string $article): bool
+    private static function looksLikeInternalSku(string $value): bool
     {
         return (bool) preg_match(
             '/(?<![\p{L}\p{N}_])[MМm]\d{4,}(?![\p{L}\p{N}_])/u',
-            $article,
+            $value,
         );
     }
 
