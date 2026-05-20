@@ -1046,7 +1046,13 @@ class CatalogEmbeddingService
         // LLM-rerank финально подтвердит совпадение.
         $catalogNameNorm = '';
         if (is_string($catalogName) && $catalogName !== '') {
-            $catalogNameNorm = (string) preg_replace('/[\s\-_.\/]/u', '', mb_strtoupper($catalogName));
+            // КРИТИЧЕСКИ важно: применяем cyrillicLookalikeFold (тот же, что
+            // в normalizeArticle) ПЕРЕД uppercase + strip. Иначе
+            // нормализованный артикул («БУAД425» с латинской A) не найдётся
+            // в name каталога («БУАД» с кириллической А) — substring-поиск
+            // мажет, валидные матчи блокируются (см. #2363 БУАД).
+            $folded = CatalogImportService::cyrillicLookalikeFold($catalogName);
+            $catalogNameNorm = (string) preg_replace('/[\s\-_.\/]/u', '', mb_strtoupper($folded));
         }
 
         // parsed_article может содержать "GAA638JR1, 3RT2016-2GG22" — тот же
