@@ -263,6 +263,88 @@
                     </div>
                 </div>
 
+                {{-- ───────── Сложность активных заявок ───────── --}}
+                @php
+                    $cKpi = $this->complexityKpi;
+                    $cBreakdown = $this->complexityBreakdown;
+                    $cMaxTotal = collect($cBreakdown)->max('total') ?: 1;
+                @endphp
+                <div class="ds-card">
+                    <div class="ds-card-header">
+                        <h3>Сложность активных заявок</h3>
+                        <span class="flex-1"></span>
+                        <span class="text-[11.5px] text-fg-3">
+                            всего: <span class="mono tnum text-fg-2">{{ $cKpi['total_active'] }}</span>
+                            · сложных:
+                            <span class="mono tnum text-amber-700 font-semibold">{{ $cKpi['hard'] }}</span>
+                            + очень сложных:
+                            <span class="mono tnum text-red-700 font-semibold">{{ $cKpi['very_hard'] }}</span>
+                        </span>
+                    </div>
+                    <div class="ds-card-body space-y-3">
+                        {{-- KPI карточки --}}
+                        <div class="grid grid-cols-3 gap-2 text-center">
+                            <div class="p-2.5 rounded-md border border-border bg-app">
+                                <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Всего активных</div>
+                                <div class="text-[20px] font-bold mono tnum text-fg-1">{{ $cKpi['total_active'] }}</div>
+                            </div>
+                            <div class="p-2.5 rounded-md border border-amber-200 bg-amber-50">
+                                <div class="text-[10.5px] uppercase tracking-wider text-amber-700 font-semibold mb-1">Сложных (hard)</div>
+                                <div class="text-[20px] font-bold mono tnum text-amber-800">{{ $cKpi['hard'] }}</div>
+                            </div>
+                            <div class="p-2.5 rounded-md border border-red-200 bg-red-50">
+                                <div class="text-[10.5px] uppercase tracking-wider text-red-700 font-semibold mb-1">Очень сложных</div>
+                                <div class="text-[20px] font-bold mono tnum text-red-800">{{ $cKpi['very_hard'] }}</div>
+                            </div>
+                        </div>
+
+                        {{-- Breakdown позиций по match_path × has_photo --}}
+                        <div>
+                            <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">
+                                Откуда приходят позиции (active)
+                            </div>
+                            <div class="space-y-1.5">
+                                @foreach($cBreakdown as $row)
+                                    @php
+                                        $rowTone = match ($row['path']) {
+                                            'internal_sku' => 'bg-emerald-500',
+                                            'brand_article' => 'bg-sky-500',
+                                            'name_match' => 'bg-amber-500',
+                                            'manual' => 'bg-red-500',
+                                            default => 'bg-neutral-400',
+                                        };
+                                    @endphp
+                                    <div class="flex items-center gap-3 text-[12.5px]">
+                                        <div class="w-32 shrink-0 text-fg-2 flex items-center gap-1.5">
+                                            <span>{{ $row['icon'] }}</span>
+                                            <span>{{ $row['label'] }}</span>
+                                            <span class="text-fg-3 text-[10.5px]">×{{ $row['weight'] }}</span>
+                                        </div>
+                                        <div class="flex-1 h-2.5 rounded-full bg-neutral-100 overflow-hidden">
+                                            <div class="h-full {{ $rowTone }}"
+                                                 style="width: {{ round($row['total'] * 100 / $cMaxTotal) }}%"></div>
+                                        </div>
+                                        <div class="w-16 text-right text-fg-1 mono tnum">
+                                            {{ $row['total'] }}
+                                        </div>
+                                        <div class="w-20 text-right text-[10.5px] text-fg-3"
+                                             title="С фото: {{ $row['with_photo'] }}; без фото: {{ $row['no_photo'] }}">
+                                            <span class="text-emerald-700">📷 {{ $row['with_photo'] }}</span>
+                                            <span class="mx-0.5">·</span>
+                                            <span>{{ $row['no_photo'] }}</span>
+                                        </div>
+                                    </div>
+                                @endforeach
+                            </div>
+                            <div class="text-[10.5px] text-fg-4 mt-2 leading-relaxed">
+                                Веса позиций задаются в Настройках (<code>complexity.weights.*</code>).
+                                Score заявки = сумма весов её active-позиций; уровень — по порогам <code>complexity.thresholds</code>.
+                                Цифры справа — «📷 с фото · без фото».
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 {{-- ───────── Менеджеры: текущая нагрузка + 14-дн sparkline ─────────
                      sum14 = сколько назначено за последние 14 дней (request_assignments).
                      points → inline SVG polyline (no Chart.js).
@@ -316,6 +398,8 @@
                                     <tr class="text-[10.5px] uppercase tracking-wider font-semibold text-fg-3 border-b border-border-subtle">
                                         <th class="text-left px-[18px] py-2">Менеджер</th>
                                         <th class="text-right px-2 py-2" title="Открытых заявок прямо сейчас">сейчас</th>
+                                        <th class="text-right px-2 py-2" title="Суммарный complexity_score активных заявок">слжн</th>
+                                        <th class="text-right px-2 py-2" title="Hard + very_hard заявок в работе">hard</th>
                                         <th class="text-right px-2 py-2" title="Назначений за 14 дней">14дн</th>
                                         <th class="text-left px-[18px] py-2">поток</th>
                                     </tr>
@@ -328,6 +412,8 @@
                                                 <div class="text-[11.5px] text-fg-3 mono">{{ $m['email'] }}</div>
                                             </td>
                                             <td class="px-2 py-2 text-right mono tnum {{ $m['total'] > 0 ? 'text-fg-1 font-semibold' : 'text-fg-3' }}">{{ $m['total'] }}</td>
+                                            <td class="px-2 py-2 text-right mono tnum {{ ($m['active_complexity'] ?? 0) > 0 ? 'text-fg-1' : 'text-fg-3' }}">{{ $m['active_complexity'] ?? 0 }}</td>
+                                            <td class="px-2 py-2 text-right mono tnum {{ ($m['hard_count'] ?? 0) > 0 ? 'text-amber-700 font-semibold' : 'text-fg-3' }}">{{ $m['hard_count'] ?? 0 }}</td>
                                             <td class="px-2 py-2 text-right mono tnum {{ $m['sum14'] > 0 ? 'text-fg-2' : 'text-fg-3' }}">{{ $m['sum14'] }}</td>
                                             <td class="px-[18px] py-2">{!! $renderSpark($m['points']) !!}</td>
                                         </tr>

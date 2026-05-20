@@ -180,13 +180,31 @@ class Index extends Component
             return [];
         }
 
+        // Phase complexity: добавляем SUM(complexity_score) — суммарная
+        // нагрузка менеджера, и hard_count (hard + very_hard active заявки).
+        // Это даёт более точную картину чем «просто число заявок» — 5
+        // заявок A/B-сложности легче чем 1 very_hard с 8 unmatched.
+        $active = [
+            RequestStatus::New->value,
+            RequestStatus::Assigned->value,
+            RequestStatus::InProgress->value,
+            RequestStatus::AwaitingClientClarification->value,
+            RequestStatus::Quoted->value,
+            RequestStatus::UnderReview->value,
+            RequestStatus::PostponedUntil->value,
+            RequestStatus::AwaitingInvoice->value,
+            RequestStatus::Invoiced->value,
+            RequestStatus::Paid->value,
+        ];
         $loads = Request::query()
             ->whereIn('assigned_user_id', $managers->pluck('id'))
             ->groupBy('assigned_user_id')
             ->selectRaw("
                 assigned_user_id,
                 COUNT(*) AS total,
-                COUNT(*) FILTER (WHERE status = '" . RequestStatus::New->value . "') AS new_count
+                COUNT(*) FILTER (WHERE status = '" . RequestStatus::New->value . "') AS new_count,
+                COALESCE(SUM(complexity_score) FILTER (WHERE status IN ('" . implode("','", $active) . "')), 0) AS active_complexity,
+                COUNT(*) FILTER (WHERE complexity_level IN ('hard', 'very_hard') AND status IN ('" . implode("','", $active) . "')) AS hard_count
             ")
             ->get()
             ->keyBy('assigned_user_id');
@@ -199,8 +217,103 @@ class Index extends Component
                 'email' => $u->email,
                 'total' => (int) ($row->total ?? 0),
                 'new' => (int) ($row->new_count ?? 0),
+                'active_complexity' => (int) ($row->active_complexity ?? 0),
+                'hard_count' => (int) ($row->hard_count ?? 0),
             ];
-        })->sortByDesc('total')->take(8)->values()->all();
+        })->sortByDesc('active_complexity')->take(8)->values()->all();
+    }
+
+    /**
+     * Phase complexity: KPI «Сложных в работе» — hard + very_hard заявки
+     * в активных статусах. Для менеджера — свои; для РОП — всех.
+     *
+     * @return array{hard: int, very_hard: int, total_active: int}
+     */
+    #[Computed]
+    public function complexityKpi(): array
+    {
+        $active = [
+            RequestStatus::New->value,
+            RequestStatus::Assigned->value,
+            RequestStatus::InProgress->value,
+            RequestStatus::AwaitingClientClarification->value,
+            RequestStatus::Quoted->value,
+            RequestStatus::UnderReview->value,
+            RequestStatus::PostponedUntil->value,
+            RequestStatus::AwaitingInvoice->value,
+            RequestStatus::Invoiced->value,
+            RequestStatus::Paid->value,
+        ];
+        $base = Request::query()->whereIn('status', $active);
+        if (! $this->isPrivileged) {
+            $base->where('assigned_user_id', auth()->id());
+        }
+
+        $rows = (clone $base)
+            ->selectRaw('complexity_level, COUNT(*) AS c')
+            ->groupBy('complexity_level')
+            ->pluck('c', 'complexity_level');
+
+        return [
+            'hard' => (int) ($rows['hard'] ?? 0),
+            'very_hard' => (int) ($rows['very_hard'] ?? 0),
+            'total_active' => (int) (clone $base)->count(),
+        ];
+    }
+
+    /**
+     * Phase complexity: разбивка active items по match_path × has_photo.
+     * Показывает «откуда приходят позиции» — сколько с M-артикулом vs
+     * нужно разбирать руками, и какая доля имеет фото для подсказки.
+     *
+     * @return array<int, array{path: string, label: string, with_photo: int, no_photo: int, total: int, weight: int}>
+     */
+    #[Computed]
+    public function complexityBreakdown(): array
+    {
+        $active = [
+            RequestStatus::New->value,
+            RequestStatus::Assigned->value,
+            RequestStatus::InProgress->value,
+            RequestStatus::AwaitingClientClarification->value,
+            RequestStatus::Quoted->value,
+            RequestStatus::UnderReview->value,
+            RequestStatus::PostponedUntil->value,
+            RequestStatus::AwaitingInvoice->value,
+            RequestStatus::Invoiced->value,
+            RequestStatus::Paid->value,
+        ];
+
+        $rows = DB::table('request_items as ri')
+            ->join('requests as r', 'r.id', '=', 'ri.request_id')
+            ->where('ri.is_active', true)
+            ->whereIn('r.status', $active);
+        if (! $this->isPrivileged) {
+            $rows->where('r.assigned_user_id', auth()->id());
+        }
+        $aggregated = $rows
+            ->groupBy('ri.match_path')
+            ->selectRaw('
+                ri.match_path AS path,
+                COUNT(*) FILTER (WHERE ri.image_attachment_id IS NOT NULL) AS with_photo,
+                COUNT(*) FILTER (WHERE ri.image_attachment_id IS NULL) AS no_photo,
+                COUNT(*) AS total
+            ')
+            ->get()
+            ->keyBy('path');
+
+        return collect(\App\Enums\MatchPath::cases())->map(function ($mp) use ($aggregated) {
+            $row = $aggregated->get($mp->value);
+            return [
+                'path' => $mp->value,
+                'label' => $mp->label(),
+                'icon' => $mp->icon(),
+                'with_photo' => (int) ($row->with_photo ?? 0),
+                'no_photo' => (int) ($row->no_photo ?? 0),
+                'total' => (int) ($row->total ?? 0),
+                'weight' => $mp->defaultWeight(),
+            ];
+        })->all();
     }
 
     /**
@@ -458,17 +571,25 @@ class Index extends Component
             $byUser[(int) $r->user_id][(string) $r->day] = (int) $r->c;
         }
 
-        // current load (для сортировки + чтобы рядом со sparkline видеть)
+        // current load (для сортировки + чтобы рядом со sparkline видеть).
+        // Phase complexity: добавляем SUM(complexity_score) и hard_count для
+        // отображения в той же строке — сложность важнее чем «просто N заявок».
+        $activeStatuses = array_map(
+            fn (RequestStatus $s) => $s->value,
+            array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+        );
         $currentLoad = Request::query()
             ->whereIn('assigned_user_id', $managers->pluck('id'))
-            ->whereIn('status', array_map(
-                fn (RequestStatus $s) => $s->value,
-                array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
-            ))
+            ->whereIn('status', $activeStatuses)
             ->groupBy('assigned_user_id')
-            ->selectRaw('assigned_user_id, COUNT(*) AS c')
-            ->pluck('c', 'assigned_user_id')
-            ->all();
+            ->selectRaw('
+                assigned_user_id,
+                COUNT(*) AS c,
+                COALESCE(SUM(complexity_score), 0) AS active_complexity,
+                COUNT(*) FILTER (WHERE complexity_level IN (\'hard\', \'very_hard\')) AS hard_count
+            ')
+            ->get()
+            ->keyBy('assigned_user_id');
 
         $result = [];
         foreach ($managers as $u) {
@@ -480,12 +601,15 @@ class Index extends Component
                 $points[] = $v;
                 $sum += $v;
             }
+            $row = $currentLoad->get($u->id);
             $result[] = [
                 'name' => $u->name,
                 'email' => $u->email,
-                'total' => (int) ($currentLoad[$u->id] ?? 0),
+                'total' => (int) ($row->c ?? 0),
                 'sum14' => $sum,
                 'points' => $points,
+                'active_complexity' => (int) ($row->active_complexity ?? 0),
+                'hard_count' => (int) ($row->hard_count ?? 0),
             ];
         }
 

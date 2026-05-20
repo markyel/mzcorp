@@ -386,6 +386,47 @@
                         </span>
                     @endif
                 </div>
+
+                {{-- Phase complexity: chip уровня сложности с разбивкой
+                     по match_path (snapshot входной нагрузки на менеджера). --}}
+                @php
+                    $cLevel = $req->complexity_level;
+                    $cScore = (int) ($req->complexity_score ?? 0);
+                    if ($cLevel) {
+                        $pathCounts = [];
+                        foreach ($items as $it) {
+                            if (! $it->is_active) continue;
+                            $p = $it->match_path?->value ?? 'manual';
+                            $pathCounts[$p] = ($pathCounts[$p] ?? 0) + 1;
+                        }
+                        $cTooltipLines = ["Score: {$cScore}"];
+                        foreach (\App\Enums\MatchPath::cases() as $mp) {
+                            $n = $pathCounts[$mp->value] ?? 0;
+                            if ($n > 0) {
+                                $cTooltipLines[] = $mp->label() . ': ' . $n . ' (×' . $mp->defaultWeight() . ')';
+                            }
+                        }
+                        $cTooltip = implode("\n", $cTooltipLines);
+                        $cChip = match ($cLevel->value) {
+                            'easy' => 'bg-neutral-100 text-fg-3 border-border',
+                            'normal' => 'bg-sky-50 text-sky-700 border-sky-200',
+                            'hard' => 'bg-amber-50 text-amber-700 border-amber-300',
+                            'very_hard' => 'bg-red-50 text-red-700 border-red-300',
+                        };
+                    }
+                @endphp
+                @if($cLevel)
+                    <div class="flex flex-col gap-1 pl-4 border-l border-border-subtle">
+                        <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Сложность</span>
+                        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm border text-[11.5px] font-medium {{ $cChip }} w-fit"
+                              style="white-space: pre-line"
+                              title="{{ $cTooltip }}">
+                            <span>{{ $cLevel->icon() }}</span>
+                            <span>{{ $cLevel->label() }}</span>
+                            <span class="font-mono text-[10.5px] opacity-70">{{ $cScore }}</span>
+                        </span>
+                    </div>
+                @endif
                 @php
                     // Phase 7 — Hero chip «📨 КП». Берём последний matched
                     // OutboundQuote (если КП было отправлено несколько раз —

@@ -189,7 +189,7 @@ class Pool extends Component
                 'emailMessage' => fn ($q) => $q
                     ->select(['id', 'from_email', 'from_name'])
                     ->withCount('attachments'),
-                'items:id,request_id,parsed_name,parsed_brand,position',
+                'items:id,request_id,parsed_name,parsed_brand,position,match_path,is_active',
                 // latestAssignment без partial-select — `latestOfMany` делает
                 // self-join, и колонки без префикса (request_id) дают
                 // SQLSTATE[42702] ambiguous column.

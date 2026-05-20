@@ -329,7 +329,7 @@
                 {{-- THEAD (sticky) --}}
                 <div class="sticky top-0 bg-[var(--bg-surface)] border-b border-[var(--border-strong)] z-[2] grid items-center px-5 h-[32px] gap-x-3
                             text-[11px] font-semibold uppercase tracking-wider text-[var(--fg-3)]"
-                     style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 170px 140px 160px 100px 80px 32px;">
+                     style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 170px 140px 160px 100px 80px 110px 32px;">
                     <span></span>
                     <span>код</span>
                     <span>заявка</span>
@@ -339,6 +339,7 @@
                     <span>клиент</span>
                     <span class="text-right">сумма</span>
                     <span class="text-right">возраст</span>
+                    <span class="text-right">сложность</span>
                     <span></span>
                 </div>
 
@@ -486,7 +487,7 @@
                         <a href="{{ $href }}" wire:key="req-{{ $req->id }}"
                            class="grid items-center px-5 h-[42px] gap-x-3 border-b border-[var(--border-subtle)] text-[12.5px] hover:bg-[var(--bg-hover)] transition-colors
                                   {{ $isOverdueAlarm ? 'bg-[var(--red-50)] hover:bg-[var(--red-100)] border-l-2 border-l-[var(--red-500)] pl-[18px]' : ($isInfoFlag ? 'bg-[var(--amber-50)] hover:bg-[var(--amber-100)] border-l-2 border-l-[var(--amber-500)] pl-[18px]' : '') }}"
-                           style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 170px 140px 160px 100px 80px 32px;">
+                           style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 170px 140px 160px 100px 80px 110px 32px;">
 
                             {{-- checkbox (Phase 2) --}}
                             <span class="w-3.5 h-3.5 border border-[var(--border-strong)] rounded-[3px] bg-[var(--bg-surface)] opacity-50"
@@ -593,6 +594,54 @@
 
                             {{-- возраст --}}
                             <span class="text-right font-mono text-[12px] {{ $ageColor }}">{{ $age ?: '—' }}</span>
+
+                            {{-- сложность (Phase complexity): chip с уровнем
+                                 + score + tooltip с разбивкой по match_path.
+                                 Денормализованные колонки `complexity_score`
+                                 и `complexity_level` пересчитываются через
+                                 RequestItemObserver. --}}
+                            @php
+                                $cLevel = $req->complexity_level;
+                                $cScore = (int) ($req->complexity_score ?? 0);
+                                if ($cLevel) {
+                                    // Tooltip: считаем items per match_path для
+                                    // этой заявки (eager-load делаем в Pool.php).
+                                    $pathCounts = [];
+                                    foreach ($req->items as $it) {
+                                        if (! $it->is_active) continue;
+                                        $p = $it->match_path?->value ?? 'manual';
+                                        $pathCounts[$p] = ($pathCounts[$p] ?? 0) + 1;
+                                    }
+                                    $totalActive = array_sum($pathCounts);
+                                    $tooltipParts = ["Score: {$cScore}", "Позиций: {$totalActive}"];
+                                    foreach (\App\Enums\MatchPath::cases() as $mp) {
+                                        $n = $pathCounts[$mp->value] ?? 0;
+                                        if ($n > 0) {
+                                            $tooltipParts[] = $mp->label() . ': ' . $n;
+                                        }
+                                    }
+                                    $cTooltip = implode("\n", $tooltipParts);
+                                    $cClasses = match ($cLevel->value) {
+                                        'easy' => 'bg-[var(--neutral-100)] text-[var(--fg-3)] border-[var(--border)]',
+                                        'normal' => 'bg-[var(--sky-50)] text-[var(--sky-700)] border-[var(--sky-200)]',
+                                        'hard' => 'bg-[var(--amber-50)] text-[var(--amber-700)] border-[var(--amber-300)]',
+                                        'very_hard' => 'bg-[var(--red-50)] text-[var(--red-700)] border-[var(--red-300)]',
+                                    };
+                                }
+                            @endphp
+                            <span class="text-right min-w-0 overflow-hidden">
+                                @if($cLevel)
+                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[3px] border text-[11px] font-medium whitespace-nowrap {{ $cClasses }}"
+                                          style="white-space: pre-line"
+                                          title="{{ $cTooltip }}">
+                                        <span>{{ $cLevel->icon() }}</span>
+                                        <span>{{ $cLevel->label() }}</span>
+                                        <span class="font-mono text-[10.5px] opacity-70">{{ $cScore }}</span>
+                                    </span>
+                                @else
+                                    <span class="text-[var(--fg-4)] text-[11px]">—</span>
+                                @endif
+                            </span>
 
                             {{-- ⋯ menu (Phase 2) --}}
                             <span class="text-center text-[var(--fg-4)] font-bold tracking-widest cursor-not-allowed"
