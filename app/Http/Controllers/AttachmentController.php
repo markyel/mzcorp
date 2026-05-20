@@ -69,6 +69,12 @@ class AttachmentController extends Controller
      * HeaderUtils — корректно экранирует не-ASCII имена файлов (RFC 6266
      * filename* + ASCII fallback). Прежний голый `filename="..."` ломал
      * скачивание для писем с кириллическими именами.
+     *
+     * filename санитизируется через sanitizeForDisposition() — Symfony
+     * makeDisposition() кидает InvalidArgumentException на `/` и `\` в
+     * filename (в т.ч. в RFC 5987-варианте), а кривое MIME-декодирование
+     * иногда оставляет в filename слэши («Для заказа по д/?-?.4а?/.xlsx»).
+     * Без санитизации каждый такой attachment отдавал 500.
      */
     private function streamAttachment(EmailAttachment $attachment, string $disposition): Response
     {
@@ -77,12 +83,13 @@ class AttachmentController extends Controller
             abort(404);
         }
 
+        $safeName = $this->sanitizeForDisposition((string) $attachment->filename);
         $headers = [
             'Content-Type' => $attachment->mime_type ?: 'application/octet-stream',
             'Content-Disposition' => HeaderUtils::makeDisposition(
                 $disposition,
-                $attachment->filename,
-                $this->asciiFallback($attachment->filename),
+                $safeName,
+                $this->asciiFallback($safeName),
             ),
         ];
 
@@ -109,14 +116,35 @@ class AttachmentController extends Controller
 
     /**
      * ASCII-fallback для legacy-клиентов, не понимающих RFC 5987 filename*.
-     * Все не-ASCII символы заменяем на «_», пустое имя → «attachment».
+     * Все не-ASCII символы + слэши заменяем на «_», пустое имя → «attachment».
      */
     private function asciiFallback(string $name): string
     {
-        $ascii = preg_replace('/[^\x20-\x7e]/', '_', $name) ?? '';
+        // Слэши тоже сюда — Symfony makeDisposition отвергает их в ASCII
+        // fallback, поэтому подменяем до передачи в header.
+        $ascii = preg_replace('/[^\x20-\x7e]|[\\/\\\\]/', '_', $name) ?? '';
         $ascii = trim(preg_replace('/_+/', '_', $ascii) ?? '', '_ .');
 
         return $ascii !== '' ? $ascii : 'attachment';
+    }
+
+    /**
+     * Санитизирует filename для Content-Disposition:
+     *   - убирает `/` и `\` (Symfony makeDisposition кидает
+     *     InvalidArgumentException на них)
+     *   - убирает CR/LF/NUL (header-injection защита)
+     *   - возвращает «attachment.bin» если после чистки пусто
+     *
+     * Используется ДО передачи в HeaderUtils::makeDisposition.
+     * Реальный путь к файлу на storage всё равно идёт по `file_path` колонке
+     * и не зависит от filename — кривое имя в БД не ломает stream.
+     */
+    private function sanitizeForDisposition(string $name): string
+    {
+        $clean = str_replace(['/', '\\', "\r", "\n", "\0"], '_', $name);
+        $clean = trim(preg_replace('/_+/', '_', $clean) ?? '', '_ .');
+
+        return $clean !== '' ? $clean : 'attachment.bin';
     }
 
     private function authorizeAccess(HttpRequest $request, EmailAttachment $attachment): void
