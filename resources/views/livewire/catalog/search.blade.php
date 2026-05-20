@@ -1,8 +1,7 @@
 {{-- Layout: rail (56px) + main. Без list-nav (240px) как в Pool —
      для каталога нет saved views / queue navigation.
      Макет: design/uploads/07-catalog-search.html. --}}
-<div class="grid"
-     style="grid-template-columns: 56px 1fr; min-height: calc(100vh - var(--topbar-h));">
+<div style="display: grid; grid-template-columns: 56px 1fr; min-height: calc(100vh - var(--topbar-h));">
 
     <x-left-rail active="catalog" />
 
@@ -26,8 +25,8 @@
     </div>
 
     {{-- ─── Search bar (grid 1fr auto auto) ─── --}}
-    <div class="bg-surface border border-border rounded-md p-2 mb-3 grid items-center gap-2.5"
-         style="grid-template-columns: 1fr auto auto;">
+    <div class="bg-surface border border-border rounded-md p-2 mb-3"
+         style="display: grid; align-items: center; gap: 10px; grid-template-columns: 1fr auto auto;">
         <div class="relative">
             <span class="absolute left-1.5 top-1/2 -translate-y-1/2 text-fg-3 text-[14px] pointer-events-none select-none">⌕</span>
             <input type="search"
@@ -69,7 +68,7 @@
     @if(mb_strlen(trim($query)) >= 2)
         <div class="bg-surface border border-border rounded-md p-3 mb-3 flex flex-col gap-2">
             {{-- Узел --}}
-            <div class="grid items-start gap-3.5" style="grid-template-columns: 92px 1fr;">
+            <div style="display: grid; align-items: start; gap: 14px; grid-template-columns: 92px 1fr;">
                 <span class="text-[10.5px] font-semibold uppercase tracking-wider text-fg-3 pt-1">Узел</span>
                 <div class="flex items-center gap-1.5 flex-wrap">
                     @if(empty($units))
@@ -91,7 +90,7 @@
             </div>
 
             {{-- Бренд --}}
-            <div class="grid items-start gap-3.5 pt-2 border-t border-border-subtle" style="grid-template-columns: 92px 1fr;">
+            <div class="pt-2 border-t border-border-subtle" style="display: grid; align-items: start; gap: 14px; grid-template-columns: 92px 1fr;">
                 <span class="text-[10.5px] font-semibold uppercase tracking-wider text-fg-3 pt-1">Бренд</span>
                 <div class="flex items-center gap-1.5 flex-wrap">
                     @if(empty($brands))
@@ -113,7 +112,7 @@
             </div>
 
             {{-- Категория KB --}}
-            <div class="grid items-center gap-3.5 pt-2 border-t border-border-subtle" style="grid-template-columns: 92px 1fr;">
+            <div class="pt-2 border-t border-border-subtle" style="display: grid; align-items: center; gap: 14px; grid-template-columns: 92px 1fr;">
                 <span class="text-[10.5px] font-semibold uppercase tracking-wider text-fg-3">Категория</span>
                 <div class="flex items-center gap-1.5">
                     <select wire:model.live="filterCategoryId"
@@ -132,7 +131,7 @@
             </div>
 
             {{-- Размер --}}
-            <div class="grid items-center gap-3.5 pt-2 border-t border-border-subtle" style="grid-template-columns: 92px 1fr;">
+            <div class="pt-2 border-t border-border-subtle" style="display: grid; align-items: center; gap: 14px; grid-template-columns: 92px 1fr;">
                 <span class="text-[10.5px] font-semibold uppercase tracking-wider text-fg-3">Размер</span>
                 <div class="flex items-center gap-2 flex-wrap">
                     @if(empty($filterDims))

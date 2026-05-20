@@ -40,8 +40,8 @@
 
     {{-- ─── Table head ─── --}}
     @php $gridCols = '64px 88px 160px 1fr 120px 88px 96px 36px'; @endphp
-    <div class="grid items-center px-4 bg-surface-2 border-b text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold"
-         style="grid-template-columns: {{ $gridCols }}; column-gap: 14px; height: 34px; border-color: var(--border-strong);">
+    <div class="bg-surface-2 border-b text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold"
+         style="display: grid; align-items: center; padding: 0 16px; height: 34px; grid-template-columns: {{ $gridCols }}; column-gap: 14px; border-color: var(--border-strong);">
         <span></span>
         <span>SKU</span>
         <span>Бренд / артикул</span>
@@ -121,10 +121,17 @@
              class="border-b border-border-subtle last:border-b-0 {{ $cat->is_active ? '' : 'opacity-60' }}">
 
             {{-- ─── Summary row ─── --}}
-            <div class="grid items-center px-4 py-3 cursor-pointer transition-colors hover:bg-[var(--bg-hover)]"
-                 :class="open && 'bg-[var(--bg-selected)]'"
-                 :style="open && 'box-shadow: inset 3px 0 0 var(--sky-500); cursor: default;'"
-                 style="grid-template-columns: {{ $gridCols }}; column-gap: 14px; min-height: 68px;"
+            {{-- Все стили через inline `:style` reactive — НЕ через
+                 `:class="open && 'bg-[var(--..)]'"`. Tailwind tree-shake'ит
+                 arbitrary классы которых нет в исходниках на build, и в Alpine
+                 :class они появляются только в runtime → CSS-правил нет.
+                 `:style` всегда применяется напрямую через DOM, минуя CSS. --}}
+            <div :style="open
+                    ? 'display: grid; align-items: center; padding: 12px 16px; min-height: 68px; grid-template-columns: {{ $gridCols }}; column-gap: 14px; background: var(--bg-selected); box-shadow: inset 3px 0 0 var(--sky-500); cursor: default;'
+                    : 'display: grid; align-items: center; padding: 12px 16px; min-height: 68px; grid-template-columns: {{ $gridCols }}; column-gap: 14px; cursor: pointer; transition: background 120ms;'"
+                 style="display: grid; align-items: center; padding: 12px 16px; min-height: 68px; grid-template-columns: {{ $gridCols }}; column-gap: 14px; cursor: pointer;"
+                 @mouseenter="if (!open) $el.style.background = 'var(--bg-hover)'"
+                 @mouseleave="if (!open) $el.style.background = ''"
                  @click="open = !open"
                  title="Кликните, чтобы развернуть карточку товара">
 
@@ -242,15 +249,17 @@
             </div>
 
             {{-- ─── Expanded detail (280px + 1fr) ─── --}}
-            {{-- inline display:none — pre-render hide до Alpine init,
-                 чтобы expanded не отображался для всех row'ов до загрузки JS.
-                 [x-cloak]{display:none} в app.css — second line of defense
-                 (на случай если view-cache ещё старый). --}}
-            <div x-show="open" x-cloak x-transition.opacity.duration.150ms
-                 class="px-4 pb-4"
-                 style="display: none; background: var(--bg-selected); box-shadow: inset 3px 0 0 var(--sky-500); border-bottom: 1px solid var(--border-subtle);">
+            {{-- Используем Tailwind `hidden` (display:none) вместо x-show.
+                 Initial: class="hidden" — скрыто прямо в HTML, до Alpine.
+                 Alpine реактивно через :class убирает hidden когда open=true.
+                 Раньше с `x-show + x-transition + inline display:none` после
+                 Livewire morph случались race conditions — блок «расползался»
+                 после повторного rendering. --}}
+            <div :class="open ? '' : 'hidden'"
+                 class="hidden px-4 pb-4"
+                 style="background: var(--bg-selected); box-shadow: inset 3px 0 0 var(--sky-500); border-bottom: 1px solid var(--border-subtle);">
 
-                <div class="grid gap-5 py-2" style="grid-template-columns: 280px 1fr;">
+                <div style="display: grid; grid-template-columns: 280px 1fr; gap: 20px; padding: 8px 0;">
 
                     {{-- ─── Левая колонка: фото + meta + price panel ─── --}}
                     <div class="flex flex-col gap-2">
@@ -368,8 +377,8 @@
                             @endphp
 
                             @foreach($kvRows as [$k, $v])
-                                <div class="grid items-baseline border-b border-border-subtle last:border-b-0"
-                                     style="grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
+                                <div class="border-b border-border-subtle last:border-b-0"
+                                     style="display: grid; align-items: baseline; grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
                                     <div class="text-[10px] font-semibold uppercase tracking-wider text-fg-3 pt-0.5">{{ $k }}</div>
                                     <div class="text-[13px] font-medium text-fg-1">{!! $v !!}</div>
                                 </div>
@@ -377,8 +386,8 @@
 
                             {{-- Multi-brand row (если >1) --}}
                             @if(count($allBrands) > 1)
-                                <div class="grid items-baseline border-b border-border-subtle last:border-b-0"
-                                     style="grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
+                                <div class="border-b border-border-subtle last:border-b-0"
+                                     style="display: grid; align-items: baseline; grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
                                     <div class="text-[10px] font-semibold uppercase tracking-wider text-fg-3 pt-0.5">Все бренды ({{ count($allBrands) }})</div>
                                     <div class="text-[13px] font-medium text-fg-1 flex flex-wrap gap-1">
                                         @foreach($allBrands as $b)
@@ -391,8 +400,8 @@
 
                             {{-- All OEM articles --}}
                             @if(! empty($allArticles))
-                                <div class="grid items-baseline border-b border-border-subtle last:border-b-0"
-                                     style="grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
+                                <div class="border-b border-border-subtle last:border-b-0"
+                                     style="display: grid; align-items: baseline; grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
                                     <div class="text-[10px] font-semibold uppercase tracking-wider text-fg-3 pt-0.5">OEM-артикулы ({{ count($allArticles) }})</div>
                                     <div class="text-[13px] font-medium text-fg-1 flex flex-wrap gap-1">
                                         @foreach($allArticles as $a)
@@ -406,8 +415,8 @@
 
                             {{-- All units (если >1) --}}
                             @if(count($allUnits) > 1)
-                                <div class="grid items-baseline border-b border-border-subtle last:border-b-0"
-                                     style="grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
+                                <div class="border-b border-border-subtle last:border-b-0"
+                                     style="display: grid; align-items: baseline; grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
                                     <div class="text-[10px] font-semibold uppercase tracking-wider text-fg-3 pt-0.5">Все узлы ({{ count($allUnits) }})</div>
                                     <div class="text-[13px] font-medium text-fg-1 flex flex-wrap gap-1">
                                         @foreach($allUnits as $u)
@@ -419,8 +428,8 @@
 
                             {{-- Description (отдельное поле от comment) --}}
                             @if($cat->description)
-                                <div class="grid items-baseline border-b border-border-subtle last:border-b-0"
-                                     style="grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
+                                <div class="border-b border-border-subtle last:border-b-0"
+                                     style="display: grid; align-items: baseline; grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
                                     <div class="text-[10px] font-semibold uppercase tracking-wider text-fg-3 pt-0.5">Описание</div>
                                     <div class="text-[12.5px] text-fg-2 whitespace-pre-line leading-relaxed">{{ $cat->description }}</div>
                                 </div>
@@ -428,8 +437,7 @@
 
                             {{-- source_hash (для отладки импорта) --}}
                             @if($cat->source_hash)
-                                <div class="grid items-baseline"
-                                     style="grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
+                                <div style="display: grid; align-items: baseline; grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 14px;">
                                     <div class="text-[10px] font-semibold uppercase tracking-wider text-fg-3 pt-0.5">Source hash</div>
                                     <div class="mono text-[11px] text-fg-3 break-all">{{ $cat->source_hash }}</div>
                                 </div>
