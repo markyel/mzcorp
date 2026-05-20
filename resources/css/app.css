@@ -19,6 +19,13 @@
     code, kbd, samp, pre, .mono {
         font-family: var(--font-mono);
     }
+    /* Alpine x-cloak — скрываем элементы до инициализации Alpine.
+       Без этого правила x-show="open" с initial state false показывает
+       блок на короткое время / навсегда если Alpine падает с ошибкой.
+       Касается catalog/search expanded rows и любых других x-show. */
+    [x-cloak] {
+        display: none !important;
+    }
 }
 
 @layer components {

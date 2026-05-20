@@ -104,11 +104,14 @@
             ));
             $allUnits = is_array($cat->units) ? array_values(array_filter($cat->units, fn ($u) => is_string($u) && trim($u) !== '')) : [];
 
-            // Размеры
+            // Размеры — фильтруем null И 0 (в импорте часто 0 = «не указано»).
+            // rtrim сам по себе делает '0.000' → '' что давало баг «0 × 0 × 0 мм».
             $catDimsLabeled = [];
             foreach (['A','B','C','D','E','F'] as $k) {
                 $v = $cat->{'size_' . strtolower($k)};
-                if ($v !== null) $catDimsLabeled[$k] = rtrim(rtrim((string) $v, '0'), '.');
+                if ($v !== null && (float) $v > 0) {
+                    $catDimsLabeled[$k] = rtrim(rtrim((string) $v, '0'), '.');
+                }
             }
             $dimSummary = implode(' × ', $catDimsLabeled);
         @endphp
@@ -239,9 +242,13 @@
             </div>
 
             {{-- ─── Expanded detail (280px + 1fr) ─── --}}
+            {{-- inline display:none — pre-render hide до Alpine init,
+                 чтобы expanded не отображался для всех row'ов до загрузки JS.
+                 [x-cloak]{display:none} в app.css — second line of defense
+                 (на случай если view-cache ещё старый). --}}
             <div x-show="open" x-cloak x-transition.opacity.duration.150ms
                  class="px-4 pb-4"
-                 style="background: var(--bg-selected); box-shadow: inset 3px 0 0 var(--sky-500); border-bottom: 1px solid var(--border-subtle);">
+                 style="display: none; background: var(--bg-selected); box-shadow: inset 3px 0 0 var(--sky-500); border-bottom: 1px solid var(--border-subtle);">
 
                 <div class="grid gap-5 py-2" style="grid-template-columns: 280px 1fr;">
 
