@@ -113,9 +113,9 @@ enum MatchPath: string
         ?string $parsedArticle = null,
         ?string $parsedName = null,
     ): self {
-        // (1) HARD OVERRIDE: M-SKU pattern в article ИЛИ name. Клиент явно
-        //     прислал M-артикул — это всегда internal_sku, независимо от
-        //     того, как именно автомат потом его сматчил в каталоге.
+        // (1a) HARD OVERRIDE: M-SKU pattern в article ИЛИ name. Клиент явно
+        //      прислал M-артикул — это всегда internal_sku, независимо от
+        //      того, как именно автомат потом его сматчил в каталоге.
         if (is_string($parsedArticle) && self::looksLikeInternalSku($parsedArticle)) {
             return self::InternalSku;
         }
@@ -123,8 +123,27 @@ enum MatchPath: string
             return self::InternalSku;
         }
 
-        // (2) Автомат-резолвер успешно сматчил → берём прямой результат.
+        // (1b) HARD OVERRIDE: matched_token из catalog_match — это что
+        //      именно сматчилось в каталоге через brand_article. M+\d{4,}
+        //      — формат уникальный для нашего MyZip-каталога, не существует
+        //      у других производителей. Значит клиент явно дал M-арт
+        //      (parser его потерял в parsed_article/name → name был
+        //      подменён каталожным name, но matched_token хранит исходный
+        //      токен из текста). Cat_sku сам по себе всегда M-SKU
+        //      (наш внутренний SKU) и не различает M-арт vs OEM.
+        //
+        //      Заполняется в CatalogResolutionService::matchByArticle для
+        //      новых matches. Для старых items до этого коммита поля нет —
+        //      override не сработает (fallback на старую логику).
         $method = $payload['catalog_match']['method'] ?? null;
+        $matchedToken = $payload['catalog_match']['matched_token'] ?? null;
+        if ($method === 'B_brand_article'
+            && is_string($matchedToken)
+            && self::looksLikeInternalSku($matchedToken)) {
+            return self::InternalSku;
+        }
+
+        // (2) Автомат-резолвер успешно сматчил → берём прямой результат.
         $matched = match ($method) {
             'A_internal_sku' => self::InternalSku,
             'B_brand_article' => self::BrandArticle,

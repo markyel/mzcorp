@@ -181,7 +181,21 @@ class CatalogResolutionService
                 continue;
             }
 
-            $this->applyCatalogToItem($item, $catalog, promoteStatus: false, matchMethod: 'B_brand_article');
+            $this->applyCatalogToItem(
+                $item,
+                $catalog,
+                promoteStatus: false,
+                matchMethod: 'B_brand_article',
+                extraPayload: [
+                    // matched_token нужен complexity-определителю
+                    // (MatchPath::detect) чтобы понять: клиент дал M-арт
+                    // (matched_token = M\d+) или OEM-код (всё прочее).
+                    // cat_sku сам по себе всегда M (наш внутренний SKU)
+                    // и не различает эти случаи.
+                    'matched_token' => $tok,
+                    'matched_token_normalized' => $norm,
+                ],
+            );
 
             Log::info('CatalogResolutionService: item matched (B:brand-article)', [
                 'request_item_id' => $item->id,
