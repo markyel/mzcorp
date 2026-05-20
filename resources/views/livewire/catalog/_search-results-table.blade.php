@@ -249,15 +249,16 @@
             </div>
 
             {{-- ─── Expanded detail (280px + 1fr) ─── --}}
-            {{-- Используем Tailwind `hidden` (display:none) вместо x-show.
-                 Initial: class="hidden" — скрыто прямо в HTML, до Alpine.
-                 Alpine реактивно через :class убирает hidden когда open=true.
-                 Раньше с `x-show + x-transition + inline display:none` после
-                 Livewire morph случались race conditions — блок «расползался»
-                 после повторного rendering. --}}
-            <div :class="open ? '' : 'hidden'"
-                 class="hidden px-4 pb-4"
-                 style="background: var(--bg-selected); box-shadow: inset 3px 0 0 var(--sky-500); border-bottom: 1px solid var(--border-subtle);">
+            {{-- x-show управляет display напрямую через DOM. Initial inline
+                 style="display: none" — скрывает блок ДО Alpine init.
+                 При open=true Alpine выставит style.display = '' (показ).
+                 БЕЗ x-transition — оно создавало race conditions с
+                 inline display:none при Livewire morph.
+                 БЕЗ :class="... hidden ..." — Alpine :class со строкой
+                 не удаляет существующие классы из обычного `class`. --}}
+            <div x-show="open"
+                 class="px-4 pb-4"
+                 style="display: none; background: var(--bg-selected); box-shadow: inset 3px 0 0 var(--sky-500); border-bottom: 1px solid var(--border-subtle);">
 
                 <div style="display: grid; grid-template-columns: 280px 1fr; gap: 20px; padding: 8px 0;">
 
