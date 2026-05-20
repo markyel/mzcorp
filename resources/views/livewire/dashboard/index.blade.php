@@ -315,19 +315,19 @@
                                         };
                                     @endphp
                                     <div class="flex items-center gap-3 text-[12.5px]">
-                                        <div class="w-32 shrink-0 text-fg-2 flex items-center gap-1.5">
-                                            <span>{{ $row['icon'] }}</span>
-                                            <span>{{ $row['label'] }}</span>
-                                            <span class="text-fg-3 text-[10.5px]">×{{ $row['weight'] }}</span>
+                                        <div class="w-48 shrink-0 text-fg-2 flex items-center gap-1.5 whitespace-nowrap">
+                                            <span class="shrink-0">{{ $row['icon'] }}</span>
+                                            <span class="shrink-0">{{ $row['label'] }}</span>
+                                            <span class="text-fg-3 text-[10.5px] shrink-0">×{{ $row['weight'] }}</span>
                                         </div>
                                         <div class="flex-1 h-2.5 rounded-full bg-neutral-100 overflow-hidden">
                                             <div class="h-full {{ $rowTone }}"
                                                  style="width: {{ round($row['total'] * 100 / $cMaxTotal) }}%"></div>
                                         </div>
-                                        <div class="w-16 text-right text-fg-1 mono tnum">
+                                        <div class="w-16 text-right text-fg-1 mono tnum shrink-0">
                                             {{ $row['total'] }}
                                         </div>
-                                        <div class="w-20 text-right text-[10.5px] text-fg-3"
+                                        <div class="w-24 text-right text-[10.5px] text-fg-3 whitespace-nowrap shrink-0"
                                              title="С фото: {{ $row['with_photo'] }}; без фото: {{ $row['no_photo'] }}">
                                             <span class="text-emerald-700">📷 {{ $row['with_photo'] }}</span>
                                             <span class="mx-0.5">·</span>
