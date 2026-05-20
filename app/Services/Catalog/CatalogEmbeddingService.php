@@ -799,29 +799,78 @@ class CatalogEmbeddingService
     /**
      * Проверка бренда позиции против всех брендов каталога (primary `brand`
      * + secondary `brands[]`). Public — используется в diagnose CLI.
+     *
+     * Логика:
+     *   1. Собираем ВСЕ нормализованные токены клиента (включая ex-brand из
+     *      скобок и обрезку организационных префиксов) — normalizeBrandTokens.
+     *   2. Аналогично для каталога — `brand` + `brands[]`.
+     *   3. Match по любому пересечению: если хоть один client-token совпадает
+     *      с любым catalog-token → safe.
+     *   4. Fallback для опечаток (ASCII-only): Levenshtein ≤ 1 на токенах
+     *      ≥ 5 символов, ≤ 2 на токенах ≥ 8 символов. Cyrillic пропускаем
+     *      (PHP levenshtein byte-level — не работает корректно на UTF-8).
      */
     public function isBrandSafe(RequestItem $item, CatalogItem $catalog): bool
     {
-        $itemBrand = $this->normalizeBrand($item->brand?->name ?: $item->parsed_brand);
-        if ($itemBrand === '') {
+        $itemTokens = $this->normalizeBrandTokens($item->brand?->name ?: $item->parsed_brand);
+        if (empty($itemTokens)) {
             return true;
         }
-        $catalogBrands = [];
+
+        $catalogTokens = [];
         if ($catalog->brand !== null && $catalog->brand !== '') {
-            $catalogBrands[] = $this->normalizeBrand($catalog->brand);
+            foreach ($this->normalizeBrandTokens($catalog->brand) as $t) {
+                $catalogTokens[] = $t;
+            }
         }
         if (is_array($catalog->brands)) {
             foreach ($catalog->brands as $b) {
                 if (is_string($b) && $b !== '') {
-                    $catalogBrands[] = $this->normalizeBrand($b);
+                    foreach ($this->normalizeBrandTokens($b) as $t) {
+                        $catalogTokens[] = $t;
+                    }
                 }
             }
         }
-        $catalogBrands = array_values(array_unique(array_filter($catalogBrands, fn ($b) => $b !== '')));
-        if (empty($catalogBrands)) {
-            return true; // в каталоге нет ни одного бренда — не блокируем
+        $catalogTokens = array_values(array_unique(array_filter($catalogTokens, fn ($x) => $x !== '')));
+        if (empty($catalogTokens)) {
+            return true; // в каталоге бренда нет — не блокируем
         }
-        return in_array($itemBrand, $catalogBrands, true);
+
+        // Exact intersection.
+        foreach ($itemTokens as $iTok) {
+            if (in_array($iTok, $catalogTokens, true)) {
+                return true;
+            }
+        }
+
+        // ASCII-only fuzzy match: «Shneider» vs «Schneider» (Levenshtein 1).
+        // PHP levenshtein на UTF-8 (Cyrillic) считает байты, не символы —
+        // даёт ложные срабатывания. Поэтому только латиница+цифры.
+        foreach ($itemTokens as $iTok) {
+            if (! preg_match('/^[A-Z0-9]+$/', $iTok)) {
+                continue;
+            }
+            $iLen = strlen($iTok);
+            if ($iLen < 5) {
+                continue;
+            }
+            foreach ($catalogTokens as $cTok) {
+                if (! preg_match('/^[A-Z0-9]+$/', $cTok)) {
+                    continue;
+                }
+                $cLen = strlen($cTok);
+                if (abs($iLen - $cLen) > 2) {
+                    continue;
+                }
+                $allowedDist = (min($iLen, $cLen) >= 8) ? 2 : 1;
+                if (levenshtein($iTok, $cTok) <= $allowedDist) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -986,11 +1035,38 @@ class CatalogEmbeddingService
         // split что в matchByArticle. Если хоть один токен совпадает с
         // catalog.brand_article — пропускаем (значит B-step тоже бы сматчил,
         // и мы согласны с этим).
+        //
+        // Prefix-relax: если один нормализованный артикул — префикс другого
+        // с разницей в длине ≤5 символов И минимальной длиной ≥4 — считаем
+        // safe. Это покрывает кейсы:
+        //   - «БУАД-4-25» (клиент дал family) ↔ «БУАД-4-25.8» (catalog SKU
+        //     конкретного исполнения): БУАД425 ⊂ БУАД4258, diff=1 → safe;
+        //   - «LC1D258» (клиент) ↔ «LC1D258F7C» (catalog Schneider with
+        //     модификатор для напряжения): LC1D258 ⊂ LC1D258F7C, diff=3 → safe.
+        // Разные модели остаются blocked:
+        //   - «6016669154» vs «6088167008» (Bernstein) — не префикс ✗;
+        //   - «SCE2G» vs «SCE02» (Allen-Bradley) — не префикс ✗;
+        //   - «22214» vs «22220» (подшипник) — не префикс ✗.
+        // Финальный verify делает LLM-rerank — даже при prefix-safe LLM
+        // отклонит если semantically different.
         $tokens = preg_split('/\s*[,\/]\s*/', $itemArticle) ?: [$itemArticle];
         foreach ($tokens as $tok) {
             $norm = CatalogImportService::normalizeArticle($tok);
-            if ($norm !== null && $norm !== '' && $norm === $catalogNorm) {
+            if ($norm === null || $norm === '') {
+                continue;
+            }
+            if ($norm === $catalogNorm) {
                 return true;
+            }
+            // Prefix relax
+            $iLen = mb_strlen($norm);
+            $cLen = mb_strlen($catalogNorm);
+            $minLen = min($iLen, $cLen);
+            $diff = abs($iLen - $cLen);
+            if ($minLen >= 4 && $diff <= 5) {
+                if (str_starts_with($catalogNorm, $norm) || str_starts_with($norm, $catalogNorm)) {
+                    return true;
+                }
             }
         }
 
@@ -1066,21 +1142,68 @@ class CatalogEmbeddingService
         });
     }
 
+    /** Legacy single-token нормализация — backwards compat. */
     private function normalizeBrand(?string $b): string
     {
-        if ($b === null) {
-            return '';
+        $tokens = $this->normalizeBrandTokens($b);
+        return $tokens[0] ?? '';
+    }
+
+    /**
+     * Multi-token brand normalization. Возвращает ВСЕ первые слова, по
+     * которым позиция/каталог могут быть идентифицированы как один бренд.
+     *
+     * Обрабатывает:
+     *   1. Организационные префиксы (ООО/ОАО/ЗАО/АО/ИП/ПАО/OOO/LLC/LTD/INC/CO)
+     *      — пропускаются, берётся следующее слово.
+     *      «ООО "Лифт-Комплекс ДС"» → «ЛИФТ»;
+     *      «Лифт-Комплекс ДС (LK)» → «ЛИФТ».
+     *
+     *   2. Ребрендинг «BRAND (ex OLDBRAND)» — добавляет оба бренда в результат.
+     *      «AVIRE (ex MEMCO)» → ['AVIRE', 'MEMCO'].
+     *
+     *   3. Опечатки (только ASCII): не делается тут, обрабатывается в
+     *      isBrandSafe через Levenshtein на equal-length tokens.
+     *
+     * @return list<string>
+     */
+    private function normalizeBrandTokens(?string $b): array
+    {
+        if ($b === null || trim($b) === '') {
+            return [];
         }
+
+        $variants = [];
+
+        // (ex BRAND) — отдельный alias из скобок (ребрендинг).
+        if (preg_match('/\(ex\s+([^)]+)\)/iu', $b, $m)) {
+            foreach ($this->normalizeBrandTokens($m[1]) as $v) {
+                $variants[] = $v;
+            }
+        }
+
+        // Primary tokenization: убираем содержимое всех скобок (там либо
+        // ex-brand уже распарсен, либо описание-комментарий), затем чистим
+        // пунктуацию.
         $s = mb_strtoupper(trim($b));
+        $sNoParen = (string) preg_replace('/\([^)]*\)/u', ' ', $s);
+        $sNoParen = (string) preg_replace('/[^\p{L}\p{N}]+/u', ' ', $sNoParen);
+        $words = preg_split('/\s+/', trim($sNoParen)) ?: [];
 
-        // Защита от мелких различий между «Schneider Electric» и «Schneider».
-        // Берём первое слово, без знаков пунктуации. На больших каталогах
-        // может сливать разные бренды с общим словом (например, «GENERAL
-        // Electric» vs «GENERAL Motors»), но для текущего домена лифтового
-        // оборудования это редкая ситуация.
-        $s = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $s);
-        $first = explode(' ', trim((string) $s))[0] ?? '';
+        // Skip leading organizational prefixes. Cyrillic + Latin варианты.
+        $orgPrefixes = [
+            'ООО', 'ОАО', 'ЗАО', 'АО', 'ПАО', 'ИП', 'НПО',
+            'OOO', 'OAO', 'ZAO', 'PAO',
+            'LLC', 'LTD', 'INC', 'CO', 'GMBH', 'AG', 'SA', 'SAS', 'BV', 'NV',
+        ];
+        while (! empty($words) && in_array($words[0], $orgPrefixes, true)) {
+            array_shift($words);
+        }
 
-        return $first;
+        if (! empty($words) && $words[0] !== '') {
+            $variants[] = $words[0];
+        }
+
+        return array_values(array_unique(array_filter($variants, fn ($v) => $v !== '')));
     }
 }
