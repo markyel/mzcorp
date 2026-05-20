@@ -917,6 +917,18 @@ class CatalogEmbeddingService
             'catalog.name_match.rerank_model',
             config('services.openai.clarification_model', 'gpt-4o-mini'),
         );
+
+        // Санитизация client article: если весь parsed_article — локальные
+        // коды поставщика (LW-...), передаём LLM-у как «пусто». Иначе
+        // LLM воспринимает LW-код как искомый идентификатор и отклоняет
+        // всех кандидатов потому что catalog brand_article (TAA*/GAA*/
+        // DAA*) не совпадает — а LW это вообще не OEM, в каталоге его нет
+        // by design. См. #2350 / #2344.
+        $clientArticle = $item->parsed_article;
+        if (is_string($clientArticle) && LocalSupplierCodePattern::isAllLocal($clientArticle)) {
+            $clientArticle = null;
+        }
+
         try {
             $result = $this->chat->chat(
                 [
@@ -924,7 +936,7 @@ class CatalogEmbeddingService
                     ['role' => 'user', 'content' => \App\Prompts\Catalog\RerankCatalogMatchPrompt::userMessage(
                         $item->brand?->name ?: $item->parsed_brand,
                         $item->parsed_name,
-                        $item->parsed_article,
+                        $clientArticle,
                         $payload,
                     )],
                 ],
@@ -974,6 +986,12 @@ class CatalogEmbeddingService
      */
     public function validateMatchWithLlm(RequestItem $item, CatalogItem $catalog, float $similarity): ?array
     {
+        // Санитизация LW-кодов из client article (см. rerankCandidatesWithLlm).
+        $clientArticle = $item->parsed_article;
+        if (is_string($clientArticle) && LocalSupplierCodePattern::isAllLocal($clientArticle)) {
+            $clientArticle = null;
+        }
+
         try {
             $result = $this->chat->chat(
                 [
@@ -981,7 +999,7 @@ class CatalogEmbeddingService
                     ['role' => 'user', 'content' => ValidateCatalogMatchPrompt::userMessage(
                         $item->brand?->name ?: $item->parsed_brand,
                         $item->parsed_name,
-                        $item->parsed_article,
+                        $clientArticle,
                         $catalog->brand,
                         $catalog->name,
                         $catalog->brand_article,
