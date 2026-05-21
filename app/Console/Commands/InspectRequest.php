@@ -2,6 +2,8 @@
 
 namespace App\Console\Commands;
 
+use App\Models\EmailAttachment;
+use App\Models\EmailMessage;
 use App\Models\Kb\ManufacturerBrand;
 use App\Models\Request;
 use Illuminate\Console\Command;
@@ -55,27 +57,54 @@ class InspectRequest extends Command
 
             $qa = $it->quality_assessment_payload ?? [];
             if (! empty($qa)) {
-                $this->line('  qa.resolved_brand_source: '.var_export($qa['resolved_brand_source'] ?? null, true));
                 $this->line('  qa.resolved_brand_id: '.var_export($qa['resolved_brand_id'] ?? null, true));
-                $this->line('  qa.available_parameters.lift_brand: '.var_export(($qa['available_parameters']['lift_brand'] ?? null), true));
-                $this->line('  qa.available_parameters keys: '.implode(', ', array_keys((array) ($qa['available_parameters'] ?? []))));
+                $this->line('  qa.detailed_category: '.json_encode($qa['detailed_category'] ?? null, JSON_UNESCAPED_UNICODE));
+                $this->line('  qa.detailed_category_decision: '.json_encode($qa['detailed_category_decision'] ?? null, JSON_UNESCAPED_UNICODE));
+                $this->line('  qa.article_classification: '.json_encode($qa['article_classification'] ?? null, JSON_UNESCAPED_UNICODE));
+                $this->line('  qa.available_parameters: '.json_encode($qa['available_parameters'] ?? null, JSON_UNESCAPED_UNICODE));
                 $this->line('  qa.extracted_parameters: '.json_encode($qa['extracted_parameters'] ?? null, JSON_UNESCAPED_UNICODE));
-                $this->line('  qa.decision_log: '.json_encode($qa['decision_log'] ?? null, JSON_UNESCAPED_UNICODE));
-                $this->line('  qa.photos_attached_by_n8n: '.var_export($qa['photos_attached_by_n8n'] ?? null, true));
+                $this->line('  qa.inherited_parameters: '.json_encode($qa['inherited_parameters'] ?? null, JSON_UNESCAPED_UNICODE));
+                $this->line('  qa.item_field_parameters: '.json_encode($qa['item_field_parameters'] ?? null, JSON_UNESCAPED_UNICODE));
+                $this->line('  qa.catalog_match: '.json_encode($qa['catalog_match'] ?? null, JSON_UNESCAPED_UNICODE));
+                $this->line('  qa.rule_evaluation: '.json_encode($qa['rule_evaluation'] ?? null, JSON_UNESCAPED_UNICODE));
+                $this->line('  qa.questions_to_ask: '.json_encode($qa['questions_to_ask'] ?? null, JSON_UNESCAPED_UNICODE));
+                $this->line('  qa.reason: '.var_export($qa['reason'] ?? null, true));
                 $this->line('  qa keys: '.implode(', ', array_keys((array) $qa)));
             } else {
                 $this->line('  qa: <empty>');
+            }
+
+            // Привязанное фото
+            if ($it->image_attachment_id) {
+                $att = EmailAttachment::find($it->image_attachment_id);
+                if ($att) {
+                    $this->line('  attachment #'.$att->id.': '.$att->filename
+                        .' ('.$att->mime_type.', '.$att->size_bytes.' bytes)'
+                        .' from email_message_id='.$att->email_message_id);
+                }
             }
             $this->line('');
         }
 
         $this->line('=== EMAIL THREAD ===');
-        foreach ($req->emailMessages()->orderBy('id')->get() as $m) {
-            $body = $m->body_text ?? $m->body_plain ?? $m->body ?? '';
-            $bodyClean = mb_substr(preg_replace('/\s+/u', ' ', $body), 0, 1500);
-            $this->line("--- msg #{$m->id} | {$m->received_at?->format('d.m H:i')} | from {$m->from_email} ---");
+        $messages = EmailMessage::query()
+            ->where('related_request_id', $req->id)
+            ->orderBy('sent_at')
+            ->orderBy('id')
+            ->get();
+        foreach ($messages as $m) {
+            $body = $m->body_plain ?? '';
+            if ($body === '' && $m->body_html) {
+                $body = strip_tags($m->body_html);
+            }
+            $bodyClean = mb_substr(preg_replace('/\s+/u', ' ', $body), 0, 2000);
+            $this->line("--- msg #{$m->id} | sent_at={$m->sent_at?->format('d.m H:i')} | dir={$m->direction?->value} | from {$m->from_email} ---");
             $this->line("  subject: {$m->subject}");
             $this->line('  body: '.$bodyClean);
+            $this->line('  attachments:');
+            foreach ($m->attachments as $a) {
+                $this->line('    #'.$a->id.' '.$a->filename.' ('.$a->mime_type.', '.$a->size_bytes.' B)');
+            }
             $this->line('');
         }
 
