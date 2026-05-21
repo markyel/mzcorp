@@ -1294,8 +1294,11 @@
                         ->where('request_id', $req->id)
                         ->where('is_active', false)
                         ->count();
-                    $canEditItems = auth()->id() === $req->assigned_user_id
-                        || auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'secretary']);
+                    // 2026-05-21: используем единый Request::isAccessibleBy() —
+                    // покрывает assigned, ROP/director/secretary И acting-менеджера
+                    // через активную делегацию. Раньше acting-через-делегирование
+                    // не получал slots/chips (canEditItems=false) — фикс UX.
+                    $canEditItems = $req->isAccessibleBy(auth()->user());
                 @endphp
                 <div class="ds-card">
                     <div class="ds-card-header">

@@ -361,8 +361,13 @@
     {{-- ====== EXPANDED-ONLY CONTENT ====== --}}
     @if($isExpanded)
 
-    {{-- SLOTS GRID — 4 колонки (скрыто для catalog-bound: уточнять нечего) --}}
-    @if(! $isCatalogBound)
+    {{-- SLOTS GRID — 4 колонки.
+         2026-05-21: убран гейт `! $isCatalogBound` — для catalog-bound
+         позиций slots тоже полезны: базовые (категория/бренд/артикул/кол-во)
+         показывают что известно с ✓, KB-derived (если есть identification
+         category) — что ещё стоит уточнить у клиента (например, марка лифта,
+         фото шильдика). Привязка к каталогу не отменяет необходимости
+         уточнить контекст применения. --}}
     <div class="grid grid-cols-2 md:grid-cols-4 bg-border-subtle gap-px">
         @foreach($slots as $slot)
             @php
@@ -395,10 +400,12 @@
             </div>
         @endforeach
     </div>
-    @endif {{-- /SLOTS not catalog-bound --}}
 
-    {{-- QUICK-CHIPS — универсальные шаблоны (скрыто для catalog-bound). --}}
-    @if(($canEditItems ?? false) && ! $isCatalogBound)
+    {{-- QUICK-CHIPS — универсальные шаблоны для любого менеджера/РОПа.
+         2026-05-21: убран гейт `! $isCatalogBound` — даже если позиция
+         сматчена с каталогом, менеджер может хотеть запросить фото
+         шильдика, марку/серию лифта или уточнить количество. --}}
+    @if(($canEditItems ?? false))
         @php
             $quickChips = [
                 ['icon' => '📷', 'label' => 'Фото шильдика',
