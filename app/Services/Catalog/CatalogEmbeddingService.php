@@ -369,6 +369,40 @@ class CatalogEmbeddingService
     }
 
     /**
+     * Разбить запрос на токены для per-token trigram поиска.
+     *
+     * Каждый токен:
+     *   · lowercase
+     *   · стрипнуты [\s\-_./,] (соответствует name-нормализации в индексе)
+     *   · длина ≥3 (короткие — шум)
+     *
+     * Для русских слов ≥4 букв добавляем stem-вариант (отрезано окончание):
+     *   «цепь» → «цеп», «ролика» → «ролик».
+     *
+     * @return list<string>
+     */
+    private function extractTrigramTokens(string $queryText): array
+    {
+        $parts = preg_split('/[\s,;]+/u', mb_strtolower($queryText)) ?: [];
+        $out = [];
+        foreach ($parts as $p) {
+            $norm = (string) preg_replace('/[\s\-_.\/,]/u', '', $p);
+            if (mb_strlen($norm) < 3) {
+                continue;
+            }
+            $out[] = $norm;
+            // Если чисто-русское слово ≥4 букв — добавляем stem-форму.
+            if (mb_strlen($norm) >= 4 && preg_match('/^[а-яё]+$/u', $norm)) {
+                $stem = $this->stemRussianWord($norm);
+                if ($stem !== $norm && mb_strlen($stem) >= 3) {
+                    $out[] = $stem;
+                }
+            }
+        }
+        return array_values(array_unique($out));
+    }
+
+    /**
      * Простое стемирование русских слов: отрезает типичные окончания
      * существительных/прилагательных. Не лингвистически идеально, но
      * закрывает 90% морфологических казусов trigram-поиска
@@ -595,22 +629,15 @@ class CatalogEmbeddingService
     private function trigramTopN(string $queryText, int $limit): array
     {
         $lower = mb_strtolower($queryText);
-        // Дефис/пробел-очищенный lower — для случая «Плата ПКЛ-32» против
-        // «Плата контроллера лифта типа ПКЛ32-04»: word_similarity на raw
-        // даёт ~0.1 из-за разных триграмм вокруг дефиса, на nosep — ~0.8.
-        // 2026-05-21: запятая добавлена в strip-набор. Catalog name содержит
-        // десятичные с запятой («L119,7»), а pg_trgm word_similarity разрывает
-        // строку на «слова» по non-alnum символам — query «L119,7» ловился
-        // хуже чем «L119 7». Унифицируем: стрипаем запятую и в query, и в SQL
-        // (см. regexp_replace ниже). GIN-индекс с тем же паттерном —
-        // миграция add_dehyphenated_name_trgm_index_with_comma.
         $lowerNoSep = (string) preg_replace('/[\s\-_.\/,]/u', '', $lower);
-        // 2026-05-21: морфология русского. word_similarity на «цепь t135» против
-        // «цепи t135» падает ниже 0.6 (порог) из-за разных триграмм вокруг
-        // последнего символа: цеп/епь/пь_ vs цеп/епи/пи_. PostgreSQL native
-        // путь через to_tsvector('russian', ...) — большая миграция; здесь
-        // делаем простой PHP-side стем: режем типичные окончания у слов ≥4
-        // букв. «цепь» и «цепи» уходят как «цеп», обе формы матчатся.
+        // 2026-05-21: токенизация. Раньше word_similarity дёргался на
+        // конкатенированной строке вида «цепьt135l1197» против длинного
+        // catalog name. Когда токены разнесены в name (между «цеп» и
+        // «l1197» 30+ символов мусора), extent растягивается, similarity
+        // падает до 0.2 — ниже порога. Лекарство: разрезаем query на
+        // токены, считаем word_similarity для каждого ОТДЕЛЬНО, берём MAX.
+        // Тогда «t135» в name = 1.0, «l1197» = 1.0, «цеп» (stem) ~0.8.
+        $tokens = $this->extractTrigramTokens($queryText);
         $lowerStemmed = $this->stemRussianPhrase($lowerNoSep);
         // normalizeArticle: uppercase + strip [\s\-_./]. Совместимо с тем
         // как мы импортируем brand_article_normalized в CatalogImportService.
@@ -656,45 +683,61 @@ class CatalogEmbeddingService
             // с GIN trgm индексом, обновляемый PG-триггером. Заменяет
             // jsonb_array_elements_text seq scan (~1500мс) на индексный
             // word_similarity lookup (~десятки мс).
-            // Два варианта lower-формы — raw и стеммированная (русские окончания
-            // обрезаны). word_similarity берёт MAX из двух — устойчиво и к
-            // ошибкам морфологии («цепь» vs «цепи»), и к артикулам без
-            // стемминга. WHERE-фильтр через OR на обеих формах.
-            $useStem = $lowerStemmed !== '' && $lowerStemmed !== $lowerNoSep;
+            // Если токенов нет (запрос слишком короткий / только разделители) —
+            // fallback на старый whole-string подход.
+            if ($tokens === []) {
+                $tokens = [$lowerNoSep];
+            }
 
+            // PG-array literal: {"tok1","tok2",...}.
+            $pgTokensArr = '{' . implode(',', array_map(
+                fn ($t) => '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $t) . '"',
+                $tokens,
+            )) . '}';
+
+            // Per-token similarity. MAX в SELECT по всем токенам — лучший
+            // одиночный hit считается рейтингом позиции. EXISTS в WHERE —
+            // достаточно одному токену пройти порог <% (default 0.6) на
+            // dehyphenated name или (опционально) articles_search.
             $sql = "
                 SELECT id AS catalog_id,
-                       GREATEST(
-                           word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g'))
-                           " . ($useStem ? ",
-                           word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g'))" : "") . "
-                           " . ($useArticles ? ",
-                           CASE
-                               WHEN articles_search IS NOT NULL AND articles_search <> ''
-                               THEN word_similarity(?, articles_search)
-                               ELSE 0
-                           END" : "") . "
+                       (
+                           SELECT MAX(s_val) FROM (
+                               SELECT MAX(word_similarity(t, regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g'))) AS s_val
+                               FROM unnest(?::text[]) AS t
+                               " . ($useArticles ? "
+                               UNION ALL
+                               SELECT
+                                   CASE
+                                       WHEN articles_search IS NOT NULL AND articles_search <> ''
+                                       THEN MAX(word_similarity(t, articles_search))
+                                       ELSE 0
+                                   END
+                               FROM unnest(?::text[]) AS t" : "") . "
+                           ) sub
                        ) AS s
                 FROM catalog_items
                 WHERE is_active = true
                   AND (
-                       ? <% regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g')
-                       " . ($useStem ? "
-                       OR ? <% regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g')" : "") . "
+                       EXISTS (
+                           SELECT 1 FROM unnest(?::text[]) AS t
+                           WHERE t <% regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g')
+                       )
                        " . ($useArticles ? "
-                       OR (articles_search IS NOT NULL AND ? <% articles_search)" : "") . "
+                       OR (articles_search IS NOT NULL AND EXISTS (
+                           SELECT 1 FROM unnest(?::text[]) AS t
+                           WHERE t <% articles_search
+                       ))" : "") . "
                   )
                 ORDER BY s DESC
                 LIMIT ?
             ";
 
             $bindings = [];
-            $bindings[] = $lowerNoSep;
-            if ($useStem) $bindings[] = $lowerStemmed;
-            if ($useArticles) $bindings[] = $norm;
-            $bindings[] = $lowerNoSep;
-            if ($useStem) $bindings[] = $lowerStemmed;
-            if ($useArticles) $bindings[] = $norm;
+            $bindings[] = $pgTokensArr;
+            if ($useArticles) $bindings[] = $pgTokensArr;
+            $bindings[] = $pgTokensArr;
+            if ($useArticles) $bindings[] = $pgTokensArr;
             $bindings[] = $limit;
 
             $rows = DB::select($sql, $bindings);
