@@ -436,6 +436,36 @@ class CatalogEmbeddingService
         $upperArr = $mkPgArr($tokens);
         $lowerArr = $mkPgArr(array_map(mb_strtolower(...), $tokens));
 
+        // 2026-05-21: точные совпадения по нашему внутреннему SKU должны
+        // быть в выдаче первыми. Раньше WHERE не включало поле sku — поиск
+        // по «M02016» не находил соответствующую catalog-карточку, потому
+        // что её sku лежит в `sku`, а не в name/article/articles_search.
+        $exactSkus = array_values(array_filter($tokens, fn ($t) => preg_match('/^M\d{4,}$/i', $t) === 1));
+        $exactSkusUpper = array_map(fn ($s) => mb_strtoupper($s), $exactSkus);
+
+        $hits = []; // catalog_id => max similarity
+
+        // Phase A — exact-sku-match (similarity=1.0). Дешевле всего:
+        // sku имеет btree-индекс, точное равенство — instant.
+        if (! empty($exactSkusUpper)) {
+            try {
+                $exactRows = DB::select(
+                    "SELECT id AS catalog_id FROM catalog_items
+                     WHERE is_active = true AND UPPER(sku) = ANY (?::text[])
+                     LIMIT ?",
+                    ['{' . implode(',', $exactSkusUpper) . '}', $limit],
+                );
+                foreach ($exactRows as $r) {
+                    $hits[(int) $r->catalog_id] = 1.0;
+                }
+            } catch (\Throwable $e) {
+                Log::info('CatalogEmbeddingService: exact-sku search failed', [
+                    'error' => $e->getMessage(),
+                    'tokens' => $exactSkusUpper,
+                ]);
+            }
+        }
+
         try {
             // WHERE expressions точно совпадают с GIN trgm индексами:
             //   - catalog_items_name_nosep_trgm_idx — для name (lower nosep)
@@ -443,41 +473,52 @@ class CatalogEmbeddingService
             //   - catalog_items_brands_search_trgm_idx — для brands_search
             // ILIKE ANY (array) идёт по индексу за десятки мс на 35K rows.
             //
-            // articles_search (миграция 2026_05_18_160000) — денормализованное
-            // text-поле со всеми OEM-артикулами через `|`. Раньше тут не
-            // дёргалось (комментарий ссылался на медленный jsonb_array_elements
-            // seq scan), но с GIN trgm индексом — быстро. Это критично:
-            // вторичные артикулы (Otis F0380CP3 при brand_article=L-8 у M01231)
-            // не ловятся trigramTopN при ≤5 цифрах И не лежат в name.
-            //
-            // brands_search (миграция 2026_05_19_180000) — UPPER(BRAND1|...).
-            // Покрывает поиск по бренду в SIMILAR-режиме (OEM-кроссы аналогов).
+            // 2026-05-21: добавлен lower(sku) ILIKE ANY — для частичного
+            // совпадения внутреннего SKU (например «02016» найдёт M02016).
+            // Exact-match по sku уже обработан выше с приоритетом 1.0;
+            // тут только partial substring (0.95) если sku содержит токен.
             $rows = DB::select(
                 "
                 SELECT id AS catalog_id
                 FROM catalog_items
                 WHERE is_active = true
                   AND (
-                       regexp_replace(lower(name), '[\\s\\-_./]', '', 'g') ILIKE ANY (?::text[])
+                       lower(sku) ILIKE ANY (?::text[])
+                       OR regexp_replace(lower(name), '[\\s\\-_./]', '', 'g') ILIKE ANY (?::text[])
                        OR brand_article_normalized ILIKE ANY (?::text[])
                        OR (articles_search IS NOT NULL AND articles_search ILIKE ANY (?::text[]))
                        OR (brands_search IS NOT NULL AND brands_search ILIKE ANY (?::text[]))
                   )
                 LIMIT ?
                 ",
-                [$lowerArr, $upperArr, $upperArr, $upperArr, $limit],
+                [$lowerArr, $lowerArr, $upperArr, $upperArr, $upperArr, $limit],
             );
+            foreach ($rows as $r) {
+                $catId = (int) $r->catalog_id;
+                // Не понижаем оценку exact-sku-match'ам.
+                if (! isset($hits[$catId])) {
+                    $hits[$catId] = 0.95;
+                }
+            }
         } catch (\Throwable $e) {
             Log::info('CatalogEmbeddingService: code-token search failed', [
                 'error' => $e->getMessage(),
                 'tokens' => $tokens,
             ]);
+        }
+
+        if ($hits === []) {
             return [];
         }
 
+        // Сортируем по similarity DESC, чтобы exact-match шёл первым.
+        arsort($hits);
         $out = [];
-        foreach ($rows as $r) {
-            $out[] = ['catalog_id' => (int) $r->catalog_id, 'similarity' => 0.95];
+        foreach ($hits as $catId => $score) {
+            $out[] = ['catalog_id' => $catId, 'similarity' => $score];
+            if (count($out) >= $limit) {
+                break;
+            }
         }
         return $out;
     }
