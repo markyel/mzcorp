@@ -74,8 +74,38 @@ class MailTryMove extends Command
         }
         $this->line('');
 
-        // 2. SELECT source folder (write mode)
-        $this->line('--- 2. SELECT source folder (write mode) ---');
+        // 2. Гарантировать существование целевой папки (рекурсивно по разделителю).
+        $this->line('--- 2. Ensure target folder ---');
+        try {
+            $existing = $client->getFolderByPath($target, soft_fail: true);
+            if ($existing) {
+                $this->info('  ✓ Папка ' . $target . ' уже существует');
+            } else {
+                // Создание по частям: 'MZ|Test' → сначала 'MZ', потом 'MZ|Test'.
+                $delimiter = str_contains($target, '|') ? '|' : '/';
+                $parts = explode($delimiter, $target);
+                $current = '';
+                foreach ($parts as $part) {
+                    if ($part === '') {
+                        continue;
+                    }
+                    $current = $current === '' ? $part : $current . $delimiter . $part;
+                    $check = $client->getFolderByPath($current, soft_fail: true);
+                    if (! $check) {
+                        $client->createFolder($current);
+                        $this->info('  + Создана: ' . $current);
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->error('  Ensure folder failed: ' . $e->getMessage());
+            $client->disconnect();
+            return self::FAILURE;
+        }
+        $this->line('');
+
+        // 3. SELECT source folder (write mode)
+        $this->line('--- 3. SELECT source folder (write mode) ---');
         try {
             $client->openFolder($source, force_select: true);
             $this->info('  ✓ SELECT ' . $source . ' OK');
@@ -86,10 +116,10 @@ class MailTryMove extends Command
         }
         $this->line('');
 
-        // 3. Проверка наличия письма по UID
-        $this->line('--- 3. FETCH flags по UID ---');
+        // 4. Проверка наличия письма по UID
+        $this->line('--- 4. FETCH flags по UID ---');
         try {
-            $flagsResp = $connection->getFlags($uid)->validatedData();
+            $flagsResp = $connection->flags($uid, IMAP::ST_UID)->validatedData();
             $flags = $flagsResp[$uid] ?? null;
             if ($flags === null) {
                 $this->warn("  ✗ UID {$uid} не найден в {$source}");
@@ -101,8 +131,8 @@ class MailTryMove extends Command
         }
         $this->line('');
 
-        // 4. MOVE
-        $this->line('--- 4. UID MOVE ---');
+        // 5. MOVE
+        $this->line('--- 5. UID MOVE ---');
         try {
             $resp = $connection->moveMessage($target, $uid, null, IMAP::ST_UID);
             $ok = $resp->boolean();
@@ -118,10 +148,10 @@ class MailTryMove extends Command
         }
         $this->line('');
 
-        // 5. Контрольная проверка
-        $this->line('--- 5. POST-CHECK: письмо ещё в source? ---');
+        // 6. Контрольная проверка
+        $this->line('--- 6. POST-CHECK: письмо ещё в source? ---');
         try {
-            $flagsResp = $connection->getFlags($uid)->validatedData();
+            $flagsResp = $connection->flags($uid, IMAP::ST_UID)->validatedData();
             $flags = $flagsResp[$uid] ?? null;
             if ($flags === null) {
                 $this->info("  ✓ UID {$uid} удалён из {$source} — MOVE сработал");
