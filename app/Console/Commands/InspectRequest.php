@@ -78,9 +78,13 @@ class InspectRequest extends Command
             if ($it->image_attachment_id) {
                 $att = EmailAttachment::find($it->image_attachment_id);
                 if ($att) {
+                    $diskRoot = config('filesystems.disks.'.($att->disk ?: 'local').'.root');
+                    $absPath = $diskRoot ? rtrim($diskRoot, '/').'/'.$att->file_path : $att->file_path;
                     $this->line('  attachment #'.$att->id.': '.$att->filename
                         .' ('.$att->mime_type.', '.$att->size_bytes.' bytes)'
                         .' from email_message_id='.$att->email_message_id);
+                    $this->line('    disk: '.$att->disk.' | file_path: '.$att->file_path);
+                    $this->line('    abs path: '.$absPath);
                 }
             }
             $this->line('');
@@ -111,9 +115,10 @@ class InspectRequest extends Command
         $this->line('=== ManufacturerBrand «ЩЛЗ» ===');
         ManufacturerBrand::query()
             ->where(function ($q) {
-                $q->where('name', 'like', '%ЩЛЗ%')
-                    ->orWhere('name', 'like', '%ербин%')
-                    ->orWhere('aliases::text', 'like', '%ЩЛЗ%');
+                $q->where('name', 'ilike', '%ЩЛЗ%')
+                    ->orWhere('name', 'ilike', '%ербин%')
+                    ->orWhereRaw("aliases::text ilike '%ЩЛЗ%'")
+                    ->orWhereRaw("aliases::text ilike '%ербин%'");
             })
             ->get(['id', 'name', 'aliases', 'specialization_tags', 'is_active'])
             ->each(function ($b) {
