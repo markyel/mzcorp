@@ -2,6 +2,7 @@
 
 namespace App\Services\Kb;
 
+use App\Models\EmailMessage;
 use App\Models\Kb\RequestContext;
 use App\Models\Request;
 use App\Models\RequestItem;
@@ -48,10 +49,16 @@ class RequestContextAnalysisService
             ])
             ->all();
 
+        // 2026-05-21: у Request нет полей source_body / source_subject —
+        // тело письма лежит в EmailMessage. Раньше промпт получал пустую
+        // строку и всегда возвращал equipment_units: []. Подтягиваем body
+        // и subject из связанного входящего сообщения.
+        [$emailBody, $emailSubject] = $this->resolveEmailContent($request);
+
         try {
             $messages = RequestContextAnalysisPrompt::build(
-                (string) ($request->source_body ?? ''),
-                $request->source_subject,
+                $emailBody,
+                $emailSubject,
                 $itemsBrief
             );
 
@@ -122,6 +129,32 @@ class RequestContextAnalysisService
             ]);
             return $context;
         }
+    }
+
+    /**
+     * Достаём текст и тему исходного входящего письма для подачи в промпт.
+     *
+     * Приоритет: body_plain, иначе strip_tags(body_html). Если письма нет
+     * (или email_message_id у заявки пуст) — возвращаем пустые строки;
+     * промпт сам корректно вернёт equipment_units=[].
+     *
+     * @return array{0: string, 1: ?string}  [body, subject]
+     */
+    private function resolveEmailContent(Request $request): array
+    {
+        if (! $request->email_message_id) {
+            return ['', $request->subject];
+        }
+        $msg = EmailMessage::find($request->email_message_id);
+        if (! $msg) {
+            return ['', $request->subject];
+        }
+        $body = (string) ($msg->body_plain ?? '');
+        if (trim($body) === '' && ! empty($msg->body_html)) {
+            $body = trim(strip_tags((string) $msg->body_html));
+        }
+        $subject = $msg->subject ?: $request->subject;
+        return [$body, $subject];
     }
 
     private function safeJsonDecode(string $content): ?array

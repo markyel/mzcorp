@@ -83,16 +83,18 @@ class ParseDryRun extends Command
                 ])
                 ->all();
 
-            $body = (string) ($req->source_body ?? '');
-            $subject = $req->source_subject;
-
-            if ($body === '') {
-                $message = EmailMessage::find($req->email_message_id);
-                $body = (string) ($message?->body_plain ?? '');
-                $subject = $subject ?? $message?->subject;
-                if ($body !== '') {
-                    $this->warn('  source_body заявки пуст — fallback на body_plain исходного письма');
+            // 2026-05-21: source_body у Request не существует как поле —
+            // тянем body / subject из связанного inbound сообщения. Этот
+            // же путь использует RequestContextAnalysisService.
+            $body = '';
+            $subject = $req->subject;
+            $msg = $req->email_message_id ? EmailMessage::find($req->email_message_id) : null;
+            if ($msg) {
+                $body = (string) ($msg->body_plain ?? '');
+                if (trim($body) === '' && ! empty($msg->body_html)) {
+                    $body = trim(strip_tags((string) $msg->body_html));
                 }
+                $subject = $msg->subject ?: $subject;
             }
 
             $this->line('  body length: '.mb_strlen($body));
