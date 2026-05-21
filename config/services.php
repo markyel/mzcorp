@@ -354,6 +354,23 @@ return [
         'brand_address' => '127549, Москва, ул. Бибиревская, д.2, кор.1, офис 104',
         'brand_phone' => '+7 (495) 565 37 72',
         'brand_email' => 'info@myZiP.ru',
+
+        // Поля для email-подписи (2026-05-21, EmailSignatureService).
+        // Общая часть всех писем менеджеров; персональная часть берётся
+        // из User (name, name_en, email, phone_extension, mobile_phone).
+        'signature' => [
+            'tagline_ru' => 'Мой ЗиП · Запчасти для лифтов и эскалаторов',
+            'tagline_en' => 'Spare parts for elevators and escalators',
+            'office_phone' => '+7 (495) 565-37-72',
+            'free_phone' => '8 (800) 333-64-72',
+            'general_email' => 'info@myzip.ru',
+            'websites' => ['myzip.ru', 'mylift.ru'],
+            // URL логотипа для HTML-версии. Должен быть публично доступен
+            // (email-клиенты тянут <img src> сами). Если null — HTML-подпись
+            // рендерится без лого.
+            'logo_url' => env('SIGNATURE_LOGO_URL', 'https://mzcorp.ru/assets/logo-myzip-email.png'),
+            'brand_color' => '#D32027',
+        ],
     ],
 
     'catalog_sync' => [

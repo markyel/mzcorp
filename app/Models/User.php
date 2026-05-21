@@ -32,9 +32,11 @@ class User extends Authenticatable
      */
     protected $fillable = [
         'name',
+        'name_en',
         'email',
         'phone',
         'phone_extension',
+        'mobile_phone',
         'password',
         'email_signature',
         'unavailable_from',

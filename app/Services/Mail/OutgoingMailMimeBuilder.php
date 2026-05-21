@@ -27,8 +27,10 @@ use Symfony\Component\Mime\Email as SymfonyEmail;
  */
 class OutgoingMailMimeBuilder
 {
-    public function __construct(private readonly MailQuoteBuilder $quoteBuilder)
-    {
+    public function __construct(
+        private readonly MailQuoteBuilder $quoteBuilder,
+        private readonly EmailSignatureService $signatureService,
+    ) {
     }
 
     /**
@@ -201,17 +203,18 @@ class OutgoingMailMimeBuilder
     }
 
     /**
+     * 2026-05-21: подпись теперь рендерится EmailSignatureService —
+     * шаблонизированная версия с общей частью (компания, ЭДО, info@,
+     * websites) из config('services.company.signature') и персональной
+     * (User.name, name_en, email, phone_extension, mobile_phone).
+     * Legacy User.email_signature (free-text) если заполнен — берётся
+     * как override без шаблона.
+     *
      * @return array{html: string, plain: string}
      */
     private function formatSignature(?User $author): array
     {
-        $raw = trim((string) ($author?->email_signature ?? ''));
-        if ($raw === '') {
-            return ['html' => '', 'plain' => ''];
-        }
-        $plain = "\n-- \n" . $raw;
-        $html = '<p style="color:#666;">-- <br>' . nl2br(htmlspecialchars($raw, ENT_QUOTES, 'UTF-8')) . '</p>';
-        return ['html' => $html, 'plain' => $plain];
+        return $this->signatureService->render($author);
     }
 
     /**

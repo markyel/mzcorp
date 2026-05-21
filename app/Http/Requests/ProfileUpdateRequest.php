@@ -18,6 +18,11 @@ class ProfileUpdateRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:255'],
+            // 2026-05-21: поля для шаблонной email-подписи v2.
+            'name_en' => ['nullable', 'string', 'max:128'],
+            'phone' => ['nullable', 'string', 'max:32'],
+            'phone_extension' => ['nullable', 'string', 'max:16'],
+            'mobile_phone' => ['nullable', 'string', 'max:32'],
             'email' => [
                 'required',
                 'string',
@@ -26,7 +31,8 @@ class ProfileUpdateRequest extends FormRequest
                 'max:255',
                 Rule::unique(User::class)->ignore($this->user()->id),
             ],
-            // Phase 1.9: подпись для исходящих писем из карточки заявки.
+            // Legacy plain-text override. Если заполнен — EmailSignatureService
+            // отдаёт его как есть, шаблон не применяется.
             'email_signature' => ['nullable', 'string', 'max:5000'],
         ];
     }
