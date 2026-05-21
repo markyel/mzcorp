@@ -275,6 +275,148 @@ sudo supervisorctl restart mzcorp-worker:*
 
 ## Журнал сессий
 
+### Сессия 2026-05-21 (ночь) — пред-релизный sprint: UID MOVE, admin-role, catalog FK, поиск, photo proxy
+
+**Контекст:** подготовка к боевому запуску. Тестовый ящик `mail@myzip.ru` + тестовые менеджеры (man1/man2/man3) надо заменить реальной почтой `info@myzip.ru` + боевыми менеджерами. По ходу всплыли проблемы с производительностью поиска, кодировкой вложений, дубликатами писем в IMAP.
+
+#### 1. Mail routing — атомарный UID MOVE (RFC 6851)
+
+Раньше `MailFolderRouter::routeToManager` делал только COPY (без MOVE/EXPUNGE — webklex 6.x давал «BAD CLIENTBUG EXPUNGE Wrong session state» при попытке чистого MOVE/COPY+EXPUNGE на Yandex). Оригинал оставался в INBOX, помечался `\Seen`. В UI секретарь видел дубликат: одно письмо в INBOX (read) + одно в `MZ|Lastname` (unread).
+
+**Проверено через `mail:try-move`** (новая команда): Yandex 360 поддерживает `MOVE` в CAPABILITY и атомарно выполняет UID MOVE — оригинал физически удаляется из INBOX, копия с новым UID появляется в target. Ответ: `OK [COPYUID <uidv> <src> <dst>] / N EXPUNGE / OK UID MOVE Completed.`.
+
+**Защита от ложного OK:** Yandex возвращает «OK [CLIENTBUG] UID MOVE Completed (no messages).» с boolean=true даже когда UID не найден. Реальный признак успеха — наличие `COPYUID` в ответе. Без COPYUID считаем no-op, БД не трогаем.
+
+После успешного MOVE обновляем `email_messages.folder = $targetPath` + `imap_uid = $newUid` (распарсенный из COPYUID).
+
+**Также в SyncMailboxFolderJob:**
+- POST-FIX (откат `\Seen` после body-fetch) теперь только для **личных ящиков** (`MailboxType::Personal`). На общих не трогаем флаги, чтобы не сломать routing для секретаря.
+- 6-й параметр `Connection::store` — это флаг режима UID/MSGN (`IMAP::ST_UID=1`). Раньше передавали `null` → команда уходила обычным STORE по sequence number, могло попадать на чужие письма.
+
+**Commits:** `460bdcc`, `bd27bce`, `bb87afe`, `8965879`, `431ba7d`, `0270fa3`, `da94338`.
+
+#### 2. Email signature v2 — шаблонная подпись для всех outbound
+
+`EmailSignatureService` собирает HTML+plain подпись из `config('services.company.signature')` (tagline, телефоны, ЭДО, websites) + User-поля (`name`, `name_en`, `phone`, `phone_extension`, `mobile_phone`). Logo встроен как `data:image/svg+xml;base64,...` (внешний URL `logo_url` блокируется почтовыми клиентами).
+
+Profile-форма расширена: `/profile` теперь редактирует `name_en` + телефоны менеджера. Legacy `email_signature` поле осталось как override (если заполнено — отдаём как есть).
+
+`OutgoingMailMimeBuilder::formatSignature()` теперь делегирует в `EmailSignatureService::render()`.
+
+**Commits:** `4ce55b8`, `47481bc`, `6ebe02b`.
+
+#### 3. Роль `admin` + UI «Ящики»
+
+Новая роль в `Role` enum + миграция `add_admin_role`:
+- Admin видит всё что директорат (route middleware `role:head_of_sales,director,admin`)
+- Только admin может назначать/редактировать admin-учёток. РОП/директор не видят admin-юзеров вообще в `/dashboard/managers` (фильтр в `Index::users`).
+- Защита в `Editor::save()` + `mount()` от обхода UI.
+
+**Страница `/dashboard/mailboxes`** (admin-only) — управление shared-ящиками:
+- Список с состоянием (active, last_sync, error, tokens/expiry)
+- Создание: OAuth flow с verification-code ИЛИ app-пароль
+- Per-row: тест соединения, активация/деактивация, переподключение, обновление credentials
+
+Подключение и активация/деактивация основной почты доступны строго админу — РОП/директор не могут случайно остановить распределение заявок.
+
+**Где admin был добавлен** (везде, где раньше director имел доступ):
+- `routes/web.php` — два middleware-блока
+- `Pool`, `Detail`, `ReassignDialog`, `Quotations\Editor`, `Dashboard\Index`, `Admin\Settings\Index`
+- `Models\Request::isAccessibleBy`
+- `Services\Request\{State,Pause,Merge}Service::ensure...`
+- `Services\Catalog\RequestItemEditor::ensureCanEdit`
+- `Controllers\QuotationPdfController`, `AttachmentController`
+- `views/livewire/requests/detail.blade.php` (все hasAnyRole)
+
+**Команда `system:cleanup-test-data`** (`--apply`, директораты+админы сохраняются автоматически). Удаляет операционные таблицы, юзеров без role=director|admin, их личные ящики; деактивирует shared-ящики; сохраняет каталог/KB/правила/настройки.
+
+**Commits:** `db1fe44`, `7fa6c87`, `0d6f254`.
+
+#### 4. Catalog FK `equipment_category_id` + backfill через rule + LLM
+
+**Проблема:** фильтр «Тип запчасти» в каталог-поиске работал по `synonyms substring-matching` против `name + unit_name + part_type` каталога. Морфологически хрупко — «тяговые цепи» в каталоге не матчилось с «тяговая цепь» synonym. M33763 при выборе категории #14 «Тяговая цепь эскалатора» выбрасывался из выдачи.
+
+**Решение:**
+- Миграция `add_equipment_category_id_to_catalog_items` (FK, nullable, ON DELETE SET NULL, GIN index).
+- `CatalogItem::equipmentCategory()` relation.
+- `CatalogItemCategorizer` сервис — двухэтапный:
+  1. Rule-based: substring synonym match с приоритизацией по числу хитов. Имя категории = +3, synonym = +1. Тие-брейк → LLM.
+  2. LLM (gpt-4o-mini, JSON response_format) с полным списком активных KB-категорий. Confidence < 0.6 → NULL.
+- `ClassifyCatalogItemPrompt` — system с правилами (приоритет part_type, разделение оборудование/деталь, комплекты → основная деталь, бренд игнорируется).
+- Команда `kb:backfill-categories`:
+  - `--apply` / `--dry-run` (default)
+  - `--rule-only` (без LLM)
+  - `--reclassify`, `--limit`, `--sku`
+  - **`--by-part-type`** — группирует SKU по уникальным part_type, делает 1 LLM-вызов на тип → bulk UPDATE всех SKU. Для нашего каталога 30k SKU → 193 уникальных part_type → 50× меньше вызовов (~$0.04 вместо $2).
+- `chunkById` вместо `chunk` (классический Laravel bug: при апдейте записей в WHERE NULL обычный `chunk()` теряет строки).
+- Search filter переписан: точный FK-матч → если `equipment_category_id` стоит и != target → режем. Fallback на substring synonym match для legacy SKU с NULL FK.
+
+**Результат:** ~99% покрытия каталога после rule + LLM. M33763 → #14 «Тяговая цепь эскалатора».
+
+**Commits:** `31c1761`, `e83a5e9`, `56b2f87`.
+
+#### 5. Catalog search — морфология, токенизация, фильтр шума
+
+Несколько последовательных оптимизаций по реальным жалобам:
+
+1. **Русские окончания** (`stemRussianPhrase`/`stemRussianWord`): «цепь» / «цепи» / «цепью» → «цеп» для слов ≥4 букв. Не трогает латиницу/цифры.
+2. **Запятая в strip-наборе**: `regexp_replace(name, '[\s\-_./,]', '', 'g')` + миграция пересоздаёт GIN trgm индекс с новым паттерном. Кейс «L119,7».
+3. **Per-word нормализация** (commit `8ea59f3`): убран `\s` из strip-set. Раньше `name_norm` склеивал всё в одно слово, word_similarity коротких токенов (`t135`, `l1197`) против такой простыни давал 0.4-0.5. Теперь пробелы между словами сохраняются, каждый токен ищется отдельно.
+4. **Per-token trigram через UNNEST** — заменено на **literal-OR** (commit `75f5949`): EXISTS UNNEST не использовал GIN индекс (nested loop), давал 1.6с. После переписывания на `'tok1' <% expr OR 'tok2' <% expr OR ...` — 77мс (×20).
+5. **AVG вместо MAX** для скоринга (commit `843c7d8`): позиция с большим числом совпавших токенов ранжируется выше. Раньше M21366 «Цепь батарея роликовая огибная» (один токен «цепь» 1.0) бил M33763 (4 токена по 0.75-1.0).
+6. **Vector noise filter ≥0.50** (commit `c173759`): если позиция нашлась ТОЛЬКО через vector (без code/trgm), требуем cosine ≥ 0.50. Multi-source не фильтруется. Кейс: «барабан» → «башмак кабины» на 0.30 (отсекается).
+
+Также добавлено: `Schedule::command('catalog:embed')` через 5 минут после каждого `catalog:sync-from-url` (раньше не было в scheduler → embedding для новых SKU не создавался, M33763 не находился через vector).
+
+**Финальные цифры:** `trigramTopN 77мс` (после прогрева), `vectorTopN 293мс`. Hybrid pool возвращает M33763 на позиции #2 при запросе «Цепь T-135 L119,7» с sim=0.92.
+
+**Commits:** `ff060fd`, `e48cd01`, `420bd12`, `843c7d8`, `8ea59f3`, `75f5949`, `c173759`.
+
+#### 6. Catalog photo proxy с дисковым кэшем
+
+`catalog_items.photo_url` указывает на внешний `https://mylift.ru/photo.php?id=GUID` — 302 redirect на CDN. ~500-800мс на фото × 20 thumb в диалоге = 10+ секунд waterfall.
+
+Route `GET /img/catalog/{id}` → `CatalogPhotoProxyController`:
+- При первом обращении скачивает с внешнего URL, сохраняет в `storage/app/public/catalog-photos/{id}.bin` + Content-Type рядом.
+- На повторных запросах отдаёт прямо с диска + `Cache-Control: public, max-age=2592000, immutable` (30 дней) — браузер тоже кеширует.
+- Безопасность: route принимает только `catalog_item.id` из БД, photo_url берётся оттуда (SSRF исключён).
+- Placeholder 1×1 PNG если внешний сервис недоступен (TTL 1 час).
+
+Blade-views (`_search-results-table.blade.php`, `item-catalog-link-dialog.blade.php`) переведены на `route('catalog.photo', $cat->id)` для thumbnail'ов. Original photo_url оставлен в `href` ссылок «полный размер».
+
+**Commit:** `900d15f`.
+
+#### 7. Mojibake в именах вложений
+
+Кейс с liftway-ботом: filename присылается как сырые UTF-8 байты в Content-Disposition без RFC 2047 wrap → webklex интерпретирует как Latin-1 → «Đ¾Ñ‚Ñ‡ĐµÑ‚.pdf» вместо «отчет.pdf».
+
+`MessagePersister::recoverMojibake` — после `decodeMimeHeader` проверяет признаки mojibake («Ð»/«Ñ»/«Đ» + диакритика рядом). Если есть — re-encode в Latin-1 (получаем сырые байты), читаем как UTF-8. Если результат содержит кириллицу — возвращаем.
+
+Не трогает корректные UTF-8/ASCII имена. Применяется при персисте новых писем; существующие битые имена чинятся командой `mail:redecode-attachment-names-from-raw`.
+
+**Commit:** `f7cabfb`.
+
+#### Готово к запуску
+
+| Что | Статус |
+|---|---|
+| Mail routing UID MOVE | ✅ задеплоен |
+| Email signature v2 | ✅ задеплоен |
+| Role admin + UI ящиков | ✅ задеплоен |
+| Catalog FK + backfill | ✅ ~99% покрытие |
+| Catalog search (morphology + tokens + filter) | ✅ M33763 на #2, 77мс |
+| Photo proxy | ✅ |
+| Mojibake recovery в attachment names | ✅ |
+| **Cleanup test data** | ⏳ ждёт apply |
+| Подключение info@myzip.ru | ⏳ ждёт админа через UI |
+| Реальные менеджеры | ⏳ |
+
+**Открытые вопросы:**
+- Vector embedding для M33763 даёт всего cosine 0.45 (он не в top-100 vector). Не критично т.к. trigram его поднял. На будущее: посмотреть `buildEmbeddableText` — что эмбеддится для каталога, можно ли улучшить (добавить артикулы, расширить контекст).
+- 77 part_type без категории после LLM прогона — возможно нужно расширять KB или понижать confidence threshold.
+
+---
+
 ### Сессия 2026-05-21 (вечер) — brand-hallucination фикс, Path A/B/C + Photo Vision classifier + UI
 
 **Контекст:** проверка на реальной заявке `M-2026-1147` (Лифт Schindler №7909814, кнопка вызова + масленка) обнаружила цепочку багов:
