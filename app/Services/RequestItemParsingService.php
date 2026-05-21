@@ -297,12 +297,34 @@ class RequestItemParsingService
             ? max(1, (int) $item['invoice_index'])
             : 1;
 
+        // Мерные позиции: length / length_unit от LLM-парсера приходят
+        // структурированно (ParseItemsPrompt v6). Раньше вторая размерность
+        // лежала текстом в note → supplier_note. Теперь:
+        //   length      → parsed_length (decimal:3)
+        //   length_unit → parsed_length_unit (string)
+        // Защита от мусора: length должен быть положительное число, иначе null.
+        $rawLength = $item['length'] ?? null;
+        $length = (is_numeric($rawLength) && (float) $rawLength > 0)
+            ? (float) $rawLength
+            : null;
+        $rawLengthUnit = $item['length_unit'] ?? null;
+        $lengthUnit = ($length !== null && is_string($rawLengthUnit) && trim($rawLengthUnit) !== '')
+            ? trim($rawLengthUnit)
+            : null;
+        // Если length есть, но length_unit пустой — сбрасываем length тоже,
+        // не сохраняем «43.56» без единицы измерения.
+        if ($lengthUnit === null) {
+            $length = null;
+        }
+
         return [
             'name' => mb_substr(trim($item['name'] ?? ''), 0, 250),
             'brand' => !empty($item['brand']) ? trim($item['brand']) : null,
             'article' => !empty($item['article']) ? trim($item['article']) : null,
             'qty' => max(0.01, (float) ($item['qty'] ?? 1)),
             'unit' => trim($item['unit'] ?? 'шт.'),
+            'length' => $length,
+            'length_unit' => $lengthUnit,
             'category' => $category,
             'note' => !empty($item['note']) ? trim($item['note']) : null,
             'invoice_index' => $invoiceIndex,

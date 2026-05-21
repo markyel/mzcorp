@@ -42,6 +42,11 @@ class RequestItemEditor
         'parsed_article',
         'parsed_qty',
         'parsed_unit',
+        // Мерные позиции — вторая размерность qty × length и override
+        // единицы расчёта total (см. RequestItem::effectiveQty()).
+        'parsed_length',
+        'parsed_length_unit',
+        'billing_unit',
         'supplier_note',
     ];
 
@@ -1051,12 +1056,9 @@ class RequestItemEditor
     private function normalizeFieldValue(string $field, mixed $value): mixed
     {
         if ($value === '' || $value === null) {
-            return match ($field) {
-                'parsed_qty' => null,
-                default => null,
-            };
+            return null;
         }
-        if ($field === 'parsed_qty') {
+        if ($field === 'parsed_qty' || $field === 'parsed_length') {
             // decimal:3 cast в модели; принимаем строку с запятой/точкой.
             $normalized = (float) str_replace(',', '.', (string) $value);
             return $normalized > 0 ? $normalized : null;
@@ -1067,6 +1069,7 @@ class RequestItemEditor
             'parsed_name' => 500,
             'parsed_article' => 500,
             'supplier_note' => 1000,
+            'parsed_unit', 'parsed_length_unit', 'billing_unit' => 16,
             default => 250,
         });
     }

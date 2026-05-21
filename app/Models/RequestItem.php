@@ -25,6 +25,14 @@ class RequestItem extends Model
         'parsed_article',
         'parsed_qty',
         'parsed_unit',
+        // Мерные позиции: вторая физическая размерность (длина/масса/объём
+        // на единицу qty). Например, поручень 43.560 м × 2 шт →
+        // parsed_qty=2, parsed_unit='шт.', parsed_length=43.560, parsed_length_unit='м'.
+        // Менеджер может переключить billing_unit='м' для пересчёта total
+        // как price × qty × length (см. effectiveQty()).
+        'parsed_length',
+        'parsed_length_unit',
+        'billing_unit',
         // Phase 2.0+: coarse-категория от парсера (одна из 19 значений
         // App\Constants\CoarseCategories::ALL). Заполняется ParseItemsPrompt v5,
         // используется CategoryRefinementService для активации LLM-pathway.
@@ -63,6 +71,7 @@ class RequestItem extends Model
     {
         return [
             'parsed_qty' => 'decimal:3',
+            'parsed_length' => 'decimal:3',
             'is_active' => 'boolean',
             'quality_assessment_payload' => 'array',
             'suggestion_confidence' => 'float',
@@ -77,6 +86,69 @@ class RequestItem extends Model
     public function isPendingSuggestion(): bool
     {
         return $this->suggestion_status === 'pending';
+    }
+
+    /**
+     * Мерная позиция = парсер вытащил вторую размерность (например,
+     * «2 шт × 43.56 м» для поручня). Используется для UI-highlight'а и
+     * для активации editable billing_unit dropdown'а.
+     */
+    public function isMeasured(): bool
+    {
+        return $this->parsed_length !== null
+            && (float) $this->parsed_length > 0
+            && $this->parsed_length_unit !== null;
+    }
+
+    /**
+     * Единица, по которой считается total. По умолчанию = parsed_unit.
+     * Менеджер может переопределить через billing_unit (обычно меняет
+     * на parsed_length_unit, чтобы цена per-meter × длина).
+     */
+    public function effectiveUnit(): ?string
+    {
+        return $this->billing_unit ?: $this->parsed_unit;
+    }
+
+    /**
+     * Эффективное количество для расчёта total:
+     *   - если billing_unit совпадает с parsed_length_unit → qty × length
+     *     (цена за метр, нужно посчитать общую длину);
+     *   - иначе → просто qty (цена за штуку/комплект, длина игнорируется).
+     */
+    public function effectiveQty(): float
+    {
+        $qty = (float) ($this->parsed_qty ?? 0);
+        if ($qty <= 0) {
+            return 0.0;
+        }
+
+        if ($this->isMeasured()
+            && $this->effectiveUnit() !== null
+            && mb_strtolower(trim((string) $this->effectiveUnit()))
+                === mb_strtolower(trim((string) $this->parsed_length_unit))) {
+            return $qty * (float) $this->parsed_length;
+        }
+
+        return $qty;
+    }
+
+    /**
+     * Total = catalogItem->price × effectiveQty(). Null если нет цены
+     * или нет qty. Точно та же формула что в _item-row.blade.php / _position-card.blade.php
+     * — централизована здесь, чтобы UI и сервисы считали одинаково.
+     */
+    public function total(): ?float
+    {
+        $ci = $this->catalogItem;
+        if (! $ci || $ci->price === null) {
+            return null;
+        }
+        $effQty = $this->effectiveQty();
+        if ($effQty <= 0) {
+            return null;
+        }
+        return (float) $ci->price * $effQty;
     }
 
     public function request(): BelongsTo

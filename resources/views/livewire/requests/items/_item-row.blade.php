@@ -29,7 +29,19 @@
     $price = $ci?->price;
     $stock = $ci?->stock_available;
     $qty = (float) ($item->parsed_qty ?? 0);
-    $total = ($price !== null && $qty > 0) ? ((float) $price * $qty) : null;
+    // Мерные позиции: парсер вытащил вторую размерность (43.56 м для поручня).
+    // Расчёт total централизован в RequestItem::total() — она же учитывает
+    // billing_unit (менеджер мог переключить «шт.» → «м»).
+    $isMeasured = $item->isMeasured();
+    $billingUnit = $item->effectiveUnit();
+    $effQty = $item->effectiveQty();
+    $total = $item->total();
+    $unitOptions = collect(['шт.', 'компл.', 'м', 'п.м.', 'м.п.', 'кг', 'л'])
+        ->push($item->parsed_unit)
+        ->push($item->parsed_length_unit)
+        ->filter()
+        ->unique()
+        ->values();
     $stockTone = $stock === null ? 'text-fg-3' : ($stock > 0 ? 'text-emerald-700' : 'text-amber-700');
     $mylinkSku = null;
     if ($ci) {
@@ -240,13 +252,42 @@
         @endif
     </div>
 
-    <span class="mono text-[12px] text-fg-1 text-right">{{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') ?: '—' }} {{ $item->parsed_unit }}</span>
+    <span class="mono text-[12px] text-fg-1 text-right whitespace-nowrap">
+        {{ rtrim(rtrim((string) $item->parsed_qty, '0'), '.') ?: '—' }} {{ $item->parsed_unit }}
+        @if($isMeasured)
+            <span class="text-fg-3" title="вторая размерность из заявки">× {{ rtrim(rtrim(number_format((float) $item->parsed_length, 3, '.', ''), '0'), '.') }} {{ $item->parsed_length_unit }}</span>
+        @endif
+    </span>
 
     <span class="mono text-[12px] {{ $price !== null ? 'text-fg-1' : 'text-fg-3' }} text-right whitespace-nowrap"
           title="{{ $ci ? 'из каталога, обновлено ' . ($ci->last_imported_at?->format('d.m.Y') ?? '—') . ($ci->is_price_actual === false ? ' · ⚠ цена не актуальна' : '') : 'нет привязки к каталогу' }}">
         {{ $price !== null ? number_format((float) $price, 2, '.', ' ') . ' ₽' : '—' }}
         @if($ci && $ci->is_price_actual === false)
             <span class="text-amber-700 font-bold" title="цена не актуальна">⚠</span>
+        @endif
+        @if($price !== null && $isMeasured && ($canEditItems ?? false))
+            {{-- Editable billing unit: dropdown с шт/м/кг для пересчёта total. --}}
+            <span x-data="{ open: false }" class="relative inline-block" @click.outside="open = false">
+                <button type="button" @click.stop="open = !open"
+                        class="text-fg-3 hover:text-sky-700 underline decoration-dotted decoration-fg-4 cursor-pointer"
+                        title="Единица расчёта суммы — клик чтобы изменить">/ {{ $billingUnit }}</button>
+                <div x-show="open" x-cloak
+                     class="absolute right-0 top-full mt-1 z-30 w-[110px] py-1 bg-surface border border-border rounded-md shadow-lg text-left text-[11.5px]">
+                    @foreach($unitOptions as $unitOption)
+                        <button type="button"
+                                @click="open = false"
+                                wire:click="editItemField({{ $item->id }}, 'billing_unit', @js($unitOption))"
+                                class="block w-full text-left px-2 py-1 hover:bg-surface-2 {{ $billingUnit === $unitOption ? 'bg-sky-50 text-sky-700 font-semibold' : 'text-fg-1' }}">
+                            / {{ $unitOption }}
+                            @if($billingUnit === $unitOption)
+                                <span class="float-right text-sky-700">✓</span>
+                            @endif
+                        </button>
+                    @endforeach
+                </div>
+            </span>
+        @elseif($price !== null && $isMeasured)
+            <span class="text-fg-3">/ {{ $billingUnit ?? 'шт.' }}</span>
         @endif
     </span>
 

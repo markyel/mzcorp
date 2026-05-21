@@ -155,6 +155,10 @@ class RequestItemPersister
                 'parsed_article' => $item['article'] ?? null,
                 'parsed_qty' => $item['qty'] ?? 1,
                 'parsed_unit' => $item['unit'] ?? 'шт.',
+                // Мерные позиции: вторая размерность (длина/масса/объём
+                // на 1 единицу qty) — структурированно от ParseItemsPrompt v6.
+                'parsed_length' => $item['length'] ?? null,
+                'parsed_length_unit' => $item['length_unit'] ?? null,
                 'category' => $item['category'] ?? null,
                 'supplier_note' => $item['note'] ?? null,
                 'data_source' => 'inbound_message',
