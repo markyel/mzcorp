@@ -106,6 +106,7 @@
                        target="_blank" rel="noopener noreferrer"
                        class="mono text-sky-700 hover:text-sky-900 hover:underline"
                        title="Открыть на mylift.ru — каталог MyLift · {{ $ci?->brand_article ?: '—' }} · обн. {{ $ci?->last_imported_at?->format('d.m.Y') ?? '—' }}">{{ $item->parsed_article }} ↗</a>
+                    <x-copy-button :value="$mylinkSku" />
                 @else
                     <span class="mono text-fg-2">{{ $item->parsed_article }}</span>
                     @if($mylinkSku)
@@ -115,6 +116,7 @@
                            target="_blank" rel="noopener noreferrer"
                            class="mono text-sky-700 hover:text-sky-900 hover:underline"
                            title="Открыть на mylift.ru">{{ $mylinkSku }} ↗</a>
+                        <x-copy-button :value="$mylinkSku" />
                     @endif
                 @endif
             @elseif($mylinkSku)
@@ -122,6 +124,7 @@
                    target="_blank" rel="noopener noreferrer"
                    class="mono text-sky-700 hover:text-sky-900 hover:underline"
                    title="Открыть на mylift.ru">{{ $mylinkSku }} ↗</a>
+                <x-copy-button :value="$mylinkSku" />
             @endif
             @if($ci?->name)
                 <span class="text-fg-2 truncate"

@@ -275,6 +275,87 @@ sudo supervisorctl restart mzcorp-worker:*
 
 ## Журнал сессий
 
+### Сессия 2026-05-21 (вечер) — brand-hallucination фикс, Path A/B/C + Photo Vision classifier + UI
+
+**Контекст:** проверка на реальной заявке `M-2026-1147` (Лифт Schindler №7909814, кнопка вызова + масленка) обнаружила цепочку багов:
+
+1. Парсер записывал `parsed_brand="ЩЛЗ (Щербинский Лифтовый Завод)"` для кнопки вызова на Schindler-лифте. В письме и на фото шильдика лифта ЩЛЗ нигде нет — чистая галлюцинация LLM.
+2. `RequestContextAnalysisService` возвращал `equipment_units: []` для **всех** заявок, потому что использовал несуществующие поля `Request::source_body` / `source_subject`. LLM получала пустую строку → ничего не извлекала.
+3. Reply «по масленке — это масленка на противовесе» не применялся к существующей позиции — `decideClarifications` требовал structured items от парсера, а тут был чистый free-text.
+4. Photo-слоты («Фото шильдика», «Фото кнопки спереди», ...) никогда не заполнялись — n8n-флаг `data_source='photo'` исчез, бланкетная логика умерла.
+
+**Сделано:**
+
+1. **ParseItemsPrompt + Vision-промпт inline в `RequestItemParsingService` — секция `brand` переписана** (`8208abe`, `829813a`, `20bf6eb`):
+   - Убрана двусмысленность «марка лифта ИЛИ производитель детали».
+   - Новая логика: (1) явно в позиции / на шильдике детали → берём; (2) OEM-fallback от шапки группы в письме («для Лифт Schindler …» → brand=Schindler для всех позиций группы); (3) null. Третий шаг — НИКОГДА не угадывать.
+   - Убран список «Otis, Kone, Schindler, …, ЩЛЗ, …» — он работал как pool кандидатов для модели.
+   - Запреты сформулированы абстрактно (про сам тип поведения — угадывание по типу детали / региону), без конкретных имён.
+
+2. **RequestContextAnalysisPrompt — добавлено правило «шапки групп позиций»** + few-shot пример `[Schindler] [№7909814] [4 эт]` с двумя позициями + второй пример с несколькими лифтами. `position_to_unit_assignments`: при одной шапке привязывать все позиции, при нескольких — по физическому расположению.
+
+3. **`RequestContextAnalysisService::analyze` — критический фикс body** (`64ba2e2`): `Request` не имеет полей `source_body`/`source_subject` — добавлен метод `resolveEmailContent()` который тянет `body_plain` (с fallback на strip_tags `body_html`) из связанного `EmailMessage`. Без этого фикса контекст-анализ всегда работал «вслепую» для всех заявок.
+
+4. **`RequestItemPersister` — auto-apply при reparse исходного письма** (`f24fc16`):
+   - Если `source_email_message_id === request.email_message_id` (это reparse, не reply от клиента) → принудительно auto-apply clarifications независимо от confidence.
+   - `applyClarificationToItems` получил флаг `$isReparseOfOriginal`: при reparse разрешена перезапись `parsed_brand` даже когда он не пуст (это улучшение, не конфликт).
+
+5. **`DecideClarificationsPrompt` — bias на clarification + `refined_name`** (`e560aba`):
+   - Раньше при сомнениях возвращал `new` → плодил дубликаты («масленка, направляющая 16 мм» + «Масленка для башмака противовеса» как две позиции вместо одной).
+   - Переписана преамбула: clarification включает место установки, назначение, контекст. Правило предпочтения: одна и та же категория + ссылка клиента («по масленке…») → всегда clarification. Default при сомнениях развёрнут на clarification.
+   - Добавлено поле `refined_name` — LLM может вернуть объединённое имя позиции. `RequestItemPersister::applyClarificationToItems` обновляет `parsed_name` по refined_name.
+
+6. **Path C — `FreeTextReplyEnricher`** (`77d58a4`, `75cd87f`):
+   - Новый сервис + промпт `EnrichExistingItemsFromReplyPrompt`. Срабатывает в `ParseRequestItemsJob` когда парсер вернул пустой `items[]` для reply, related_request_id заполнен, активного `ClarificationBatch` нет.
+   - LLM смотрит на existing items + body reply, возвращает `[{item_id, field, value, source_quote, confidence, reasoning}]`. Пишет в существующий канал `enrichment_suggestions[]` в `quality_assessment_payload` — UI блок «Предложенные уточнения» автоматически подхватывает.
+   - Фикс «применить ничего не меняет»: ENRICHABLE_FIELDS использовало `note`, а `RequestItemEditor::EDITABLE_FIELDS` знает только `supplier_note` → тихий return без изменений. Заменено на `supplier_note` + backwards-compat мапинг `note→supplier_note`.
+   - Защита от дублирования: метод `contextAlreadyInName` — если ≥70% значимых слов value уже есть в `parsed_name`, suggestion пропускается (избегаем «note: на противовесе» когда имя уже «масленка на противовесе»).
+
+7. **Photo Classifier (Vision-классификатор фоток)** — Phase 3 в `ResolveKbJob` (`ed89902`, `3ffb94d`, `776f320`):
+   - Миграция `email_attachments.metadata` jsonb для `kb_slot_candidates[]`.
+   - `PhotoClassifierPrompt` + `PhotoSlotClassifierService::classifyForRequest(Request)` — **один Vision-вызов на всю заявку** (photo-centric v2; v1 был item-centric с N вызовами и противоречиями).
+   - На вход модели: список позиций (item_index, name, brand, category_name, photo_slots категории) + все image-аттачменты треда (до 12 за вызов). На выход: `assignments[]` с `{image_index, item_index, slug, confidence, status: matched|other|irrelevant, description}`.
+   - matched + confidence≥0.6 → `extracted_parameters[$slug]=true` для позиции + запись в `EmailAttachment.metadata.kb_slot_candidates`. UI (см. ниже) рендерит превью.
+   - На M-2026-1147 кнопка вызова получила 5 matched из 8 фоток (4× `photo_button_back` включая шильдик SCH-5550287, 1× `photo_button_front`); фото лифтового шильдика Schindler корректно помечено `irrelevant`.
+
+8. **UI — превью фоток на photo-слотах** (`3ffb94d`):
+   - `PositionSlotResolver` расширен полями `is_photo` и `photo_attachments[]` — для photo-параметров лениво подтягивает `EmailAttachment.metadata.kb_slot_candidates` и группирует по slug.
+   - `_position-card.blade.php` — на photo-слотах вместо «да» рендерит до 4 миниатюр 36×36 с lightbox через `open-image` dispatch. Tooltip = filename + confidence + Vision-описание.
+
+9. **UI — список заявок (`pool.blade.php`)** (`4841357`):
+   - Описание заявки получает приоритет (1fr). Колонка СУММА убрана (всегда пусто до Phase 3). СТАТУС + СОБЫТИЕ объединены в одну ячейку. Сложность переехала в код-ячейку — компактная цветная точка с tooltip. Под кодом — дата создания. Колонка КЛИЕНТ перенесена после кода, перед описанием. Сетка: `24px 130px 170px minmax(280px,1fr) 200px 150px 80px 32px`.
+
+10. **UI — позиции** (`fbcb17b`):
+    - `canEditItems` через `Request::isAccessibleBy()` (включает делегирование).
+    - Снят гейт `! $isCatalogBound` для slots grid + quick-chips: даже для catalog-bound позиций менеджер может хотеть запросить «фото шильдика» / «марку лифта».
+
+11. **CLI-инструменты** (`0cc9df0`+):
+    - `php artisan inspect:request {code}` — позиции, payload, тред, бренды в БД.
+    - `php artisan parse:dry-run {code}` — прогон парсера + контекст-анализа без записи в БД.
+    - `php artisan parse:debug-reply {message_id}` — подробный разбор reply: body, существующие позиции, items от ParseItemsPrompt, decisions от decideClarifications + reasoning + refined_name.
+    - `php artisan path-c:test {message_id}` — прямой запуск FreeTextReplyEnricher.
+    - `php artisan photo:classify {item_id}` — отдельный запуск photo-классификатора для одной позиции.
+    - `php artisan request:reparse {code}` — перепрогон всей заявки (обновлено: **по всем inbound-сообщениям треда в хронологическом порядке**, не только исходному). Опции `--queue --reset --no-kb --only-original`.
+
+**Известные ограничения:**
+
+- **DetailedCategoryRefiner не покрывает «масленку»** — для позиции «масленка, направляющая 16 мм» `qa.reason='detailed_category_not_resolved'`, `identification_category_id` остался NULL → photo classifier и slot grid у этой позиции no-op. Нужно расширять seed-данные KB (новая категория «масленка/направляющая»). Не блокер.
+- **Backfill старых заявок не делали** — старые заявки с галлюцинированными брендами останутся как есть до ручного `request:reparse` каждой. Пользователь принял решение не делать массовый backfill — главное чтобы новые заявки обрабатывались корректно.
+- **Vision-OCR ошибки** — артикул `SCH_55502867` Vision прочитал как `SCH-5550287` (потерян 0/8, `_`→`-`). Это про точность модели, не про промпт. Промпт `detail: 'high'` уже стоит.
+
+**Триггер на новые письма (без изменений в pipeline):**
+```
+inbound → MailRouter → ParseRequestItemsJob (Vision извлекает позиции из фоток)
+                          → RequestItemPersister (sticky-routing, status, dispatch ResolveKbJob)
+                             ├ RequestContextAnalysisService (Phase 1, контекст с шапкой)
+                             ├ QualityAssessmentService (Phase 2, по каждой позиции)
+                             └ PhotoSlotClassifierService (Phase 3, ОДИН Vision-вызов)
+```
+
+Для reply (msg.related_request_id != null, нет активного ClarificationBatch):
+- `ParseRequestItemsJob` → `decideClarifications` (если items не пуст) → auto-apply / pending_clarifications с refined_name.
+- Если items пуст → `FreeTextReplyEnricher` (Path C) → enrichment_suggestions для UI «Предложенные уточнения».
+
 ### Сессия 2026-05-21 — UI положения каталога + мерные позиции (фаза 1)
 
 **Контекст:** после bulk-resolve C-step (231 матч из 1256) переключились на улучшение UI заявок и точности расчётов.
