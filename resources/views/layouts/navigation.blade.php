@@ -43,7 +43,7 @@
 
     $navLinks = [];
     $navLinks[] = ['route' => 'dashboard', 'label' => 'Дашборд', 'pattern' => 'dashboard'];
-    if ($user?->hasAnyRole(['manager', 'head_of_sales', 'director', 'secretary'])) {
+    if ($user?->hasAnyRole(['manager', 'head_of_sales', 'director', 'secretary', 'admin'])) {
         $navLinks[] = ['route' => 'requests.index', 'label' => 'Заявки', 'pattern' => 'requests.*'];
         // «Каталог» вынесен в левый rail (resources/views/components/left-rail.blade.php),
         // в горизонтальный топбар не дублируется.
