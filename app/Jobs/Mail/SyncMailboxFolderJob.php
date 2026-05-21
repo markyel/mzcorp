@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Mail;
 
+use App\Enums\MailboxType;
 use App\Enums\MailDirection;
 use App\Models\Mailbox;
 use App\Models\MailboxFolderState;
@@ -211,35 +212,46 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
         // на коллекции вызываем `->first()`.
         $connection = $folder->getClient()->getConnection();
 
+        // POST-FIX применяем ТОЛЬКО для личных ящиков менеджеров. Логика:
+        //   · Личный ящик: менеджер открывает Yandex и должен видеть письмо
+        //     как новое (непрочитанное). Webklex body-fetch ставит \Seen
+        //     как side-effect — это нужно откатить.
+        //   · Общий ящик (mail@myzip.ru): MailFolderRouter::routeToManager
+        //     явно ставит \Seen на оригинал в INBOX после COPY в MZ/Lastname,
+        //     чтобы секретарь не видел «непрочитанный шум» от уже
+        //     распределённых заявок. Webklex side-effect здесь как раз
+        //     удобен — фиксирует \Seen ещё до явного setFlag, и попытка
+        //     setFlag в routeToManager идёт уже на READ-WRITE сессии
+        //     роутера (см. MailFolderRouter::routeToManager).
+        //     Откатывать \Seen в общем ящике — значит сломать routing для
+        //     секретаря: все письма копятся непрочитанными в INBOX
+        //     независимо от того, маршрутизированы они в подпапку или нет.
+        $applyUnreadFix = $mailbox->type === MailboxType::Personal;
+
         foreach ($newUids as $uid) {
             try {
                 // PRE-FLIGHT: проверяем флаги ДО body-fetch'а. Webklex 6.x с
                 // setFetchBody(true)+setFetchFlags(true) генерирует FETCH BODY[]
                 // (а не BODY.PEEK[]) — даже при FT_PEEK сервер выставляет
-                // \Seen на стороне сервера. Если письмо было непрочитанным,
-                // мы откатим \Seen после fetch'а (см. POST-FIX ниже).
-                //
-                // Требование: и общие, и личные ящики хранят оригинальное
-                // состояние «прочитано/нет», чтобы менеджер видел в своём
-                // почтовом клиенте непрочитанные письма как и было. \Seen
-                // ставится явно только в MailFolderRouter::routeToManager()
-                // (для общих ящиков после COPY) и AppendToSentFolderJob
-                // (для своих исходящих).
+                // \Seen на стороне сервера. Если письмо было непрочитанным
+                // и это ЛИЧНЫЙ ящик — откатим \Seen после fetch'а (POST-FIX).
                 $wasUnread = false;
-                try {
-                    $flagsBefore = (array) $connection->getFlags($uid)->validatedData();
-                    // flagsBefore приходит как [$uid => ['\Seen', ...]] или [].
-                    $flagsList = is_array($flagsBefore[$uid] ?? null) ? $flagsBefore[$uid] : [];
-                    $wasUnread = ! in_array('\\Seen', $flagsList, true)
-                        && ! in_array('Seen', $flagsList, true);
-                } catch (\Throwable $flagsErr) {
-                    // Лог и продолжаем — будем считать «было прочитано»
-                    // (безопасный default: не трогаем флаги).
-                    Log::debug('SyncMailboxFolderJob: pre-flight flags fetch failed', [
-                        'mailbox_id' => $mailbox->id,
-                        'uid' => $uid,
-                        'error' => $flagsErr->getMessage(),
-                    ]);
+                if ($applyUnreadFix) {
+                    try {
+                        $flagsBefore = (array) $connection->getFlags($uid)->validatedData();
+                        // flagsBefore приходит как [$uid => ['\Seen', ...]] или [].
+                        $flagsList = is_array($flagsBefore[$uid] ?? null) ? $flagsBefore[$uid] : [];
+                        $wasUnread = ! in_array('\\Seen', $flagsList, true)
+                            && ! in_array('Seen', $flagsList, true);
+                    } catch (\Throwable $flagsErr) {
+                        // Лог и продолжаем — будем считать «было прочитано»
+                        // (безопасный default: не трогаем флаги).
+                        Log::debug('SyncMailboxFolderJob: pre-flight flags fetch failed', [
+                            'mailbox_id' => $mailbox->id,
+                            'uid' => $uid,
+                            'error' => $flagsErr->getMessage(),
+                        ]);
+                    }
                 }
 
                 $msg = $folder->query()
@@ -255,11 +267,9 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
                     continue;
                 }
 
-                // POST-FIX: если письмо было непрочитанным до fetch'а — откатываем
-                // \Seen, который мог проставиться webklex'ом из-за бага BODY[]
-                // vs BODY.PEEK[]. Идемпотентно: STORE -FLAGS (\Seen) на уже
-                // непрочитанное письмо ничего не меняет.
-                if ($wasUnread) {
+                // POST-FIX: только для личных ящиков. На общих не трогаем флаги —
+                // там routeToManager сам решит, что должно быть \Seen.
+                if ($applyUnreadFix && $wasUnread) {
                     try {
                         $connection->store(['\\Seen'], $uid, $uid, '-', true, null);
                     } catch (\Throwable $unseenErr) {

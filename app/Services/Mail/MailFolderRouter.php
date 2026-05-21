@@ -107,13 +107,44 @@ class MailFolderRouter
             // оправдано тем, что оригинал нельзя удалить (Yandex IMAP не
             // даёт EXPUNGE после COPY в той же сессии), и без \Seen в INBOX
             // копится «непрочитанный шум» который мешает секретарю.
+            //
+            // ВАЖНО: query()->...->get() выше использует EXAMINE (READ-ONLY).
+            // STORE в read-only режиме отклоняется сервером. Явно открываем
+            // папку в READ-WRITE режиме (force_select=true) перед STORE.
+            // Двухступенчатый STORE:
+            //   1) webklex Message::setFlag (high-level, открывает folder).
+            //   2) fallback на raw connection STORE с UID (если #1 не сработал).
+            $seenApplied = false;
             try {
-                $msg->setFlag('Seen');
+                $client->openFolder($sourceFolder->path, force_select: true);
+                $setFlagResult = $msg->setFlag('Seen');
+                $seenApplied = $setFlagResult !== false;
             } catch (\Throwable $seenError) {
-                Log::info('MailFolderRouter: setFlag(Seen) skipped', [
+                Log::info('MailFolderRouter: setFlag(Seen) failed, will try raw STORE', [
                     'email_message_id' => $message->id,
                     'error' => $seenError->getMessage(),
                 ]);
+            }
+            if (! $seenApplied) {
+                try {
+                    $connection = $client->getConnection();
+                    // STORE +FLAGS (\Seen) на UID-range [$uid..$uid].
+                    $connection->store(
+                        ['\\Seen'],
+                        (int) $message->imap_uid,
+                        (int) $message->imap_uid,
+                        '+',
+                        true,
+                        null,
+                    );
+                    $seenApplied = true;
+                } catch (\Throwable $rawError) {
+                    Log::warning('MailFolderRouter: raw STORE \\Seen also failed', [
+                        'email_message_id' => $message->id,
+                        'imap_uid' => $message->imap_uid,
+                        'error' => $rawError->getMessage(),
+                    ]);
+                }
             }
 
             // БД отражает физическое размещение оригинала — он остался в INBOX.
@@ -126,6 +157,7 @@ class MailFolderRouter
                 'from_folder' => $sourceFolder->path,
                 'to_folder' => $targetPath,
                 'manager_id' => $manager?->id,
+                'seen_applied' => $seenApplied,
             ]);
 
             return $targetPath;
