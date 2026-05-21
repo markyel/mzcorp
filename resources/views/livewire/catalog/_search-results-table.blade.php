@@ -135,16 +135,18 @@
                  @click="open = !open"
                  title="Кликните, чтобы развернуть карточку товара">
 
-                {{-- Thumb 56×56 --}}
+                {{-- Thumb 56×56 — через наш прокси с дисковым кэшем (route catalog.photo).
+                     Original photo_url остаётся в href для full-size в новой вкладке. --}}
                 <div @click.stop>
                     @if($cat->photo_url)
+                        @php $catThumb = route('catalog.photo', $cat->id); @endphp
                         <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
                            data-cat-preview-trigger
-                           x-on:mouseenter="$dispatch('catalog-preview-open', { el: $el, url: '{{ addslashes($cat->photo_url) }}' })"
+                           x-on:mouseenter="$dispatch('catalog-preview-open', { el: $el, url: '{{ addslashes($catThumb) }}' })"
                            x-on:mouseleave="$dispatch('catalog-preview-close')"
                            class="block w-14 h-14 rounded-md overflow-hidden bg-surface-2 border border-border"
                            title="Открыть фото в новой вкладке">
-                            <img src="{{ $cat->photo_url }}" alt=""
+                            <img src="{{ $catThumb }}" alt=""
                                  loading="lazy" referrerpolicy="no-referrer"
                                  class="w-full h-full object-cover"
                                  onerror="this.style.display='none'; this.parentElement.classList.add('flex','items-center','justify-center'); this.parentElement.innerHTML += '<span class=\'text-fg-3 text-[10px]\'>нет</span>';">
@@ -268,7 +270,7 @@
                             <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
                                class="block w-full rounded-md overflow-hidden bg-surface border border-border"
                                style="aspect-ratio: 1/1;">
-                                <img src="{{ $cat->photo_url }}" alt="{{ $cat->name }}"
+                                <img src="{{ route('catalog.photo', $cat->id) }}" alt="{{ $cat->name }}"
                                      loading="lazy" referrerpolicy="no-referrer"
                                      class="w-full h-full object-cover">
                             </a>

@@ -43,6 +43,14 @@ Route::middleware('auth')->group(function () {
             ->where('contentId', '.*')
             ->name('attachments.inline');
 
+        // Прокси фото каталога с дисковым кэшем (Phase B / 2026-05-21).
+        // Внешний photo_url (mylift.ru) делает 302 → CDN, что даёт
+        // ~500-800мс на фото × 20 thumb = 10+ секунд waterfall. Прокси
+        // кэширует на диск + ставит браузеру Cache-Control max-age=30days.
+        Route::get('/img/catalog/{id}', [\App\Http\Controllers\CatalogPhotoProxyController::class, 'show'])
+            ->where('id', '\d+')
+            ->name('catalog.photo');
+
         // КП (наши исходящие) — preview + download PDF. Permission проверяется
         // в контроллере (owner/acting/privileged).
         Route::get('/dashboard/quotations/{quotation}/preview',

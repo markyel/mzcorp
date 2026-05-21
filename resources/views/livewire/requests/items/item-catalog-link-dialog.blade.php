@@ -478,7 +478,7 @@
                                     <div class="aspect-[1.6/1] rounded-md bg-app border border-border overflow-hidden mb-2">
                                         @if($c->photo_url)
                                             <a href="{{ $c->photo_url }}" target="_blank" rel="noopener noreferrer" class="block w-full h-full">
-                                                <img src="{{ $c->photo_url }}" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer">
+                                                <img src="{{ route('catalog.photo', $c->id) }}" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer">
                                             </a>
                                         @else
                                             <div class="w-full h-full flex items-center justify-center text-[10px] text-fg-3">нет фото</div>
