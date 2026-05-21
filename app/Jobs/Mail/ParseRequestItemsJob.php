@@ -75,6 +75,7 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
     public function handle(
         RequestItemParsingService $parser,
         RequestItemPersister $persister,
+        \App\Services\Mail\FreeTextReplyEnricher $freeTextEnricher,
     ): void {
         $message = EmailMessage::find($this->emailMessageId);
         if (! $message) {
@@ -127,6 +128,41 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                 'email_message_id' => $message->id,
                 'request_id' => $message->related_request_id,
             ]);
+
+            // Path C (2026-05-21): для reply-сообщения без структурированных
+            // позиций пробуем извлечь контекстные уточнения к существующим
+            // позициям («масленка на противовесе», «по плате — модель ABC»).
+            // Гейт: только если это reply к существующей заявке, не reset,
+            // и нет активного ClarificationBatch (тот случай покрывает
+            // ClarificationAnswerMatcher через MatchClarificationAnswersJob).
+            if ($message->related_request_id && ! $this->reset) {
+                $hasRecentSentBatch = \App\Models\ClarificationBatch::query()
+                    ->where('request_id', $message->related_request_id)
+                    ->where('status', \App\Models\ClarificationBatch::STATUS_SENT)
+                    ->whereNotNull('sent_at')
+                    ->where('sent_at', '<', $message->sent_at ?? now())
+                    ->exists();
+                if (! $hasRecentSentBatch) {
+                    $request = \App\Models\Request::find($message->related_request_id);
+                    if ($request !== null) {
+                        try {
+                            $result = $freeTextEnricher->enrich($message, $request);
+                            Log::info('ParseRequestItemsJob: free-text enrichment ran', [
+                                'email_message_id' => $message->id,
+                                'request_id' => $message->related_request_id,
+                                'suggestions' => $result['suggestions'],
+                                'auto_applied' => $result['auto_applied'],
+                            ]);
+                        } catch (\Throwable $e) {
+                            Log::warning('ParseRequestItemsJob: FreeTextReplyEnricher failed', [
+                                'email_message_id' => $message->id,
+                                'request_id' => $message->related_request_id,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
+                    }
+                }
+            }
 
             return;
         }
