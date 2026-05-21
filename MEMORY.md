@@ -275,6 +275,58 @@ sudo supervisorctl restart mzcorp-worker:*
 
 ## Журнал сессий
 
+### Сессия 2026-05-21 — UI положения каталога + мерные позиции (фаза 1)
+
+**Контекст:** после bulk-resolve C-step (231 матч из 1256) переключились на улучшение UI заявок и точности расчётов.
+
+**Сделано:**
+
+1. **UI: lead_time + is_price_actual на сматченных позициях** (коммит `75c3238`):
+   - `_item-row.blade.php` и `_position-card.blade.php` — в ячейке «Цена» добавлен ⚠ амбер-значок, если `is_price_actual === false`; в title добавлено «цена не актуальна».
+   - В ячейке «Наличие» — когда `stock <= 0`, ниже «нет» появляется маленький блок `{lead_time_days} дн` с tooltip «срок поставки под заказ». Параллель с UI catalog-search.
+   - Поля проверены в модели: `CatalogItem` имеет casts `is_price_actual=>boolean`, `lead_time_days=>integer`, `last_imported_at=>datetime`. Eager-load `catalogItem` уже выполняется.
+
+2. **Мерные позиции — Фаза 1** (коммит `c375c23`):
+   Кейс M-2026-1287: клиент пишет «поручень — 43,56м — 2 шт», цена в каталоге 4 199 ₽/м. Раньше total = price × qty = 8 398 ₽, занижение в 44 раза (правильно 365 814.88 ₽).
+
+   **Архитектура:**
+   - Каталог НЕ хранит unit-of-measure (поле `unit_name` оказалось «Узел» из MDB — функциональная группа, не единица). Mерность детектится только из RequestItem (от LLM-парсера).
+   - Источник истины о мерности — RequestItem, написал ли клиент вторую размерность.
+
+   **Изменения:**
+   - **Миграция** `add_length_fields_to_request_items`: `parsed_length` decimal(12,3), `parsed_length_unit` string(16), `billing_unit` string(16).
+   - **`RequestItem` модель** — добавлены: `$fillable` + `casts['parsed_length'=>'decimal:3']`, методы `isMeasured()`, `effectiveUnit()`, `effectiveQty()`, `total()`. Единая формула: если `billing_unit === parsed_length_unit` → `qty × length`, иначе `qty`.
+   - **`ParseItemsPrompt` v6** — раньше LLM писал «43.56 м каждый» текстом в `note`, теперь структурированно `length`+`length_unit`. `note` освобождён для свободных пометок. Добавлен Пример 4а (поручень 43.56м × 2 шт).
+   - **`RequestItemParsingService`** (normalizer) + **`RequestItemPersister`** (create) — нормализуют и персистят новые поля. Защита: length без unit → null.
+   - **`RequestItemEditor::EDITABLE_FIELDS`** расширен на `parsed_length`, `parsed_length_unit`, `billing_unit`. `normalizeFieldValue` обрабатывает decimal + string-16.
+   - **UI `_item-row.blade.php` + `_position-card.blade.php`**:
+     - qty cell: «2 шт. × 43.56 м» для мерных;
+     - price cell: «4 199.00 ₽ / шт.» (dotted underline = clickable);
+     - клик по «/ шт.» → x-data dropdown шт./компл./м/п.м./м.п./кг/л + parsed_unit + parsed_length_unit. Выбор → `wire:click="editItemField($id, 'billing_unit', $unit)"` (использует существующий generic-метод).
+   - **Total** теперь рассчитывается через `$item->total()` → автоматически пересчитывается при смене billing_unit.
+
+   **НЕ сделано (отложено):**
+   - **Quotation pipeline** (`QuotationItem.unit_quantity` + `QuotationService::recalcTotals` учёт length) — Фаза 2. Сейчас КП клиенту считается по старой формуле `price × qty`, и при смене billing_unit в заявке расхождение НЕ пробрасывается в КП.
+   - **Backfill старых заявок** (regex по `supplier_note` для извлечения length) — опционально, можно потом.
+   - **`ItemEditDialog`** — modal-edit не получил inputs для `parsed_length`/`parsed_length_unit`. Менеджер может править только через inline-dropdown билинг-юнита. Manual ввод длины — позднее.
+
+   **Проверка на M-2026-1287:**
+   ```bash
+   php artisan migrate
+   php artisan view:clear
+   php artisan tinker --execute="
+   \$it = App\Models\RequestItem::where('catalog_item_id', App\Models\CatalogItem::where('sku','M14761')->value('id'))->first();
+   \$it->parsed_length = 43.56; \$it->parsed_length_unit = 'м'; \$it->save();
+   dump([\$it->effectiveUnit(), \$it->effectiveQty(), \$it->total()]);
+   "
+   ```
+   В UI: qty «2 шт. × 43.56 м», цена «4 199.00 ₽ / шт.» (dotted underline). Клик → «м» → total = 365 814.88 ₽.
+
+**Открытые вопросы для следующей сессии:**
+- Quotation pipeline — пробросить effective_qty в QuotationItem (`QuotationService::autoFillItemsFromRequest` + `recalcTotals`). Унификация с `OutboundQuoteItem` (у него уже есть `unit_quantity`).
+- ItemEditDialog — добавить inputs для parsed_length / parsed_length_unit (чтобы менеджер мог вручную задать мерность, если парсер не вытащил).
+- Прогон свежих заявок с мерными товарами — убедиться, что v6 prompt правильно вытаскивает `length`+`length_unit` для канатов/ремней/цепей.
+
 ### Сессия 2026-05-05 (вечер)
 Инфраструктура: skeleton Laravel 12, composer.json/lock, миграция pgvector tolerant, nginx vhost для `mzcorp.ru`. Прервалась перебоем электричества до активации vhost.
 
