@@ -79,88 +79,83 @@ class MailFolderRouter
                 throw new \RuntimeException("Source folder '{$message->folder}' not found");
             }
 
-            // Yandex 360 любит per-message read-write SELECT для MOVE/COPY.
-            // FT_PEEK гарантирует, что \Seen не выставится при чтении.
-            $msgs = $sourceFolder->query()
-                ->setFetchOptions(IMAP::FT_PEEK)
-                ->setFetchBody(false)
-                ->setFetchFlags(true)
-                ->whereUid($message->imap_uid)
-                ->get();
+            // Атомарный UID MOVE (RFC 6851). Yandex 360 поддерживает MOVE
+            // в CAPABILITY: проверено `mail:try-move` 2026-05-21 — ответ
+            // сервера «OK [COPYUID <uidv> <src> <dst>] / N EXPUNGE / OK
+            // UID MOVE Completed.». Оригинал физически удаляется из INBOX
+            // одной командой, копия появляется в target — без дубликата.
+            //
+            // Требует READ-WRITE сессии (SELECT, не EXAMINE).
+            $client->openFolder($sourceFolder->path, force_select: true);
+            $connection = $client->getConnection();
 
-            $msg = $msgs->first();
-            if (! $msg) {
-                throw new \RuntimeException(
-                    "Message UID {$message->imap_uid} not found in '{$message->folder}'"
+            $newUid = null;
+            $rawResponse = null;
+            try {
+                $resp = $connection->moveMessage(
+                    $targetPath,
+                    (int) $message->imap_uid,
+                    null,
+                    IMAP::ST_UID,
                 );
+                $rawResponse = $resp->validatedData();
+                // Реальный признак успеха — наличие COPYUID в ответе.
+                // Yandex возвращает «OK [CLIENTBUG] UID MOVE Completed (no
+                // messages).» с boolean=true даже когда UID не найден и
+                // ничего не переместилось. По COPYUID отличаем настоящее
+                // перемещение от no-op.
+                $newUid = $this->parseCopyUid($rawResponse);
+            } catch (\Throwable $moveError) {
+                Log::warning('MailFolderRouter: UID MOVE threw exception', [
+                    'email_message_id' => $message->id,
+                    'mailbox_id' => $mailbox->id,
+                    'from_folder' => $sourceFolder->path,
+                    'to_folder' => $targetPath,
+                    'imap_uid' => $message->imap_uid,
+                    'error' => $moveError->getMessage(),
+                ]);
+                return null;
             }
 
-            // Только COPY, без MOVE/DELETE/EXPUNGE — webklex 6.x на Yandex 360
-            // даёт «BAD [CLIENTBUG] EXPUNGE Wrong session state» при попытке
-            // чистого MOVE или COPY+EXPUNGE. Соглашаемся на дублирование:
-            // оригинал остаётся в INBOX, копия появляется в MZ|Ivanov для
-            // секретаря.
-            $msg->copy($targetPath, expunge: false);
-
-            // Помечаем оригинал в INBOX как прочитанный (\Seen). Это явное
-            // отступление от Foundation §1 / CLAUDE.md «Не ставь \Seen» —
-            // оправдано тем, что оригинал нельзя удалить (Yandex IMAP не
-            // даёт EXPUNGE после COPY в той же сессии), и без \Seen в INBOX
-            // копится «непрочитанный шум» который мешает секретарю.
-            //
-            // ВАЖНО: query()->...->get() выше использует EXAMINE (READ-ONLY).
-            // STORE в read-only режиме отклоняется сервером. Явно открываем
-            // папку в READ-WRITE режиме (force_select=true) перед STORE.
-            // Двухступенчатый STORE:
-            //   1) webklex Message::setFlag (high-level, открывает folder).
-            //   2) fallback на raw connection STORE с UID (если #1 не сработал).
-            $seenApplied = false;
-            try {
-                $client->openFolder($sourceFolder->path, force_select: true);
-                $setFlagResult = $msg->setFlag('Seen');
-                $seenApplied = $setFlagResult !== false;
-            } catch (\Throwable $seenError) {
-                Log::info('MailFolderRouter: setFlag(Seen) failed, will try raw STORE', [
+            if ($newUid === null) {
+                // OK без COPYUID = no-op (письмо уже не в source-папке,
+                // CLIENTBUG, или Yandex отказался по другой причине).
+                Log::warning('MailFolderRouter: UID MOVE no-op (нет COPYUID в ответе)', [
                     'email_message_id' => $message->id,
-                    'error' => $seenError->getMessage(),
+                    'mailbox_id' => $mailbox->id,
+                    'from_folder' => $sourceFolder->path,
+                    'to_folder' => $targetPath,
+                    'imap_uid' => $message->imap_uid,
+                    'response' => is_array($rawResponse)
+                        ? mb_substr(implode(' | ', array_map('strval', $rawResponse)), 0, 300)
+                        : null,
+                ]);
+                return null;
+            }
+
+            // Синхронизируем БД с физическим перемещением. Если COPYUID удалось
+            // распарсить — пишем новый UID; иначе обнуляем (sync целевой папки
+            // дозальёт его). Сохраняем target folder в любом случае.
+            try {
+                $message->forceFill([
+                    'folder' => $targetPath,
+                    'imap_uid' => $newUid,
+                ])->save();
+            } catch (\Throwable $dbErr) {
+                Log::warning('MailFolderRouter: failed to update DB after MOVE', [
+                    'email_message_id' => $message->id,
+                    'error' => $dbErr->getMessage(),
                 ]);
             }
-            if (! $seenApplied) {
-                try {
-                    $connection = $client->getConnection();
-                    // UID STORE +FLAGS (\Seen). 6-й параметр IMAP::ST_UID — флаг
-                    // режима UID; раньше передавали null → команда уходила
-                    // обычным STORE (по sequence number), что для нашего UID
-                    // не имело смысла. См. webklex/php-imap@6.x Protocol::store.
-                    $connection->store(
-                        ['\\Seen'],
-                        (int) $message->imap_uid,
-                        (int) $message->imap_uid,
-                        '+',
-                        true,
-                        IMAP::ST_UID,
-                    );
-                    $seenApplied = true;
-                } catch (\Throwable $rawError) {
-                    Log::warning('MailFolderRouter: raw STORE \\Seen also failed', [
-                        'email_message_id' => $message->id,
-                        'imap_uid' => $message->imap_uid,
-                        'error' => $rawError->getMessage(),
-                    ]);
-                }
-            }
 
-            // БД отражает физическое размещение оригинала — он остался в INBOX.
-            // Не меняем folder/uid у EmailMessage. Только Request маршрутизирован
-            // (через folder name target в логе и нашу доменную модель).
-
-            Log::info('MailFolderRouter: moved', [
+            Log::info('MailFolderRouter: moved (UID MOVE)', [
                 'email_message_id' => $message->id,
                 'mailbox_id' => $mailbox->id,
                 'from_folder' => $sourceFolder->path,
                 'to_folder' => $targetPath,
                 'manager_id' => $manager?->id,
-                'seen_applied' => $seenApplied,
+                'old_uid' => (int) $message->imap_uid,
+                'new_uid' => $newUid,
             ]);
 
             return $targetPath;
@@ -226,6 +221,33 @@ class MailFolderRouter
         }
 
         return $parts[0] ?? 'unknown';
+    }
+
+    /**
+     * Из ответа UID MOVE / UID COPY извлечь новый UID в целевой папке.
+     *
+     * RFC 4315 формат: `* OK [COPYUID <uidvalidity> <source_uid_set> <dest_uid_set>]`
+     * Yandex отдаёт: `OK [COPYUID 1778847504 2117 206]\r\n`
+     *
+     * Для одиночного MOVE source и dest — единичные UID (без диапазонов).
+     *
+     * @param mixed $validatedData Ответ webklex Response::validatedData().
+     */
+    private function parseCopyUid(mixed $validatedData): ?int
+    {
+        if (! is_array($validatedData)) {
+            return null;
+        }
+        foreach ($validatedData as $line) {
+            if (! is_string($line)) {
+                continue;
+            }
+            if (preg_match('/COPYUID\s+\d+\s+\S+\s+(\d+)/i', $line, $m)) {
+                return (int) $m[1];
+            }
+        }
+
+        return null;
     }
 
     /**
