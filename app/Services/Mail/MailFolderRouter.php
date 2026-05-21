@@ -128,14 +128,17 @@ class MailFolderRouter
             if (! $seenApplied) {
                 try {
                     $connection = $client->getConnection();
-                    // STORE +FLAGS (\Seen) на UID-range [$uid..$uid].
+                    // UID STORE +FLAGS (\Seen). 6-й параметр IMAP::ST_UID — флаг
+                    // режима UID; раньше передавали null → команда уходила
+                    // обычным STORE (по sequence number), что для нашего UID
+                    // не имело смысла. См. webklex/php-imap@6.x Protocol::store.
                     $connection->store(
                         ['\\Seen'],
                         (int) $message->imap_uid,
                         (int) $message->imap_uid,
                         '+',
                         true,
-                        null,
+                        IMAP::ST_UID,
                     );
                     $seenApplied = true;
                 } catch (\Throwable $rawError) {

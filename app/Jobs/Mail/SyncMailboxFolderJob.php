@@ -269,9 +269,13 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
 
                 // POST-FIX: только для личных ящиков. На общих не трогаем флаги —
                 // там routeToManager сам решит, что должно быть \Seen.
+                // ВАЖНО: 6-й параметр Connection::store — это флаг режима UID/MSGN
+                // (IMAP::ST_UID=1 по умолчанию). Раньше передавали null → команда
+                // уходила как обычный STORE по sequence number, а не UID STORE.
+                // Это могло приводить к попаданию на чужое письмо или silent-no-op.
                 if ($applyUnreadFix && $wasUnread) {
                     try {
-                        $connection->store(['\\Seen'], $uid, $uid, '-', true, null);
+                        $connection->store(['\\Seen'], $uid, $uid, '-', true, IMAP::ST_UID);
                     } catch (\Throwable $unseenErr) {
                         Log::debug('SyncMailboxFolderJob: failed to restore unread flag', [
                             'mailbox_id' => $mailbox->id,
