@@ -261,14 +261,28 @@ class RequestItemPersister
         //   low  → складываем в pending_clarifications (jsonb на Request),
         //          менеджер решит через UI (applyClarification / reject).
         // Правило безопасности: пустое / невалидное confidence = low.
+        //
+        // 2026-05-21: дополнительное правило для reparse исходного письма.
+        // Если source_email_message_id совпадает с request.email_message_id,
+        // то это НЕ reply от клиента, а просто более качественный разбор
+        // того же первичного письма (после обновления промптов или ручного
+        // request:reparse). Такие clarifications принудительно auto-apply
+        // и перезаписывают brand даже если он не пуст — это улучшение
+        // данных, не противоречие от клиента.
         $clarStoredCount = 0;
         $clarAutoApplied = 0;
         if (! empty($clarifications)) {
             $existing->load('items');
-            [$autoList, $pendingList] = $this->splitClarificationsByConfidence($clarifications);
+            $isReparseOfOriginal = $existing->email_message_id === $message->id;
+            [$autoList, $pendingList] = $this->splitClarificationsByConfidence(
+                $clarifications,
+                $isReparseOfOriginal ? $message->id : null,
+            );
 
             foreach ($autoList as $entry) {
-                if ($this->applyClarificationToItems($existing, $entry)) {
+                $isReparseEntry = $isReparseOfOriginal
+                    && ($entry['source_email_message_id'] ?? null) === $message->id;
+                if ($this->applyClarificationToItems($existing, $entry, $isReparseEntry)) {
                     $clarAutoApplied++;
                 }
             }
@@ -353,12 +367,18 @@ class RequestItemPersister
      * @param  list<array<string, mixed>>  $clarifications
      * @return array{0: list<array<string, mixed>>, 1: list<array<string, mixed>>}
      */
-    private function splitClarificationsByConfidence(array $clarifications): array
-    {
+    private function splitClarificationsByConfidence(
+        array $clarifications,
+        ?int $reparseSourceMessageId = null,
+    ): array {
         $high = [];
         $low = [];
         foreach ($clarifications as $c) {
-            if (($c['confidence'] ?? null) === 'high') {
+            $isReparseOfOriginal = $reparseSourceMessageId !== null
+                && ($c['source_email_message_id'] ?? null) === $reparseSourceMessageId;
+            if ($isReparseOfOriginal || ($c['confidence'] ?? null) === 'high') {
+                // Reparse того же исходного письма всегда auto-apply
+                // (это серверный upgrade данных, не уточнение от клиента).
                 $high[] = $c;
             } else {
                 $low[] = $c;
@@ -379,7 +399,7 @@ class RequestItemPersister
      *
      * @return bool true если item реально изменился (что-то добавили).
      */
-    private function applyClarificationToItems(Request $request, array $entry): bool
+    private function applyClarificationToItems(Request $request, array $entry, bool $isReparseOfOriginal = false): bool
     {
         $targetPos = (int) ($entry['target_position'] ?? 0);
         if ($targetPos <= 0) {
@@ -408,9 +428,18 @@ class RequestItemPersister
                 $dirty = true;
             }
         }
-        if (is_string($addBrand) && $addBrand !== '' && empty($item->parsed_brand)) {
-            $item->parsed_brand = $addBrand;
-            $dirty = true;
+        if (is_string($addBrand) && $addBrand !== '') {
+            // Reply от клиента: brand заполняем только если он был пуст
+            //   (не затираем то, что менеджер мог уже подтвердить).
+            // Reparse того же исходного письма: перезаписываем brand если
+            //   значение отличается — это улучшение от лучшей LLM, не
+            //   противоречие, менеджеру оверрайдить нечего.
+            $shouldWrite = empty($item->parsed_brand)
+                || ($isReparseOfOriginal && trim((string) $item->parsed_brand) !== trim($addBrand));
+            if ($shouldWrite) {
+                $item->parsed_brand = $addBrand;
+                $dirty = true;
+            }
         }
         if ($dirty) {
             $item->save();
@@ -420,6 +449,7 @@ class RequestItemPersister
                 'target_position' => $targetPos,
                 'added_article' => $addArt,
                 'added_brand' => $addBrand,
+                'is_reparse_of_original' => $isReparseOfOriginal,
                 'source_email_message_id' => $entry['source_email_message_id'] ?? null,
                 'reasoning' => $entry['reasoning'] ?? null,
             ]);
