@@ -67,3 +67,17 @@ Schedule::command('catalog:sync-from-url')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Embeddings новых/изменившихся каталожных позиций. Инкрементально —
+// проверяет hash против catalog_item_embeddings и эмбеддит только дельту.
+// Запускаем через 5 минут после каждого slot'а catalog:sync-from-url,
+// чтобы только что импортированные SKU оказывались в vector-индексе.
+// Без этого vector-поиск на свежих позициях не работает (см. 2026-05-21
+// кейс M33763: добавлен вчера, embedding ОТСУТСТВУЕТ, найти можно было
+// только через code/trgm, не через семантику).
+Schedule::command('catalog:embed')
+    ->cron('5 3,7,11,15,19,23 * * *')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();

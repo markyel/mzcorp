@@ -369,6 +369,69 @@ class CatalogEmbeddingService
     }
 
     /**
+     * Простое стемирование русских слов: отрезает типичные окончания
+     * существительных/прилагательных. Не лингвистически идеально, но
+     * закрывает 90% морфологических казусов trigram-поиска
+     * («цепь»/«цепи»/«цепью» → «цеп»).
+     *
+     * Применяется к словам ≥4 букв. Минимальная длина основы — 3 буквы,
+     * чтобы не превратить «дом» → «д». Окончания в порядке убывания длины,
+     * чтобы «ями» сработало раньше «и».
+     */
+    private function stemRussianWord(string $word): string
+    {
+        if (mb_strlen($word) < 4) {
+            return $word;
+        }
+        // Только русскоязычные слова — латиницу/цифры не трогаем.
+        if (! preg_match('/^[а-яё]+$/u', $word)) {
+            return $word;
+        }
+        // Окончания существительных, прилагательных, глаголов (упрощённо).
+        static $endings = [
+            'ыми', 'ями', 'ями', 'ями', 'ого', 'ому', 'его', 'ему',
+            'ах', 'ям', 'ыми', 'ой', 'ою', 'ей', 'ью', 'ом', 'ям',
+            'ев', 'ов', 'ам', 'ах', 'ат', 'ят',
+            'ы', 'и', 'у', 'я', 'е', 'й', 'а', 'о', 'ь', 'ю',
+        ];
+        foreach ($endings as $end) {
+            if (mb_strlen($word) - mb_strlen($end) >= 3 && str_ends_with($word, $end)) {
+                return mb_substr($word, 0, -mb_strlen($end));
+            }
+        }
+        return $word;
+    }
+
+    /**
+     * Стемировать каждое слово в lower-фразе (после удаления разделителей
+     * единым строковым символом склейки). Сохраняет латиницу/цифры
+     * (артикулы T-135 → t135 не трогаются).
+     */
+    private function stemRussianPhrase(string $lowerNoSep): string
+    {
+        // Разрезаем lowerNoSep на «слова» = последовательности букв/цифр
+        // или одиночные символы (не используется для articles, поэтому без
+        // разделителей вход уже идёт). Но если на вход пришло несколько
+        // склеенных русских слов — обработаем как одну строку
+        // word-by-word через regex split по латиница<->кириллица переходам.
+        if (! preg_match('/[а-яё]/u', $lowerNoSep)) {
+            return $lowerNoSep;
+        }
+        // Pre-split по переходам между алфавитами и цифрами — на случай
+        // если вход уже склеен (типа "цепьt135").
+        $parts = preg_split('/(?<=[а-яё])(?=[a-z0-9])|(?<=[a-z0-9])(?=[а-яё])/u', $lowerNoSep) ?: [];
+        $out = '';
+        foreach ($parts as $p) {
+            if (preg_match('/^[а-яё]+$/u', $p)) {
+                $out .= $this->stemRussianWord($p);
+            } else {
+                $out .= $p;
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Извлечь из произвольной строки токены вида ПКЛ32, ЕИЛА.687255.008-04 —
      * последовательности символов с минимум одной буквой И одной цифрой,
      * длина ≥3 после очистки разделителей. Используется для прямого
@@ -536,6 +599,13 @@ class CatalogEmbeddingService
         // «Плата контроллера лифта типа ПКЛ32-04»: word_similarity на raw
         // даёт ~0.1 из-за разных триграмм вокруг дефиса, на nosep — ~0.8.
         $lowerNoSep = (string) preg_replace('/[\s\-_.\/]/u', '', $lower);
+        // 2026-05-21: морфология русского. word_similarity на «цепь t135» против
+        // «цепи t135» падает ниже 0.6 (порог) из-за разных триграмм вокруг
+        // последнего символа: цеп/епь/пь_ vs цеп/епи/пи_. PostgreSQL native
+        // путь через to_tsvector('russian', ...) — большая миграция; здесь
+        // делаем простой PHP-side стем: режем типичные окончания у слов ≥4
+        // букв. «цепь» и «цепи» уходят как «цеп», обе формы матчатся.
+        $lowerStemmed = $this->stemRussianPhrase($lowerNoSep);
         // normalizeArticle: uppercase + strip [\s\-_./]. Совместимо с тем
         // как мы импортируем brand_article_normalized в CatalogImportService.
         $norm = (string) (\App\Services\Catalog\CatalogImportService::normalizeArticle($queryText) ?? '');
@@ -580,10 +650,18 @@ class CatalogEmbeddingService
             // с GIN trgm индексом, обновляемый PG-триггером. Заменяет
             // jsonb_array_elements_text seq scan (~1500мс) на индексный
             // word_similarity lookup (~десятки мс).
+            // Два варианта lower-формы — raw и стеммированная (русские окончания
+            // обрезаны). word_similarity берёт MAX из двух — устойчиво и к
+            // ошибкам морфологии («цепь» vs «цепи»), и к артикулам без
+            // стемминга. WHERE-фильтр через OR на обеих формах.
+            $useStem = $lowerStemmed !== '' && $lowerStemmed !== $lowerNoSep;
+
             $sql = "
                 SELECT id AS catalog_id,
                        GREATEST(
                            word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./]', '', 'g'))
+                           " . ($useStem ? ",
+                           word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./]', '', 'g'))" : "") . "
                            " . ($useArticles ? ",
                            CASE
                                WHEN articles_search IS NOT NULL AND articles_search <> ''
@@ -595,6 +673,8 @@ class CatalogEmbeddingService
                 WHERE is_active = true
                   AND (
                        ? <% regexp_replace(lower(name), '[\\s\\-_./]', '', 'g')
+                       " . ($useStem ? "
+                       OR ? <% regexp_replace(lower(name), '[\\s\\-_./]', '', 'g')" : "") . "
                        " . ($useArticles ? "
                        OR (articles_search IS NOT NULL AND ? <% articles_search)" : "") . "
                   )
@@ -602,9 +682,14 @@ class CatalogEmbeddingService
                 LIMIT ?
             ";
 
-            $bindings = $useArticles
-                ? [$lowerNoSep, $norm, $lowerNoSep, $norm, $limit]
-                : [$lowerNoSep, $lowerNoSep, $limit];
+            $bindings = [];
+            $bindings[] = $lowerNoSep;
+            if ($useStem) $bindings[] = $lowerStemmed;
+            if ($useArticles) $bindings[] = $norm;
+            $bindings[] = $lowerNoSep;
+            if ($useStem) $bindings[] = $lowerStemmed;
+            if ($useArticles) $bindings[] = $norm;
+            $bindings[] = $limit;
 
             $rows = DB::select($sql, $bindings);
         } catch (\Throwable $e) {
