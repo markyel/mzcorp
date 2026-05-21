@@ -28,7 +28,8 @@ class KbBackfillCategories extends Command
                             {--rule-only : Только rule-based, без LLM-fallback}
                             {--reclassify : Обрабатывать всё, включая уже классифицированные}
                             {--limit=0 : Ограничить число позиций (0 = без ограничения)}
-                            {--sku= : SKU для классификации (один-позиционный режим)}';
+                            {--sku= : SKU для классификации (один-позиционный режим)}
+                            {--by-part-type : Группировать по уникальным part_type — 1 LLM-вызов на тип, bulk UPDATE всех SKU группы}';
 
     protected $description = 'Заполнить catalog_items.equipment_category_id через rule-based + LLM (gpt-4o-mini)';
 
@@ -39,6 +40,11 @@ class KbBackfillCategories extends Command
         $reclassify = (bool) $this->option('reclassify');
         $limit = (int) $this->option('limit');
         $sku = trim((string) $this->option('sku'));
+        $byPartType = (bool) $this->option('by-part-type');
+
+        if ($byPartType) {
+            return $this->runByPartType($categorizer, $apply, $ruleOnly, $reclassify);
+        }
 
         $query = CatalogItem::query()->where('is_active', true);
         if (! $reclassify) {
@@ -152,6 +158,160 @@ class KbBackfillCategories extends Command
         } else {
             $this->warn('  DRY RUN — БД НЕ изменена. Используй --apply.');
         }
+        $this->line('');
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Группируем неклассифицированные SKU по уникальным part_type,
+     * один LLM-вызов на тип → bulk UPDATE всех SKU этого типа.
+     *
+     * Экономия: 10148 SKU обычно укладываются в ~200 уникальных part_type
+     * (50× меньше LLM-вызовов, 50× дешевле, 50× быстрее).
+     *
+     * Группы с пустым part_type (NULL/'') пропускаются — для них нужен
+     * per-item classify (есть в обычном режиме без --by-part-type).
+     */
+    private function runByPartType(
+        CatalogItemCategorizer $categorizer,
+        bool $apply,
+        bool $ruleOnly,
+        bool $reclassify,
+    ): int {
+        $base = \DB::table('catalog_items')
+            ->where('is_active', true)
+            ->whereNotNull('part_type')
+            ->where('part_type', '!=', '');
+        if (! $reclassify) {
+            $base->whereNull('equipment_category_id');
+        }
+
+        $groups = (clone $base)
+            ->selectRaw('part_type, count(*) as cnt')
+            ->groupBy('part_type')
+            ->orderByDesc('cnt')
+            ->get();
+
+        $totalGroups = $groups->count();
+        $totalItems = (int) $groups->sum('cnt');
+
+        $this->line('');
+        $this->line('=================================================================');
+        $this->line(sprintf(
+            '  BACKFILL BY PART_TYPE  %s  rule-only=%s  groups=%d  items=%d',
+            $apply ? 'APPLY' : 'DRY-RUN',
+            $ruleOnly ? 'Y' : 'N',
+            $totalGroups,
+            $totalItems,
+        ));
+        $this->line('=================================================================');
+        $this->line('');
+
+        if ($totalGroups === 0) {
+            $this->info('Нет групп для обработки.');
+            return self::SUCCESS;
+        }
+
+        $categories = $categorizer->preloadCategories();
+        $this->line('KB-категорий: ' . $categories->count());
+        $this->line('');
+
+        $stats = [
+            'groups_total' => $totalGroups,
+            'groups_matched' => 0,
+            'groups_no_match' => 0,
+            'rule_groups' => 0,
+            'llm_groups' => 0,
+            'items_updated' => 0,
+        ];
+
+        $bar = $this->output->createProgressBar($totalGroups);
+        $bar->setFormat(' %current%/%max% [%bar%]  %message%');
+        $bar->setMessage('starting');
+        $bar->start();
+
+        $startedAt = microtime(true);
+
+        foreach ($groups as $g) {
+            $partType = (string) $g->part_type;
+            $bar->setMessage(mb_substr($partType, 0, 40) . " ({$g->cnt})");
+
+            // Берём представителя группы — SKU с наибольшим заполнением полей
+            // (приоритет items с name+unit_name).
+            $sample = CatalogItem::query()
+                ->where('is_active', true)
+                ->where('part_type', $partType)
+                ->when(! $reclassify, fn ($q) => $q->whereNull('equipment_category_id'))
+                ->orderByRaw('CASE WHEN unit_name IS NOT NULL AND unit_name <> \'\' THEN 0 ELSE 1 END')
+                ->orderByRaw('LENGTH(COALESCE(name, \'\')) DESC')
+                ->first();
+
+            if (! $sample) {
+                $bar->advance();
+                continue;
+            }
+
+            try {
+                $result = $categorizer->categorize($sample, allowLlm: ! $ruleOnly);
+            } catch (\Throwable $e) {
+                $this->line('');
+                $this->error("  ✗ part_type «{$partType}»: " . $e->getMessage());
+                $bar->advance();
+                continue;
+            }
+
+            $category = $result['category'];
+            $method = (string) $result['method'];
+
+            if ($category === null) {
+                $stats['groups_no_match']++;
+                $bar->advance();
+                continue;
+            }
+
+            $stats['groups_matched']++;
+            if (str_starts_with($method, 'rule_')) {
+                $stats['rule_groups']++;
+            } elseif (str_starts_with($method, 'llm_')) {
+                $stats['llm_groups']++;
+            }
+
+            if ($apply) {
+                // Bulk UPDATE всех SKU этого part_type ОДНИМ SQL — никаких Eloquent.
+                $upd = \DB::table('catalog_items')
+                    ->where('is_active', true)
+                    ->where('part_type', $partType);
+                if (! $reclassify) {
+                    $upd->whereNull('equipment_category_id');
+                }
+                $affected = $upd->update(['equipment_category_id' => $category->id]);
+                $stats['items_updated'] += $affected;
+            }
+
+            $bar->advance();
+        }
+
+        $bar->finish();
+        $this->line('');
+        $this->line('');
+
+        $elapsed = microtime(true) - $startedAt;
+
+        $this->line('--- Результаты ---');
+        $this->line(sprintf('  Групп обработано:   %d (за %0.1f сек)', $stats['groups_total'], $elapsed));
+        $this->info(sprintf('  Группы → категория: %d', $stats['groups_matched']));
+        $this->line(sprintf('     · rule-based:    %d', $stats['rule_groups']));
+        $this->line(sprintf('     · LLM:           %d', $stats['llm_groups']));
+        $this->warn(sprintf('  Без категории:      %d', $stats['groups_no_match']));
+        if ($apply) {
+            $this->info(sprintf('  SKU обновлено:      %d', $stats['items_updated']));
+        } else {
+            $this->warn('  DRY RUN — БД НЕ изменена. Используй --apply.');
+        }
+        $this->line('');
+        $this->line('  Оставшиеся NULL (пустой part_type) — обработай per-item:');
+        $this->line('    php artisan kb:backfill-categories --apply');
         $this->line('');
 
         return self::SUCCESS;
