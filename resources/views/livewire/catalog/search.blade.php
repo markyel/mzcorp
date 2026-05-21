@@ -118,7 +118,7 @@
                 <span class="text-[10.5px] font-semibold uppercase tracking-wider text-fg-3">Тип запчасти</span>
                 <div class="flex items-center gap-1.5">
                     <select wire:model.live="filterCategoryId"
-                            class="h-[26px] px-2 border border-border rounded-md bg-app text-fg-1 text-[12px] outline-none focus:border-[var(--sky-500)]">
+                            class="h-[30px] py-0 px-2 border border-border rounded-md bg-app text-fg-1 text-[12.5px] leading-tight outline-none focus:border-[var(--sky-500)] min-w-[260px]">
                         <option value="">— любой —</option>
                         @foreach($kbCats as $cat)
                             <option value="{{ $cat->id }}">{{ $cat->name }}</option>
