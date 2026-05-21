@@ -3,7 +3,6 @@
 namespace App\Jobs\Kb;
 
 use App\Models\Request as RequestModel;
-use App\Models\RequestItem;
 use App\Services\Kb\PhotoSlotClassifierService;
 use App\Services\Kb\QualityAssessmentService;
 use App\Services\Kb\RequestContextAnalysisService;
@@ -107,26 +106,19 @@ class ResolveKbJob implements ShouldQueue, ShouldBeUnique
             }
         }
 
-        // Phase 3 (2026-05-21): Photo classifier — Vision-проход по фоткам
-        // треда для каждой позиции, если у её категории есть photo-slot'ы.
-        // Свой try/catch на каждую позицию, чтобы Vision-таймаут одной
-        // позиции не блокировал остальные. Внутри сервис сам ничего не
-        // запустит если у item нет identification_category_id или нет
-        // image-attachment'ов в треде — это дешёвый no-op.
-        foreach ($request->items as $itemStub) {
-            try {
-                $fresh = RequestItem::with('kbCategory')->find($itemStub->id);
-                if ($fresh === null) {
-                    continue;
-                }
-                $photoClassifier->classifyForItem($fresh);
-            } catch (Throwable $e) {
-                Log::warning('ResolveKbJob: photo classifier failed (non-fatal)', [
-                    'request_id' => $this->requestId,
-                    'item_id' => $itemStub->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        // Phase 3 (2026-05-21, v2 photo-centric): Photo classifier —
+        // ОДИН Vision-вызов на всю заявку. Модель получает целостный
+        // контекст (все позиции + все фотки треда) и сама раскладывает
+        // фотки между позициями и photo-slug'ами. Раньше (v1) был
+        // item-centric — N вызовов, каждая фотка анализировалась N раз,
+        // были противоречия. Non-fatal: Vision-сбой не валит KB-resolve.
+        try {
+            $photoClassifier->classifyForRequest($request->fresh(['items']));
+        } catch (Throwable $e) {
+            Log::warning('ResolveKbJob: photo classifier failed (non-fatal)', [
+                'request_id' => $this->requestId,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         Log::info('ResolveKbJob: done', [

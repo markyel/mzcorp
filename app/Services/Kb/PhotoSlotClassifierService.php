@@ -3,39 +3,51 @@
 namespace App\Services\Kb;
 
 use App\Models\EmailAttachment;
+use App\Models\EmailMessage;
 use App\Models\Kb\IdentificationParameter;
 use App\Models\Kb\IdentificationRule;
+use App\Models\Request as RequestModel;
 use App\Models\RequestItem;
 use App\Prompts\Kb\PhotoClassifierPrompt;
 use App\Services\AI\OpenAIChatService;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Photo Classifier (2026-05-21): Vision-классификация фоток треда по
- * KB photo-slug'ам для конкретной позиции.
+ * Photo Classifier v2 (2026-05-21, photo-centric): один Vision-вызов на
+ * всю заявку. Раньше (v1) был item-centric — N вызовов на позицию,
+ * каждая фотка анализировалась N раз. v2 даёт модели целостный контекст.
  *
- * Что делает:
- *  1. Берёт RequestItem, определяет его identification_category_id.
- *  2. Подтягивает все photo-type параметры (`value_type='photo'`),
- *     которые упомянуты в IdentificationRule'ах этой категории.
- *  3. Собирает изображения из всего треда (EmailMessage'ы с
- *     related_request_id == request_id).
- *  4. Делает один Vision-вызов с пачкой изображений + списком slug'ов.
- *  5. Для каждого matched изображения:
- *     - пишет в EmailAttachment.metadata.kb_slot_candidates[];
- *     - агрегирует в item.quality_assessment_payload.extracted_parameters[$slug] = true.
+ * Что делает classifyForRequest(Request):
+ *  1. Собирает image-attachments всего треда (related_request_id).
+ *  2. Собирает список активных позиций с identification_category_id +
+ *     photo-slug'ами их категорий (через IdentificationRule.alternatives
+ *     .required_parameter_ids + value_type='photo').
+ *  3. Если ни фоток, ни позиций с photo-слотами — no-op.
+ *  4. Один Vision-вызов с пачкой изображений + массивом позиций.
+ *  5. Для каждой matched-сборки image+item+slug:
+ *      · пишет в EmailAttachment.metadata.kb_slot_candidates[];
+ *      · агрегирует в RequestItem.quality_assessment_payload
+ *        .extracted_parameters[$slug] = true.
+ *  6. Метаданные attachment'а пишутся ВСЕГДА (включая irrelevant/other)
+ *     для аудит-следа.
  *
- * Триггер: после QualityAssessmentService::assessItem(), в ResolveKbJob.
- * Идемпотентность: повторный вызов перезаписывает kb_slot_candidates для
- * данного request_item_id (старые матчи к этой же позиции стираются).
+ * Идемпотентность: при повторе сначала стираем kb_slot_candidates всех
+ * attachment'ов треда (от любых request_item этой заявки) — это
+ * корректный сброс, т.к. сейчас классификация делается на уровне заявки.
+ *
+ * Метод classifyForItem(RequestItem) сохранён для CLI photo:classify —
+ * под капотом вызывает classifyForRequest($item->request) и фильтрует
+ * результат для одного item.
  */
 class PhotoSlotClassifierService
 {
     private const LLM_MODEL = 'gpt-4o';
     private const LLM_TEMPERATURE = 0.1;
-    private const LLM_MAX_TOKENS = 2000;
-    private const MAX_IMAGES_PER_CALL = 8; // OpenAI limit на content array
+    private const LLM_MAX_TOKENS = 3000;
+    private const MAX_IMAGES_PER_CALL = 12; // OpenAI limit на content array
+    private const MAX_ITEMS_PER_CALL = 8;   // прагматический лимит
     private const CONFIDENCE_FLOOR = 0.6;
 
     public function __construct(
@@ -44,38 +56,59 @@ class PhotoSlotClassifierService
     }
 
     /**
-     * @return array{considered_photos: int, matched: int, slugs_covered: int}
+     * Главный entry-point: классифицировать все фото треда заявки.
+     *
+     * @return array{considered_photos: int, items_with_slots: int, matched: int, slugs_covered: int, vision_called: bool}
      */
-    public function classifyForItem(RequestItem $item): array
+    public function classifyForRequest(RequestModel $request): array
     {
-        $photoSlots = $this->photoSlotsForItem($item);
-        if (empty($photoSlots)) {
-            return ['considered_photos' => 0, 'matched' => 0, 'slugs_covered' => 0];
+        $itemsWithSlots = $this->collectItemsWithSlots($request);
+        $attachments = $this->collectImageAttachmentsForRequest($request);
+
+        if ($itemsWithSlots->isEmpty() || $attachments->isEmpty()) {
+            // Нет ни позиций с photo-слотами, ни фоток — нечего делать.
+            return [
+                'considered_photos' => $attachments->count(),
+                'items_with_slots' => $itemsWithSlots->count(),
+                'matched' => 0,
+                'slugs_covered' => 0,
+                'vision_called' => false,
+            ];
         }
 
-        $attachments = $this->collectImageAttachments($item);
-        if ($attachments->isEmpty()) {
-            return ['considered_photos' => 0, 'matched' => 0, 'slugs_covered' => 0];
-        }
+        // Ограничиваем размер пачки.
+        $batchAttachments = $attachments->take(self::MAX_IMAGES_PER_CALL);
+        $batchItems = $itemsWithSlots->take(self::MAX_ITEMS_PER_CALL);
 
-        // Ограничиваем пачку — модель не умеет много изображений за раз.
-        $batch = $attachments->take(self::MAX_IMAGES_PER_CALL);
-
-        [$imagesBase64, $attachmentIds] = $this->encodeImages($batch);
+        [$imagesBase64, $attachmentIds] = $this->encodeImages($batchAttachments);
         if (empty($imagesBase64)) {
-            return ['considered_photos' => 0, 'matched' => 0, 'slugs_covered' => 0];
+            return [
+                'considered_photos' => 0,
+                'items_with_slots' => $itemsWithSlots->count(),
+                'matched' => 0,
+                'slugs_covered' => 0,
+                'vision_called' => false,
+            ];
         }
 
-        $messages = PhotoClassifierPrompt::build(
-            photoSlots: $photoSlots,
-            imagesBase64: $imagesBase64,
-            itemContext: [
-                'parsed_name' => (string) $item->parsed_name,
-                'parsed_brand' => (string) $item->parsed_brand,
-                'parsed_article' => (string) $item->parsed_article,
-                'category_name' => $item->kbCategory?->name,
-            ],
-        );
+        // Подготовка items для промпта (item_index = индекс в массиве).
+        $itemsForPrompt = $batchItems
+            ->values()
+            ->map(fn (array $row, int $i) => [
+                'position_id' => $row['item']->position,
+                'item_index' => $i,
+                'name' => (string) $row['item']->parsed_name,
+                'brand' => $row['item']->parsed_brand,
+                'article' => $row['item']->parsed_article,
+                'category_name' => $row['item']->kbCategory?->name,
+                'photo_slots' => $row['photo_slots'],
+            ])
+            ->all();
+
+        // Параллельный массив: item_index → RequestItem (для записи payload).
+        $itemByIndex = $batchItems->values()->map(fn ($row) => $row['item'])->all();
+
+        $messages = PhotoClassifierPrompt::build($itemsForPrompt, $imagesBase64);
 
         try {
             $response = $this->openai->chat($messages, self::LLM_MODEL, [
@@ -85,67 +118,82 @@ class PhotoSlotClassifierService
             ]);
         } catch (\Throwable $e) {
             Log::warning('PhotoSlotClassifierService: LLM call failed', [
-                'item_id' => $item->id,
+                'request_id' => $request->id,
+                'images' => count($imagesBase64),
+                'items' => count($itemsForPrompt),
                 'error' => $e->getMessage(),
             ]);
-            return ['considered_photos' => count($imagesBase64), 'matched' => 0, 'slugs_covered' => 0];
+            return [
+                'considered_photos' => count($imagesBase64),
+                'items_with_slots' => $itemsWithSlots->count(),
+                'matched' => 0,
+                'slugs_covered' => 0,
+                'vision_called' => true,
+            ];
         }
 
         $raw = (string) ($response['content'] ?? '');
         $parsed = json_decode($raw, true);
-        $classifications = is_array($parsed['classifications'] ?? null) ? $parsed['classifications'] : [];
+        $assignments = is_array($parsed['assignments'] ?? null) ? $parsed['assignments'] : [];
 
-        // Сначала — почистить старые kb_slot_candidates для ЭТОЙ request_item_id
-        // (идемпотентность: при повторном классифицировании старые матчи стираются).
-        foreach ($batch as $att) {
-            $this->stripOldCandidatesForItem($att, $item->id);
+        // Idempotent: чистим старые kb_slot_candidates всех attachment'ов
+        // батча — они принадлежат этой же заявке, перезаписываем заново.
+        foreach ($batchAttachments as $att) {
+            $this->resetCandidatesForRequest($att, $request->id);
         }
 
         $matchedCount = 0;
-        $matchedSlugs = [];
+        $matchedSlugsPerItem = []; // [item_id => [slug => true]]
 
-        foreach ($classifications as $c) {
-            if (! is_array($c)) {
+        foreach ($assignments as $a) {
+            if (! is_array($a)) {
                 continue;
             }
-            $idx = (int) ($c['image_index'] ?? -1);
-            $slug = is_string($c['slug'] ?? null) && trim($c['slug']) !== '' ? trim($c['slug']) : null;
-            $confidence = (float) ($c['confidence'] ?? 0);
-            $description = trim((string) ($c['description'] ?? ''));
-            $status = (string) ($c['status'] ?? 'matched');
+            $imgIdx = (int) ($a['image_index'] ?? -1);
+            $itemIdx = isset($a['item_index']) && $a['item_index'] !== null ? (int) $a['item_index'] : null;
+            $slug = is_string($a['slug'] ?? null) && trim($a['slug']) !== '' ? trim($a['slug']) : null;
+            $confidence = (float) ($a['confidence'] ?? 0);
+            $description = trim((string) ($a['description'] ?? ''));
+            $status = (string) ($a['status'] ?? 'matched');
 
-            if ($idx < 0 || $idx >= count($attachmentIds)) {
+            if ($imgIdx < 0 || $imgIdx >= count($attachmentIds)) {
                 continue;
             }
-            $attachmentId = $attachmentIds[$idx];
+            $attachmentId = $attachmentIds[$imgIdx];
+            $targetItem = ($itemIdx !== null && isset($itemByIndex[$itemIdx])) ? $itemByIndex[$itemIdx] : null;
+            $targetItemId = $targetItem?->id;
 
-            // Записываем в attachment metadata даже irrelevant/other —
-            // это полезный аудит-след. Но для extracted_parameters
-            // учитываем только matched + slug != null + confidence пройден.
             $candidate = [
-                'request_item_id' => $item->id,
+                'request_id' => $request->id,
+                'request_item_id' => $targetItemId,
                 'slug' => $slug,
                 'confidence' => round($confidence, 2),
                 'status' => $status,
                 'description' => mb_substr($description, 0, 500),
                 'classified_at' => now()->toIso8601String(),
-                'classifier_version' => 'v1',
+                'classifier_version' => 'v2-photo-centric',
             ];
             $this->appendCandidateToAttachment($attachmentId, $candidate);
 
-            if ($status === 'matched' && $slug !== null && $confidence >= self::CONFIDENCE_FLOOR) {
+            $isMatched = $status === 'matched'
+                && $slug !== null
+                && $targetItemId !== null
+                && $confidence >= self::CONFIDENCE_FLOOR;
+            if ($isMatched) {
                 $matchedCount++;
-                $matchedSlugs[$slug] = true;
+                $matchedSlugsPerItem[$targetItemId][$slug] = true;
             }
         }
 
-        // Агрегируем в item.quality_assessment_payload — для каждого
-        // matched-slug ставим extracted_parameters[$slug] = true. Это
-        // позволит PositionSlotResolver показать ✓ в UI.
-        if (! empty($matchedSlugs)) {
+        // Агрегируем в items.quality_assessment_payload.extracted_parameters.
+        foreach ($matchedSlugsPerItem as $itemId => $slugs) {
+            $item = RequestItem::find((int) $itemId);
+            if (! $item) {
+                continue;
+            }
             $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
             $extracted = is_array($payload['extracted_parameters'] ?? null) ? $payload['extracted_parameters'] : [];
-            foreach (array_keys($matchedSlugs) as $slug) {
+            foreach (array_keys($slugs) as $slug) {
                 $extracted[$slug] = true;
             }
             $payload['extracted_parameters'] = $extracted;
@@ -155,36 +203,122 @@ class PhotoSlotClassifierService
         }
 
         Log::info('PhotoSlotClassifierService: done', [
-            'item_id' => $item->id,
-            'considered' => count($imagesBase64),
+            'request_id' => $request->id,
+            'considered_photos' => count($imagesBase64),
+            'items_with_slots' => $itemsWithSlots->count(),
             'matched' => $matchedCount,
-            'slugs_covered' => count($matchedSlugs),
+            'slugs_covered' => array_sum(array_map('count', $matchedSlugsPerItem)),
             'usage' => $response['usage'] ?? null,
         ]);
 
         return [
             'considered_photos' => count($imagesBase64),
+            'items_with_slots' => $itemsWithSlots->count(),
             'matched' => $matchedCount,
-            'slugs_covered' => count($matchedSlugs),
+            'slugs_covered' => array_sum(array_map('count', $matchedSlugsPerItem)),
+            'vision_called' => true,
         ];
     }
 
     /**
-     * Достать список photo-параметров для категории item'а.
-     * Делаем union по всем active IdentificationRule этой категории.
+     * Совместимость с CLI photo:classify {item_id}. Запускает
+     * classifyForRequest и возвращает срез статистики для одной позиции.
      *
+     * @return array{considered_photos: int, matched: int, slugs_covered: int}
+     */
+    public function classifyForItem(RequestItem $item): array
+    {
+        $request = $item->request;
+        if (! $request) {
+            return ['considered_photos' => 0, 'matched' => 0, 'slugs_covered' => 0];
+        }
+        $full = $this->classifyForRequest($request);
+        // Сводим к ракурсу одной позиции: посчитать сколько слотов и
+        // фоток приписано именно этой позиции.
+        $matched = 0;
+        $slugs = [];
+        $fresh = $item->fresh();
+        $payload = is_array($fresh?->quality_assessment_payload) ? $fresh->quality_assessment_payload : [];
+        $extracted = is_array($payload['extracted_parameters'] ?? null) ? $payload['extracted_parameters'] : [];
+        foreach ($extracted as $k => $v) {
+            if (str_starts_with($k, 'photo_') && $v === true) {
+                $slugs[$k] = true;
+            }
+        }
+        // matched-фото для этой позиции — считаем по kb_slot_candidates.
+        $msgIds = EmailMessage::where('related_request_id', $request->id)->pluck('id');
+        $atts = EmailAttachment::whereIn('email_message_id', $msgIds)->get(['metadata']);
+        foreach ($atts as $a) {
+            $cands = is_array($a->metadata['kb_slot_candidates'] ?? null) ? $a->metadata['kb_slot_candidates'] : [];
+            foreach ($cands as $c) {
+                if (is_array($c)
+                    && (int) ($c['request_item_id'] ?? 0) === $item->id
+                    && ($c['status'] ?? null) === 'matched') {
+                    $matched++;
+                }
+            }
+        }
+        return [
+            'considered_photos' => $full['considered_photos'],
+            'matched' => $matched,
+            'slugs_covered' => count($slugs),
+        ];
+    }
+
+    /**
+     * Активные позиции заявки + photo-параметры их категорий.
+     *
+     * @return Collection<int, array{item: RequestItem, photo_slots: array<int, array{slug: string, name: string, question_template: ?string}>}>
+     */
+    private function collectItemsWithSlots(RequestModel $request): Collection
+    {
+        $items = $request->items()
+            ->where('is_active', true)
+            ->whereNotNull('identification_category_id')
+            ->with('kbCategory')
+            ->orderBy('position')
+            ->get();
+
+        $result = collect();
+        foreach ($items as $item) {
+            $photoSlots = $this->photoSlotsForCategory((int) $item->identification_category_id);
+            if (empty($photoSlots)) {
+                continue;
+            }
+            $result->push(['item' => $item, 'photo_slots' => $photoSlots]);
+        }
+        return $result;
+    }
+
+    /**
+     * Все image-аттачменты треда. HEIC/HEIF пропускаем (Vision не ест).
+     *
+     * @return Collection<int, EmailAttachment>
+     */
+    private function collectImageAttachmentsForRequest(RequestModel $request): Collection
+    {
+        $messageIds = EmailMessage::query()
+            ->where('related_request_id', $request->id)
+            ->pluck('id');
+        if ($messageIds->isEmpty()) {
+            return collect();
+        }
+        return EmailAttachment::query()
+            ->whereIn('email_message_id', $messageIds)
+            ->where('mime_type', 'like', 'image/%')
+            ->whereNotIn('mime_type', ['image/heic', 'image/heif'])
+            ->orderBy('id')
+            ->get();
+    }
+
+    /**
      * @return array<int, array{slug: string, name: string, question_template: ?string}>
      */
-    private function photoSlotsForItem(RequestItem $item): array
+    private function photoSlotsForCategory(int $categoryId): array
     {
-        $categoryId = $item->identification_category_id;
-        if (! $categoryId) {
-            return [];
-        }
-
         $rules = IdentificationRule::query()
             ->with('alternatives')
-            ->where('category_id', (int) $categoryId)
+            ->where('category_id', $categoryId)
             ->where('is_active', true)
             ->get();
 
@@ -200,7 +334,6 @@ class PhotoSlotClassifierService
         if (empty($paramIds)) {
             return [];
         }
-
         return IdentificationParameter::query()
             ->whereIn('id', array_keys($paramIds))
             ->where('value_type', 'photo')
@@ -216,48 +349,10 @@ class PhotoSlotClassifierService
     }
 
     /**
-     * Все image-аттачменты треда позиции. Если у item есть привязанный
-     * image_attachment_id — ставим его первым (как «первичная фотка»).
-     *
-     * @return \Illuminate\Support\Collection<int, EmailAttachment>
-     */
-    private function collectImageAttachments(RequestItem $item): \Illuminate\Support\Collection
-    {
-        $requestId = $item->request_id;
-        $messageIds = \App\Models\EmailMessage::query()
-            ->where('related_request_id', $requestId)
-            ->pluck('id')
-            ->all();
-        if (empty($messageIds)) {
-            return collect();
-        }
-
-        $attachments = EmailAttachment::query()
-            ->whereIn('email_message_id', $messageIds)
-            ->where(function ($q) {
-                $q->where('mime_type', 'like', 'image/%');
-            })
-            ->whereNotIn('mime_type', ['image/heic', 'image/heif']) // OpenAI Vision не ест HEIC
-            ->get();
-
-        // image_attachment_id — приоритет первым.
-        if ($item->image_attachment_id) {
-            $primary = $attachments->firstWhere('id', (int) $item->image_attachment_id);
-            if ($primary) {
-                $attachments = $attachments->reject(fn ($a) => $a->id === $primary->id)->prepend($primary);
-            }
-        }
-
-        return $attachments;
-    }
-
-    /**
-     * Считать файлы и собрать data:URI массив + параллельный массив id.
-     *
-     * @param  \Illuminate\Support\Collection<int, EmailAttachment>  $attachments
+     * @param  Collection<int, EmailAttachment>  $attachments
      * @return array{0: array<int, string>, 1: array<int, int>}
      */
-    private function encodeImages(\Illuminate\Support\Collection $attachments): array
+    private function encodeImages(Collection $attachments): array
     {
         $images = [];
         $ids = [];
@@ -283,7 +378,6 @@ class PhotoSlotClassifierService
 
     private function appendCandidateToAttachment(int $attachmentId, array $candidate): void
     {
-        /** @var EmailAttachment|null $att */
         $att = EmailAttachment::find($attachmentId);
         if (! $att) {
             return;
@@ -298,21 +392,30 @@ class PhotoSlotClassifierService
     }
 
     /**
-     * Перед записью новых результатов чистим старые матчи для этой
-     * request_item_id — иначе при повторном классифицировании накопятся
-     * дубли. Матчи для других позиций (если фото использовалось в разных
-     * заявках/позициях) НЕ трогаем.
+     * При перепрогоне на заявку — стираем все kb_slot_candidates этой
+     * заявки (по request_id), оставляя только от других заявок (если
+     * фото каким-то образом фигурирует в нескольких заявках).
      */
-    private function stripOldCandidatesForItem(EmailAttachment $att, int $itemId): void
+    private function resetCandidatesForRequest(EmailAttachment $att, int $requestId): void
     {
         $meta = is_array($att->metadata) ? $att->metadata : [];
         $list = is_array($meta['kb_slot_candidates'] ?? null) ? $meta['kb_slot_candidates'] : [];
         if (empty($list)) {
             return;
         }
-        $kept = array_values(array_filter($list, fn ($c) => ! (is_array($c) && (int) ($c['request_item_id'] ?? 0) === $itemId)));
+        $kept = array_values(array_filter($list, function ($c) use ($requestId) {
+            if (! is_array($c)) {
+                return true;
+            }
+            // Старый v1 не писал request_id — у тех записей чистим всегда
+            // (это первая v2-перезапись, лучше переписать).
+            if (! array_key_exists('request_id', $c)) {
+                return false;
+            }
+            return (int) $c['request_id'] !== $requestId;
+        }));
         if (count($kept) === count($list)) {
-            return; // ничего не было — экономим save
+            return;
         }
         $meta['kb_slot_candidates'] = $kept;
         $att->metadata = $meta;

@@ -3,36 +3,56 @@
 namespace App\Prompts\Kb;
 
 /**
- * Vision-классификатор фоток по KB photo-slot'ам (2026-05-21).
+ * Vision-классификатор фоток по KB photo-slot'ам (2026-05-21, v2 photo-centric).
  *
- * Цель: для каждой фотки треда определить какой photo-slug категории
- * позиции она представляет (фото шильдика, лицевой стороны, общего вида,
- * паспорта и т.п.). Результат заполняет request_items.quality_assessment_payload
- * .extracted_parameters[photo_*] = true и EmailAttachment.metadata.kb_slot_candidates.
+ * Цель: за ОДИН Vision-вызов распределить все фотки треда заявки между
+ * позициями заявки + photo-слотами категорий этих позиций.
  *
- * Вход: список ожидаемых photo-slug'ов категории + N изображений по порядку.
- * Выход: для каждой image_index — какой slug подошёл (или null), confidence,
- * краткое описание что видно.
+ * Раньше (v1) был item-centric — отдельный вызов на каждую позицию,
+ * каждая фотка анализировалась N раз. Это давало противоречия и было
+ * дорого. v2 даёт модели целостный контекст: «у заявки 3 позиции, вот
+ * 8 фоток, разложи их».
+ *
+ * Вход:
+ *   - items: [{position_id, item_index, name, brand, article, category_name, photo_slots: [{slug, name, question_template}]}]
+ *   - imagesBase64: [data:image/...;base64,..., ...] в порядке image_index
+ *
+ * Выход:
+ *   {"assignments": [
+ *     {"image_index": 0, "item_index": 1, "slug": "photo_nameplate",
+ *      "confidence": 0.92, "status": "matched",
+ *      "description": "видна табличка кнопки с артикулом SCH-5550287"},
+ *     {"image_index": 1, "item_index": null, "slug": null,
+ *      "confidence": 0.0, "status": "irrelevant",
+ *      "description": "шильдик лифта Schindler, не относится к запчастям"},
+ *     ...
+ *   ]}
+ *
+ * Заметки:
+ *   - item_index = индекс позиции в items[], НЕ position_id (а сервис сам
+ *     мапит item_index → position_id).
+ *   - Одна фотка → один item + один slug (модель выбирает лучшее
+ *     соответствие; если можно «и шильдик, и общий вид» — приоритет
+ *     более информативному).
  */
 class PhotoClassifierPrompt
 {
     /**
-     * @param  array<int, array{slug: string, name: string, question_template: ?string}>  $photoSlots
-     * @param  array<int, string>  $imagesBase64   data:image/jpeg;base64,... или URL
-     * @param  array{parsed_name?: string, parsed_brand?: string, parsed_article?: string, category_name?: string}  $itemContext
+     * @param  array<int, array{position_id: int, item_index: int, name: string, brand: ?string, article: ?string, category_name: ?string, photo_slots: array<int, array{slug: string, name: string, question_template: ?string}>}>  $items
+     * @param  array<int, string>  $imagesBase64
      * @return array<int, array{role: string, content: mixed}>
      */
-    public static function build(array $photoSlots, array $imagesBase64, array $itemContext): array
+    public static function build(array $items, array $imagesBase64): array
     {
         $userContent = [
-            ['type' => 'text', 'text' => self::userTextBlock($photoSlots, $itemContext)],
+            ['type' => 'text', 'text' => self::userTextBlock($items)],
         ];
         foreach ($imagesBase64 as $img) {
             $userContent[] = [
                 'type' => 'image_url',
                 'image_url' => [
                     'url' => $img,
-                    'detail' => 'high', // важно для чтения шильдиков/маркировок
+                    'detail' => 'high', // важно для чтения шильдиков
                 ],
             ];
         }
@@ -46,91 +66,132 @@ class PhotoClassifierPrompt
     private static function systemMessage(): string
     {
         return <<<'TXT'
-Ты — Vision-классификатор фотографий, приложенных к заявке на лифтовую
-запчасть. Менеджер прикрепил пачку фото, и тебе нужно определить, какие
-из них — фото шильдика, какие — лицевой стороны изделия, какие — общий
-вид, и т.д.
+Ты — Vision-классификатор. На вход — заявка на лифтовые запчасти с
+несколькими позициями и пачка фотографий, которые клиент приложил.
+Твоя задача — за ОДИН проход разложить все фото:
+  - какие из них относятся к какой позиции заявки;
+  - какому photo-slug этой позиции соответствует (фото шильдика, лицевой
+    стороны, общего вида и т.п.) — только из списка ожидаемых slug'ов
+    для категории этой позиции;
+  - что вообще на фото — для аудита и UI.
 
-ВХОД:
-1. Список ожидаемых photo-слотов для текущей категории позиции — у
-   каждого slug, человеческое имя и question_template (что мы обычно
-   просим у клиента под этим слотом).
-2. Контекст позиции: что заказал клиент (название, бренд, артикул).
-3. Несколько изображений по порядку (image_index = 0, 1, 2, ...).
+═══ ВХОДНЫЕ ДАННЫЕ ═══
 
-ЗАДАЧА: для КАЖДОГО изображения определить:
-  - Подходит ли оно под один из ожидаемых photo-slots?
-  - Если да — какой именно slug, с какой уверенностью.
-  - Что конкретно видно (короткое описание для аудита и менеджера).
+Сначала текст: ПОЗИЦИИ ЗАЯВКИ — для каждой указаны item_index, название,
+бренд, артикул (если известен), категория, и ОЖИДАЕМЫЕ photo-слоты этой
+категории.
 
-ПРАВИЛА:
-- Одно изображение может подходить РОВНО под один slug (выбирай лучший
-  по смыслу — если на фото и шильдик и общий вид, приоритет — шильдик,
-  потому что он информативнее).
-- Если фото вообще не относится к товару (палец, пол, кабина лифта
-  издалека) — slug=null, status="irrelevant", описание короткое.
-- Если фото товара, но не подходит ни под один из ожидаемых slug'ов —
-  slug=null, status="other", описание что на фото.
-- Сразу несколько фоток могут попасть под один slug (клиент прислал
-  несколько ракурсов шильдика) — это нормально, всем им проставляй
-  тот же slug.
-- НЕ ВЫДУМЫВАЙ: если на фото не видно надписей/маркировок, не «угадывай»
-  что это шильдик. Бери только то, что РЕАЛЬНО видно.
-- confidence: 0.0–1.0. Выше 0.9 — однозначное соответствие. 0.6–0.9 —
-  скорее да, но есть вариативность. Ниже 0.6 — НЕ возвращай slug,
-  ставь null.
+Затем картинки в порядке image_index = 0, 1, 2, ... Все они приложены к
+одному треду заявки. Часть из них — конкретные фото запчастей. Часть —
+шильдики, шильдики лифтов (общая панель), руки, размытые снимки, общая
+обстановка кабины. Часть может быть фотками поставщиков/каталогов из
+интернета (вставленные клиентом для иллюстрации).
+
+═══ ПРАВИЛА КЛАССИФИКАЦИИ ═══
+
+Для каждой image_index выбери ОДИН из исходов:
+
+1. status="matched" — фото подходит под какой-то photo-slug одной из
+   позиций. Заполни:
+     · item_index = индекс позиции из массива items (0-based);
+     · slug = ровно тот slug, который указан в photo_slots этой позиции;
+     · confidence = 0.0-1.0;
+     · description = краткое объяснение (1-2 предложения), что видно.
+
+2. status="other" — фото относится к запчасти, но не подходит ни под один
+   ожидаемый slug (например фото общего вида запчасти, у которой нет
+   слота photo_general). Заполни item_index если можно определить к
+   какой позиции; иначе null. slug=null.
+
+3. status="irrelevant" — фото не имеет прямого отношения ни к одной
+   позиции: шильдик ЛИФТА в целом (если запчасти-кнопки нет в наличии),
+   рука/палец без товара, размытое, общий план кабины. item_index=null,
+   slug=null, confidence=0.
+
+═══ ВАЖНЫЕ ПРИНЦИПЫ ═══
+
+- Одна фотка получает ОДИН исход. Если на ней одновременно и шильдик
+  кнопки, и кусок платы — выбирай более информативный slot (обычно
+  шильдик > общий вид).
+- Можно несколько фоток назначать на один slug одной позиции (клиент
+  прислал несколько ракурсов шильдика — это нормально).
+- Можно несколько фоток назначать на разные позиции (одна заявка → две
+  кнопки + одна плата — разложи их).
+- НЕ ВЫДУМЫВАЙ: если на фото плохо видно, и нельзя надёжно отнести
+  к slug'у — ставь status="other" или confidence ниже 0.6.
+- confidence:
+    ≥0.9 — однозначное соответствие.
+    0.6-0.9 — хорошее, но есть неоднозначность.
+    <0.6 — ставь status="other" (модель не уверена).
 
 ВЫХОДНОЙ JSON (строго, без markdown):
 {
-  "classifications": [
+  "assignments": [
     {
       "image_index": 0,
-      "slug": "photo_nameplate" | null,
-      "confidence": 0.0,
-      "status": "matched" | "irrelevant" | "other",
-      "description": "виден шильдик Schindler с артикулом SCH_55502867"
+      "item_index": 1,
+      "slug": "photo_nameplate",
+      "confidence": 0.92,
+      "status": "matched",
+      "description": "видна табличка кнопки с артикулом SCH-5550287"
     },
-    ...
+    {
+      "image_index": 1,
+      "item_index": null,
+      "slug": null,
+      "confidence": 0.0,
+      "status": "irrelevant",
+      "description": "шильдик лифта Schindler в кабине, не относится к запчастям"
+    }
   ]
 }
 
-Если нет ни одного полезного фото — верни classifications: [].
+Если ВСЕ фото irrelevant — верни такой же массив со status="irrelevant"
+для каждой. Никогда не возвращай assignments: [].
 TXT;
     }
 
     /**
-     * @param  array<int, array{slug: string, name: string, question_template: ?string}>  $photoSlots
-     * @param  array<string, mixed>  $itemContext
+     * @param  array<int, array<string, mixed>>  $items
      */
-    private static function userTextBlock(array $photoSlots, array $itemContext): string
+    private static function userTextBlock(array $items): string
     {
         $lines = [];
-        $lines[] = 'КОНТЕКСТ ПОЗИЦИИ:';
-        $lines[] = '  название: '.((string) ($itemContext['parsed_name'] ?? '(не задано)'));
-        if (! empty($itemContext['parsed_brand'])) {
-            $lines[] = '  бренд: '.$itemContext['parsed_brand'];
-        }
-        if (! empty($itemContext['parsed_article'])) {
-            $lines[] = '  артикул: '.$itemContext['parsed_article'];
-        }
-        if (! empty($itemContext['category_name'])) {
-            $lines[] = '  категория: '.$itemContext['category_name'];
-        }
-        $lines[] = '';
-        $lines[] = 'ОЖИДАЕМЫЕ PHOTO-СЛОТЫ ЭТОЙ КАТЕГОРИИ:';
-        if (empty($photoSlots)) {
-            $lines[] = '  (нет специфичных photo-слотов — используй только photo_general если он есть)';
+        $lines[] = 'ПОЗИЦИИ ЗАЯВКИ:';
+        if (empty($items)) {
+            $lines[] = '  (нет позиций с photo-слотами — все фото пометь как irrelevant или other)';
         } else {
-            foreach ($photoSlots as $slot) {
-                $line = '  · '.$slot['slug'].' — '.$slot['name'];
-                if (! empty($slot['question_template'])) {
-                    $line .= '. Что мы просим: '.mb_substr((string) $slot['question_template'], 0, 200);
+            foreach ($items as $it) {
+                $idx = (int) ($it['item_index'] ?? 0);
+                $lines[] = '';
+                $lines[] = '  item_index='.$idx.':';
+                $lines[] = '    название: '.((string) ($it['name'] ?? '(без названия)'));
+                if (! empty($it['brand'])) {
+                    $lines[] = '    бренд: '.$it['brand'];
                 }
-                $lines[] = $line;
+                if (! empty($it['article'])) {
+                    $lines[] = '    артикул: '.$it['article'];
+                }
+                if (! empty($it['category_name'])) {
+                    $lines[] = '    категория: '.$it['category_name'];
+                }
+                $slots = is_array($it['photo_slots'] ?? null) ? $it['photo_slots'] : [];
+                if (empty($slots)) {
+                    $lines[] = '    photo-слоты: (нет специфичных — для этой позиции matched ставь только если очень очевидно)';
+                } else {
+                    $lines[] = '    photo-слоты:';
+                    foreach ($slots as $s) {
+                        $line = '      · '.$s['slug'].' — '.$s['name'];
+                        if (! empty($s['question_template'])) {
+                            $line .= '. Что просим: '.mb_substr((string) $s['question_template'], 0, 150);
+                        }
+                        $lines[] = $line;
+                    }
+                }
             }
         }
         $lines[] = '';
-        $lines[] = 'НИЖЕ — изображения (image_index = 0, 1, 2, ...). Классифицируй каждое.';
+        $lines[] = 'НИЖЕ — все фотографии треда (image_index = 0, 1, 2, ...). Разложи каждую.';
 
         return implode("\n", $lines);
     }
