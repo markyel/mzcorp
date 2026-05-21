@@ -62,11 +62,15 @@ class EnrichExistingItemsFromReplyPrompt
 3. Контекст применения (где/как стоит, на каком узле):
    «масленка на противовесе», «кнопка из кабины», «верхний концевик»,
    «по второму лифту — все остальные позиции с прошлого письма»
-   → field = note, value = краткое описание контекста.
+   → field = supplier_note, value = краткое описание контекста.
+   ВАЖНО: не предлагай supplier_note если та же информация уже отражена
+   в parsed_name существующей позиции. Например если name уже «Масленка
+   для башмака противовеса», то supplier_note=«на противовесе» — это
+   дубль, не предлагай. Suggestion должен добавлять НОВУЮ информацию.
 
 4. Уточнение по фото:
    «фото 3 — это то что нужно», «на фото видна табличка GBA21230F10»
-   → field = parsed_article (если артикул) или note (если контекст).
+   → field = parsed_article (если артикул) или supplier_note (если контекст).
 
 5. KB-параметры (марка лифта, материал, габариты и т.п.):
    «диаметр 6 мм», «оригинал, не аналог», «с подсветкой»
@@ -98,7 +102,7 @@ class EnrichExistingItemsFromReplyPrompt
   "suggestions": [
     {
       "item_id": 12345,
-      "field": "parsed_brand" | "parsed_article" | "parsed_qty" | "note" | "kb:<slug>",
+      "field": "parsed_brand" | "parsed_article" | "parsed_qty" | "supplier_note" | "kb:<slug>",
       "value": "Schindler" | "GBA21230F10" | "2" | "на противовесе" | ...,
       "source_quote": "по масленке - это масленка на противовесе",
       "confidence": 0.92,

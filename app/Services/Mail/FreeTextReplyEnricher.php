@@ -31,7 +31,7 @@ class FreeTextReplyEnricher
     private const LLM_TEMPERATURE = 0.2;
     private const LLM_MAX_TOKENS = 1500;
     private const CONFIDENCE_FLOOR = 0.6;
-    private const ENRICHABLE_FIELDS = ['parsed_article', 'parsed_brand', 'parsed_qty', 'note'];
+    private const ENRICHABLE_FIELDS = ['parsed_article', 'parsed_brand', 'parsed_qty', 'supplier_note'];
 
     public function __construct(
         private readonly OpenAIChatService $openai,
@@ -110,6 +110,11 @@ class FreeTextReplyEnricher
             }
             $itemId = (int) ($s['item_id'] ?? 0);
             $field = (string) ($s['field'] ?? '');
+            // Backwards-compat: ранние версии промпта могли использовать
+            // `note`, а реальное поле в RequestItem — `supplier_note`.
+            if ($field === 'note') {
+                $field = 'supplier_note';
+            }
             $value = trim((string) ($s['value'] ?? ''));
             $confidence = (float) ($s['confidence'] ?? 0);
             $sourceQuote = trim((string) ($s['source_quote'] ?? ''));
@@ -130,6 +135,19 @@ class FreeTextReplyEnricher
                 continue;
             }
             if ($this->valueAlreadyPresent($item, $field, $value)) {
+                continue;
+            }
+
+            // 2026-05-21: для supplier_note — не предлагать если эта же
+            // информация уже отражена в parsed_name (например имя уже
+            // содержит «для башмака противовеса», смысла добавлять note
+            // «на противовесе» нет — будет дублирование контекста).
+            if ($field === 'supplier_note' && $this->contextAlreadyInName($item, $value)) {
+                Log::info('FreeTextReplyEnricher: skip supplier_note — already in parsed_name', [
+                    'item_id' => $item->id,
+                    'value' => $value,
+                    'name' => $item->parsed_name,
+                ]);
                 continue;
             }
 
@@ -245,5 +263,37 @@ class FreeTextReplyEnricher
     private function normalizeFieldValue(string $v): string
     {
         return mb_strtolower(preg_replace('/[\s\-_.\/]/u', '', trim($v)) ?? '');
+    }
+
+    /**
+     * Проверка: не дублирует ли предлагаемое supplier_note ту же
+     * информацию, что уже есть в parsed_name. Сравнение по основным
+     * словам (≥4 символа) с учётом окончаний — простой токен-overlap.
+     * Это защищает от случая «масленка для башмака противовеса» в имени
+     * + suggestion «note: на противовесе» (информация уже в имени).
+     */
+    private function contextAlreadyInName(RequestItem $item, string $value): bool
+    {
+        $name = mb_strtolower((string) ($item->parsed_name ?? ''));
+        if ($name === '') {
+            return false;
+        }
+        $tokens = preg_split('/[\s,\-_.\/]+/u', mb_strtolower($value)) ?: [];
+        $significant = array_values(array_filter($tokens, fn ($t) => mb_strlen($t) >= 4));
+        if (empty($significant)) {
+            return false;
+        }
+        $matched = 0;
+        foreach ($significant as $tok) {
+            // Сравнение по 4 первым символам (учитывает окончания:
+            // «противовес-е» vs «противовес-а»).
+            $stem = mb_substr($tok, 0, 4);
+            if ($stem !== '' && mb_strpos($name, $stem) !== false) {
+                $matched++;
+            }
+        }
+        // Если ≥70% значимых слов value уже есть в name — считаем
+        // что информация дублирует.
+        return $matched / count($significant) >= 0.7;
     }
 }
