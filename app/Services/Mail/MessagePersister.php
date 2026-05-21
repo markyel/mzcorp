@@ -125,6 +125,12 @@ class MessagePersister
             $rawName = $disposition . '-' . Str::random(8) . '.' . $ext;
         }
         $decodedFilename = $this->decodeMimeHeader($rawName);
+        // Mojibake recovery: некоторые отправители (gmail.com forwarder'ы, боты
+        // типа liftway) шлют filename как сырые UTF-8 байты без RFC 2047 wrap,
+        // а webklex интерпретирует их как Latin-1 → строка содержит «Đµ Đ¾Đ±»
+        // вместо «русские буквы». См. recoverMojibake — попытка обратного
+        // преобразования. Не трогает уже-корректный UTF-8.
+        $decodedFilename = $this->recoverMojibake($decodedFilename);
         // Yandex кейс: после регекс-fallback'а может остаться хвост вида
         // «... pdf» (пробел вместо точки перед расширением — encoded-word
         // обрезался не на границе). Нормализуем на популярных расширениях.
@@ -175,6 +181,48 @@ class MessagePersister
      * (пробел перед `pdf` вместо точки) — iconv/mb роняли строку как есть,
      * regex-fallback декодирует encoded-word и оставляет хвост ` pdf` как есть.
      */
+    /**
+     * Восстановить mojibake'нутый текст (UTF-8 байты прочитанные как Latin-1
+     * или Windows-1252). Признак: строка ВАЛИДНА как UTF-8, но содержит
+     * характерные «Ð», «Ñ», «Đ» байты сразу после которых идут диакритические
+     * латинские символы — это бывшие кириллические буквы.
+     *
+     * Алгоритм: re-encode строки как Latin-1 (получаем сырые байты),
+     * пытаемся прочесть как UTF-8. Если результат валиден и содержит
+     * кириллицу — возвращаем его, иначе оригинал.
+     *
+     * Кейс 2026-05-21: liftway-бот forwards с filename'ом «отчет.pdf»
+     * как raw-UTF8 байты в Content-Disposition без RFC 2047 wrap.
+     * webklex отдаёт «Đ¾Ñ‚Ñ‡ĐµÑ‚.pdf», recoverMojibake → «отчет.pdf».
+     */
+    private function recoverMojibake(string $value): string
+    {
+        if ($value === '' || ! mb_check_encoding($value, 'UTF-8')) {
+            return $value;
+        }
+        // Признак mojibake: содержит «Ð»/«Ñ»/«Đ» с латинской диакритикой рядом.
+        // (Чистый английский filename вроде "report.pdf" эти символы не имеет.)
+        if (! preg_match('/[ÐĐÑ][\x{0080}-\x{00FF}\x{0100}-\x{017F}]/u', $value)) {
+            return $value;
+        }
+
+        // Конвертируем строку обратно в Latin-1/Win-1252 (получаем сырые байты),
+        // затем читаем эти байты как UTF-8.
+        $raw = @mb_convert_encoding($value, 'ISO-8859-1', 'UTF-8');
+        if (! is_string($raw) || $raw === '') {
+            return $value;
+        }
+        if (! mb_check_encoding($raw, 'UTF-8')) {
+            return $value;
+        }
+        // Должна появиться кириллица (или хотя бы убыть mojibake-признаки).
+        $hasCyrillic = preg_match('/[\x{0400}-\x{04FF}]/u', $raw);
+        if (! $hasCyrillic) {
+            return $value;
+        }
+        return $raw;
+    }
+
     private function decodeMimeHeader(string $value): string
     {
         if ($value === '' || ! str_contains($value, '=?')) {
