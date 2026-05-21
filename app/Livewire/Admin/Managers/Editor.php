@@ -30,7 +30,7 @@ class Editor extends Component
     public string $password = '';
     public string $passwordConfirmation = '';
 
-    #[Validate('required|in:manager,head_of_sales,secretary,director')]
+    #[Validate('required|in:manager,head_of_sales,secretary,director,admin')]
     public string $role = 'manager';
 
     public function mount(?User $user = null): void
@@ -40,12 +40,55 @@ class Editor extends Component
             $this->name = $user->name;
             $this->email = $user->email;
             $this->role = $user->roles->first()?->name ?? 'manager';
+
+            // Защита: не-админ не может открывать страницу редактирования
+            // admin-юзера. РОП/директор не должны даже видеть, что такой есть.
+            if ($user->hasRole(RoleEnum::Admin->value) && ! $this->currentIsAdmin()) {
+                abort(403, 'Управление админ-учётками доступно только админу.');
+            }
         }
+    }
+
+    /**
+     * Текущий авторизованный пользователь — admin?
+     */
+    private function currentIsAdmin(): bool
+    {
+        return (bool) auth()->user()?->hasRole(RoleEnum::Admin->value);
+    }
+
+    /**
+     * Список ролей, доступных для назначения текущим пользователем.
+     * Не-админ не может назначить роль `admin`.
+     *
+     * @return array<int, RoleEnum>
+     */
+    private function availableRoles(): array
+    {
+        $all = RoleEnum::cases();
+        if ($this->currentIsAdmin()) {
+            return $all;
+        }
+
+        return array_values(array_filter($all, static fn (RoleEnum $r): bool => $r !== RoleEnum::Admin));
     }
 
     public function save()
     {
         $this->validate();
+
+        // Запрет назначать admin не-админом (на случай обхода UI).
+        if ($this->role === RoleEnum::Admin->value && ! $this->currentIsAdmin()) {
+            $this->addError('role', 'Роль «Админ» может назначить только админ.');
+            return null;
+        }
+        // Запрет править admin-учётку не-админом.
+        if ($this->userId) {
+            $target = User::find($this->userId);
+            if ($target && $target->hasRole(RoleEnum::Admin->value) && ! $this->currentIsAdmin()) {
+                abort(403);
+            }
+        }
 
         // Уникальность email — отдельной проверкой, чтобы корректно учитывать
         // edit (исключить текущую запись из уникальности).
@@ -114,7 +157,7 @@ class Editor extends Component
     public function render()
     {
         return view('livewire.admin.managers.editor', [
-            'roles' => RoleEnum::cases(),
+            'roles' => $this->availableRoles(),
         ]);
     }
 }

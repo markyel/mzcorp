@@ -14,6 +14,12 @@ enum Role: string
     case HeadOfSales = 'head_of_sales';
     case Secretary = 'secretary';
     case Director = 'director';
+    /**
+     * Технический администратор — видит всё (как директорат), но
+     * управлять админами могут только другие админы. Не виден в списках
+     * менеджеров для РОПа/директора, не назначается на заявки.
+     */
+    case Admin = 'admin';
 
     /**
      * Локализованное название роли (для UI).
@@ -25,6 +31,7 @@ enum Role: string
             self::HeadOfSales => 'РОП',
             self::Secretary => 'Секретарь',
             self::Director => 'Директорат',
+            self::Admin => 'Админ',
         };
     }
 

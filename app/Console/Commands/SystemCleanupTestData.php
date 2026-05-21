@@ -113,7 +113,7 @@ class SystemCleanupTestData extends Command
         $usersToDelete = $allUsers->whereNotIn('id', $directorIds);
 
         $this->line('--- Пользователи: ---');
-        $this->line(sprintf('  Сохраняем (роль director): %d', $usersToKeep->count()));
+        $this->line(sprintf('  Сохраняем (роли director/admin): %d', $usersToKeep->count()));
         foreach ($usersToKeep as $u) {
             $this->line(sprintf('    · #%d  %s  <%s>', $u->id, $u->name, $u->email));
         }
@@ -143,7 +143,7 @@ class SystemCleanupTestData extends Command
         foreach ($personalMailboxesToDelete as $m) {
             $this->line(sprintf('    × #%d  %s  (%s)', $m->id, $m->email, $m->type->value ?? $m->type));
         }
-        $this->line(sprintf('  Личные ящики директоров (СОХРАНЯЕМ): %d', $personalMailboxesKept->count()));
+        $this->line(sprintf('  Личные ящики директоров/админов (СОХРАНЯЕМ): %d', $personalMailboxesKept->count()));
         foreach ($personalMailboxesKept as $m) {
             $this->line(sprintf('    · #%d  %s  (is_active=%s)', $m->id, $m->email, $m->is_active ? 'true' : 'false'));
         }
@@ -153,11 +153,11 @@ class SystemCleanupTestData extends Command
         }
         $this->line('');
 
-        // 4. Защита: должен быть хотя бы один директор
+        // 4. Защита: должен быть хотя бы один защищённый юзер (director или admin)
         if ($usersToKeep->isEmpty()) {
-            $this->error('STOP: не найдено ни одного пользователя с ролью `director`.');
-            $this->error('  Иначе после очистки в системе не останется админов.');
-            $this->error('  Создайте директора через админку и запустите команду заново.');
+            $this->error('STOP: не найдено ни одного пользователя с ролью `director` или `admin`.');
+            $this->error('  Иначе после очистки в системе не останется кому управлять.');
+            $this->error('  Создайте директора/админа через админку и запустите команду заново.');
             return self::FAILURE;
         }
 
@@ -271,7 +271,8 @@ class SystemCleanupTestData extends Command
     }
 
     /**
-     * Возвращает ID всех пользователей с ролью `director` (Spatie).
+     * Возвращает ID всех пользователей с ролями `director` или `admin` (Spatie).
+     * Это «защищённые» учётки — не удаляются при cleanup.
      *
      * @return array<int, int>
      */
@@ -281,12 +282,12 @@ class SystemCleanupTestData extends Command
             return [];
         }
 
-        return DB::table('model_has_roles')
+        return array_values(array_unique(DB::table('model_has_roles')
             ->join('roles', 'roles.id', '=', 'model_has_roles.role_id')
-            ->where('roles.name', 'director')
+            ->whereIn('roles.name', ['director', 'admin'])
             ->where('model_has_roles.model_type', User::class)
             ->pluck('model_has_roles.model_id')
             ->map(static fn ($v): int => (int) $v)
-            ->all();
+            ->all()));
     }
 }

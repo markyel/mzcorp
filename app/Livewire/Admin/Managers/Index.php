@@ -53,6 +53,11 @@ class Index extends Component
         }
 
         $user = User::findOrFail($userId);
+        if (! $this->canManage($user)) {
+            session()->flash('error', 'Нет доступа к управлению админ-учётками.');
+
+            return;
+        }
         $user->forceFill(['archived_at' => now()])->save();
 
         session()->flash('status', "«{$user->name}» переведён в архив.");
@@ -61,9 +66,31 @@ class Index extends Component
     public function restore(int $userId): void
     {
         $user = User::findOrFail($userId);
+        if (! $this->canManage($user)) {
+            session()->flash('error', 'Нет доступа к управлению админ-учётками.');
+
+            return;
+        }
         $user->forceFill(['archived_at' => null])->save();
 
         session()->flash('status', "«{$user->name}» восстановлен.");
+    }
+
+    /**
+     * Может ли текущий пользователь управлять целевым.
+     * Правило: админ-юзера может править только другой админ.
+     */
+    private function canManage(User $target): bool
+    {
+        $current = auth()->user();
+        if (! $current) {
+            return false;
+        }
+        if ($target->hasRole(RoleEnum::Admin->value) && ! $current->hasRole(RoleEnum::Admin->value)) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -92,6 +119,13 @@ class Index extends Component
                 'roles:id,name',
                 'ownedMailboxes:id,owner_user_id,email,is_active,last_synced_at,last_error_at',
             ]);
+
+        // Админ-юзера видит только другой админ. РОПа/директора не должны
+        // видеть admin-учёток вообще (даже в фильтре «все»).
+        $current = auth()->user();
+        if (! $current?->hasRole(RoleEnum::Admin->value)) {
+            $query->whereDoesntHave('roles', fn ($q) => $q->where('name', RoleEnum::Admin->value));
+        }
 
         if ($this->filter === 'archived') {
             $query->archived();

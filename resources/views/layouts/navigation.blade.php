@@ -48,11 +48,17 @@
         // «Каталог» вынесен в левый rail (resources/views/components/left-rail.blade.php),
         // в горизонтальный топбар не дублируется.
     }
-    if ($user?->hasAnyRole(['head_of_sales', 'director'])) {
+    if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'mail-rules.index', 'label' => 'Правила почты', 'pattern' => 'mail-rules.*'];
         $navLinks[] = ['route' => 'mail-review.index', 'label' => 'Авто-отклонённые', 'pattern' => 'mail-review.*'];
         $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];
         $navLinks[] = ['route' => 'settings.index', 'label' => 'Настройки', 'pattern' => 'settings.*'];
+    }
+    if ($user?->hasRole('admin')) {
+        // Подключение основной почты и активация/деактивация маршрутизации —
+        // только для админа. Скрыто от РОПа/директора, чтобы случайно
+        // не остановить распределение заявок.
+        $navLinks[] = ['route' => 'mailboxes.index', 'label' => 'Ящики', 'pattern' => 'mailboxes.*'];
     }
 
     $disabledTitle = 'Доступно в Phase 2';

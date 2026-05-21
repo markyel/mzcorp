@@ -101,6 +101,16 @@ Route::middleware('auth')->group(function () {
             return view('admin.mail-review.index');
         })->name('mail-review.index');
     });
+
+    // Общие почтовые ящики (mail@myzip.ru, info@myzip.ru и т.п.) —
+    // подключение, OAuth/app-password, активация/деактивация
+    // распределения заявок. Доступно ТОЛЬКО админу: критично, что
+    // ни директор, ни РОП не могут случайно отключить основную почту.
+    Route::middleware('role:admin')->group(function () {
+        Route::get('/dashboard/mailboxes', function () {
+            return view('admin.mailboxes.index');
+        })->name('mailboxes.index');
+    });
 });
 
 require __DIR__.'/auth.php';
