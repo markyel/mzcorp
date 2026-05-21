@@ -59,7 +59,22 @@ class ItemCatalogLinkDialog extends Component
      */
     public bool $filterBrand = false;
     public bool $filterCategory = false;
+    /**
+     * Старый bool «все размеры subject разом» сохранён для
+     * backwards-compat в blade-шаблонах. Реальная фильтрация теперь
+     * управляется через $selectedDims (multi-select по конкретным
+     * размерам). Если $selectedDims пуст, но $filterDims=true —
+     * применяем ВСЕ размеры из subjectDimensions (старый режим).
+     */
     public bool $filterDims = false;
+    /**
+     * Массив subject-размеров (в мм), которые включены для фильтрации.
+     * Менеджер может включать по одному / нескольким / всем.
+     * Пустой массив + $filterDims=false → фильтр выключен.
+     *
+     * @var array<int, int>
+     */
+    public array $selectedDims = [];
     public ?string $filterUnit = null;
 
     /**
@@ -136,6 +151,7 @@ class ItemCatalogLinkDialog extends Component
         $this->filterBrand = false;
         $this->filterCategory = false;
         $this->filterDims = false;
+        $this->selectedDims = [];
         $this->filterUnit = null;
         $this->compareView = 'compare';
     }
@@ -150,9 +166,36 @@ class ItemCatalogLinkDialog extends Component
         $this->filterCategory = ! $this->filterCategory;
     }
 
+    /**
+     * Toggle одного размера в multi-select.
+     * Включён → выключаем. Выключен → включаем + включаем общий
+     * $filterDims, чтобы applyBaseChipFilters сработал.
+     */
+    public function toggleDimFilter(int $dim): void
+    {
+        $idx = array_search($dim, $this->selectedDims, true);
+        if ($idx !== false) {
+            array_splice($this->selectedDims, $idx, 1);
+        } else {
+            $this->selectedDims[] = $dim;
+        }
+        // Общий flag активен пока есть хоть один выбранный размер.
+        $this->filterDims = ! empty($this->selectedDims);
+    }
+
+    /**
+     * Старая «все размеры разом» кнопка: если выбрано хоть что-то — снять
+     * выбор; если ничего — выбрать все subject-размеры (полный фильтр).
+     */
     public function toggleDimsFilter(): void
     {
-        $this->filterDims = ! $this->filterDims;
+        if (! empty($this->selectedDims) || $this->filterDims) {
+            $this->selectedDims = [];
+            $this->filterDims = false;
+        } else {
+            $this->selectedDims = array_values($this->subjectDimensions);
+            $this->filterDims = ! empty($this->selectedDims);
+        }
     }
 
     /**
@@ -626,53 +669,46 @@ class ItemCatalogLinkDialog extends Component
             }
         }
 
-        if ($this->filterDims) {
-            $dims = $this->subjectDimensions;
-            if (! empty($dims)) {
-                $tol = self::DIM_TOLERANCE_MM;
-                // 2026-05-21 фикс OR→majority: раньше любой совпавший
-                // размер пропускал позицию. Это давало false-positive для
-                // ремня 16×1360×2 при поиске ролика 44×16 — совпадение
-                // по «16» проходило, хотя 44 нет.
-                //
-                // Новое правило: считаем сколько subject-размеров нашлось
-                // в catalog.size_a..f (±tol). Каждый subject-размер «съедает»
-                // ровно один catalog-размер (не один catalog-размер на
-                // несколько subject-ов). Позиция проходит если найдено
-                // ≥ ceil(|dims|/2) совпадений, но минимум 2 при |dims|≥2
-                // (для 2-мерных subject требуем оба).
-                $needed = max(1, (int) ceil(count($dims) / 2));
-                if (count($dims) >= 2) {
-                    $needed = max($needed, 2);
+        // Фильтр размеров: applies ALL selected dims (multi-select).
+        // Если $selectedDims пуст, но $filterDims=true — fallback на ВСЕ
+        // subject-размеры (старое «фильтровать по всем сразу»).
+        $activeDims = ! empty($this->selectedDims)
+            ? $this->selectedDims
+            : ($this->filterDims ? $this->subjectDimensions : []);
+        if (! empty($activeDims)) {
+            $tol = self::DIM_TOLERANCE_MM;
+            // Правило: КАЖДЫЙ выбранный размер должен иметь совпадение в
+            // catalog.size_a..f (±tol). Greedy-матчинг — один catalog-размер
+            // покрывает только один subject-размер (избегаем «16» съедает
+            // оба subject-«16» при двух одинаковых).
+            $rows = array_filter($rows, function ($row) use ($activeDims, $tol) {
+                $cat = $row['catalog'];
+                $sizes = array_values(array_filter([
+                    $cat->size_a, $cat->size_b, $cat->size_c,
+                    $cat->size_d, $cat->size_e, $cat->size_f,
+                ], fn ($v) => $v !== null));
+                if ($sizes === []) {
+                    return false;
                 }
-                $rows = array_filter($rows, function ($row) use ($dims, $tol, $needed) {
-                    $cat = $row['catalog'];
-                    $sizes = array_values(array_filter([
-                        $cat->size_a, $cat->size_b, $cat->size_c,
-                        $cat->size_d, $cat->size_e, $cat->size_f,
-                    ], fn ($v) => $v !== null));
-                    if ($sizes === []) {
-                        return false;
-                    }
-                    // Greedy-матчинг с пометкой использованных catalog-размеров,
-                    // чтобы «16» в subject не съел «16» в catalog дважды.
-                    $used = [];
-                    $matched = 0;
-                    foreach ($dims as $d) {
-                        foreach ($sizes as $i => $s) {
-                            if (isset($used[$i])) {
-                                continue;
-                            }
-                            if (abs(((int) round((float) $s)) - $d) <= $tol) {
-                                $used[$i] = true;
-                                $matched++;
-                                break;
-                            }
+                $used = [];
+                foreach ($activeDims as $d) {
+                    $found = false;
+                    foreach ($sizes as $i => $s) {
+                        if (isset($used[$i])) {
+                            continue;
+                        }
+                        if (abs(((int) round((float) $s)) - $d) <= $tol) {
+                            $used[$i] = true;
+                            $found = true;
+                            break;
                         }
                     }
-                    return $matched >= $needed;
-                });
-            }
+                    if (! $found) {
+                        return false; // хотя бы один требуемый размер не нашёлся
+                    }
+                }
+                return true;
+            });
         }
 
         return $rows;

@@ -220,14 +220,25 @@
                             </button>
                         @endif
                         @if(! empty($subjDims))
-                            <button type="button" wire:click="toggleDimsFilter"
-                                    class="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border {{ $filterDims ? 'bg-amber-100 border-amber-300 text-amber-900' : 'bg-surface-2 border-border text-fg-2 hover:bg-surface' }}"
-                                    title="Показывать каталог где хотя бы один размер (size_a..f) совпадает с одним из {{ implode(', ', $subjDims) }} ±5 мм">
-                                <span class="text-[10px]">{{ $filterDims ? '✓' : '+' }}</span>
-                                <span>размер:</span>
-                                <span class="font-semibold mono">{{ implode(' · ', $subjDims) }}</span>
-                                <span class="text-[10px] text-fg-3">мм ±5</span>
-                            </button>
+                            <span class="text-fg-3 text-[10px] font-semibold uppercase tracking-wider ml-1">размер:</span>
+                            @foreach($subjDims as $dim)
+                                @php $dimActive = in_array($dim, $selectedDims, true); @endphp
+                                <button type="button" wire:click="toggleDimFilter({{ $dim }})"
+                                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border mono {{ $dimActive ? 'bg-amber-100 border-amber-300 text-amber-900' : 'bg-surface-2 border-border text-fg-2 hover:bg-surface' }}"
+                                        title="Показывать каталог где есть размер (size_a..f) около {{ $dim }} мм ±5">
+                                    <span class="text-[10px]">{{ $dimActive ? '✓' : '+' }}</span>
+                                    <span class="font-semibold">{{ $dim }}</span>
+                                    <span class="text-[10px] text-fg-3">мм</span>
+                                </button>
+                            @endforeach
+                            <span class="text-[10px] text-fg-3">±5</span>
+                            @if(count($subjDims) > 1)
+                                <button type="button" wire:click="toggleDimsFilter"
+                                        class="text-[10px] text-fg-3 hover:text-fg-1 underline decoration-dotted ml-1"
+                                        title="{{ $filterDims ? 'Снять выбор размеров' : 'Выбрать все размеры (фильтрация по AND)' }}">
+                                    {{ $filterDims && count($selectedDims) === count($subjDims) ? 'снять все' : 'все' }}
+                                </button>
+                            @endif
                         @endif
                     </div>
                 @endif
