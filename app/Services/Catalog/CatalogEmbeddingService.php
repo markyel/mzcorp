@@ -547,7 +547,7 @@ class CatalogEmbeddingService
                 WHERE is_active = true
                   AND (
                        lower(sku) ILIKE ANY (?::text[])
-                       OR regexp_replace(lower(name), '[\\s\\-_./]', '', 'g') ILIKE ANY (?::text[])
+                       OR regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g') ILIKE ANY (?::text[])
                        OR brand_article_normalized ILIKE ANY (?::text[])
                        OR (articles_search IS NOT NULL AND articles_search ILIKE ANY (?::text[]))
                        OR (brands_search IS NOT NULL AND brands_search ILIKE ANY (?::text[]))
@@ -598,7 +598,13 @@ class CatalogEmbeddingService
         // Дефис/пробел-очищенный lower — для случая «Плата ПКЛ-32» против
         // «Плата контроллера лифта типа ПКЛ32-04»: word_similarity на raw
         // даёт ~0.1 из-за разных триграмм вокруг дефиса, на nosep — ~0.8.
-        $lowerNoSep = (string) preg_replace('/[\s\-_.\/]/u', '', $lower);
+        // 2026-05-21: запятая добавлена в strip-набор. Catalog name содержит
+        // десятичные с запятой («L119,7»), а pg_trgm word_similarity разрывает
+        // строку на «слова» по non-alnum символам — query «L119,7» ловился
+        // хуже чем «L119 7». Унифицируем: стрипаем запятую и в query, и в SQL
+        // (см. regexp_replace ниже). GIN-индекс с тем же паттерном —
+        // миграция add_dehyphenated_name_trgm_index_with_comma.
+        $lowerNoSep = (string) preg_replace('/[\s\-_.\/,]/u', '', $lower);
         // 2026-05-21: морфология русского. word_similarity на «цепь t135» против
         // «цепи t135» падает ниже 0.6 (порог) из-за разных триграмм вокруг
         // последнего символа: цеп/епь/пь_ vs цеп/епи/пи_. PostgreSQL native
@@ -659,9 +665,9 @@ class CatalogEmbeddingService
             $sql = "
                 SELECT id AS catalog_id,
                        GREATEST(
-                           word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./]', '', 'g'))
+                           word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g'))
                            " . ($useStem ? ",
-                           word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./]', '', 'g'))" : "") . "
+                           word_similarity(?, regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g'))" : "") . "
                            " . ($useArticles ? ",
                            CASE
                                WHEN articles_search IS NOT NULL AND articles_search <> ''
@@ -672,9 +678,9 @@ class CatalogEmbeddingService
                 FROM catalog_items
                 WHERE is_active = true
                   AND (
-                       ? <% regexp_replace(lower(name), '[\\s\\-_./]', '', 'g')
+                       ? <% regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g')
                        " . ($useStem ? "
-                       OR ? <% regexp_replace(lower(name), '[\\s\\-_./]', '', 'g')" : "") . "
+                       OR ? <% regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g')" : "") . "
                        " . ($useArticles ? "
                        OR (articles_search IS NOT NULL AND ? <% articles_search)" : "") . "
                   )
