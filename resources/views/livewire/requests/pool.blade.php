@@ -326,20 +326,20 @@
                     @endif
                 </div>
             @else
-                {{-- THEAD (sticky) --}}
+                {{-- THEAD (sticky) — 2026-05-21 redesign:
+                     описание получает приоритет (1fr). Сумма скрыта (пусто
+                     до Phase 3), сложность переехала в код-ячейку иконкой,
+                     статус+событие объединены в одну колонку. --}}
                 <div class="sticky top-0 bg-[var(--bg-surface)] border-b border-[var(--border-strong)] z-[2] grid items-center px-5 h-[32px] gap-x-3
                             text-[11px] font-semibold uppercase tracking-wider text-[var(--fg-3)]"
-                     style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 170px 140px 160px 100px 80px 110px 32px;">
+                     style="grid-template-columns: 24px 130px 170px minmax(280px,1fr) 200px 150px 80px 32px;">
                     <span></span>
                     <span>код</span>
-                    <span>заявка</span>
-                    <span>статус</span>
-                    <span>событие</span>
-                    <span>менеджер</span>
                     <span>клиент</span>
-                    <span class="text-right">сумма</span>
+                    <span>заявка</span>
+                    <span>статус&nbsp;/&nbsp;событие</span>
+                    <span>менеджер</span>
                     <span class="text-right">возраст</span>
-                    <span class="text-right">сложность</span>
                     <span></span>
                 </div>
 
@@ -355,7 +355,6 @@
                         <span class="font-semibold text-[11px] text-[var(--fg-3)] tnum">· {{ $group['count'] }}</span>
                         <span class="ml-auto text-[11.5px] font-medium text-[var(--fg-3)] flex gap-3.5">
                             <span title="{{ $disabledTitle }}">ср. возраст —</span>
-                            <span title="{{ $disabledTitle }}">сумма —</span>
                         </span>
                     </div>
                     @endif
@@ -484,19 +483,81 @@
                             $clientLine2 = $req->client_name ? $req->client_email : null;
                         @endphp
 
+                        @php
+                            // 2026-05-21 redesign: считаем сложность здесь же,
+                            // чтобы вынести иконку в код-ячейку (рядом с
+                            // internal_code + датой). Раньше сложность жила
+                            // в отдельной колонке chip'ом с label+score —
+                            // теперь это компактная цветная точка с tooltip.
+                            $cLevel = $req->complexity_level;
+                            $cScore = (int) ($req->complexity_score ?? 0);
+                            $cTooltip = null;
+                            $cDotColor = null;
+                            if ($cLevel) {
+                                $pathCounts = [];
+                                foreach ($req->items as $it) {
+                                    if (! $it->is_active) continue;
+                                    $p = $it->match_path?->value ?? 'manual';
+                                    $pathCounts[$p] = ($pathCounts[$p] ?? 0) + 1;
+                                }
+                                $totalActive = array_sum($pathCounts);
+                                $tooltipParts = [
+                                    $cLevel->shortLabel() . ' · score ' . $cScore,
+                                    'Позиций: ' . $totalActive,
+                                ];
+                                foreach (\App\Enums\MatchPath::cases() as $mp) {
+                                    $n = $pathCounts[$mp->value] ?? 0;
+                                    if ($n > 0) {
+                                        $tooltipParts[] = $mp->label() . ': ' . $n;
+                                    }
+                                }
+                                $cTooltip = implode("\n", $tooltipParts);
+                                $cDotColor = match ($cLevel->value) {
+                                    'easy' => 'var(--fg-4)',
+                                    'normal' => 'var(--sky-600)',
+                                    'hard' => 'var(--amber-600)',
+                                    'very_hard' => 'var(--red-600)',
+                                };
+                            }
+                            $createdShort = $req->created_at?->format('d.m.y');
+                        @endphp
+
                         <a href="{{ $href }}" wire:key="req-{{ $req->id }}"
-                           class="grid items-center px-5 h-[42px] gap-x-3 border-b border-[var(--border-subtle)] text-[12.5px] hover:bg-[var(--bg-hover)] transition-colors
+                           class="grid items-center px-5 min-h-[44px] gap-x-3 border-b border-[var(--border-subtle)] text-[12.5px] hover:bg-[var(--bg-hover)] transition-colors
                                   {{ $isOverdueAlarm ? 'bg-[var(--red-50)] hover:bg-[var(--red-100)] border-l-2 border-l-[var(--red-500)] pl-[18px]' : ($isInfoFlag ? 'bg-[var(--amber-50)] hover:bg-[var(--amber-100)] border-l-2 border-l-[var(--amber-500)] pl-[18px]' : '') }}"
-                           style="grid-template-columns: 24px 110px minmax(220px,1fr) 150px 170px 140px 160px 100px 80px 110px 32px;">
+                           style="grid-template-columns: 24px 130px 170px minmax(280px,1fr) 200px 150px 80px 32px;">
 
                             {{-- checkbox (Phase 2) --}}
                             <span class="w-3.5 h-3.5 border border-[var(--border-strong)] rounded-[3px] bg-[var(--bg-surface)] opacity-50"
                                   title="{{ $disabledTitle }}"></span>
 
-                            {{-- code --}}
-                            <span class="font-mono text-[12px] text-[var(--accent)]">{{ $req->internal_code }}</span>
+                            {{-- code + complexity dot + дата (2026-05-21) --}}
+                            <span class="min-w-0 overflow-hidden">
+                                <div class="flex items-center gap-1.5">
+                                    @if($cLevel)
+                                        <span class="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                                              style="background: {{ $cDotColor }};"
+                                              title="{{ $cTooltip }}"></span>
+                                    @else
+                                        <span class="inline-block w-2 h-2 rounded-full flex-shrink-0 border border-dashed border-[var(--border-strong)]"
+                                              title="Сложность не рассчитана"></span>
+                                    @endif
+                                    <span class="font-mono text-[12px] text-[var(--accent)] truncate">{{ $req->internal_code }}</span>
+                                </div>
+                                @if($createdShort)
+                                    <div class="text-[10.5px] text-[var(--fg-4)] font-mono mt-0.5 pl-[14px]">{{ $createdShort }}</div>
+                                @endif
+                            </span>
 
-                            {{-- title (t1 + badges, t2) --}}
+                            {{-- client (перемещён до title — 2026-05-21) --}}
+                            <span class="min-w-0 overflow-hidden">
+                                <div class="font-medium text-[var(--fg-1)] truncate">{{ $clientLine1 ?: '—' }}</div>
+                                @if($clientLine2)
+                                    <div class="text-[11.5px] text-[var(--fg-3)] mt-0.5 truncate">{{ $clientLine2 }}</div>
+                                @endif
+                            </span>
+
+                            {{-- title (t1 + badges, t2) — основная колонка, 1fr --}}
                             <span class="pr-2 overflow-hidden min-w-0">
                                 <div class="font-medium text-[var(--fg-1)] truncate flex items-center gap-1.5">
                                     <span class="truncate">{{ $titleT1 }}</span>
@@ -524,41 +585,31 @@
                                 @endif
                             </span>
 
-                            {{-- status chip — через enum-метод (Phase 1.10 универсал). --}}
-                            <span>
-                                <span class="chip {{ $req->status->chipClass() }}">
-                                    <span class="dot"></span>{{ $req->status->label() }}
-                                </span>
-                            </span>
-
-                            {{-- событие: тип последней активности (Phase pool-event).
-                                 requiresAttention() — амбер, silencesAttention() / нейтральные — серый. --}}
+                            {{-- статус + событие (объединено 2026-05-21):
+                                 статус (chip) сверху, тип события (с иконкой) снизу.
+                                 Если событие отсутствует — рендерим только статус. --}}
                             @php
                                 $actType = $req->last_activity_type;
                                 $actAt = $req->last_activity_at;
-                                if ($actType) {
-                                    $actClasses = $actType->requiresAttention()
-                                        ? 'bg-[var(--amber-50)] text-[var(--amber-800)] border-[var(--amber-700)]/30'
-                                        : 'bg-[var(--neutral-100)] text-[var(--fg-2)] border-[var(--border-subtle)]';
-                                }
+                                $actAccent = $actType && $actType->requiresAttention();
                             @endphp
                             <span class="min-w-0 overflow-hidden">
-                                @if($actType)
-                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[3px] border text-[11px] font-medium {{ $actClasses }}"
-                                          title="{{ $actType->label() }}{{ $actAt ? ' · ' . $actAt->format('d.m.Y H:i') : '' }}">
-                                        <span>{{ $actType->icon() }}</span>
-                                        <span class="truncate">{{ $actType->label() }}</span>
+                                <div class="flex items-center">
+                                    <span class="chip {{ $req->status->chipClass() }}">
+                                        <span class="dot"></span>{{ $req->status->label() }}
                                     </span>
-                                @else
-                                    <span class="text-[var(--fg-4)] text-[11px]">—</span>
+                                </div>
+                                @if($actType)
+                                    <div class="text-[11px] mt-0.5 truncate {{ $actAccent ? 'text-[var(--amber-800)]' : 'text-[var(--fg-3)]' }}"
+                                         title="{{ $actType->label() }}{{ $actAt ? ' · ' . $actAt->format('d.m.Y H:i') : '' }}">
+                                        <span>{{ $actType->icon() }}</span>
+                                        <span>{{ $actType->label() }}</span>
+                                    </div>
                                 @endif
                             </span>
 
                             {{-- manager + (optional) acting badge --}}
                             @php
-                                // Phase 2 delegation: для текущего юзера если он
-                                // acting в active delegation — показываем badge
-                                // «временно от @{owner}».
                                 $authId = auth()->id();
                                 $activeDelegation = $req->relationLoaded('activeDelegations')
                                     ? $req->activeDelegations->first()
@@ -581,72 +632,8 @@
                                 @endif
                             </span>
 
-                            {{-- client --}}
-                            <span class="min-w-0 overflow-hidden">
-                                <div class="font-medium text-[var(--fg-1)] truncate">{{ $clientLine1 ?: '—' }}</div>
-                                @if($clientLine2)
-                                    <div class="text-[11.5px] text-[var(--fg-3)] mt-0.5 truncate">{{ $clientLine2 }}</div>
-                                @endif
-                            </span>
-
-                            {{-- сумма (Phase 3) --}}
-                            <span class="text-right text-[var(--fg-4)] font-medium tnum" title="{{ $disabledTitle }}">—</span>
-
                             {{-- возраст --}}
                             <span class="text-right font-mono text-[12px] {{ $ageColor }}">{{ $age ?: '—' }}</span>
-
-                            {{-- сложность (Phase complexity): chip с уровнем
-                                 + score + tooltip с разбивкой по match_path.
-                                 Денормализованные колонки `complexity_score`
-                                 и `complexity_level` пересчитываются через
-                                 RequestItemObserver. --}}
-                            @php
-                                $cLevel = $req->complexity_level;
-                                $cScore = (int) ($req->complexity_score ?? 0);
-                                if ($cLevel) {
-                                    // Tooltip: считаем items per match_path для
-                                    // этой заявки (eager-load делаем в Pool.php).
-                                    $pathCounts = [];
-                                    foreach ($req->items as $it) {
-                                        if (! $it->is_active) continue;
-                                        $p = $it->match_path?->value ?? 'manual';
-                                        $pathCounts[$p] = ($pathCounts[$p] ?? 0) + 1;
-                                    }
-                                    $totalActive = array_sum($pathCounts);
-                                    $tooltipParts = ["Score: {$cScore}", "Позиций: {$totalActive}"];
-                                    foreach (\App\Enums\MatchPath::cases() as $mp) {
-                                        $n = $pathCounts[$mp->value] ?? 0;
-                                        if ($n > 0) {
-                                            $tooltipParts[] = $mp->label() . ': ' . $n;
-                                        }
-                                    }
-                                    $cTooltip = implode("\n", $tooltipParts);
-                                    $cClasses = match ($cLevel->value) {
-                                        'easy' => 'bg-[var(--neutral-100)] text-[var(--fg-3)] border-[var(--border)]',
-                                        'normal' => 'bg-[var(--sky-50)] text-[var(--sky-700)] border-[var(--sky-200)]',
-                                        'hard' => 'bg-[var(--amber-50)] text-[var(--amber-700)] border-[var(--amber-300)]',
-                                        'very_hard' => 'bg-[var(--red-50)] text-[var(--red-700)] border-[var(--red-300)]',
-                                    };
-                                }
-                            @endphp
-                            <span class="text-right min-w-0 overflow-hidden">
-                                @if($cLevel)
-                                    {{-- shortLabel: «Очень сложная» → «Оч. сложная»
-                                         чтобы вмещаться в 110px колонку одной строкой.
-                                         Раньше `style="white-space: pre-line"` стояло
-                                         ради многострочного tooltip — но pre-line
-                                         работает на content элемента, не на title;
-                                         оно ломало chip на 2 строки и рвало row-height. --}}
-                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[3px] border text-[11px] font-medium whitespace-nowrap {{ $cClasses }}"
-                                          title="{{ $cTooltip }}">
-                                        <span class="shrink-0">{{ $cLevel->icon() }}</span>
-                                        <span class="shrink-0">{{ $cLevel->shortLabel() }}</span>
-                                        <span class="font-mono text-[10.5px] opacity-70 shrink-0">{{ $cScore }}</span>
-                                    </span>
-                                @else
-                                    <span class="text-[var(--fg-4)] text-[11px]">—</span>
-                                @endif
-                            </span>
 
                             {{-- ⋯ menu (Phase 2) --}}
                             <span class="text-center text-[var(--fg-4)] font-bold tracking-widest cursor-not-allowed"
