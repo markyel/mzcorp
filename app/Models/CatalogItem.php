@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Kb\EquipmentCategory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -26,6 +27,10 @@ class CatalogItem extends Model
         'units',
         'placement',
         'part_type',
+        // FK на equipment_categories (Phase B): прямая привязка SKU к KB-категории
+        // вместо substring-фильтрации по synonyms. Заполняется командой
+        // kb:backfill-categories (rule-based + LLM fallback).
+        'equipment_category_id',
         'brand',
         'brand_article',
         // Нормализованная форма (uppercase + удалены [\s\-_./]) для быстрого
@@ -86,5 +91,10 @@ class CatalogItem extends Model
     public function lastImport(): BelongsTo
     {
         return $this->belongsTo(CatalogImport::class, 'last_import_id');
+    }
+
+    public function equipmentCategory(): BelongsTo
+    {
+        return $this->belongsTo(EquipmentCategory::class, 'equipment_category_id');
     }
 }

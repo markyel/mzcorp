@@ -291,7 +291,16 @@ class Search extends Component
         }
 
         if ($this->filterCategoryId !== null) {
-            $cat = $this->kbCategories->firstWhere('id', $this->filterCategoryId);
+            $targetId = (int) $this->filterCategoryId;
+
+            // Phase B (2026-05-21): фильтр опирается на FK catalog_items.equipment_category_id,
+            // заполненный командой `kb:backfill-categories`. Точно, без морфологических
+            // казусов substring-matcher'а.
+            //
+            // Fallback на старую synonym-логику оставлен для legacy SKU где FK ещё NULL —
+            // чтобы поиск не пропадал до полного прогона backfill. Эту ветку можно убрать
+            // когда все catalog_items будут классифицированы.
+            $cat = $this->kbCategories->firstWhere('id', $targetId);
             $synonyms = [];
             if ($cat) {
                 $synonyms[] = mb_strtolower($cat->name);
@@ -303,28 +312,38 @@ class Search extends Component
                     }
                 }
             }
-            if ($synonyms !== []) {
-                $rows = array_filter($rows, function ($row) use ($synonyms) {
-                    $c = $row['catalog'];
-                    $haystack = mb_strtolower(
-                        ($c->name ?? '') . ' '
-                        . ($c->unit_name ?? '') . ' '
-                        . ($c->part_type ?? '')
-                    );
-                    foreach ($synonyms as $syn) {
-                        if ($syn === '') continue;
-                        // Word-boundary через Unicode-классы: см. LazyLift KB
-                        // synonym matcher fix (MEMORY.md «Грабли → LazyLift KB
-                        // synonym matcher через substring»). Голый mb_strpos
-                        // даёт false-positives на коротких синонимах.
-                        $pattern = '/(?<![\p{L}\p{N}_])' . preg_quote($syn, '/') . '(?![\p{L}\p{N}_])/u';
-                        if (preg_match($pattern, $haystack)) {
-                            return true;
-                        }
-                    }
+
+            $rows = array_filter($rows, function ($row) use ($targetId, $synonyms) {
+                $c = $row['catalog'];
+
+                // 1. Точный FK-матч.
+                if ((int) ($c->equipment_category_id ?? 0) === $targetId) {
+                    return true;
+                }
+
+                // 2. FK у позиции стоит, но НЕ совпадает с target — категория явно другая, режем.
+                if (($c->equipment_category_id ?? null) !== null) {
                     return false;
-                });
-            }
+                }
+
+                // 3. Legacy SKU без FK — fallback на substring synonym match.
+                if ($synonyms === []) {
+                    return false;
+                }
+                $haystack = mb_strtolower(
+                    ($c->name ?? '') . ' '
+                    . ($c->unit_name ?? '') . ' '
+                    . ($c->part_type ?? '')
+                );
+                foreach ($synonyms as $syn) {
+                    if ($syn === '') continue;
+                    $pattern = '/(?<![\p{L}\p{N}_])' . preg_quote($syn, '/') . '(?![\p{L}\p{N}_])/u';
+                    if (preg_match($pattern, $haystack)) {
+                        return true;
+                    }
+                }
+                return false;
+            });
         }
 
         if (! empty($this->filterDims)) {
