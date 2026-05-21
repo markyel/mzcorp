@@ -111,13 +111,15 @@
                 </div>
             </div>
 
-            {{-- Категория KB --}}
+            {{-- Тип запчасти (KB EquipmentCategory) — раньше называлось
+                 «Категория», переименовано 2026-05-21: смысл — тип
+                 запчасти / детали, а не категория товара. --}}
             <div class="pt-2 border-t border-border-subtle" style="display: grid; align-items: center; gap: 14px; grid-template-columns: 92px 1fr;">
-                <span class="text-[10.5px] font-semibold uppercase tracking-wider text-fg-3">Категория</span>
+                <span class="text-[10.5px] font-semibold uppercase tracking-wider text-fg-3">Тип запчасти</span>
                 <div class="flex items-center gap-1.5">
                     <select wire:model.live="filterCategoryId"
-                            class="h-[26px] px-2 border border-border rounded-md bg-app text-[12px] outline-none focus:border-[var(--sky-500)]">
-                        <option value="">— любая —</option>
+                            class="h-[26px] px-2 border border-border rounded-md bg-app text-fg-1 text-[12px] outline-none focus:border-[var(--sky-500)]">
+                        <option value="">— любой —</option>
                         @foreach($kbCats as $cat)
                             <option value="{{ $cat->id }}">{{ $cat->name }}</option>
                         @endforeach
@@ -125,7 +127,7 @@
                     @if($filterCategoryId !== null)
                         <button type="button" wire:click="setCategory(null)"
                                 class="text-fg-3 hover:text-red-700 text-[12px]"
-                                title="Снять фильтр категории">✕</button>
+                                title="Снять фильтр">✕</button>
                     @endif
                 </div>
             </div>
