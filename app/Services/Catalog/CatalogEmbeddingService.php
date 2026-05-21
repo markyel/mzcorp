@@ -695,26 +695,28 @@ class CatalogEmbeddingService
                 $tokens,
             )) . '}';
 
-            // Per-token similarity. MAX в SELECT по всем токенам — лучший
-            // одиночный hit считается рейтингом позиции. EXISTS в WHERE —
-            // достаточно одному токену пройти порог <% (default 0.6) на
-            // dehyphenated name или (опционально) articles_search.
+            // Per-token similarity. AVG по всем токенам — позиция, у которой
+            // больше токенов совпало, ранжируется выше. Для каждого токена
+            // берём GREATEST(name_sim, articles_sim) — токен может совпасть
+            // с любым из полей. EXISTS в WHERE — достаточно одному токену
+            // пройти порог <% (default 0.6).
+            //
+            // Почему AVG, а не MAX: при запросе «Цепь T-135 L119,7» позиция
+            // с одним совпавшим «цепь» (1.0) выигрывала у позиции с тремя
+            // совпавшими токенами по 0.75-1.0. AVG нормализует: больше
+            // matched-tokens → выше средняя → выше ранг.
             $sql = "
                 SELECT id AS catalog_id,
                        (
-                           SELECT MAX(s_val) FROM (
-                               SELECT MAX(word_similarity(t, regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g'))) AS s_val
-                               FROM unnest(?::text[]) AS t
-                               " . ($useArticles ? "
-                               UNION ALL
-                               SELECT
-                                   CASE
-                                       WHEN articles_search IS NOT NULL AND articles_search <> ''
-                                       THEN MAX(word_similarity(t, articles_search))
-                                       ELSE 0
-                                   END
-                               FROM unnest(?::text[]) AS t" : "") . "
-                           ) sub
+                           SELECT AVG(GREATEST(
+                               word_similarity(t, regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g'))
+                               " . ($useArticles ? ",
+                               CASE WHEN articles_search IS NOT NULL AND articles_search <> ''
+                                    THEN word_similarity(t, articles_search)
+                                    ELSE 0
+                               END" : "") . "
+                           ))
+                           FROM unnest(?::text[]) AS t
                        ) AS s
                 FROM catalog_items
                 WHERE is_active = true
@@ -733,11 +735,12 @@ class CatalogEmbeddingService
                 LIMIT ?
             ";
 
+            // Placeholders: 1 для SELECT AVG, 1 для WHERE EXISTS name,
+            // (опционально) 1 для WHERE EXISTS articles_search, 1 для LIMIT.
             $bindings = [];
-            $bindings[] = $pgTokensArr;
-            if ($useArticles) $bindings[] = $pgTokensArr;
-            $bindings[] = $pgTokensArr;
-            if ($useArticles) $bindings[] = $pgTokensArr;
+            $bindings[] = $pgTokensArr;                          // SELECT AVG
+            $bindings[] = $pgTokensArr;                          // WHERE EXISTS name
+            if ($useArticles) $bindings[] = $pgTokensArr;        // WHERE EXISTS articles_search
             $bindings[] = $limit;
 
             $rows = DB::select($sql, $bindings);
