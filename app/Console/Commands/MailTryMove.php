@@ -32,7 +32,8 @@ class MailTryMove extends Command
                             {mailbox_id : ID ящика из таблицы mailboxes}
                             {uid : IMAP UID письма в исходной папке}
                             {target : Целевая папка (пример: MZ|Test)}
-                            {--source=INBOX : Исходная папка}';
+                            {--source=INBOX : Исходная папка}
+                            {--skip-ensure : Не создавать target-папку (используйте если она уже есть)}';
 
     protected $description = 'Тест UID MOVE одного письма на Yandex IMAP';
 
@@ -74,33 +75,38 @@ class MailTryMove extends Command
         }
         $this->line('');
 
-        // 2. Гарантировать существование целевой папки (рекурсивно по разделителю).
+        // 2. Гарантировать существование целевой папки.
         $this->line('--- 2. Ensure target folder ---');
-        try {
-            $existing = $client->getFolderByPath($target, soft_fail: true);
-            if ($existing) {
-                $this->info('  ✓ Папка ' . $target . ' уже существует');
-            } else {
-                // Создание по частям: 'MZ|Test' → сначала 'MZ', потом 'MZ|Test'.
-                $delimiter = str_contains($target, '|') ? '|' : '/';
-                $parts = explode($delimiter, $target);
-                $current = '';
-                foreach ($parts as $part) {
-                    if ($part === '') {
-                        continue;
-                    }
-                    $current = $current === '' ? $part : $current . $delimiter . $part;
-                    $check = $client->getFolderByPath($current, soft_fail: true);
-                    if (! $check) {
-                        $client->createFolder($current);
-                        $this->info('  + Создана: ' . $current);
+        if ($this->option('skip-ensure')) {
+            $this->warn('  · skip-ensure: проверка/создание папки пропущена');
+        } else {
+            try {
+                $existing = $client->getFolderByPath($target, soft_fail: true);
+                if ($existing) {
+                    $this->info('  ✓ Папка ' . $target . ' уже существует');
+                } else {
+                    // Создание по частям: 'MZ|Test' → сначала 'MZ', потом 'MZ|Test'.
+                    $delimiter = str_contains($target, '|') ? '|' : '/';
+                    $parts = explode($delimiter, $target);
+                    $current = '';
+                    foreach ($parts as $part) {
+                        if ($part === '') {
+                            continue;
+                        }
+                        $current = $current === '' ? $part : $current . $delimiter . $part;
+                        $check = $client->getFolderByPath($current, soft_fail: true);
+                        if (! $check) {
+                            $client->createFolder($current);
+                            $this->info('  + Создана: ' . $current);
+                        }
                     }
                 }
+            } catch (\Throwable $e) {
+                $this->error('  Ensure folder failed: ' . $e->getMessage());
+                $this->warn('  Совет: запустите с --skip-ensure после создания папки через Yandex web UI');
+                $client->disconnect();
+                return self::FAILURE;
             }
-        } catch (\Throwable $e) {
-            $this->error('  Ensure folder failed: ' . $e->getMessage());
-            $client->disconnect();
-            return self::FAILURE;
         }
         $this->line('');
 
