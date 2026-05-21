@@ -112,6 +112,7 @@ class ReassignDialog extends Component
             RoleEnum::HeadOfSales->value,
             RoleEnum::Director->value,
             RoleEnum::Secretary->value,
+            RoleEnum::Admin->value,
         ]);
         if (! $allowed) {
             abort(403);

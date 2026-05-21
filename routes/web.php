@@ -26,7 +26,7 @@ Route::middleware('auth')->group(function () {
 
     // Заявки — пул менеджера и карточка. Все 4 роли;
     // фильтрация «своё/всё» — внутри Pool component.
-    Route::middleware('role:manager,head_of_sales,director,secretary')->group(function () {
+    Route::middleware('role:manager,head_of_sales,director,secretary,admin')->group(function () {
         Route::get('/dashboard/requests', function () {
             return view('requests.index');
         })->name('requests.index');
@@ -62,7 +62,7 @@ Route::middleware('auth')->group(function () {
     });
 
     // Mail routing rules — управление правилами для РОП и директора.
-    Route::middleware('role:head_of_sales,director')->group(function () {
+    Route::middleware('role:head_of_sales,director,admin')->group(function () {
         Route::get('/dashboard/mail-rules', function () {
             return view('admin.mail-rules.index');
         })->name('mail-rules.index');

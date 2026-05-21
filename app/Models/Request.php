@@ -272,7 +272,7 @@ class Request extends Model
         if ($this->isOwnedBy($user)) {
             return true;
         }
-        if ($user->hasAnyRole(['head_of_sales', 'director', 'secretary'])) {
+        if ($user->hasAnyRole(['head_of_sales', 'director', 'secretary', 'admin'])) {
             return true;
         }
 

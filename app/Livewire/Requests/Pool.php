@@ -94,6 +94,7 @@ class Pool extends Component
         $isViewerOnly = $user?->hasAnyRole([
             Role::Director->value,
             Role::Secretary->value,
+            Role::Admin->value,
         ]) && ! $user->hasRole(Role::HeadOfSales->value)
             && ! $user->hasRole(Role::Manager->value);
         if ($isViewerOnly && request()->query('scope') === null) {
@@ -178,6 +179,7 @@ class Pool extends Component
             Role::HeadOfSales->value,
             Role::Director->value,
             Role::Secretary->value,
+            Role::Admin->value,
         ]));
     }
 

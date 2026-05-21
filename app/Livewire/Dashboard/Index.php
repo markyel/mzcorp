@@ -61,6 +61,7 @@ class Index extends Component
             RoleEnum::HeadOfSales->value,
             RoleEnum::Director->value,
             RoleEnum::Secretary->value,
+            RoleEnum::Admin->value,
         ]);
     }
 

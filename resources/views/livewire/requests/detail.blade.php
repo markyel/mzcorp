@@ -118,7 +118,7 @@
         // $canEditItems определена внутри @case('items'), здесь баннер
         // отрисовывается ВНЕ tabs — вычисляем локально.
         $_canEdit = auth()->id() === $req->assigned_user_id
-            || auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'secretary']);
+            || auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'secretary', 'admin']);
 
         // «Открыть позиции →» только если мы не на items-табе.
         $_onItemsTab = $tab === 'items';
@@ -465,11 +465,11 @@
             $isOwner = $authUser && $req->assigned_user_id === $authUser->id;
             $isDelegate = $authUser && $req->isDelegatedTo($authUser);
             $canManage = $isOwner || $isDelegate
-                || $authUser?->hasAnyRole(['head_of_sales', 'director']);
+                || $authUser?->hasAnyRole(['head_of_sales', 'director', 'admin']);
             // Отвечать клиенту — owner или acting (но не РОП без явной делегации
             // — он не должен «случайно» писать клиенту от чужого имени).
             $canReply = $isOwner || $isDelegate;
-            $canReassign = $authUser?->hasAnyRole(['head_of_sales', 'director', 'secretary']);
+            $canReassign = $authUser?->hasAnyRole(['head_of_sales', 'director', 'secretary', 'admin']);
             $lastInbound = $thread->reverse()
                 ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound);
             $allowed = $req->status->allowedTransitions();

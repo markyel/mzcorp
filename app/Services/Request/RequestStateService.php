@@ -320,6 +320,7 @@ class RequestStateService
         $privileged = $author->hasAnyRole([
             RoleEnum::HeadOfSales->value,
             RoleEnum::Director->value,
+            RoleEnum::Admin->value,
         ]);
         if ($privileged) {
             return;

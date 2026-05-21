@@ -369,7 +369,7 @@ class Index extends Component
     public function save(SettingsService $svc): void
     {
         $user = auth()->user();
-        if (! $user || ! $user->hasAnyRole(['head_of_sales', 'director'])) {
+        if (! $user || ! $user->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
             abort(403);
         }
 

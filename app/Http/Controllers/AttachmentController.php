@@ -169,6 +169,7 @@ class AttachmentController extends Controller
             Role::HeadOfSales->value,
             Role::Director->value,
             Role::Secretary->value,
+            Role::Admin->value,
         ]);
         if ($isPrivileged) {
             return;

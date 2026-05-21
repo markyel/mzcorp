@@ -1010,6 +1010,7 @@ class RequestItemEditor
             RoleEnum::HeadOfSales->value,
             RoleEnum::Director->value,
             RoleEnum::Secretary->value,
+            RoleEnum::Admin->value,
         ]);
         if ($privileged) {
             return;

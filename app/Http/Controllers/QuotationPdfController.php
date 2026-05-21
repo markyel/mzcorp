@@ -50,7 +50,7 @@ class QuotationPdfController extends Controller
         if (! $user) {
             abort(403);
         }
-        if ($user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value, Role::Secretary->value])) {
+        if ($user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value, Role::Secretary->value, Role::Admin->value])) {
             return;
         }
         $req = $quotation->request;

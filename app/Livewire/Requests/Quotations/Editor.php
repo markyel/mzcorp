@@ -111,7 +111,7 @@ class Editor extends Component
         if (! $user) {
             return false;
         }
-        if ($user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value])) {
+        if ($user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value, Role::Admin->value])) {
             return true;
         }
         $req = $this->request;

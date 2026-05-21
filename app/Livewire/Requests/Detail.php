@@ -83,6 +83,7 @@ class Detail extends Component
             Role::HeadOfSales->value,
             Role::Director->value,
             Role::Secretary->value,
+            Role::Admin->value,
         ]);
 
         if (! $isPrivileged && $request->assigned_user_id !== $user?->id) {
@@ -250,6 +251,7 @@ class Detail extends Component
             Role::HeadOfSales->value,
             Role::Director->value,
             Role::Secretary->value,
+            Role::Admin->value,
         ]);
         if (! $isPrivileged && $this->request->assigned_user_id !== $user?->id) {
             abort(403);
@@ -1153,6 +1155,7 @@ class Detail extends Component
         $privileged = $user->hasAnyRole([
             Role::HeadOfSales->value,
             Role::Director->value,
+            Role::Admin->value,
         ]);
         if ($user->hasRole(Role::Secretary->value)) {
             abort(403, 'Секретарь только просматривает заявки.');
@@ -1203,7 +1206,7 @@ class Detail extends Component
         if ($user === null) {
             abort(403);
         }
-        if (! $this->request->isAccessibleBy($user) && ! $user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value])) {
+        if (! $this->request->isAccessibleBy($user) && ! $user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value, Role::Admin->value])) {
             abort(403);
         }
 
@@ -1250,7 +1253,7 @@ class Detail extends Component
         if ($user === null) {
             abort(403);
         }
-        if (! $this->request->isAccessibleBy($user) && ! $user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value])) {
+        if (! $this->request->isAccessibleBy($user) && ! $user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value, Role::Admin->value])) {
             abort(403);
         }
 
