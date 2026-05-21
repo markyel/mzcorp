@@ -209,8 +209,39 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
         // «Method WhereQuery::whereFirst() is not supported». Поэтому
         // сначала `->get()` (это вернёт MessageCollection), а уже
         // на коллекции вызываем `->first()`.
+        $connection = $folder->getClient()->getConnection();
+
         foreach ($newUids as $uid) {
             try {
+                // PRE-FLIGHT: проверяем флаги ДО body-fetch'а. Webklex 6.x с
+                // setFetchBody(true)+setFetchFlags(true) генерирует FETCH BODY[]
+                // (а не BODY.PEEK[]) — даже при FT_PEEK сервер выставляет
+                // \Seen на стороне сервера. Если письмо было непрочитанным,
+                // мы откатим \Seen после fetch'а (см. POST-FIX ниже).
+                //
+                // Требование: и общие, и личные ящики хранят оригинальное
+                // состояние «прочитано/нет», чтобы менеджер видел в своём
+                // почтовом клиенте непрочитанные письма как и было. \Seen
+                // ставится явно только в MailFolderRouter::routeToManager()
+                // (для общих ящиков после COPY) и AppendToSentFolderJob
+                // (для своих исходящих).
+                $wasUnread = false;
+                try {
+                    $flagsBefore = (array) $connection->getFlags($uid)->validatedData();
+                    // flagsBefore приходит как [$uid => ['\Seen', ...]] или [].
+                    $flagsList = is_array($flagsBefore[$uid] ?? null) ? $flagsBefore[$uid] : [];
+                    $wasUnread = ! in_array('\\Seen', $flagsList, true)
+                        && ! in_array('Seen', $flagsList, true);
+                } catch (\Throwable $flagsErr) {
+                    // Лог и продолжаем — будем считать «было прочитано»
+                    // (безопасный default: не трогаем флаги).
+                    Log::debug('SyncMailboxFolderJob: pre-flight flags fetch failed', [
+                        'mailbox_id' => $mailbox->id,
+                        'uid' => $uid,
+                        'error' => $flagsErr->getMessage(),
+                    ]);
+                }
+
                 $msg = $folder->query()
                     ->setFetchOptions(IMAP::FT_PEEK)
                     ->setFetchBody(true)
@@ -222,6 +253,22 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
                 if (! $msg) {
                     // UID мог исчезнуть между getUids() и FETCH (EXPUNGE на сервере).
                     continue;
+                }
+
+                // POST-FIX: если письмо было непрочитанным до fetch'а — откатываем
+                // \Seen, который мог проставиться webklex'ом из-за бага BODY[]
+                // vs BODY.PEEK[]. Идемпотентно: STORE -FLAGS (\Seen) на уже
+                // непрочитанное письмо ничего не меняет.
+                if ($wasUnread) {
+                    try {
+                        $connection->store(['\\Seen'], $uid, $uid, '-', true, null);
+                    } catch (\Throwable $unseenErr) {
+                        Log::debug('SyncMailboxFolderJob: failed to restore unread flag', [
+                            'mailbox_id' => $mailbox->id,
+                            'uid' => $uid,
+                            'error' => $unseenErr->getMessage(),
+                        ]);
+                    }
                 }
 
                 $fetched++;
