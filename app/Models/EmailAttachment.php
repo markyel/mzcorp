@@ -23,6 +23,10 @@ class EmailAttachment extends Model
         'file_path',
         'disk',
         'is_inline',
+        // Photo Classifier (2026-05-21): результаты Vision-классификации
+        // по KB photo-slug'ам — kb_slot_candidates[].
+        // См. App\Services\Kb\PhotoSlotClassifierService.
+        'metadata',
     ];
 
     protected function casts(): array
@@ -30,6 +34,7 @@ class EmailAttachment extends Model
         return [
             'size_bytes' => 'integer',
             'is_inline' => 'bool',
+            'metadata' => 'array',
         ];
     }
 

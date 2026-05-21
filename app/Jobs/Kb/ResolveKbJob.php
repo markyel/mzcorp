@@ -3,6 +3,8 @@
 namespace App\Jobs\Kb;
 
 use App\Models\Request as RequestModel;
+use App\Models\RequestItem;
+use App\Services\Kb\PhotoSlotClassifierService;
 use App\Services\Kb\QualityAssessmentService;
 use App\Services\Kb\RequestContextAnalysisService;
 use Illuminate\Bus\Queueable;
@@ -63,6 +65,7 @@ class ResolveKbJob implements ShouldQueue, ShouldBeUnique
     public function handle(
         RequestContextAnalysisService $contextAnalyzer,
         QualityAssessmentService $assessor,
+        PhotoSlotClassifierService $photoClassifier,
     ): void {
         $request = RequestModel::query()
             ->with('items:id,request_id,quality_assessment_status')
@@ -99,6 +102,28 @@ class ResolveKbJob implements ShouldQueue, ShouldBeUnique
                 Log::error('ResolveKbJob: assess failed for item (fatal)', [
                     'request_id' => $this->requestId,
                     'item_id' => $item->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Phase 3 (2026-05-21): Photo classifier — Vision-проход по фоткам
+        // треда для каждой позиции, если у её категории есть photo-slot'ы.
+        // Свой try/catch на каждую позицию, чтобы Vision-таймаут одной
+        // позиции не блокировал остальные. Внутри сервис сам ничего не
+        // запустит если у item нет identification_category_id или нет
+        // image-attachment'ов в треде — это дешёвый no-op.
+        foreach ($request->items as $itemStub) {
+            try {
+                $fresh = RequestItem::with('kbCategory')->find($itemStub->id);
+                if ($fresh === null) {
+                    continue;
+                }
+                $photoClassifier->classifyForItem($fresh);
+            } catch (Throwable $e) {
+                Log::warning('ResolveKbJob: photo classifier failed (non-fatal)', [
+                    'request_id' => $this->requestId,
+                    'item_id' => $itemStub->id,
                     'error' => $e->getMessage(),
                 ]);
             }
