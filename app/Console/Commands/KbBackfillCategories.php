@@ -89,7 +89,11 @@ class KbBackfillCategories extends Command
 
         $startedAt = microtime(true);
 
-        $query->chunk(50, function ($chunk) use ($categorizer, $apply, $ruleOnly, &$stats, $bar) {
+        // chunkById вместо chunk: при наших мутациях (запись FK, которая
+        // выкидывает строку из WHERE NULL) обычный chunk теряет записи через
+        // одну (классический Laravel chunk-pagination bug). chunkById идёт по
+        // монотонно возрастающим id и не зависит от изменений в WHERE.
+        $query->chunkById(50, function ($chunk) use ($categorizer, $apply, $ruleOnly, &$stats, $bar) {
             foreach ($chunk as $item) {
                 $stats['total']++;
                 $bar->setMessage(sprintf('sku=%s', mb_substr((string) $item->sku, 0, 20)));
