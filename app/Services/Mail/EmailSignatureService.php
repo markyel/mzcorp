@@ -312,9 +312,11 @@ class EmailSignatureService
                 $candidates[] = public_path($path);
             }
         }
-        // Default fallback — public/assets/logo-myzip-email.png/.svg.
-        $candidates[] = public_path('assets/logo-myzip-email.png');
+        // Default fallback — public/assets/logo-myzip-email.{svg,png}.
+        // SVG приоритетнее: цветной герб на прозрачном; PNG-вариант
+        // оказался белым (для тёмных фонов) — не виден на белом письме.
         $candidates[] = public_path('assets/logo-myzip-email.svg');
+        $candidates[] = public_path('assets/logo-myzip-email.png');
 
         foreach ($candidates as $absPath) {
             if (! is_file($absPath) || ! is_readable($absPath)) {
