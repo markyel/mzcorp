@@ -32,7 +32,7 @@ class InspectRequest extends Command
         $this->line("=== Заявка #{$req->id} {$req->internal_code} ===");
         $this->line("subject: {$req->subject}");
         $this->line("client_email: {$req->client_email}");
-        $this->line("status: {$req->status}");
+        $this->line('status: '.(is_object($req->status) ? ($req->status->value ?? get_class($req->status)) : (string) $req->status));
         $this->line('');
 
         $this->line('=== ПОЗИЦИИ ===');
