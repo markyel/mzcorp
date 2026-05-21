@@ -581,7 +581,7 @@ class CatalogEmbeddingService
                 WHERE is_active = true
                   AND (
                        lower(sku) ILIKE ANY (?::text[])
-                       OR regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g') ILIKE ANY (?::text[])
+                       OR regexp_replace(lower(name), '[\\-_./,]', '', 'g') ILIKE ANY (?::text[])
                        OR brand_article_normalized ILIKE ANY (?::text[])
                        OR (articles_search IS NOT NULL AND articles_search ILIKE ANY (?::text[]))
                        OR (brands_search IS NOT NULL AND brands_search ILIKE ANY (?::text[]))
@@ -709,7 +709,7 @@ class CatalogEmbeddingService
                 SELECT id AS catalog_id,
                        (
                            SELECT AVG(GREATEST(
-                               word_similarity(t, regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g'))
+                               word_similarity(t, regexp_replace(lower(name), '[\\-_./,]', '', 'g'))
                                " . ($useArticles ? ",
                                CASE WHEN articles_search IS NOT NULL AND articles_search <> ''
                                     THEN word_similarity(t, articles_search)
@@ -723,7 +723,7 @@ class CatalogEmbeddingService
                   AND (
                        EXISTS (
                            SELECT 1 FROM unnest(?::text[]) AS t
-                           WHERE t <% regexp_replace(lower(name), '[\\s\\-_./,]', '', 'g')
+                           WHERE t <% regexp_replace(lower(name), '[\\-_./,]', '', 'g')
                        )
                        " . ($useArticles ? "
                        OR (articles_search IS NOT NULL AND EXISTS (
