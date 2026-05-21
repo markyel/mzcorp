@@ -689,58 +689,49 @@ class CatalogEmbeddingService
                 $tokens = [$lowerNoSep];
             }
 
-            // PG-array literal: {"tok1","tok2",...}.
-            $pgTokensArr = '{' . implode(',', array_map(
-                fn ($t) => '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $t) . '"',
-                $tokens,
-            )) . '}';
+            // Per-token similarity. AVG по токенам — позиция с большим числом
+            // совпавших токенов ранжируется выше. Для каждого токена берём
+            // GREATEST(name_sim, articles_sim) — токен может совпасть с любым
+            // из полей. WHERE — OR с literal-токенами (не EXISTS UNNEST),
+            // чтобы PG использовал GIN trgm индекс (см. 2026-05-21:
+            // EXISTS UNNEST давал nested loop вместо index lookup → 1.6с
+            // вместо ~200мс).
+            $nameExpr = "regexp_replace(lower(name), '[\\-_./,]', '', 'g')";
+            $selectTerms = [];
+            $whereOrs = [];
+            $bindings = [];
+            foreach ($tokens as $tok) {
+                if ($useArticles) {
+                    $selectTerms[] = "GREATEST("
+                        . "word_similarity(?, $nameExpr), "
+                        . "CASE WHEN articles_search IS NOT NULL AND articles_search <> '' "
+                        . "THEN word_similarity(?, articles_search) ELSE 0 END)";
+                    $bindings[] = $tok;
+                    $bindings[] = $tok;
+                } else {
+                    $selectTerms[] = "word_similarity(?, $nameExpr)";
+                    $bindings[] = $tok;
+                }
+            }
+            $avgExpr = '(' . implode(' + ', $selectTerms) . ') / ' . count($tokens) . '.0';
 
-            // Per-token similarity. AVG по всем токенам — позиция, у которой
-            // больше токенов совпало, ранжируется выше. Для каждого токена
-            // берём GREATEST(name_sim, articles_sim) — токен может совпасть
-            // с любым из полей. EXISTS в WHERE — достаточно одному токену
-            // пройти порог <% (default 0.6).
-            //
-            // Почему AVG, а не MAX: при запросе «Цепь T-135 L119,7» позиция
-            // с одним совпавшим «цепь» (1.0) выигрывала у позиции с тремя
-            // совпавшими токенами по 0.75-1.0. AVG нормализует: больше
-            // matched-tokens → выше средняя → выше ранг.
+            foreach ($tokens as $tok) {
+                $whereOrs[] = "? <% $nameExpr";
+                $bindings[] = $tok;
+                if ($useArticles) {
+                    $whereOrs[] = "(articles_search IS NOT NULL AND ? <% articles_search)";
+                    $bindings[] = $tok;
+                }
+            }
+
             $sql = "
-                SELECT id AS catalog_id,
-                       (
-                           SELECT AVG(GREATEST(
-                               word_similarity(t, regexp_replace(lower(name), '[\\-_./,]', '', 'g'))
-                               " . ($useArticles ? ",
-                               CASE WHEN articles_search IS NOT NULL AND articles_search <> ''
-                                    THEN word_similarity(t, articles_search)
-                                    ELSE 0
-                               END" : "") . "
-                           ))
-                           FROM unnest(?::text[]) AS t
-                       ) AS s
+                SELECT id AS catalog_id, ($avgExpr) AS s
                 FROM catalog_items
                 WHERE is_active = true
-                  AND (
-                       EXISTS (
-                           SELECT 1 FROM unnest(?::text[]) AS t
-                           WHERE t <% regexp_replace(lower(name), '[\\-_./,]', '', 'g')
-                       )
-                       " . ($useArticles ? "
-                       OR (articles_search IS NOT NULL AND EXISTS (
-                           SELECT 1 FROM unnest(?::text[]) AS t
-                           WHERE t <% articles_search
-                       ))" : "") . "
-                  )
+                  AND (" . implode(' OR ', $whereOrs) . ")
                 ORDER BY s DESC
                 LIMIT ?
             ";
-
-            // Placeholders: 1 для SELECT AVG, 1 для WHERE EXISTS name,
-            // (опционально) 1 для WHERE EXISTS articles_search, 1 для LIMIT.
-            $bindings = [];
-            $bindings[] = $pgTokensArr;                          // SELECT AVG
-            $bindings[] = $pgTokensArr;                          // WHERE EXISTS name
-            if ($useArticles) $bindings[] = $pgTokensArr;        // WHERE EXISTS articles_search
             $bindings[] = $limit;
 
             $rows = DB::select($sql, $bindings);
