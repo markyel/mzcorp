@@ -1356,6 +1356,13 @@ PROMPT;
                 'additional_brand' => isset($newItems[$idx]['brand']) && $newItems[$idx]['brand'] !== ''
                     ? (string) $newItems[$idx]['brand']
                     : null,
+                // 2026-05-21: LLM может предложить более информативное имя
+                // позиции (объединение текущего + контекста из reply).
+                // Применяется через RequestItemPersister::applyClarificationToItems.
+                'refined_name' => isset($d['refined_name']) && is_string($d['refined_name'])
+                    && trim($d['refined_name']) !== ''
+                    ? mb_substr(trim($d['refined_name']), 0, 200)
+                    : null,
                 'confidence' => $confidence,
                 'reasoning' => isset($d['reasoning']) && is_string($d['reasoning'])
                     ? mb_substr($d['reasoning'], 0, 500)

@@ -417,6 +417,7 @@ class RequestItemPersister
 
         $addArt = $entry['additional_article'] ?? null;
         $addBrand = $entry['additional_brand'] ?? null;
+        $refinedName = $entry['refined_name'] ?? null;
         $dirty = false;
 
         if (is_string($addArt) && $addArt !== '') {
@@ -441,6 +442,18 @@ class RequestItemPersister
                 $dirty = true;
             }
         }
+        // 2026-05-21: refined_name — обновлённое имя позиции, в которое
+        // LLM объединила существующее имя и уточнение из reply
+        // («масленка, направляющая 16 мм» + «масленка на противовесе» →
+        // «Масленка для башмака противовеса, направляющая 16 мм»).
+        if (is_string($refinedName) && trim($refinedName) !== '') {
+            $current = trim((string) ($item->parsed_name ?? ''));
+            $refined = trim($refinedName);
+            if (mb_strtolower($refined) !== mb_strtolower($current)) {
+                $item->parsed_name = $refined;
+                $dirty = true;
+            }
+        }
         if ($dirty) {
             $item->save();
             Log::info('RequestItemPersister: clarification auto-applied', [
@@ -449,6 +462,7 @@ class RequestItemPersister
                 'target_position' => $targetPos,
                 'added_article' => $addArt,
                 'added_brand' => $addBrand,
+                'refined_name' => $refinedName,
                 'is_reparse_of_original' => $isReparseOfOriginal,
                 'source_email_message_id' => $entry['source_email_message_id'] ?? null,
                 'reasoning' => $entry['reasoning'] ?? null,
