@@ -325,6 +325,21 @@ class CatalogEmbeddingService
         // M28598 (искомый CENTA-фотобарьер, vec=0.88) и WECO M21626
         // (другой бренд, vec=0.73) оба имели blended=1.0 → искомый
         // случайно проигрывал и не попадал в top-10.
+        // Фильтр шума: vector-only позиции с низким cosine — это семантические
+        // false-positives (запрос «барабан» → vector цепляет «башмак» 0.3
+        // потому что оба «лифтовые детали»). Отрезаем такие.
+        //   · multi-source ИЛИ с кодом/trgm → пропускаем без фильтра
+        //   · vector-only → требуем score ≥ min_vector_only (default 0.50)
+        // Конфиг: config('services.catalog.search.min_vector_only', 0.50)
+        $minVecOnly = (float) config('services.catalog.search.min_vector_only', 0.50);
+        $scored = array_values(array_filter($scored, function ($r) use ($minVecOnly) {
+            $isVectorOnly = $r['code'] === null && $r['trgm'] === null;
+            if (! $isVectorOnly) {
+                return true;
+            }
+            return ($r['vector'] ?? 0.0) >= $minVecOnly;
+        }));
+
         usort($scored, function ($a, $b) {
             $cmp = $b['score'] <=> $a['score'];
             if ($cmp !== 0) {
