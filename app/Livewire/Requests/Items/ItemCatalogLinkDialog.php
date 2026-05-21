@@ -630,24 +630,47 @@ class ItemCatalogLinkDialog extends Component
             $dims = $this->subjectDimensions;
             if (! empty($dims)) {
                 $tol = self::DIM_TOLERANCE_MM;
-                $rows = array_filter($rows, function ($row) use ($dims, $tol) {
+                // 2026-05-21 фикс OR→majority: раньше любой совпавший
+                // размер пропускал позицию. Это давало false-positive для
+                // ремня 16×1360×2 при поиске ролика 44×16 — совпадение
+                // по «16» проходило, хотя 44 нет.
+                //
+                // Новое правило: считаем сколько subject-размеров нашлось
+                // в catalog.size_a..f (±tol). Каждый subject-размер «съедает»
+                // ровно один catalog-размер (не один catalog-размер на
+                // несколько subject-ов). Позиция проходит если найдено
+                // ≥ ceil(|dims|/2) совпадений, но минимум 2 при |dims|≥2
+                // (для 2-мерных subject требуем оба).
+                $needed = max(1, (int) ceil(count($dims) / 2));
+                if (count($dims) >= 2) {
+                    $needed = max($needed, 2);
+                }
+                $rows = array_filter($rows, function ($row) use ($dims, $tol, $needed) {
                     $cat = $row['catalog'];
-                    $sizes = array_filter([
+                    $sizes = array_values(array_filter([
                         $cat->size_a, $cat->size_b, $cat->size_c,
                         $cat->size_d, $cat->size_e, $cat->size_f,
-                    ], fn ($v) => $v !== null);
+                    ], fn ($v) => $v !== null));
                     if ($sizes === []) {
                         return false;
                     }
-                    foreach ($sizes as $s) {
-                        $sInt = (int) round((float) $s);
-                        foreach ($dims as $d) {
-                            if (abs($sInt - $d) <= $tol) {
-                                return true;
+                    // Greedy-матчинг с пометкой использованных catalog-размеров,
+                    // чтобы «16» в subject не съел «16» в catalog дважды.
+                    $used = [];
+                    $matched = 0;
+                    foreach ($dims as $d) {
+                        foreach ($sizes as $i => $s) {
+                            if (isset($used[$i])) {
+                                continue;
+                            }
+                            if (abs(((int) round((float) $s)) - $d) <= $tol) {
+                                $used[$i] = true;
+                                $matched++;
+                                break;
                             }
                         }
                     }
-                    return false;
+                    return $matched >= $needed;
                 });
             }
         }
