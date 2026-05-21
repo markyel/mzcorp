@@ -79,6 +79,11 @@ class PositionSlotResolver
             ? $item->quality_assessment_payload['extracted_parameters']
             : [];
 
+        // Photo Classifier (2026-05-21): кэш kb_slot_candidates по photo-slug'у
+        // для этого item'а. Заполняем лениво — только если попадётся
+        // photo-параметр в kbParams.
+        $photoAttachmentsBySlug = null;
+
         if ($item->identification_category_id) {
             $kbParams = $this->kbParametersForCategory((int) $item->identification_category_id);
             foreach ($kbParams as $param) {
@@ -89,6 +94,13 @@ class PositionSlotResolver
                 }
                 $value = $extracted[$param->slug] ?? null;
                 $valueStr = $this->stringifyExtractedValue($value, $param->unit);
+
+                $photoAttachments = [];
+                if ($param->value_type === 'photo') {
+                    $photoAttachmentsBySlug ??= $this->collectPhotoAttachmentsForItem($item);
+                    $photoAttachments = $photoAttachmentsBySlug[$param->slug] ?? [];
+                }
+
                 $slots[] = $this->slot(
                     'kb:' . $param->slug,
                     $param->name ?: $param->slug,
@@ -96,6 +108,8 @@ class PositionSlotResolver
                     $valueStr ? 'enriched' : null,
                     false,
                     $param->question_template,
+                    $param->value_type === 'photo',
+                    $photoAttachments,
                 );
             }
         }
@@ -194,6 +208,9 @@ class PositionSlotResolver
         return $this->kbParamsCache[$categoryId] = $params;
     }
 
+    /**
+     * @param  array<int, array{id: int, filename: ?string, confidence: float, description: ?string}>  $photoAttachments
+     */
     private function slot(
         string $key,
         string $label,
@@ -201,8 +218,14 @@ class PositionSlotResolver
         ?string $source,
         bool $required,
         ?string $questionTemplate = null,
+        bool $isPhoto = false,
+        array $photoAttachments = [],
     ): array {
-        $filled = $value !== null && trim($value) !== '';
+        $hasPhoto = $isPhoto && ! empty($photoAttachments);
+        // Photo-слот считается filled если хотя бы одно фото есть в
+        // photo_attachments — независимо от value (extracted_parameters
+        // могут быть пустыми, но фото уже привязано).
+        $filled = $hasPhoto || ($value !== null && trim($value) !== '');
 
         return [
             'key' => $key,
@@ -212,7 +235,67 @@ class PositionSlotResolver
             'source' => $filled ? $source : null,
             'required' => $required,
             'question_template' => $questionTemplate,
+            'is_photo' => $isPhoto,
+            'photo_attachments' => $photoAttachments, // для photo-слотов: до N миниатюр в UI
         ];
+    }
+
+    /**
+     * Photo Classifier (2026-05-21): достаём kb_slot_candidates по всем
+     * image-attachment'ам треда позиции и группируем по slug.
+     *
+     * @return array<string, array<int, array{id: int, filename: ?string, confidence: float, description: ?string}>>
+     */
+    private function collectPhotoAttachmentsForItem(RequestItem $item): array
+    {
+        $requestId = $item->request_id;
+        if (! $requestId) {
+            return [];
+        }
+        $messageIds = \App\Models\EmailMessage::query()
+            ->where('related_request_id', $requestId)
+            ->pluck('id');
+        if ($messageIds->isEmpty()) {
+            return [];
+        }
+        $attachments = \App\Models\EmailAttachment::query()
+            ->whereIn('email_message_id', $messageIds)
+            ->whereNotNull('metadata')
+            ->get(['id', 'filename', 'metadata']);
+
+        $bySlug = [];
+        foreach ($attachments as $att) {
+            $candidates = is_array($att->metadata['kb_slot_candidates'] ?? null)
+                ? $att->metadata['kb_slot_candidates'] : [];
+            foreach ($candidates as $c) {
+                if (! is_array($c)) {
+                    continue;
+                }
+                if ((int) ($c['request_item_id'] ?? 0) !== (int) $item->id) {
+                    continue;
+                }
+                if (($c['status'] ?? null) !== 'matched') {
+                    continue;
+                }
+                $slug = (string) ($c['slug'] ?? '');
+                if ($slug === '') {
+                    continue;
+                }
+                $bySlug[$slug] ??= [];
+                $bySlug[$slug][] = [
+                    'id' => (int) $att->id,
+                    'filename' => $att->filename,
+                    'confidence' => (float) ($c['confidence'] ?? 0),
+                    'description' => is_string($c['description'] ?? null) ? $c['description'] : null,
+                ];
+            }
+        }
+        // Сортируем по confidence DESC внутри каждого slug.
+        foreach ($bySlug as $slug => $list) {
+            usort($list, fn ($a, $b) => $b['confidence'] <=> $a['confidence']);
+            $bySlug[$slug] = $list;
+        }
+        return $bySlug;
     }
 
     private function stringifyExtractedValue(mixed $value, ?string $unit): ?string

@@ -372,6 +372,8 @@
         @foreach($slots as $slot)
             @php
                 $isFilled = $slot['status'] === 'filled';
+                $isPhotoSlot = ! empty($slot['is_photo']);
+                $photoAttachments = is_array($slot['photo_attachments'] ?? null) ? $slot['photo_attachments'] : [];
                 $tone = $isFilled
                     ? 'bg-surface'
                     : 'bg-gradient-to-b from-surface to-amber-50/60';
@@ -383,8 +385,31 @@
                 <div class="text-fg-3 text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1.5">
                     {!! $iconBefore !!}
                     <span>{{ $slot['label'] }}</span>
+                    @if($isPhotoSlot && count($photoAttachments) > 0)
+                        <span class="text-fg-4 text-[10px] font-normal normal-case tracking-normal">· {{ count($photoAttachments) }} фото</span>
+                    @endif
                 </div>
-                @if($isFilled)
+                @if($isPhotoSlot && count($photoAttachments) > 0)
+                    {{-- Photo Classifier (2026-05-21): миниатюры сматченных
+                         Vision-классификатором фоток. Клик → лайтбокс.
+                         Confidence показываем как opacity overlay'ом. --}}
+                    <div class="flex items-center gap-1 flex-wrap">
+                        @foreach(array_slice($photoAttachments, 0, 4) as $att)
+                            <button type="button"
+                                    x-on:click="$dispatch('open-image', { src: @js(route('attachments.preview', $att['id'])), name: @js($att['filename']), dl: @js(route('attachments.download', $att['id'])) })"
+                                    class="w-9 h-9 rounded-[3px] overflow-hidden border border-border bg-app block shrink-0 hover:border-sky-500 transition-colors"
+                                    title="{{ $att['filename'] }} · confidence {{ (int) round($att['confidence'] * 100) }}%{{ $att['description'] ? ' · ' . $att['description'] : '' }}">
+                                <img src="{{ route('attachments.preview', $att['id']) }}"
+                                     alt="{{ $att['filename'] }}"
+                                     loading="lazy"
+                                     class="w-9 h-9 object-cover block">
+                            </button>
+                        @endforeach
+                        @if(count($photoAttachments) > 4)
+                            <span class="text-fg-3 text-[11px] ml-1">+{{ count($photoAttachments) - 4 }}</span>
+                        @endif
+                    </div>
+                @elseif($isFilled)
                     <div class="text-fg-1 text-[12.5px] leading-tight tnum">{{ $slot['value'] }}</div>
                 @else
                     <div class="text-amber-700 text-[12.5px] leading-tight flex items-center gap-1.5">
