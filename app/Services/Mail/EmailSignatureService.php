@@ -28,6 +28,12 @@ class EmailSignatureService
     public function __construct() {}
 
     /**
+     * Кэш data-URI логотипа на время request'а — чтобы не читать файл
+     * по нескольку раз при отправке батча писем.
+     */
+    private ?string $logoDataUriCache = null;
+
+    /**
      * Рендер подписи в plain + html для конкретного менеджера.
      *
      * @return array{plain: string, html: string}
@@ -167,7 +173,7 @@ class EmailSignatureService
         $taglineEn = (string) ($sig['tagline_en'] ?? '');
         $legalName = (string) ($company['legal_name'] ?? '');
         $edoId = (string) ($company['edo_id'] ?? '');
-        $logoUrl = (string) ($sig['logo_url'] ?? '');
+        $logoUrl = $this->resolveLogoSrc((string) ($sig['logo_url'] ?? ''));
         $websites = is_array($sig['websites'] ?? null) ? $sig['websites'] : [];
 
         $rows = [];
@@ -276,6 +282,74 @@ class EmailSignatureService
             .'</tr></table>';
 
         return $html;
+    }
+
+    /**
+     * Превращает logo_url из config в src для <img>. Если URL указывает
+     * на локальный файл в public/ — встраиваем как data:image/...;base64
+     * (надёжнее: email-клиенты не блокируют data-URI как внешние картинки).
+     * Если внешний URL (http/https другого хоста) — оставляем как есть
+     * с учётом риска блокировки.
+     *
+     * Возвращает пустую строку если ни локального файла, ни валидного
+     * URL — тогда renderHtml() не рендерит логотип-колонку.
+     */
+    private function resolveLogoSrc(string $configured): string
+    {
+        if ($this->logoDataUriCache !== null) {
+            return $this->logoDataUriCache;
+        }
+
+        // 1) Если в config есть путь, выглядящий как локальный
+        //    (https://OUR-DOMAIN/assets/... или /assets/... или просто
+        //    «logo-myzip-email.png»), читаем из public/.
+        $candidates = [];
+        if ($configured !== '') {
+            // Извлекаем path из URL.
+            $path = parse_url($configured, PHP_URL_PATH) ?: $configured;
+            $path = ltrim($path, '/');
+            if ($path !== '') {
+                $candidates[] = public_path($path);
+            }
+        }
+        // Default fallback — public/assets/logo-myzip-email.png/.svg.
+        $candidates[] = public_path('assets/logo-myzip-email.png');
+        $candidates[] = public_path('assets/logo-myzip-email.svg');
+
+        foreach ($candidates as $absPath) {
+            if (! is_file($absPath) || ! is_readable($absPath)) {
+                continue;
+            }
+            $content = @file_get_contents($absPath);
+            if ($content === false || $content === '') {
+                continue;
+            }
+            $mime = $this->detectImageMime($absPath, $content);
+            if ($mime === null) {
+                continue;
+            }
+            $b64 = base64_encode($content);
+            return $this->logoDataUriCache = 'data:'.$mime.';base64,'.$b64;
+        }
+
+        // Нет локального файла — оставляем внешний URL (если был задан).
+        // Это работает если файл реально доступен по https и почтовый
+        // клиент не блокирует внешние картинки. Хуже data-URI, но
+        // лучше чем ничего.
+        return $this->logoDataUriCache = $configured;
+    }
+
+    private function detectImageMime(string $path, string $content): ?string
+    {
+        $ext = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+        return match ($ext) {
+            'png' => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            'svg' => 'image/svg+xml',
+            'webp' => 'image/webp',
+            default => null,
+        };
     }
 
     /**
