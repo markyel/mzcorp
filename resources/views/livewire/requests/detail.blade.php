@@ -1281,11 +1281,23 @@
                                 </div>
                             @endforeach
 
-                            {{-- Phase 1.9 — Compose / Reply form. --}}
-                            @if(auth()->id() === $req->assigned_user_id)
+                            {{-- Phase 1.9 — Compose / Reply form.
+                                 $canReply = owner / acting / admin / РОП / директорат
+                                 (см. блок «Actions» в Aside). Письмо уходит с
+                                 ящика assigned-менеджера через OutgoingMailboxResolver,
+                                 даже если отправляет админ. --}}
+                            @if($canReply)
                                 <div class="px-[18px] py-3.5 bg-surface-2 border-t border-border">
                                     <div class="flex items-center gap-2 mb-2">
-                                        <span class="text-[12px] text-fg-3">Ответ клиенту через MyLift — копия сохранится в Sent ящика.</span>
+                                        <span class="text-[12px] text-fg-3">
+                                            Ответ клиенту через MyLift — копия сохранится в Sent ящика
+                                            @if(! $isOwner && ! $isDelegate && $req->assignedUser)
+                                                <span class="text-fg-2">{{ $req->assignedUser->name }}</span>.
+                                                <span class="text-amber-700">(вы отправляете от его имени)</span>
+                                            @else
+                                                ящика.
+                                            @endif
+                                        </span>
                                         <span class="flex-1"></span>
                                         @if($req->client_email)
                                             <button type="button"
@@ -1300,7 +1312,8 @@
                             @else
                                 <div class="px-[18px] py-3.5 bg-surface-2 border-t border-border text-[12px] text-fg-3">
                                     Отвечать на эту заявку может только назначенный менеджер
-                                    ({{ $req->assignedUser?->name ?? '— не назначен —' }}).
+                                    ({{ $req->assignedUser?->name ?? '— не назначен —' }}),
+                                    acting (делегат) или admin/РОП/директорат.
                                 </div>
                             @endif
                         </div>
