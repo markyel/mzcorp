@@ -22,11 +22,12 @@
     };
 
     // Phase 1.10: chipClass через enum-метод (полный набор статусов из Foundation §5.2).
-    // displayedStatus — milestone (peak_status) для header'а; operational status
-    // остаётся в чипе как tooltip + используется для permissions ($req->status).
-    $displayedStatus = $req->displayedStatus;
-    $statusDiverged = $displayedStatus !== $req->status;
-    $statusChip = $displayedStatus->chipClass();
+    // displayedStatusBadge — composite: peak-milestone ИЛИ activity-overlay
+    // «ход за нами» (📨 Клиент ответил). Operational status остаётся как
+    // tooltip + используется для permissions ($req->status).
+    $badge = $req->displayedStatusBadge;
+    $statusDiverged = $badge['label'] !== $req->status->label();
+    $statusChip = $badge['chipClass'];
     $age = $req->created_at?->diffForHumans(['short' => true, 'parts' => 2]) ?? '—';
     $managerInitials = \Illuminate\Support\Str::of($req->assignedUser?->name ?? '?')
         ->substr(0, 1)->upper();
@@ -255,9 +256,9 @@
                     <span class="inline-flex items-center gap-1.5 flex-wrap">
                         <span class="chip {{ $statusChip }}"
                               @if($statusDiverged)
-                                  title="Текущий operational: {{ $req->status->label() }} · чип показывает дальше всего достигнутый этап (peak)"
+                                  title="Operational: {{ $req->status->label() }} · чип учитывает milestone (peak) + activity overlay"
                               @endif>
-                            <span class="dot"></span>{{ $displayedStatus->label() }}
+                            <span class="dot"></span>{{ $badge['icon'] ? $badge['icon'].' ' : '' }}{{ $badge['label'] }}
                         </span>
                         @if($statusDiverged)
                             <span class="text-[11px] text-[var(--fg-3)]" title="Operational статус — куда сейчас идёт работа">
@@ -2136,11 +2137,12 @@
                                     <div class="px-[18px] py-2 border-b border-border-subtle bg-surface-2 flex items-center gap-2 text-[12px]">
                                         <a href="{{ route('requests.show', $linkedReq) }}"
                                            class="mono text-[13px] text-sky-700 hover:underline font-semibold">{{ $linkedReq->internal_code }}</a>
-                                        <span class="chip {{ $linkedReq->displayedStatus->chipClass() }} text-[10.5px]"
-                                              @if($linkedReq->displayedStatus !== $linkedReq->status)
+                                        @php $linkedBadge = $linkedReq->displayedStatusBadge; @endphp
+                                        <span class="chip {{ $linkedBadge['chipClass'] }} text-[10.5px]"
+                                              @if($linkedBadge['label'] !== $linkedReq->status->label())
                                                   title="Operational: {{ $linkedReq->status->label() }}"
                                               @endif>
-                                            <span class="dot"></span>{{ $linkedReq->displayedStatus->label() }}
+                                            <span class="dot"></span>{{ $linkedBadge['icon'] ? $linkedBadge['icon'].' ' : '' }}{{ $linkedBadge['label'] }}
                                         </span>
                                         @if($linkedReq->assignedUser)
                                             <span class="text-[11.5px] text-fg-3">· {{ $linkedReq->assignedUser->name }}</span>

@@ -139,6 +139,65 @@ class Request extends Model
     }
 
     /**
+     * Расширенный «бейдж статуса» для UI — это displayedStatus + накладка
+     * activity (ClientReplied / SupplierReplied), чтобы менеджер сразу видел
+     * «ход за мной» с амбер-сигналом.
+     *
+     * Возвращает массив {label, chipClass, icon, isAttention}:
+     *   - Terminal / Paused → как обычно (current).
+     *   - last_activity_type требует внимания И current не AwaitingClient
+     *     Clarification (т.е. мы уже не висим в «жду клиента») — показываем
+     *     activity-label «📨 Клиент ответил» / «Ответ поставщика» с warn-чипом.
+     *     Это явный сигнал что ход за менеджером.
+     *   - Иначе fallback на displayedStatus (peak или current).
+     *
+     * @return array{label: string, chipClass: string, icon: ?string, isAttention: bool}
+     */
+    public function getDisplayedStatusBadgeAttribute(): array
+    {
+        $current = $this->status;
+        if ($current === null) {
+            return [
+                'label' => RequestStatus::Pending->label(),
+                'chipClass' => RequestStatus::Pending->chipClass(),
+                'icon' => null,
+                'isAttention' => false,
+            ];
+        }
+        // Terminal / Paused — без overlay'а.
+        if ($current->isTerminal() || $current === RequestStatus::Paused) {
+            return [
+                'label' => $current->label(),
+                'chipClass' => $current->chipClass(),
+                'icon' => null,
+                'isAttention' => false,
+            ];
+        }
+        // Активность «ход за нами» имеет приоритет над milestone-чипом —
+        // менеджеру важнее знать что КЛИЕНТ только что ответил, чем что
+        // заявка дошла до Quoted (это он и так помнит).
+        $activity = $this->last_activity_type;
+        if ($activity instanceof \App\Enums\RequestActivityType
+            && $activity->requiresAttention()
+            && $current !== RequestStatus::AwaitingClientClarification) {
+            return [
+                'label' => $activity->label(),
+                'chipClass' => 'chip-warn',
+                'icon' => $activity->icon(),
+                'isAttention' => true,
+            ];
+        }
+        $displayed = $this->displayedStatus;
+
+        return [
+            'label' => $displayed->label(),
+            'chipClass' => $displayed->chipClass(),
+            'icon' => null,
+            'isAttention' => false,
+        ];
+    }
+
+    /**
      * Заявка, в которую эту слили (если эта — loser слияния).
      */
     public function mergedInto(): BelongsTo
