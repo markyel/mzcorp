@@ -466,9 +466,13 @@
             $isDelegate = $authUser && $req->isDelegatedTo($authUser);
             $canManage = $isOwner || $isDelegate
                 || $authUser?->hasAnyRole(['head_of_sales', 'director', 'admin']);
-            // Отвечать клиенту — owner или acting (но не РОП без явной делегации
-            // — он не должен «случайно» писать клиенту от чужого имени).
-            $canReply = $isOwner || $isDelegate;
+            // Отвечать клиенту — owner, acting, ИЛИ admin/РОП/директорат
+            // (2026-05-28: расширено по запросу — админ должен мочь
+            // отправить от имени любого менеджера, mailbox при этом
+            // resolver берёт по assigned_user_id, т.е. письмо уходит
+            // с ящика menager'а, не админа). Секретарь оставлен read-only.
+            $canReply = $isOwner || $isDelegate
+                || $authUser?->hasAnyRole(['head_of_sales', 'director', 'admin']);
             $canReassign = $authUser?->hasAnyRole(['head_of_sales', 'director', 'secretary', 'admin']);
             $lastInbound = $thread->reverse()
                 ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound);

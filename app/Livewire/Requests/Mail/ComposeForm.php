@@ -73,8 +73,8 @@ class ComposeForm extends Component
         if (! $user) {
             abort(403);
         }
-        if ($req->assigned_user_id !== $user->id) {
-            abort(403, 'Отвечать может только назначенный менеджер.');
+        if (! $this->isAuthorizedToSend($req, $user)) {
+            abort(403, 'Отвечать может только назначенный менеджер, acting (делегат) или admin/РОП/директорат.');
         }
     }
 
@@ -82,7 +82,33 @@ class ComposeForm extends Component
     {
         $req = $this->request();
         $user = auth()->user();
-        return $user !== null && $req->assigned_user_id === $user->id;
+        return $user !== null && $this->isAuthorizedToSend($req, $user);
+    }
+
+    /**
+     * Кто может отправлять письма от имени заявки:
+     *  - assigned-менеджер,
+     *  - acting (active delegation — на время отсутствия assigned),
+     *  - admin / head_of_sales / director (override для пинг-понга проблемных
+     *    кейсов; см. 2026-05-28 — admin отправляет от лица менеджера).
+     *
+     * Mailbox для отправки определяется OutgoingMailboxResolver по
+     * Request.assigned_user_id — то есть письмо всегда уходит от ящика
+     * закреплённого менеджера, независимо от того кто нажал «Отправить».
+     */
+    private function isAuthorizedToSend(\App\Models\Request $req, \App\Models\User $user): bool
+    {
+        if ($req->assigned_user_id === $user->id) {
+            return true; // owner
+        }
+        if (method_exists($req, 'isDelegatedTo') && $req->isDelegatedTo($user)) {
+            return true; // acting
+        }
+        return $user->hasAnyRole([
+            \App\Enums\Role::Admin->value,
+            \App\Enums\Role::HeadOfSales->value,
+            \App\Enums\Role::Director->value,
+        ]);
     }
 
     #[On('open-reply')]
