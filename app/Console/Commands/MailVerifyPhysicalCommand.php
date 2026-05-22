@@ -89,24 +89,29 @@ class MailVerifyPhysicalCommand extends Command
             try {
                 $client = $connector->imapClient($mailbox);
                 foreach ($msgs as $m) {
-                    $rfcId = trim((string) $m->message_id);
-                    if ($rfcId === '') {
-                        $rows[] = [$m->id, $m->mailbox_id, $m->folder ?? '—', '—', '—', 'no message_id', mb_strimwidth((string) $m->subject, 0, 30, '…')];
+                    // Yandex IMAP SEARCH HEADER Message-ID не работает —
+                    // используем UID FETCH. Проверяем что imap_uid (новый,
+                    // после MOVE) реально существует в target папке.
+                    // Для INBOX используем тот же uid — он может остаться
+                    // как «удалённая но не expunged» копия (если EXPUNGE
+                    // не прошёл по Yandex CLIENTBUG).
+                    $uid = (int) $m->imap_uid;
+                    if ($uid <= 0) {
+                        $rows[] = [$m->id, $m->mailbox_id, $m->folder ?? '—', '—', '—', 'no imap_uid', mb_strimwidth((string) $m->subject, 0, 30, '…')];
                         $stats['error']++;
                         continue;
                     }
 
-                    $inInbox = $this->existsInFolder($client, 'INBOX', $rfcId);
                     $inTarget = ($m->folder !== null && $m->folder !== 'INBOX')
-                        ? $this->existsInFolder($client, (string) $m->folder, $rfcId)
-                        : $inInbox; // если БД говорит INBOX — target == inbox
+                        ? $this->uidExistsInFolder($client, (string) $m->folder, $uid)
+                        : false;
+                    $inInbox = $this->uidExistsInFolder($client, 'INBOX', $uid);
 
                     $verdict = match (true) {
-                        $inTarget && $inInbox && $m->folder !== 'INBOX' => 'in_both',
-                        $inTarget && ! $inInbox && $m->folder !== 'INBOX' => 'only_in_target',
+                        $inTarget && $inInbox => 'in_both',
+                        $inTarget && ! $inInbox => 'only_in_target',
                         ! $inTarget && $inInbox => 'only_in_inbox',
-                        ! $inTarget && ! $inInbox => 'nowhere',
-                        default => 'unknown',
+                        default => 'nowhere',
                     };
                     $stats[$verdict] = ($stats[$verdict] ?? 0) + 1;
 
@@ -152,6 +157,12 @@ class MailVerifyPhysicalCommand extends Command
     /**
      * SEARCH HEADER Message-ID в указанной папке. Возвращает true если
      * хотя бы один matching UID есть.
+     *
+     * 2026-05-22: Yandex IMAP SEARCH HEADER Message-ID ВСЕГДА возвращает
+     * пустой результат для нашего корпуса (проверено `verify-physical
+     * --latest=20` — 20/20 nowhere несмотря на успешные `MailFolderRouter:
+     * moved` в логе). Это известный quirk Yandex 360 — search по header
+     * Message-ID не индексируется. UID FETCH работает корректно.
      */
     private function existsInFolder(\Webklex\PHPIMAP\Client $client, string $folderPath, string $messageId): bool
     {
@@ -179,6 +190,40 @@ class MailVerifyPhysicalCommand extends Command
             Log::info('mail:verify-physical: search failed', [
                 'folder' => $folderPath,
                 'message_id' => $messageId,
+                'error' => $e->getMessage(),
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Проверка по UID — надёжная альтернатива SEARCH HEADER. Если UID
+     * существует в указанной папке, FETCH вернёт сообщение. Это работает
+     * на Yandex 360 (в отличие от SEARCH HEADER Message-ID).
+     */
+    private function uidExistsInFolder(\Webklex\PHPIMAP\Client $client, string $folderPath, int $uid): bool
+    {
+        if ($uid <= 0) {
+            return false;
+        }
+        try {
+            $folder = $client->getFolderByPath($folderPath, soft_fail: true);
+            if (! $folder) {
+                return false;
+            }
+            $client->openFolder($folder->path);
+            $msg = $folder->query()
+                ->setFetchOptions(\Webklex\PHPIMAP\IMAP::FT_PEEK)
+                ->setFetchBody(false)
+                ->setFetchFlags(false)
+                ->whereUid($uid)
+                ->get()
+                ->first();
+            return $msg !== null;
+        } catch (\Throwable $e) {
+            Log::info('mail:verify-physical: UID FETCH failed', [
+                'folder' => $folderPath,
+                'uid' => $uid,
                 'error' => $e->getMessage(),
             ]);
             return false;
