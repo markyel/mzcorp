@@ -256,6 +256,7 @@ class Pool extends Component
             return collect();
         }
         return \App\Models\User::query()
+            ->active()
             ->role(Role::requestHandlerRoles())
             ->orderBy('name')
             ->get(['id', 'name'])
@@ -577,8 +578,11 @@ class Pool extends Component
             'groups' => $groups,
             'effectiveScope' => $effectiveScope,
             'totals' => [
-                'mine' => Request::where('assigned_user_id', auth()->id())->count(),
-                'all' => $this->canSeeAll ? Request::count() : null,
+                // «Мои / Команда» в фильтр-баре показывают только открытые
+                // (isOpenForAssignment), чтобы счётчики не «висели» после
+                // массового закрытия заявок (например bulk-close-historic).
+                'mine' => $myAssigned,
+                'all' => $allOpen,
                 'mine_open' => $myAssigned,
                 'unassigned' => $unassigned,
                 'all_open' => $allOpen,

@@ -176,7 +176,7 @@ class Index extends Component
             return [];
         }
 
-        $managers = User::role(RoleEnum::requestHandlerRoles())->get();
+        $managers = User::active()->role(RoleEnum::requestHandlerRoles())->get();
         if ($managers->isEmpty()) {
             return [];
         }
@@ -546,7 +546,7 @@ class Index extends Component
         if (! $this->isPrivileged) {
             return [];
         }
-        $managers = User::role(RoleEnum::requestHandlerRoles())->get();
+        $managers = User::active()->role(RoleEnum::requestHandlerRoles())->get();
         if ($managers->isEmpty()) {
             return [];
         }

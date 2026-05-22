@@ -208,6 +208,7 @@ class Index extends Component
     public function availableManagers(): Collection
     {
         return User::query()
+            ->active()
             ->role(Role::requestHandlerRoles())
             ->orderBy('name')
             ->get(['id', 'name']);
