@@ -62,6 +62,7 @@ class SystemCleanupTestData extends Command
         ['table' => 'quotations', 'label' => 'Коммерческие предложения'],
         ['table' => 'outbound_quote_items', 'label' => 'Позиции исходящих КП (парсер)'],
         ['table' => 'outbound_quotes', 'label' => 'Исходящие КП (парсер)'],
+        ['table' => 'invoices', 'label' => 'Счета (Phase 4)'],
         ['table' => 'ai_decisions', 'label' => 'AI-решения'],
         ['table' => 'routed_mails', 'label' => 'Аудит маршрутизации писем'],
         ['table' => 'email_attachments', 'label' => 'Вложения писем'],
