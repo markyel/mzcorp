@@ -108,15 +108,18 @@ class Request extends Model
      * «возврат на правки» / AwaitingClientClarification при вопросе клиента
      * после КП). Operational status показывает что менеджеру делать сейчас,
      * но визуально полезнее видеть milestone — «КП отправлено» вместо
-     * «В работе». peak_status хранит max-достигнутый lifecycle-этап.
+     * «В работе» или «Жду клиента». peak_status хранит «дошли ли мы хотя
+     * бы раз до Quoted/UnderReview/Invoice/Paid/Won».
      *
      * Правила display:
-     *   - Terminal (ClosedWon / ClosedLost) — всегда показываем current,
-     *     потому что заявка закрыта; peak уже не релевантен.
-     *   - Paused — показываем Paused (paused — мета-состояние,
-     *     детали в paused_from_status).
-     *   - Иначе — peak_status, если он «старше» current'а по
-     *     RequestStatus::lifecycleOrder; иначе current.
+     *   - Terminal (ClosedWon / ClosedLost) или Paused — показываем current
+     *     (заявка закрыта / заморожена, чип отражает это состояние).
+     *   - Иначе если peak установлен (заявка дошла до Quoted+ хотя бы раз) —
+     *     показываем peak. Даже если current откатился в InProgress (правки)
+     *     или AwaitingClientClarification (клиент уточняет КП) — milestone
+     *     уже достигнут, чип «КП отправлено» точнее operational'а.
+     *   - Если peak null (заявка ещё не дошла до Quoted) — показываем
+     *     current operational статус (Жду клиента / В работе / Назначена).
      */
     public function getDisplayedStatusAttribute(): RequestStatus
     {
@@ -128,7 +131,7 @@ class Request extends Model
             return $current;
         }
         $peak = $this->peak_status;
-        if ($peak instanceof RequestStatus && $peak->lifecycleOrder() > $current->lifecycleOrder()) {
+        if ($peak instanceof RequestStatus) {
             return $peak;
         }
 

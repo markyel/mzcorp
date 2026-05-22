@@ -69,11 +69,6 @@ class RequestsBackfillPeakStatusCommand extends Command
                         }
                     }
 
-                    if ($bestStatus === null) {
-                        $stats['skipped']++;
-                        continue;
-                    }
-
                     // Идемпотентность: пропускаем если уже совпадает.
                     if ($req->peak_status === $bestStatus) {
                         $stats['skipped']++;
@@ -81,9 +76,11 @@ class RequestsBackfillPeakStatusCommand extends Command
                     }
 
                     if (! $dryRun) {
+                        // bestStatus === null → заявка не достигла ни одного
+                        // milestone (peak должен быть очищен).
                         DB::table('requests')
                             ->where('id', $req->id)
-                            ->update(['peak_status' => $bestStatus->value]);
+                            ->update(['peak_status' => $bestStatus?->value]);
                     }
                     $stats['updated']++;
                 }

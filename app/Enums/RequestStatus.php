@@ -121,35 +121,43 @@ enum RequestStatus: string
     /**
      * Порядковый номер в lifecycle для peak_status / display.
      *
-     * Используется RequestStateService::updatePeakStatus и accessor'ом
-     * Request::displayedStatus, чтобы показывать «дальше всего дошедший»
-     * milestone, а не текущий operational статус.
+     * Семантика: peak_status трекает только РЕАЛЬНЫЕ ВЕХИ (Quoted+) — после
+     * которых заявка содержательно продвинулась по pipeline. Pre-КП этапы
+     * (Pending / New / Assigned / InProgress) и БЛОКИРУЮЩИЕ состояния
+     * (AwaitingClientClarification — «менеджер ждёт ответа клиента»,
+     * Paused, PostponedUntil) — НЕ милстоуны, peak не сдвигают (-1).
      *
-     * Правила:
-     *   - Pause / PostponedUntil не считаются milestone — peak не сдвигают
-     *     (возвращаем -1, peak останется на предыдущем максимуме).
-     *   - ClosedLost — failure, тоже -1; в displayedStatus отображаем как
-     *     текущий terminal-чип, peak не трогаем (заявка дошла туда, куда
-     *     дошла; ClosedLost — не «вершина»).
-     *   - ClosedWon — наивысший milestone (10).
-     *   - Остальное — линейный порядок happy-path'а.
+     * Bug history (2026-05-22 М-2026-1488): прежде AwaitingClientClarification
+     * имела order=4 > InProgress=3 → peak задирался при отправке вопроса,
+     * и даже после ответа клиента (current=InProgress) displayed показывало
+     * «Жду клиента», потому что peak=AwaitingClientClarification «застревал».
+     *
+     * Правильное поведение:
+     *  - До Quoted: peak=null, displayed = current operational.
+     *  - На/после Quoted: peak=Quoted; даже если current=AwaitingClient
+     *    Clarification (клиент уточняет КП) — displayed=Quoted (заявка УЖЕ
+     *    на milestone «КП отправлено», ожидание ответа — это под-состояние).
+     *  - Terminal: ClosedLost=-1 (failure, не milestone); ClosedWon=10.
      */
     public function lifecycleOrder(): int
     {
         return match ($this) {
-            self::Pending => 0,
-            self::New => 1,
-            self::Assigned => 2,
-            self::InProgress => 3,
-            self::AwaitingClientClarification => 4,
+            // Реальные milestone'ы — двигают peak.
             self::Quoted => 5,
             self::UnderReview => 6,
             self::AwaitingInvoice => 7,
             self::Invoiced => 8,
             self::Paid => 9,
             self::ClosedWon => 10,
-            // Non-milestone — peak не двигаем.
-            self::PostponedUntil, self::Paused, self::ClosedLost => -1,
+            // Pre-КП работа + блокировки + failure — peak не сдвигают.
+            self::Pending,
+            self::New,
+            self::Assigned,
+            self::InProgress,
+            self::AwaitingClientClarification,
+            self::PostponedUntil,
+            self::Paused,
+            self::ClosedLost => -1,
         };
     }
 
