@@ -160,11 +160,24 @@ class AiDecisionService
             }
         }
 
-        DB::transaction(function () use ($decision, $request, $target, $author, $context, $extra) {
+        // Auto-mode: author=null. RequestStateService::ensureCanTransition
+        // в этом случае бьёт abort(403) с пустым message — поэтому передаём
+        // systemTransition=true для system-actor'а (audit by_user_id=null).
+        // Manual-confirm путь (author не null) — permission check проходит штатно.
+        $isAuto = isset($extra['auto']) && $extra['auto'];
+        $isSystemActor = $isAuto || $author === null;
+
+        DB::transaction(function () use ($decision, $request, $target, $author, $context, $isAuto, $isSystemActor) {
             try {
-                $this->stateService->transitionTo($request, $target, $author, $context);
+                $this->stateService->transitionTo(
+                    $request,
+                    $target,
+                    $author,
+                    $context,
+                    systemTransition: $isSystemActor,
+                );
                 $decision->update([
-                    'status' => (isset($extra['auto']) && $extra['auto'])
+                    'status' => $isAuto
                         ? AiDecisionStatus::AutoApplied->value
                         : AiDecisionStatus::ManuallyConfirmed->value,
                     'applied_at' => now(),
@@ -175,12 +188,16 @@ class AiDecisionService
                     'decision_id' => $decision->id,
                     'target' => $target->value,
                     'error' => $e->getMessage(),
+                    'error_class' => $e::class,
                 ]);
                 $decision->update([
                     'status' => AiDecisionStatus::Failed->value,
                     'payload' => array_merge(
                         is_array($decision->payload) ? $decision->payload : [],
-                        ['apply_error' => $e->getMessage()],
+                        [
+                            'apply_error' => $e->getMessage(),
+                            'apply_error_class' => $e::class,
+                        ],
                     ),
                 ]);
             }
