@@ -96,11 +96,12 @@
                 В этом периоде ничего не найдено. Попробуй сменить фильтры или расширить период.
             </div>
         @else
-            {{-- table-fixed: колонки получают строго объявленные widths,
-                 «Тема» (без width) занимает весь оставшийся flex. Без min-width
-                 — на узких экранах truncate срабатывает в каждой ячейке.
-                 «Заявка» сделана как chip ВНУТРИ колонки темы (отдельной
-                 колонки больше нет — экономим ~120px ширины). --}}
+            {{-- overflow-hidden на ds-card-уровне — safety net:
+                 - table-fixed + truncate должны держать колонки в их widths,
+                 - но iframe-srcdoc / long mono-email в expand-row могут
+                   «прорывать» min-content size; overflow:hidden отрезает,
+                   не сcroll-bar (scrollbar появлялся при overflow-x-auto). --}}
+            <div class="overflow-hidden">
             <table class="w-full text-[12.5px] table-fixed">
                 <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
                     <tr>
@@ -214,14 +215,17 @@
                                     @if(! $full)
                                         <div class="px-6 py-4 text-fg-3">Загрузка…</div>
                                     @else
-                                        <div class="px-6 py-4 space-y-3">
-                                            {{-- Header: From / To / Cc / Subject / Mailbox --}}
-                                            <div class="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 text-[12px]">
+                                        <div class="px-6 py-4 space-y-3 min-w-0">
+                                            {{-- Header: From / To / Cc / Subject / Mailbox.
+                                                 min-w-0 + break-words на 1fr-колонке — иначе
+                                                 grid с long mono-email (например 50+ chars
+                                                 без пробелов) растягивает таблицу. --}}
+                                            <div class="grid grid-cols-[110px_minmax(0,1fr)] gap-x-3 gap-y-1 text-[12px]">
                                                 <div class="text-fg-3">Тема:</div>
-                                                <div class="text-fg-1 font-medium">{{ $full->subject ?: '(без темы)' }}</div>
+                                                <div class="text-fg-1 font-medium break-words min-w-0">{{ $full->subject ?: '(без темы)' }}</div>
 
                                                 <div class="text-fg-3">От:</div>
-                                                <div class="text-fg-1 mono">
+                                                <div class="text-fg-1 mono break-all min-w-0">
                                                     @if($full->from_name) {{ $full->from_name }} @endif
                                                     &lt;{{ $full->from_email }}&gt;
                                                 </div>
@@ -229,7 +233,7 @@
                                                 @php $to = is_array($full->to_recipients) ? $full->to_recipients : []; @endphp
                                                 @if(! empty($to))
                                                     <div class="text-fg-3">Кому:</div>
-                                                    <div class="text-fg-1 mono">
+                                                    <div class="text-fg-1 mono break-all min-w-0">
                                                         @foreach($to as $i => $r)
                                                             @if($i > 0), @endif
                                                             @if(! empty($r['name'])) {{ $r['name'] }} @endif
@@ -241,7 +245,7 @@
                                                 @php $cc = is_array($full->cc_recipients) ? $full->cc_recipients : []; @endphp
                                                 @if(! empty($cc))
                                                     <div class="text-fg-3">Копия:</div>
-                                                    <div class="text-fg-1 mono">
+                                                    <div class="text-fg-1 mono break-all min-w-0">
                                                         @foreach($cc as $i => $r)
                                                             @if($i > 0), @endif
                                                             @if(! empty($r['name'])) {{ $r['name'] }} @endif
@@ -251,7 +255,7 @@
                                                 @endif
 
                                                 <div class="text-fg-3">Через:</div>
-                                                <div class="text-fg-2 mono">
+                                                <div class="text-fg-2 mono break-all min-w-0">
                                                     {{ $full->mailbox?->email ?? '—' }}
                                                     @if($full->folder) · {{ $full->folder }}@endif
                                                 </div>
@@ -376,6 +380,7 @@
                     @endforeach
                 </tbody>
             </table>
+            </div>{{-- /overflow-hidden table wrapper --}}
 
             @if($emails->hasPages())
                 <div class="px-4 py-3 border-t border-border-subtle">{{ $emails->links() }}</div>
