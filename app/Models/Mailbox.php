@@ -72,14 +72,14 @@ class Mailbox extends Model
      *
      * Правила:
      *  - is_active = true (общая база);
-     *  - общие ящики (type = general) — синкаем всегда;
+     *  - общие ящики (type = shared) — синкаем всегда;
      *  - личные (type = personal) — только если у владельца есть managerial
      *    роль (manager / head_of_sales). Личные ящики директора, секретаря,
      *    админа НЕ читаем — даже если авторизованы. При смене роли владельца
      *    на РОПа/менеджера фильтр тут же начнёт пропускать ящик (без правки
      *    is_active или повторной авторизации).
      *
-     * Логика на стороне DB: WHERE (type='general') OR EXISTS(role mapping
+     * Логика на стороне DB: WHERE (type='shared') OR EXISTS(role mapping
      * для owner_user_id в managerial roles). Это позволяет дёргать scope
      * прямо из любого query без подгрузки relations.
      */
@@ -89,7 +89,7 @@ class Mailbox extends Model
 
         return $query->where('is_active', true)
             ->where(function (Builder $q) use ($managerial) {
-                $q->where('type', MailboxType::General->value)
+                $q->where('type', MailboxType::Shared->value)
                     ->orWhere(function (Builder $q2) use ($managerial) {
                         $q2->where('type', MailboxType::Personal->value)
                             ->whereExists(function ($sub) use ($managerial) {
