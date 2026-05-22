@@ -24,15 +24,27 @@ use Illuminate\Support\Facades\Log;
  * ищет письмо и пропускает если оригинал уже в папке менеджера.
  * При retry — best-effort, не валит UI-операцию.
  *
- * tries=3 + backoff=30 покрывают transient Yandex IMAP ошибки
- * (rate-limit, EXPUNGE wrong state).
+ * Yandex 360 IMAP периодически возвращает «BAD [CLIENTBUG] EXPUNGE Wrong
+ * session state» или OK без COPYUID (CLIENTBUG no-op). Это transient —
+ * MailFolderRouter бросает TransientImapException, queue делает retry
+ * с экспоненциальным backoff. 5 попыток с интервалами 30s/2m/5m/10m/30m
+ * покрывают как мелкий flake, так и более длительные «штормы» сервера.
  */
 class RouteMailToManagerJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 3;
-    public int $backoff = 30;
+    public int $tries = 5;
+
+    /**
+     * Backoff в секундах между попытками: 30s, 2m, 5m, 10m, 30m.
+     *
+     * @return array<int, int>
+     */
+    public function backoff(): array
+    {
+        return [30, 120, 300, 600, 1800];
+    }
 
     public function __construct(
         public readonly int $emailMessageId,

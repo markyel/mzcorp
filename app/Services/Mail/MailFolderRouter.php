@@ -2,6 +2,7 @@
 
 namespace App\Services\Mail;
 
+use App\Exceptions\Mail\TransientImapException;
 use App\Models\EmailMessage;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
@@ -114,12 +115,18 @@ class MailFolderRouter
                     'imap_uid' => $message->imap_uid,
                     'error' => $moveError->getMessage(),
                 ]);
-                return null;
+                throw new TransientImapException(
+                    sprintf('UID MOVE failed for email_message=%d: %s', $message->id, $moveError->getMessage()),
+                    0,
+                    $moveError,
+                );
             }
 
             if ($newUid === null) {
                 // OK без COPYUID = no-op (письмо уже не в source-папке,
                 // CLIENTBUG, или Yandex отказался по другой причине).
+                // Бросаем TransientImapException — caller (Job) повторит с
+                // backoff; типичный Yandex-flake проходит со 2-й попытки.
                 Log::warning('MailFolderRouter: UID MOVE no-op (нет COPYUID в ответе)', [
                     'email_message_id' => $message->id,
                     'mailbox_id' => $mailbox->id,
@@ -130,7 +137,9 @@ class MailFolderRouter
                         ? mb_substr(implode(' | ', array_map('strval', $rawResponse)), 0, 300)
                         : null,
                 ]);
-                return null;
+                throw new TransientImapException(
+                    sprintf('UID MOVE no-op (no COPYUID) for email_message=%d', $message->id),
+                );
             }
 
             // Yandex 360 quirk (подтверждено 2026-05-22 через verify-physical
@@ -190,7 +199,13 @@ class MailFolderRouter
             ]);
 
             return $targetPath;
+        } catch (TransientImapException $e) {
+            // Уже залогировано в inner catch; пробрасываем для retry в Job.
+            throw $e;
         } catch (\Throwable $e) {
+            // Прочие IMAP-ошибки (BAD CLIENTBUG на ensureFolder, network drop
+            // в getFolderByPath и т.п.) тоже считаем transient — Yandex
+            // достаточно flake-склонен, чтобы любой outer-catch стоило ретраить.
             Log::error('MailFolderRouter: failed', [
                 'email_message_id' => $message->id,
                 'mailbox_id' => $mailbox->id,
@@ -198,7 +213,11 @@ class MailFolderRouter
                 'error' => $e->getMessage(),
             ]);
 
-            return null;
+            throw new TransientImapException(
+                sprintf('routeToManager outer failure for email_message=%d: %s', $message->id, $e->getMessage()),
+                0,
+                $e,
+            );
         } finally {
             $client?->disconnect();
         }
@@ -222,7 +241,24 @@ class MailFolderRouter
             $current = $current === '' ? $part : $current . $delimiter . $part;
             $existing = $client->getFolderByPath($current, soft_fail: true);
             if (! $existing) {
-                $client->createFolder($current);
+                $created = $client->createFolder($current);
+
+                // Yandex 360 webmail рисует дерево из LSUB (только подписанные).
+                // createFolder() не делает SUBSCRIBE автоматически — без явного
+                // вызова MZ|Lastname создаётся физически, MOVE едет туда, но
+                // секретарь и менеджер не видят папку в web UI. Fail-soft: если
+                // SUBSCRIBE упал — папка всё равно есть, можно подписать вручную.
+                try {
+                    $fresh = $created instanceof \Webklex\PHPIMAP\Folder
+                        ? $created
+                        : $client->getFolderByPath($current, soft_fail: true);
+                    $fresh?->subscribe();
+                } catch (\Throwable $e) {
+                    Log::info('MailFolderRouter: SUBSCRIBE after createFolder failed', [
+                        'folder' => $current,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
         }
     }

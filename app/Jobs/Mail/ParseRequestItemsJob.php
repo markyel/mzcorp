@@ -272,8 +272,20 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                         ->with('assignedUser')
                         ->first();
                     if ($related && $related->assigned_user_id && $related->assignedUser) {
-                        app(\App\Services\Mail\MailFolderRouter::class)
-                            ->routeToManager($message, $related->assignedUser);
+                        try {
+                            app(\App\Services\Mail\MailFolderRouter::class)
+                                ->routeToManager($message, $related->assignedUser);
+                        } catch (\App\Exceptions\Mail\TransientImapException $e) {
+                            // Yandex-flake: перекладываем на async Job с
+                            // backoff'ом (см. RouteMailToManagerJob::tries=5).
+                            Log::info('ParseRequestItemsJob: reply-routing transient fail, dispatching async retry', [
+                                'email_message_id' => $message->id,
+                                'manager_id' => $related->assigned_user_id,
+                                'error' => $e->getMessage(),
+                            ]);
+                            \App\Jobs\Mail\RouteMailToManagerJob::dispatch($message->id, $related->assigned_user_id)
+                                ->delay(now()->addSeconds(30));
+                        }
                     }
                 }
             } catch (\Throwable $e) {

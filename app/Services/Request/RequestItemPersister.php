@@ -4,6 +4,8 @@ namespace App\Services\Request;
 
 use App\Enums\EmailCategory;
 use App\Enums\RequestStatus;
+use App\Exceptions\Mail\TransientImapException;
+use App\Jobs\Mail\RouteMailToManagerJob;
 use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Models\RequestItem;
@@ -262,7 +264,23 @@ class RequestItemPersister
                 ? $existing->assignedUser
                 : $this->assignment->autoAssign($existing);
             if ($manager && $needsRouting) {
-                $this->folders->routeToManager($message, $manager);
+                // Сначала пробуем синхронно — быстрый happy-path. На transient
+                // Yandex-flake (CLIENTBUG EXPUNGE, no-COPYUID и т.п.) router
+                // бросает TransientImapException → перекладываем на async Job
+                // с экспоненциальным backoff (tries=5, до 30 минут). Без этого
+                // ~1 письмо из 200 застревало в INBOX (см. 2026-05-22 incident
+                // с email_message=2919 / request M-2026-1487).
+                try {
+                    $this->folders->routeToManager($message, $manager);
+                } catch (TransientImapException $e) {
+                    Log::info('RequestItemPersister: transient routing failure, dispatching async retry', [
+                        'email_message_id' => $message->id,
+                        'manager_id' => $manager->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    RouteMailToManagerJob::dispatch($message->id, $manager->id)
+                        ->delay(now()->addSeconds(30));
+                }
             }
             // Phase 1.10: первый auto-assign записываем как initial-event
             // в request_state_changes (Pending → Assigned).
