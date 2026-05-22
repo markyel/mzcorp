@@ -301,6 +301,39 @@
                         @endforeach
                     </div>
                 </span>
+
+                {{-- Сортировка пула (для canSeeAll). Менеджер всегда видит
+                     attention-first — см. effectiveSort в Pool::render. --}}
+                @php
+                    $_sortLabels = [
+                        'attention'    => 'По вниманию',
+                        'created_desc' => 'Сначала новые',
+                        'created_asc'  => 'Сначала старые',
+                    ];
+                    $_currentSortLabel = $_sortLabels[$sort] ?? 'По вниманию';
+                @endphp
+                <span x-data="{ open: false }" @click.outside="open = false"
+                      class="relative inline-flex items-center">
+                    <button type="button" @click="open = !open"
+                            class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium border bg-[var(--bg-surface)] text-[var(--fg-2)] border-[var(--border-strong)] hover:text-[var(--fg-1)]"
+                            title="Сортировка пула">
+                        Сортировка:
+                        <span class="font-semibold">{{ $_currentSortLabel }}</span>
+                        <span class="text-[10px] opacity-70">▾</span>
+                    </button>
+                    <div x-show="open" x-cloak x-transition.origin.top.left
+                         class="absolute left-0 top-full mt-1 z-30 min-w-[200px] py-1 bg-[var(--bg-surface)] border border-[var(--border-strong)] rounded-md shadow-lg text-left text-[12.5px]">
+                        @foreach($_sortLabels as $_sk => $_sv)
+                            <button type="button"
+                                    @click="open = false"
+                                    wire:click="setSort('{{ $_sk }}')"
+                                    class="block w-full text-left px-3 py-1.5 hover:bg-[var(--bg-surface-2)] {{ $sort === $_sk ? 'text-[var(--accent)] font-semibold' : 'text-[var(--fg-1)]' }}">
+                                {{ $_sv }}
+                                @if($sort === $_sk)<span class="float-right text-[var(--accent)]">✓</span>@endif
+                            </button>
+                        @endforeach
+                    </div>
+                </span>
             @endif
 
             {{-- Phase 1.10: bucket-chips (группа статусов). Phase 1.11

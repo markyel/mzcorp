@@ -65,6 +65,19 @@ class Pool extends Component
     #[Url(as: 'mgr')]
     public ?int $assignedUserId = null;
 
+    /**
+     * Сортировка пула. Значения:
+     *   attention     — по attention_level DESC + last_activity_at DESC (default).
+     *                   Менеджеру нужно сразу видеть «требует внимания» сверху.
+     *   created_desc  — по дате создания заявки DESC (новые сверху).
+     *   created_asc   — по дате создания заявки ASC (старые сверху — backlog).
+     *
+     * Менеджер всегда видит attention (форсим в render). Для canSeeAll —
+     * dropdown с выбором.
+     */
+    #[Url(as: 'sort')]
+    public string $sort = 'attention';
+
     public function updatingSearch(): void
     {
         $this->resetPage();
@@ -89,6 +102,18 @@ class Pool extends Component
 
     public function updatingAssignedUserId(): void
     {
+        $this->resetPage();
+    }
+
+    public function updatingSort(): void
+    {
+        $this->resetPage();
+    }
+
+    public function setSort(string $sort): void
+    {
+        $allowed = ['attention', 'created_desc', 'created_asc'];
+        $this->sort = in_array($sort, $allowed, true) ? $sort : 'attention';
         $this->resetPage();
     }
 
@@ -275,23 +300,21 @@ class Pool extends Component
             ])
             ->withCount('items');
 
-        // Pool re-sort («как в почте»):
-        //  - attention_level=1 сверху (manual / fresh / client_replied /
-        //    postponed_resume / overdue SlaBreach)
-        //  - дальше — last_activity_at DESC (свежие сверху)
-        //  - id DESC как tiebreak
-        // Для paused / closed / all attention-сорт не имеет смысла,
-        // но last_activity_at DESC всё равно даёт «свежие сверху».
-        if (in_array($this->bucket, ['active', 'overdue'], true)) {
-            $query
-                ->orderByDesc('attention_level')
-                ->orderByRaw('last_activity_at DESC NULLS LAST')
-                ->orderByDesc('id');
-        } else {
-            $query
-                ->orderByRaw('last_activity_at DESC NULLS LAST')
-                ->orderByDesc('id');
-        }
+        // Pool re-sort. Менеджеру нужна attention-первая, РОП/директор/админ
+        // могут переключаться на created_desc / created_asc (Foundation-feedback
+        // 2026-05-22: «по дате создания заявки» для разбора backlog).
+        // Для menager force attention (он не имеет UI для смены $sort).
+        $effectiveSort = $this->canSeeAll ? $this->sort : 'attention';
+        match ($effectiveSort) {
+            'created_desc' => $query->orderByDesc('created_at')->orderByDesc('id'),
+            'created_asc'  => $query->orderBy('created_at')->orderBy('id'),
+            default => in_array($this->bucket, ['active', 'overdue'], true)
+                ? $query->orderByDesc('attention_level')
+                    ->orderByRaw('last_activity_at DESC NULLS LAST')
+                    ->orderByDesc('id')
+                : $query->orderByRaw('last_activity_at DESC NULLS LAST')
+                    ->orderByDesc('id'),
+        };
 
         // Менеджер по умолчанию видит свои; РОП/директор — все.
         // Foundation Фаза 2: «свои» теперь включает active delegations
