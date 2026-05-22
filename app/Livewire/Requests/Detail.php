@@ -163,16 +163,27 @@ class Detail extends Component
                 ['request_id' => $this->request->id, 'user_id' => $user->id],
                 ['last_seen_at' => now()],
             );
-            app(\App\Services\Request\AttentionService::class)
-                ->onManagerOpened($this->request);
+
+            // Гейт «реально работает с заявкой» — owner или acting через
+            // delegation. РОП/директор/admin смотрят как наблюдатели и
+            // НЕ должны двигать статус / снимать attention-флаги.
+            // (isAccessibleBy включает privileged-роли — здесь это
+            // неподходящая семантика.)
+            $isHandler = $this->request->isOwnedBy($user)
+                || $this->request->isDelegatedTo($user);
+
+            if ($isHandler) {
+                app(\App\Services\Request\AttentionService::class)
+                    ->onManagerOpened($this->request);
+            }
 
             // Implicit-state: ответственный менеджер (или acting через
             // delegation) открыл заявку — значит он начал работу. Без
             // кнопки «Начать работу» — статус подсасывается по факту.
             // РОП/директор-наблюдатель НЕ триггерит — они просто смотрят.
             if (
-                in_array($this->request->status, [RequestStatus::Assigned, RequestStatus::New], true)
-                && $this->request->isAccessibleBy($user)
+                $isHandler
+                && in_array($this->request->status, [RequestStatus::Assigned, RequestStatus::New], true)
             ) {
                 try {
                     app(\App\Services\Request\RequestStateService::class)
