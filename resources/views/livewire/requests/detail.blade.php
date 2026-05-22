@@ -726,23 +726,30 @@
                     </button>
                 @endif
 
-                {{-- Убраны semi-auto кнопки:
-                       • «📨 КП отправлено» / «❓ Жду уточнение клиента» —
-                                         Quoted и AwaitingClientClarification ставятся
-                                         через OutboundDocumentDetector / ClarificationPanel
-                                         post-send hook.
-                       • «📑 Клиент на согласовании» / «⏰ Клиент отложил» /
-                         «💵 Запросил счёт» — UnderReview, PostponedUntil,
-                                         AwaitingInvoice ставятся через
-                                         InboundIntentClassifier (gpt-4o-mini, 6 intent'ов)
-                                         → AI-плашка «Применить» в action-panel сверху.
-                                         Для PostponedUntil AI вытаскивает
-                                         suggested_resume_date из текста, для ClosedLost
-                                         AI вытаскивает suggested_closed_lost_reason.
-                     Если detector промахнулся в редком кейсе — менеджер либо
-                     отправит исправленный КП (detector подхватит), либо
-                     закроет через «⊘ Закрыть как потеря» с reason'ом,
-                     либо обратится к РОПу. --}}
+                {{-- Ручные переходы вперёд по pipeline.
+                     Изначально были убраны в надежде на auto-detect
+                     (OutboundDocumentDetector / InboundIntentClassifier), но
+                     практика показала: AI промахивается, заявки застревают
+                     в Assigned/InProgress (см. 2026-05-22 — 11 КП в Assigned).
+                     Менеджеру нужен ручной escape hatch.
+
+                     AI-плашка над action-panel остаётся для случаев когда
+                     detector сработал — менеджер может «Применить» одним
+                     кликом. Здесь же — ручной путь когда AI молчит. --}}
+
+                @if($allow($RS::Quoted) && $req->status !== $RS::Quoted)
+                    <button type="button" wire:click="transitionStatus('quoted')"
+                            class="btn btn-sm"
+                            @disabled(! $canManage)
+                            title="КП отправлено клиенту. Если auto-detect не сработал.">📤 КП отправлено</button>
+                @endif
+
+                @if($allow($RS::AwaitingInvoice) && $req->status !== $RS::AwaitingInvoice)
+                    <button type="button" wire:click="transitionStatus('awaiting_invoice')"
+                            class="btn btn-sm"
+                            @disabled(! $canManage)
+                            title="Клиент попросил выставить счёт. Если AI не уловил intent.">📋 Запросил счёт</button>
+                @endif
 
                 @if($allow($RS::Invoiced))
                     <button type="button" wire:click="transitionStatus('invoiced')"

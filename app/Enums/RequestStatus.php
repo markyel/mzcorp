@@ -131,45 +131,62 @@ enum RequestStatus: string
     {
         return match ($this) {
             self::Pending => [self::New, self::Assigned, self::ClosedLost],
-            self::New => [self::Assigned, self::InProgress, self::AwaitingClientClarification, self::Quoted, self::ClosedLost],
-            // Phase 2: добавлен Quoted — менеджер может сразу отправить КП
-            // без формального «Начать работу». Auto-detect КП работает
-            // на любом активном статусе.
-            self::Assigned => [self::InProgress, self::AwaitingClientClarification, self::Quoted, self::ClosedLost],
+
+            // 2026-05-22 расширение: auto-detect КП (OutboundDocumentDetector)
+            // и intent-классификатор клиента (InboundIntentClassifier) часто
+            // промахиваются — заявки застревают в Assigned/InProgress даже
+            // с отправленным КП. Менеджеру нужен ручной escape hatch на
+            // любой шаг pipeline. Карта переходов расширена так:
+            //   — из любого active статуса можно «📤 КП отправлено» → Quoted,
+            //     «📋 Запросил счёт» → AwaitingInvoice, «✓ Закрыть как успех»
+            //     → ClosedWon (cash без формальной цепочки счёт→оплата).
+            //   — обратный путь (InProgress) сохранён для возврата к работе.
+            //   — ClosedLost везде доступен.
+            self::New => [
+                self::Assigned, self::InProgress,
+                self::AwaitingClientClarification,
+                self::Quoted, self::AwaitingInvoice,
+                self::ClosedWon, self::ClosedLost,
+            ],
+            self::Assigned => [
+                self::InProgress, self::AwaitingClientClarification,
+                self::Quoted, self::AwaitingInvoice,
+                self::ClosedWon, self::ClosedLost,
+            ],
             self::InProgress => [
                 self::AwaitingClientClarification,
-                self::Quoted,
-                self::ClosedLost,
+                self::Quoted, self::AwaitingInvoice,
+                self::ClosedWon, self::ClosedLost,
             ],
             self::AwaitingClientClarification => [
                 self::InProgress,
-                self::Quoted,
-                self::ClosedLost,
+                self::Quoted, self::AwaitingInvoice,
+                self::ClosedWon, self::ClosedLost,
             ],
             self::Quoted => [
-                self::UnderReview,
-                self::PostponedUntil,
+                self::UnderReview, self::PostponedUntil,
                 self::AwaitingInvoice,
-                self::InProgress, // вернуться, если клиент хочет правки
-                self::ClosedWon,
-                self::ClosedLost,
+                self::InProgress, // возврат на правки
+                self::ClosedWon, self::ClosedLost,
             ],
             self::UnderReview => [
                 self::InProgress,
                 self::AwaitingInvoice,
-                self::ClosedWon,
-                self::ClosedLost,
+                self::ClosedWon, self::ClosedLost,
             ],
             self::PostponedUntil => [
                 self::InProgress,
-                self::ClosedLost,
+                self::Quoted, self::AwaitingInvoice,
+                self::ClosedWon, self::ClosedLost,
             ],
             self::AwaitingInvoice => [
                 self::Invoiced,
+                self::ClosedWon, // cash без формального учёта оплаты
                 self::ClosedLost,
             ],
             self::Invoiced => [
                 self::Paid,
+                self::ClosedWon, // без отдельного шага Paid (упрощённый учёт)
                 self::ClosedLost,
             ],
             self::Paid => [
