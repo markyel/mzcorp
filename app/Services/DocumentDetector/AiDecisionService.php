@@ -183,6 +183,26 @@ class AiDecisionService
                     'applied_at' => now(),
                     'applied_by_user_id' => $author?->id,
                 ]);
+            } catch (\DomainException $e) {
+                // State machine отказал — например заявка уже terminal
+                // (closed_lost / closed_won), или transitionTo требует
+                // данных, которых нет в auto-payload (closed_lost_reason).
+                // Это НЕ technical failure — suggestion стал неактуален.
+                // Помечаем Dismissed, чтобы Failed оставалось только для
+                // непредвиденных багов (легче триажить failed_jobs).
+                Log::info('AiDecisionService: apply dismissed by state machine', [
+                    'decision_id' => $decision->id,
+                    'target' => $target->value,
+                    'reason' => $e->getMessage(),
+                ]);
+                $decision->update([
+                    'status' => AiDecisionStatus::Dismissed->value,
+                    'applied_at' => now(),
+                    'payload' => array_merge(
+                        is_array($decision->payload) ? $decision->payload : [],
+                        ['dismiss_reason' => $e->getMessage()],
+                    ),
+                ]);
             } catch (\Throwable $e) {
                 Log::warning('AiDecisionService: apply failed — transitionTo threw', [
                     'decision_id' => $decision->id,

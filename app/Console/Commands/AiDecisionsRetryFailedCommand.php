@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\AiDecisionStatus;
 use App\Enums\DetectorType;
+use App\Enums\RequestStatus;
 use App\Models\AiDecision;
 use App\Services\DocumentDetector\AiDecisionService;
 use Illuminate\Console\Command;
@@ -26,13 +27,15 @@ class AiDecisionsRetryFailedCommand extends Command
     protected $signature = 'ai-decisions:retry-failed
         {--type= : Фильтр по detector_type (через запятую)}
         {--since=30d : За какой период брать failed (7d/24h/30d)}
-        {--apply : Применить (по умолчанию dry-run)}';
+        {--apply : Применить (по умолчанию dry-run)}
+        {--skip-terminal : Decisions для terminal-заявок сразу пометить Dismissed без попытки retry}';
 
     protected $description = 'Прогнать failed AiDecisions заново (после bug-fix в apply()).';
 
     public function handle(AiDecisionService $service): int
     {
         $apply = (bool) $this->option('apply');
+        $skipTerminal = (bool) $this->option('skip-terminal');
         $sinceOpt = (string) $this->option('since');
         $typeOpt = (string) ($this->option('type') ?? '');
 
@@ -68,7 +71,7 @@ class AiDecisionsRetryFailedCommand extends Command
         ));
         $this->newLine();
 
-        $stats = ['retried' => 0, 'still_failed' => 0, 'succeeded' => 0, 'skipped' => 0];
+        $stats = ['retried' => 0, 'still_failed' => 0, 'succeeded' => 0, 'skipped' => 0, 'dismissed_terminal' => 0];
 
         foreach ($rows as $d) {
             $type = $d->detector_type;
@@ -81,6 +84,34 @@ class AiDecisionsRetryFailedCommand extends Command
                 $d->email_message_id,
                 (float) $d->confidence,
             );
+
+            // --skip-terminal: для заявок в closed_lost/closed_won/paid не пытаемся
+            // ретраить — state machine откажет в переходе. Сразу Dismissed
+            // с пометкой dismiss_reason=terminal_request_status.
+            if ($skipTerminal) {
+                $reqStatus = $d->request()->value('status');
+                $reqStatusEnum = $reqStatus !== null ? RequestStatus::tryFrom((string) $reqStatus) : null;
+                if ($reqStatusEnum?->isTerminal()) {
+                    if (! $apply) {
+                        $this->line('  [DRY-DISMISS] ' . $line . ' (req status=' . $reqStatus . ')');
+                        $stats['dismissed_terminal']++;
+
+                        continue;
+                    }
+                    $payload = is_array($d->payload) ? $d->payload : [];
+                    unset($payload['apply_error'], $payload['apply_error_class']);
+                    $payload['dismiss_reason'] = 'terminal_request_status:' . $reqStatus;
+                    $d->update([
+                        'status' => AiDecisionStatus::Dismissed->value,
+                        'payload' => $payload,
+                        'applied_at' => now(),
+                    ]);
+                    $this->line('  ↷ ' . $line . ' → dismissed (terminal=' . $reqStatus . ')');
+                    $stats['dismissed_terminal']++;
+
+                    continue;
+                }
+            }
 
             if (! $apply) {
                 $this->line('  [DRY] ' . $line);
@@ -120,8 +151,14 @@ class AiDecisionsRetryFailedCommand extends Command
 
         $this->newLine();
         $this->table(
-            ['retried', 'succeeded', 'still_failed', 'skipped'],
-            [[$stats['retried'], $stats['succeeded'], $stats['still_failed'], $stats['skipped']]],
+            ['retried', 'succeeded', 'still_failed', 'skipped', 'dismissed_terminal'],
+            [[
+                $stats['retried'],
+                $stats['succeeded'],
+                $stats['still_failed'],
+                $stats['skipped'],
+                $stats['dismissed_terminal'],
+            ]],
         );
 
         return self::SUCCESS;
