@@ -272,8 +272,53 @@ sudo supervisorctl restart mzcorp-worker:*
 - **`SupplierResolverService` нужен в DI graph (Phase 2.0):** мы скопировали LazyLift KB без supplier-инфры (suppliers/Supplier model нет), но `RequestContextAnalysisService` принимает `SupplierResolverService` в конструкторе. Без stub-класса `kb:resolve` падает с `ReflectionException: Class App\Services\Kb\SupplierResolverService does not exist`. **Решение:** stub возвращающий `null` на `resolve()`. Заменить полноценным когда supplier model появится.
 - **MyLift KB ≠ LazyLift KB (Phase 2.0+):** drop-in из LazyLift @ `7fee1f77` живёт в нашем репо как **независимая копия**. Все наши фиксы (synonym word-boundaries, insufficient-when-brand-known, internal SKU detection) НЕ распространяются обратно в LazyLift автоматически. Если кто-то синкнёт MyLift-KB обратно к LazyLift — нужен ручной merge. Для long-term можно вынести в `composer.json` shared package, но сейчас drop-in копия проще.
 - **Расхождение «оценочного объёма» сидеров с реальным (Phase 2.0):** Explore-agent предположил «~140 rules / ~80 extractors». Реально в LazyLift JSON @ `7fee1f77`: 39 rules, 4 extractors. Не баг, а ограниченность исходного KB-corpus. Покрыты только тяговые канаты, контактор, дверной упор, индикация — узлы которыми занимались первыми. Кабели/индикаторы/освещение — белые пятна, items с такими названиями уходят в `not_covered`.
+- **Phantom outbound link через L4 OutgoingMailLinker (2026-05-22 находка):** Старая логика `matchByOpenRequestForRecipients` искала открытые Request по `whereIn('client_email', recipients)` и при множественном match брала «самую свежую». При first-time синке личного ящика с большой Sent-историей это создавало каскад ложных привязок: outbound к коллеге `@myzip.ru` цеплялся к фантомной Request, у которой `client_email` = тот же коллега (артефакт внутренней переписки, ParseRequestItemsJob создал Request из inbound от коллеги). Дальше через L1/L2 каскадно — все письма с References на эту цепочку наследуют привязку. На mbox=6 (директор) такое привязалось 62 раза к 10 разным Request. **Решение (commit `8883717`):** три новых guard'а в L4: (1) фильтр `filterExternal` отбрасывает наши адреса (internal_domains + Mailbox.email + User.email) из recipients; (2) time-window `config('services.mail.outbound_link_window_days')` (default 90 дней) — Request старше окна не матчится; (3) при 2+ кандидатах — `return null + WARNING`, никакого «pick latest». Sanity для будущих ящиков менеджеров: cleanup через скрипт «outbound с related_request_id, без настоящего parent в БД (whereIn message_id) и без M-code в subject» → массовое отвязывание.
+- **request_state_changes.event = varchar(32) (2026-05-22 находка):** Колонка коротко-индексируемая, длинные event-имена (`system.cleanup.internal_client_email_phantom` = 44 символа) падают на `SQLSTATE[22001] String data, right truncated`. Держим event'ы ≤ 32 символов. Использованные: `clarification_sent`, `reanimate`, `cleanup.internal_phantom` (24 chars).
 
 ## Журнал сессий
+
+### Сессия 2026-05-22 — Mailbox::syncable, first-time watermark, phantom link bug cleanup
+
+**Контекст:** Александр Роденков (директор) был замечен как «магнит» для фантомных заявок. UI заявки M-2026-0019 показывал «через alexander.rodenkov@myzip.ru», хотя по бизнес-роли его почту синкать не нужно. Расследование вскрыло три независимых проблемы и привело к большому cleanup'у.
+
+#### 1. `Mailbox::syncable()` — фильтр ящиков по роли владельца
+
+Personal-ящик идёт в IMAP-синк только если у владельца есть managerial-роль (`manager` / `head_of_sales`). Личные ящики директора, секретаря, админа — не читаем, даже если `is_active=true` и OAuth валиден. При смене роли владельца (Director→HeadOfSales) фильтр тут же подхватывает ящик без правки `is_active` или повторной авторизации. Реализовано через DB-scope (JOIN на `model_has_roles`/`roles`), без N+1.
+
+Использовано в `MailSyncCommand` (`Mailbox::query()->syncable()`). Опция `--mailbox=ID` намеренно обходит фильтр для ручной отладки. `SyncMailboxFolderJob` принимает конкретный mailbox_id и фильтра не требует.
+
+**Commits:** `58f1c2a`, `49540aa` (fix Shared vs General опечатки в enum).
+
+#### 2. First-time watermark в `SyncMailboxFolderJob`
+
+При первом подключении ящика (`sync_count=0 AND last_uid_seen=0 AND !uidValidityJustReset`) job ставит `last_uid_seen = MAX(UID)` папки и выходит без processing. Старая история остаётся на IMAP-сервере, в `email_messages` не льётся, `MailRouter::route` на ней не вызывается, LLM не дёргается. Семантика: «читаем только то, что приходит после подключения».
+
+UIDVALIDITY-сброс (server-side смена валидности) идёт отдельной веткой — там last_uid_seen=0 в state с sync_count>0; флаг `$uidValidityJustReset` исключает такой кейс из first-time, полный resync известного ящика работает штатно.
+
+Для ретроспективного забора конкретного письма — отдельный путь (`mail:reingest-uid` / ручной `--since-uid`).
+
+**Commit:** `a61ad17`.
+
+#### 3. Phantom link bug в `OutgoingMailLinker` L4 (главное расследование)
+
+При синке Sent ящика директора 62 outbound-письма прилипли к 10 чужим Request через старый L4 fallback (см. соответствующую граблю выше). Анализ показал две корневых причины:
+
+- **L4 был жадным:** искал любую открытую Request с `client_email IN recipients`, при множественном match — pick latest без проверки subject / времени / thread-relevance.
+- **«Магниты» — 35 фантомных Request с `client_email=коллега@myzip.ru`** (`info@`/`noreply@`/`order@` и реальные коллеги). Эти Request родились ещё до фикса `InternalSenderDetector` (M-2026-0161) — `IncomingMailProcessor` создавал заявку из внутреннего письма с `from_email` коллеги, и `client_email` записывался как этот коллега. Каждый outbound, в чьих `to/cc` был тот же коллега, через L4 цеплялся к этому магниту.
+- **Каскад через L1/L2:** один раз привязавшись через L4, письмо начинает «магнитить» через References — все будущие письма с этим Message-ID в References наследуют привязку.
+
+**Фикс (commit `8883717`):** три guard'а в L4. Детали — в грабле выше.
+
+**Cleanup БД:**
+- 62 phantom outbound отвязаны от Request (письма из mbox=6 без настоящего parent в БД и без M-code в subject).
+- 27 активных Request с internal `client_email` (@myzip.ru) → `closed_lost / off_topic`, audit-event `cleanup.internal_phantom`, comment с пояснением. Ещё 8 таких Request уже были `closed_lost` — итого 35 «магнитов» обезврежены.
+- 58 писем mbox=6 остаются привязанными — это legit L1/L2/L3 матчи (настоящий parent в БД или M-code в subject).
+
+**Открытые задачи (отдельная сессия):**
+- **Supplier-blacklist в категоризаторе.** Кейс #1396/#1397 (Zagro AG / Angelo Zani): supplier-correspondence на английском (`«Hi Alexander, can you offer it?»`) категоризатор принял за `client_request` с confidence 0.9-0.95. Нужен либо blacklist доменов (`zagro.ch`, `oss-elevator-parts.com`, `escalatorparts.cn`), либо доработка промпта (учёт направления сделки).
+- **3 Request с supplier client_email** (#19 `steven@oss-elevator-parts.com`, #244 `kid@escalatorparts.cn`, #1397 `angelo.zani@zagro.ch` — последняя уже закрыта). Их L4 guards не зацепят (фикс задеплоен), но они активные. Глазами посмотреть и решить.
+
+
 
 ### Сессия 2026-05-21 (ночь) — пред-релизный sprint: UID MOVE, admin-role, catalog FK, поиск, photo proxy
 
