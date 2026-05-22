@@ -36,7 +36,7 @@ class RequestsReparseTraceCommand extends Command
     protected $signature = 'requests:reparse-trace
         {code : internal_code заявки}
         {--attachment-id=* : id вложений; по умолчанию все структурные (xlsx/pdf/docx)}
-        {--dump-dir= : каталог для дампа; по умолчанию storage/app/reparse-trace/{code}-{ts}}';
+        {--dump-dir= : каталог для дампа; по умолчанию storage/app/reparse-trace/<code>-<timestamp>}';
 
     protected $description = 'READ-ONLY: пошаговый трейс re-parse заявки с дампом артефактов.';
 
