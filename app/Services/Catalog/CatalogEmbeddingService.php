@@ -207,12 +207,20 @@ class CatalogEmbeddingService
         // ни в vector-20 — с code-100 точно попадёт.
         $codePoolLimit = max($poolLimit, 100);
 
+        // Timing-логи: считаем длительность каждого шага отдельно
+        // (code/trgm/vector/backfill/total). Без них непонятно где
+        // бутылочное горлышко: embed-запрос к OpenAI обычно 500-2000мс,
+        // но иногда тормозит SQL backfill или сам vectorTopN.
+        $tStart = microtime(true);
+
         // 1) Code-token ILIKE — извлекаем из запроса токены вида ПКЛ32 /
         //    ЕИЛА.687255.008-04 (буквы+цифры, ≥3 симв.) и ищем их как
         //    подстроки в normalized name, brand_article_normalized и
         //    articles[]. Это решает кейс «Плата ПКЛ-32»: word_similarity
         //    рассеивается на длинных фразах, ILIKE же ловит «ПКЛ32» прямо.
+        $tCodeStart = microtime(true);
         $codeRows = $this->codeTokenTopN($queryText, $codePoolLimit);
+        $tCodeMs = (int) ((microtime(true) - $tCodeStart) * 1000);
 
         // 2) Trigram (pg_trgm) — для fuzzy-матча целой фразы.
         // 3) Vector — семантика, ~500-2000мс embed.
@@ -228,10 +236,23 @@ class CatalogEmbeddingService
         // Решение: ВСЕГДА запускаем trgm+vector — они дают semantic
         // ранжирование, разруливающее ties между code-кандидатами.
         // Расходы: vector embed ~$0.0001 + 500-1500мс на запрос.
+        $tTrgmStart = microtime(true);
         $trgmRows = $this->trigramTopN($queryText, $poolLimit);
+        $tTrgmMs = (int) ((microtime(true) - $tTrgmStart) * 1000);
+
+        $tVecStart = microtime(true);
         $vectorRows = $this->vectorTopN($queryText, $poolLimit, $requestItemId);
+        $tVecMs = (int) ((microtime(true) - $tVecStart) * 1000);
 
         if ($codeRows === [] && $trgmRows === [] && $vectorRows === []) {
+            Log::info('catalog.topN: empty (no candidates)', [
+                'request_item_id' => $requestItemId,
+                'query_preview' => mb_substr($queryText, 0, 80),
+                't_code_ms' => $tCodeMs,
+                't_trgm_ms' => $tTrgmMs,
+                't_vec_ms' => $tVecMs,
+                't_total_ms' => (int) ((microtime(true) - $tStart) * 1000),
+            ]);
             return [];
         }
 
@@ -272,6 +293,24 @@ class CatalogEmbeddingService
                 $missingVecIds[] = $cid;
             }
         }
+        // Cap backfill: чем меньше id'шников в IN-условии pgvector backfill,
+        // тем быстрее запрос. Сейчас (M-2026-1215, generic-токены 220VAC/L2000)
+        // pool кандидатов из codeTokenTopN — до 100 элементов. SQL JOIN на
+        // 100×35K rows может занимать 200-500мс, при том что для top-10
+        // итогового скоринга нам нужны только лучшие кандидаты по
+        // не-vector сигналам. Сжимаем до top-30: остальные всё равно
+        // отсеятся min_vector_only фильтром или сортировкой.
+        $backfillCap = (int) config('services.catalog.search.backfill_cap', 30);
+        if (count($missingVecIds) > $backfillCap) {
+            // Сортируем по max(code, trgm*1.10) desc, берём top-N.
+            usort($missingVecIds, function ($a, $b) use ($merged) {
+                $sa = max($merged[$a]['code'] ?? 0, ($merged[$a]['trgm'] ?? 0) * 1.10);
+                $sb = max($merged[$b]['code'] ?? 0, ($merged[$b]['trgm'] ?? 0) * 1.10);
+                return $sb <=> $sa;
+            });
+            $missingVecIds = array_slice($missingVecIds, 0, $backfillCap);
+        }
+        $tBackfillStart = microtime(true);
         if (! empty($missingVecIds)) {
             $backfilled = $this->vectorScoresForIds($queryText, $missingVecIds, $requestItemId);
             foreach ($backfilled as $cid => $sim) {
@@ -280,6 +319,7 @@ class CatalogEmbeddingService
                 }
             }
         }
+        $tBackfillMs = (int) ((microtime(true) - $tBackfillStart) * 1000);
 
         $scored = [];
         foreach ($merged as $cid => $m) {
@@ -379,6 +419,21 @@ class CatalogEmbeddingService
                 'vector_score' => $r['vector'],
             ];
         }
+
+        Log::info('catalog.topN: done', [
+            'request_item_id' => $requestItemId,
+            'query_preview' => mb_substr($queryText, 0, 80),
+            'pool_code' => count($codeRows),
+            'pool_trgm' => count($trgmRows),
+            'pool_vec' => count($vectorRows),
+            'backfilled' => count($missingVecIds),
+            'returned' => count($out),
+            't_code_ms' => $tCodeMs,
+            't_trgm_ms' => $tTrgmMs,
+            't_vec_ms' => $tVecMs,
+            't_backfill_ms' => $tBackfillMs,
+            't_total_ms' => (int) ((microtime(true) - $tStart) * 1000),
+        ]);
 
         return $out;
     }
@@ -776,17 +831,35 @@ class CatalogEmbeddingService
      */
     /**
      * Embed query text → pgvector literal `[v1,v2,...]` или null при ошибке.
-     * Кешируется для одного запроса в простой статической мапе по hash
-     * (на случай если хелперы вызовут embed дважды для одного queryText —
-     * вызовов OpenAI всё равно один).
+     *
+     * Двухуровневый кеш:
+     *  1) process-static — для одного PHP-запроса (если embed дёргается дважды).
+     *  2) Cache::driver (Redis/file) на 7 дней — для разных Livewire-апдейтов
+     *     по той же позиции / другим позициям с тем же query text. Embedding
+     *     `text-embedding-3-small` детерминирован, кеш безопасен. Это убирает
+     *     500-2000мс OpenAI HTTP-вызова при повторных открытиях окна.
+     *
+     * Killswitch: `services.catalog.search.embed_cache_enabled` (default true).
      */
     private function embedQueryToVectorLiteral(string $queryText, ?int $requestItemId): ?string
     {
-        static $cache = [];
-        $key = md5($queryText);
-        if (array_key_exists($key, $cache)) {
-            return $cache[$key];
+        static $procCache = [];
+        $hash = md5($queryText);
+        if (array_key_exists($hash, $procCache)) {
+            return $procCache[$hash];
         }
+
+        $useCache = (bool) config('services.catalog.search.embed_cache_enabled', true);
+        $cacheKey = 'catalog_embed:' . $hash;
+        $ttl = (int) config('services.catalog.search.embed_cache_ttl', 7 * 86400);
+
+        if ($useCache) {
+            $cached = \Illuminate\Support\Facades\Cache::get($cacheKey);
+            if (is_string($cached) && $cached !== '') {
+                return $procCache[$hash] = $cached;
+            }
+        }
+
         try {
             $result = $this->embedder->embed($queryText);
         } catch (\Throwable $e) {
@@ -795,17 +868,29 @@ class CatalogEmbeddingService
                 'query_preview' => mb_substr($queryText, 0, 80),
                 'error' => $e->getMessage(),
             ]);
-            return $cache[$key] = null;
+            return $procCache[$hash] = null;
         }
         $queryVector = $result['embedding'] ?? [];
         if (empty($queryVector)) {
-            return $cache[$key] = null;
+            return $procCache[$hash] = null;
         }
         $literal = '[' . implode(',', array_map(
             fn ($v) => is_finite($v) ? sprintf('%.7f', $v) : '0',
             $queryVector,
         )) . ']';
-        return $cache[$key] = $literal;
+
+        if ($useCache) {
+            try {
+                \Illuminate\Support\Facades\Cache::put($cacheKey, $literal, $ttl);
+            } catch (\Throwable $e) {
+                // Cache fail-soft: не валим запрос, embed уже получен.
+                Log::info('CatalogEmbeddingService: embed cache put failed', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $procCache[$hash] = $literal;
     }
 
     /**

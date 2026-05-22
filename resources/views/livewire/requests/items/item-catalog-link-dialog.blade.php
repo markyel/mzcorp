@@ -277,27 +277,38 @@
 
                     @error('query') <div class="text-red-700 text-[12px] mb-2">{{ $message }}</div> @enderror
 
-                    @php $results = $this->textResults; @endphp
-
                     <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden border border-border-subtle rounded-md" style="min-height: 0">
-                        @if(mb_strlen(trim($query)) < 2)
-                            <div class="px-3 py-6 text-center text-fg-3 text-[12px]">
-                                Введите минимум 2 символа для поиска.
-                            </div>
-                        @elseif(empty($results))
-                            <div class="px-3 py-6 text-center text-fg-3 text-[12px]">
-                                @if($filterBrand || $filterCategory || $filterDims || $filterUnit !== null)
-                                    Все кандидаты отфильтрованы chip'ами выше — снимите хотя бы один.
-                                @else
-                                    Ничего не найдено. Попробуйте «Похожие из каталога».
-                                @endif
+                        @if(! $resultsReady)
+                            {{-- Skeleton: моментально показываем окно, поиск
+                                 запускается отдельным wire:init round-trip'ом.
+                                 Раньше окно «висело» на initial render пока
+                                 текст-поиск не отработает (50-300 мс — не
+                                 страшно, но единообразно с similar). --}}
+                            <div wire:init="markReady"
+                                 class="px-3 py-6 text-center text-fg-3 text-[12px] animate-pulse">
+                                ⏳ Ищем в каталоге…
                             </div>
                         @else
-                            @include('livewire.requests.items._catalog-results-table', [
-                                'rows' => collect($results),
-                                'selectedId' => $selectedCatalogId,
-                                'compareIds' => $compareIds,
-                            ])
+                            @php $results = $this->textResults; @endphp
+                            @if(mb_strlen(trim($query)) < 2)
+                                <div class="px-3 py-6 text-center text-fg-3 text-[12px]">
+                                    Введите минимум 2 символа для поиска.
+                                </div>
+                            @elseif(empty($results))
+                                <div class="px-3 py-6 text-center text-fg-3 text-[12px]">
+                                    @if($filterBrand || $filterCategory || $filterDims || $filterUnit !== null)
+                                        Все кандидаты отфильтрованы chip'ами выше — снимите хотя бы один.
+                                    @else
+                                        Ничего не найдено. Попробуйте «Похожие из каталога».
+                                    @endif
+                                </div>
+                            @else
+                                @include('livewire.requests.items._catalog-results-table', [
+                                    'rows' => collect($results),
+                                    'selectedId' => $selectedCatalogId,
+                                    'compareIds' => $compareIds,
+                                ])
+                            @endif
                         @endif
                     </div>
                 @else
@@ -331,25 +342,38 @@
                         <span wire:loading wire:target="similarResults,setMode,applySimilarQuery,resetSimilarQuery" class="text-amber-700">⏳ ищем…</span>
                     </div>
 
-                    @php $simResults = $this->similarResults; @endphp
-
                     <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden border border-border-subtle rounded-md" style="min-height: 0">
-                        @if(empty($simResults))
-                            <div class="px-3 py-6 text-center text-fg-3 text-[12px]"
-                                 wire:loading.remove wire:target="similarResults,setMode">
-                                @if($filterBrand || $filterCategory || $filterDims || $filterUnit !== null)
-                                    Все кандидаты отфильтрованы chip'ами выше — снимите хотя бы один.
-                                @else
-                                    Не удалось получить похожие позиции (возможно, у позиции пусто название/бренд, либо
-                                    эмбеддинг-сервис недоступен).
-                                @endif
+                        @if(! $resultsReady)
+                            {{-- Skeleton: openInMode сбрасывает $resultsReady.
+                                 wire:init="markReady" триггерит отдельный
+                                 round-trip который вычислит similarResults.
+                                 До этого момента окно уже отрисовано —
+                                 менеджер видит реакцию мгновенно вместо
+                                 «висит 2-6 секунд» на embed+SQL. --}}
+                            <div wire:init="markReady"
+                                 class="px-3 py-6 text-center text-fg-3 text-[12px] animate-pulse">
+                                ⏳ Ищем похожие позиции в каталоге…
+                                <div class="text-[10.5px] text-fg-4 mt-1">embed + vector search, 1–3 сек</div>
                             </div>
                         @else
-                            @include('livewire.requests.items._catalog-results-table', [
-                                'rows' => collect($simResults),
-                                'selectedId' => $selectedCatalogId,
-                                'compareIds' => $compareIds,
-                            ])
+                            @php $simResults = $this->similarResults; @endphp
+                            @if(empty($simResults))
+                                <div class="px-3 py-6 text-center text-fg-3 text-[12px]"
+                                     wire:loading.remove wire:target="similarResults,setMode">
+                                    @if($filterBrand || $filterCategory || $filterDims || $filterUnit !== null)
+                                        Все кандидаты отфильтрованы chip'ами выше — снимите хотя бы один.
+                                    @else
+                                        Не удалось получить похожие позиции (возможно, у позиции пусто название/бренд, либо
+                                        эмбеддинг-сервис недоступен).
+                                    @endif
+                                </div>
+                            @else
+                                @include('livewire.requests.items._catalog-results-table', [
+                                    'rows' => collect($simResults),
+                                    'selectedId' => $selectedCatalogId,
+                                    'compareIds' => $compareIds,
+                                ])
+                            @endif
                         @endif
                     </div>
                 @endif

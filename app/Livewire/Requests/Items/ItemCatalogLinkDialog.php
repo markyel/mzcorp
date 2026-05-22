@@ -83,6 +83,14 @@ class ItemCatalogLinkDialog extends Component
      */
     public string $compareView = 'compare';
 
+    /**
+     * Skeleton-gate: при openInMode ставим false. В blade при $resultsReady=false
+     * рендерится skeleton с wire:init="markReady", что мгновенно показывает
+     * окно, и только потом запускает дорогой similarResultsBase (vector +
+     * embed). Без этого окно «висит» 2-6 секунд на initial render.
+     */
+    public bool $resultsReady = false;
+
     public const COMPARE_MAX = 8;
 
     /** Допуск ±N мм при сравнении размеров subject vs catalog.size_a..f. */
@@ -125,8 +133,21 @@ class ItemCatalogLinkDialog extends Component
         // путь (parsed_*) до первого ручного «Искать».
         $this->similarQueryActive = '';
         $this->selectedCatalogId = $item->catalog_item_id;
+        // Skeleton: сначала откроем окно, потом wire:init="markReady"
+        // запустит тяжёлый поиск отдельным round-trip'ом.
+        $this->resultsReady = false;
         $this->resetErrorBag();
         $this->open = true;
+    }
+
+    /**
+     * Триггерится из blade через wire:init на skeleton-блоке. После этого
+     * computed similarResults / textResults вычислятся в отдельном
+     * Livewire-запросе — модал к этому моменту уже отрисован.
+     */
+    public function markReady(): void
+    {
+        $this->resultsReady = true;
     }
 
     public function setMode(string $mode): void
@@ -134,6 +155,11 @@ class ItemCatalogLinkDialog extends Component
         if (in_array($mode, ['text', 'similar'], true)) {
             $this->mode = $mode;
             $this->selectedCatalogId = null;
+            // Переключение на similar — снова тяжёлый поиск, прячем
+            // результаты до wire:init markReady (мгновенный отклик
+            // на клик «Похожие»). Для text-режима поиск дешёвый,
+            // но единообразно: сначала skeleton, потом результат.
+            $this->resultsReady = false;
         }
     }
 
