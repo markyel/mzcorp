@@ -28,10 +28,15 @@ class MailSyncCommand extends Command
 
     public function handle(): int
     {
-        $query = Mailbox::query()->where('is_active', true);
+        // syncable() = is_active + (general OR personal с managerial-ролью owner).
+        // Личные ящики директора/секретаря/админа исключаются автоматически,
+        // даже если авторизация валидна. При смене роли владельца на
+        // менеджера/РОПа фильтр тут же подхватит ящик.
+        $query = Mailbox::query()->syncable();
 
         if ($id = $this->option('mailbox')) {
-            $query->where('id', $id);
+            // Явный --mailbox=ID обходит фильтр (для ручной отладки/diagnose).
+            $query = Mailbox::query()->where('id', $id);
         }
 
         $mailboxes = $query->get();

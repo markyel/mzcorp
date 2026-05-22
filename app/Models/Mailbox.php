@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Enums\MailboxAuthType;
 use App\Enums\MailboxType;
+use App\Enums\Role;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -63,6 +65,43 @@ class Mailbox extends Model
     public function owner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'owner_user_id');
+    }
+
+    /**
+     * Ящики, подходящие для IMAP-синка.
+     *
+     * Правила:
+     *  - is_active = true (общая база);
+     *  - общие ящики (type = general) — синкаем всегда;
+     *  - личные (type = personal) — только если у владельца есть managerial
+     *    роль (manager / head_of_sales). Личные ящики директора, секретаря,
+     *    админа НЕ читаем — даже если авторизованы. При смене роли владельца
+     *    на РОПа/менеджера фильтр тут же начнёт пропускать ящик (без правки
+     *    is_active или повторной авторизации).
+     *
+     * Логика на стороне DB: WHERE (type='general') OR EXISTS(role mapping
+     * для owner_user_id в managerial roles). Это позволяет дёргать scope
+     * прямо из любого query без подгрузки relations.
+     */
+    public function scopeSyncable(Builder $query): Builder
+    {
+        $managerial = Role::requestHandlerRoles();
+
+        return $query->where('is_active', true)
+            ->where(function (Builder $q) use ($managerial) {
+                $q->where('type', MailboxType::General->value)
+                    ->orWhere(function (Builder $q2) use ($managerial) {
+                        $q2->where('type', MailboxType::Personal->value)
+                            ->whereExists(function ($sub) use ($managerial) {
+                                $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                                    ->from('model_has_roles as mhr')
+                                    ->join('roles as r', 'r.id', '=', 'mhr.role_id')
+                                    ->whereColumn('mhr.model_id', 'mailboxes.owner_user_id')
+                                    ->where('mhr.model_type', User::class)
+                                    ->whereIn('r.name', $managerial);
+                            });
+                    });
+            });
     }
 
     public function folderStates(): HasMany
