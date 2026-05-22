@@ -43,11 +43,30 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
     /** Чанк fetch'а — больше = меньше IMAP round-trips, но больше памяти. */
     private const FETCH_CHUNK = 50;
 
-    /** Ограничение на одну итерацию sync-а, чтобы при первом подключении к старому ящику не зависнуть. */
-    private const MAX_MESSAGES_PER_RUN = 500;
+    /**
+     * Ограничение на одну итерацию sync-а, чтобы при первом подключении к
+     * старому ящику не зависнуть. 100 — компромисс: меньше шансов на timeout
+     * (см. ниже), кран успевает добежать до конца раньше уникального окна.
+     * Раньше было 500 — на больших ящиках (Yandex 100k+ писем) `Query->get()`
+     * per-UID + MailRouter (LLM categorize) на каждое письмо вылезали за
+     * timeout=120, job попадал в failed_jobs каждые 6 минут (см. 2026-05-22).
+     */
+    private const MAX_MESSAGES_PER_RUN = 100;
 
     public int $tries = 3;
-    public int $timeout = 120;
+
+    /**
+     * Раньше было 120с — на массивных ящиках Yandex IMAP не успевал отдать
+     * headers + body для всех 500 писем (см. fetchAndPersist цикл), плюс
+     * MailRouter::route внутри foreach дёргает MailCategoryClassifier (LLM,
+     * 1-3s/письмо) и MailFolderRouter (отдельная IMAP-сессия). Job регулярно
+     * вылетал в Illuminate\Queue\TimeoutExceededException, очередь копила
+     * failed_jobs.
+     *
+     * 600с (10 мин) с MAX_MESSAGES_PER_RUN=100 даёт ~6с/письмо headroom —
+     * хватает на IMAP fetch + LLM categorize + IMAP move.
+     */
+    public int $timeout = 600;
 
     public function __construct(
         public readonly int $mailboxId,
@@ -62,7 +81,10 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
 
     public function uniqueFor(): int
     {
-        return 5 * 60; // секунд: после этого считаем job «зависшим» и разблокируем.
+        // Должен быть БОЛЬШЕ $timeout, иначе при честном долгом fetch'е
+        // (10 мин) cron может запустить дубль и пара будет конкурировать
+        // за один IMAP-логин. 15 мин = timeout (10) + запас (5).
+        return 15 * 60;
     }
 
     public function handle(MailboxConnector $connector, MessagePersister $persister): void
