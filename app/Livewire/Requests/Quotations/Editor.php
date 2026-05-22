@@ -295,29 +295,17 @@ class Editor extends Component
         }
         $position = ($q->items->max('position') ?? 0) + 1;
 
-        // Multiplier-логика: если парсер извлёк parsed_length («1 цепь × 125
-        // звеньев», «2 шт × 25 метров» и т.п.) И единица длины относится к
-        // measurable-категории — биллинг считаем В НЕЙ. Иначе qty=parsed_qty
-        // как раньше. См. M-2026-1478 (M00839: 1 цепь = 125 звеньев → qty=125).
-        //
-        // Whitelist measurable units — иначе вылезут шумные parsed_length_unit
-        // вроде «шт» или «позиция», которые multiplier применять не должны.
-        $lengthUnit = mb_strtolower(trim((string) $reqItem->parsed_length_unit));
-        $applyLength = ((float) $reqItem->parsed_length) > 0
-            && in_array($lengthUnit, [
-                'звено', 'звеньев', 'звен',
-                'м', 'метр', 'метров', 'мм', 'см',
-                'кг', 'г', 'т',
-                'л', 'мл',
-                'м2', 'м²', 'м3', 'м³',
-            ], true);
-        if ($applyLength) {
-            $billingQty = (float) ($reqItem->parsed_qty ?: 1) * (float) $reqItem->parsed_length;
-            $billingUnit = $reqItem->parsed_length_unit;
-        } else {
-            $billingQty = (float) ($reqItem->parsed_qty ?: 1);
-            $billingUnit = $reqItem->parsed_unit ?: 'шт';
-        }
+        // Используем существующий механизм RequestItem::effectiveQty() /
+        // effectiveUnit() — он уже учитывает menager-controlled поле
+        // `billing_unit`. Если менеджер в карточке позиции переключил
+        // billing_unit на parsed_length_unit (например «звено» для M00839),
+        // effectiveQty вернёт parsed_qty × parsed_length; иначе — обычное
+        // parsed_qty. Та же формула что в _item-row.blade.php / _position-card —
+        // теперь и КП считает единообразно. См. M-2026-1478 (M00839: после
+        // выбора «цена за звено» qty в КП = 1 × 125 = 125).
+        $effQty = $reqItem->effectiveQty();
+        $billingQty = $effQty > 0 ? $effQty : ((float) ($reqItem->parsed_qty ?: 1));
+        $billingUnit = $reqItem->effectiveUnit() ?: 'шт';
 
         $item = new \App\Models\QuotationItem([
             'quotation_id' => $q->id,
