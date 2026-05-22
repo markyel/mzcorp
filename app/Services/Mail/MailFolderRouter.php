@@ -133,6 +133,37 @@ class MailFolderRouter
                 return null;
             }
 
+            // Yandex 360 quirk (подтверждено 2026-05-22 через verify-physical
+            // UID FETCH — 20/20 in_both): UID MOVE возвращает COPYUID, копия
+            // в target создаётся, НО оригинал в source НЕ EXPUNGED — Yandex
+            // не выполняет EXPUNGE по неизвестной причине, в Yandex Web UI
+            // секретарь видит дубль (оригинал в INBOX + копия в MZ/...).
+            //
+            // Lекарство (по CLAUDE.md «грабли Yandex»): пометить оригинал
+            // `\Seen`. Дубль остаётся физически, но прочитанный — Yandex
+            // UI не показывает его в счётчике непрочитанных, секретарь не
+            // отвлекается. Это safer чем \Deleted+EXPUNGE (которые Yandex
+            // CLIENTBUG-валит).
+            //
+            // Source folder уже открыт через openFolder выше — STORE
+            // выполняется в той же READ-WRITE сессии. Fail-soft.
+            try {
+                $connection->store(
+                    ['\Seen'],
+                    (int) $message->imap_uid,
+                    (int) $message->imap_uid,
+                    '+',
+                    true,
+                    IMAP::ST_UID,
+                );
+            } catch (\Throwable $seenErr) {
+                Log::info('MailFolderRouter: STORE \Seen на оригинал не удался', [
+                    'email_message_id' => $message->id,
+                    'old_uid' => (int) $message->imap_uid,
+                    'error' => $seenErr->getMessage(),
+                ]);
+            }
+
             // Синхронизируем БД с физическим перемещением. Если COPYUID удалось
             // распарсить — пишем новый UID; иначе обнуляем (sync целевой папки
             // дозальёт его). Сохраняем target folder в любом случае.
