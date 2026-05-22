@@ -1,9 +1,15 @@
 @props([
-    /** Активный раздел: 'dashboard' | 'requests' | 'catalog' | null. */
+    /** Активный раздел: 'dashboard' | 'requests' | 'catalog' | 'mail' | null. */
     'active' => null,
 ])
 @php
     $disabledTitle = 'Доступно в Phase 2';
+
+    $railUser = auth()->user();
+    // «Почта» — read-only листинг всей почты по всем ящикам, доступен
+    // head_of_sales / secretary / director / admin. Менеджерам не
+    // показываем — у них своя карточка заявки с тред-табом.
+    $canSeeMail = $railUser?->hasAnyRole(['head_of_sales', 'secretary', 'director', 'admin']);
 
     // Единый список левого rail для всех страниц с 3-col shell.
     // active маркируется по значению атрибута компонента, не по route()
@@ -16,10 +22,13 @@
         ['icon' => '⌕', 'label' => 'Поиск по каталогу', 'href' => route('catalog.search'),   'key' => 'catalog'],
     ];
 
+    if ($canSeeMail) {
+        $rail[] = ['icon' => '✉', 'label' => 'Почта', 'href' => route('mail.index'), 'key' => 'mail'];
+    }
+
     // Phase 2 placeholder'ы — disabled (без href), показываются для
     // структуры UI.
     $railDisabled = [
-        ['icon' => '✉', 'label' => 'Почта'],
         ['icon' => '⌗', 'label' => 'Правила'],
         ['icon' => '▦', 'label' => 'KB'],
         ['sep' => true],

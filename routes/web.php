@@ -69,6 +69,15 @@ Route::middleware('auth')->group(function () {
         })->name('catalog.search');
     });
 
+    // Раздел «Почта» — read-only листинг писем всех ящиков (общих +
+    // личных менеджеров). Для head_of_sales / secretary / director / admin.
+    // Менеджеры в этот раздел не ходят — у них своя карточка заявки с тред-табом.
+    Route::middleware('role:head_of_sales,secretary,director,admin')->group(function () {
+        Route::get('/dashboard/mail', function () {
+            return view('mail.index');
+        })->name('mail.index');
+    });
+
     // Mail routing rules — управление правилами для РОП и директора.
     Route::middleware('role:head_of_sales,director,admin')->group(function () {
         Route::get('/dashboard/mail-rules', function () {
