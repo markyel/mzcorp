@@ -1199,7 +1199,11 @@
                                         @endif
 
                                         @php
-                                            $canReplyHere = auth()->id() === $req->assigned_user_id;
+                                            // Inline-кнопки «↩ Ответить / ↩↩ Ответить всем»
+                                            // под каждым сообщением треда. Используем $canReply
+                                            // (= owner / acting / admin / РОП / директорат)
+                                            // вместо старого hardcoded == assigned_user_id.
+                                            $canReplyHere = $canReply;
                                             $isDraftMsg = (bool) $msg->is_draft;
                                             $isMyDraft = $isDraftMsg && $msg->draft_author_user_id === auth()->id();
                                         @endphp
