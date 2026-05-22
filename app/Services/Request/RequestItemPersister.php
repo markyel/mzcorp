@@ -147,7 +147,16 @@ class RequestItemPersister
             }
 
             $maxPosition++;
-            RequestItem::create([
+            // Трасса дедупа: дубли, схлопнутые dedupeWithinList в эту
+            // позицию. Прокидывается через __merged_from (см.
+            // RequestItemParsingService::dedupeWithinList). Менеджер видит
+            // в UI «эта позиция собрана из строк ...».
+            $mergedFrom = $item['__merged_from'] ?? null;
+            if (is_array($mergedFrom) && empty($mergedFrom)) {
+                $mergedFrom = null;
+            }
+
+            $createdItem = RequestItem::create([
                 'request_id' => $existing->id,
                 'position' => $maxPosition,
                 'parsed_name' => $item['name'],
@@ -169,7 +178,14 @@ class RequestItemPersister
                 'suggestion_status' => $suggestionStatus,
                 'suggestion_confidence' => $finalConfidence,
                 'suggestion_source_email_id' => $suggestionStatus !== null ? $message->id : null,
+                'parsing_merged_from' => $mergedFrom,
             ]);
+
+            // Агрегируем сводку дедупа в requests.parsing_meta.dedup_dropped
+            // для баннера на вкладке «Позиции» и backfill-репортинга.
+            if ($mergedFrom !== null) {
+                $this->appendParsingMetaDedup($existing, $createdItem->position, $mergedFrom);
+            }
         }
 
         // Audit для reply-парсинга: state_change с подсчётами, чтобы менеджер
@@ -316,6 +332,47 @@ class RequestItemPersister
             'just_created' => $justCreated,
             'clarifications' => $clarStoredCount,
         ];
+    }
+
+    /**
+     * Аппендит записи о схлопнутых дублях в requests.parsing_meta.dedup_dropped.
+     *
+     * Каждая запись содержит позицию-победителя и описание съеденного дубля
+     * (source, name, article, qty, reason). UI вкладки «Позиции» рендерит
+     * на их основе баннер «N позиций было схлопнуто как дубли — показать».
+     *
+     * @param  list<array{source: ?string, name: string, article: ?string, qty: string, reason: string, dedup_key: string}>  $mergedFrom
+     */
+    private function appendParsingMetaDedup(Request $request, int $winnerPosition, array $mergedFrom): void
+    {
+        try {
+            $meta = $request->parsing_meta ?? [];
+            $dropped = $meta['dedup_dropped'] ?? [];
+            $nowIso = now()->toIso8601String();
+
+            foreach ($mergedFrom as $entry) {
+                $dropped[] = [
+                    'source' => $entry['source'] ?? null,
+                    'name' => $entry['name'] ?? '',
+                    'article' => $entry['article'] ?? null,
+                    'qty' => $entry['qty'] ?? '',
+                    'reason' => $entry['reason'] ?? 'same_normalized_article_qty_inv',
+                    'dedup_key' => $entry['dedup_key'] ?? null,
+                    'merged_into_position' => $winnerPosition,
+                    'at' => $nowIso,
+                ];
+            }
+
+            $meta['dedup_dropped'] = $dropped;
+            $request->parsing_meta = $meta;
+            $request->save();
+        } catch (\Throwable $e) {
+            Log::warning('RequestItemPersister: failed to append parsing_meta dedup', [
+                'request_id' => $request->id,
+                'winner_position' => $winnerPosition,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

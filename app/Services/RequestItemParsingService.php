@@ -754,10 +754,12 @@ PROMPT;
             }
             if (!empty($images)) {
                 try {
-                    $items = array_merge(
-                        $items,
-                        $this->parseItemsFromPhotoMarkings($images, $referenceText, $attachmentIds),
-                    );
+                    $visionItems = $this->parseItemsFromPhotoMarkings($images, $referenceText, $attachmentIds);
+                    foreach ($visionItems as &$vi) {
+                        $vi['__source'] = $vi['__source'] ?? 'vision_photo';
+                    }
+                    unset($vi);
+                    $items = array_merge($items, $visionItems);
                 } catch (\Throwable $e) {
                     Log::error('parseItemsFromInboundContent: vision parse failed', [
                         'source' => $sourceTag,
@@ -787,7 +789,14 @@ PROMPT;
                     null,
                     true,
                 );
-                $items = array_merge($items, $this->parseItemsFromFile($upload));
+                $structuredItems = $this->parseItemsFromFile($upload);
+                $ext = strtolower(pathinfo((string) ($att->filename ?? ''), PATHINFO_EXTENSION));
+                $srcTag = "{$ext}_attachment_{$att->id}";
+                foreach ($structuredItems as &$si) {
+                    $si['__source'] = $si['__source'] ?? $srcTag;
+                }
+                unset($si);
+                $items = array_merge($items, $structuredItems);
             } catch (\Throwable $e) {
                 Log::error('parseItemsFromInboundContent: structured parse failed', [
                     'source' => $sourceTag,
@@ -811,16 +820,18 @@ PROMPT;
             && (empty($items) || $linkedUrlsText !== null);
         if ($shouldTryText) {
             try {
-                $items = array_merge(
-                    $items,
-                    $this->parseItemsWithGPT(
-                        $referenceText ?? '',
-                        $subject !== '' ? $subject : null,
-                        $fromEmail !== '' ? $fromEmail : null,
-                        $fromName !== '' ? $fromName : null,
-                        $linkedUrlsText,
-                    ),
+                $textItems = $this->parseItemsWithGPT(
+                    $referenceText ?? '',
+                    $subject !== '' ? $subject : null,
+                    $fromEmail !== '' ? $fromEmail : null,
+                    $fromName !== '' ? $fromName : null,
+                    $linkedUrlsText,
                 );
+                foreach ($textItems as &$ti) {
+                    $ti['__source'] = $ti['__source'] ?? 'email_body';
+                }
+                unset($ti);
+                $items = array_merge($items, $textItems);
             } catch (\Throwable $e) {
                 Log::warning('parseItemsFromInboundContent: text-only parse failed', [
                     'source' => $sourceTag,
@@ -1155,6 +1166,11 @@ PROMPT;
     /**
      * Дедупликация внутри уже распарсенного списка (фото + pdf могут вернуть
      * одну и ту же позицию). Ключ — артикул (нормализованный) либо имя.
+     *
+     * Каждому kept-item клеится поле `__merged_from`: массив описаний
+     * съеденных дублей (для записи в request_items.parsing_merged_from
+     * и requests.parsing_meta через RequestItemPersister). Менеджер
+     * увидит в UI «эта позиция собрана из 2 строк xlsx».
      */
     private function dedupeWithinList(array $items): array
     {
@@ -1171,7 +1187,7 @@ PROMPT;
         //  - Multi-invoice (M-2026-1032): items из счёта 1 имеют invoice_index=1,
         //    из счёта 2 — invoice_index=2 → ключи разные → НЕ схлопываются
         //    даже если совпадают article и qty (M33374 qty=2 в обоих счетах).
-        $seen = [];
+        $seenIndex = []; // key => index в $result
         $result = [];
         foreach ($items as $item) {
             $base = $this->normalizeArticle($item['article'] ?? null);
@@ -1184,10 +1200,25 @@ PROMPT;
             $qty = (string) ($item['qty'] ?? '');
             $invoiceIndex = (int) ($item['invoice_index'] ?? 1);
             $key = $base . '|qty=' . $qty . '|inv=' . $invoiceIndex;
-            if (isset($seen[$key])) {
+
+            $droppedEntry = [
+                'source' => $item['__source'] ?? null,
+                'name' => (string) ($item['name'] ?? ''),
+                'article' => $item['article'] ?? null,
+                'qty' => $qty,
+                'reason' => 'same_normalized_article_qty_inv',
+                'dedup_key' => $key,
+            ];
+
+            if (isset($seenIndex[$key])) {
+                // Уже видели — добавляем в trace победителю.
+                $winnerIdx = $seenIndex[$key];
+                $merged = $result[$winnerIdx]['__merged_from'] ?? [];
+                $merged[] = $droppedEntry;
+                $result[$winnerIdx]['__merged_from'] = $merged;
                 continue;
             }
-            $seen[$key] = true;
+            $seenIndex[$key] = count($result);
             $result[] = $item;
         }
         return $result;

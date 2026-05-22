@@ -848,6 +848,69 @@
 
             {{-- ───── ОБЗОР ───── --}}
             @case('overview')
+                @php
+                    // Справочно из файлов — что AttachmentMetaExtractionService
+                    // нашёл в xlsx/pdf/docx помимо позиций (серийник лифта,
+                    // модель, объект, договор, контактное лицо, желаемая дата).
+                    // Источник: requests.parsing_meta.attachment_extracted[].
+                    $_pm = is_array($req->parsing_meta) ? $req->parsing_meta : [];
+                    $_attExtracted = $_pm['attachment_extracted'] ?? [];
+
+                    // Карта человекочитаемых меток полей.
+                    $_metaLabels = [
+                        'lift_serial' => 'Зав. номер',
+                        'lift_model' => 'Модель лифта',
+                        'lift_brand' => 'Бренд',
+                        'object_address' => 'Адрес объекта',
+                        'object_name' => 'Объект',
+                        'contract_number' => 'Договор',
+                        'desired_date' => 'Желаемая дата',
+                        'contact_person' => 'Контакт',
+                        'contact_phone' => 'Телефон',
+                        'notes' => 'Замечания',
+                    ];
+                @endphp
+
+                @if(! empty($_attExtracted))
+                    <div class="ds-card mb-4 border-emerald-300">
+                        <div class="ds-card-header bg-emerald-50">
+                            <h3 class="text-emerald-900">Справочно из файлов</h3>
+                            <span class="text-[10.5px] font-semibold text-emerald-900 bg-emerald-100 px-1.5 py-0.5 rounded-full">{{ count($_attExtracted) }}</span>
+                            <span class="flex-1"></span>
+                            <span class="text-[11.5px] text-emerald-800">Извлечено LLM из вложений (не входит в список позиций)</span>
+                        </div>
+                        <div class="divide-y divide-emerald-100">
+                            @foreach($_attExtracted as $_blk)
+                                @php
+                                    $_fields = $_blk['fields'] ?? [];
+                                    $_links = $_fields['links'] ?? [];
+                                @endphp
+                                <div class="px-[18px] py-2.5 text-[12.5px]">
+                                    <div class="text-[11px] text-fg-3 mb-1.5">
+                                        Файл: <span class="mono text-fg-1">{{ $_blk['filename'] ?? '—' }}</span>
+                                    </div>
+                                    <div class="grid gap-x-4 gap-y-1" style="grid-template-columns: 130px 1fr">
+                                        @foreach($_metaLabels as $_k => $_lbl)
+                                            @if(! empty($_fields[$_k]))
+                                                <div class="text-fg-3 text-[11.5px]">{{ $_lbl }}</div>
+                                                <div class="text-fg-1">{{ $_fields[$_k] }}</div>
+                                            @endif
+                                        @endforeach
+                                        @if(! empty($_links) && is_array($_links))
+                                            <div class="text-fg-3 text-[11.5px]">Ссылки</div>
+                                            <div class="flex flex-col gap-0.5">
+                                                @foreach($_links as $_u)
+                                                    <a href="{{ $_u }}" target="_blank" rel="noopener" class="text-sky-700 hover:underline mono text-[11.5px] truncate">{{ $_u }}</a>
+                                                @endforeach
+                                            </div>
+                                        @endif
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                @endif
+
                 <div class="grid gap-4" style="grid-template-columns: 1.55fr 1fr">
 
                     {{-- Left: Позиции preview + Переписка preview --}}
@@ -1215,6 +1278,66 @@
                 {{-- Старый верхний блок «История уточнений» удалён —
                      сводный блок теперь рендерится один раз под списком
                      позиций (см. ниже после @foreach($items)). --}}
+
+                @php
+                    // Дедуп-трасса: RequestItemPersister аппендит в
+                    // requests.parsing_meta.dedup_dropped[] каждую съеденную
+                    // dedupeWithinList дубль-строку. Менеджеру показываем
+                    // компактный баннер «N позиций было схлопнуто», чтобы
+                    // он мог сверить с исходным файлом — возможно клиент
+                    // случайно поставил одинаковые артикулы у разных
+                    // позиций (СРЕДНИЕ/КОНЕЧНЫЕ ЭТАЖИ, Р1/Р2 кнопки).
+                    $parsingMeta = is_array($req->parsing_meta) ? $req->parsing_meta : [];
+                    $dedupDropped = $parsingMeta['dedup_dropped'] ?? [];
+                @endphp
+
+                @if(! empty($dedupDropped))
+                    <div class="ds-card mb-3 border-sky-300">
+                        <div class="ds-card-header bg-sky-50">
+                            <h3 class="text-sky-900">Парсер схлопнул дубли</h3>
+                            <span class="text-[10.5px] font-semibold text-sky-900 bg-sky-100 px-1.5 py-0.5 rounded-full">{{ count($dedupDropped) }}</span>
+                            <span class="flex-1"></span>
+                            <span class="text-[11.5px] text-sky-800">Одинаковый артикул + qty + invoice_index у разных строк исходника — оставлена первая. Проверьте — возможно нужно расщепить.</span>
+                        </div>
+                        <details class="px-[18px] py-2 text-[12.5px]">
+                            <summary class="cursor-pointer text-sky-800 select-none py-1">Показать детали ({{ count($dedupDropped) }})</summary>
+                            <div class="divide-y divide-sky-100 mt-1">
+                                @foreach($dedupDropped as $d)
+                                    @php
+                                        $mergedPos = $d['merged_into_position'] ?? null;
+                                        $winner = $mergedPos ? $items->firstWhere('position', (int) $mergedPos) : null;
+                                    @endphp
+                                    <div class="py-2 flex items-start gap-3 flex-wrap">
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex items-center gap-2 flex-wrap">
+                                                <span class="text-fg-3 text-[11px]">Съедено:</span>
+                                                <span class="font-medium text-fg-1">{{ \Illuminate\Support\Str::limit($d['name'] ?? '—', 80) }}</span>
+                                                @if(! empty($d['article']))
+                                                    <span class="mono text-[11.5px] text-fg-2">{{ \Illuminate\Support\Str::limit($d['article'], 60) }}</span>
+                                                @endif
+                                                <span class="text-[11px] text-fg-3">× {{ $d['qty'] ?? '?' }}</span>
+                                            </div>
+                                            <div class="mt-1 text-[11px] text-fg-3 flex items-center gap-2 flex-wrap">
+                                                <span>Источник: <span class="mono">{{ $d['source'] ?? '—' }}</span></span>
+                                                <span>·</span>
+                                                <span>Слито в позицию:
+                                                    @if($winner)
+                                                        <span class="mono text-fg-1">#{{ $winner->position }}</span>
+                                                        <span class="text-fg-2">{{ \Illuminate\Support\Str::limit($winner->parsed_name, 50) }}</span>
+                                                    @else
+                                                        <span class="mono">#{{ $mergedPos ?? '?' }}</span>
+                                                    @endif
+                                                </span>
+                                                <span>·</span>
+                                                <span class="italic">{{ $d['reason'] ?? '' }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </details>
+                    </div>
+                @endif
 
                 @if(! empty($pendingClarifications))
                     <div class="ds-card mb-3 border-amber-300">

@@ -102,8 +102,23 @@
     {{-- HEADER --}}
     <div class="grid items-center px-[12px] {{ $isExpanded ? 'py-2 border-b border-border-subtle' : 'py-1' }} gap-2.5 min-h-[44px]"
          style="grid-template-columns: 28px 44px minmax(0,1fr) 130px 80px 90px 80px 90px 28px 24px">
-        {{-- Position number --}}
-        <div class="text-fg-3 font-semibold text-[13px] text-right mono">{{ $item->position }}</div>
+        {{-- Position number + dedup-merged иконка (если есть схлопнутые дубли) --}}
+        @php
+            $_mergedFrom = is_array($item->parsing_merged_from) ? $item->parsing_merged_from : [];
+            $_mergedCount = count($_mergedFrom);
+            $_mergedTitle = $_mergedCount > 0
+                ? 'При парсинге сюда было слито ' . $_mergedCount . ' дубль(-ей): ' . collect($_mergedFrom)
+                    ->map(fn ($m) => \Illuminate\Support\Str::limit(($m['name'] ?? '') . ' [' . ($m['article'] ?? '∅') . ']', 80))
+                    ->implode(' · ')
+                : '';
+        @endphp
+        <div class="text-fg-3 font-semibold text-[13px] text-right mono flex items-center justify-end gap-1">
+            @if($_mergedCount > 0)
+                <span class="inline-flex items-center justify-center w-[14px] h-[14px] rounded-full bg-sky-100 text-sky-700 text-[10px] font-bold leading-none cursor-help shrink-0"
+                      title="{{ $_mergedTitle }}">✱</span>
+            @endif
+            <span>{{ $item->position }}</span>
+        </div>
 
         {{-- Image. Если передан galleryItems+galleryIndex (Positions-таб) —
              dispatch'им items+index, чтобы лайтбокс показал стрелки и

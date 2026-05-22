@@ -65,6 +65,11 @@ class RequestItem extends Model
         // ручной правки менеджером значение не меняется — это
         // характеристика того, как заявка пришла.
         'match_path',
+        // Список дублей из исходного парсинга, схлопнутых dedupeWithinList
+        // в эту позицию-победителя. Заполняется RequestItemPersister при
+        // первичном создании; не меняется при дальнейших правках. Каждый
+        // элемент: {source, name, article, qty, reason, dedup_key}.
+        'parsing_merged_from',
     ];
 
     protected function casts(): array
@@ -77,6 +82,7 @@ class RequestItem extends Model
             'suggestion_confidence' => 'float',
             'suggestion_source_email_id' => 'integer',
             'match_path' => \App\Enums\MatchPath::class,
+            'parsing_merged_from' => 'array',
         ];
     }
 

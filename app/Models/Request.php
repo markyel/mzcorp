@@ -63,6 +63,12 @@ class Request extends Model
         // выводится по порогам AppSetting `complexity.thresholds`.
         'complexity_score',
         'complexity_level',
+        // Агрегированная мета парсинга: dedup_dropped[] (схлопнутые дубли
+        // с привязкой к merged_into_position) и attachment_extracted[]
+        // (справочная инфа из вложений — серийник, модель, объект, контракт).
+        // Заполняется RequestItemPersister + AttachmentMetaExtractionService.
+        // См. миграцию add_parsing_meta_to_requests_table.
+        'parsing_meta',
     ];
 
     protected function casts(): array
@@ -85,6 +91,7 @@ class Request extends Model
             'merged_at' => 'datetime',
             'complexity_score' => 'integer',
             'complexity_level' => \App\Enums\ComplexityLevel::class,
+            'parsing_meta' => 'array',
         ];
     }
 
