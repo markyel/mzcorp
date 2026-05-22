@@ -52,15 +52,19 @@ class MailDiagInboxCommand extends Command
         // Select только нужные поля: без body_plain/body_html/raw_source/headers
         // — это сотни KB на письмо. Без проекции команда падала OOM на
         // массовых INBOX'ах (500+ писем × 100KB body).
-        // Личные ящики менеджеров (MailboxType::Personal) НЕ имеют MZ/*
-        // подпапок по дизайну — там письма ДОЛЖНЫ быть в INBOX.
-        // MailDeliverToManagerService копирует письма из общего ящика в
-        // INBOX личного. Если включать их сюда — false-positive: «застряло»
-        // в личном INBOX, хотя так и должно быть.
+        // Тип ящика — personal vs general. Влияет ТОЛЬКО на классификацию
+        // *_routable: в личном ящике письмо уже у нужного менеджера в его
+        // INBOX и никуда ехать не должно (MailDeliverToManagerService так
+        // и делает). Все прочие проблемы (awaiting_classify, *_pending,
+        // *_no_link, *_no_manager) — показываем независимо от типа ящика,
+        // т.к. это реальные проблемы и для personal (клиент мог написать
+        // менеджеру напрямую, и pipeline всё равно должен создать Request).
         $personalMailboxIds = \App\Models\Mailbox::query()
             ->where('type', \App\Enums\MailboxType::Personal->value)
             ->pluck('id')
+            ->map(fn ($id) => (int) $id)
             ->all();
+        $personalSet = array_flip($personalMailboxIds);
 
         $q = EmailMessage::query()
             ->select([
@@ -80,10 +84,6 @@ class MailDiagInboxCommand extends Command
                        ->where('folder', 'not like', '%MZ|%');
                 })->orWhereNull('folder');
             });
-
-        if (! empty($personalMailboxIds)) {
-            $q->whereNotIn('mailbox_id', $personalMailboxIds);
-        }
 
         if ($mailboxId) {
             $q->where('mailbox_id', $mailboxId);
@@ -118,7 +118,8 @@ class MailDiagInboxCommand extends Command
             'thread_reply_no_manager' => [], // related есть но нет менеджера
             'client_request_no_req' => [], // category=client_request, но Request не создалась
             'client_request_pending' => [], // Request есть, status=Pending, нет менеджера
-            'client_request_routable' => [], // Request с менеджером, письмо в INBOX — bug
+            'client_request_routable' => [], // Request с менеджером, письмо в INBOX (общий ящик) — bug
+            'in_personal_inbox' => [], // письмо в личном ящике менеджера — это норма
             'unknown'           => [],   // прочее (для debug)
         ];
 
@@ -127,6 +128,7 @@ class MailDiagInboxCommand extends Command
             $relId = $m->related_request_id;
             $related = $relId ? $requests->get($relId) : null;
             $hasManager = $related && $related->assigned_user_id;
+            $isPersonal = isset($personalSet[(int) $m->mailbox_id]);
 
             if ($cat === null) {
                 $groups['awaiting_classify'][] = $m;
@@ -139,10 +141,13 @@ class MailDiagInboxCommand extends Command
             if ($cat === EmailCategory::ThreadReply->value) {
                 if (! $relId) {
                     $groups['thread_reply_no_link'][] = $m;
-                } elseif ($hasManager) {
-                    $groups['thread_reply_routable'][] = $m;
-                } else {
+                } elseif (! $hasManager) {
                     $groups['thread_reply_no_manager'][] = $m;
+                } elseif ($isPersonal) {
+                    // Reply в личный ящик менеджера — норма (он уже у него).
+                    $groups['in_personal_inbox'][] = $m;
+                } else {
+                    $groups['thread_reply_routable'][] = $m;
                 }
                 continue;
             }
@@ -151,6 +156,11 @@ class MailDiagInboxCommand extends Command
                     $groups['client_request_no_req'][] = $m;
                 } elseif (! $hasManager) {
                     $groups['client_request_pending'][] = $m;
+                } elseif ($isPersonal) {
+                    // Заявка в личном INBOX менеджера (либо доставленная
+                    // MailDeliverToManagerService копия, либо прямое письмо
+                    // клиента менеджеру) — это норма, ехать ей некуда.
+                    $groups['in_personal_inbox'][] = $m;
                 } else {
                     $groups['client_request_routable'][] = $m;
                 }
@@ -267,6 +277,7 @@ class MailDiagInboxCommand extends Command
             'irrelevant' => 'Не клиентская (спам / поставщик / служебное)',
             'thread_reply_no_link' => 'Reply, но не привязан к Request',
             'thread_reply_routable' => 'Reply ↔ Request с менеджером — РОУТИТЬ',
+            'in_personal_inbox' => 'В личном INBOX менеджера (норма)',
             'thread_reply_no_manager' => 'Reply ↔ Request без менеджера',
             'client_request_no_req' => 'Заявка, но Request не создалась',
             'client_request_pending' => 'Заявка, Pending, нет менеджера',

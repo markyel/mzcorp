@@ -46,6 +46,11 @@ class MailVerifyPhysicalCommand extends Command
         if ($explicitId) {
             $q->whereKey($explicitId);
         } else {
+            // По дефолту смотрим только записи с БД-folder начинающимся на
+            // MZ/ или MZ| — это те, которые мы пытались переместить через
+            // routeToManager. Личные ящики тоже могут иметь такие записи
+            // (если ParseRequestItemsJob сделал routing в самом personal),
+            // их тоже включаем.
             $q->where(function ($w) {
                 $w->where('folder', 'like', 'MZ|%')
                   ->orWhere('folder', 'like', 'MZ/%');
@@ -53,16 +58,6 @@ class MailVerifyPhysicalCommand extends Command
         }
         if ($mailboxId) {
             $q->where('mailbox_id', $mailboxId);
-        } else {
-            // Личные ящики менеджеров не имеют MZ/* подпапок — verify
-            // не имеет смысла. Чтобы не ловить false-nowhere — фильтруем.
-            $personalMailboxIds = \App\Models\Mailbox::query()
-                ->where('type', \App\Enums\MailboxType::Personal->value)
-                ->pluck('id')
-                ->all();
-            if (! empty($personalMailboxIds)) {
-                $q->whereNotIn('mailbox_id', $personalMailboxIds);
-            }
         }
 
         $messages = $q->get();
