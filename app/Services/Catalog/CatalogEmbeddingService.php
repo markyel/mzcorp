@@ -453,6 +453,21 @@ class CatalogEmbeddingService
      */
     private function extractTrigramTokens(string $queryText): array
     {
+        // Стоп-слова: служебные метки шапки RequestItemEditor::buildQueryText
+        // («Бренд: KONE\nТип запчасти: ...\nАртикул производителя: ...»).
+        // Без фильтра в pool попадают 10-15 общих токенов, каждый раздувает
+        // WHERE OR-ветку и заставляет PG считать word_similarity для тысяч
+        // matching строк (popular слова «кнопка», «лифтовая» матчат много).
+        // На проде это давало t_trgm_ms = 5-7 сек. После фильтра — десятки мс.
+        static $stopWords = [
+            // labels из buildQueryText
+            'бренд', 'тип', 'запчасти', 'запчасть', 'артикул', 'производителя',
+            'производитель', 'название', 'наименование', 'описание', 'категория',
+            'позиция', 'код', 'модель', 'марка',
+            // частые служебные английские
+            'name', 'type', 'brand', 'article', 'model', 'category',
+        ];
+
         $parts = preg_split('/[\s,;]+/u', mb_strtolower($queryText)) ?: [];
         $out = [];
         foreach ($parts as $p) {
@@ -460,16 +475,32 @@ class CatalogEmbeddingService
             if (mb_strlen($norm) < 3) {
                 continue;
             }
+            if (in_array($norm, $stopWords, true)) {
+                continue;
+            }
             $out[] = $norm;
             // Если чисто-русское слово ≥4 букв — добавляем stem-форму.
             if (mb_strlen($norm) >= 4 && preg_match('/^[а-яё]+$/u', $norm)) {
                 $stem = $this->stemRussianWord($norm);
-                if ($stem !== $norm && mb_strlen($stem) >= 3) {
+                if ($stem !== $norm && mb_strlen($stem) >= 3 && ! in_array($stem, $stopWords, true)) {
                     $out[] = $stem;
                 }
             }
         }
-        return array_values(array_unique($out));
+        $out = array_values(array_unique($out));
+
+        // Cap до top-N самых длинных токенов. Длиннее = специфичнее, реже
+        // встречается в каталоге = быстрый GIN scan. На запросах с длинным
+        // verbose-описанием (12+ токенов) каждый extra-токен × 35K строк
+        // word_similarity складывается в секунды. Конфиг через
+        // services.catalog.search.trgm_token_cap (default 5).
+        $cap = (int) config('services.catalog.search.trgm_token_cap', 5);
+        if ($cap > 0 && count($out) > $cap) {
+            usort($out, fn ($a, $b) => mb_strlen($b) <=> mb_strlen($a));
+            $out = array_slice($out, 0, $cap);
+        }
+
+        return $out;
     }
 
     /**

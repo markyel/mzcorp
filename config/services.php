@@ -115,6 +115,11 @@ return [
             // Cap количества id'шников для backfill cosine: больше = шире
             // покрытие, но медленнее SQL (JOIN с 35K embeddings). 30 — баланс.
             'backfill_cap' => (int) env('CATALOG_SEARCH_BACKFILL_CAP', 30),
+            // Cap токенов для trigramTopN: больше токенов в WHERE OR-ветке =
+            // больше matching строк (popular слова раздувают bitmap), каждый
+            // re-check word_similarity складывается в секунды. На проде 10-15
+            // токенов давали t_trgm_ms = 5-7 сек, top-5 — десятки/сотни мс.
+            'trgm_token_cap' => (int) env('CATALOG_SEARCH_TRGM_TOKEN_CAP', 5),
         ],
     ],
 
