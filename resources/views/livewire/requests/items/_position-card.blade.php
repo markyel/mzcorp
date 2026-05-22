@@ -26,6 +26,18 @@
         'internal_catalog_not_found' => ['chip-danger', 'нет в каталоге'],
         default => null,
     };
+    // Цветной кружок KB-статуса (компактный индикатор вместо chip-текста).
+    // Tooltip даёт расшифровку при наведении.
+    $qaDotColor = match ($qaStatus) {
+        'sufficient' => 'bg-emerald-500',
+        'insufficient' => 'bg-amber-500',
+        'not_covered' => 'bg-neutral-400',
+        'assessment_failed' => 'bg-rose-500',
+        'internal_catalog_pending' => 'bg-sky-500',
+        'internal_catalog_not_found' => 'bg-rose-500',
+        default => null,
+    };
+    $qaDotTitle = $qaConfig[1] ?? '';
     $itemImg = $item->imageAttachment;
     $itemImgIsImage = $itemImg && $isImageAttachment($itemImg);
     $ci = $item->catalogItem;
@@ -153,55 +165,39 @@
                  title="Без привязки к фото">img</div>
         @endif
 
-        {{-- Title --}}
+        {{-- Title — 3 строки:
+             1) название извлечённой позиции + копирование + brand-chip;
+             2) цветной кружок KB-статуса + категория + артикул из заявки + КП-chip;
+             3) сматченное название из каталога MyLift (полностью, без обрезки).
+             Длинный chip «данных достаточно / нет правил» убран в кружок —
+             в большом списке текст-чип отвлекает. --}}
         <div class="min-w-0">
+            {{-- Строка 1: только название заявки + копи + бренд --}}
             <div class="font-medium text-[13px] leading-tight text-fg-1 flex items-baseline gap-1.5 flex-wrap">
                 <span>{{ $item->parsed_name ?: '(без названия)' }}</span>
+                @if($item->parsed_name)
+                    <x-copy-button :value="$item->parsed_name" />
+                @endif
                 @if($item->brand)
                     <span class="inline-flex items-center px-1.5 rounded-sm bg-neutral-100 text-neutral-700 font-semibold text-[10.5px] uppercase tracking-wider">{{ $item->brand->name }}</span>
                 @elseif($item->parsed_brand)
                     <span class="inline-flex items-center px-1.5 rounded-sm bg-neutral-100 text-neutral-700 font-semibold text-[10.5px] uppercase tracking-wider">{{ $item->parsed_brand }}</span>
                 @endif
-                @if($qaConfig)
-                    <span class="chip {{ $qaConfig[0] }} text-[10.5px]"><span class="dot"></span>{{ $qaConfig[1] }}</span>
-                @endif
             </div>
-            <div class="text-[11.5px] text-fg-3 flex items-center gap-2 flex-wrap">
+
+            {{-- Строка 2: KB-кружок, категория, артикул из заявки, КП-chip.
+                 M-SKU MyLift вынесен в отдельную колонку правее (рядом с qty). --}}
+            <div class="text-[11.5px] text-fg-3 flex items-center gap-2 flex-wrap mt-0.5">
+                @if($qaDotColor)
+                    <span class="inline-block w-2 h-2 rounded-full {{ $qaDotColor }} shrink-0"
+                          title="{{ $qaDotTitle }}"></span>
+                @endif
                 @if($item->kbCategory)
                     <span>{{ $item->kbCategory->name }}</span>
                 @endif
                 @if($item->parsed_article)
-                    <span class="text-border-strong">·</span>
-                    @if($mylinkSku && trim((string) $item->parsed_article) === $mylinkSku)
-                        {{-- parsed_article === M-SKU → весь артикул кликабельный, дубль убран. --}}
-                        <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
-                           target="_blank" rel="noopener noreferrer"
-                           class="mono text-sky-700 hover:text-sky-900 hover:underline"
-                           title="Открыть на mylift.ru — каталог MyLift · {{ $ci?->brand_article ?: '—' }} · обн. {{ $ci?->last_imported_at?->format('d.m.Y') ?? '—' }}">арт. {{ $item->parsed_article }} ↗</a>
-                        <x-copy-button :value="$mylinkSku" />
-                    @else
-                        <span class="mono text-fg-2">арт. {{ $item->parsed_article }}</span>
-                        @if($mylinkSku)
-                            <span class="text-border-strong">·</span>
-                            <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
-                               target="_blank" rel="noopener noreferrer"
-                               class="mono text-sky-700 hover:text-sky-900 hover:underline"
-                               title="Открыть на mylift.ru">{{ $mylinkSku }} ↗</a>
-                            <x-copy-button :value="$mylinkSku" />
-                        @endif
-                    @endif
-                @elseif($mylinkSku)
-                    <span class="text-border-strong">·</span>
-                    <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
-                       target="_blank" rel="noopener noreferrer"
-                       class="mono text-sky-700 hover:text-sky-900 hover:underline"
-                       title="Открыть на mylift.ru">{{ $mylinkSku }} ↗</a>
-                    <x-copy-button :value="$mylinkSku" />
-                @endif
-                @if($ci?->name)
-                    <span class="text-border-strong">·</span>
-                    <span class="text-fg-2 truncate max-w-[440px]"
-                          title="Название из каталога MyLift: {{ $ci->name }}">📦 «{{ $ci->name }}»</span>
+                    @if($item->kbCategory)<span class="text-border-strong">·</span>@endif
+                    <span class="mono text-fg-2">арт. {{ $item->parsed_article }}</span>
                 @endif
 
                 {{-- Phase 7: chip «📨 в КП» — сумма позиции в исходящих КП.
@@ -225,17 +221,32 @@
                     </button>
                 @endif
             </div>
+
+            {{-- Строка 3: сматченный товар каталога MyLift (полное название). --}}
+            @if($ci?->name)
+                <div class="text-[11.5px] text-fg-2 mt-0.5 flex items-baseline gap-1.5 flex-wrap">
+                    <span title="Название из каталога MyLift">📦 «{{ $ci->name }}»</span>
+                </div>
+            @endif
         </div>
 
-        {{-- Status — только enrichment-индикатор (clarification дублируется
-             toggle-иконкой ❓ справа c badge'ом). --}}
-        <div class="flex items-center gap-1 flex-wrap">
+        {{-- Status-колонка теперь несёт сматченный M-SKU (если есть) +
+             кнопку копирования + индикатор enrichment-предложений 💡.
+             Раньше тут был «—» / 💡N — выбросили в пользу полезной инфы.
+             Title бренда / категории / артикула — в Title-колонке слева. --}}
+        <div class="flex items-center gap-1 flex-wrap text-[11.5px] min-w-0">
+            @if($mylinkSku)
+                <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
+                   target="_blank" rel="noopener noreferrer"
+                   class="mono text-sky-700 hover:text-sky-900 hover:underline truncate"
+                   title="Открыть на mylift.ru — каталог MyLift{{ $ci ? ' · обн. ' . ($ci->last_imported_at?->format('d.m.Y') ?? '—') : '' }}">{{ $mylinkSku }} ↗</a>
+                <x-copy-button :value="$mylinkSku" />
+            @endif
             @if($pendingSuggCount > 0)
                 <span class="inline-flex items-center px-1 rounded-sm bg-amber-50 text-amber-800 text-[10px] font-semibold"
-                      title="предложений обогащения к применению">
-                    💡{{ $pendingSuggCount }}
-                </span>
-            @else
+                      title="предложений обогащения к применению">💡{{ $pendingSuggCount }}</span>
+            @endif
+            @if(! $mylinkSku && $pendingSuggCount === 0)
                 <span class="text-[11px] text-fg-3">—</span>
             @endif
         </div>
