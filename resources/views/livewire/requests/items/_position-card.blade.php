@@ -173,12 +173,12 @@
              в большом списке текст-чип отвлекает. --}}
         <div class="min-w-0">
             {{-- Строка 1: название заявки + копи + бренд.
-                 Inline-layout (НЕ flex), копи-button «прилипает» к
-                 последнему слову названия через &nbsp; — иначе при
-                 переносе длинного имени иконка уезжает на новую строку
-                 одна. brand-chip висит inline-flex сразу за кнопкой. --}}
+                 Копи-button лежит ВНУТРИ того же <span> что и название,
+                 склеена &nbsp; — иначе DOM-граница между </span> и
+                 <button> позволяла браузеру переносить кнопку отдельно.
+                 brand-chip висит inline-flex дальше по строке. --}}
             <div class="font-medium text-[13px] leading-tight text-fg-1">
-                <span class="align-middle">{{ $item->parsed_name ?: '(без названия)' }}</span>@if($item->parsed_name)&nbsp;<x-copy-button :value="$item->parsed_name" />@endif
+                <span>{{ $item->parsed_name ?: '(без названия)' }}@if($item->parsed_name)&nbsp;<x-copy-button :value="$item->parsed_name" />@endif</span>
                 @if($item->brand)
                     <span class="inline-flex items-center align-middle ml-1.5 px-1.5 rounded-sm bg-neutral-100 text-neutral-700 font-semibold text-[10.5px] uppercase tracking-wider">{{ $item->brand->name }}</span>
                 @elseif($item->parsed_brand)
