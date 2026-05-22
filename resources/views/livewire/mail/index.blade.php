@@ -51,39 +51,32 @@
                 @endforeach
             </div>
 
-            {{-- Привязка к заявке --}}
+            {{-- Привязка к заявке — короткие labels, иначе строка раздувается. --}}
             <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden">
-                @php $linkages = ['all' => 'Все', 'linked' => 'С заявкой', 'unlinked' => 'Без заявки']; @endphp
+                @php $linkages = ['all' => 'Все', 'linked' => '🔗 С заявкой', 'unlinked' => '✕ Без']; @endphp
                 @foreach($linkages as $k => $label)
                     @php $on = $linkage === $k; @endphp
                     <button type="button" wire:click="setLinkage('{{ $k }}')"
                             class="h-[26px] px-2.5 whitespace-nowrap font-medium border-r border-border last:border-r-0
-                                   {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface text-fg-2 hover:text-fg-1' }}">
+                                   {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface text-fg-2 hover:text-fg-1' }}"
+                            title="Привязка к заявке: {{ $k === 'all' ? 'все' : ($k === 'linked' ? 'только связанные с Request' : 'только без Request') }}">
                         {{ $label }}
                     </button>
                 @endforeach
             </div>
 
-            {{-- Категория письма (gpt-4o classifier). --}}
-            <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden">
-                @php
-                    $categories = [
-                        ''               => 'Все категории',
-                        'client_request' => 'Заявка',
-                        'thread_reply'   => 'Ответ в треде',
-                        'irrelevant'     => 'Не клиентская',
-                        'unclassified'   => '? Не классиф.',
-                    ];
-                @endphp
-                @foreach($categories as $k => $label)
-                    @php $on = $category === $k; @endphp
-                    <button type="button" wire:click="setCategory('{{ $k }}')"
-                            class="h-[26px] px-2.5 whitespace-nowrap font-medium border-r border-border last:border-r-0
-                                   {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface text-fg-2 hover:text-fg-1' }}">
-                        {{ $label }}
-                    </button>
-                @endforeach
-            </div>
+            {{-- Категория (gpt-4o classifier) — dropdown.
+                 5 кнопок в chip-row занимали ~600px и переполняли строку
+                 на 1280-1440px. Dropdown ~160px помещается без overflow. --}}
+            <select wire:model.live="category"
+                    class="h-[26px] px-2 border border-border rounded-md bg-surface text-fg-1 text-[12px] outline-none focus:border-[var(--sky-500)]"
+                    title="Категория письма (gpt-4o classifier)">
+                <option value="">🏷 Все категории</option>
+                <option value="client_request">Заявка клиента</option>
+                <option value="thread_reply">Ответ в треде</option>
+                <option value="irrelevant">Не клиентская</option>
+                <option value="unclassified">? Не классиф.</option>
+            </select>
 
             {{-- Cross-mailbox копии --}}
             <button type="button" wire:click="toggleShowCopies"

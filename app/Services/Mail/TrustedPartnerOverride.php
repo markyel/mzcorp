@@ -37,23 +37,47 @@ class TrustedPartnerOverride
 
         foreach ($partners as $p) {
             $senderPattern = (string) ($p['sender_pattern'] ?? '');
-            $markerPattern = (string) ($p['marker_pattern'] ?? '');
             $name = (string) ($p['name'] ?? 'unnamed');
 
-            if ($senderPattern === '' || $markerPattern === '') {
-                continue;
-            }
-            if (! @preg_match($senderPattern, $from)) {
-                continue;
-            }
-            if (! @preg_match($markerPattern, $haystack)) {
+            if ($senderPattern === '' || ! @preg_match($senderPattern, $from)) {
                 continue;
             }
 
-            return [
-                'category' => EmailCategory::ClientRequest,
-                'partner' => $name,
-            ];
+            // Поддерживаем оба формата конфига:
+            //  - 'marker_pattern' => '/regex/' (legacy, единственный)
+            //  - 'marker_patterns' => ['/regex1/', '/regex2/', ...] (массив,
+            //     match по логическому OR — достаточно одного совпадения)
+            $markers = [];
+            if (! empty($p['marker_patterns']) && is_array($p['marker_patterns'])) {
+                $markers = $p['marker_patterns'];
+            } elseif (! empty($p['marker_pattern'])) {
+                $markers = [(string) $p['marker_pattern']];
+            }
+
+            // Если маркеры не заданы — match только по sender. Полезно для
+            // партнёров, у которых вся почта это бизнес-канал клиентских
+            // заказов (нет служебной переписки на том же домене).
+            if (empty($markers)) {
+                return [
+                    'category' => EmailCategory::ClientRequest,
+                    'partner' => $name,
+                    'matched_by' => 'sender_only',
+                ];
+            }
+
+            foreach ($markers as $idx => $markerPattern) {
+                $markerPattern = (string) $markerPattern;
+                if ($markerPattern === '') {
+                    continue;
+                }
+                if (@preg_match($markerPattern, $haystack)) {
+                    return [
+                        'category' => EmailCategory::ClientRequest,
+                        'partner' => $name,
+                        'matched_by' => 'marker:' . $idx,
+                    ];
+                }
+            }
         }
 
         return null;
