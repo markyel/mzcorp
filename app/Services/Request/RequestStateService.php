@@ -99,6 +99,19 @@ class RequestStateService
         DB::transaction(function () use ($request, $from, $to, $author, $context, $closedLostReason, $closedLostComment) {
             $request->status = $to;
 
+            // peak_status — milestone-rollup. lifecycleOrder=-1 для non-milestone
+            // (Paused / PostponedUntil / ClosedLost) — peak не сдвигаем; иначе
+            // если новый этап «старше» текущего peak — обновляем. Это
+            // позволяет UI показывать в чипе «дальше всего достигнутый»
+            // статус, а не текущий operational (см. Request::displayedStatus).
+            $toOrder = $to->lifecycleOrder();
+            if ($toOrder >= 0) {
+                $currentPeakOrder = $request->peak_status?->lifecycleOrder() ?? -1;
+                if ($toOrder > $currentPeakOrder) {
+                    $request->peak_status = $to;
+                }
+            }
+
             // Terminal: closed_at + lost-reason if applicable.
             if ($to->isTerminal()) {
                 $request->closed_at = now();

@@ -700,10 +700,22 @@
                                 $actAt = $req->last_activity_at;
                                 $actAccent = $actType && $actType->requiresAttention();
                             @endphp
+                            @php
+                                // displayedStatus — milestone-rollup (peak_status или
+                                // current). См. Request::getDisplayedStatusAttribute.
+                                // Если откатились (Quoted → InProgress) — показываем
+                                // Quoted, чтобы менеджер видел дальше всего достигнутый
+                                // этап. Tooltip — actual operational status.
+                                $displayedStatus = $req->displayedStatus;
+                                $statusDiverged = $displayedStatus !== $req->status;
+                            @endphp
                             <span class="min-w-0 overflow-hidden">
                                 <div class="flex items-center">
-                                    <span class="chip {{ $req->status->chipClass() }}">
-                                        <span class="dot"></span>{{ $req->status->label() }}
+                                    <span class="chip {{ $displayedStatus->chipClass() }}"
+                                          @if($statusDiverged)
+                                              title="Текущий operational: {{ $req->status->label() }}"
+                                          @endif>
+                                        <span class="dot"></span>{{ $displayedStatus->label() }}
                                     </span>
                                 </div>
                                 @if($actType)

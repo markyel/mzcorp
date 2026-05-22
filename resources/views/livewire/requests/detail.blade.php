@@ -22,7 +22,11 @@
     };
 
     // Phase 1.10: chipClass через enum-метод (полный набор статусов из Foundation §5.2).
-    $statusChip = $req->status->chipClass();
+    // displayedStatus — milestone (peak_status) для header'а; operational status
+    // остаётся в чипе как tooltip + используется для permissions ($req->status).
+    $displayedStatus = $req->displayedStatus;
+    $statusDiverged = $displayedStatus !== $req->status;
+    $statusChip = $displayedStatus->chipClass();
     $age = $req->created_at?->diffForHumans(['short' => true, 'parts' => 2]) ?? '—';
     $managerInitials = \Illuminate\Support\Str::of($req->assignedUser?->name ?? '?')
         ->substr(0, 1)->upper();
@@ -249,7 +253,17 @@
                 <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle">
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Статус</span>
                     <span class="inline-flex items-center gap-1.5 flex-wrap">
-                        <span class="chip {{ $statusChip }}"><span class="dot"></span>{{ $req->status->label() }}</span>
+                        <span class="chip {{ $statusChip }}"
+                              @if($statusDiverged)
+                                  title="Текущий operational: {{ $req->status->label() }} · чип показывает дальше всего достигнутый этап (peak)"
+                              @endif>
+                            <span class="dot"></span>{{ $displayedStatus->label() }}
+                        </span>
+                        @if($statusDiverged)
+                            <span class="text-[11px] text-[var(--fg-3)]" title="Operational статус — куда сейчас идёт работа">
+                                → {{ $req->status->label() }}
+                            </span>
+                        @endif
                         @if(($req->reanimated_count ?? 0) > 0 && $req->reanimated_at)
                             @php
                                 $daysSinceReanimate = (int) abs(now()->diffInDays($req->reanimated_at, false));
@@ -2122,8 +2136,11 @@
                                     <div class="px-[18px] py-2 border-b border-border-subtle bg-surface-2 flex items-center gap-2 text-[12px]">
                                         <a href="{{ route('requests.show', $linkedReq) }}"
                                            class="mono text-[13px] text-sky-700 hover:underline font-semibold">{{ $linkedReq->internal_code }}</a>
-                                        <span class="chip {{ $linkedReq->status->chipClass() }} text-[10.5px]">
-                                            <span class="dot"></span>{{ $linkedReq->status->label() }}
+                                        <span class="chip {{ $linkedReq->displayedStatus->chipClass() }} text-[10.5px]"
+                                              @if($linkedReq->displayedStatus !== $linkedReq->status)
+                                                  title="Operational: {{ $linkedReq->status->label() }}"
+                                              @endif>
+                                            <span class="dot"></span>{{ $linkedReq->displayedStatus->label() }}
                                         </span>
                                         @if($linkedReq->assignedUser)
                                             <span class="text-[11.5px] text-fg-3">· {{ $linkedReq->assignedUser->name }}</span>

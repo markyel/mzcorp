@@ -119,6 +119,41 @@ enum RequestStatus: string
     }
 
     /**
+     * Порядковый номер в lifecycle для peak_status / display.
+     *
+     * Используется RequestStateService::updatePeakStatus и accessor'ом
+     * Request::displayedStatus, чтобы показывать «дальше всего дошедший»
+     * milestone, а не текущий operational статус.
+     *
+     * Правила:
+     *   - Pause / PostponedUntil не считаются milestone — peak не сдвигают
+     *     (возвращаем -1, peak останется на предыдущем максимуме).
+     *   - ClosedLost — failure, тоже -1; в displayedStatus отображаем как
+     *     текущий terminal-чип, peak не трогаем (заявка дошла туда, куда
+     *     дошла; ClosedLost — не «вершина»).
+     *   - ClosedWon — наивысший milestone (10).
+     *   - Остальное — линейный порядок happy-path'а.
+     */
+    public function lifecycleOrder(): int
+    {
+        return match ($this) {
+            self::Pending => 0,
+            self::New => 1,
+            self::Assigned => 2,
+            self::InProgress => 3,
+            self::AwaitingClientClarification => 4,
+            self::Quoted => 5,
+            self::UnderReview => 6,
+            self::AwaitingInvoice => 7,
+            self::Invoiced => 8,
+            self::Paid => 9,
+            self::ClosedWon => 10,
+            // Non-milestone — peak не двигаем.
+            self::PostponedUntil, self::Paused, self::ClosedLost => -1,
+        };
+    }
+
+    /**
      * Карта разрешённых переходов из текущего статуса. Single source of truth
      * для UI кнопок и backend-валидации.
      *
@@ -167,6 +202,7 @@ enum RequestStatus: string
                 self::UnderReview, self::PostponedUntil,
                 self::AwaitingInvoice,
                 self::InProgress, // возврат на правки
+                self::AwaitingClientClarification, // клиент уточняет после КП
                 self::ClosedWon, self::ClosedLost,
             ],
             self::UnderReview => [

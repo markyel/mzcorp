@@ -24,6 +24,11 @@ class Request extends Model
         'email_message_id',
         'assigned_user_id',
         'status',
+        // peak_status — «дальше всего достигнутый» milestone в lifecycle
+        // (см. RequestStatus::lifecycleOrder). Обновляется автоматически
+        // в RequestStateService::transitionTo; UI читает через accessor
+        // displayedStatus, который выбирает между current и peak.
+        'peak_status',
         'client_email',
         'client_name',
         'subject',
@@ -75,6 +80,7 @@ class Request extends Model
     {
         return [
             'status' => RequestStatus::class,
+            'peak_status' => RequestStatus::class,
             'assigned_at' => 'datetime',
             'pending_clarifications' => 'array',
             'paused_until' => 'datetime',
@@ -93,6 +99,40 @@ class Request extends Model
             'complexity_level' => \App\Enums\ComplexityLevel::class,
             'parsing_meta' => 'array',
         ];
+    }
+
+    /**
+     * Статус для отображения в UI (чип в пуле, header заявки, дашборд).
+     *
+     * Логика: state-machine разрешает «откаты» (Quoted → InProgress
+     * «возврат на правки» / AwaitingClientClarification при вопросе клиента
+     * после КП). Operational status показывает что менеджеру делать сейчас,
+     * но визуально полезнее видеть milestone — «КП отправлено» вместо
+     * «В работе». peak_status хранит max-достигнутый lifecycle-этап.
+     *
+     * Правила display:
+     *   - Terminal (ClosedWon / ClosedLost) — всегда показываем current,
+     *     потому что заявка закрыта; peak уже не релевантен.
+     *   - Paused — показываем Paused (paused — мета-состояние,
+     *     детали в paused_from_status).
+     *   - Иначе — peak_status, если он «старше» current'а по
+     *     RequestStatus::lifecycleOrder; иначе current.
+     */
+    public function getDisplayedStatusAttribute(): RequestStatus
+    {
+        $current = $this->status;
+        if ($current === null) {
+            return RequestStatus::Pending;
+        }
+        if ($current->isTerminal() || $current === RequestStatus::Paused) {
+            return $current;
+        }
+        $peak = $this->peak_status;
+        if ($peak instanceof RequestStatus && $peak->lifecycleOrder() > $current->lifecycleOrder()) {
+            return $peak;
+        }
+
+        return $current;
     }
 
     /**
