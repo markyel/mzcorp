@@ -1,5 +1,5 @@
 @props([
-    /** Активный раздел: 'dashboard' | 'requests' | 'catalog' | 'mail' | null. */
+    /** Активный раздел: 'dashboard' | 'requests' | 'catalog' | 'mail' | 'invoices' | null. */
     'active' => null,
 ])
 @php
@@ -10,6 +10,10 @@
     // head_of_sales / secretary / director / admin. Менеджерам не
     // показываем — у них своя карточка заявки с тред-табом.
     $canSeeMail = $railUser?->hasAnyRole(['head_of_sales', 'secretary', 'director', 'admin']);
+    // «Счета» — все авторизованные роли. Менеджер видит scope='mine'
+    // (только свои Invoice через request.assigned_user_id), привилегированные
+    // — scope='all'. Фильтр scope принудительно ограничивается в Livewire.
+    $canSeeInvoices = $railUser?->hasAnyRole(['manager', 'head_of_sales', 'secretary', 'director', 'admin']);
 
     // Единый список левого rail для всех страниц с 3-col shell.
     // active маркируется по значению атрибута компонента, не по route()
@@ -24,6 +28,10 @@
 
     if ($canSeeMail) {
         $rail[] = ['icon' => '✉', 'label' => 'Почта', 'href' => route('mail.index'), 'key' => 'mail'];
+    }
+
+    if ($canSeeInvoices) {
+        $rail[] = ['icon' => '₽', 'label' => 'Счета', 'href' => route('invoices.index'), 'key' => 'invoices'];
     }
 
     // Phase 2 placeholder'ы — disabled (без href), показываются для

@@ -78,6 +78,15 @@ Route::middleware('auth')->group(function () {
         })->name('mail.index');
     });
 
+    // Phase 4: раздел «Счета». Менеджер видит свои Invoice, привилегированные
+    // (РОП / директор / секретарь / админ) — все. Permission-фильтр scope='mine'
+    // принудительно установлен для менеджеров внутри Livewire-компонента.
+    Route::middleware('role:manager,head_of_sales,secretary,director,admin')->group(function () {
+        Route::get('/dashboard/invoices', function () {
+            return view('invoices.index');
+        })->name('invoices.index');
+    });
+
     // Mail routing rules — управление правилами для РОП и директора.
     Route::middleware('role:head_of_sales,director,admin')->group(function () {
         Route::get('/dashboard/mail-rules', function () {
