@@ -1165,28 +1165,28 @@ PROMPT;
 
     /**
      * Дедупликация внутри уже распарсенного списка (фото + pdf могут вернуть
-     * одну и ту же позицию). Ключ — артикул (нормализованный) либо имя.
+     * одну и ту же позицию). Ключ — артикул (нормализованный) либо имя,
+     * без учёта qty.
      *
-     * Каждому kept-item клеится поле `__merged_from`: массив описаний
-     * съеденных дублей (для записи в request_items.parsing_merged_from
-     * и requests.parsing_meta через RequestItemPersister). Менеджер
-     * увидит в UI «эта позиция собрана из 2 строк xlsx».
+     * Поведение для qty (изменено 2026-05-22):
+     *  - Дубли в РАМКАХ одного invoice_index СУММИРУЮТСЯ. Две строки
+     *    «AVNS4 qty=4» → одна позиция qty=8 (а не qty=4 как раньше).
+     *  - Multi-invoice (M-2026-1032) по-прежнему НЕ слипается между счетами:
+     *    invoice_index разный → разные ключи.
+     *  - Если случай «photo+text показывают одну позицию» попадает под
+     *    суммирование (qty=1 + qty=1 → 2) — менеджер увидит баннер
+     *    «было/стало» во вкладке Позиции и поправит руками. Сознательный
+     *    компромисс, чтобы НЕ терять qty в xlsx-кейсах с реальными
+     *    повторами одного артикула (типичный сценарий: клиент дважды
+     *    занёс позицию в файле, ожидая сумму).
+     *
+     * Каждому kept-item клеятся служебные поля:
+     *  - `__merged_from`: список съеденных дублей (для UI / parsing_meta).
+     *  - `__qty_summed`: итоговая сумма qty (если было слияние). Persister
+     *    берёт её приоритетно вместо item['qty'].
      */
     private function dedupeWithinList(array $items): array
     {
-        // Защита от пересечений photo+PDF+text-парсинга — одна и та же позиция
-        // могла быть извлечена дважды из разных источников.
-        //
-        // Ключ дедупа: normalizeArticle(article) + qty + invoice_index
-        // (если article пуст — lower(name) + qty + invoice_index).
-        //
-        // invoice_index приходит от LLM (см. ParseItemsPrompt секция «Несколько
-        // счетов в одном письме»). Default = 1.
-        //  - Обычное письмо: все items имеют invoice_index=1 → ключ совпадает
-        //    при настоящих дублях (photo+text) → схлопывается;
-        //  - Multi-invoice (M-2026-1032): items из счёта 1 имеют invoice_index=1,
-        //    из счёта 2 — invoice_index=2 → ключи разные → НЕ схлопываются
-        //    даже если совпадают article и qty (M33374 qty=2 в обоих счетах).
         $seenIndex = []; // key => index в $result
         $result = [];
         foreach ($items as $item) {
@@ -1197,22 +1197,29 @@ PROMPT;
             if ($base === '') {
                 continue;
             }
-            $qty = (string) ($item['qty'] ?? '');
             $invoiceIndex = (int) ($item['invoice_index'] ?? 1);
-            $key = $base . '|qty=' . $qty . '|inv=' . $invoiceIndex;
+            $key = $base . '|inv=' . $invoiceIndex;
+            $thisQty = (float) ($item['qty'] ?? 0);
 
             $droppedEntry = [
                 'source' => $item['__source'] ?? null,
                 'name' => (string) ($item['name'] ?? ''),
                 'article' => $item['article'] ?? null,
-                'qty' => $qty,
-                'reason' => 'same_normalized_article_qty_inv',
+                'qty' => (string) ($item['qty'] ?? ''),
+                'reason' => 'same_normalized_article_inv',
                 'dedup_key' => $key,
             ];
 
             if (isset($seenIndex[$key])) {
-                // Уже видели — добавляем в trace победителю.
+                // Слияние: суммируем qty в победителя и копим trace.
                 $winnerIdx = $seenIndex[$key];
+                $currentSum = isset($result[$winnerIdx]['__qty_summed'])
+                    ? (float) $result[$winnerIdx]['__qty_summed']
+                    : (float) ($result[$winnerIdx]['qty'] ?? 0);
+                $newSum = $currentSum + $thisQty;
+                $result[$winnerIdx]['__qty_summed'] = $newSum;
+
+                $droppedEntry['qty_summed_into'] = $newSum;
                 $merged = $result[$winnerIdx]['__merged_from'] ?? [];
                 $merged[] = $droppedEntry;
                 $result[$winnerIdx]['__merged_from'] = $merged;

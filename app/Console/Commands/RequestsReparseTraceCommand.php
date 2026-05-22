@@ -319,15 +319,16 @@ class RequestsReparseTraceCommand extends Command
             $sourceTag = "{$ext}_attachment_{$perAtt['attachment_id']}";
 
             // Индекс по dedup_key → kept-item (winner среди LLM).
+            // Ключ синхронизирован с RequestItemParsingService и
+            // traceDedupeWithinList: qty в ключе не учитывается.
             $winnerByKey = [];
             foreach ($kept as $k) {
                 $base = $this->normalizeArticle($k['article'] ?? null);
                 if ($base === '') {
                     $base = mb_strtolower(trim((string) ($k['name'] ?? '')));
                 }
-                $qty = (string) ($k['qty'] ?? '');
                 $inv = (int) ($k['invoice_index'] ?? 1);
-                $key = $base . '|qty=' . $qty . '|inv=' . $inv;
+                $key = $base . '|inv=' . $inv;
                 $winnerByKey[$key] = $k;
             }
 
@@ -383,13 +384,29 @@ class RequestsReparseTraceCommand extends Command
                     continue;
                 }
 
+                // Backfill: рассчитываем qty_summed_into = сумма qty всех
+                // дублей этого ключа в трассе LLM + qty победителя. Это
+                // только информативная сводка для UI; реальный qty
+                // существующих request_items не меняем (backfill не
+                // переписывает позиции, только parsing_meta).
+                $winnerQty = (float) ($winner['qty'] ?? 0);
+                $eatenSum = 0.0;
+                foreach ($localDropped as $dx) {
+                    if (($dx['key'] ?? null) === $key) {
+                        $eatenSum += (float) ($dx['qty'] ?? 0);
+                    }
+                }
+                $qtySummedInto = $winnerQty + $eatenSum;
+
                 $entry = [
                     'source' => $sourceTag,
                     'name' => (string) ($d['name'] ?? ''),
                     'article' => $d['article'] ?? null,
                     'qty' => (string) ($d['qty'] ?? ''),
-                    'reason' => $d['reason'] ?? 'same_normalized_article_qty_inv',
+                    'reason' => $d['reason'] ?? 'same_normalized_article_inv',
                     'dedup_key' => $key,
+                    'qty_original_winner' => (string) $winnerQty,
+                    'qty_summed_into' => $qtySummedInto,
                 ];
 
                 $perItem[$matchItem->id][] = $entry;
@@ -471,7 +488,9 @@ class RequestsReparseTraceCommand extends Command
             }
             $qty = (string) ($item['qty'] ?? '');
             $invoiceIndex = (int) ($item['invoice_index'] ?? 1);
-            $key = $base . '|qty=' . $qty . '|inv=' . $invoiceIndex;
+            // Синхронизировано с RequestItemParsingService::dedupeWithinList:
+            // qty НЕ входит в ключ — дубли в одном invoice суммируются.
+            $key = $base . '|inv=' . $invoiceIndex;
 
             if (isset($seen[$key])) {
                 $dropped[] = [

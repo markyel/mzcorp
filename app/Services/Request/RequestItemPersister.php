@@ -156,13 +156,29 @@ class RequestItemPersister
                 $mergedFrom = null;
             }
 
+            // Если dedupeWithinList склеил дубли — у победителя в
+            // __qty_summed лежит сумма qty (собственный + qty съеденных).
+            // Берём её приоритетно. Оригинал собственного qty победителя
+            // фиксируем в merged_from[].qty_original_winner, чтобы UI мог
+            // показать «было X + Y → стало Z».
+            $qtyOriginalWinner = $item['qty'] ?? 1;
+            $qtyToStore = $item['__qty_summed'] ?? $qtyOriginalWinner;
+            if ($mergedFrom !== null) {
+                foreach ($mergedFrom as &$mfEntry) {
+                    if (! isset($mfEntry['qty_original_winner'])) {
+                        $mfEntry['qty_original_winner'] = (string) $qtyOriginalWinner;
+                    }
+                }
+                unset($mfEntry);
+            }
+
             $createdItem = RequestItem::create([
                 'request_id' => $existing->id,
                 'position' => $maxPosition,
                 'parsed_name' => $item['name'],
                 'parsed_brand' => $item['brand'] ?? null,
                 'parsed_article' => $item['article'] ?? null,
-                'parsed_qty' => $item['qty'] ?? 1,
+                'parsed_qty' => $qtyToStore,
                 'parsed_unit' => $item['unit'] ?? 'шт.',
                 // Мерные позиции: вторая размерность (длина/масса/объём
                 // на 1 единицу qty) — структурированно от ParseItemsPrompt v6.
@@ -356,9 +372,14 @@ class RequestItemPersister
                     'name' => $entry['name'] ?? '',
                     'article' => $entry['article'] ?? null,
                     'qty' => $entry['qty'] ?? '',
-                    'reason' => $entry['reason'] ?? 'same_normalized_article_qty_inv',
+                    'reason' => $entry['reason'] ?? 'same_normalized_article_inv',
                     'dedup_key' => $entry['dedup_key'] ?? null,
                     'merged_into_position' => $winnerPosition,
+                    // qty_summed_into — итоговый qty победителя после слияния
+                    // (учитывает все merged_from). qty_original_winner — qty
+                    // победителя ДО слияния. Используются UI: «было X+Y → стало Z».
+                    'qty_summed_into' => $entry['qty_summed_into'] ?? null,
+                    'qty_original_winner' => $entry['qty_original_winner'] ?? null,
                     'at' => $nowIso,
                 ];
             }

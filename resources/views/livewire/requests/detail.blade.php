@@ -1294,10 +1294,10 @@
                 @if(! empty($dedupDropped))
                     <div class="ds-card mb-3 border-sky-300">
                         <div class="ds-card-header bg-sky-50">
-                            <h3 class="text-sky-900">Парсер схлопнул дубли</h3>
+                            <h3 class="text-sky-900">Парсер схлопнул дубли · количество просуммировано</h3>
                             <span class="text-[10.5px] font-semibold text-sky-900 bg-sky-100 px-1.5 py-0.5 rounded-full">{{ count($dedupDropped) }}</span>
                             <span class="flex-1"></span>
-                            <span class="text-[11.5px] text-sky-800">Одинаковый артикул + qty + invoice_index у разных строк исходника — оставлена первая. Проверьте — возможно нужно расщепить.</span>
+                            <span class="text-[11.5px] text-sky-800">Одинаковый артикул + invoice_index у разных строк исходника — оставлена одна позиция, qty просуммированы. Проверьте — возможно нужно расщепить вручную.</span>
                         </div>
                         <details class="px-[18px] py-2 text-[12.5px]">
                             <summary class="cursor-pointer text-sky-800 select-none py-1">Показать детали ({{ count($dedupDropped) }})</summary>
@@ -1306,6 +1306,9 @@
                                     @php
                                         $mergedPos = $d['merged_into_position'] ?? null;
                                         $winner = $mergedPos ? $items->firstWhere('position', (int) $mergedPos) : null;
+                                        $qtyEaten = $d['qty'] ?? null;
+                                        $qtyOrigWin = $d['qty_original_winner'] ?? null;
+                                        $qtySummed = $d['qty_summed_into'] ?? null;
                                     @endphp
                                     <div class="py-2 flex items-start gap-3 flex-wrap">
                                         <div class="flex-1 min-w-0">
@@ -1315,7 +1318,7 @@
                                                 @if(! empty($d['article']))
                                                     <span class="mono text-[11.5px] text-fg-2">{{ \Illuminate\Support\Str::limit($d['article'], 60) }}</span>
                                                 @endif
-                                                <span class="text-[11px] text-fg-3">× {{ $d['qty'] ?? '?' }}</span>
+                                                <span class="text-[11px] text-fg-3">× {{ $qtyEaten ?? '?' }}</span>
                                             </div>
                                             <div class="mt-1 text-[11px] text-fg-3 flex items-center gap-2 flex-wrap">
                                                 <span>Источник: <span class="mono">{{ $d['source'] ?? '—' }}</span></span>
@@ -1328,8 +1331,17 @@
                                                         <span class="mono">#{{ $mergedPos ?? '?' }}</span>
                                                     @endif
                                                 </span>
-                                                <span>·</span>
-                                                <span class="italic">{{ $d['reason'] ?? '' }}</span>
+                                                @if($qtyOrigWin !== null && $qtySummed !== null)
+                                                    <span>·</span>
+                                                    <span class="inline-flex items-center gap-1">
+                                                        <span class="text-fg-3">qty:</span>
+                                                        <span class="mono text-fg-2">{{ $qtyOrigWin }}</span>
+                                                        <span class="text-fg-3">+</span>
+                                                        <span class="mono text-fg-2">{{ $qtyEaten ?? '?' }}</span>
+                                                        <span class="text-fg-3">→</span>
+                                                        <span class="mono font-semibold text-sky-800">{{ $qtySummed }}</span>
+                                                    </span>
+                                                @endif
                                             </div>
                                         </div>
                                     </div>

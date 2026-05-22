@@ -106,11 +106,22 @@
         @php
             $_mergedFrom = is_array($item->parsing_merged_from) ? $item->parsing_merged_from : [];
             $_mergedCount = count($_mergedFrom);
-            $_mergedTitle = $_mergedCount > 0
-                ? 'При парсинге сюда было слито ' . $_mergedCount . ' дубль(-ей): ' . collect($_mergedFrom)
-                    ->map(fn ($m) => \Illuminate\Support\Str::limit(($m['name'] ?? '') . ' [' . ($m['article'] ?? '∅') . ']', 80))
-                    ->implode(' · ')
-                : '';
+            // Сводка суммирования qty: исходный qty победителя берём из
+            // первого merged-entry (там у всех одинаковый qty_original_winner),
+            // итоговую сумму — из последнего (qty_summed_into аккумулируется).
+            $_qtyOrigWin = $_mergedCount > 0 ? ($_mergedFrom[0]['qty_original_winner'] ?? null) : null;
+            $_qtySummed = $_mergedCount > 0
+                ? ($_mergedFrom[$_mergedCount - 1]['qty_summed_into'] ?? null)
+                : null;
+            $_mergedTitle = '';
+            if ($_mergedCount > 0) {
+                $_mergedTitle = 'Слито ' . $_mergedCount . ' дубль(-ей): ' . collect($_mergedFrom)
+                    ->map(fn ($m) => \Illuminate\Support\Str::limit(($m['name'] ?? '') . ' [' . ($m['article'] ?? '∅') . ' × ' . ($m['qty'] ?? '?') . ']', 80))
+                    ->implode(' · ');
+                if ($_qtyOrigWin !== null && $_qtySummed !== null) {
+                    $_mergedTitle = 'Qty просуммировано: ' . $_qtyOrigWin . ' → ' . $_qtySummed . '. ' . $_mergedTitle;
+                }
+            }
         @endphp
         <div class="text-fg-3 font-semibold text-[13px] text-right mono flex items-center justify-end gap-1">
             @if($_mergedCount > 0)
