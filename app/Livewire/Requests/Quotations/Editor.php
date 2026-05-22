@@ -294,13 +294,38 @@ class Editor extends Component
             return;
         }
         $position = ($q->items->max('position') ?? 0) + 1;
+
+        // Multiplier-логика: если парсер извлёк parsed_length («1 цепь × 125
+        // звеньев», «2 шт × 25 метров» и т.п.) И единица длины относится к
+        // measurable-категории — биллинг считаем В НЕЙ. Иначе qty=parsed_qty
+        // как раньше. См. M-2026-1478 (M00839: 1 цепь = 125 звеньев → qty=125).
+        //
+        // Whitelist measurable units — иначе вылезут шумные parsed_length_unit
+        // вроде «шт» или «позиция», которые multiplier применять не должны.
+        $lengthUnit = mb_strtolower(trim((string) $reqItem->parsed_length_unit));
+        $applyLength = ((float) $reqItem->parsed_length) > 0
+            && in_array($lengthUnit, [
+                'звено', 'звеньев', 'звен',
+                'м', 'метр', 'метров', 'мм', 'см',
+                'кг', 'г', 'т',
+                'л', 'мл',
+                'м2', 'м²', 'м3', 'м³',
+            ], true);
+        if ($applyLength) {
+            $billingQty = (float) ($reqItem->parsed_qty ?: 1) * (float) $reqItem->parsed_length;
+            $billingUnit = $reqItem->parsed_length_unit;
+        } else {
+            $billingQty = (float) ($reqItem->parsed_qty ?: 1);
+            $billingUnit = $reqItem->parsed_unit ?: 'шт';
+        }
+
         $item = new \App\Models\QuotationItem([
             'quotation_id' => $q->id,
             'position' => $position,
             'request_item_id' => $reqItem->id,
             'catalog_item_id' => $cat->id,
-            'qty' => (float) ($reqItem->parsed_qty ?: 1),
-            'unit' => $reqItem->parsed_unit ?: 'шт',
+            'qty' => $billingQty,
+            'unit' => $billingUnit,
             'catalog_unit_price' => (float) ($cat->price ?: 0),
             'catalog_price_min' => $cat->price_min !== null ? (float) $cat->price_min : null,
             'catalog_lead_time_days' => $cat->lead_time_days,
