@@ -531,6 +531,24 @@ class Pool extends Component
                 ->count()
             : null;
 
+        // Phase: per-manager счётчик открытых заявок для секции «Команда»
+        // в Aside. Только для canSeeAll. Один GROUP BY вместо N запросов.
+        $managerOpenCounts = [];
+        if ($this->canSeeAll) {
+            $rows = Request::query()
+                ->selectRaw('assigned_user_id, COUNT(*) AS cnt')
+                ->whereNotNull('assigned_user_id')
+                ->whereIn('status', array_map(
+                    fn (RequestStatus $s) => $s->value,
+                    array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+                ))
+                ->groupBy('assigned_user_id')
+                ->get();
+            foreach ($rows as $r) {
+                $managerOpenCounts[(int) $r->assigned_user_id] = (int) $r->cnt;
+            }
+        }
+
         return view('livewire.requests.pool', [
             'page' => $page,
             'groups' => $groups,
@@ -545,6 +563,7 @@ class Pool extends Component
             'statusCounts' => $statusCounts,
             'bucketCounts' => $bucketCounts,
             'bucketStatuses' => $bucketStatuses,
+            'managerOpenCounts' => $managerOpenCounts,
         ]);
     }
 }
