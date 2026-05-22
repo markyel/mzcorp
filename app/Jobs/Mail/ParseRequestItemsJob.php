@@ -254,6 +254,34 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                 }
             }
 
+            // Reply-routing fallback: письмо-напоминание клиента («прошу
+            // ускорить») может не содержать новых позиций — Persister
+            // early-return'ит на пустых items+clarifications, routing не
+            // выполняется, письмо остаётся в INBOX вместо папки менеджера.
+            // Если письмо привязано к существующей Request (InboundReplyLinker)
+            // у которой назначен менеджер — двигаем в его папку.
+            try {
+                $message->refresh();
+                $needsManualRoute = $message->related_request_id
+                    && ! str_contains((string) $message->folder, '/MZ/');
+                if ($needsManualRoute) {
+                    $related = \App\Models\Request::query()
+                        ->whereKey($message->related_request_id)
+                        ->with('assignedUser')
+                        ->first();
+                    if ($related && $related->assigned_user_id && $related->assignedUser) {
+                        app(\App\Services\Mail\MailFolderRouter::class)
+                            ->routeToManager($message, $related->assignedUser);
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('ParseRequestItemsJob: reply-routing fallback failed', [
+                    'email_message_id' => $message->id,
+                    'related_request_id' => $message->related_request_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
             Log::info('ParseRequestItemsJob: items persisted', [
                 'email_message_id' => $message->id,
                 'request_id' => $result['request']?->id,
