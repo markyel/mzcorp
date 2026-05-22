@@ -347,6 +347,24 @@ return [
     ],
 
     /*
+    | Phase 4: настройки отправки КП (Quotation) клиенту через ComposeForm.
+    | См. App\Livewire\Requests\Quotations\Editor::sendQuotation.
+    */
+    'quotations' => [
+        /*
+        | Шаблон тела письма при отправке КП. Plain-text. Placeholders:
+        |   {client_name}     — Request.client_name (fallback «коллеги»)
+        |   {internal_code}   — код заявки M-YYYY-NNNN
+        |   {quotation_code}  — Quotation.internal_code + версия (vN)
+        |   {total}           — total ₽ с двумя знаками + thousand-separator
+        |   {valid_until}     — дата действия КП DD.MM.YYYY
+        |   {sender_name}     — имя менеджера-отправителя
+        */
+        'email_body_template' => env('QUOTATION_EMAIL_BODY_TEMPLATE')
+            ?: "Здравствуйте, {client_name}!\n\nВысылаем коммерческое предложение по запросу {internal_code} (КП {quotation_code}).\n\nИтого: {total} ₽ (вкл. НДС).\nСрок действия: {valid_until}.\n\nС уважением,\n{sender_name}",
+    ],
+
+    /*
     | Phase 1.10: state-machine заявок (Foundation §5.4).
     | См. RequestPauseService и `requests:resume-paused` cron.
     */

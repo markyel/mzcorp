@@ -1107,6 +1107,21 @@ class Detail extends Component
         $this->dispatch('open-draft', draftId: $draftId, requestId: $this->request->id);
     }
 
+    /**
+     * Phase 4: «📨 Отправить КП клиенту» — Editor сгенерировал PDF
+     * + создал draft с прикреплённым КП. Переключаем таб на «Переписка»
+     * (где зарегистрирован ComposeForm) и просим его открыть draft —
+     * менеджер видит готовое письмо, может править recipients/body
+     * и отправить. После send'а ComposeForm::applyPostSendHooks подхватит
+     * marker `quotation_sent` и переведёт заявку в Quoted.
+     */
+    #[On('quotation-send-ready')]
+    public function openQuotationDraft(int $draftId): void
+    {
+        $this->tab = 'thread';
+        $this->dispatch('open-draft', draftId: $draftId, requestId: $this->request->id);
+    }
+
     /* ---------------- Phase 1.10 — state-machine transitions ---------------- */
 
     /**

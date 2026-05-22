@@ -182,6 +182,130 @@ class Editor extends Component
         $this->dispatch('toast', message: "Черновик {$q->internal_code} отменён", type: 'success');
     }
 
+    /**
+     * Phase 4: «📨 Отправить КП клиенту».
+     *
+     * Что делает:
+     *  1. Генерирует PDF через QuotationPdfService::render и сохраняет его
+     *     в storage/app/quotations/{q.id}_v{q.version}.pdf (idempotent —
+     *     если файл уже есть, переиспользует).
+     *  2. Ищет последнее inbound-письмо клиента в этой заявке. Если есть —
+     *     создаёт reply-draft (сохраняет thread по In-Reply-To/References),
+     *     иначе — compose-draft с темой `[M-YYYY-NNNN] subject`.
+     *  3. Заполняет body draft'а из шаблона (config('services.quotations.email_body_template')).
+     *  4. Создаёт EmailAttachment с PDF + прописывает marker
+     *     `{type: 'quotation_sent', quotation_id: N}` в `detected_artifacts`.
+     *     Post-send hook в ComposeForm::applyPostSendHooks подхватит marker:
+     *       - Quotation::markSent() — status=sent + sent_at + sent_email_message_id
+     *       - Request → Quoted через RequestStateService
+     *  5. Дисптачит `quotation-send-ready` → Detail переключает таб на
+     *     «Переписка» + диспатчит `open-draft` → ComposeForm раскрывает draft.
+     *     Менеджер может править recipients/body перед отправкой.
+     *
+     * Permission: assigned manager / acting / privileged (через ensureCanEdit).
+     * Если КП в финальном статусе (accepted/rejected/cancelled) — отказ.
+     */
+    public function sendQuotation(
+        int $quotationId,
+        \App\Services\Quotations\QuotationPdfService $pdfSvc,
+        \App\Services\Mail\EmailDraftService $draftSvc,
+    ): void {
+        $this->ensureCanEdit();
+
+        $q = $this->request->quotations()->whereKey($quotationId)->with('items')->first();
+        if (! $q) {
+            $this->dispatch('toast', message: 'КП не найдена.', type: 'error');
+            return;
+        }
+
+        // editable (draft) ИЛИ ещё не отправленная sent (resend). Финальные
+        // accepted/rejected/cancelled — нельзя; создайте новую версию.
+        $canSend = $q->status->isEditable() || $q->status === \App\Enums\QuotationStatus::Sent;
+        if (! $canSend) {
+            $this->dispatch('toast', message: 'КП в финальном статусе (' . $q->status->value . '). Создайте новую версию.', type: 'error');
+            return;
+        }
+
+        // 1. PDF binary → storage.
+        try {
+            $pdfBinary = $pdfSvc->render($q, isolated: true);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Editor::sendQuotation: PDF render failed', [
+                'quotation_id' => $q->id,
+                'error' => $e->getMessage(),
+            ]);
+            $this->dispatch('toast', message: 'Ошибка генерации PDF: ' . $e->getMessage(), type: 'error');
+            return;
+        }
+        $filename = $pdfSvc->filename($q);
+        $relativePath = sprintf('quotations/%d_v%d.pdf', $q->id, $q->version);
+        \Illuminate\Support\Facades\Storage::disk('local')->put($relativePath, $pdfBinary);
+
+        // 2. Найти last inbound-письмо клиента (для thread-reply).
+        $lastInbound = \App\Models\EmailMessage::query()
+            ->where('related_request_id', $this->request->id)
+            ->where('direction', \App\Enums\MailDirection::Inbound->value)
+            ->where('is_draft', false)
+            ->orderByDesc('id')
+            ->first();
+
+        // 3. Создать draft.
+        try {
+            $draft = $lastInbound
+                ? $draftSvc->createReply($this->request, $lastInbound, auth()->user(), replyAll: false)
+                : $draftSvc->createCompose($this->request, auth()->user());
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Editor::sendQuotation: createDraft failed', [
+                'quotation_id' => $q->id,
+                'error' => $e->getMessage(),
+            ]);
+            $this->dispatch('toast', message: 'Не удалось создать черновик: ' . $e->getMessage(), type: 'error');
+            return;
+        }
+
+        // 4. Body из шаблона + marker для post-send hook.
+        $template = (string) config(
+            'services.quotations.email_body_template',
+            "Здравствуйте, {client_name}!\n\nВысылаем коммерческое предложение по запросу {internal_code}.\nИтого: {total} ₽ (вкл. НДС).\nСрок действия: {valid_until}.\n\nС уважением,\n{sender_name}"
+        );
+        $body = strtr($template, [
+            '{client_name}' => $this->request->client_name ?: 'коллеги',
+            '{internal_code}' => $this->request->internal_code,
+            '{quotation_code}' => $q->internal_code . ' v' . $q->version,
+            '{total}' => number_format((float) $q->total, 2, '.', ' '),
+            '{valid_until}' => $q->valid_until?->format('d.m.Y') ?? '—',
+            '{sender_name}' => auth()->user()->name ?? '',
+        ]);
+
+        $artifacts = is_array($draft->detected_artifacts ?? null) ? $draft->detected_artifacts : [];
+        $artifacts[] = [
+            'type' => 'quotation_sent',
+            'quotation_id' => $q->id,
+            'transition_to_status' => 'quoted',
+            'pdf_path' => $relativePath,
+        ];
+
+        $draft->forceFill([
+            'body_plain' => $body,
+            'detected_artifacts' => $artifacts,
+        ])->save();
+
+        // 5. Attach PDF.
+        $draft->attachments()->create([
+            'filename' => $filename,
+            'mime_type' => 'application/pdf',
+            'size_bytes' => strlen($pdfBinary),
+            'content_id' => null,
+            'file_path' => $relativePath,
+            'disk' => 'local',
+            'is_inline' => false,
+        ]);
+
+        // 6. Открыть draft в Compose-табе (через Detail listener).
+        $this->dispatch('quotation-send-ready', draftId: $draft->id, requestId: $this->request->id);
+        $this->dispatch('toast', message: "Черновик готов: {$q->internal_code} v{$q->version}. Проверьте и отправьте.", type: 'success');
+    }
+
     public function switchToVersion(int $quotationId): void
     {
         $exists = $this->versions->firstWhere('id', $quotationId);

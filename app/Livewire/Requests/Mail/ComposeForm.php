@@ -516,13 +516,25 @@ class ComposeForm extends Component
     private function applyPostSendHooks(\App\Models\EmailMessage $sent): void
     {
         $artifacts = is_array($sent->detected_artifacts ?? null) ? $sent->detected_artifacts : [];
-        $marker = collect($artifacts)
-            ->first(fn ($a) => is_array($a) && ($a['type'] ?? null) === 'clarification_batch');
 
-        if ($marker === null) {
-            return;
+        // Обрабатываем все markers (порядок: clarification → quotation).
+        foreach ($artifacts as $marker) {
+            if (! is_array($marker)) {
+                continue;
+            }
+            match ($marker['type'] ?? null) {
+                'clarification_batch' => $this->handleClarificationBatchHook($sent, $marker),
+                'quotation_sent'      => $this->handleQuotationSentHook($sent, $marker),
+                default               => null, // unknown marker — ignore
+            };
         }
+    }
 
+    /**
+     * Foundation §6.2 — отправлены уточняющие вопросы клиенту.
+     */
+    private function handleClarificationBatchHook(\App\Models\EmailMessage $sent, array $marker): void
+    {
         $batchId = (int) ($marker['batch_id'] ?? 0);
         if ($batchId === 0) {
             return;
@@ -539,9 +551,7 @@ class ComposeForm extends Component
             'sent_message_id' => $sent->id,
         ]);
 
-        // 2. Transition Request → AwaitingClientClarification (если переход
-        // разрешён). transitionTo выкинет DomainException если нельзя —
-        // ловим non-fatal и логируем.
+        // 2. Transition Request → AwaitingClientClarification.
         $targetStatus = $marker['transition_to_status'] ?? null;
         if ($targetStatus !== 'awaiting_client_clarification') {
             return;
@@ -574,6 +584,77 @@ class ComposeForm extends Component
                 'ComposeForm: clarification post-send transition failed (non-fatal)',
                 [
                     'batch_id' => $batch->id,
+                    'request_id' => $request->id,
+                    'current_status' => $request->status->value,
+                    'error' => $e->getMessage(),
+                ],
+            );
+        }
+    }
+
+    /**
+     * Phase 4 — отправлено КП клиенту.
+     *  1. QuotationService::markSent — status=sent + sent_at + sent_email_message_id.
+     *  2. RequestStateService::transitionTo($req, Quoted) с audit event.
+     * Любые исключения — non-fatal (письмо уже отправлено), warning в лог.
+     */
+    private function handleQuotationSentHook(\App\Models\EmailMessage $sent, array $marker): void
+    {
+        $qId = (int) ($marker['quotation_id'] ?? 0);
+        if ($qId === 0) {
+            return;
+        }
+        $quotation = \App\Models\Quotation::find($qId);
+        if (! $quotation) {
+            return;
+        }
+
+        // 1. Mark quotation sent.
+        try {
+            app(\App\Services\Quotations\QuotationService::class)->markSent($quotation, $sent->id);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning(
+                'ComposeForm: quotation markSent failed (non-fatal)',
+                [
+                    'quotation_id' => $quotation->id,
+                    'sent_message_id' => $sent->id,
+                    'error' => $e->getMessage(),
+                ],
+            );
+            // Продолжаем — transition важнее, markSent потом можно поправить руками.
+        }
+
+        // 2. Transition Request → Quoted.
+        $request = $quotation->request;
+        if (! $request) {
+            return;
+        }
+        try {
+            app(\App\Services\Request\RequestStateService::class)->transitionTo(
+                $request,
+                \App\Enums\RequestStatus::Quoted,
+                auth()->user(),
+                [
+                    'event' => 'quotation_sent',
+                    'comment' => sprintf(
+                        'КП %s v%d отправлено клиенту.',
+                        $quotation->internal_code,
+                        $quotation->version,
+                    ),
+                    'payload' => [
+                        'quotation_id' => $quotation->id,
+                        'quotation_code' => $quotation->internal_code,
+                        'quotation_version' => $quotation->version,
+                        'sent_message_id' => $sent->id,
+                    ],
+                ],
+            );
+        } catch (\Throwable $e) {
+            // Не валим — заявка может быть уже в Quoted/AwaitingInvoice/etc.
+            \Illuminate\Support\Facades\Log::warning(
+                'ComposeForm: quotation post-send transition failed (non-fatal)',
+                [
+                    'quotation_id' => $quotation->id,
                     'request_id' => $request->id,
                     'current_status' => $request->status->value,
                     'error' => $e->getMessage(),

@@ -286,7 +286,15 @@
                        class="btn btn-sm">👁 Превью PDF</a>
                     <a href="{{ route('quotations.download', $q) }}"
                        class="btn btn-sm" title="Скачать PDF на диск">⤓ PDF</a>
-                    <button type="button" class="btn btn-primary btn-sm" disabled title="Фаза 4 — отправка через ComposeForm">📨 Отправить КП</button>
+                    <button type="button"
+                            wire:click="sendQuotation({{ $q->id }})"
+                            wire:loading.attr="disabled"
+                            wire:target="sendQuotation"
+                            wire:confirm="Подготовить КП {{ $q->internal_code }} v{{ $q->version }} к отправке клиенту? Откроется черновик с прикреплённым PDF — вы сможете проверить и отправить."
+                            class="btn btn-primary btn-sm"
+                            title="Сгенерировать PDF, прикрепить к письму и открыть Compose для проверки и отправки">
+                        📨 Отправить КП клиенту
+                    </button>
                 @else
                     <div class="text-[11.5px] text-fg-3">Просмотр read-only.</div>
                     <span class="flex-1"></span>
