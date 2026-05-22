@@ -49,6 +49,17 @@ class Index extends Component
     #[Url(as: 'link')]
     public string $linkage = 'all';
 
+    /**
+     * Показывать ли cross-mailbox копии писем. По умолчанию false:
+     * `DeliverToManagerInboxJob` дублирует входящее в личный INBOX
+     * менеджера — это техническая копия, не отдельное письмо.
+     * Detail.php их прячет через `detected_artifacts->>'cross_mailbox_copy_of' IS NULL`,
+     * здесь тот же фильтр. Toggle позволяет РОПу при необходимости
+     * аудитировать сами копии (debug-режим).
+     */
+    #[Url(as: 'copies')]
+    public bool $showCopies = false;
+
     /** id раскрытого письма (для inline-превью). */
     #[Url(as: 'expand')]
     public ?int $expandedId = null;
@@ -81,6 +92,12 @@ class Index extends Component
     public function setLinkage(string $l): void
     {
         $this->linkage = in_array($l, ['all', 'linked', 'unlinked'], true) ? $l : 'all';
+        $this->resetPage();
+    }
+
+    public function toggleShowCopies(): void
+    {
+        $this->showCopies = ! $this->showCopies;
         $this->resetPage();
     }
 
@@ -191,6 +208,13 @@ class Index extends Component
     private function buildQuery(): Builder
     {
         $q = EmailMessage::query()->notDraft();
+
+        // Скрываем cross-mailbox копии (DeliverToManagerInboxJob дублирует
+        // оригинал из общего ящика в личный INBOX менеджера). По умолчанию
+        // показываем только оригиналы — тот же фильтр что в Detail::mount.
+        if (! $this->showCopies) {
+            $q->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL");
+        }
 
         if ($this->mailboxId) {
             $q->where('mailbox_id', $this->mailboxId);

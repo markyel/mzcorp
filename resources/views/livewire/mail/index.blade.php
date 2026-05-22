@@ -70,6 +70,16 @@
                     {{ $label }}
                 </button>
             @endforeach
+
+            <span class="w-px h-5 bg-border mx-1"></span>
+
+            {{-- Cross-mailbox копии --}}
+            <button type="button" wire:click="toggleShowCopies"
+                    class="h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium
+                           {{ $showCopies ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface border border-border-strong text-fg-2 hover:text-fg-1' }}"
+                    title="Показывать копии писем в личных ящиках менеджеров (DeliverToManagerInboxJob)">
+                {{ $showCopies ? '☑' : '☐' }} копии
+            </button>
         </div>
     </div>
 
@@ -81,11 +91,14 @@
                 В этом периоде ничего не найдено. Попробуй сменить фильтры или расширить период.
             </div>
         @else
-            <table class="w-full text-[12.5px]">
+            {{-- overflow-x-auto на случай если экран уже min-width таблицы (1320px).
+                 Без этого 8 фиксированных колонок просто обрезаются по правому краю. --}}
+            <div class="overflow-x-auto">
+            <table class="w-full text-[12.5px]" style="min-width: 1320px">
                 <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
                     <tr>
-                        <th class="px-3 py-2 text-left w-[110px]">Дата</th>
-                        <th class="px-3 py-2 text-left">От → Кому</th>
+                        <th class="px-3 py-2 text-left w-[100px]">Дата</th>
+                        <th class="px-3 py-2 text-left w-[240px]">От → Кому</th>
                         <th class="px-3 py-2 text-left">Тема</th>
                         <th class="px-3 py-2 text-left w-[200px]">Ящик</th>
                         <th class="px-3 py-2 text-center w-[60px]">Влож.</th>
@@ -358,6 +371,7 @@
                     @endforeach
                 </tbody>
             </table>
+            </div>{{-- /overflow-x-auto --}}
 
             @if($emails->hasPages())
                 <div class="px-4 py-3 border-t border-border-subtle">{{ $emails->links() }}</div>
