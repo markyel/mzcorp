@@ -103,15 +103,26 @@
                    не сcroll-bar (scrollbar появлялся при overflow-x-auto). --}}
             <div class="overflow-hidden">
             <table class="w-full text-[12.5px] table-fixed">
+                {{-- Явный <colgroup> — на Tailwind 4 widths из <th> не всегда
+                     корректно применяются к table-fixed. <col> работает железно. --}}
+                <colgroup>
+                    <col style="width: 90px">
+                    <col style="width: 200px">
+                    <col>{{-- Тема / Заявка: занимает оставшееся пространство --}}
+                    <col style="width: 150px">
+                    <col style="width: 50px">
+                    <col style="width: 125px">
+                    <col style="width: 28px">
+                </colgroup>
                 <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
                     <tr>
-                        <th class="px-3 py-2 text-left w-[90px]">Дата</th>
-                        <th class="px-3 py-2 text-left w-[200px]">От → Кому</th>
+                        <th class="px-3 py-2 text-left">Дата</th>
+                        <th class="px-3 py-2 text-left">От → Кому</th>
                         <th class="px-3 py-2 text-left">Тема / Заявка</th>
-                        <th class="px-3 py-2 text-left w-[150px]">Ящик</th>
-                        <th class="px-3 py-2 text-center w-[50px]">Влож.</th>
-                        <th class="px-3 py-2 text-left w-[125px]">Категория</th>
-                        <th class="px-3 py-2 text-center w-[28px]"></th>
+                        <th class="px-3 py-2 text-left">Ящик</th>
+                        <th class="px-3 py-2 text-center">Влож.</th>
+                        <th class="px-3 py-2 text-left">Категория</th>
+                        <th class="px-3 py-2 text-center"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -141,12 +152,15 @@
                                 {{ $when?->format('d.m.Y') ?? '—' }}<br>
                                 <span class="text-fg-4">{{ $when?->format('H:i') ?? '' }}</span>
                             </td>
-                            <td class="px-3 py-2 max-w-[280px] align-top">
-                                <div class="flex items-center gap-1.5 text-[12px]">
+                            {{-- style="max-width:0" — CSS-trick для table-fixed:
+                                 заставляет td уважать width из <col> и не растягиваться
+                                 от длинного содержимого. truncate внутри div работает. --}}
+                            <td class="px-3 py-2 align-top" style="max-width: 0">
+                                <div class="flex items-center gap-1.5 text-[12px] min-w-0">
                                     @if($isInbound)
-                                        <span class="text-fg-3 text-[10px]">↘</span>
+                                        <span class="text-fg-3 text-[10px] shrink-0">↘</span>
                                     @else
-                                        <span class="text-fg-3 text-[10px]">↗</span>
+                                        <span class="text-fg-3 text-[10px] shrink-0">↗</span>
                                     @endif
                                     <span class="font-medium text-fg-1 truncate" title="{{ $em->from_email }}">{{ $fromText }}</span>
                                 </div>
@@ -160,7 +174,7 @@
                                     @endif
                                 </div>
                             </td>
-                            <td class="px-3 py-2 align-top">
+                            <td class="px-3 py-2 align-top" style="max-width: 0">
                                 <div class="text-fg-1 truncate" title="{{ $em->subject }}">
                                     {{ $em->subject ?: '(без темы)' }}
                                 </div>
@@ -176,7 +190,7 @@
                                     </div>
                                 @endif
                             </td>
-                            <td class="px-3 py-2 text-[11.5px] text-fg-2 align-top">
+                            <td class="px-3 py-2 text-[11.5px] text-fg-2 align-top" style="max-width: 0">
                                 @if($mb)
                                     <div class="truncate mono" title="{{ $mb->email }}">{{ $mb->email }}</div>
                                     @if($mb->owner)
