@@ -135,9 +135,10 @@ class Index extends Component
     }
 
     /**
-     * Список ящиков для dropdown'а фильтра. Берём все ящики (включая
-     * inactive и personal-без-managerial-роли) — для read-only audit'а
-     * полезно посмотреть archived/excluded mailbox'ы тоже.
+     * Список ящиков для dropdown'а фильтра. Показываем только syncable
+     * (общие shared + личные с managerial-ролью владельца). Личные
+     * ящики директора/секретаря/админа исключаются — их почта не входит
+     * в бизнес-аудит, и сам синк их не читает (см. Mailbox::scopeSyncable).
      *
      * @return Collection<int, Mailbox>
      */
@@ -145,6 +146,7 @@ class Index extends Component
     public function mailboxesForFilter(): Collection
     {
         return Mailbox::query()
+            ->syncable()
             ->select(['id', 'email', 'name', 'type', 'owner_user_id', 'is_active'])
             ->with('owner:id,name')
             ->orderBy('type')
@@ -208,6 +210,12 @@ class Index extends Component
     private function buildQuery(): Builder
     {
         $q = EmailMessage::query()->notDraft();
+
+        // Жёсткий scope: показываем письма ТОЛЬКО из syncable-ящиков
+        // (общие + личные менеджеров/РОПа). Почта директора/секретаря/админа
+        // не входит в бизнес-аудит — она и в IMAP не синкается. Подзапрос
+        // защищает от прямого подбора mailbox_id через URL.
+        $q->whereIn('mailbox_id', Mailbox::query()->syncable()->select('id'));
 
         // Скрываем cross-mailbox копии (DeliverToManagerInboxJob дублирует
         // оригинал из общего ящика в личный INBOX менеджера). По умолчанию
