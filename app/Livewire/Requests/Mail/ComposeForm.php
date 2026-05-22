@@ -112,7 +112,7 @@ class ComposeForm extends Component
     }
 
     #[On('open-reply')]
-    public function openReply(int $messageId, ?int $requestId = null, EmailDraftService $drafts): void
+    public function openReply(int $messageId, EmailDraftService $drafts, ?int $requestId = null): void
     {
         if ($requestId !== null && $requestId !== $this->requestId) {
             return;
@@ -121,7 +121,7 @@ class ComposeForm extends Component
     }
 
     #[On('open-reply-all')]
-    public function openReplyAll(int $messageId, ?int $requestId = null, EmailDraftService $drafts): void
+    public function openReplyAll(int $messageId, EmailDraftService $drafts, ?int $requestId = null): void
     {
         if ($requestId !== null && $requestId !== $this->requestId) {
             return;
@@ -152,17 +152,32 @@ class ComposeForm extends Component
     }
 
     #[On('open-compose')]
-    public function openCompose(?int $requestId = null, EmailDraftService $drafts): void
+    public function openCompose(EmailDraftService $drafts, ?int $requestId = null): void
     {
+        // Сигнатура: DI ПЕРЕД scalar-args с default value. В PHP 8.4
+        // обратный порядок hard-deprecated, в 8.3 warning. Livewire 3
+        // матчит named-args из dispatch payload по имени, не по позиции,
+        // так что порядок параметров безопасно менять.
         if ($requestId !== null && $requestId !== $this->requestId) {
             return;
         }
         if (! $this->canReply()) {
-            session()->flash('error', 'Отвечать может только назначенный менеджер.');
+            session()->flash('error', 'Отвечать может только назначенный менеджер, acting (делегат) или admin/РОП/директорат.');
             return;
         }
         $req = $this->request();
-        $draft = $drafts->createCompose($req, auth()->user());
+        try {
+            $draft = $drafts->createCompose($req, auth()->user());
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('ComposeForm::openCompose failed', [
+                'request_id' => $req->id,
+                'user_id' => auth()->id(),
+                'error' => $e->getMessage(),
+                'trace' => mb_substr($e->getTraceAsString(), 0, 2000),
+            ]);
+            session()->flash('error', 'Не удалось создать черновик: ' . $e->getMessage());
+            return;
+        }
         $this->hydrateFromDraft($draft);
         $this->replyToMessageId = null;
         $this->mode = 'compose';
