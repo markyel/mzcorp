@@ -53,6 +53,16 @@ class MailVerifyPhysicalCommand extends Command
         }
         if ($mailboxId) {
             $q->where('mailbox_id', $mailboxId);
+        } else {
+            // Личные ящики менеджеров не имеют MZ/* подпапок — verify
+            // не имеет смысла. Чтобы не ловить false-nowhere — фильтруем.
+            $personalMailboxIds = \App\Models\Mailbox::query()
+                ->where('type', \App\Enums\MailboxType::Personal->value)
+                ->pluck('id')
+                ->all();
+            if (! empty($personalMailboxIds)) {
+                $q->whereNotIn('mailbox_id', $personalMailboxIds);
+            }
         }
 
         $messages = $q->get();

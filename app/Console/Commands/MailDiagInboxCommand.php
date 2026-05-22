@@ -52,6 +52,16 @@ class MailDiagInboxCommand extends Command
         // Select только нужные поля: без body_plain/body_html/raw_source/headers
         // — это сотни KB на письмо. Без проекции команда падала OOM на
         // массовых INBOX'ах (500+ писем × 100KB body).
+        // Личные ящики менеджеров (MailboxType::Personal) НЕ имеют MZ/*
+        // подпапок по дизайну — там письма ДОЛЖНЫ быть в INBOX.
+        // MailDeliverToManagerService копирует письма из общего ящика в
+        // INBOX личного. Если включать их сюда — false-positive: «застряло»
+        // в личном INBOX, хотя так и должно быть.
+        $personalMailboxIds = \App\Models\Mailbox::query()
+            ->where('type', \App\Enums\MailboxType::Personal->value)
+            ->pluck('id')
+            ->all();
+
         $q = EmailMessage::query()
             ->select([
                 'id', 'mailbox_id', 'folder', 'direction', 'category',
@@ -70,6 +80,10 @@ class MailDiagInboxCommand extends Command
                        ->where('folder', 'not like', '%MZ|%');
                 })->orWhereNull('folder');
             });
+
+        if (! empty($personalMailboxIds)) {
+            $q->whereNotIn('mailbox_id', $personalMailboxIds);
+        }
 
         if ($mailboxId) {
             $q->where('mailbox_id', $mailboxId);
