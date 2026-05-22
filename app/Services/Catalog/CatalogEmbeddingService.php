@@ -831,35 +831,21 @@ class CatalogEmbeddingService
      */
     /**
      * Embed query text → pgvector literal `[v1,v2,...]` или null при ошибке.
+     * Кешируется для одного PHP-запроса в простой статической мапе по hash
+     * (если embed дёргается дважды для одного queryText — вызовов OpenAI
+     * всё равно один).
      *
-     * Двухуровневый кеш:
-     *  1) process-static — для одного PHP-запроса (если embed дёргается дважды).
-     *  2) Cache::driver (Redis/file) на 7 дней — для разных Livewire-апдейтов
-     *     по той же позиции / другим позициям с тем же query text. Embedding
-     *     `text-embedding-3-small` детерминирован, кеш безопасен. Это убирает
-     *     500-2000мс OpenAI HTTP-вызова при повторных открытиях окна.
-     *
-     * Killswitch: `services.catalog.search.embed_cache_enabled` (default true).
+     * Долгоживущего Cache::driver НЕ держим: queryText = parsed_name +
+     * parsed_article позиции, по каждой позиции менеджер обычно проходит
+     * один раз — кеш не переиспользовался бы между сессиями.
      */
     private function embedQueryToVectorLiteral(string $queryText, ?int $requestItemId): ?string
     {
-        static $procCache = [];
-        $hash = md5($queryText);
-        if (array_key_exists($hash, $procCache)) {
-            return $procCache[$hash];
+        static $cache = [];
+        $key = md5($queryText);
+        if (array_key_exists($key, $cache)) {
+            return $cache[$key];
         }
-
-        $useCache = (bool) config('services.catalog.search.embed_cache_enabled', true);
-        $cacheKey = 'catalog_embed:' . $hash;
-        $ttl = (int) config('services.catalog.search.embed_cache_ttl', 7 * 86400);
-
-        if ($useCache) {
-            $cached = \Illuminate\Support\Facades\Cache::get($cacheKey);
-            if (is_string($cached) && $cached !== '') {
-                return $procCache[$hash] = $cached;
-            }
-        }
-
         try {
             $result = $this->embedder->embed($queryText);
         } catch (\Throwable $e) {
@@ -868,29 +854,17 @@ class CatalogEmbeddingService
                 'query_preview' => mb_substr($queryText, 0, 80),
                 'error' => $e->getMessage(),
             ]);
-            return $procCache[$hash] = null;
+            return $cache[$key] = null;
         }
         $queryVector = $result['embedding'] ?? [];
         if (empty($queryVector)) {
-            return $procCache[$hash] = null;
+            return $cache[$key] = null;
         }
         $literal = '[' . implode(',', array_map(
             fn ($v) => is_finite($v) ? sprintf('%.7f', $v) : '0',
             $queryVector,
         )) . ']';
-
-        if ($useCache) {
-            try {
-                \Illuminate\Support\Facades\Cache::put($cacheKey, $literal, $ttl);
-            } catch (\Throwable $e) {
-                // Cache fail-soft: не валим запрос, embed уже получен.
-                Log::info('CatalogEmbeddingService: embed cache put failed', [
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-
-        return $procCache[$hash] = $literal;
+        return $cache[$key] = $literal;
     }
 
     /**

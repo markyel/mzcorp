@@ -428,6 +428,12 @@ class ItemCatalogLinkDialog extends Component
     #[Computed]
     public function textResultsBase(): array
     {
+        // Guard: до markReady (skeleton-фаза) не ходим в SQL. Без этого
+        // computed дёргается из availableUnits/textResults на первом render —
+        // выигрыш skeleton'а превращается в двойную работу.
+        if (! $this->resultsReady) {
+            return [];
+        }
         if ($this->mode !== 'text' || mb_strlen(trim($this->query)) < 2) {
             return [];
         }
@@ -455,6 +461,14 @@ class ItemCatalogLinkDialog extends Component
     #[Computed]
     public function similarResultsBase(): array
     {
+        // Guard: до markReady не запускаем embed + SQL. Это критично — без
+        // guard'а computed дёргается при первом render через availableUnits
+        // и chip-row, тогда поиск проходит ДВАЖДЫ (skeleton фаза +
+        // post-markReady фаза) и общее время вырастает в 2 раза вместо
+        // того чтобы UI чувствовался моментальным.
+        if (! $this->resultsReady) {
+            return [];
+        }
         if ($this->mode !== 'similar' || ! $this->requestItemId) {
             return [];
         }

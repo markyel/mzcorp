@@ -115,11 +115,6 @@ return [
             // Cap количества id'шников для backfill cosine: больше = шире
             // покрытие, но медленнее SQL (JOIN с 35K embeddings). 30 — баланс.
             'backfill_cap' => (int) env('CATALOG_SEARCH_BACKFILL_CAP', 30),
-            // Cache embed-вектора OpenAI (text-embedding-3-small детерминирован).
-            // 7 дней по умолчанию: позиции переоткрывают часто, экономим
-            // 500-2000мс на каждый повторный показ окна «Похожее».
-            'embed_cache_enabled' => filter_var(env('CATALOG_SEARCH_EMBED_CACHE_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
-            'embed_cache_ttl' => (int) env('CATALOG_SEARCH_EMBED_CACHE_TTL', 7 * 86400),
         ],
     ],
 
