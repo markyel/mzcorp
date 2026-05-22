@@ -323,7 +323,12 @@ return [
             [
                 'name' => 'Liftway-saas',
                 'sender_pattern' => '/@(liftway\.store|liftway\.ru)$/i',
-                'marker_pattern' => '/\bLZ-REQ-\d+\b/u',
+                // Поддержанные маркеры в subject/body:
+                //  - LZ-REQ-NNNN: исторический формат запроса от Liftway-saas.
+                //  - ЗК-YYYY-NNNN: новый формат «заказ» (наблюдался с 2026-05-22,
+                //    например «Запрос на подтверждение — ЗК-2026-0288 — Liftway.ru»).
+                //    Семантика та же — нам надо подтвердить наличие/цены/сроки.
+                'marker_pattern' => '/\b(LZ-REQ-\d+|ЗК-\d{4}-\d+)\b/u',
             ],
         ],
     ],

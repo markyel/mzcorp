@@ -8,102 +8,90 @@
             <span class="text-[11.5px] text-fg-3 mono">{{ $this->emails->total() }} писем за период</span>
         </div>
 
-        <div class="px-4 pb-3 flex items-center gap-2 flex-wrap text-[12.5px]">
+        {{-- Компактный фильтр-row: chip-кнопки сгруппированы в segmented-control
+             (border-rounded box, кнопки бок-о-бок без gap'ов между ними).
+             Подписи групп убраны — это съедало 100+px без пользы. На
+             1280-1440px фильтры помещаются в 1-2 строки (flex-wrap). --}}
+        <div class="px-4 pb-3 flex items-center gap-2 gap-y-2 flex-wrap text-[12px]">
             {{-- Ящик --}}
-            <span class="text-fg-3 uppercase tracking-wider text-[10.5px] font-semibold">Ящик:</span>
             <select wire:model.live="mailboxId"
-                    class="h-[26px] px-2 border border-border rounded-md bg-surface text-fg-1 text-[12px] outline-none focus:border-[var(--sky-500)] max-w-[260px]">
-                <option value="">Все ящики</option>
+                    class="h-[26px] px-2 border border-border rounded-md bg-surface text-fg-1 text-[12px] outline-none focus:border-[var(--sky-500)] max-w-[280px]"
+                    title="Фильтр по ящику">
+                <option value="">📬 Все ящики</option>
                 @foreach($this->mailboxesForFilter as $mb)
                     <option value="{{ $mb->id }}">
-                        {{ $mb->email }}
-                        @if($mb->type?->value === 'personal' && $mb->owner) · {{ $mb->owner->name }}@endif
-                        @if(! $mb->is_active) · ⏸ inactive @endif
+                        {{ $mb->email }}@if($mb->type?->value === 'personal' && $mb->owner) · {{ $mb->owner->name }}@endif
                     </option>
                 @endforeach
             </select>
 
-            <span class="w-px h-5 bg-border mx-1"></span>
-
             {{-- Направление --}}
-            <span class="text-fg-3 uppercase tracking-wider text-[10.5px] font-semibold">Направление:</span>
-            @php
-                $directions = ['' => 'Все', 'inbound' => 'Входящие', 'outbound' => 'Исходящие'];
-            @endphp
-            @foreach($directions as $k => $label)
-                @php $on = $direction === $k; @endphp
-                <button type="button" wire:click="setDirection('{{ $k }}')"
-                        class="h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium
-                               {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface border border-border-strong text-fg-2 hover:text-fg-1' }}">
-                    {{ $label }}
-                </button>
-            @endforeach
-
-            <span class="w-px h-5 bg-border mx-1"></span>
+            <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden">
+                @php $directions = ['' => 'Все', 'inbound' => 'Входящие', 'outbound' => 'Исходящие']; @endphp
+                @foreach($directions as $k => $label)
+                    @php $on = $direction === $k; @endphp
+                    <button type="button" wire:click="setDirection('{{ $k }}')"
+                            class="h-[26px] px-2.5 whitespace-nowrap font-medium border-r border-border last:border-r-0
+                                   {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface text-fg-2 hover:text-fg-1' }}">
+                        {{ $label }}
+                    </button>
+                @endforeach
+            </div>
 
             {{-- Период --}}
-            <span class="text-fg-3 uppercase tracking-wider text-[10.5px] font-semibold">Период:</span>
-            @php
-                $periods = ['today' => 'Сегодня', '7d' => '7 дн.', '30d' => '30 дн.', '90d' => '90 дн.', 'all' => 'Всё'];
-            @endphp
-            @foreach($periods as $k => $label)
-                @php $on = $period === $k; @endphp
-                <button type="button" wire:click="setPeriod('{{ $k }}')"
-                        class="h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium
-                               {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface border border-border-strong text-fg-2 hover:text-fg-1' }}">
-                    {{ $label }}
-                </button>
-            @endforeach
-
-            <span class="w-px h-5 bg-border mx-1"></span>
+            <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden">
+                @php $periods = ['today' => 'Сегодня', '7d' => '7 дн.', '30d' => '30 дн.', '90d' => '90 дн.', 'all' => 'Всё']; @endphp
+                @foreach($periods as $k => $label)
+                    @php $on = $period === $k; @endphp
+                    <button type="button" wire:click="setPeriod('{{ $k }}')"
+                            class="h-[26px] px-2.5 whitespace-nowrap font-medium border-r border-border last:border-r-0
+                                   {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface text-fg-2 hover:text-fg-1' }}">
+                        {{ $label }}
+                    </button>
+                @endforeach
+            </div>
 
             {{-- Привязка к заявке --}}
-            <span class="text-fg-3 uppercase tracking-wider text-[10.5px] font-semibold">Заявка:</span>
-            @php
-                $linkages = ['all' => 'Все', 'linked' => 'С заявкой', 'unlinked' => 'Без заявки'];
-            @endphp
-            @foreach($linkages as $k => $label)
-                @php $on = $linkage === $k; @endphp
-                <button type="button" wire:click="setLinkage('{{ $k }}')"
-                        class="h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium
-                               {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface border border-border-strong text-fg-2 hover:text-fg-1' }}">
-                    {{ $label }}
-                </button>
-            @endforeach
+            <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden">
+                @php $linkages = ['all' => 'Все', 'linked' => 'С заявкой', 'unlinked' => 'Без заявки']; @endphp
+                @foreach($linkages as $k => $label)
+                    @php $on = $linkage === $k; @endphp
+                    <button type="button" wire:click="setLinkage('{{ $k }}')"
+                            class="h-[26px] px-2.5 whitespace-nowrap font-medium border-r border-border last:border-r-0
+                                   {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface text-fg-2 hover:text-fg-1' }}">
+                        {{ $label }}
+                    </button>
+                @endforeach
+            </div>
 
-            <span class="w-px h-5 bg-border mx-1"></span>
+            {{-- Категория письма (gpt-4o classifier). --}}
+            <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden">
+                @php
+                    $categories = [
+                        ''               => 'Все категории',
+                        'client_request' => 'Заявка',
+                        'thread_reply'   => 'Ответ в треде',
+                        'irrelevant'     => 'Не клиентская',
+                        'unclassified'   => '? Не классиф.',
+                    ];
+                @endphp
+                @foreach($categories as $k => $label)
+                    @php $on = $category === $k; @endphp
+                    <button type="button" wire:click="setCategory('{{ $k }}')"
+                            class="h-[26px] px-2.5 whitespace-nowrap font-medium border-r border-border last:border-r-0
+                                   {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface text-fg-2 hover:text-fg-1' }}">
+                        {{ $label }}
+                    </button>
+                @endforeach
+            </div>
 
             {{-- Cross-mailbox копии --}}
             <button type="button" wire:click="toggleShowCopies"
-                    class="h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium
-                           {{ $showCopies ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface border border-border-strong text-fg-2 hover:text-fg-1' }}"
+                    class="h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium border
+                           {{ $showCopies ? 'bg-[var(--accent)] text-fg-on-accent border-[var(--accent)]' : 'bg-surface border-border text-fg-2 hover:text-fg-1' }}"
                     title="Показывать копии писем в личных ящиках менеджеров (DeliverToManagerInboxJob)">
                 {{ $showCopies ? '☑' : '☐' }} копии
             </button>
-        </div>
-
-        {{-- Категория письма (gpt-4o classifier) — отдельная строка фильтров.
-             Тип «рекламация / поставщик / бухгалтерия» в текущем enum не
-             выделен, всё это уходит в irrelevant. --}}
-        <div class="px-4 pb-3 flex items-center gap-1.5 flex-wrap text-[12.5px]">
-            <span class="text-fg-3 uppercase tracking-wider text-[10.5px] font-semibold mr-1">Категория:</span>
-            @php
-                $categories = [
-                    ''               => 'Все',
-                    'client_request' => 'Заявка клиента',
-                    'thread_reply'   => 'Ответ в треде',
-                    'irrelevant'     => 'Не клиентская',
-                    'unclassified'   => 'Не классифицировано',
-                ];
-            @endphp
-            @foreach($categories as $k => $label)
-                @php $on = $category === $k; @endphp
-                <button type="button" wire:click="setCategory('{{ $k }}')"
-                        class="h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium
-                               {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface border border-border-strong text-fg-2 hover:text-fg-1' }}">
-                    {{ $label }}
-                </button>
-            @endforeach
         </div>
     </div>
 
