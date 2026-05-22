@@ -818,6 +818,85 @@
                 <button class="btn btn-sm" disabled title="Доступно в Phase 3">🔄 Refresh цен (поставщики)</button>
             @endif
 
+            {{-- Phase 4 — inline-секция «Счета заявки» под action-panel.
+                 Показывает компактный список Invoice'ов с возможностью
+                 пометить оплаченным или аннулировать прямо отсюда.
+                 Полный листинг — на /dashboard/invoices. --}}
+            @php $invoices = $this->invoicesForRequest; @endphp
+            @if($invoices->isNotEmpty())
+                <div class="mt-3 pt-3 border-t border-border-subtle">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold">Счета · {{ $invoices->count() }}</span>
+                        <span class="flex-1"></span>
+                        <a href="{{ route('invoices.index') }}?q={{ $req->internal_code }}"
+                           wire:navigate
+                           class="text-[11px] text-[var(--sky-700)] hover:underline">все →</a>
+                    </div>
+                    <div class="space-y-2">
+                        @foreach($invoices as $inv)
+                            @php
+                                $invStatus = $inv->status?->value ?? 'pending';
+                                $isPending = $invStatus === 'pending';
+                                $isOverdue = $isPending && $inv->expires_at?->isPast();
+                                $chipMap = [
+                                    'pending'   => 'chip-warn',
+                                    'paid'      => 'chip-ok',
+                                    'expired'   => 'chip-danger',
+                                    'cancelled' => 'chip-paused',
+                                ];
+                                $labelMap = [
+                                    'pending'   => 'Ожидает',
+                                    'paid'      => 'Оплачен',
+                                    'expired'   => 'Просрочен',
+                                    'cancelled' => 'Аннулирован',
+                                ];
+                                $daysRemain = ($isPending && $inv->expires_at) ? now()->diffInDays($inv->expires_at, false) : null;
+                            @endphp
+                            <div wire:key="inv-{{ $inv->id }}"
+                                 class="p-2 rounded-md border border-border bg-surface {{ $isOverdue ? 'bg-red-50 border-red-200' : '' }}">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="chip {{ $chipMap[$invStatus] ?? 'chip-neutral' }}"><span class="dot"></span>{{ $labelMap[$invStatus] ?? $invStatus }}</span>
+                                    <span class="mono text-[12px] text-fg-1 truncate" title="{{ $inv->invoice_number }}">№{{ $inv->invoice_number }}</span>
+                                </div>
+                                <div class="text-[11px] text-fg-3 mono flex flex-wrap gap-x-2">
+                                    <span>выст. {{ $inv->issued_at?->format('d.m.Y') }}</span>
+                                    @if($isPending && $inv->expires_at)
+                                        @if($isOverdue)
+                                            <span class="text-red-700 font-medium">⚠ просрочен {{ abs((int) $daysRemain) }} дн.</span>
+                                        @elseif($daysRemain !== null && $daysRemain <= 2)
+                                            <span class="text-amber-700">⏳ осталось {{ (int) $daysRemain }} дн.</span>
+                                        @else
+                                            <span>до {{ $inv->expires_at->format('d.m.Y') }}</span>
+                                        @endif
+                                    @elseif($invStatus === 'paid' && $inv->paid_at)
+                                        <span class="text-emerald-700">оплачен {{ $inv->paid_at->format('d.m.Y') }}</span>
+                                    @elseif($invStatus === 'cancelled' && $inv->cancellation_reason)
+                                        <span class="text-fg-3 truncate" title="{{ $inv->cancellation_reason }}">отм.: {{ \Illuminate\Support\Str::limit($inv->cancellation_reason, 30) }}</span>
+                                    @endif
+                                </div>
+                                @if($inv->amount_snapshot !== null)
+                                    <div class="text-[11.5px] text-fg-2 mono mt-0.5">
+                                        {{ number_format((float) $inv->amount_snapshot, 2, '.', ' ') }} ₽
+                                    </div>
+                                @endif
+                                @if($isPending && $canManage)
+                                    <div class="flex gap-1.5 mt-1.5">
+                                        <button type="button"
+                                                wire:click="markInvoicePaid({{ $inv->id }})"
+                                                wire:confirm="Пометить счёт №{{ $inv->invoice_number }} как оплаченный?"
+                                                class="btn btn-sm btn-primary text-[11px] px-2 py-0.5">✓ Оплачен</button>
+                                        <button type="button"
+                                                onclick="const r = prompt('Причина аннулирования счёта №{{ $inv->invoice_number }}?'); if (r) @this.call('cancelInvoice', {{ $inv->id }}, r);"
+                                                class="btn btn-sm text-[11px] px-2 py-0.5 text-red-700"
+                                                title="Аннулировать счёт">✕ Аннул.</button>
+                                    </div>
+                                @endif
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
+
             {{-- Слияние дубликата (Phase merge). Owner/acting/privileged.
                  Кнопка показывается только когда заявка active (есть с чем сливать). --}}
             @if(($canManage || $canReassign) && ! in_array($req->status, [$RS::Paused, $RS::ClosedWon, $RS::ClosedLost, $RS::Pending, $RS::Paid], true))

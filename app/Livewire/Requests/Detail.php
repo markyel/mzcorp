@@ -1122,6 +1122,98 @@ class Detail extends Component
         $this->dispatch('open-draft', draftId: $draftId, requestId: $this->request->id);
     }
 
+    /* ---------------- Phase 4 — inline Invoices section --------------------- */
+
+    /**
+     * Счета заявки (inline-секция в action-panel). Эта computed-prop
+     * — не для отдельного pagination, а для компактного списка из 3-5
+     * последних invoice'ов. Полный листинг — на /dashboard/invoices.
+     */
+    #[\Livewire\Attributes\Computed]
+    public function invoicesForRequest()
+    {
+        return \App\Models\Invoice::query()
+            ->where('request_id', $this->request->id)
+            ->with('createdByUser:id,name')
+            ->orderByDesc('id')
+            ->limit(10)
+            ->get();
+    }
+
+    /**
+     * Отметить счёт оплаченным прямо из карточки заявки.
+     * Permission: owner / acting (delegation) / privileged (head_of_sales,
+     * director, admin). Inline-проверка через Request::isAccessibleBy.
+     */
+    public function markInvoicePaid(int $invoiceId, \App\Services\Invoices\InvoiceService $service): void
+    {
+        $user = auth()->user();
+        $privileged = $user?->hasAnyRole([
+            Role::HeadOfSales->value,
+            Role::Director->value,
+            Role::Admin->value,
+        ]) ?? false;
+        if (! $user || (! $privileged && ! $this->request->isAccessibleBy($user))) {
+            $this->dispatch('toast', message: 'Нет прав.', type: 'error');
+            return;
+        }
+        $invoice = \App\Models\Invoice::where('request_id', $this->request->id)
+            ->whereKey($invoiceId)
+            ->first();
+        if (! $invoice) {
+            return;
+        }
+        try {
+            $service->markPaid($invoice, auth()->user());
+        } catch (\Throwable $e) {
+            $this->dispatch('toast', message: 'Ошибка: ' . $e->getMessage(), type: 'error');
+            return;
+        }
+        $this->dispatch('toast', message: "Счёт №{$invoice->invoice_number} оплачен.", type: 'success');
+        $this->dispatch('request-state-changed');
+        unset($this->invoicesForRequest);
+        $this->request->refresh();
+    }
+
+    /**
+     * Аннулировать счёт. Подтверждение через wire:confirm + prompt для
+     * reason'а (передаётся как параметр от UI).
+     */
+    public function cancelInvoice(int $invoiceId, string $reason, \App\Services\Invoices\InvoiceService $service): void
+    {
+        $user = auth()->user();
+        $privileged = $user?->hasAnyRole([
+            Role::HeadOfSales->value,
+            Role::Director->value,
+            Role::Admin->value,
+        ]) ?? false;
+        if (! $user || (! $privileged && ! $this->request->isAccessibleBy($user))) {
+            $this->dispatch('toast', message: 'Нет прав.', type: 'error');
+            return;
+        }
+        $reason = trim($reason);
+        if ($reason === '') {
+            $this->dispatch('toast', message: 'Укажите причину аннулирования.', type: 'error');
+            return;
+        }
+        $invoice = \App\Models\Invoice::where('request_id', $this->request->id)
+            ->whereKey($invoiceId)
+            ->first();
+        if (! $invoice) {
+            return;
+        }
+        try {
+            $service->cancel($invoice, $reason, auth()->user());
+        } catch (\Throwable $e) {
+            $this->dispatch('toast', message: 'Ошибка: ' . $e->getMessage(), type: 'error');
+            return;
+        }
+        $this->dispatch('toast', message: "Счёт №{$invoice->invoice_number} аннулирован.", type: 'success');
+        $this->dispatch('request-state-changed');
+        unset($this->invoicesForRequest);
+        $this->request->refresh();
+    }
+
     /* ---------------- Phase 1.10 — state-machine transitions ---------------- */
 
     /**
