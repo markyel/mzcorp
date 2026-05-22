@@ -81,6 +81,30 @@
                 {{ $showCopies ? '☑' : '☐' }} копии
             </button>
         </div>
+
+        {{-- Категория письма (gpt-4o classifier) — отдельная строка фильтров.
+             Тип «рекламация / поставщик / бухгалтерия» в текущем enum не
+             выделен, всё это уходит в irrelevant. --}}
+        <div class="px-4 pb-3 flex items-center gap-1.5 flex-wrap text-[12.5px]">
+            <span class="text-fg-3 uppercase tracking-wider text-[10.5px] font-semibold mr-1">Категория:</span>
+            @php
+                $categories = [
+                    ''               => 'Все',
+                    'client_request' => 'Заявка клиента',
+                    'thread_reply'   => 'Ответ в треде',
+                    'irrelevant'     => 'Не клиентская',
+                    'unclassified'   => 'Не классифицировано',
+                ];
+            @endphp
+            @foreach($categories as $k => $label)
+                @php $on = $category === $k; @endphp
+                <button type="button" wire:click="setCategory('{{ $k }}')"
+                        class="h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium
+                               {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface border border-border-strong text-fg-2 hover:text-fg-1' }}">
+                    {{ $label }}
+                </button>
+            @endforeach
+        </div>
     </div>
 
     {{-- List --}}
@@ -91,20 +115,21 @@
                 В этом периоде ничего не найдено. Попробуй сменить фильтры или расширить период.
             </div>
         @else
-            {{-- overflow-x-auto на случай если экран уже min-width таблицы (1320px).
-                 Без этого 8 фиксированных колонок просто обрезаются по правому краю. --}}
-            <div class="overflow-x-auto">
-            <table class="w-full text-[12.5px]" style="min-width: 1320px">
+            {{-- table-fixed: колонки получают строго объявленные widths,
+                 «Тема» (без width) занимает весь оставшийся flex. Без min-width
+                 — на узких экранах truncate срабатывает в каждой ячейке.
+                 «Заявка» сделана как chip ВНУТРИ колонки темы (отдельной
+                 колонки больше нет — экономим ~120px ширины). --}}
+            <table class="w-full text-[12.5px] table-fixed">
                 <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
                     <tr>
-                        <th class="px-3 py-2 text-left w-[100px]">Дата</th>
-                        <th class="px-3 py-2 text-left w-[240px]">От → Кому</th>
-                        <th class="px-3 py-2 text-left">Тема</th>
-                        <th class="px-3 py-2 text-left w-[200px]">Ящик</th>
-                        <th class="px-3 py-2 text-center w-[60px]">Влож.</th>
-                        <th class="px-3 py-2 text-left w-[130px]">Категория</th>
-                        <th class="px-3 py-2 text-left w-[140px]">Заявка</th>
-                        <th class="px-3 py-2 text-center w-[34px]"></th>
+                        <th class="px-3 py-2 text-left w-[90px]">Дата</th>
+                        <th class="px-3 py-2 text-left w-[200px]">От → Кому</th>
+                        <th class="px-3 py-2 text-left">Тема / Заявка</th>
+                        <th class="px-3 py-2 text-left w-[150px]">Ящик</th>
+                        <th class="px-3 py-2 text-center w-[50px]">Влож.</th>
+                        <th class="px-3 py-2 text-left w-[125px]">Категория</th>
+                        <th class="px-3 py-2 text-center w-[28px]"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -153,10 +178,21 @@
                                     @endif
                                 </div>
                             </td>
-                            <td class="px-3 py-2 max-w-[420px] align-top">
+                            <td class="px-3 py-2 align-top">
                                 <div class="text-fg-1 truncate" title="{{ $em->subject }}">
                                     {{ $em->subject ?: '(без темы)' }}
                                 </div>
+                                @if($req)
+                                    <div class="mt-0.5">
+                                        <a href="{{ route('requests.show', $req->id) }}"
+                                           wire:navigate
+                                           onclick="event.stopPropagation()"
+                                           class="inline-flex items-center gap-1 text-[11px] text-[var(--sky-700)] hover:underline mono"
+                                           title="Открыть карточку заявки">
+                                            ↗ {{ $req->internal_code ?? '#'.$req->id }}
+                                        </a>
+                                    </div>
+                                @endif
                             </td>
                             <td class="px-3 py-2 text-[11.5px] text-fg-2 align-top">
                                 @if($mb)
@@ -182,18 +218,6 @@
                                     <span class="text-fg-4 text-[11px]">—</span>
                                 @endif
                             </td>
-                            <td class="px-3 py-2 align-top">
-                                @if($req)
-                                    <a href="{{ route('requests.show', $req->id) }}"
-                                       wire:navigate
-                                       onclick="event.stopPropagation()"
-                                       class="chip chip-info hover:opacity-80">
-                                        <span class="dot"></span>{{ $req->internal_code ?? '#'.$req->id }}
-                                    </a>
-                                @else
-                                    <span class="text-fg-4 text-[11px]">—</span>
-                                @endif
-                            </td>
                             <td class="px-3 py-2 text-center align-top">
                                 <span class="text-fg-3 text-[12px]">
                                     {{ $isExpanded ? '▲' : '▼' }}
@@ -205,7 +229,7 @@
                         @if($isExpanded)
                             @php $full = $this->expandedEmail; @endphp
                             <tr wire:key="email-expand-{{ $em->id }}" class="bg-surface-2 border-b border-border">
-                                <td colspan="8" class="p-0">
+                                <td colspan="7" class="p-0">
                                     @if(! $full)
                                         <div class="px-6 py-4 text-fg-3">Загрузка…</div>
                                     @else
@@ -371,7 +395,6 @@
                     @endforeach
                 </tbody>
             </table>
-            </div>{{-- /overflow-x-auto --}}
 
             @if($emails->hasPages())
                 <div class="px-4 py-3 border-t border-border-subtle">{{ $emails->links() }}</div>

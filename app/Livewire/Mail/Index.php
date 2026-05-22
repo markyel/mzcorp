@@ -50,6 +50,15 @@ class Index extends Component
     public string $linkage = 'all';
 
     /**
+     * Фильтр по категории gpt-4o классификатора:
+     *   '' = все
+     *   'client_request' / 'thread_reply' / 'irrelevant' — конкретная категория
+     *   'unclassified' — category IS NULL (новые письма до classify-фазы)
+     */
+    #[Url(as: 'cat')]
+    public string $category = '';
+
+    /**
      * Показывать ли cross-mailbox копии писем. По умолчанию false:
      * `DeliverToManagerInboxJob` дублирует входящее в личный INBOX
      * менеджера — это техническая копия, не отдельное письмо.
@@ -92,6 +101,13 @@ class Index extends Component
     public function setLinkage(string $l): void
     {
         $this->linkage = in_array($l, ['all', 'linked', 'unlinked'], true) ? $l : 'all';
+        $this->resetPage();
+    }
+
+    public function setCategory(string $c): void
+    {
+        $allowed = array_merge([''], EmailCategory::values(), ['unclassified']);
+        $this->category = in_array($c, $allowed, true) ? $c : '';
         $this->resetPage();
     }
 
@@ -249,6 +265,12 @@ class Index extends Component
             $q->whereNotNull('related_request_id');
         } elseif ($this->linkage === 'unlinked') {
             $q->whereNull('related_request_id');
+        }
+
+        if ($this->category === 'unclassified') {
+            $q->whereNull('category');
+        } elseif (in_array($this->category, EmailCategory::values(), true)) {
+            $q->where('category', $this->category);
         }
 
         return $q;
