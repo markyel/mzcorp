@@ -131,6 +131,57 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
 
             $state->uid_validity = $serverUidValidity;
 
+            // FIRST-TIME WATERMARK: при первом подключении ящика мы НЕ хотим
+            // ретроспективно затаскивать всю историю INBOX/Sent — это создавало
+            // фантомные Request из старых писем (supplier-цепочки, уже
+            // отработанные менеджером заявки и т.п.) + сотни LLM-вызовов на
+            // классификацию. Семантика «начинаем читать с момента подключения».
+            //
+            // Определяем first-time по комбинации:
+            //   - sync_count == 0  (ещё ни разу не синкались),
+            //   - last_uid_seen == 0  (нет watermark'а от предыдущего синка),
+            //   - state НЕ был только что переинициализирован UIDVALIDITY-сбросом
+            //     (там тоже last_uid_seen=0, но это полный resync известного ящика,
+            //     его обрабатываем штатно — а не watermark'ом).
+            //
+            // Старая история останется на IMAP-сервере, в email_messages не льётся.
+            // Если нужно подтянуть конкретное письмо ретроспективно — отдельная
+            // команда (mail:reingest-uid или ручной --mailbox=N --since-uid=K).
+            $uidValidityJustReset = $state->uid_validity === $serverUidValidity
+                && $state->last_uid_seen === 0
+                && $state->exists
+                && $state->sync_count > 0;
+
+            $isFirstSync = ! $state->exists
+                || ($state->sync_count === 0 && $state->last_uid_seen === 0 && ! $uidValidityJustReset);
+
+            if ($isFirstSync) {
+                $allUids = (array) $folder->getClient()
+                    ->getConnection()
+                    ->getUid()
+                    ->validatedData();
+                $maxUid = ! empty($allUids) ? (int) max(array_map('intval', $allUids)) : 0;
+
+                $state->last_uid_seen = $maxUid;
+                $state->last_synced_at = now();
+                $state->sync_count = 1;
+                $state->save();
+
+                $mailbox->forceFill([
+                    'last_synced_at' => now(),
+                    'last_error_at' => null,
+                    'last_error_message' => null,
+                ])->save();
+
+                Log::info('SyncMailboxFolderJob: first-time watermark set, история пропущена', [
+                    'mailbox_id' => $mailbox->id,
+                    'folder' => $folder->path,
+                    'watermark_uid' => $maxUid,
+                ]);
+
+                return;
+            }
+
             $newSinceUid = $state->last_uid_seen + 1;
             $stats = $this->fetchAndPersist($folder, $newSinceUid, $mailbox, $direction, $persister);
 
