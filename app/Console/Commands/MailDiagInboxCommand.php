@@ -61,9 +61,14 @@ class MailDiagInboxCommand extends Command
             ->where('direction', MailDirection::Inbound->value)
             ->where('created_at', '>=', $since)
             // INBOX (любой регистр и язык) — всё что не уехало в /MZ/...
+            // Менеджерские папки на Yandex IMAP — «MZ|Ivanov», на других
+            // серверах могут быть «MZ/Ivanov». Учитываем оба разделителя,
+            // иначе письма уже в MZ-папках попадают в «застрявшие».
             ->where(function ($w) {
-                $w->where('folder', 'not like', '%/MZ/%')
-                  ->orWhereNull('folder');
+                $w->where(function ($w2) {
+                    $w2->where('folder', 'not like', '%MZ/%')
+                       ->where('folder', 'not like', '%MZ|%');
+                })->orWhereNull('folder');
             });
 
         if ($mailboxId) {

@@ -262,8 +262,10 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
             // у которой назначен менеджер — двигаем в его папку.
             try {
                 $message->refresh();
-                $needsManualRoute = $message->related_request_id
-                    && ! str_contains((string) $message->folder, '/MZ/');
+                $folderStr = (string) $message->folder;
+                // Yandex IMAP использует «|» как разделитель папок, остальные «/».
+                $alreadyRouted = str_contains($folderStr, 'MZ/') || str_contains($folderStr, 'MZ|');
+                $needsManualRoute = $message->related_request_id && ! $alreadyRouted;
                 if ($needsManualRoute) {
                     $related = \App\Models\Request::query()
                         ->whereKey($message->related_request_id)

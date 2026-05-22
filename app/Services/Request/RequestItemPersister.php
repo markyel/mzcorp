@@ -238,9 +238,13 @@ class RequestItemPersister
         // MOVE в INBOX/MZ/{Lastname} — при первом создании ИЛИ если письмо
         // ещё не маршрутизировано (backfill: Request создан старым AI-classify
         // pipeline до того, как добавили folder routing). Идемпотентность —
-        // по проверке наличия «/MZ/» в текущем пути.
-        $needsRouting = $justCreated
-            || ! str_contains((string) $message->folder, '/MZ/');
+        // по проверке наличия «MZ» как имени подпапки в текущем пути.
+        // Yandex IMAP использует «|» как разделитель, остальные «/» — учитываем
+        // оба, иначе письма уже в MZ|Manager детектились как «нужно
+        // route» и вызывали повторный IMAP MOVE.
+        $folderStr = (string) $message->folder;
+        $alreadyRouted = str_contains($folderStr, 'MZ/') || str_contains($folderStr, 'MZ|');
+        $needsRouting = $justCreated || ! $alreadyRouted;
 
         // Phase 1.8d-pending fix: parser-driven activation. Если items
         // добавлены к существующему Pending-Request у которого письмо уже
