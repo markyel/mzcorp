@@ -751,10 +751,16 @@
                             title="Клиент попросил выставить счёт. Если AI не уловил intent.">📋 Запросил счёт</button>
                 @endif
 
+                {{-- 📋 Выставить счёт — открывает диалог с вводом номера,
+                     даты, срока действия (5 раб.дн по умолчанию).
+                     Создаёт Invoice + переводит заявку в Invoiced.
+                     Показывается из любого статуса, откуда разрешён переход
+                     в Invoiced (карта переходов из RequestStatus). --}}
                 @if($allow($RS::Invoiced))
-                    <button type="button" wire:click="transitionStatus('invoiced')"
+                    <button type="button"
+                            wire:click="$dispatch('open-issue-invoice-dialog')"
                             class="btn btn-sm"
-                            @disabled(! $canManage)>💴 Счёт отправлен</button>
+                            @disabled(! $canManage)>📋 Выставить счёт</button>
                 @endif
 
                 @if($allow($RS::Paid))
@@ -822,6 +828,7 @@
             <livewire:requests.pause-dialog :request="$req" wire:key="pause-{{ $req->id }}" />
             <livewire:requests.postpone-dialog :request="$req" wire:key="postpone-{{ $req->id }}" />
             <livewire:requests.close-lost-dialog :request="$req" wire:key="close-lost-{{ $req->id }}" />
+            <livewire:requests.issue-invoice-dialog :request="$req" wire:key="issue-invoice-{{ $req->id }}" />
             {{-- Phase 7: ручной доматчинг строк КП к позициям заявки. --}}
             <livewire:requests.quotes.match-request-item-dialog :request="$req" wire:key="quote-match-{{ $req->id }}" />
         </div>

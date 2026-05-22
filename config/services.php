@@ -365,6 +365,19 @@ return [
     ],
 
     /*
+    | Phase 4: настройки счетов.
+    | См. App\Services\Invoices\InvoiceService и InvoicesCheckExpiryCommand.
+    */
+    'invoices' => [
+        /*
+        | Срок действия счёта по умолчанию (рабочих дней с учётом
+        | российского производственного календаря — см. config/russian_calendar.php).
+        | Менеджер может изменить в диалоге выставления.
+        */
+        'default_validity_business_days' => (int) env('INVOICE_DEFAULT_VALIDITY_BUSINESS_DAYS', 5),
+    ],
+
+    /*
     | Phase 1.10: state-machine заявок (Foundation §5.4).
     | См. RequestPauseService и `requests:resume-paused` cron.
     */

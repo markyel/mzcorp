@@ -34,14 +34,22 @@ class RequestStateService
 
     /**
      * @param  array{closed_lost_reason?: string, closed_lost_comment?: string, closed_lost_quote?: string, closed_lost_source_message_id?: int, comment?: string, event?: string, payload?: array}  $context
+     * @param  bool  $systemTransition  Cron / scheduler / автоматический процесс
+     *                                  вызывает без User → пропускаем permission
+     *                                  check. В audit `by_user_id = null`.
+     *                                  Использовать ТОЛЬКО для system actor'ов
+     *                                  (cron, jobs), не для UI.
      */
     public function transitionTo(
         Request $request,
         RequestStatus $to,
         ?User $author,
         array $context = [],
+        bool $systemTransition = false,
     ): Request {
-        $this->ensureCanTransition($request, $author);
+        if (! $systemTransition) {
+            $this->ensureCanTransition($request, $author);
+        }
 
         $from = $request->status;
         if ($from === $to) {

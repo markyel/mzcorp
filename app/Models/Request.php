@@ -217,6 +217,15 @@ class Request extends Model
     }
 
     /**
+     * Счета по заявке (Phase 4). Может быть несколько — после expire/cancel
+     * менеджер может перевыставить новый. Сортировка id desc — последний сверху.
+     */
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(Invoice::class)->orderByDesc('id');
+    }
+
+    /**
      * Активные делегации (ended_at IS NULL) — обычно 0 или 1 одновременно,
      * но schema допускает несколько (теоретически несколько оригиналов
      * для одной заявки никогда не будет, но запас).

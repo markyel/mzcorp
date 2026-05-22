@@ -81,3 +81,13 @@ Schedule::command('catalog:embed')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Phase 4: ежедневно в 07:00 проверяем просроченные счета. По истечении
+// expires_at счёт → expired, Request возвращается в AwaitingInvoice
+// (если у него нет других pending invoices — для re-issue). См.
+// InvoicesCheckExpiryCommand + Services/Invoices/InvoiceService::expire.
+Schedule::command('invoices:check-expiry')
+    ->dailyAt('07:00')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer();
