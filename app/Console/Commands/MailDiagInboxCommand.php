@@ -49,7 +49,15 @@ class MailDiagInboxCommand extends Command
 
         $since = now()->subHours($sinceHours);
 
+        // Select только нужные поля: без body_plain/body_html/raw_source/headers
+        // — это сотни KB на письмо. Без проекции команда падала OOM на
+        // массовых INBOX'ах (500+ писем × 100KB body).
         $q = EmailMessage::query()
+            ->select([
+                'id', 'mailbox_id', 'folder', 'direction', 'category',
+                'category_confidence', 'related_request_id', 'subject',
+                'from_email', 'from_name', 'created_at',
+            ])
             ->where('direction', MailDirection::Inbound->value)
             ->where('created_at', '>=', $since)
             // INBOX (любой регистр и язык) — всё что не уехало в /MZ/...
@@ -201,7 +209,13 @@ class MailDiagInboxCommand extends Command
                     continue;
                 }
                 try {
-                    $r = $router->routeToManager($m, $related->assignedUser);
+                    // Перегружаем полную модель — router читает imap_uid и др.
+                    $full = EmailMessage::find($m->id);
+                    if (! $full) {
+                        $stats['skipped']++;
+                        continue;
+                    }
+                    $r = $router->routeToManager($full, $related->assignedUser);
                     if ($r !== null) {
                         $stats['ok']++;
                     } else {
