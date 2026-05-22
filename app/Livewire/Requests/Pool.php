@@ -55,6 +55,16 @@ class Pool extends Component
     #[Url(as: 'bucket')]
     public string $bucket = 'active';
 
+    /**
+     * Фильтр «по конкретному менеджеру» (assigned_user_id = N) — доступен
+     * только для ролей с canSeeAll (РОП / директорат / секретарь / админ).
+     * Менеджер этим фильтром управлять не может (видит только свои).
+     * При активном фильтре scope автоматически считается 'all' внутри
+     * render(), чтобы не было конфликта «мои + чужой».
+     */
+    #[Url(as: 'mgr')]
+    public ?int $assignedUserId = null;
+
     public function updatingSearch(): void
     {
         $this->resetPage();
@@ -75,6 +85,26 @@ class Pool extends Component
         $this->resetPage();
         // При переключении bucket — сбрасываем уточняющий status-фильтр.
         $this->status = '';
+    }
+
+    public function updatingAssignedUserId(): void
+    {
+        $this->resetPage();
+    }
+
+    /**
+     * Установить фильтр по менеджеру (или сбросить, передав null/0).
+     * При активном фильтре по менеджеру — scope автоматически 'all' и
+     * unassignedOnly выключается (конфликт «нераспределённые vs менеджер»).
+     */
+    public function setManagerFilter(?int $userId): void
+    {
+        $this->assignedUserId = ($userId !== null && $userId > 0) ? $userId : null;
+        if ($this->assignedUserId !== null) {
+            $this->scope = 'all';
+            $this->unassignedOnly = false;
+        }
+        $this->resetPage();
     }
 
     /**
@@ -183,6 +213,49 @@ class Pool extends Component
         ]));
     }
 
+    /**
+     * Список менеджеров для UI-фильтра. Берём роли manager + head_of_sales
+     * (это те, кому реально могут быть назначены заявки — см.
+     * Role::requestHandlerRoles). Подгружаем простую коллекцию id+name,
+     * сортируем по имени для предсказуемого порядка в dropdown.
+     *
+     * Возвращается только если canSeeAll (фильтр не имеет смысла для
+     * менеджера — он видит только свои).
+     *
+     * @return \Illuminate\Support\Collection<int, array{id:int, name:string}>
+     */
+    #[Computed]
+    public function availableManagers(): Collection
+    {
+        if (! $this->canSeeAll) {
+            return collect();
+        }
+        return \App\Models\User::query()
+            ->role(Role::requestHandlerRoles())
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn ($u) => ['id' => (int) $u->id, 'name' => (string) $u->name])
+            ->values();
+    }
+
+    /**
+     * Имя выбранного менеджера (для chip-подписи). null если фильтр
+     * не активен или менеджер не найден.
+     */
+    #[Computed]
+    public function selectedManagerName(): ?string
+    {
+        if ($this->assignedUserId === null) {
+            return null;
+        }
+        foreach ($this->availableManagers as $m) {
+            if ($m['id'] === $this->assignedUserId) {
+                return $m['name'];
+            }
+        }
+        return null;
+    }
+
     public function render()
     {
         $query = Request::query()
@@ -224,7 +297,17 @@ class Pool extends Component
         // Foundation Фаза 2: «свои» теперь включает active delegations
         // (заявки, временно открытые ему коллегой в отпуске).
         $effectiveScope = $this->canSeeAll ? $this->scope : 'mine';
-        if ($effectiveScope === 'mine') {
+
+        // Manager-filter (только для canSeeAll): если выбран конкретный
+        // менеджер — переопределяем scope на 'all', чтобы не было
+        // SQL-конфликта «assigned_user_id = me AND assigned_user_id = X».
+        $managerFilterActive = $this->canSeeAll && $this->assignedUserId !== null;
+        if ($managerFilterActive) {
+            $effectiveScope = 'all';
+            $query->where('assigned_user_id', $this->assignedUserId);
+        }
+
+        if ($effectiveScope === 'mine' && ! $managerFilterActive) {
             $authId = auth()->id();
             $query->where(function ($q) use ($authId) {
                 $q->where('assigned_user_id', $authId)

@@ -227,6 +227,57 @@
                     <button wire:click="$set('scope', 'all')"
                             class="font-medium {{ $effectiveScope === 'all' ? 'text-[var(--accent)]' : 'text-[var(--fg-2)] hover:text-[var(--fg-1)]' }}">Команда ({{ $totals['all'] }})</button>
                 </span>
+
+                {{-- Фильтр по конкретному менеджеру (доступен canSeeAll).
+                     Alpine dropdown, выбор через wire:click setManagerFilter.
+                     При активном фильтре — chip подсвечивается accent-цветом
+                     и показывает имя выбранного. ✕ сбрасывает. --}}
+                @php
+                    $_mgrActive = $this->assignedUserId !== null;
+                    $_mgrSelectedName = $this->selectedManagerName;
+                @endphp
+                <span x-data="{ open: false }" @click.outside="open = false"
+                      class="relative inline-flex items-center">
+                    <button type="button" @click="open = !open"
+                            class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium border
+                                   {{ $_mgrActive
+                                      ? 'bg-[var(--accent)] text-fg-on-accent border-[var(--accent)]'
+                                      : 'bg-[var(--bg-surface)] text-[var(--fg-2)] border-[var(--border-strong)] hover:text-[var(--fg-1)]' }}"
+                            title="Фильтр заявок по конкретному менеджеру">
+                        Менеджер:
+                        <span class="font-semibold">{{ $_mgrSelectedName ?? 'все' }}</span>
+                        <span class="text-[10px] opacity-70">▾</span>
+                    </button>
+                    @if($_mgrActive)
+                        <button type="button"
+                                wire:click="setManagerFilter(null)"
+                                class="ml-1 inline-flex items-center justify-center w-[18px] h-[18px] rounded-sm text-[var(--fg-3)] hover:text-[var(--red-600)] hover:bg-[var(--bg-surface-2)]"
+                                title="Сбросить фильтр менеджера">✕</button>
+                    @endif
+
+                    <div x-show="open" x-cloak x-transition.origin.top.left
+                         class="absolute left-0 top-full mt-1 z-30 min-w-[220px] max-h-[320px] overflow-y-auto py-1 bg-[var(--bg-surface)] border border-[var(--border-strong)] rounded-md shadow-lg text-left text-[12.5px]">
+                        <button type="button"
+                                @click="open = false"
+                                wire:click="setManagerFilter(null)"
+                                class="block w-full text-left px-3 py-1.5 hover:bg-[var(--bg-surface-2)] {{ ! $_mgrActive ? 'text-[var(--accent)] font-semibold' : 'text-[var(--fg-1)]' }}">
+                            Все менеджеры
+                            @if(! $_mgrActive)<span class="float-right text-[var(--accent)]">✓</span>@endif
+                        </button>
+                        <div class="my-1 border-t border-[var(--border-subtle)]"></div>
+                        @foreach($this->availableManagers as $_mgr)
+                            <button type="button"
+                                    @click="open = false"
+                                    wire:click="setManagerFilter({{ (int) $_mgr['id'] }})"
+                                    class="block w-full text-left px-3 py-1.5 hover:bg-[var(--bg-surface-2)] {{ $this->assignedUserId === (int) $_mgr['id'] ? 'text-[var(--accent)] font-semibold' : 'text-[var(--fg-1)]' }}">
+                                {{ $_mgr['name'] }}
+                                @if($this->assignedUserId === (int) $_mgr['id'])
+                                    <span class="float-right text-[var(--accent)]">✓</span>
+                                @endif
+                            </button>
+                        @endforeach
+                    </div>
+                </span>
             @endif
 
             {{-- Phase 1.10: bucket-chips (группа статусов). Phase 1.11
