@@ -34,6 +34,7 @@ class MailCategoryClassifier
         private readonly CategorizeIncomingPrompt $prompt,
         private readonly TrustedPartnerOverride $partnerOverride,
         private readonly InternalSenderDetector $internalSender,
+        private readonly UnintendedRecipientDetector $unintendedRecipient,
     ) {
     }
 
@@ -101,6 +102,41 @@ class MailCategoryClassifier
                 'email_message_id' => $message->id,
                 'partner' => $override['partner'],
                 'category' => $category->value,
+            ]);
+
+            return [
+                'category' => $category,
+                'confidence' => 1.0,
+                'intent' => null,
+                'reasoning' => $reasoning,
+            ];
+        }
+
+        // Unintended-recipient short-circuit: письмо не адресовано ни одному
+        // из наших ящиков/пользователей/доменов И не относится к нашему
+        // известному треду (in_reply_to / references — пусто или ссылается
+        // на Message-ID, которого у нас в БД нет). Такие письма попадают к
+        // нам случайно: BCC, forward со стороны Yandex, mailing list. См.
+        // M-2026-1491 (info@unisystem.si → valentina.larosa@moris.it,
+        // Vasukhno был BCC, gpt-4o уверенно сказал client_request).
+        $unintendedReason = $this->unintendedRecipient->detect($message);
+        if ($unintendedReason !== null) {
+            $category = EmailCategory::Irrelevant;
+            $reasoning = 'Unintended recipient: ' . $unintendedReason;
+            $message->forceFill([
+                'category' => $category->value,
+                'category_confidence' => 1.0,
+                'category_intent' => null,
+                'category_reasoning' => $reasoning,
+                'categorized_at' => now(),
+            ])->save();
+
+            Log::info('MailCategoryClassifier: unintended recipient override', [
+                'email_message_id' => $message->id,
+                'from_email' => $message->from_email,
+                'to' => $message->to_recipients,
+                'cc' => $message->cc_recipients,
+                'reason' => $unintendedReason,
             ]);
 
             return [
