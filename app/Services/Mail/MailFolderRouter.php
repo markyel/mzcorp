@@ -42,6 +42,18 @@ class MailFolderRouter
             return null;
         }
 
+        // Идемпотентность: если message.folder УЖЕ MZ|*, ничего не делаем.
+        // Иначе после первого успешного MOVE последующие retry (например
+        // RouteMailToManagerJob от RequestItemPersister fallback + от
+        // ParseRequestItemsJob fallback одновременно) попадают на UID MOVE
+        // из target → target, который Yandex отвечает «OK без COPYUID»
+        // (no-op). Раньше это бросало TransientImapException → retry-storm
+        // 5×backoff. Теперь — early return, фолдер уже правильный.
+        $currentFolder = (string) $message->folder;
+        if (str_starts_with($currentFolder, 'MZ/') || str_starts_with($currentFolder, 'MZ|')) {
+            return $currentFolder;
+        }
+
         // Yandex IMAP / webklex имеют проблемы с не-ASCII именами папок
         // (createFolder и copy/move работают по-разному с MUTF-7). Решение:
         // имена папок только в ASCII через транслитерацию.
