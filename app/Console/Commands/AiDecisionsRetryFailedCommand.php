@@ -89,24 +89,29 @@ class AiDecisionsRetryFailedCommand extends Command
             // ретраить — state machine откажет в переходе. Сразу Dismissed
             // с пометкой dismiss_reason=terminal_request_status.
             if ($skipTerminal) {
-                $reqStatus = $d->request()->value('status');
-                $reqStatusEnum = $reqStatus !== null ? RequestStatus::tryFrom((string) $reqStatus) : null;
+                // Request model кастит status в enum, поэтому Builder::value
+                // возвращает RequestStatus, а не string. Нормализуем оба случая.
+                $reqStatusRaw = $d->request()->value('status');
+                $reqStatusEnum = $reqStatusRaw instanceof RequestStatus
+                    ? $reqStatusRaw
+                    : (is_string($reqStatusRaw) ? RequestStatus::tryFrom($reqStatusRaw) : null);
+                $reqStatusStr = $reqStatusEnum?->value ?? 'unknown';
                 if ($reqStatusEnum?->isTerminal()) {
                     if (! $apply) {
-                        $this->line('  [DRY-DISMISS] ' . $line . ' (req status=' . $reqStatus . ')');
+                        $this->line('  [DRY-DISMISS] ' . $line . ' (req status=' . $reqStatusStr . ')');
                         $stats['dismissed_terminal']++;
 
                         continue;
                     }
                     $payload = is_array($d->payload) ? $d->payload : [];
                     unset($payload['apply_error'], $payload['apply_error_class']);
-                    $payload['dismiss_reason'] = 'terminal_request_status:' . $reqStatus;
+                    $payload['dismiss_reason'] = 'terminal_request_status:' . $reqStatusStr;
                     $d->update([
                         'status' => AiDecisionStatus::Dismissed->value,
                         'payload' => $payload,
                         'applied_at' => now(),
                     ]);
-                    $this->line('  ↷ ' . $line . ' → dismissed (terminal=' . $reqStatus . ')');
+                    $this->line('  ↷ ' . $line . ' → dismissed (terminal=' . $reqStatusStr . ')');
                     $stats['dismissed_terminal']++;
 
                     continue;
