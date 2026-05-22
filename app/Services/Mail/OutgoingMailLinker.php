@@ -207,16 +207,42 @@ class OutgoingMailLinker
     }
 
     /**
-     * L4: ищем открытые заявки по адресам получателей. Берём первый адрес,
-     * по которому есть ровно 1 открытая Request. Если таких уникальных
-     * привязок нет, но есть множественный матч — берём самую свежую и
-     * логируем WARNING (РОП может вручную переподчинить через UI, если
-     * оказалось не то).
+     * L4: ищем открытые заявки по адресам получателей.
+     *
+     * 2026-05-22: переписано после кейса mbox=6 (alexander.rodenkov, см.
+     * MEMORY.md «Phantom outbound через L4»). Старая логика была слишком
+     * жадной — 62 outbound-письма директора прилипли к 10 Request через
+     * совпадение to/cc и client_email коллеги (`@myzip.ru` как client_email
+     * или supplier-домен у фантомной Request).
+     *
+     * Новые guard'ы (все обязательны):
+     *  1. Recipient-фильтр: исключаем внутренние адреса из to/cc через
+     *     `InternalSenderDetector::detect`. Письмо коллеге не должно
+     *     привязываться к заявке только потому, что у заявки случайно
+     *     client_email = этот коллега.
+     *  2. Time-window: только заявки, созданные в окне последних N дней
+     *     (`config('services.mail.outbound_link_window_days')`, default 90).
+     *     Outbound на адрес «древнего» клиента — почти всегда новый thread.
+     *  3. Refuse-on-ambiguity: при 2+ кандидатах — null + WARNING.
+     *     Старая логика тихо брала «самую свежую», что создаёт ложные связи.
+     *     РОП руками решит, если оператору это нужно.
      */
     private function matchByOpenRequestForRecipients(EmailMessage $message): ?Request
     {
         $emails = $this->extractRecipientEmails($message);
         if (empty($emails)) {
+            return null;
+        }
+
+        // Guard-1: убрать внутренние/наши адреса из набора получателей.
+        // Если после фильтра ничего не осталось — это внутренняя переписка,
+        // не привязываем.
+        $externalRecipients = $this->filterExternal($emails);
+        if (empty($externalRecipients)) {
+            Log::debug('OutgoingMailLinker L4: all recipients internal, skip', [
+                'email_message_id' => $message->id,
+                'recipients' => $emails,
+            ]);
             return null;
         }
 
@@ -226,11 +252,17 @@ class OutgoingMailLinker
             RequestStatus::Assigned->value,
         ];
 
-        $candidates = Request::query()
-            ->whereIn('client_email', $emails)
-            ->whereIn('status', $openStatuses)
-            ->orderByDesc('created_at')
-            ->get();
+        // Guard-2: time-window. По умолчанию 90 дней.
+        $windowDays = (int) config('services.mail.outbound_link_window_days', 90);
+        $cutoff = $windowDays > 0 ? now()->subDays($windowDays) : null;
+
+        $query = Request::query()
+            ->whereIn('client_email', $externalRecipients)
+            ->whereIn('status', $openStatuses);
+        if ($cutoff !== null) {
+            $query->where('created_at', '>=', $cutoff);
+        }
+        $candidates = $query->orderByDesc('created_at')->get();
 
         if ($candidates->isEmpty()) {
             return null;
@@ -240,20 +272,69 @@ class OutgoingMailLinker
             return $candidates->first();
         }
 
-        // 2+ кандидата: при отсутствии header-threading это плохой сигнал
-        // — оператор мог писать «вообще» этому клиенту. Берём самую свежую,
-        // помечаем suspicious. РОП увидит выбор в табе «Активность» (через
-        // тред) и при ошибке использует «Переподчинить» (Phase 1.13).
-        $picked = $candidates->first();
-
-        Log::warning('OutgoingMailLinker: ambiguous outbound recipient match — picked latest', [
+        // Guard-3: 2+ кандидата — отказ. Не угадываем «самую свежую».
+        // Лучше оставить outbound без привязки и попросить РОПа руками,
+        // чем тихо создать ложную связь, которая потом распространяется
+        // через References-каскад в L1/L2.
+        Log::warning('OutgoingMailLinker L4: ambiguous, refusing to auto-link', [
             'email_message_id' => $message->id,
-            'recipient_emails' => $emails,
+            'recipients' => $externalRecipients,
             'candidate_request_ids' => $candidates->pluck('id')->all(),
-            'picked_request_id' => $picked->id,
         ]);
 
-        return $picked;
+        return null;
+    }
+
+    /**
+     * Оставить только внешние email-адреса (отбросить наши internal_domains,
+     * наши Mailbox.email, наши User.email). Использует тот же детектор,
+     * что и MailCategoryClassifier (через InternalSenderDetector::detect),
+     * но напрямую — обёрткой над EmailMessage не пользуемся, тут только
+     * адрес.
+     *
+     * @param  array<int, string>  $emails
+     * @return array<int, string>
+     */
+    private function filterExternal(array $emails): array
+    {
+        $domains = (array) config('services.mail.internal_domains', []);
+        $domains = array_values(array_filter(array_map(
+            fn ($d) => mb_strtolower(trim((string) $d)),
+            $domains,
+        )));
+
+        // Mailbox.email / User.email — наших адресов мало (5-10 mailbox'ов,
+        // десятки User'ов), поэтому забираем всё разом и сравниваем
+        // case-insensitive в PHP. Это надёжнее `whereIn(DB::raw('LOWER(email)'))`
+        // и не зависит от SQL-collation. Memory-overhead ~1KB.
+        $ourSet = [];
+        foreach (\App\Models\Mailbox::query()->pluck('email') as $e) {
+            $ourSet[mb_strtolower((string) $e)] = true;
+        }
+        foreach (\App\Models\User::query()->pluck('email') as $e) {
+            $ourSet[mb_strtolower((string) $e)] = true;
+        }
+
+        $external = [];
+        foreach ($emails as $e) {
+            $eLower = mb_strtolower($e);
+            if (isset($ourSet[$eLower])) {
+                continue;
+            }
+            $isInternalDomain = false;
+            foreach ($domains as $d) {
+                if ($d !== '' && str_ends_with($eLower, '@' . $d)) {
+                    $isInternalDomain = true;
+                    break;
+                }
+            }
+            if ($isInternalDomain) {
+                continue;
+            }
+            $external[] = $eLower;
+        }
+
+        return array_values(array_unique($external));
     }
 
     /**

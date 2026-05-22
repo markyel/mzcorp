@@ -261,6 +261,17 @@ return [
         */
         'empty_body_guard_min_chars' => (int) env('MAIL_EMPTY_BODY_MIN_CHARS', 40),
 
+        /*
+        | OutgoingMailLinker L4 time-window (дни). Outbound-письма
+        | привязываются по client_email только если открытая Request
+        | создана в окне последних N дней. Защищает от прилипания свежих
+        | ответов к давно «остывшим» заявкам того же клиента.
+        |
+        | 0 — отключить time-window (опасно: возвращает старое поведение,
+        | при котором фантомные привязки росли каскадом через L1/L2).
+        */
+        'outbound_link_window_days' => (int) env('MAIL_OUTBOUND_LINK_WINDOW_DAYS', 90),
+
         'external_codes' => [
             // Liftway-saas: LZ-REQ-NNNN — общий маркер запроса в их системе.
             '/\bLZ-REQ-\d+\b/u',
