@@ -28,9 +28,40 @@
                 </header>
             @endisset
 
-            <main class="flex-1">
-                {{ $slot }}
-            </main>
+            @php
+                // Auto-detect active по route name если не передано явно.
+                $resolvedRailActive = ($railActive ?? null) ?: match (true) {
+                    request()->routeIs('dashboard')         => 'dashboard',
+                    request()->routeIs('requests.*')        => 'requests',
+                    request()->routeIs('catalog.*')         => 'catalog',
+                    request()->routeIs('mail.index')        => 'mail',
+                    request()->routeIs('invoices.*')        => 'invoices',
+                    default                                  => null,
+                };
+                $showRail = ($rail ?? true);
+            @endphp
+
+            @auth
+                @if($showRail)
+                    {{-- Глобальный rail (56px) + main. Wrapper'ы могут отключить
+                         через :rail="false" если строят свой grid с доп. колонками
+                         (pool — rail+list+main, catalog.search — rail+main внутри). --}}
+                    <main class="flex-1 grid" style="grid-template-columns: 56px 1fr; min-height: calc(100vh - var(--topbar-h));">
+                        <x-left-rail :active="$resolvedRailActive" />
+                        <div class="min-w-0">
+                            {{ $slot }}
+                        </div>
+                    </main>
+                @else
+                    <main class="flex-1">
+                        {{ $slot }}
+                    </main>
+                @endif
+            @else
+                <main class="flex-1">
+                    {{ $slot }}
+                </main>
+            @endauth
         </div>
     </body>
 </html>
