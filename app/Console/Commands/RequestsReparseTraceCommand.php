@@ -29,16 +29,27 @@ use Illuminate\Support\Facades\Storage;
  *   php artisan requests:reparse-trace M-2026-1215 --attachment-id=123
  *   php artisan requests:reparse-trace M-2026-1215 --dump-dir=storage/app/reparse-trace
  *
- * НИЧЕГО НЕ УДАЛЯЕТ И НЕ СОХРАНЯЕТ В БД. Только читает + пишет файлы трейса.
+ * Backfill режимы (пишут в БД):
+ *   --backfill-dedup    — записать parsing_meta.dedup_dropped и
+ *                         request_items.parsing_merged_from на основе
+ *                         текущего трейса (матч по нормализованному
+ *                         артикулу). Существующие позиции не пересоздаём.
+ *   --backfill-meta     — запустить AttachmentMetaExtractionApplier на
+ *                         вложения этой заявки (записать
+ *                         parsing_meta.attachment_extracted).
+ *
+ * По умолчанию — READ-ONLY (только дамп).
  */
 class RequestsReparseTraceCommand extends Command
 {
     protected $signature = 'requests:reparse-trace
         {code : internal_code заявки}
         {--attachment-id=* : id вложений; по умолчанию все структурные (xlsx/pdf/docx)}
-        {--dump-dir= : каталог для дампа; по умолчанию storage/app/reparse-trace/<code>-<timestamp>}';
+        {--dump-dir= : каталог для дампа; по умолчанию storage/app/reparse-trace/<code>-<timestamp>}
+        {--backfill-dedup : записать parsing_meta.dedup_dropped и items.parsing_merged_from по результатам трейса}
+        {--backfill-meta : запустить AttachmentMetaExtractionApplier на эту заявку}';
 
-    protected $description = 'READ-ONLY: пошаговый трейс re-parse заявки с дампом артефактов.';
+    protected $description = 'READ-ONLY трейс re-parse + опциональный backfill parsing_meta для одной заявки.';
 
     public function handle(RequestItemParsingService $parser): int
     {
@@ -241,7 +252,173 @@ class RequestsReparseTraceCommand extends Command
         );
         $this->info("Summary: {$summaryPath}");
 
+        // ── Backfill (опционально) ──────────────────────────────────────
+        if ((bool) $this->option('backfill-dedup')) {
+            $this->newLine();
+            $this->info('=== Backfill: dedup-trace в parsing_meta + items.parsing_merged_from ===');
+            $this->backfillDedup($req, $existingItems, $summary, $attachments);
+        }
+
+        if ((bool) $this->option('backfill-meta')) {
+            $this->newLine();
+            $this->info('=== Backfill: attachment_extracted (extra-info LLM) ===');
+            try {
+                app(\App\Services\Mail\AttachmentMetaExtractionApplier::class)
+                    ->applyForMessage($msg, $req);
+                $req->refresh();
+                $extracted = ($req->parsing_meta['attachment_extracted'] ?? []);
+                $this->info(sprintf('  → записано %d блок(а/ов) attachment_extracted', count($extracted)));
+            } catch (\Throwable $e) {
+                $this->error("  ✗ extra-info backfill упал: {$e->getMessage()}");
+            }
+        }
+
         return self::SUCCESS;
+    }
+
+    /**
+     * Backfill дедуп-трассы в БД на основе уже посчитанного $summary.
+     * Матч съеденных дублей к существующим request_items по нормализованному
+     * артикулу + qty + invoice_index. На каждой найденной позиции
+     * перезаписывает parsing_merged_from; в requests.parsing_meta.dedup_dropped
+     * аппендит сводку.
+     *
+     * @param  \Illuminate\Support\Collection<int,EmailAttachment>  $attachments
+     */
+    private function backfillDedup(
+        ClientRequest $req,
+        \Illuminate\Support\Collection $existingItems,
+        array $summary,
+        \Illuminate\Support\Collection $attachments,
+    ): void {
+        // Перепрогон step1-3 для каждого attachment не нужен — мы только что
+        // его сделали и сохранили в $summary.attachments[*].step3_file.
+        // Читаем json'ы и матчим.
+        $meta = is_array($req->parsing_meta) ? $req->parsing_meta : [];
+        $dropped = $meta['dedup_dropped'] ?? [];
+        $perItem = []; // request_item.id => list of dropped entries
+
+        $nowIso = now()->toIso8601String();
+
+        foreach ($summary['attachments'] as $perAtt) {
+            $step3File = $perAtt['step3_file'] ?? null;
+            if (! $step3File || ! is_file($step3File)) {
+                continue;
+            }
+            $trace = json_decode((string) file_get_contents($step3File), true);
+            if (! is_array($trace)) {
+                continue;
+            }
+            $kept = $trace['kept'] ?? [];
+            $localDropped = $trace['dropped'] ?? [];
+            if (empty($localDropped)) {
+                continue;
+            }
+
+            $ext = strtolower(pathinfo($perAtt['filename'] ?? '', PATHINFO_EXTENSION));
+            $sourceTag = "{$ext}_attachment_{$perAtt['attachment_id']}";
+
+            // Индекс по dedup_key → kept-item (winner среди LLM).
+            $winnerByKey = [];
+            foreach ($kept as $k) {
+                $base = $this->normalizeArticle($k['article'] ?? null);
+                if ($base === '') {
+                    $base = mb_strtolower(trim((string) ($k['name'] ?? '')));
+                }
+                $qty = (string) ($k['qty'] ?? '');
+                $inv = (int) ($k['invoice_index'] ?? 1);
+                $key = $base . '|qty=' . $qty . '|inv=' . $inv;
+                $winnerByKey[$key] = $k;
+            }
+
+            foreach ($localDropped as $d) {
+                $key = $d['key'] ?? null;
+                if (! $key || ! isset($winnerByKey[$key])) {
+                    continue;
+                }
+                $winner = $winnerByKey[$key];
+                $winnerArticle = $this->normalizeArticle($winner['article'] ?? null);
+                $winnerName = mb_strtolower(trim((string) ($winner['name'] ?? '')));
+
+                // Найти соответствующий RequestItem.
+                $matchItem = null;
+                foreach ($existingItems as $ri) {
+                    if (! $ri->is_active) {
+                        continue;
+                    }
+                    $riArticle = $this->normalizeArticle($ri->parsed_article);
+                    if ($winnerArticle !== '' && $riArticle !== '' && $riArticle === $winnerArticle) {
+                        $matchItem = $ri;
+                        break;
+                    }
+                    if ($winnerArticle === '' && $winnerName !== '') {
+                        $riName = mb_strtolower(trim((string) ($ri->parsed_name ?? '')));
+                        if ($riName !== '') {
+                            similar_text($winnerName, $riName, $percent);
+                            if ($percent >= 70) {
+                                $matchItem = $ri;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (! $matchItem) {
+                    $this->warn("  не нашёл RequestItem для dedup_key={$key}");
+                    continue;
+                }
+
+                $entry = [
+                    'source' => $sourceTag,
+                    'name' => (string) ($d['name'] ?? ''),
+                    'article' => $d['article'] ?? null,
+                    'qty' => (string) ($d['qty'] ?? ''),
+                    'reason' => $d['reason'] ?? 'same_normalized_article_qty_inv',
+                    'dedup_key' => $key,
+                ];
+
+                $perItem[$matchItem->id][] = $entry;
+                $dropped[] = $entry + [
+                    'merged_into_position' => $matchItem->position,
+                    'at' => $nowIso,
+                ];
+            }
+        }
+
+        // Запись в request_items.
+        $itemsUpdated = 0;
+        foreach ($perItem as $itemId => $entries) {
+            $ri = $existingItems->firstWhere('id', $itemId);
+            if (! $ri) {
+                continue;
+            }
+            $existingMerged = is_array($ri->parsing_merged_from) ? $ri->parsing_merged_from : [];
+            $merged = array_merge($existingMerged, $entries);
+            // Уникализация по dedup_key (на случай повторного backfill).
+            $seen = [];
+            $uniq = [];
+            foreach ($merged as $m) {
+                $k = $m['dedup_key'] ?? json_encode($m);
+                if (isset($seen[$k])) {
+                    continue;
+                }
+                $seen[$k] = true;
+                $uniq[] = $m;
+            }
+            $ri->parsing_merged_from = $uniq;
+            $ri->save();
+            $itemsUpdated++;
+        }
+
+        // Запись в requests.parsing_meta.
+        $meta['dedup_dropped'] = $dropped;
+        $req->parsing_meta = $meta;
+        $req->save();
+
+        $this->info(sprintf(
+            '  → items updated: %d, dedup_dropped total: %d',
+            $itemsUpdated,
+            count($dropped),
+        ));
     }
 
     /**

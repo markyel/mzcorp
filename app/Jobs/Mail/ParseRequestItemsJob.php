@@ -236,6 +236,24 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
 
             $result = $persister->persist($message, $items, $clarifications);
 
+            // Extra-info из структурных вложений (xlsx/pdf/docx): серийник
+            // лифта, модель, объект, договор, желаемая дата. Складывается
+            // в requests.parsing_meta.attachment_extracted[] для блока
+            // «Справочно из файлов» на карточке. Fail-soft — любая ошибка
+            // не валит persist.
+            if ($result['request'] !== null) {
+                try {
+                    app(\App\Services\Mail\AttachmentMetaExtractionApplier::class)
+                        ->applyForMessage($message, $result['request']);
+                } catch (\Throwable $e) {
+                    Log::warning('ParseRequestItemsJob: attachment meta extraction failed', [
+                        'email_message_id' => $message->id,
+                        'request_id' => $result['request']->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
             Log::info('ParseRequestItemsJob: items persisted', [
                 'email_message_id' => $message->id,
                 'request_id' => $result['request']?->id,

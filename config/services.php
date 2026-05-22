@@ -93,6 +93,12 @@ return [
         // Matcher позиций КП → RequestItem fallback (OutboundQuoteItemMatcher).
         // Применяется только на unmatched после детерминированных шагов — mini.
         'quote_matcher_model' => env('OPENAI_QUOTE_MATCHER_MODEL', 'gpt-4o-mini'),
+        // Extra-info extractor (AttachmentMetaExtractionService): извлекает
+        // из текста вложений серийник лифта, модель, серию, объект, договор,
+        // желаемую дату, контактное лицо. Короткий focused-промпт, mini хватает.
+        'attachment_meta_model' => env('OPENAI_ATTACHMENT_META_MODEL', 'gpt-4o-mini'),
+        // Killswitch если LLM-расходы нежелательны.
+        'attachment_meta_enabled' => filter_var(env('OPENAI_ATTACHMENT_META_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         // Phase 2 use-case C: размер батча на /v1/embeddings (OpenAI лимит 2048).
         // 100 — компромисс между latency на запрос и количеством HTTP-вызовов.
         'embedding_batch_size' => (int) env('OPENAI_EMBEDDING_BATCH_SIZE', 100),
