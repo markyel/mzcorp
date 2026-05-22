@@ -813,89 +813,14 @@
                             @disabled(! $canManage)>⊘ Закрыть как потеря</button>
                 @endif
 
-                {{-- Disabled buttons (для напоминания — Phase 2/3). --}}
-                <button class="btn btn-sm" disabled title="Доступно в Phase 2">🧾 Сформировать КП</button>
-                <button class="btn btn-sm" disabled title="Доступно в Phase 3">🔄 Refresh цен (поставщики)</button>
+                {{-- Disabled placeholder'ы убраны:
+                     «🧾 Сформировать КП» — функционал в табе «КП» (Editor).
+                     «🔄 Refresh цен» — Phase 3, появится когда будет готов. --}}
             @endif
 
-            {{-- Phase 4 — inline-секция «Счета заявки» под action-panel.
-                 Показывает компактный список Invoice'ов с возможностью
-                 пометить оплаченным или аннулировать прямо отсюда.
-                 Полный листинг — на /dashboard/invoices. --}}
-            @php $invoices = $this->invoicesForRequest; @endphp
-            @if($invoices->isNotEmpty())
-                <div class="mt-3 pt-3 border-t border-border-subtle">
-                    <div class="flex items-center gap-2 mb-2">
-                        <span class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold">Счета · {{ $invoices->count() }}</span>
-                        <span class="flex-1"></span>
-                        <a href="{{ route('invoices.index') }}?q={{ $req->internal_code }}"
-                           wire:navigate
-                           class="text-[11px] text-[var(--sky-700)] hover:underline">все →</a>
-                    </div>
-                    <div class="space-y-2">
-                        @foreach($invoices as $inv)
-                            @php
-                                $invStatus = $inv->status?->value ?? 'pending';
-                                $isPending = $invStatus === 'pending';
-                                $isOverdue = $isPending && $inv->expires_at?->isPast();
-                                $chipMap = [
-                                    'pending'   => 'chip-warn',
-                                    'paid'      => 'chip-ok',
-                                    'expired'   => 'chip-danger',
-                                    'cancelled' => 'chip-paused',
-                                ];
-                                $labelMap = [
-                                    'pending'   => 'Ожидает',
-                                    'paid'      => 'Оплачен',
-                                    'expired'   => 'Просрочен',
-                                    'cancelled' => 'Аннулирован',
-                                ];
-                                $daysRemain = ($isPending && $inv->expires_at) ? now()->diffInDays($inv->expires_at, false) : null;
-                            @endphp
-                            <div wire:key="inv-{{ $inv->id }}"
-                                 class="p-2 rounded-md border border-border bg-surface {{ $isOverdue ? 'bg-red-50 border-red-200' : '' }}">
-                                <div class="flex items-center gap-2 mb-1">
-                                    <span class="chip {{ $chipMap[$invStatus] ?? 'chip-neutral' }}"><span class="dot"></span>{{ $labelMap[$invStatus] ?? $invStatus }}</span>
-                                    <span class="mono text-[12px] text-fg-1 truncate" title="{{ $inv->invoice_number }}">№{{ $inv->invoice_number }}</span>
-                                </div>
-                                <div class="text-[11px] text-fg-3 mono flex flex-wrap gap-x-2">
-                                    <span>выст. {{ $inv->issued_at?->format('d.m.Y') }}</span>
-                                    @if($isPending && $inv->expires_at)
-                                        @if($isOverdue)
-                                            <span class="text-red-700 font-medium">⚠ просрочен {{ abs((int) $daysRemain) }} дн.</span>
-                                        @elseif($daysRemain !== null && $daysRemain <= 2)
-                                            <span class="text-amber-700">⏳ осталось {{ (int) $daysRemain }} дн.</span>
-                                        @else
-                                            <span>до {{ $inv->expires_at->format('d.m.Y') }}</span>
-                                        @endif
-                                    @elseif($invStatus === 'paid' && $inv->paid_at)
-                                        <span class="text-emerald-700">оплачен {{ $inv->paid_at->format('d.m.Y') }}</span>
-                                    @elseif($invStatus === 'cancelled' && $inv->cancellation_reason)
-                                        <span class="text-fg-3 truncate" title="{{ $inv->cancellation_reason }}">отм.: {{ \Illuminate\Support\Str::limit($inv->cancellation_reason, 30) }}</span>
-                                    @endif
-                                </div>
-                                @if($inv->amount_snapshot !== null)
-                                    <div class="text-[11.5px] text-fg-2 mono mt-0.5">
-                                        {{ number_format((float) $inv->amount_snapshot, 2, '.', ' ') }} ₽
-                                    </div>
-                                @endif
-                                @if($isPending && $canManage)
-                                    <div class="flex gap-1.5 mt-1.5">
-                                        <button type="button"
-                                                wire:click="markInvoicePaid({{ $inv->id }})"
-                                                wire:confirm="Пометить счёт №{{ $inv->invoice_number }} как оплаченный?"
-                                                class="btn btn-sm btn-primary text-[11px] px-2 py-0.5">✓ Оплачен</button>
-                                        <button type="button"
-                                                onclick="const r = prompt('Причина аннулирования счёта №{{ $inv->invoice_number }}?'); if (r) @this.call('cancelInvoice', {{ $inv->id }}, r);"
-                                                class="btn btn-sm text-[11px] px-2 py-0.5 text-red-700"
-                                                title="Аннулировать счёт">✕ Аннул.</button>
-                                    </div>
-                                @endif
-                            </div>
-                        @endforeach
-                    </div>
-                </div>
-            @endif
+            {{-- Phase 4: счета заявки → отдельный таб «Счета».
+                 Таб подсвечивается по состоянию: красный при overdue,
+                 amber при pending, emerald при только-оплаченных. --}}
 
             {{-- Слияние дубликата (Phase merge). Owner/acting/privileged.
                  Кнопка показывается только когда заявка active (есть с чем сливать). --}}
@@ -916,17 +841,43 @@
     {{-- ────────── TABS ────────── --}}
     <div class="flex border border-border bg-surface px-4 rounded-t-md" style="border-bottom-color: var(--border-subtle)">
         @foreach($tabs as $key => $meta)
-            @php $active = $tab === $key; @endphp
+            @php
+                $active = $tab === $key;
+                // Phase 4 — state-based подсветка таба (используется для invoices).
+                // Возможные state: 'overdue' (красный), 'pending' (amber),
+                // 'paid' (emerald), 'closed' (нейтральный gray), null (без state).
+                $state = $meta['state'] ?? null;
+                $stateTextCls = match ($state) {
+                    'overdue' => $active ? 'text-red-700' : 'text-red-600',
+                    'pending' => $active ? 'text-amber-700' : 'text-amber-600',
+                    'paid'    => $active ? 'text-emerald-700' : 'text-emerald-600',
+                    default   => null,
+                };
+                $stateBorderCls = match ($state) {
+                    'overdue' => $active ? 'border-red-500' : 'border-transparent',
+                    'pending' => $active ? 'border-amber-500' : 'border-transparent',
+                    'paid'    => $active ? 'border-emerald-500' : 'border-transparent',
+                    default   => null,
+                };
+                $stateBadgeCls = match ($state) {
+                    'overdue' => 'bg-red-50 text-red-700',
+                    'pending' => 'bg-amber-50 text-amber-700',
+                    'paid'    => 'bg-emerald-50 text-emerald-700',
+                    default   => null,
+                };
+            @endphp
             <button type="button"
                     @if(! $meta['disabled']) wire:click="setTab('{{ $key }}')" @else disabled title="Доступно в Phase 2" @endif
+                    @if($state) title="Состояние: {{ ['overdue'=>'просрочены','pending'=>'ожидают оплаты','paid'=>'оплачены','closed'=>'все закрыты'][$state] ?? $state }}" @endif
                     class="-mb-px px-3.5 py-2.5 text-[12.5px] inline-flex items-center gap-1.5 border-b-2 transition-colors
                            {{ $active
-                              ? 'text-fg-1 font-semibold border-accent'
-                              : 'text-fg-3 border-transparent ' . ($meta['disabled'] ? 'opacity-55 cursor-not-allowed' : 'hover:text-fg-1 cursor-pointer') }}">
+                              ? ($stateTextCls ?: 'text-fg-1') . ' font-semibold ' . ($stateBorderCls ?: 'border-accent')
+                              : ($stateTextCls ?: 'text-fg-3') . ' border-transparent ' . ($meta['disabled'] ? 'opacity-55 cursor-not-allowed' : 'hover:text-fg-1 cursor-pointer') }}">
+                @if($state === 'overdue')<span class="inline-block w-1.5 h-1.5 rounded-full bg-red-500"></span>@endif
                 {{ $meta['label'] }}
                 @if($meta['count'] !== null)
                     <span class="text-[10.5px] font-semibold px-1.5 rounded-full
-                                 {{ $active ? 'bg-red-50 text-red-700' : 'bg-neutral-100 text-fg-2' }}">
+                                 {{ $stateBadgeCls ?: ($active ? 'bg-red-50 text-red-700' : 'bg-neutral-100 text-fg-2') }}">
                         {{ $meta['count'] }}
                     </span>
                 @endif
@@ -2196,6 +2147,142 @@
                         :request-id="$req->id"
                         wire:key="clarification-{{ $req->id }}" />
                 </div>
+                @break
+
+            {{-- ───── СЧЕТА ─────
+                 Phase 4: список Invoice'ов заявки с inline-actions
+                 «✓ Оплачен» / «✕ Аннулировать». Перенесено из action-panel
+                 в отдельный таб — там распухало sidebar. --}}
+            @case('invoices')
+                @php $invList = $this->invoicesForRequest; @endphp
+                @if($invList->isEmpty())
+                    <div class="ds-card p-8 text-center text-fg-3">
+                        <div class="text-fg-1 font-medium mb-1">Счетов ещё нет</div>
+                        <div class="text-sm">Когда менеджер выставит счёт через action-panel, он появится здесь.</div>
+                        @if($canManage && in_array($req->status, [$RS::Quoted, $RS::AwaitingInvoice, $RS::UnderReview, $RS::InProgress, $RS::AwaitingClientClarification], true))
+                            <button type="button"
+                                    wire:click="$dispatch('open-issue-invoice-dialog')"
+                                    class="btn btn-primary mt-3">
+                                📋 Выставить счёт
+                            </button>
+                        @endif
+                    </div>
+                @else
+                    <div class="ds-card">
+                        <div class="ds-card-header">
+                            <h3>Счета заявки</h3>
+                            <span class="text-[12px] text-fg-3 ml-2">{{ $invList->count() }} {{ $invList->count() === 1 ? 'счёт' : 'счетов' }}</span>
+                            <span class="flex-1"></span>
+                            <a href="{{ route('invoices.index') }}?q={{ $req->internal_code }}"
+                               wire:navigate
+                               class="text-[12px] text-[var(--sky-700)] hover:underline">
+                                Полный реестр →
+                            </a>
+                            @if($canManage && in_array($req->status, [$RS::Quoted, $RS::AwaitingInvoice, $RS::UnderReview, $RS::InProgress, $RS::AwaitingClientClarification], true))
+                                <button type="button"
+                                        wire:click="$dispatch('open-issue-invoice-dialog')"
+                                        class="btn btn-sm btn-primary ml-2">
+                                    + Выставить
+                                </button>
+                            @endif
+                        </div>
+
+                        <div class="overflow-hidden">
+                        <table class="w-full text-[12.5px] table-fixed">
+                            <colgroup>
+                                <col style="width: 160px">  {{-- № счёта --}}
+                                <col style="width: 110px">  {{-- Выставлен --}}
+                                <col style="width: 140px">  {{-- Действителен до --}}
+                                <col style="width: 130px">  {{-- Сумма --}}
+                                <col style="width: 130px">  {{-- Статус --}}
+                                <col>                        {{-- Комментарий --}}
+                                <col style="width: 210px">  {{-- Actions --}}
+                            </colgroup>
+                            <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
+                                <tr>
+                                    <th class="px-3 py-2 text-left">№ счёта</th>
+                                    <th class="px-3 py-2 text-left">Выставлен</th>
+                                    <th class="px-3 py-2 text-left">Действителен до</th>
+                                    <th class="px-3 py-2 text-right">Сумма</th>
+                                    <th class="px-3 py-2 text-left">Статус</th>
+                                    <th class="px-3 py-2 text-left">Комментарий</th>
+                                    <th class="px-3 py-2 text-right">Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach($invList as $inv)
+                                    @php
+                                        $invStatus = $inv->status?->value ?? 'pending';
+                                        $isPending = $invStatus === 'pending';
+                                        $isOverdue = $isPending && $inv->expires_at?->isPast();
+                                        $chipMap = ['pending'=>'chip-warn','paid'=>'chip-ok','expired'=>'chip-danger','cancelled'=>'chip-paused'];
+                                        $labelMap = ['pending'=>'Ожидает','paid'=>'Оплачен','expired'=>'Просрочен','cancelled'=>'Аннулирован'];
+                                        $daysRemain = ($isPending && $inv->expires_at) ? now()->diffInDays($inv->expires_at, false) : null;
+                                    @endphp
+                                    <tr wire:key="inv-tab-{{ $inv->id }}"
+                                        class="border-b border-border-subtle last:border-b-0 hover:bg-hover {{ $isOverdue ? 'bg-red-50' : '' }}">
+                                        <td class="px-3 py-2 mono text-[12px] text-fg-1 align-top" style="max-width: 0">
+                                            <span class="truncate block" title="{{ $inv->invoice_number }}">{{ $inv->invoice_number }}</span>
+                                        </td>
+                                        <td class="px-3 py-2 mono text-[11.5px] text-fg-2 align-top whitespace-nowrap">
+                                            {{ $inv->issued_at?->format('d.m.Y') ?? '—' }}
+                                        </td>
+                                        <td class="px-3 py-2 align-top">
+                                            <div class="mono text-[11.5px] text-fg-2 whitespace-nowrap">
+                                                {{ $inv->expires_at?->format('d.m.Y') ?? '—' }}
+                                            </div>
+                                            @if($isPending && $daysRemain !== null)
+                                                @if($isOverdue)
+                                                    <div class="text-[10.5px] text-red-700 font-medium">⚠ просрочен {{ abs((int) $daysRemain) }} дн.</div>
+                                                @elseif($daysRemain <= 2)
+                                                    <div class="text-[10.5px] text-amber-700">⏳ осталось {{ (int) $daysRemain }} дн.</div>
+                                                @else
+                                                    <div class="text-[10.5px] text-fg-3">⏳ {{ (int) $daysRemain }} дн.</div>
+                                                @endif
+                                            @elseif($invStatus === 'paid' && $inv->paid_at)
+                                                <div class="text-[10.5px] text-emerald-700 mono">оплачен {{ $inv->paid_at->format('d.m.Y') }}</div>
+                                            @endif
+                                        </td>
+                                        <td class="px-3 py-2 mono text-[12px] text-fg-1 align-top text-right whitespace-nowrap">
+                                            @if($inv->amount_snapshot !== null)
+                                                {{ number_format((float) $inv->amount_snapshot, 2, '.', ' ') }} ₽
+                                            @else
+                                                <span class="text-fg-4">—</span>
+                                            @endif
+                                        </td>
+                                        <td class="px-3 py-2 align-top">
+                                            <span class="chip {{ $chipMap[$invStatus] ?? 'chip-neutral' }}">
+                                                <span class="dot"></span>{{ $labelMap[$invStatus] ?? $invStatus }}
+                                            </span>
+                                        </td>
+                                        <td class="px-3 py-2 text-[11.5px] text-fg-2 align-top" style="max-width: 0">
+                                            @if($inv->comment)
+                                                <div class="truncate" title="{{ $inv->comment }}">{{ $inv->comment }}</div>
+                                            @elseif($inv->cancellation_reason)
+                                                <div class="truncate text-red-700" title="{{ $inv->cancellation_reason }}">отм.: {{ $inv->cancellation_reason }}</div>
+                                            @else
+                                                <span class="text-fg-4">—</span>
+                                            @endif
+                                        </td>
+                                        <td class="px-3 py-2 text-right align-top whitespace-nowrap">
+                                            @if($isPending && $canManage)
+                                                <button type="button"
+                                                        wire:click="markInvoicePaid({{ $inv->id }})"
+                                                        wire:confirm="Пометить счёт №{{ $inv->invoice_number }} как оплаченный?"
+                                                        class="btn btn-sm btn-primary">✓ Оплачен</button>
+                                                <button type="button"
+                                                        onclick="const r = prompt('Причина аннулирования счёта №{{ $inv->invoice_number }}?'); if (r) @this.call('cancelInvoice', {{ $inv->id }}, r);"
+                                                        class="btn btn-sm text-red-700"
+                                                        title="Аннулировать счёт">✕</button>
+                                            @endif
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                        </div>
+                    </div>
+                @endif
                 @break
 
             {{-- ───── ПОСТАВЩИКИ ───── --}}

@@ -469,6 +469,26 @@ class Detail extends Component
         $quotationsCount = $this->request->quotations()->whereNotIn('status', ['cancelled'])->count();
         $quotesCount = $outboundQuotesCount + $quotationsCount;
 
+        // Phase 4: счета — состояние таба для визуальной подсветки.
+        //   overdue — есть pending счёт с истёкшим expires_at (красный)
+        //   pending — есть pending без overdue (amber)
+        //   paid    — есть только финальные (paid/cancelled/expired), нет pending (emerald)
+        //   null    — счетов нет
+        $invoices = $this->invoicesForRequest;
+        $invCount = $invoices->count();
+        $invState = null;
+        if ($invCount > 0) {
+            $hasOverdue = $invoices->contains(fn ($i) => $i->status?->value === 'pending' && $i->expires_at?->isPast());
+            $hasPending = $invoices->contains(fn ($i) => $i->status?->value === 'pending');
+            $hasPaid = $invoices->contains(fn ($i) => $i->status?->value === 'paid');
+            $invState = match (true) {
+                $hasOverdue => 'overdue',
+                $hasPending => 'pending',
+                $hasPaid    => 'paid',
+                default     => 'closed',
+            };
+        }
+
         // Таб «КП» всегда виден — без него менеджер не может создать первый
         // черновик КП через QuotationEditor. Counter null при нуле (чтобы
         // не показывать «КП 0»).
@@ -477,6 +497,7 @@ class Detail extends Component
             'thread'    => ['label' => 'Переписка',  'count' => $threadCount, 'disabled' => false],
             'items'     => ['label' => 'Позиции',    'count' => $items,       'disabled' => false],
             'quotes'    => ['label' => 'КП',         'count' => $quotesCount > 0 ? $quotesCount : null, 'disabled' => false],
+            'invoices'  => ['label' => 'Счета',      'count' => $invCount > 0 ? $invCount : null, 'disabled' => false, 'state' => $invState],
             'suppliers' => ['label' => 'Поставщики', 'count' => null,         'disabled' => true],
             'activity'  => ['label' => 'Активность', 'count' => $activity,    'disabled' => false],
             'files'     => ['label' => 'Файлы',      'count' => $files,       'disabled' => false],
