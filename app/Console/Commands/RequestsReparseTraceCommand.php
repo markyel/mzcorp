@@ -341,24 +341,40 @@ class RequestsReparseTraceCommand extends Command
                 $winnerName = mb_strtolower(trim((string) ($winner['name'] ?? '')));
 
                 // Найти соответствующий RequestItem.
+                // Стратегия двухпроходная:
+                //   1) exact-match нормализованного артикула;
+                //   2) если не нашли — fallback по имени (similar_text ≥ 70%).
+                // Раньше fallback срабатывал ТОЛЬКО когда winnerArticle == '',
+                // но при backfill LLM иногда возвращает «обогащённый» артикул
+                // (со склеенным описанием faceplate'ов), который не совпадает
+                // с тем, что в БД. Без fallback мы теряли матч.
                 $matchItem = null;
-                foreach ($existingItems as $ri) {
-                    if (! $ri->is_active) {
-                        continue;
+                if ($winnerArticle !== '') {
+                    foreach ($existingItems as $ri) {
+                        if (! $ri->is_active) {
+                            continue;
+                        }
+                        $riArticle = $this->normalizeArticle($ri->parsed_article);
+                        if ($riArticle !== '' && $riArticle === $winnerArticle) {
+                            $matchItem = $ri;
+                            break;
+                        }
                     }
-                    $riArticle = $this->normalizeArticle($ri->parsed_article);
-                    if ($winnerArticle !== '' && $riArticle !== '' && $riArticle === $winnerArticle) {
-                        $matchItem = $ri;
-                        break;
-                    }
-                    if ($winnerArticle === '' && $winnerName !== '') {
+                }
+                if (! $matchItem && $winnerName !== '') {
+                    $bestPercent = 0.0;
+                    foreach ($existingItems as $ri) {
+                        if (! $ri->is_active) {
+                            continue;
+                        }
                         $riName = mb_strtolower(trim((string) ($ri->parsed_name ?? '')));
-                        if ($riName !== '') {
-                            similar_text($winnerName, $riName, $percent);
-                            if ($percent >= 70) {
-                                $matchItem = $ri;
-                                break;
-                            }
+                        if ($riName === '') {
+                            continue;
+                        }
+                        similar_text($winnerName, $riName, $percent);
+                        if ($percent >= 70 && $percent > $bestPercent) {
+                            $bestPercent = $percent;
+                            $matchItem = $ri;
                         }
                     }
                 }
