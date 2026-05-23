@@ -118,7 +118,14 @@ class MessagePersister
         // параметров name=/filename=). `?? ` ловит только null, поэтому
         // отдельно проверяем после trim. Синтезируем читаемое имя на
         // основе MIME — `inline-a3b2c1d4.jpg` понятнее чем UUID-storage-key.
-        $rawName = trim((string) ($att->getName() ?? ''));
+        //
+        // 2026-05-23: до getName() пробуем raw MIME header — Webklex
+        // sanitizeName() стрипает `/` из base64 в MIME-encoded словах,
+        // что ломает декодирование (length не-кратна 4 → base64_decode
+        // выдаёт мусор + control bytes). Кейс M-2026-1471/att#3985.
+        // resolveRawFilename() обходит sanitizeName и берёт значение
+        // прямо из raw header'а парта.
+        $rawName = $this->resolveRawFilename($att);
         if ($rawName === '') {
             $ext = $this->guessExtension((string) $att->getMimeType()) ?: 'bin';
             $disposition = $att->getDisposition() === 'inline' ? 'inline' : 'attachment';
@@ -240,15 +247,29 @@ class MessagePersister
         }
 
         // Regex-fallback: декодируем все вхождения `=?charset?enc?text?=` руками.
+        // Дополнительно: если B-вариант имеет длину НЕ кратную 4 — это маркер,
+        // что Webklex sanitizeName() стрипнул `/` из base64. Пробуем восстановить
+        // через repairCorruptedBase64() — вставляет недостающий '/' в каждую
+        // позицию, выбирает ту, что даёт валидный UTF-8 с кириллицей.
         $result = preg_replace_callback(
             '/=\?([A-Za-z0-9_\-]+)\?([qQbB])\?([^?]*)\?=/',
             function (array $m): string {
                 $charset = $m[1];
                 $encoding = strtoupper($m[2]);
                 $text = $m[3];
-                $bytes = $encoding === 'B'
-                    ? base64_decode($text, true)
-                    : quoted_printable_decode(str_replace('_', ' ', $text));
+
+                if ($encoding === 'B') {
+                    $bytes = base64_decode($text, true);
+                    if ($bytes === false && strlen($text) % 4 !== 0) {
+                        $repaired = $this->repairCorruptedBase64($text, $charset);
+                        if ($repaired !== null) {
+                            $bytes = $repaired;
+                        }
+                    }
+                } else {
+                    $bytes = quoted_printable_decode(str_replace('_', ' ', $text));
+                }
+
                 if ($bytes === false || $bytes === '') {
                     return $m[0];
                 }
@@ -260,6 +281,155 @@ class MessagePersister
         );
 
         return is_string($result) && $result !== '' ? $result : $value;
+    }
+
+    /**
+     * Получить filename вложения, обходя Webklex sanitizeName().
+     *
+     * Webklex `Attachment::getName()` пропускает значение через sanitizeName(),
+     * который стрипает `/` (опасный для filesystem path). Но в MIME-encoded
+     * слове (`=?UTF-8?B?...?=`) тело — это base64-encoded строка, где `/`
+     * валидный символ алфавита. Удаление `/` ломает длину (≠ кратной 4),
+     * base64_decode падает в strict mode, и в результате декодирования
+     * получаем мусор с `?` и control-байтами.
+     *
+     * Источник истины — raw header attachment'а. Если его нет (старые версии
+     * Webklex / нестандартный transport) — fallback на getName() как раньше.
+     *
+     * Source: LazyLift @ SupplierMailService::resolveAttachmentName (adapted).
+     */
+    private function resolveRawFilename(Attachment $att): string
+    {
+        try {
+            if (method_exists($att, 'getHeader')) {
+                $header = $att->getHeader();
+                if ($header !== null && isset($header->raw) && (string) $header->raw !== '') {
+                    $extracted = $this->extractFilenameFromRawHeader((string) $header->raw);
+                    if ($extracted !== null && $extracted !== '') {
+                        return $extracted;
+                    }
+                }
+            }
+        } catch (\Throwable) {
+            // не критично — упадём в fallback
+        }
+
+        return trim((string) ($att->getName() ?? ''));
+    }
+
+    /**
+     * Извлечь filename= из raw MIME-заголовка, минуя sanitizeName().
+     *
+     * Покрывает:
+     *   1. RFC 2231 single-shot: filename*=charset''percent-encoded
+     *   2. MIME encoded-word (RFC 2047): filename="=?UTF-8?B?...?="
+     *      Возвращаем raw encoded-string — decodeMimeHeader() её обработает,
+     *      включая repair corrupted base64.
+     *   3. Plain quoted: filename="имя.pdf"
+     *   4. Plain unquoted: filename=name.pdf
+     *
+     * Source: LazyLift @ SupplierMailService::extractFilenameFromRawHeader
+     * (drop-in).
+     */
+    private function extractFilenameFromRawHeader(string $rawHeader): ?string
+    {
+        // (1) RFC 2231: filename*=UTF-8''%D0%9F...
+        if (preg_match("/filename\*\s*=\s*([^']+)'[^']*'([^\s;]+)/i", $rawHeader, $m)) {
+            $charset = $m[1];
+            $encoded = rtrim($m[2], " \t;");
+            $decoded = rawurldecode($encoded);
+            if (stripos($charset, 'UTF-8') !== false && mb_check_encoding($decoded, 'UTF-8')) {
+                return $decoded;
+            }
+            $converted = @mb_convert_encoding($decoded, 'UTF-8', $charset);
+
+            return is_string($converted) && $converted !== '' ? $converted : null;
+        }
+
+        // (2) MIME encoded-word(s): filename="=?UTF-8?B?...?="
+        // Может быть несколько подряд (RFC 2047 §6.2). Возвращаем raw —
+        // decodeMimeHeader() декодирует с repair corrupted base64.
+        $mimeWordPattern = '=\?[^?]+\?[BQbq]\?[^?]*\?=';
+        $pattern = '/(?:filename|name)\s*=\s*"?(' . $mimeWordPattern . '(?:\s*' . $mimeWordPattern . ')*)"?/i';
+        if (preg_match($pattern, $rawHeader, $m)) {
+            return $m[1];
+        }
+
+        // (3) Plain quoted: filename="..."
+        if (preg_match('/(?:filename|name)\s*=\s*"([^"]+)"/i', $rawHeader, $m)) {
+            return $m[1];
+        }
+
+        // (4) Plain unquoted: filename=name.pdf
+        if (preg_match('/(?:filename|name)\s*=\s*([^\s;]+)/i', $rawHeader, $m)) {
+            $val = rtrim($m[1], '"');
+
+            return $val !== '' ? $val : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Восстановить base64-данные, повреждённые Webklex sanitizeName() —
+     * удалённым `/` (path separator). Длина становится НЕ кратной 4,
+     * base64_decode strict возвращает false → весь encoded-word теряется.
+     *
+     * Алгоритм: для каждой позиции пробуем вставить `/` или `+`, padding'уем,
+     * декодируем. Берём кандидата с максимальным score (кол-во кириллических
+     * букв + 5 бонус за отсутствие replacement-char).
+     *
+     * Обрабатываем только 1 missing char — typical Webklex case.
+     *
+     * Source: LazyLift @ SupplierMailService::repairCorruptedBase64.
+     *
+     * @return string|null Декодированные байты или null если repair не удался.
+     */
+    private function repairCorruptedBase64(string $base64, string $charset): ?string
+    {
+        if (strlen($base64) % 4 === 0) {
+            return null;
+        }
+        $missing = (4 - (strlen($base64) % 4)) % 4;
+        if ($missing !== 1) {
+            return null; // 2-3 missing — слишком большой brute-force, не пытаемся
+        }
+
+        $data = rtrim($base64, '=');
+        $tryChars = ['/', '+'];
+
+        $bestDecoded = null;
+        $bestScore = 0;
+
+        foreach ($tryChars as $char) {
+            for ($pos = 0; $pos <= strlen($data); $pos++) {
+                $candidate = substr($data, 0, $pos) . $char . substr($data, $pos);
+                $padNeeded = (4 - (strlen($candidate) % 4)) % 4;
+                $candidate .= str_repeat('=', $padNeeded);
+
+                $decoded = base64_decode($candidate, true);
+                if ($decoded === false) {
+                    continue;
+                }
+
+                if (stripos($charset, 'UTF-8') !== false) {
+                    if (! mb_check_encoding($decoded, 'UTF-8')) {
+                        continue;
+                    }
+                    preg_match_all('/[а-яёА-ЯЁ]/u', $decoded, $matches);
+                    $score = count($matches[0]);
+                    if (! str_contains($decoded, "\xEF\xBF\xBD")) {
+                        $score += 5;
+                    }
+                    if ($score > $bestScore && $score >= 3) {
+                        $bestScore = $score;
+                        $bestDecoded = $decoded;
+                    }
+                }
+            }
+        }
+
+        return $bestDecoded;
     }
 
     /**
