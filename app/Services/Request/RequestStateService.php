@@ -3,10 +3,12 @@
 namespace App\Services\Request;
 
 use App\Enums\ClosedLostReason;
+use App\Enums\MailboxType;
 use App\Enums\RequestStatus;
 use App\Enums\Role as RoleEnum;
 use App\Models\EmailMessage;
 use App\Models\Request;
+use App\Models\RequestAssignment;
 use App\Models\RequestStateChange;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -215,7 +217,6 @@ class RequestStateService
 
         DB::transaction(function () use ($request, $to, $author, $from, $snapshot, $sourceMessage) {
             $newCount = (int) ($request->reanimated_count ?? 0) + 1;
-            $request->status = $to;
             $request->closed_at = null;
             $request->closed_lost_reason = null;
             $request->closed_lost_comment = null;
@@ -225,6 +226,21 @@ class RequestStateService
             $request->reanimated_count = $newCount;
             $request->save();
 
+            // Re-assessment ответственного при реанимации:
+            //   - письмо в личный ящик активного request_handler → отдаём
+            //     ему (sig A, сильнейший);
+            //   - текущий assignee archived / без нужной роли → autoAssign
+            //     (sig B);
+            //   - unavailable (отпуск/болезнь) — НЕ трогаем, человек вернётся
+            //     и delegation acting'у даст доступ на время.
+            $reassignmentDetails = $this->reassessAssignmentOnReanimate($request, $sourceMessage);
+
+            // Статус — после re-assignment'а: autoAssign внутри (если был
+            // вызван) выставил Assigned, нам же нужен InProgress (реанимация
+            // = заявка вернулась в работу, как раньше).
+            $request->status = $to;
+            $request->save();
+
             RequestStateChange::create([
                 'request_id' => $request->id,
                 'from_status' => $from->value,
@@ -232,11 +248,12 @@ class RequestStateService
                 'by_user_id' => $author?->id,
                 'event' => 'reanimate',
                 'comment' => 'Клиент написал после закрытия — реанимация',
-                'payload' => [
+                'payload' => array_filter([
                     'reanimate_count' => $newCount,
                     'restored_from' => $snapshot,
                     'source_email_message_id' => $sourceMessage->id,
-                ],
+                    'reassignment' => $reassignmentDetails,
+                ]),
             ]);
 
             // Phase 1.11: после reanimate ставим attention now+SLA-дедлайн
@@ -255,6 +272,130 @@ class RequestStateService
         ]);
 
         return $request;
+    }
+
+    /**
+     * Пересчёт ответственного при реанимации closed_lost заявки.
+     *
+     * Два независимых сигнала меняют менеджера:
+     *
+     *   A) **Direct mailbox** — письмо пришло в личный почтовый ящик
+     *      активного request_handler. Самый сильный сигнал: клиент написал
+     *      персонально менеджеру X. Переподчиняем владельцу ящика, даже
+     *      если текущий assignee активен (личный канал важнее sticky).
+     *
+     *   B) **Архивный assignee** — текущий ответственный заархивирован
+     *      (уволен) или потерял request_handler роль. Запускаем
+     *      `AssignmentService::autoAssign` — full sticky + RR, выберется
+     *      активный менеджер.
+     *
+     * Unavailable (отпуск / болезнь) — НЕ повод переподчинять. Менеджер
+     * вернётся; если на время отсутствия открыто delegation — acting
+     * получит доступ автоматически через `Request::isAccessibleBy`.
+     *
+     * @return array{kind: string, from_user_id: ?int, to_user_id: int}|null
+     *         null если переподчинения не было (текущий активный assignee
+     *         остался прежним).
+     */
+    private function reassessAssignmentOnReanimate(Request $request, EmailMessage $sourceMessage): ?array
+    {
+        $previousAssigneeId = $request->assigned_user_id;
+
+        // Signal A: direct mailbox owner override.
+        $directOwner = $this->resolveDirectMailboxOwner($sourceMessage);
+        if ($directOwner !== null && $directOwner->id !== $previousAssigneeId) {
+            $this->reassignDuringReanimate($request, $directOwner, 'reanimate_direct_mailbox');
+
+            return [
+                'kind' => 'direct_mailbox',
+                'from_user_id' => $previousAssigneeId,
+                'to_user_id' => $directOwner->id,
+            ];
+        }
+
+        // Signal B: текущий assignee архивирован / не подходит по роли.
+        // Unavailable (отпуск) намеренно НЕ триггерит — человек вернётся.
+        $assigneeStillEligible = $previousAssigneeId !== null
+            && User::query()
+                ->active()
+                ->role(RoleEnum::requestHandlerRoles())
+                ->whereKey($previousAssigneeId)
+                ->exists();
+
+        if (! $assigneeStillEligible) {
+            $newAssignee = app(AssignmentService::class)->autoAssign($request);
+            if ($newAssignee !== null && $newAssignee->id !== $previousAssigneeId) {
+                return [
+                    'kind' => 'archived_reassign',
+                    'from_user_id' => $previousAssigneeId,
+                    'to_user_id' => $newAssignee->id,
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Personal mailbox owner (активный request_handler) — или null.
+     */
+    private function resolveDirectMailboxOwner(EmailMessage $message): ?User
+    {
+        if (! $message->mailbox_id) {
+            return null;
+        }
+        $mailbox = $message->mailbox;
+        if (! $mailbox || $mailbox->type !== MailboxType::Personal || ! $mailbox->owner_user_id) {
+            return null;
+        }
+
+        return User::query()
+            ->active()
+            ->role(RoleEnum::requestHandlerRoles())
+            ->find($mailbox->owner_user_id);
+    }
+
+    /**
+     * Inline-переподчинение во время реанимации.
+     *
+     * Не использует `AssignmentService::autoAssign` (тот пересчитывает
+     * sticky/RR и трогает status) и не `ReassignService` (тот пишет
+     * `manual_reassign:` reason — это не ручная операция). Своя короткая
+     * запись с `reanimate_*` reason для аудит-трейла.
+     */
+    private function reassignDuringReanimate(Request $request, User $newAssignee, string $reason): void
+    {
+        $request->assigned_user_id = $newAssignee->id;
+        $request->assigned_at = now();
+        $request->save();
+
+        RequestAssignment::create([
+            'request_id' => $request->id,
+            'user_id' => $newAssignee->id,
+            'by_user_id' => null,
+            'reason' => $reason,
+            'assigned_at' => now(),
+        ]);
+
+        // IMAP-доставка оригинала письма в личный ящик нового assignee +
+        // COPY в подпапку MZ|<Фамилия> общего ящика. Идемпотентны.
+        $email = $request->emailMessage;
+        if ($email) {
+            \App\Jobs\Mail\RouteMailToManagerJob::dispatch($email->id, $newAssignee->id);
+            \App\Jobs\Mail\DeliverToManagerInboxJob::dispatch($email->id, $newAssignee->id);
+        }
+
+        try {
+            $newAssignee->notify(
+                \App\Notifications\RequestAssignedNotification::from($request->fresh(), $reason),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('RequestStateService: reanimate reassign notification failed (non-fatal)', [
+                'request_id' => $request->id,
+                'new_assignee_id' => $newAssignee->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
