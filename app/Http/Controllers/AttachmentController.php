@@ -116,13 +116,20 @@ class AttachmentController extends Controller
 
     /**
      * ASCII-fallback для legacy-клиентов, не понимающих RFC 5987 filename*.
-     * Все не-ASCII символы + слэши заменяем на «_», пустое имя → «attachment».
+     *
+     * Заменяем «_» на:
+     *   - все не-ASCII (вне \x20-\x7e);
+     *   - `/` и `\` — Symfony makeDisposition отвергает в fallback;
+     *   - `%` — RFC 6266 запрещает (Symfony кидает InvalidArgumentException,
+     *     кейс M-2026-1471: MIME-декодер выдал имя с `%` среди прочих
+     *     control-байтов);
+     *   - `"` и `'` — кавычки ломают quoted-string в Content-Disposition.
+     *
+     * Пустое имя → «attachment».
      */
     private function asciiFallback(string $name): string
     {
-        // Слэши тоже сюда — Symfony makeDisposition отвергает их в ASCII
-        // fallback, поэтому подменяем до передачи в header.
-        $ascii = preg_replace('/[^\x20-\x7e]|[\\/\\\\]/', '_', $name) ?? '';
+        $ascii = preg_replace('/[^\x20-\x7e]|[\\/\\\\%"\']/', '_', $name) ?? '';
         $ascii = trim(preg_replace('/_+/', '_', $ascii) ?? '', '_ .');
 
         return $ascii !== '' ? $ascii : 'attachment';
