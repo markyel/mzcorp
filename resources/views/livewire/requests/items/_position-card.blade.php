@@ -229,6 +229,63 @@
                     <span title="Название из каталога MyLift">📦 «{{ $ci->name }}»</span>
                 </div>
             @endif
+
+            {{-- Phase 2.1 — Строка 4: маппинг наследования.
+                 child:  «↻ было в M-NNNN · поз. N · qty X шт» (с qty delta если отличается).
+                 parent: «↻ продолжена в M-NNNN[, M-NNNN]» (children, ссылающиеся на эту позицию).
+                 Параметры:
+                   $inheritanceLink     RequestItemLink|Collection|null
+                   $inheritanceIsChild  bool — сторона текущей заявки в наследовании
+            --}}
+            @if(! empty($inheritanceLink ?? null))
+                @if($inheritanceIsChild ?? false)
+                    @php
+                        $pi = $inheritanceLink->parentItem;
+                        $pr = $pi?->request;
+                    @endphp
+                    @if($pi && $pr)
+                        <div class="text-[11px] text-violet-700 mt-0.5 flex items-center gap-1 flex-wrap"
+                             title="Соответствие позиции в архивной заявке (наследование, источник: {{ $inheritanceLink->mapping_source }}{{ $inheritanceLink->mapping_confidence ? ' · ' . round($inheritanceLink->mapping_confidence * 100) . '%' : '' }})">
+                            <span class="inline-flex items-center bg-violet-50 px-1 rounded-sm">↻ было в</span>
+                            <a href="{{ route('requests.show', $pr) }}"
+                               class="mono text-sky-700 hover:underline">{{ $pr->internal_code }}</a>
+                            <span class="text-fg-3">· поз. {{ $pi->position }}</span>
+                            @if($pi->parsed_qty)
+                                @php
+                                    $pq = rtrim(rtrim((string) $pi->parsed_qty, '0'), '.') ?: '0';
+                                    $cq = rtrim(rtrim((string) $item->parsed_qty, '0'), '.') ?: '0';
+                                    $qtyChanged = $pq !== '' && $cq !== '' && $pq !== $cq;
+                                @endphp
+                                <span class="text-fg-3{{ $qtyChanged ? ' font-medium text-amber-700' : '' }}">·
+                                    {{ $qtyChanged ? 'было ' . $pq : $pq }} {{ $pi->parsed_unit }}{{ $qtyChanged ? ' → ' . $cq . ' ' . $item->parsed_unit : '' }}
+                                </span>
+                            @endif
+                        </div>
+                    @endif
+                @else
+                    @php
+                        $childLinks = $inheritanceLink instanceof \Illuminate\Support\Collection
+                            ? $inheritanceLink
+                            : collect([$inheritanceLink]);
+                    @endphp
+                    @if($childLinks->isNotEmpty())
+                        <div class="text-[11px] text-violet-700 mt-0.5 flex items-center gap-1 flex-wrap"
+                             title="Эта позиция продолжается в наследующих заявках">
+                            <span class="inline-flex items-center bg-violet-50 px-1 rounded-sm">↻ продолжена в</span>
+                            @foreach($childLinks as $cl)
+                                @php
+                                    $ch = $cl->childItem;
+                                    $cr = $ch?->request;
+                                @endphp
+                                @if($cr)
+                                    <a href="{{ route('requests.show', $cr) }}"
+                                       class="mono text-sky-700 hover:underline">{{ $cr->internal_code }}</a>{{ ! $loop->last ? ',' : '' }}
+                                @endif
+                            @endforeach
+                        </div>
+                    @endif
+                @endif
+            @endif
         </div>
 
         {{-- Status-колонка теперь несёт сматченный M-SKU (если есть) +

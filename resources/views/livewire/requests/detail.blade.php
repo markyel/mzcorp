@@ -886,6 +886,19 @@
                 <livewire:requests.merge-dialog :request="$req" wire:key="merge-{{ $req->id }}" />
             @endif
 
+            {{-- Phase 2.1 — отвязать наследование (только для child-заявок).
+                 Доступно owner / acting / privileged. История item-links
+                 сохраняется (is_active=false), статус child обнуляется. --}}
+            @if(($canManage || $canReassign) && $req->isInheritanceChild())
+                <button type="button"
+                        wire:click="unlinkInheritance"
+                        wire:confirm="Отвязать эту заявку от архивной {{ $req->inheritanceParent?->internal_code }}? Связи позиций будут деактивированы (история сохранится)."
+                        class="btn btn-sm"
+                        title="Эта заявка ошибочно помечена как наследник — отвязать">
+                    🔗 Отвязать наследование
+                </button>
+            @endif
+
             {{-- Модальные диалоги (single-instance per Detail). --}}
             <livewire:requests.pause-dialog :request="$req" wire:key="pause-{{ $req->id }}" />
             <livewire:requests.postpone-dialog :request="$req" wire:key="postpone-{{ $req->id }}" />
@@ -1943,8 +1956,18 @@
                                 }
                             @endphp
                             <div class="p-[8px] bg-app">
+                            @php
+                                // Phase 2.1 — Inheritance link для текущей позиции.
+                                // child  → одна ссылка на parent-item.
+                                // parent → коллекция child-links (несколько детей могут ссылаться).
+                                $inhLinksMap = $this->inheritanceItemLinks;
+                                $isInhChild = $req->isInheritanceChild();
+                            @endphp
                             @foreach($items as $item)
-                                @php $slots = $slotResolver->resolve($item); @endphp
+                                @php
+                                    $slots = $slotResolver->resolve($item);
+                                    $inhLinkForItem = $inhLinksMap->get($item->id);
+                                @endphp
                                 @include('livewire.requests.items._position-card', [
                                     'item' => $item,
                                     'slots' => $slots,
@@ -1954,6 +1977,8 @@
                                     'expanded' => (bool) ($expandedPositions[$item->id] ?? false),
                                     'galleryIndex' => $positionsItemIdx[$item->id] ?? null,
                                     'galleryItems' => $positionsGallery,
+                                    'inheritanceLink' => $inhLinkForItem,
+                                    'inheritanceIsChild' => $isInhChild,
                                 ])
                             @endforeach
                             </div>

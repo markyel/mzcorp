@@ -445,6 +445,98 @@ class Detail extends Component
     }
 
     /**
+     * Phase 2.1 inheritance: Map<request_item_id, RequestItemLink>
+     * для текущей заявки.
+     *
+     *  - child:  ключ — id child-item, link.parentItem указывает на
+     *            архивную родительскую позицию.
+     *  - parent: ключ — id parent-item, link.childItem указывает на
+     *            позицию в наследующей заявке (для отображения
+     *            «→ продолжена в M-NNNN»).
+     *
+     * Возвращает пустую коллекцию если заявка не участвует в наследовании.
+     */
+    #[Computed]
+    public function inheritanceItemLinks(): \Illuminate\Support\Collection
+    {
+        $itemIds = $this->request->items->pluck('id');
+        if ($itemIds->isEmpty()) {
+            return collect();
+        }
+
+        if ($this->request->isInheritanceChild()) {
+            return \App\Models\RequestItemLink::query()
+                ->active()
+                ->whereIn('child_item_id', $itemIds)
+                ->with(['parentItem' => fn ($q) => $q->select('id', 'request_id', 'position', 'parsed_name', 'parsed_article', 'parsed_qty', 'parsed_unit')])
+                ->with(['parentItem.request:id,internal_code,status'])
+                ->get()
+                ->keyBy('child_item_id');
+        }
+
+        if ($this->request->isInheritanceParent()) {
+            return \App\Models\RequestItemLink::query()
+                ->active()
+                ->whereIn('parent_item_id', $itemIds)
+                ->with(['childItem' => fn ($q) => $q->select('id', 'request_id', 'position', 'parsed_qty', 'parsed_unit')])
+                ->with(['childItem.request:id,internal_code,status'])
+                ->get()
+                ->groupBy('parent_item_id');
+        }
+
+        return collect();
+    }
+
+    /**
+     * Phase 2.1 — отвязать наследование (только для child-заявок).
+     *
+     * Permission: owner / acting (delegation) / privileged
+     * (head_of_sales, director, admin). Менеджер может ошибочно
+     * связанную child-заявку отвязать от parent. Item-links
+     * деактивируются (история сохраняется).
+     */
+    public function unlinkInheritance(\App\Services\Request\RequestInheritanceService $service): void
+    {
+        $user = auth()->user();
+        if (! $user) {
+            abort(403);
+        }
+
+        $privileged = $user->hasAnyRole([
+            \App\Enums\Role::HeadOfSales->value,
+            \App\Enums\Role::Director->value,
+            \App\Enums\Role::Admin->value,
+        ]) ?? false;
+        if (! $privileged && ! $this->request->isAccessibleBy($user)) {
+            $this->dispatch('toast', message: 'Нет прав отвязать наследование.', type: 'error');
+            return;
+        }
+
+        if (! $this->request->isInheritanceChild()) {
+            $this->dispatch('toast', message: 'Эта заявка не является наследником.', type: 'error');
+            return;
+        }
+
+        $parentCode = $this->request->inheritanceParent?->internal_code;
+        try {
+            $service->unlinkChild(
+                $this->request,
+                reason: 'manual',
+                unlinkedBy: (string) ($user->email ?? $user->id),
+            );
+            $this->reloadRequest();
+            $this->dispatch('toast', message: 'Наследование от ' . ($parentCode ?: 'архивной') . ' отвязано.', type: 'success');
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Detail::unlinkInheritance failed', [
+                'request_id' => $this->request->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+            $this->dispatch('toast', message: 'Не удалось отвязать: ' . $e->getMessage(), type: 'error');
+        }
+    }
+
+    /**
      * Подписи и счётчики для табов. `null` = без счётчика.
      *
      * @return array<string, array{label: string, count: ?int, disabled: bool}>
