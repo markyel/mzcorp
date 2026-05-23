@@ -132,7 +132,10 @@ class AttachmentController extends Controller
      * Санитизирует filename для Content-Disposition:
      *   - убирает `/` и `\` (Symfony makeDisposition кидает
      *     InvalidArgumentException на них)
-     *   - убирает CR/LF/NUL (header-injection защита)
+     *   - убирает ВСЕ control characters \x00-\x1F + \x7F (header-injection
+     *     защита + кейс M-2026-1471: MIME-декодер выдал filename с байтом
+     *     0x0C (Form Feed) — на скачивании 500. CR/LF/NUL — частный случай;
+     *     все control'ы безопаснее вычистить разом.)
      *   - возвращает «attachment.bin» если после чистки пусто
      *
      * Используется ДО передачи в HeaderUtils::makeDisposition.
@@ -141,7 +144,11 @@ class AttachmentController extends Controller
      */
     private function sanitizeForDisposition(string $name): string
     {
-        $clean = str_replace(['/', '\\', "\r", "\n", "\0"], '_', $name);
+        // Вычищаем control characters (\x00-\x1F + \x7F) одним regex'ом
+        // + path separators. /u не нужен — работаем побайтно для надёжности
+        // на mojibake (filename может содержать invalid UTF-8 после кривого
+        // MIME-декода, /u в этом случае вернул бы null).
+        $clean = preg_replace('/[\x00-\x1F\x7F\\/\\\\]/', '_', $name) ?? '';
         $clean = trim(preg_replace('/_+/', '_', $clean) ?? '', '_ .');
 
         return $clean !== '' ? $clean : 'attachment.bin';
