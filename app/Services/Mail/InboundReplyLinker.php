@@ -416,7 +416,59 @@ class InboundReplyLinker
             ->orderByDesc('closed_at')
             ->first();
 
+        if ($closedCandidate === null) {
+            return null;
+        }
+
+        // Guard A: не реанимировать массово-закрытые заявки без явного
+        // клиентского триггера на закрытие. closed_lost_source_message_id
+        // заполняется когда заявку закрыл InboundIntentClassifier на основе
+        // конкретного письма клиента (decline / off_topic с цитатой). NULL
+        // означает административное / массовое закрытие (Pre-launch cleanup,
+        // ручное РОПом без citation). Реанимировать такие через слабый
+        // сигнал from_email — слишком много false positives.
+        if ($closedCandidate->closed_lost_source_message_id === null) {
+            Log::info('InboundReplyLinker: skip reanimate — mass-closed (no source msg)', [
+                'email_message_id' => $message->id,
+                'closed_request_id' => $closedCandidate->id,
+                'closed_lost_comment' => mb_substr((string) $closedCandidate->closed_lost_comment, 0, 100),
+            ]);
+
+            return null;
+        }
+
+        // Guard B: subject inbound и closed-кандидата должны совпадать
+        // после нормализации (strip Re:/Fwd:/Отв: + lower-case). Кейс
+        // M-2026-1471: клиент сделал Fwd: Re: «Запрос стоимости лм8809»
+        // с новым запросом сверху, а closed заявка — «Запрос стоимости
+        // лм4115». Это разные треды одного клиента — должна быть новая
+        // заявка, не реанимация старой.
+        if ($this->normalizeSubject((string) $message->subject)
+            !== $this->normalizeSubject((string) $closedCandidate->subject)
+        ) {
+            Log::info('InboundReplyLinker: skip reanimate — subject mismatch', [
+                'email_message_id' => $message->id,
+                'closed_request_id' => $closedCandidate->id,
+                'inbound_subject' => mb_substr((string) $message->subject, 0, 120),
+                'closed_subject' => mb_substr((string) $closedCandidate->subject, 0, 120),
+            ]);
+
+            return null;
+        }
+
         return $closedCandidate;
+    }
+
+    /**
+     * Нормализованный subject для сравнения: вырезаем reply/forward
+     * префиксы (рекурсивно — `Re: Fwd: Re:` тоже схлопывается), trim,
+     * lower-case. Возвращаем пустую строку для пустого subject.
+     */
+    private function normalizeSubject(string $s): string
+    {
+        $s = (string) preg_replace('/^\s*((re|fwd|fw|отв|ответ)\s*:\s*)+/iu', '', $s);
+
+        return mb_strtolower(trim($s));
     }
 
     /**
