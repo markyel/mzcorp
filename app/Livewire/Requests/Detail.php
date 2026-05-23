@@ -488,6 +488,66 @@ class Detail extends Component
     }
 
     /**
+     * Phase 2.3 — ручная реанимация closed_lost заявки.
+     *
+     * Используется когда менеджер ОСОЗНАННО хочет вернуть заявку в работу
+     * (типичный кейс: клиент молчал после КП → передумал, попросил обновить
+     * счёт; auto-реанимация отключена в Phase 1). В отличие от auto-flow:
+     *   - не пересматривает assignee (assigned_user_id остаётся как был);
+     *   - не требует source email (менеджер инициирует сам);
+     *   - audit event=`manual_reanimate` (для отличия в Activity).
+     *
+     * Permission: owner / acting (delegation) / privileged
+     * (head_of_sales, director, admin). Секретарь — нет (он только наблюдатель).
+     */
+    public function manualReanimate(\App\Services\Request\RequestStateService $service): void
+    {
+        $user = auth()->user();
+        if (! $user) {
+            abort(403);
+        }
+        if ($user->hasRole(\App\Enums\Role::Secretary->value)) {
+            $this->dispatch('toast', message: 'Секретарь только просматривает заявки.', type: 'error');
+            return;
+        }
+
+        $privileged = $user->hasAnyRole([
+            \App\Enums\Role::HeadOfSales->value,
+            \App\Enums\Role::Director->value,
+            \App\Enums\Role::Admin->value,
+        ]) ?? false;
+        if (! $privileged && ! $this->request->isAccessibleBy($user)) {
+            $this->dispatch('toast', message: 'Нет прав реанимировать.', type: 'error');
+            return;
+        }
+
+        if ($this->request->status !== RequestStatus::ClosedLost) {
+            $this->dispatch('toast', message: 'Реанимировать можно только закрытые с потерей.', type: 'error');
+            return;
+        }
+
+        try {
+            $service->reanimate(
+                $this->request,
+                $user,
+                sourceMessage: null,
+                reassessAssignee: false,
+                event: 'manual_reanimate',
+                comment: 'Ручная реанимация менеджером',
+            );
+            $this->reloadRequest();
+            $this->dispatch('toast', message: 'Заявка реанимирована. Менеджер сохранён.', type: 'success');
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Detail::manualReanimate failed', [
+                'request_id' => $this->request->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+            $this->dispatch('toast', message: 'Не удалось реанимировать: ' . $e->getMessage(), type: 'error');
+        }
+    }
+
+    /**
      * Phase 2.1 — отвязать наследование (только для child-заявок).
      *
      * Permission: owner / acting (delegation) / privileged

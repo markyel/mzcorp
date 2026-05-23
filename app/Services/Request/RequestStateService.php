@@ -192,8 +192,14 @@ class RequestStateService
      * Реанимировать можно только из closed_lost — closed_won не трогаем
      * (там сделка состоялась, новое письмо клиента = новый запрос).
      */
-    public function reanimate(Request $request, ?User $author, EmailMessage $sourceMessage): Request
-    {
+    public function reanimate(
+        Request $request,
+        ?User $author,
+        ?EmailMessage $sourceMessage,
+        bool $reassessAssignee = true,
+        string $event = 'reanimate',
+        string $comment = 'Клиент написал после закрытия — реанимация',
+    ): Request {
         if ($request->status !== RequestStatus::ClosedLost) {
             throw new \DomainException(sprintf(
                 'Реанимация доступна только из closed_lost, текущий статус: %s.',
@@ -215,7 +221,7 @@ class RequestStateService
             'closed_lost_source_message_id' => $request->closed_lost_source_message_id,
         ];
 
-        DB::transaction(function () use ($request, $to, $author, $from, $snapshot, $sourceMessage) {
+        DB::transaction(function () use ($request, $to, $author, $from, $snapshot, $sourceMessage, $reassessAssignee, $event, $comment) {
             $newCount = (int) ($request->reanimated_count ?? 0) + 1;
             $request->closed_at = null;
             $request->closed_lost_reason = null;
@@ -226,14 +232,22 @@ class RequestStateService
             $request->reanimated_count = $newCount;
             $request->save();
 
-            // Re-assessment ответственного при реанимации:
+            // Re-assessment ответственного при реанимации (auto-flow):
             //   - письмо в личный ящик активного request_handler → отдаём
             //     ему (sig A, сильнейший);
             //   - текущий assignee archived / без нужной роли → autoAssign
             //     (sig B);
             //   - unavailable (отпуск/болезнь) — НЕ трогаем, человек вернётся
             //     и delegation acting'у даст доступ на время.
-            $reassignmentDetails = $this->reassessAssignmentOnReanimate($request, $sourceMessage);
+            //
+            // Phase 2.3: при manual reanimate ($reassessAssignee=false)
+            // пропускаем re-assessment — менеджер осознанно жмёт «реанимировать»,
+            // он же и продолжит работу. sourceMessage null допустим для manual
+            // (нет триггерного письма — просто решение оператора).
+            $reassignmentDetails = null;
+            if ($reassessAssignee && $sourceMessage !== null) {
+                $reassignmentDetails = $this->reassessAssignmentOnReanimate($request, $sourceMessage);
+            }
 
             // Статус — после re-assignment'а: autoAssign внутри (если был
             // вызван) выставил Assigned, нам же нужен InProgress (реанимация
@@ -246,12 +260,12 @@ class RequestStateService
                 'from_status' => $from->value,
                 'to_status' => $to->value,
                 'by_user_id' => $author?->id,
-                'event' => 'reanimate',
-                'comment' => 'Клиент написал после закрытия — реанимация',
+                'event' => $event,
+                'comment' => $comment,
                 'payload' => array_filter([
                     'reanimate_count' => $newCount,
                     'restored_from' => $snapshot,
-                    'source_email_message_id' => $sourceMessage->id,
+                    'source_email_message_id' => $sourceMessage?->id,
                     'reassignment' => $reassignmentDetails,
                 ]),
             ]);
@@ -267,8 +281,10 @@ class RequestStateService
             'request_id' => $request->id,
             'previous_count' => $snapshot['closed_at'] !== null ? $request->reanimated_count - 1 : 0,
             'new_count' => $request->reanimated_count,
-            'source_email_message_id' => $sourceMessage->id,
+            'source_email_message_id' => $sourceMessage?->id,
             'restored_from' => $snapshot,
+            'event' => $event,
+            'reassess_assignee' => $reassessAssignee,
         ]);
 
         return $request;

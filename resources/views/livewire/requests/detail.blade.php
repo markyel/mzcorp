@@ -733,6 +733,20 @@
                     <livewire:requests.reassign-dialog :request="$req" wire:key="reassign-{{ $req->id }}" />
                 @endif
 
+                {{-- Phase 2.3 — ручная реанимация closed_lost (только она;
+                     closed_won не реанимируется — там сделка состоялась).
+                     Permission: owner / acting / privileged. Менеджер сохраняется,
+                     re-assessment ассайни не запускается. --}}
+                @if($req->status === $RS::ClosedLost && ($canManage || $canReassign))
+                    <button type="button"
+                            wire:click="manualReanimate"
+                            wire:confirm="Вернуть заявку в работу? Статус сменится на «В работе», менеджер останется тот же."
+                            class="btn btn-sm"
+                            title="Реанимировать — typical случай: клиент молчал, потом передумал и попросил обновить КП/счёт">
+                        ↻ Реанимировать
+                    </button>
+                @endif
+
             {{-- Paused: единственная кнопка «снять с паузы». --}}
             @elseif($req->status === $RS::Paused)
                 <div class="ds-card p-3 text-[12.5px] bg-neutral-50 border-neutral-300">
