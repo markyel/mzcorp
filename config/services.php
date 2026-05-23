@@ -102,6 +102,18 @@ return [
         // Phase 2 use-case C: размер батча на /v1/embeddings (OpenAI лимит 2048).
         // 100 — компромисс между latency на запрос и количеством HTTP-вызовов.
         'embedding_batch_size' => (int) env('OPENAI_EMBEDDING_BATCH_SIZE', 100),
+        // Phase 2.1 inheritance: финальный валидатор гипотезы «новая Request —
+        // продолжение архивной closed_lost». Бинарная задача yes/no — mini.
+        'inheritance_check_model' => env('OPENAI_INHERITANCE_CHECK_MODEL', 'gpt-4o-mini'),
+    ],
+
+    /*
+    | Phase 2.1 — наследование заявок от архивных closed_lost.
+    */
+    'inheritance' => [
+        // Минимальная LLM-уверенность для авто-link'а child→parent.
+        // Ниже — оставляем как отдельную заявку без наследования.
+        'confidence_threshold' => (float) env('INHERITANCE_CONFIDENCE_THRESHOLD', 0.7),
     ],
 
     /*

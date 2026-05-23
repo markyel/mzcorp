@@ -63,6 +63,13 @@ class Request extends Model
         // Слияние заявок (RequestMergeService).
         'merged_into_id',
         'merged_at',
+        // Phase 2.1 — наследование от архивной closed_lost заявки.
+        // Заполняется CheckInheritanceJob после LLM-подтверждения
+        // гипотезы «новая Request — продолжение архивной».
+        // См. RequestInheritanceService (drop-in из LazyLift).
+        'inheritance_group_id',
+        'inheritance_role',
+        'inheritance_parent_id',
         // Сложность (RequestComplexityService) — snapshot входной нагрузки
         // на менеджера. Score = Σ MatchPath::weight(items active). Level
         // выводится по порогам AppSetting `complexity.thresholds`.
@@ -213,6 +220,41 @@ class Request extends Model
     public function mergedFrom()
     {
         return $this->hasMany(self::class, 'merged_into_id');
+    }
+
+    /**
+     * Phase 2.1 — наследование. Родитель (архивная закрытая заявка),
+     * от которой эта Request наследована.
+     */
+    public function inheritanceParent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'inheritance_parent_id');
+    }
+
+    /**
+     * Phase 2.1 — наследующие заявки (если эта — родитель).
+     *
+     * @return HasMany
+     */
+    public function inheritanceChildren(): HasMany
+    {
+        return $this->hasMany(self::class, 'inheritance_parent_id');
+    }
+
+    /**
+     * Эта заявка — родитель в наследовании.
+     */
+    public function isInheritanceParent(): bool
+    {
+        return $this->inheritance_role === 'parent';
+    }
+
+    /**
+     * Эта заявка — наследник от родителя.
+     */
+    public function isInheritanceChild(): bool
+    {
+        return $this->inheritance_role === 'child' && ! empty($this->inheritance_parent_id);
     }
 
     public function emailMessage(): BelongsTo

@@ -309,6 +309,19 @@ class RequestItemPersister
             \App\Jobs\Kb\ResolveKbJob::dispatch($existing->id);
         }
 
+        // Phase 2.1 inheritance: если в source-message linker оставил
+        // подозрение про closed_lost кандидата — async LLM-проверка
+        // «это продолжение архивной заявки?». При confidence ≥ threshold
+        // → RequestInheritanceService::linkChild. Шансов нет если позиций
+        // нет (LLM не сможет сравнить), но job сам пропустит такие.
+        $sourceMessage = $existing->emailMessage;
+        $candidateHint = is_array($sourceMessage?->detected_artifacts ?? null)
+            ? ($sourceMessage->detected_artifacts['inheritance_candidate_id'] ?? null)
+            : null;
+        if ($candidateHint !== null && $existing->inheritance_parent_id === null) {
+            \App\Jobs\Request\CheckInheritanceJob::dispatch($existing->id);
+        }
+
         // Phase 2 + 2026-05-19: clarifications от LLM делятся по confidence:
         //   high → применяем АВТОМАТИЧЕСКИ (parsed_article append + brand
         //          fill if empty) — без участия менеджера, тихо в фоне.

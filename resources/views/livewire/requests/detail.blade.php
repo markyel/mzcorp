@@ -360,6 +360,43 @@
                         <span class="text-fg-3">—</span>
                     @endif
                 </div>
+                @php
+                    // Phase 2.1 inheritance: chip направления.
+                    // child  → «↻ наследник M-NNNN» (ссылка на parent).
+                    // parent → «↻ продолжена в M-NNNN[, M-NNNN…]» (ссылки на детей).
+                    // Иначе — слот скрыт.
+                    $inhParent = $this->request->isInheritanceChild()
+                        ? $this->request->inheritanceParent
+                        : null;
+                    $inhChildren = $this->request->isInheritanceParent()
+                        ? $this->request->inheritanceChildren()->orderByDesc('created_at')->get(['id','internal_code','status'])
+                        : collect();
+                @endphp
+                @if($inhParent || $inhChildren->isNotEmpty())
+                <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle min-w-0">
+                    <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Наследование</span>
+                    @if($inhParent)
+                        <span class="flex items-center gap-1.5 flex-wrap"
+                              title="Эта заявка — продолжение архивной {{ $inhParent->internal_code }} (LLM подтвердил сходство позиций)">
+                            <span class="inline-flex items-center text-[10.5px] font-semibold px-1.5 py-0.5 rounded-[3px] bg-violet-50 text-violet-700">↻ наследник</span>
+                            <a href="{{ route('requests.show', $inhParent) }}"
+                               class="mono text-[12px] text-sky-700 hover:underline">{{ $inhParent->internal_code }}</a>
+                        </span>
+                    @else
+                        <span class="flex items-center gap-1.5 flex-wrap"
+                              title="У этой архивной заявки есть {{ $inhChildren->count() }} новых наследников">
+                            <span class="inline-flex items-center text-[10.5px] font-semibold px-1.5 py-0.5 rounded-[3px] bg-violet-50 text-violet-700">↻ продолжена ×{{ $inhChildren->count() }}</span>
+                            @foreach($inhChildren->take(3) as $child)
+                                <a href="{{ route('requests.show', $child) }}"
+                                   class="mono text-[12px] text-sky-700 hover:underline">{{ $child->internal_code }}</a>{{ ! $loop->last ? ',' : '' }}
+                            @endforeach
+                            @if($inhChildren->count() > 3)
+                                <span class="text-fg-3 text-[12px]">+{{ $inhChildren->count() - 3 }}</span>
+                            @endif
+                        </span>
+                    @endif
+                </div>
+                @endif
                 <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle">
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Возраст</span>
                     <span class="text-fg-1 mono">{{ $age }}</span>

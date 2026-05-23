@@ -50,6 +50,12 @@ class InboundReplyLinker
     }
 
     /**
+     * Lookback для поиска closed_lost кандидата (Phase 2.1 наследование).
+     * Кандидат — точка отсчёта для CheckInheritanceJob (LLM-проверка).
+     */
+    private const ARCHIVE_CANDIDATE_LOOKBACK_DAYS = 180;
+
+    /**
      * @return Request|null  null = thread не найден, обычный flow.
      */
     public function tryLink(EmailMessage $message): ?Request
@@ -139,24 +145,20 @@ class InboundReplyLinker
 
         // Автоматическая реанимация закрытых заявок ОТКЛЮЧЕНА (Phase 1
         // нового поведения). Архивная заявка — это история; новый запрос
-        // клиента не должен «оживлять» её, даже если есть header threading.
-        // Реальные кейсы продолжения треда (клиент молчал → передумал)
-        // обслуживаются:
-        //   1. Через manual reanimate (Phase 3): кнопка «↻ Реанимировать»
-        //      в карточке закрытой заявки, доступна owner/acting/privileged.
-        //   2. Через «наследование» (Phase 2): новая Request создаётся
-        //      отдельно, а при item-similarity (LLM check после парсинга
-        //      позиций) — пишется FK на архивную как inherited_from.
+        // клиента не должен «оживлять» её автоматически.
         //
-        // Тут возвращаем null — IncomingMailProcessor создаст новую Request,
-        // не подвязав к закрытой.
+        // НО: само наличие thread-match'а — это сигнал что новая Request
+        // может быть продолжением архивной. Сохраняем кандидата в
+        // detected_artifacts.inheritance_candidate_id — после парсинга
+        // позиций async-job CheckInheritanceJob проверит гипотезу через
+        // LLM, и при подтверждении (confidence >= threshold) свяжет новую
+        // Request с архивной через RequestInheritanceService::linkChild.
+        //
+        // Реальные кейсы продолжения (клиент молчал → передумал, просит
+        // обновить КП) — обслуживаются именно так (наследование), плюс
+        // ручная кнопка «↻ Реанимировать» (Phase 3).
         if ($request->status->isTerminal()) {
-            Log::info('InboundReplyLinker: skip — matched closed request, new Request will be created', [
-                'email_message_id' => $message->id,
-                'matched_request_id' => $request->id,
-                'matched_status' => $request->status->value,
-                'matched_by' => $matchedBy,
-            ]);
+            $this->rememberInheritanceCandidate($message, $request, (string) $matchedBy);
 
             return null;
         }
@@ -355,22 +357,85 @@ class InboundReplyLinker
             ->orderByDesc('created_at')
             ->get();
 
-        if ($candidates->isEmpty()) {
-            // Закрытые заявки НЕ рассматриваем — auto-реанимация отключена
-            // (Phase 1). Если у клиента нет ни одной открытой Request,
-            // вернётся null → IncomingMailProcessor создаст новую.
-            // Связь с архивной закроется через Phase 2 («наследование»
-            // по item-similarity, отдельный фикс).
+        if ($candidates->isNotEmpty()) {
+            if ($candidates->count() === 1) {
+                return $candidates->first();
+            }
+            // 5-й уровень: AI multi-choice. На сбое clarifier возвращает либо
+            // самую свежую (fallback), либо null (если AI решил что это новая тема).
+            return $this->clarifier->chooseRequest($message, $candidates);
+        }
+
+        // Level 4-bis: если открытых заявок нет — ищем кандидата среди
+        // закрытых (Phase 2.1 «наследование»). НЕ реанимируем —
+        // tryLink() запишет hint, после парсинга позиций async LLM-check
+        // решит, стоит ли линковать как наследника.
+        //
+        // Guards A/B остаются как фильтры качества кандидата: даже на
+        // стадии «найти hint» массово-закрытые (Pre-launch cleanup) и
+        // совсем другие subject'ы — не стоит подсовывать LLM.
+        $lookbackDate = now()->subDays(self::ARCHIVE_CANDIDATE_LOOKBACK_DAYS);
+        $closedCandidate = Request::query()
+            ->where('client_email', $message->from_email)
+            ->where('status', RequestStatus::ClosedLost->value)
+            ->where('closed_at', '>=', $lookbackDate)
+            ->orderByDesc('closed_at')
+            ->first();
+
+        if ($closedCandidate === null) {
             return null;
         }
 
-        if ($candidates->count() === 1) {
-            return $candidates->first();
+        // Guard A: массово-закрытые без явного клиентского триггера —
+        // не подсовываем LLM (high false-positive rate).
+        if ($closedCandidate->closed_lost_source_message_id === null) {
+            return null;
         }
 
-        // 5-й уровень: AI multi-choice. На сбое clarifier возвращает либо
-        // самую свежую (fallback), либо null (если AI решил что это новая тема).
-        return $this->clarifier->chooseRequest($message, $candidates);
+        // Guard B: subject inbound и closed-кандидата должны совпадать
+        // после нормализации. Разные темы — почти наверняка разные треды.
+        if ($this->normalizeSubject((string) $message->subject)
+            !== $this->normalizeSubject((string) $closedCandidate->subject)
+        ) {
+            return null;
+        }
+
+        // Возвращаем кандидата — статус ClosedLost, поэтому tryLink()
+        // пойдёт по terminal-ветке: запишет hint, вернёт null. Новая
+        // Request будет создана IncomingMailProcessor'ом; CheckInheritanceJob
+        // решит, линковать ли как наследника.
+        return $closedCandidate;
+    }
+
+    /**
+     * Phase 2.1 — записать кандидата в наследование (hint).
+     * Дёргается из tryLink() когда matched-request имеет terminal статус.
+     */
+    private function rememberInheritanceCandidate(EmailMessage $message, Request $candidate, string $matchedBy): void
+    {
+        $artifacts = (array) ($message->detected_artifacts ?? []);
+        $artifacts['inheritance_candidate_id'] = $candidate->id;
+        $artifacts['inheritance_candidate_matched_by'] = $matchedBy;
+        $message->forceFill(['detected_artifacts' => $artifacts])->save();
+
+        Log::info('InboundReplyLinker: archive candidate remembered for inheritance check', [
+            'email_message_id' => $message->id,
+            'candidate_request_id' => $candidate->id,
+            'candidate_status' => $candidate->status->value,
+            'matched_by' => $matchedBy,
+        ]);
+    }
+
+    /**
+     * Нормализованный subject для сравнения: вырезаем reply/forward
+     * префиксы (рекурсивно — `Re: Fwd: Re:` тоже схлопывается), trim,
+     * lower-case. Возвращаем пустую строку для пустого subject.
+     */
+    private function normalizeSubject(string $s): string
+    {
+        $s = (string) preg_replace('/^\s*((re|fwd|fw|отв|ответ)\s*:\s*)+/iu', '', $s);
+
+        return mb_strtolower(trim($s));
     }
 
     /**
