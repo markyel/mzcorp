@@ -324,12 +324,14 @@
                         // Иконка + tooltip по типу sticky (catalog/client/text).
                         // Старые записи без kind рендерятся нейтрально.
                         $stickyKindLabel = match ($sticky['kind'] ?? null) {
+                            'direct_mailbox' => '📬 личный ящик',
                             'catalog' => '📦 каталог',
                             'client' => '👤 клиент',
                             'text' => '🔤 текст',
                             default => null,
                         };
                         $stickyHoverTitle = match ($sticky['kind'] ?? null) {
+                            'direct_mailbox' => 'Письмо пришло напрямую в личный ящик менеджера — назначение в обход round-robin',
                             'catalog' => 'Sticky сработал по совпадению catalog_item_id — тот же товар каталога уже у этого менеджера',
                             'client' => 'Sticky сработал по client_email — у менеджера есть открытая заявка от того же клиента',
                             'text' => 'Sticky сработал по парсеному артикулу/названию позиции',
@@ -353,7 +355,7 @@
                         </span>
                     @elseif($sticky['legacy'])
                         <span class="text-fg-2 text-[12px]"
-                              title="Старая запись sticky — детали привязки не сохранены">{{ $stickyKindLabel ?? 'sticky' }}</span>
+                              title="{{ ($sticky['kind'] ?? null) === 'direct_mailbox' ? $stickyHoverTitle : 'Старая запись sticky — детали привязки не сохранены' }}">{{ $stickyKindLabel ?? 'sticky' }}</span>
                     @else
                         <span class="text-fg-3">—</span>
                     @endif

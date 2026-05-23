@@ -2,6 +2,7 @@
 
 namespace App\Services\Request;
 
+use App\Enums\MailboxType;
 use App\Enums\Role as RoleEnum;
 use App\Enums\RequestStatus;
 use App\Models\Request;
@@ -14,9 +15,16 @@ use Illuminate\Support\Facades\DB;
  * Phase 1 sticky + round-robin.
  *
  * Порядок выбора менеджера:
- *  1) Sticky — трёхуровневый поиск менеджера, который уже работал с тем же
- *     товаром / клиентом. Уровни проверяются по убыванию надёжности сигнала,
- *     первый сработавший побеждает (early-return):
+ *  1) Sticky — четырёхуровневый поиск менеджера, который уже владеет
+ *     каналом коммуникации или работал с тем же товаром / клиентом.
+ *     Уровни проверяются по убыванию надёжности сигнала, первый
+ *     сработавший побеждает (early-return):
+ *
+ *     1.0) **direct_mailbox** — письмо пришло в личный почтовый ящик
+ *          менеджера (`Mailbox.type=Personal` с owner_user_id). Самый
+ *          сильный сигнал — клиент написал лично. Игнорирует
+ *          unavailable owner (delegation покроет на время отсутствия).
+ *          reason kind=`direct_mailbox`, linked=[].
  *
  *     1a) **catalog_item_id** — у любой позиции новой заявки уже
  *         резолвлен `request_items.catalog_item_id` (через C-step или
@@ -151,13 +159,22 @@ class AssignmentService
     }
 
     /**
-     * Sticky-маршрутизация трёх уровней (см. doc-блок класса).
+     * Sticky-маршрутизация четырёх уровней (см. doc-блок класса).
      *
      * @param  Collection<int, User>  $managers  Активные менеджеры.
-     * @return array{user: User, linked: array<int>, kind: 'catalog'|'client'|'text'}|null
+     * @return array{user: User, linked: array<int>, kind: 'direct_mailbox'|'catalog'|'client'|'text'}|null
      */
     private function pickStickyManager(Request $request, Collection $managers): ?array
     {
+        // Level 0: письмо пришло в личный ящик менеджера — он и owner,
+        // независимо от sticky-истории и round-robin. Бизнес-правило:
+        // если клиент написал лично менеджеру X, передавать заявку
+        // другому через round-robin нельзя.
+        $byMailbox = $this->pickStickyByDirectMailbox($request);
+        if ($byMailbox) {
+            return $byMailbox;
+        }
+
         $managerIds = $managers->pluck('id')->all();
         // Открытые статусы для пула sticky-кандидатов.
         $openStatuses = array_map(
@@ -179,6 +196,53 @@ class AssignmentService
 
         // Level 3: parsed_article / parsed_name (текстовый матч).
         return $this->pickStickyByText($request, $managers, $managerIds, $openStatuses);
+    }
+
+    /**
+     * Level 0: письмо пришло в личный почтовый ящик менеджера.
+     *
+     * Бизнес-смысл: клиент написал лично менеджеру X. Передавать другому
+     * через round-robin/sticky нельзя — это нарушение прямой связи
+     * менеджер ⇄ клиент. Owner ящика становится assignee **даже если
+     * сейчас unavailable** (отпуск/командировка): заявка персональная,
+     * delegation откроет её acting'у автоматически на время отсутствия.
+     *
+     * Источник истины: `email_messages.mailbox.owner_user_id` при
+     * `type=Personal`. Если у ящика нет owner'а (shared / общий ящик) —
+     * возвращаем null, дальше идёт обычный sticky/round-robin.
+     *
+     * Защиты:
+     *   - owner archived → fallback к sticky/RR (его аккаунт деактивирован);
+     *   - owner не request_handler (manager/head_of_sales) → fallback
+     *     (личные ящики директора/секретаря/админа не должны синкаться
+     *     согласно `Mailbox::scopeSyncable`, но defensive).
+     *
+     * @return array{user: User, linked: array<int>, kind: 'direct_mailbox'}|null
+     */
+    private function pickStickyByDirectMailbox(Request $request): ?array
+    {
+        $message = $request->emailMessage;
+        if (! $message || ! $message->mailbox_id) {
+            return null;
+        }
+
+        $mailbox = $message->mailbox;
+        if (! $mailbox || $mailbox->type !== MailboxType::Personal) {
+            return null;
+        }
+        if (! $mailbox->owner_user_id) {
+            return null;
+        }
+
+        $owner = User::query()
+            ->active()
+            ->role(RoleEnum::requestHandlerRoles())
+            ->find($mailbox->owner_user_id);
+        if (! $owner) {
+            return null;
+        }
+
+        return ['user' => $owner, 'linked' => [], 'kind' => 'direct_mailbox'];
     }
 
     /**
