@@ -167,6 +167,22 @@ class InboundReplyLinker
         // ClosedWon никогда не реанимируем — там сделка состоялась, новое
         // письмо обрабатывается как новая заявка.
         if ($request->status === RequestStatus::ClosedLost) {
+            // Категория irrelevant — категорический блок реанимации.
+            // Кейс M-2026-0244: supplier-reply (kid@escalatorparts.cn,
+            // EXW price/Delivery time) распознан категоризатором как
+            // irrelevant, но header-threading прицепил его к старой
+            // массово-закрытой («Pre-launch cleanup») заявке от того же
+            // адреса, и reanimate сработал. supplier reply не должен
+            // реанимировать клиентскую заявку.
+            if ($message->category === EmailCategory::Irrelevant->value) {
+                Log::info('InboundReplyLinker: skip reanimate — irrelevant category', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $request->id,
+                    'matched_by' => $matchedBy,
+                ]);
+
+                return null;
+            }
             try {
                 $request = $this->stateService->reanimate($request, null, $message);
                 $matchedBy = ($matchedBy ?? 'unknown') . ':reanimated';
@@ -343,6 +359,17 @@ class InboundReplyLinker
 
         // Жёсткий блок: AI говорит «это новая заявка» — верим.
         if ($message->category === EmailCategory::ClientRequest->value) {
+            return null;
+        }
+
+        // Irrelevant — это категорически «не клиент». Чаще всего сюда
+        // попадают supplier-reply на наши закупочные запросы, авто-ответы,
+        // newsletter'ы. Level 4 (from_email + open Request) для них опасен:
+        // supplier мог раньше писать нам по другому поводу, и его новый
+        // reply прицепится к чужой клиентской заявке. Header threading
+        // (levels 1-3) для irrelevant остаётся — там точное совпадение
+        // по Message-ID, можно безопасно положить в наш тред.
+        if ($message->category === EmailCategory::Irrelevant->value) {
             return null;
         }
 
