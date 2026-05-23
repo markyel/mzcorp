@@ -50,28 +50,6 @@ class InboundReplyLinker
     }
 
     /**
-     * Lookback для реанимации по from_email (level 4-bis).
-     * Header-threading (levels 1-3) реанимирует без ограничения по сроку —
-     * там явный thread-link и контекст важнее.
-     */
-    private const REANIMATE_FROM_EMAIL_LOOKBACK_DAYS = 180;
-
-    /**
-     * Foundation §5.2: реанимация по from_email допустима только для
-     * «тихих» причин закрытия. Декларативные decline'ы (price/timing/
-     * competitor) НЕ реанимируем по этому уровню — клиент явно отказался,
-     * новое письмо скорее всего другая тема (создастся новая Request).
-     * Декларативные decline'ы ВСЁ ЕЩЁ реанимируются по header-threading
-     * (levels 1-3) — там есть прямой message_id link.
-     */
-    private const REANIMATE_FROM_EMAIL_SILENT_REASONS = [
-        'no_client_response_to_clarification',
-        'no_client_response_to_quote',
-        'manual_other',
-        'off_topic',
-    ];
-
-    /**
      * @return Request|null  null = thread не найден, обычный flow.
      */
     public function tryLink(EmailMessage $message): ?Request
@@ -159,42 +137,27 @@ class InboundReplyLinker
             return null;
         }
 
-        // Foundation §5.2: реанимация закрытых заявок.
-        // Header-threading (levels 1-3) — реанимируем любой closed_lost,
-        // потому что есть явный thread-link.
-        // From_email-match (level 4-bis) — уже отфильтрован в matchByOpenRequestForFromEmail
-        // (только silent reasons + lookback).
-        // ClosedWon никогда не реанимируем — там сделка состоялась, новое
-        // письмо обрабатывается как новая заявка.
-        if ($request->status === RequestStatus::ClosedLost) {
-            // Категория irrelevant — категорический блок реанимации.
-            // Кейс M-2026-0244: supplier-reply (kid@escalatorparts.cn,
-            // EXW price/Delivery time) распознан категоризатором как
-            // irrelevant, но header-threading прицепил его к старой
-            // массово-закрытой («Pre-launch cleanup») заявке от того же
-            // адреса, и reanimate сработал. supplier reply не должен
-            // реанимировать клиентскую заявку.
-            if ($message->category === EmailCategory::Irrelevant->value) {
-                Log::info('InboundReplyLinker: skip reanimate — irrelevant category', [
-                    'email_message_id' => $message->id,
-                    'request_id' => $request->id,
-                    'matched_by' => $matchedBy,
-                ]);
+        // Автоматическая реанимация закрытых заявок ОТКЛЮЧЕНА (Phase 1
+        // нового поведения). Архивная заявка — это история; новый запрос
+        // клиента не должен «оживлять» её, даже если есть header threading.
+        // Реальные кейсы продолжения треда (клиент молчал → передумал)
+        // обслуживаются:
+        //   1. Через manual reanimate (Phase 3): кнопка «↻ Реанимировать»
+        //      в карточке закрытой заявки, доступна owner/acting/privileged.
+        //   2. Через «наследование» (Phase 2): новая Request создаётся
+        //      отдельно, а при item-similarity (LLM check после парсинга
+        //      позиций) — пишется FK на архивную как inherited_from.
+        //
+        // Тут возвращаем null — IncomingMailProcessor создаст новую Request,
+        // не подвязав к закрытой.
+        if ($request->status->isTerminal()) {
+            Log::info('InboundReplyLinker: skip — matched closed request, new Request will be created', [
+                'email_message_id' => $message->id,
+                'matched_request_id' => $request->id,
+                'matched_status' => $request->status->value,
+                'matched_by' => $matchedBy,
+            ]);
 
-                return null;
-            }
-            try {
-                $request = $this->stateService->reanimate($request, null, $message);
-                $matchedBy = ($matchedBy ?? 'unknown') . ':reanimated';
-            } catch (\Throwable $e) {
-                Log::warning('InboundReplyLinker: reanimate failed (non-fatal)', [
-                    'email_message_id' => $message->id,
-                    'request_id' => $request->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        } elseif ($request->status === RequestStatus::ClosedWon) {
-            // Не реанимируем won — это новый запрос от клиента.
             return null;
         }
 
@@ -392,83 +355,22 @@ class InboundReplyLinker
             ->orderByDesc('created_at')
             ->get();
 
-        if ($candidates->isNotEmpty()) {
-            if ($candidates->count() === 1) {
-                return $candidates->first();
-            }
-
-            // 5-й уровень: AI multi-choice. На сбое clarifier возвращает либо
-            // самую свежую (fallback), либо null (если AI решил что это новая тема).
-            return $this->clarifier->chooseRequest($message, $candidates);
-        }
-
-        // Foundation §5.2: level 4-bis — reanimate closed_lost.
-        // Только если у клиента нет ОТКРЫТЫХ заявок (иначе приоритет
-        // у open). Только silent reasons. Только за последние N дней.
-        // Это спасает кейс «клиент молчал 30 дней после КП → no_client_response_to_quote
-        // → через 2 недели передумал, написал → реанимируем ту же заявку».
-        $lookbackDate = now()->subDays(self::REANIMATE_FROM_EMAIL_LOOKBACK_DAYS);
-        $closedCandidate = Request::query()
-            ->where('client_email', $message->from_email)
-            ->where('status', RequestStatus::ClosedLost->value)
-            ->whereIn('closed_lost_reason', self::REANIMATE_FROM_EMAIL_SILENT_REASONS)
-            ->where('closed_at', '>=', $lookbackDate)
-            ->orderByDesc('closed_at')
-            ->first();
-
-        if ($closedCandidate === null) {
+        if ($candidates->isEmpty()) {
+            // Закрытые заявки НЕ рассматриваем — auto-реанимация отключена
+            // (Phase 1). Если у клиента нет ни одной открытой Request,
+            // вернётся null → IncomingMailProcessor создаст новую.
+            // Связь с архивной закроется через Phase 2 («наследование»
+            // по item-similarity, отдельный фикс).
             return null;
         }
 
-        // Guard A: не реанимировать массово-закрытые заявки без явного
-        // клиентского триггера на закрытие. closed_lost_source_message_id
-        // заполняется когда заявку закрыл InboundIntentClassifier на основе
-        // конкретного письма клиента (decline / off_topic с цитатой). NULL
-        // означает административное / массовое закрытие (Pre-launch cleanup,
-        // ручное РОПом без citation). Реанимировать такие через слабый
-        // сигнал from_email — слишком много false positives.
-        if ($closedCandidate->closed_lost_source_message_id === null) {
-            Log::info('InboundReplyLinker: skip reanimate — mass-closed (no source msg)', [
-                'email_message_id' => $message->id,
-                'closed_request_id' => $closedCandidate->id,
-                'closed_lost_comment' => mb_substr((string) $closedCandidate->closed_lost_comment, 0, 100),
-            ]);
-
-            return null;
+        if ($candidates->count() === 1) {
+            return $candidates->first();
         }
 
-        // Guard B: subject inbound и closed-кандидата должны совпадать
-        // после нормализации (strip Re:/Fwd:/Отв: + lower-case). Кейс
-        // M-2026-1471: клиент сделал Fwd: Re: «Запрос стоимости лм8809»
-        // с новым запросом сверху, а closed заявка — «Запрос стоимости
-        // лм4115». Это разные треды одного клиента — должна быть новая
-        // заявка, не реанимация старой.
-        if ($this->normalizeSubject((string) $message->subject)
-            !== $this->normalizeSubject((string) $closedCandidate->subject)
-        ) {
-            Log::info('InboundReplyLinker: skip reanimate — subject mismatch', [
-                'email_message_id' => $message->id,
-                'closed_request_id' => $closedCandidate->id,
-                'inbound_subject' => mb_substr((string) $message->subject, 0, 120),
-                'closed_subject' => mb_substr((string) $closedCandidate->subject, 0, 120),
-            ]);
-
-            return null;
-        }
-
-        return $closedCandidate;
-    }
-
-    /**
-     * Нормализованный subject для сравнения: вырезаем reply/forward
-     * префиксы (рекурсивно — `Re: Fwd: Re:` тоже схлопывается), trim,
-     * lower-case. Возвращаем пустую строку для пустого subject.
-     */
-    private function normalizeSubject(string $s): string
-    {
-        $s = (string) preg_replace('/^\s*((re|fwd|fw|отв|ответ)\s*:\s*)+/iu', '', $s);
-
-        return mb_strtolower(trim($s));
+        // 5-й уровень: AI multi-choice. На сбое clarifier возвращает либо
+        // самую свежую (fallback), либо null (если AI решил что это новая тема).
+        return $this->clarifier->chooseRequest($message, $candidates);
     }
 
     /**
