@@ -202,7 +202,7 @@ class MessagePersister
      * как raw-UTF8 байты в Content-Disposition без RFC 2047 wrap.
      * webklex отдаёт «Đ¾Ñ‚Ñ‡ĐµÑ‚.pdf», recoverMojibake → «отчет.pdf».
      */
-    private function recoverMojibake(string $value): string
+    public function recoverMojibake(string $value): string
     {
         if ($value === '' || ! mb_check_encoding($value, 'UTF-8')) {
             return $value;
@@ -230,7 +230,7 @@ class MessagePersister
         return $raw;
     }
 
-    private function decodeMimeHeader(string $value): string
+    public function decodeMimeHeader(string $value): string
     {
         if ($value === '' || ! str_contains($value, '=?')) {
             return $value;
@@ -298,7 +298,7 @@ class MessagePersister
      *
      * Source: LazyLift @ SupplierMailService::resolveAttachmentName (adapted).
      */
-    private function resolveRawFilename(Attachment $att): string
+    public function resolveRawFilename(Attachment $att): string
     {
         try {
             if (method_exists($att, 'getHeader')) {
