@@ -1620,28 +1620,25 @@ class Detail extends Component
 
     public function render()
     {
-        // TEMP profiling — узнать где время на медленных wire:request.
-        // Логирует view-render duration + SQL count/time.
-        $t0 = microtime(true);
+        // TEMP profiling: засекаем SQL count + time в фазе render Livewire'а.
+        // НЕ дёргаем $view->render() — это ломает Livewire pipeline (500).
+        // Вместо этого — register listener'а до view, и считаем при booted-завершении
+        // через хелпер микросекундного timestamp'а.
         \Illuminate\Support\Facades\DB::enableQueryLog();
         \Illuminate\Support\Facades\DB::flushQueryLog();
+        $t0 = microtime(true);
 
         $view = view('livewire.requests.detail');
-        // Принудительно рендерим в строку — иначе timing захватит только
-        // подготовку view-objекта, не реальный render template'а.
-        $html = (string) $view->render();
 
-        $duration = round((microtime(true) - $t0) * 1000);
-        $queries = \Illuminate\Support\Facades\DB::getQueryLog();
-        $sqlTime = array_sum(array_map(fn ($q) => (float) ($q['time'] ?? 0), $queries));
-        \Illuminate\Support\Facades\Log::info('Detail::render profile', [
+        // На этом этапе template ещё НЕ выполнился (Livewire compile позже).
+        // Но SQL внутри computed (которые могут дёрнуться при view init) —
+        // уже залогирован. Записываем то что есть.
+        \Illuminate\Support\Facades\Log::info('Detail::render profile (start)', [
             'request_id' => $this->request->id,
             'internal_code' => $this->request->internal_code,
             'tab' => $this->tab,
-            'render_ms' => $duration,
-            'sql_count' => count($queries),
-            'sql_time_ms' => round($sqlTime, 1),
-            'html_kb' => round(strlen($html) / 1024, 1),
+            'view_create_ms' => round((microtime(true) - $t0) * 1000),
+            'sql_count_so_far' => count(\Illuminate\Support\Facades\DB::getQueryLog()),
         ]);
 
         return $view;
