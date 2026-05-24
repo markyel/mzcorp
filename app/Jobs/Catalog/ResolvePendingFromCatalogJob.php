@@ -45,7 +45,10 @@ class ResolvePendingFromCatalogJob implements ShouldQueue, ShouldBeUnique
     public int $tries = 1;
     public int $timeout = 120; // dispatch'ер сам по себе быстрый — оставляем запас.
 
-    private const CHUNK_SIZE = 100;
+    // 2026-05-24: уменьшили с 100 до 50 после боевого теста — C-stage
+    // (vector+LLM) стоит ~2-3с/item, 50 items × 3 = 150с укладывается
+    // в timeout=300 ChunkJob'а с запасом. 100 валилось по timeout.
+    private const CHUNK_SIZE = 50;
 
     public function uniqueId(): string
     {

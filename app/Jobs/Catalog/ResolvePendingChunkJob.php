@@ -20,11 +20,13 @@ use Illuminate\Support\Facades\Log;
  * job. Каждый chunk идёт в очередь отдельным job'ом — параллелятся
  * между worker'ами, retry'ются независимо, не накапливают память.
  *
- * Тюнинг:
- *   - $timeout=120 — 100 items × ~0.5-1с/item (C-stage с pgvector +
- *     LLM validation — самый дорогой) укладываются.
- *   - $tries=2 — на transient API errors retry один раз.
- *   - chunk size 100 задаётся в caller'е (ResolvePendingFromCatalogJob).
+ * Тюнинг (после 2026-05-24 boevoj test'a):
+ *   - chunk size 50 (в caller'е) + $timeout=300 — реальный C-stage
+ *     стоит ~2-3с/item (pgvector HNSW + LLM gpt-4o-mini validation),
+ *     то есть 50 × 3 = 150с с запасом до 300.
+ *   - $tries=1 — retry бесполезен: если timeout сработал, повторный
+ *     запуск тоже не уложится. Лучше job-fail и видеть это в
+ *     queue:failed, чем тратить worker-минуту повторно.
  */
 class ResolvePendingChunkJob implements ShouldQueue
 {
@@ -33,8 +35,8 @@ class ResolvePendingChunkJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $tries = 2;
-    public int $timeout = 120;
+    public int $tries = 1;
+    public int $timeout = 300;
 
     /**
      * @param  array<int, int>  $itemIds  request_items.id для обработки
