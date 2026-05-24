@@ -6,6 +6,7 @@ use App\Models\InboundUrlFetch;
 use App\Models\RequestItem;
 use App\Prompts\Mail\DecideClarificationsPrompt;
 use App\Prompts\Mail\ParseItemsPrompt;
+use App\Prompts\Mail\ParseItemsUnifiedPrompt;
 use App\Services\AI\OpenAIChatService;
 use App\Services\Mail\EmailTextCleanerService;
 use App\Services\Web\InboundUrlFetcherService;
@@ -827,29 +828,72 @@ PROMPT;
                 && !in_array($mime, ['image/heic', 'image/heif'], true);
         });
 
-        if ($imageAttachments->isNotEmpty()) {
-            $images = [];
-            // Phase 2: id'ы аттачментов строго в том же порядке, что и data:URI'ы
-            // в $images. Если какой-то аттачмент не прочитался — он пропускается
-            // в ОБА массива, чтобы маппинг image_index не съехал.
-            $attachmentIds = [];
-            foreach ($imageAttachments as $att) {
-                try {
-                    $content = \Illuminate\Support\Facades\Storage::disk($att->disk)->get($att->file_path);
-                    if ($content === null) {
-                        continue;
+        // 1a) Unified path для лёгких писем (≤3 фото, без structured-вложений).
+        // ОДИН Vision-вызов видит subject + body + linked URLs + все фото
+        // сразу — снимает проблему дублей между photo-parser и text-parser
+        // (артикул с шильдика сам приклеивается к позиции из текста). См.
+        // ParseItemsUnifiedPrompt + M-2026-1495.
+        // Heavy-письма (PDF-таблицы, screenshot'ы счетов, 4+ фото) идут по
+        // split pipeline ниже — там document-extraction отдельным слоем
+        // надёжнее и vision-контекст не разрывает потолок.
+        $structuredAttachments = $attachments->filter(function ($a) {
+            return preg_match('/\.(pdf|docx|xlsx|xls)$/i', (string) $a->filename) === 1;
+        });
+        $canUseUnified = $imageAttachments->count() > 0
+            && $imageAttachments->count() <= 3
+            && $structuredAttachments->isEmpty();
+
+        if ($canUseUnified) {
+            try {
+                [$images, $attachmentIds] = $this->loadImageDataUris($imageAttachments, $sourceTag);
+                if (!empty($images)) {
+                    $unifiedItems = $this->parseItemsUnified(
+                        images: $images,
+                        attachmentIds: $attachmentIds,
+                        subject: $subject,
+                        body: $referenceText ?? '',
+                        fromEmail: $fromEmail,
+                        fromName: $fromName,
+                        linkedUrlsText: $linkedUrlsText,
+                    );
+                    foreach ($unifiedItems as &$ui) {
+                        $ui['__source'] = $ui['__source'] ?? 'unified';
                     }
-                    $mime = $att->mime_type ?: 'image/jpeg';
-                    $images[] = "data:{$mime};base64," . base64_encode($content);
-                    $attachmentIds[] = (int) $att->id;
-                } catch (\Throwable $e) {
-                    Log::warning('parseItemsFromInboundContent: image read failed', [
+                    unset($ui);
+
+                    Log::warning('parseItemsFromInboundContent: pipeline summary', [
                         'source' => $sourceTag,
-                        'attachment_id' => $att->id,
-                        'error' => $e->getMessage(),
+                        'path' => 'unified',
+                        'subject_preview' => mb_substr($subject, 0, 60),
+                        'images_count' => $imageAttachments->count(),
+                        'structured_count' => 0,
+                        'items_before_dedup' => count($unifiedItems),
+                        'items_breakdown' => array_map(
+                            fn ($it) => [
+                                'src' => $it['__source'] ?? '?',
+                                'name' => mb_substr((string) ($it['name'] ?? ''), 0, 70),
+                                'art' => $it['article'] ?? null,
+                                'qty' => $it['qty'] ?? null,
+                                'inv' => $it['invoice_index'] ?? null,
+                            ],
+                            $unifiedItems,
+                        ),
                     ]);
+
+                    return $this->dedupeWithinList($unifiedItems);
                 }
+            } catch (\Throwable $e) {
+                // Не валим парсинг: fallback на split pipeline (он сам обработает
+                // images + text). Логируем, чтобы видеть частоту фоллбэков.
+                Log::error('parseItemsFromInboundContent: unified parse failed, falling back to split', [
+                    'source' => $sourceTag,
+                    'error' => $e->getMessage(),
+                ]);
             }
+        }
+
+        if ($imageAttachments->isNotEmpty()) {
+            [$images, $attachmentIds] = $this->loadImageDataUris($imageAttachments, $sourceTag);
             if (!empty($images)) {
                 try {
                     $visionItems = $this->parseItemsFromPhotoMarkings($images, $referenceText, $attachmentIds);
@@ -868,10 +912,7 @@ PROMPT;
         }
 
         // 2) Структурные файлы — каждый отдельно через parseItemsFromFile.
-        $structuredAttachments = $attachments->filter(function ($a) {
-            return preg_match('/\.(pdf|docx|xlsx|xls)$/i', (string) $a->filename) === 1;
-        });
-
+        //    $structuredAttachments уже отфильтрован выше (в unified-гарде).
         foreach ($structuredAttachments as $att) {
             try {
                 $absolutePath = \Illuminate\Support\Facades\Storage::disk($att->disk)->path($att->file_path);
@@ -946,6 +987,7 @@ PROMPT;
         // Диагностика для multi-invoice кейсов: какой путь набрал какие items.
         Log::warning('parseItemsFromInboundContent: pipeline summary', [
             'source' => $sourceTag,
+            'path' => 'split',
             'subject_preview' => mb_substr($subject, 0, 60),
             'images_count' => $imageAttachments->count(),
             'structured_count' => $structuredAttachments->count(),
@@ -969,6 +1011,166 @@ PROMPT;
         //    дубли (photo+text дают одну позицию) — режутся (одинаковый
         //    invoice_index, дефолт 1).
         return $this->dedupeWithinList($items);
+    }
+
+    /**
+     * Прочитать вложения-картинки из storage в data:URI'ы (base64), синхронно
+     * собрать список id'ов в том же порядке. Если какой-то аттачмент не
+     * прочитался — пропускается в ОБА массива, чтобы маппинг image_index не съехал.
+     *
+     * @param \Illuminate\Support\Collection<\App\Models\EmailAttachment> $imageAttachments
+     * @return array{0: array<string>, 1: array<int>} [$imagesDataUris, $attachmentIds]
+     */
+    private function loadImageDataUris(\Illuminate\Support\Collection $imageAttachments, string $sourceTag): array
+    {
+        $images = [];
+        $attachmentIds = [];
+        foreach ($imageAttachments as $att) {
+            try {
+                $content = \Illuminate\Support\Facades\Storage::disk($att->disk)->get($att->file_path);
+                if ($content === null) {
+                    continue;
+                }
+                $mime = $att->mime_type ?: 'image/jpeg';
+                $images[] = "data:{$mime};base64," . base64_encode($content);
+                $attachmentIds[] = (int) $att->id;
+            } catch (\Throwable $e) {
+                Log::warning('loadImageDataUris: image read failed', [
+                    'source' => $sourceTag,
+                    'attachment_id' => $att->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+        return [$images, $attachmentIds];
+    }
+
+    /**
+     * Unified Vision-парсинг: ОДИН вызов LLM видит ВСЮ заявку (subject + body +
+     * linked URLs + до 3 фото) и возвращает консолидированный items[].
+     *
+     * Снимает проблему дублей split-pipeline (photo-parser и text-parser
+     * возвращали отдельные item'ы для одной позиции, потому что в дедупе
+     * ключ был article+qty+invoice_index — но photo читал article с шильдика,
+     * а text оставлял null → разные ключи). См. M-2026-1495.
+     *
+     * Применяется только к «лёгким» письмам (≤3 фото без structured
+     * вложений) — для тяжёлых остаётся split pipeline (он лучше масштабируется
+     * на PDF-таблицы и multi-invoice screenshot'ы).
+     *
+     * @param array<string> $images data:image/...;base64,... в том же порядке, что $attachmentIds
+     * @param array<int> $attachmentIds id email_attachments в порядке $images
+     * @return array<array{name: string, brand: ?string, article: ?string, qty: float, unit: string, note: ?string, email_attachment_id: ?int}>
+     */
+    private function parseItemsUnified(
+        array $images,
+        array $attachmentIds,
+        string $subject,
+        string $body,
+        string $fromEmail,
+        string $fromName,
+        ?string $linkedUrlsText,
+    ): array {
+        // Симметричный cap (как в parseItemsFromPhotoMarkings).
+        $images = array_slice($images, 0, 3);
+        $attachmentIds = array_slice($attachmentIds, 0, 3);
+
+        $userPromptText = $this->buildInboundUserPrompt(
+            text: $body,
+            subject: $subject !== '' ? $subject : null,
+            fromEmail: $fromEmail !== '' ? $fromEmail : null,
+            fromName: $fromName !== '' ? $fromName : null,
+            linkedUrlsText: $linkedUrlsText,
+        );
+
+        $content = [['type' => 'text', 'text' => $userPromptText]];
+        foreach ($images as $img) {
+            $content[] = [
+                'type' => 'image_url',
+                'image_url' => ['url' => $img, 'detail' => 'high'],
+            ];
+        }
+
+        $result = $this->openai->chat(
+            [
+                ['role' => 'system', 'content' => ParseItemsUnifiedPrompt::systemMessage()],
+                ['role' => 'user', 'content' => $content],
+            ],
+            config('services.openai.vision_model'),
+            [
+                'temperature' => 0,
+                // photo_descriptions[] CoT + items[]: запас на 3 фото + ~10 items.
+                'max_tokens' => 6144,
+                'response_format' => ['type' => 'json_object'],
+            ],
+        );
+
+        $parsed = json_decode($result['content'] ?? '', true);
+        $items = $parsed['items'] ?? [];
+        $invoiceAnalysis = $parsed['invoice_analysis'] ?? null;
+        $photoDescriptions = is_array($parsed['photo_descriptions'] ?? null)
+            ? $parsed['photo_descriptions']
+            : [];
+
+        Log::warning('parseItemsUnified: GPT responded', [
+            'images' => count($images),
+            'subject_preview' => mb_substr($subject, 0, 60),
+            'body_chars' => mb_strlen($body),
+            'linked_urls_chars' => $linkedUrlsText !== null ? mb_strlen($linkedUrlsText) : 0,
+            'finish_reason' => $result['raw']['choices'][0]['finish_reason'] ?? null,
+            'usage' => $result['usage'] ?? null,
+            'invoice_analysis' => $invoiceAnalysis,
+            'items_count' => count($items),
+            'photo_descriptions' => $photoDescriptions,
+            'image_index_distribution' => array_count_values(array_filter(array_map(
+                fn ($it) => $it['image_index'] ?? null,
+                $items,
+            ), fn ($v) => $v !== null)),
+        ]);
+
+        $normalizedItems = array_values(array_filter(
+            array_map(function (array $item) use ($attachmentIds) {
+                $normalized = $this->normalizeParsedItem($item);
+                if ($normalized === null) {
+                    return null;
+                }
+                // image_index → email_attachments.id (та же логика, что в
+                // parseItemsFromPhotoMarkings).
+                $idx = $item['image_index'] ?? null;
+                $attId = null;
+                if (is_int($idx) && $idx >= 0 && $idx < count($attachmentIds)) {
+                    $attId = $attachmentIds[$idx] ?? null;
+                }
+                $normalized['email_attachment_id'] = $attId;
+
+                return $normalized;
+            }, $items),
+            fn ($i) => $i !== null,
+        ));
+
+        // Phase 2.4b fallback: 1×1 trivial bind (см. parseItemsFromPhotoMarkings).
+        $itemsWithoutAtt = array_keys(array_filter(
+            $normalizedItems,
+            fn ($it) => empty($it['email_attachment_id']),
+        ));
+        $usedAttIds = array_filter(array_map(
+            fn ($it) => $it['email_attachment_id'] ?? null,
+            $normalizedItems,
+        ));
+        $unusedAttIds = array_values(array_diff(
+            array_filter($attachmentIds, fn ($id) => $id !== null),
+            $usedAttIds,
+        ));
+        if (count($itemsWithoutAtt) === 1 && count($unusedAttIds) === 1) {
+            $itemIdx = $itemsWithoutAtt[0];
+            $normalizedItems[$itemIdx]['email_attachment_id'] = $unusedAttIds[0];
+            Log::info('parseItemsUnified: trivial 1×1 photo fallback applied', [
+                'item_index' => $itemIdx,
+                'email_attachment_id' => $unusedAttIds[0],
+            ]);
+        }
+
+        return $normalizedItems;
     }
 
     /**
