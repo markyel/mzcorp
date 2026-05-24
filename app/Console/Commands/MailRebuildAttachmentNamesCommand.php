@@ -198,7 +198,7 @@ class MailRebuildAttachmentNamesCommand extends Command
      *
      * Если кандидатов несколько — берём первый. Если ни одного — null.
      */
-    private function matchAttachmentToParts(EmailAttachment $dbAtt, \Webklex\PHPIMAP\Attachment\AttachmentCollection $msgAtts): ?\Webklex\PHPIMAP\Attachment
+    private function matchAttachmentToParts(EmailAttachment $dbAtt, \Webklex\PHPIMAP\Support\AttachmentCollection $msgAtts): ?\Webklex\PHPIMAP\Attachment
     {
         $dbMime = mb_strtolower(trim((string) $dbAtt->mime_type));
         $dbSize = (int) $dbAtt->size_bytes;
