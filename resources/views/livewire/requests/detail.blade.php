@@ -730,7 +730,7 @@
                     @endif
                 </div>
                 @if($canReassign)
-                    <livewire:requests.reassign-dialog :request="$req" wire:key="reassign-{{ $req->id }}" />
+                    <livewire:requests.reassign-dialog :request="$req" wire:key="reassign-{{ $req->id }}" lazy />
                 @endif
 
                 {{-- Phase 2.3 — ручная реанимация closed_lost (только она;
@@ -771,7 +771,7 @@
                     </button>
                 @endif
                 @if($canReassign)
-                    <livewire:requests.reassign-dialog :request="$req" wire:key="reassign-{{ $req->id }}" />
+                    <livewire:requests.reassign-dialog :request="$req" wire:key="reassign-{{ $req->id }}" lazy />
                 @endif
 
             {{-- Активные статусы. --}}
@@ -872,7 +872,7 @@
                         <button class="btn btn-sm flex-1" disabled>⏸ Пауза</button>
                     @endif
                     @if($canReassign)
-                        <livewire:requests.reassign-dialog :request="$req" wire:key="reassign-{{ $req->id }}" />
+                        <livewire:requests.reassign-dialog :request="$req" wire:key="reassign-{{ $req->id }}" lazy />
                     @else
                         <button class="btn btn-sm flex-1" disabled title="Только РОП/директор/секретарь">⊘ Переподчинить</button>
                     @endif
@@ -897,7 +897,7 @@
             {{-- Слияние дубликата (Phase merge). Owner/acting/privileged.
                  Кнопка показывается только когда заявка active (есть с чем сливать). --}}
             @if(($canManage || $canReassign) && ! in_array($req->status, [$RS::Paused, $RS::ClosedWon, $RS::ClosedLost, $RS::Pending, $RS::Paid], true))
-                <livewire:requests.merge-dialog :request="$req" wire:key="merge-{{ $req->id }}" />
+                <livewire:requests.merge-dialog :request="$req" wire:key="merge-{{ $req->id }}" lazy />
             @endif
 
             {{-- Phase 2.1 — отвязать наследование (только для child-заявок).
@@ -913,13 +913,18 @@
                 </button>
             @endif
 
-            {{-- Модальные диалоги (single-instance per Detail). --}}
-            <livewire:requests.pause-dialog :request="$req" wire:key="pause-{{ $req->id }}" />
-            <livewire:requests.postpone-dialog :request="$req" wire:key="postpone-{{ $req->id }}" />
-            <livewire:requests.close-lost-dialog :request="$req" wire:key="close-lost-{{ $req->id }}" />
-            <livewire:requests.issue-invoice-dialog :request="$req" wire:key="issue-invoice-{{ $req->id }}" />
+            {{-- Модальные диалоги (single-instance per Detail).
+                 lazy=true — Livewire не hydrate'ит компонент при mount страницы,
+                 рендерит placeholder <div>. State грузится только при первом
+                 dispatch'е open-event. Экономия: ~70-100 КБ raw payload на
+                 каждый dialog × 5 = ~400-500 КБ за один Detail page.
+            --}}
+            <livewire:requests.pause-dialog :request="$req" wire:key="pause-{{ $req->id }}" lazy />
+            <livewire:requests.postpone-dialog :request="$req" wire:key="postpone-{{ $req->id }}" lazy />
+            <livewire:requests.close-lost-dialog :request="$req" wire:key="close-lost-{{ $req->id }}" lazy />
+            <livewire:requests.issue-invoice-dialog :request="$req" wire:key="issue-invoice-{{ $req->id }}" lazy />
             {{-- Phase 7: ручной доматчинг строк КП к позициям заявки. --}}
-            <livewire:requests.quotes.match-request-item-dialog :request="$req" wire:key="quote-match-{{ $req->id }}" />
+            <livewire:requests.quotes.match-request-item-dialog :request="$req" wire:key="quote-match-{{ $req->id }}" lazy />
         </div>
     </div>
 
@@ -2244,17 +2249,19 @@
                     @endif
 
                     {{-- Priority 1: модалки ручных действий с позициями.
-                         Single-instance, слушают $dispatch события от строк. --}}
+                         Single-instance, слушают $dispatch события от строк.
+                         lazy — те же резоны что у других диалогов (Phase perf).
+                    --}}
                     @if($canEditItems)
                         <livewire:requests.items.item-edit-dialog
                             :request-id="$req->id"
-                            wire:key="item-edit-{{ $req->id }}" />
+                            wire:key="item-edit-{{ $req->id }}" lazy />
                         <livewire:requests.items.item-catalog-link-dialog
                             :request-id="$req->id"
-                            wire:key="item-catalog-link-{{ $req->id }}" />
+                            wire:key="item-catalog-link-{{ $req->id }}" lazy />
                         <livewire:requests.items.item-photo-rebind-dialog
                             :request-id="$req->id"
-                            wire:key="item-photo-rebind-{{ $req->id }}" />
+                            wire:key="item-photo-rebind-{{ $req->id }}" lazy />
                     @endif
 
                     {{-- Foundation §6.2: панель уточняющих вопросов клиенту.
