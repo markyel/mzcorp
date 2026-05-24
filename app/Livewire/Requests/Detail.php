@@ -1622,39 +1622,4 @@ class Detail extends Component
     {
         return view('livewire.requests.detail');
     }
-
-    // TEMP profiling — измеряем полный wire-request lifecycle.
-    // booted() = после hydrate state из incoming payload.
-    // dehydrate() = после render template, перед отдачей response.
-    // Разница = всё что Livewire делает за один update.
-    //
-    // SQL count показывает суммарно queries (mount + computed + render).
-    // Это позволит увидеть выпадает ли N+1 в blade-traversal'е,
-    // а не только в mount-eager-load.
-    private float $profileStartTime = 0;
-
-    public function booted(): void
-    {
-        $this->profileStartTime = microtime(true);
-        \Illuminate\Support\Facades\DB::flushQueryLog();
-        \Illuminate\Support\Facades\DB::enableQueryLog();
-    }
-
-    public function dehydrate(): void
-    {
-        if ($this->profileStartTime <= 0) {
-            return;
-        }
-        $ms = round((microtime(true) - $this->profileStartTime) * 1000);
-        $queries = \Illuminate\Support\Facades\DB::getQueryLog();
-        $sqlTime = array_sum(array_map(fn ($q) => (float) ($q['time'] ?? 0), $queries));
-        \Illuminate\Support\Facades\Log::info('Detail wire-request profile', [
-            'request_id' => $this->request->id ?? null,
-            'internal_code' => $this->request->internal_code ?? null,
-            'tab' => $this->tab,
-            'total_ms' => $ms,
-            'sql_count' => count($queries),
-            'sql_time_ms' => round($sqlTime, 1),
-        ]);
-    }
 }
