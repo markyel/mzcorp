@@ -40,6 +40,20 @@ class InternalSenderDetector
             return null;
         }
 
+        // 0. Allowlist — техническая автоматика на нашем домене, которая
+        // не является «сотрудником» и должна пропускаться дальше
+        // (категоризатор сам решит client_request / irrelevant).
+        // Типовой кейс: order@myzip.ru — web-form ящик сайта, шлёт заявки
+        // клиентов через нашу почту. Без allowlist'а doman match банил их
+        // как «внутренние», заявки терялись.
+        $allowlist = array_filter(array_map(
+            fn ($e) => mb_strtolower(trim((string) $e)),
+            (array) config('services.mail.internal_sender_allowlist', [])
+        ));
+        if (in_array($from, $allowlist, true)) {
+            return null;
+        }
+
         // 1. Domain match.
         $domains = (array) config('services.mail.internal_domains', []);
         foreach ($domains as $d) {

@@ -39,9 +39,18 @@ class IncomingMailProcessor
 
     public function processIfRequest(EmailMessage $message): ?Request
     {
-        // Только заявки клиентов. Решение принимает Level-1 категоризатор
-        // (gpt-4o), Level-2 (gpt-4o-mini) удалён — системно ошибался.
-        if ($message->category !== EmailCategory::ClientRequest->value) {
+        // Принимаем client_request (новая заявка) и thread_reply (ответ
+        // в треде). Для thread_reply создаём Request ТОЛЬКО когда linker
+        // не нашёл existing — это «висящий» reply на тред которого у нас
+        // нет (forward старой переписки клиента, например). Без этого
+        // fallback'а такие письма пропадали без следа. Кейс M-?-?
+        // (Ангелина «Re: Fwd: Запрос стоимости лм3245» — после удаления
+        // Level-2 классификатора thread_reply без linker-match выпадал).
+        $acceptedCategories = [
+            EmailCategory::ClientRequest->value,
+            EmailCategory::ThreadReply->value,
+        ];
+        if (! in_array($message->category, $acceptedCategories, true)) {
             return null;
         }
 

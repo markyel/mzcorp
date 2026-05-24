@@ -262,6 +262,21 @@ return [
         )),
 
         /*
+        | Allowlist для InternalSenderDetector. Адреса в этом списке
+        | НЕ считаются «внутренними сотрудниками», даже если их домен
+        | в internal_domains. Типовой кейс: order@myzip.ru — технический
+        | ящик сайта, который шлёт заявки клиентов через нашу почту;
+        | без allowlist domain match банил его как внутреннего.
+        |
+        | Список через запятую:
+        |   MAIL_INTERNAL_SENDER_ALLOWLIST=order@myzip.ru,web@myzip.ru
+        */
+        'internal_sender_allowlist' => array_filter(array_map(
+            'trim',
+            explode(',', (string) env('MAIL_INTERNAL_SENDER_ALLOWLIST', 'order@myzip.ru'))
+        )),
+
+        /*
         | Empty-content guard в IncomingMailProcessor. Если очищенное тело
         | inbound-письма короче порога И нет attachments — Request не
         | создаётся (письмо переписывается в category=irrelevant). Кейс:

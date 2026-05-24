@@ -276,10 +276,19 @@ class MailRouter
         }
 
         // Phase 1.8: для писем-заявок создаём Request. Решение принимается
-        // ТОЛЬКО по EmailCategory — без второго LLM-прохода. IncomingMailProcessor
-        // идемпотентен по related_request_id (reply linker мог уже прицепить
-        // письмо к существующей заявке выше).
-        if ($message->category === EmailCategory::ClientRequest->value) {
+        // по EmailCategory. IncomingMailProcessor идемпотентен по
+        // related_request_id (reply linker мог уже прицепить письмо к
+        // существующей заявке выше).
+        //
+        // ThreadReply тоже передаём — внутри процессор создаст Request только
+        // если linker не нашёл existing (related_request_id null). Это спасает
+        // «висящие» thread_reply'и: клиент сделал forward старой переписки,
+        // у нас в БД нет того треда — без fallback'а заявка не создавалась.
+        $createCategories = [
+            EmailCategory::ClientRequest->value,
+            EmailCategory::ThreadReply->value,
+        ];
+        if (in_array($message->category, $createCategories, true)) {
             $this->incoming->processIfRequest($message);
         }
 
