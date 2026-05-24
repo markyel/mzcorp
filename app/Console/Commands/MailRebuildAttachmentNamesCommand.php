@@ -8,18 +8,34 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Webklex\PHPIMAP\Message as WebklexMessage;
 
 /**
  * Backfill `email_attachments.filename` для исторических битых имён.
  *
- * Отличия от старого `mail:redecode-attachment-names-from-raw`:
- *   - матч attachment ↔ MIME-part через Webklex `Message::fromString` +
- *     соответствие по `mime_type + size_bytes` (с tolerance), а не по
- *     порядку появления (старая команда часто давала PDF имя PNG-подписи);
- *   - использует свежий `MessagePersister::resolveRawFilename` который
- *     обходит Webklex `sanitizeName()` (стрипает `/` из base64) — тот же
- *     decoder что для новых писем после коммита fa047c9.
+ * Стратегия:
+ *   1. Найти подозрительные filename'ы (`??`, `/`, `\`, control bytes).
+ *   2. Для каждого письма зачитать raw_source.
+ *   3. Регексом вытащить ВСЕ Content-Disposition / Content-Type блоки
+ *      с filename/name (с поддержкой RFC 5322 line folding).
+ *   4. Для каждого блока определить mime_type и extract'нуть raw-имя
+ *      через MessagePersister::extractFilenameFromRawHeader (приватная,
+ *      эту логику делаем тут локально).
+ *   5. Группировать БД-attachments по mime_type, raw-блоки по mime_type.
+ *   6. Внутри группы matching по индексу — порядок появления в raw_source
+ *      совпадает с порядком в БД (insert порядок = MIME-парт порядок).
+ *   7. Decode имя через MessagePersister::decodeMimeHeader + recoverMojibake.
+ *   8. Если новое имя «выглядит читаемым» (нет control bytes / U+FFFD /
+ *      кратных `?`) и отличается от текущего — update.
+ *
+ * Почему НЕ Webklex Message::fromString: проверка показала, что Webklex
+ * парсер теряет вложенные attachment'ы (msg#2957: 1 PDF + 2 PNG в raw,
+ * Webklex отдаёт только 2 PNG). Прямой regex-парсинг raw_source даёт
+ * полную картину.
+ *
+ * Почему index-within-mime, а не index-overall: MIME-парты PDF и PNG
+ * могут идти вперемешку. Index by overall — хрупкий (как в старой
+ * mail:redecode-attachment-names-from-raw). Index within same mime_type
+ * — надёжный для типичных писем (1-2 PDF, 1-2 PNG).
  *
  * Usage:
  *   php artisan mail:rebuild-attachment-names --dry-run
@@ -33,16 +49,7 @@ class MailRebuildAttachmentNamesCommand extends Command
         {--limit=1000 : Максимум email-message обработать за прогон}
         {--attachment= : Точечный режим: ID конкретного attachment\'а}';
 
-    protected $description = 'Backfill email_attachments.filename через Webklex MimeMessage + новый decoder (RawFilename + repair base64).';
-
-    /**
-     * Размер по mime_type — допустимое расхождение в долях.
-     * Webklex getSize() возвращает decoded body size, БД size_bytes исторически
-     * хранила encoded (base64 ~33% больше) → если одинаковый mime даёт ровно
-     * одного кандидата, мы берём его без size-проверки вообще.
-     * При нескольких кандидатах по mime — фильтруем по best size match.
-     */
-    private const SIZE_TOLERANCE_RATIO = 0.5;
+    protected $description = 'Backfill email_attachments.filename через regex-парсинг raw_source + новый decoder.';
 
     public function __construct(private readonly MessagePersister $persister)
     {
@@ -55,10 +62,6 @@ class MailRebuildAttachmentNamesCommand extends Command
         $limit = (int) $this->option('limit');
         $singleId = $this->option('attachment') ? (int) $this->option('attachment') : null;
 
-        // Кандидаты: filename содержит признаки битости —
-        // повторные `?`, control-bytes (записаны как `_` в file_path
-        // sanitizer'ом, но в самом filename могут оставаться '?'/'\f'/'\x00').
-        // Дополнительно — slashes (`/` или `\`) в filename: corrupted base64.
         $query = EmailAttachment::query()
             ->select(['id', 'email_message_id', 'filename', 'mime_type', 'size_bytes']);
 
@@ -69,11 +72,10 @@ class MailRebuildAttachmentNamesCommand extends Command
                 $q->where('filename', 'like', '%?%?%')
                     ->orWhere('filename', 'like', '%/%')
                     ->orWhere('filename', 'like', '%\\%');
-                // control-byte сложно искать SQL'ом — propagate post-filter ниже.
             });
         }
 
-        $rows = $query->orderBy('email_message_id')->get();
+        $rows = $query->orderBy('email_message_id')->orderBy('id')->get();
         if ($rows->isEmpty()) {
             $this->info('Подозрительных filename не найдено.');
             return self::SUCCESS;
@@ -92,8 +94,7 @@ class MailRebuildAttachmentNamesCommand extends Command
             'renamed' => 0,
             'unchanged' => 0,
             'no_raw_source' => 0,
-            'parse_failed' => 0,
-            'no_match' => 0,
+            'no_part_for_mime' => 0,
             'still_broken' => 0,
         ];
         $messageCount = 0;
@@ -111,83 +112,85 @@ class MailRebuildAttachmentNamesCommand extends Command
                 continue;
             }
 
-            try {
-                /** @var WebklexMessage $msg */
-                $msg = WebklexMessage::fromString($rawSource);
-                $msgAtts = $msg->getAttachments();
-            } catch (\Throwable $e) {
-                $stats['parse_failed'] += $atts->count();
-                $this->error("  msg#{$msgId}: parse failed — {$e->getMessage()}");
-                continue;
-            }
+            // Парсим все «filename-несущие» MIME-парт-headers из raw_source.
+            // Группируем по mime_type — порядок появления внутри группы
+            // должен совпадать с insertion order в БД.
+            $partsByMime = $this->extractFilenamesFromRawSource($rawSource);
 
-            foreach ($atts as $dbAtt) {
-                $resolved = $this->matchAttachmentToParts($dbAtt, $msgAtts);
-                if ($resolved === null) {
-                    $stats['no_match']++;
+            // Группируем БД-attachments этого msg по mime_type, сохраняя порядок id.
+            $attsByMime = $atts->sortBy('id')->groupBy(
+                fn (EmailAttachment $a) => mb_strtolower(trim((string) $a->mime_type))
+            );
+
+            foreach ($attsByMime as $mime => $mimeGroup) {
+                $partsList = $partsByMime[$mime] ?? [];
+
+                foreach ($mimeGroup->values() as $idx => $dbAtt) {
+                    if (! isset($partsList[$idx])) {
+                        $stats['no_part_for_mime']++;
+                        $this->line(sprintf(
+                            '  att#%d: mime=%s idx=%d — нет соответствующего MIME-part (parts_count=%d)',
+                            $dbAtt->id,
+                            $mime,
+                            $idx,
+                            count($partsList),
+                        ));
+                        continue;
+                    }
+
+                    $newRaw = $partsList[$idx];
+                    if ($newRaw === '') {
+                        $stats['no_part_for_mime']++;
+                        continue;
+                    }
+
+                    // Decode + cleanup pipeline тот же что в MessagePersister.
+                    $decoded = $this->persister->decodeMimeHeader($newRaw);
+                    $decoded = $this->persister->recoverMojibake($decoded);
+                    $decoded = (string) preg_replace(
+                        '/\s+(pdf|docx?|xlsx?|pptx?|zip|rar|7z|jpe?g|png|gif|tiff?|heic|webp)\s*$/i',
+                        '.$1',
+                        $decoded,
+                    );
+                    $decoded = Str::limit(trim($decoded), 255, '');
+
+                    if ($decoded === '' || $this->looksBroken($decoded)) {
+                        $stats['still_broken']++;
+                        $this->line(sprintf(
+                            '  att#%d: новое имя тоже битое (%s) — skip',
+                            $dbAtt->id,
+                            mb_substr($decoded, 0, 60),
+                        ));
+                        continue;
+                    }
+
+                    if ($decoded === $dbAtt->filename) {
+                        $stats['unchanged']++;
+                        continue;
+                    }
+
                     $this->line(sprintf(
-                        '  att#%d: нет соответствующего MIME-part (mime=%s, size=%d)',
+                        '  att#%d: %s  →  %s',
                         $dbAtt->id,
-                        $dbAtt->mime_type,
-                        $dbAtt->size_bytes,
+                        mb_substr((string) $dbAtt->filename, 0, 60),
+                        mb_substr($decoded, 0, 80),
                     ));
-                    continue;
+
+                    if (! $dry) {
+                        EmailAttachment::where('id', $dbAtt->id)->update(['filename' => $decoded]);
+                    }
+                    $stats['renamed']++;
                 }
-
-                $newRaw = $this->persister->resolveRawFilename($resolved);
-                if ($newRaw === '') {
-                    $stats['no_match']++;
-                    continue;
-                }
-
-                $decoded = $this->persister->decodeMimeHeader($newRaw);
-                $decoded = $this->persister->recoverMojibake($decoded);
-                $decoded = (string) preg_replace(
-                    '/\s+(pdf|docx?|xlsx?|pptx?|zip|rar|7z|jpe?g|png|gif|tiff?|heic|webp)\s*$/i',
-                    '.$1',
-                    $decoded,
-                );
-                $decoded = Str::limit(trim($decoded), 255, '');
-
-                // Если новое имя такое же кривое (содержит `?`, control bytes) —
-                // не пишем, оставляем старое. Лучше старое чем новое такое же.
-                if ($decoded === '' || $this->looksBroken($decoded)) {
-                    $stats['still_broken']++;
-                    $this->line(sprintf(
-                        '  att#%d: новое имя тоже битое (%s) — skip',
-                        $dbAtt->id,
-                        mb_substr($decoded, 0, 60),
-                    ));
-                    continue;
-                }
-
-                if ($decoded === $dbAtt->filename) {
-                    $stats['unchanged']++;
-                    continue;
-                }
-
-                $this->line(sprintf(
-                    '  att#%d: %s  →  %s',
-                    $dbAtt->id,
-                    mb_substr((string) $dbAtt->filename, 0, 60),
-                    mb_substr($decoded, 0, 80),
-                ));
-
-                if (! $dry) {
-                    EmailAttachment::where('id', $dbAtt->id)->update(['filename' => $decoded]);
-                }
-                $stats['renamed']++;
             }
         }
 
         $this->newLine();
         $this->info(sprintf(
-            'Готово: переименовано=%d · без_изменений=%d · нет_raw=%d · parse_failed=%d · нет_match=%d · still_broken=%d',
+            'Готово: переименовано=%d · без_изменений=%d · нет_raw=%d · нет_part_for_mime=%d · still_broken=%d',
             $stats['renamed'],
             $stats['unchanged'],
             $stats['no_raw_source'],
-            $stats['parse_failed'],
-            $stats['no_match'],
+            $stats['no_part_for_mime'],
             $stats['still_broken'],
         ));
         if ($dry) {
@@ -200,87 +203,139 @@ class MailRebuildAttachmentNamesCommand extends Command
     }
 
     /**
-     * Найти в коллекции Webklex-attachment'ов один соответствующий записи в БД.
+     * Извлечь все Content-Disposition / Content-Type блоки с filename/name
+     * из raw_source. Группирует по mime_type, сохраняя порядок появления.
      *
-     * Алгоритм:
-     *   1. Filter по mime_type (если оба заполнены — должны совпадать).
-     *   2. Если после filter ровно один кандидат — берём его (size не сверяем,
-     *      БД хранила encoded size исторически, Webklex отдаёт decoded —
-     *      расхождение ~33% в base64-случае).
-     *   3. Если несколько — выбираем тот, у кого size ближе всего к
-     *      dbSize (по ratio, tolerance 0.5).
-     *   4. Если ни одного по mime — null.
+     * Один MIME-парт обычно даёт ДВА совпадения (Content-Type + Content-
+     * Disposition), оба с одним и тем же name=/filename=. Сохраняем
+     * уникальные пары (mime, raw_filename) по индексу.
+     *
+     * @return array<string, list<string>> Map<mime_lower, list<raw_filename_value>>
      */
-    private function matchAttachmentToParts(EmailAttachment $dbAtt, \Webklex\PHPIMAP\Support\AttachmentCollection $msgAtts): ?\Webklex\PHPIMAP\Attachment
+    private function extractFilenamesFromRawSource(string $raw): array
     {
-        $dbMime = mb_strtolower(trim((string) $dbAtt->mime_type));
-        $dbSize = (int) $dbAtt->size_bytes;
+        // (1) Найти все MIME-парт-границы. Каждый «парт» начинается с
+        // headers (Content-Type / Content-Disposition / Content-Transfer-Encoding)
+        // и продолжается до boundary. Проще: ищем Content-Type заголовки —
+        // каждый = новый парт. RFC 5322 line-folding учитываем.
+        preg_match_all(
+            '/Content-Type:[^\r\n]*(?:\r?\n[ \t]+[^\r\n]+)*/i',
+            $raw,
+            $ctMatches,
+            PREG_OFFSET_CAPTURE,
+        );
 
-        $sameMime = [];
-        foreach ($msgAtts as $att) {
-            $partMime = mb_strtolower(trim((string) $att->getMimeType()));
-            if ($dbMime !== '' && $partMime !== '' && $dbMime !== $partMime) {
+        // Также нам нужны Content-Disposition блоки рядом с Content-Type,
+        // потому что filename часто там, а не в Content-Type.
+        preg_match_all(
+            '/Content-Disposition:[^\r\n]*(?:\r?\n[ \t]+[^\r\n]+)*/i',
+            $raw,
+            $cdMatches,
+            PREG_OFFSET_CAPTURE,
+        );
+
+        $result = [];
+        $seenOffsets = [];
+
+        foreach ($ctMatches[0] as $ctMatch) {
+            $headerBlock = $ctMatch[0];
+            $offset = $ctMatch[1];
+
+            // Берём mime_type из Content-Type.
+            if (! preg_match('/Content-Type:\s*([^;\s]+)/i', $headerBlock, $mm)) {
                 continue;
             }
-            $sameMime[] = $att;
-        }
-
-        if (count($sameMime) === 0) {
-            return null;
-        }
-        if (count($sameMime) === 1) {
-            return $sameMime[0];
-        }
-
-        // Несколько кандидатов с одинаковым mime — ищем по size proximity.
-        if ($dbSize <= 0) {
-            return $sameMime[0]; // фолбэк: первый
-        }
-
-        $best = null;
-        $bestDelta = PHP_INT_MAX;
-        foreach ($sameMime as $att) {
-            $partSize = (int) $att->getSize();
-            $delta = abs($partSize - $dbSize);
-            // tolerance: 50% от max(dbSize, partSize). Allows base64 inflation.
-            $threshold = (int) (max($dbSize, $partSize) * self::SIZE_TOLERANCE_RATIO);
-            if ($delta > $threshold) {
+            $mime = mb_strtolower(trim($mm[1]));
+            if ($mime === '' || $mime === 'multipart/mixed' || $mime === 'multipart/alternative'
+                || $mime === 'multipart/related' || $mime === 'text/plain' || $mime === 'text/html'
+            ) {
                 continue;
             }
-            if ($delta < $bestDelta) {
-                $bestDelta = $delta;
-                $best = $att;
+
+            // Ищем filename в Content-Type или в ближайшем Content-Disposition
+            // в окне +500 байт после Content-Type (типичная близость).
+            $extractFromText = $this->extractFilenameRaw($headerBlock);
+            if ($extractFromText === null) {
+                // Ищем Content-Disposition в пределах 500 байт.
+                foreach ($cdMatches[0] as $cd) {
+                    $cdOffset = $cd[1];
+                    if ($cdOffset >= $offset && $cdOffset - $offset < 500) {
+                        $extractFromText = $this->extractFilenameRaw($cd[0]);
+                        if ($extractFromText !== null) {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if ($extractFromText !== null && $extractFromText !== '') {
+                // Уникальность по offset — чтобы не дублировать если CT+CD
+                // обработаны вместе.
+                if (! in_array($offset, $seenOffsets, true)) {
+                    $result[$mime][] = $extractFromText;
+                    $seenOffsets[] = $offset;
+                }
             }
         }
-        return $best;
+
+        return $result;
     }
 
     /**
-     * Имя «битое» если содержит `?` (replacement), control-bytes (\x00-\x1F),
-     * либо подряд idущие подчёркивания (sanitized из path separator) занимают
-     * больше половины длины.
+     * Локальная копия MessagePersister::extractFilenameFromRawHeader.
+     * Дублируем — этот метод приватный в персистере; делать его публичным
+     * только ради backfill-команды — излишне для разовой задачи.
+     */
+    private function extractFilenameRaw(string $rawHeader): ?string
+    {
+        // (1) RFC 2231: filename*=UTF-8''%D0%9F...
+        if (preg_match("/filename\*\s*=\s*([^']+)'[^']*'([^\s;]+)/i", $rawHeader, $m)) {
+            $charset = $m[1];
+            $encoded = rtrim($m[2], " \t;");
+            $decoded = rawurldecode($encoded);
+            if (stripos($charset, 'UTF-8') !== false && mb_check_encoding($decoded, 'UTF-8')) {
+                return $decoded;
+            }
+            $converted = @mb_convert_encoding($decoded, 'UTF-8', $charset);
+            return is_string($converted) && $converted !== '' ? $converted : null;
+        }
+
+        // (2) MIME encoded-word: filename="=?UTF-8?B?...?=" (может быть несколько)
+        $mimeWordPattern = '=\?[^?]+\?[BQbq]\?[^?]*\?=';
+        $pattern = '/(?:filename|name)\s*=\s*"?(' . $mimeWordPattern . '(?:\s*' . $mimeWordPattern . ')*)"?/i';
+        if (preg_match($pattern, $rawHeader, $m)) {
+            return $m[1];
+        }
+
+        // (3) Plain quoted: filename="..."
+        if (preg_match('/(?:filename|name)\s*=\s*"([^"]+)"/i', $rawHeader, $m)) {
+            return $m[1];
+        }
+
+        // (4) Plain unquoted: filename=name.pdf
+        if (preg_match('/(?:filename|name)\s*=\s*([^\s;]+)/i', $rawHeader, $m)) {
+            $val = rtrim($m[1], '"');
+            return $val !== '' ? $val : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Имя «битое» если содержит U+FFFD, control bytes, или много `?` подряд.
      */
     private function looksBroken(string $name): bool
     {
         if ($name === '') {
             return true;
         }
-        // Control bytes (включая 0x0C из MIME-decode мусора).
         if (preg_match('/[\x00-\x1F\x7F]/', $name)) {
             return true;
         }
-        // Заменённые символы UTF-8 (U+FFFD).
         if (str_contains($name, "\xEF\xBF\xBD")) {
             return true;
         }
-        // Много `?` подряд — mojibake.
         if (preg_match('/\?{2,}/', $name)) {
-            return true;
-        }
-        // Подчёркивания + `?` больше половины — pseudonym из sanitize.
-        $len = mb_strlen($name);
-        $junk = preg_match_all('/[_?]/u', $name);
-        if ($len > 8 && $junk > $len / 2) {
             return true;
         }
         return false;
