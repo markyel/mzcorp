@@ -376,6 +376,23 @@ class RequestItemPersister
             'just_created' => $justCreated,
         ]);
 
+        // Пересчёт "возможных дублей" между активными позициями. После
+        // dedupeWithinList в парсере остаются позиции, которые автоматически
+        // схлопнуть нельзя (разные article'ы, или один с article, другой
+        // без), но имеют близкое name — обычно это «PDF дал артикул, текст
+        // тела повторил позицию без артикула». Менеджеру удобнее видеть
+        // визуальный сигнал «возможно дубль #N» с одного взгляда, чем
+        // самому сравнивать названия. Решение про слияние — за ним
+        // (через UI «🔗 Это уточнение позиции»).
+        try {
+            $this->recomputePossibleDuplicates($existing);
+        } catch (\Throwable $e) {
+            Log::warning('RequestItemPersister: recomputePossibleDuplicates failed (non-fatal)', [
+                'request_id' => $existing->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return [
             'request' => $existing->fresh(),
             'new' => count($filtered['new']),
@@ -383,6 +400,133 @@ class RequestItemPersister
             'just_created' => $justCreated,
             'clarifications' => $clarStoredCount,
         ];
+    }
+
+    /**
+     * Пересчёт возможных дублей между активными позициями текущей Request.
+     *
+     * Логика: проходим по всем парам (i, j) активных items. Если name'ы
+     * близки (lower-trim equal ИЛИ similar_text ≥ 85%), но автоматически
+     * НЕ схлопнулись (разные article'ы / один null другой нет / разные
+     * brand'ы) — записываем взаимную ссылку в quality_assessment_payload
+     * каждой из двух позиций (`possible_duplicate_of` массив с id'шниками
+     * и similarity).
+     *
+     * UI _position-card рендерит chip «⚠ возможно дубль #N» по этому
+     * полю. Решение про слияние — менеджер через UI dropdown
+     * «🔗 Это уточнение позиции».
+     *
+     * Идемпотентно: предыдущие записи `possible_duplicate_of` затираются
+     * на каждом вызове (после reparse список items может измениться).
+     */
+    private function recomputePossibleDuplicates(Request $request): void
+    {
+        $items = $request->items()
+            ->where('is_active', true)
+            ->get(['id', 'parsed_name', 'parsed_article', 'parsed_brand', 'quality_assessment_payload']);
+
+        if ($items->count() < 2) {
+            // Нечего сравнивать — но сбросим у единственного, если там был хвост.
+            foreach ($items as $it) {
+                $payload = (array) ($it->quality_assessment_payload ?? []);
+                if (isset($payload['possible_duplicate_of'])) {
+                    unset($payload['possible_duplicate_of']);
+                    $it->forceFill(['quality_assessment_payload' => $payload])->save();
+                }
+            }
+            return;
+        }
+
+        // Map<item_id, array<int, {item_id, similarity}>>
+        $duplicatesPerItem = [];
+
+        $list = $items->values();
+        $n = $list->count();
+        for ($i = 0; $i < $n; $i++) {
+            for ($j = $i + 1; $j < $n; $j++) {
+                $a = $list[$i];
+                $b = $list[$j];
+                $similarity = $this->possibleDuplicateSimilarity($a, $b);
+                if ($similarity === null) {
+                    continue;
+                }
+                $duplicatesPerItem[$a->id][] = [
+                    'item_id' => $b->id,
+                    'similarity' => $similarity,
+                ];
+                $duplicatesPerItem[$b->id][] = [
+                    'item_id' => $a->id,
+                    'similarity' => $similarity,
+                ];
+            }
+        }
+
+        foreach ($items as $it) {
+            $payload = (array) ($it->quality_assessment_payload ?? []);
+            $dups = $duplicatesPerItem[$it->id] ?? null;
+            if ($dups === null) {
+                if (isset($payload['possible_duplicate_of'])) {
+                    unset($payload['possible_duplicate_of']);
+                    $it->forceFill(['quality_assessment_payload' => $payload])->save();
+                }
+                continue;
+            }
+            $payload['possible_duplicate_of'] = array_values($dups);
+            $it->forceFill(['quality_assessment_payload' => $payload])->save();
+        }
+    }
+
+    /**
+     * Похожесть двух items как кандидатов на «возможный дубль».
+     *
+     * Условия:
+     *   - lower-trim name'ы совпадают, ИЛИ similar_text ≥ 85%;
+     *   - И НЕ оба имеют одинаковые article (если оба совпадают — это бы
+     *     dedupeWithinList схлопнул раньше; раз остались — qty/inv разные,
+     *     это multi-invoice case, НЕ возможный дубль);
+     *   - И НЕ совпадают brand'ы при разных article'ах (если бренды
+     *     разные — это разные товары даже при похожем name).
+     *
+     * @return float|null similarity 0.0–1.0 или null если не дубль.
+     */
+    private function possibleDuplicateSimilarity(\App\Models\RequestItem $a, \App\Models\RequestItem $b): ?float
+    {
+        $aName = mb_strtolower(trim((string) $a->parsed_name));
+        $bName = mb_strtolower(trim((string) $b->parsed_name));
+        if ($aName === '' || $bName === '') {
+            return null;
+        }
+
+        $aArt = $this->normalizeArticleKey((string) $a->parsed_article);
+        $bArt = $this->normalizeArticleKey((string) $b->parsed_article);
+
+        // Оба с одинаковым article — это multi-invoice / разный qty случай,
+        // не «возможный дубль» (намеренно сохранено dedupeWithinList).
+        if ($aArt !== '' && $bArt !== '' && $aArt === $bArt) {
+            return null;
+        }
+
+        // Разные ненулевые brand'ы при разных article'ах — точно разные товары.
+        $aBrand = mb_strtolower(trim((string) $a->parsed_brand));
+        $bBrand = mb_strtolower(trim((string) $b->parsed_brand));
+        if ($aBrand !== '' && $bBrand !== '' && $aBrand !== $bBrand) {
+            return null;
+        }
+
+        // Name match.
+        if ($aName === $bName) {
+            return 1.0;
+        }
+        similar_text($aName, $bName, $pct);
+        if ($pct >= 85.0) {
+            return round($pct / 100.0, 2);
+        }
+        return null;
+    }
+
+    private function normalizeArticleKey(string $article): string
+    {
+        return preg_replace('/[\s\-_.\/]/u', '', mb_strtoupper(trim($article))) ?? '';
     }
 
     /**

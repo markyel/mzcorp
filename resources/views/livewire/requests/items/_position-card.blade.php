@@ -286,6 +286,41 @@
                     @endif
                 @endif
             @endif
+
+            {{-- Phase: «возможно дубль». RequestItemPersister после parse
+                 ищет пары близких позиций (name lower-eq или similar_text ≥85%),
+                 которые НЕ схлопнулись dedupeWithinList (разные article'ы
+                 или один без артикула). Подсветка для менеджера — он сам
+                 решит через UI «🔗 Это уточнение позиции #N».
+                 Источник: $item->quality_assessment_payload['possible_duplicate_of']
+                 = [{item_id, similarity}, ...].
+            --}}
+            @php
+                $possibleDups = is_array($item->quality_assessment_payload['possible_duplicate_of'] ?? null)
+                    ? $item->quality_assessment_payload['possible_duplicate_of']
+                    : [];
+                $possibleDupItems = collect();
+                if (! empty($possibleDups)) {
+                    $ids = array_filter(array_map(fn ($d) => (int) ($d['item_id'] ?? 0), $possibleDups));
+                    if (! empty($ids)) {
+                        $possibleDupItems = ($items ?? collect())
+                            ->whereIn('id', $ids)
+                            ->where('is_active', true);
+                    }
+                }
+            @endphp
+            @if($possibleDupItems->isNotEmpty())
+                <div class="text-[11px] text-amber-700 mt-0.5 flex items-center gap-1 flex-wrap"
+                     title="Похожее название и в этих позициях — возможно одна и та же запчасть. Решение про слияние — за вами: ⋮ → «🔗 Это уточнение позиции…»">
+                    <span class="inline-flex items-center bg-amber-50 px-1 rounded-sm">⚠ возможно дубль</span>
+                    @foreach($possibleDupItems as $dup)
+                        @php
+                            $sim = collect($possibleDups)->firstWhere('item_id', $dup->id)['similarity'] ?? null;
+                        @endphp
+                        <span class="mono text-amber-900">#{{ $dup->position }}</span>{{ $sim !== null ? ' (' . round($sim * 100) . '%)' : '' }}{{ ! $loop->last ? ',' : '' }}
+                    @endforeach
+                </div>
+            @endif
         </div>
 
         {{-- Status-колонка теперь несёт сматченный M-SKU (если есть) +
