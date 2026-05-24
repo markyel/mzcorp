@@ -272,6 +272,12 @@ class RequestItemParsingService
         $parsed = json_decode($raw, true);
         $items = $parsed['items'] ?? [];
 
+        // Diagnostic: что вернул Vision LLM ДО нормализации/фильтра.
+        Log::info('parseItemsFromImages: LLM raw items', [
+            'count' => count($items),
+            'names' => array_map(fn ($it) => mb_substr((string) ($it['name'] ?? ''), 0, 80), $items),
+        ]);
+
         return array_values(array_filter(
             array_map(fn(array $item) => $this->normalizeParsedItem($item), $items),
             fn ($i) => $i !== null,
@@ -945,8 +951,14 @@ PROMPT;
             'structured_count' => $structuredAttachments->count(),
             'tried_text' => $shouldTryText,
             'items_before_dedup' => count($items),
-            'items_articles' => array_map(
-                fn ($it) => ($it['article'] ?? '?') . '/q' . ($it['qty'] ?? '?') . '/inv' . ($it['invoice_index'] ?? '?'),
+            'items_breakdown' => array_map(
+                fn ($it) => [
+                    'src' => $it['__source'] ?? '?',
+                    'name' => mb_substr((string) ($it['name'] ?? ''), 0, 70),
+                    'art' => $it['article'] ?? null,
+                    'qty' => $it['qty'] ?? null,
+                    'inv' => $it['invoice_index'] ?? null,
+                ],
                 $items,
             ),
         ]);
