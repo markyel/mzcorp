@@ -387,18 +387,21 @@ class InboundReplyLinker
         }
 
         // Guard A: массово-закрытые без явного клиентского триггера —
-        // не подсовываем LLM (high false-positive rate).
+        // не подсовываем LLM. Mass-closed (Pre-launch cleanup, cron-
+        // recovery) — это административные действия без участия клиента,
+        // наследовать от них бессмысленно: оригинальный контекст потерян
+        // (closed_lost_source_message_id IS NULL).
         if ($closedCandidate->closed_lost_source_message_id === null) {
             return null;
         }
 
-        // Guard B: subject inbound и closed-кандидата должны совпадать
-        // после нормализации. Разные темы — почти наверняка разные треды.
-        if ($this->normalizeSubject((string) $message->subject)
-            !== $this->normalizeSubject((string) $closedCandidate->subject)
-        ) {
-            return null;
-        }
+        // Guard B (subject mismatch) — СНЯТ. Изначально был эвристикой
+        // экономии LLM-вызовов, но получилось слишком грубо: forward'ы
+        // / новые темы того же клиента отрезались до LLM-проверки.
+        // По дизайну наследования — LLM check должен решать по позициям
+        // и контексту письма, не по subject (он часто не совпадает в
+        // forward'ах). LLM-вызов дёшев (gpt-4o-mini), false-positive
+        // случаи отсекутся уже при confidence-проверке (≥0.7).
 
         // Возвращаем кандидата — статус ClosedLost, поэтому tryLink()
         // пойдёт по terminal-ветке: запишет hint, вернёт null. Новая
@@ -424,18 +427,6 @@ class InboundReplyLinker
             'candidate_status' => $candidate->status->value,
             'matched_by' => $matchedBy,
         ]);
-    }
-
-    /**
-     * Нормализованный subject для сравнения: вырезаем reply/forward
-     * префиксы (рекурсивно — `Re: Fwd: Re:` тоже схлопывается), trim,
-     * lower-case. Возвращаем пустую строку для пустого subject.
-     */
-    private function normalizeSubject(string $s): string
-    {
-        $s = (string) preg_replace('/^\s*((re|fwd|fw|отв|ответ)\s*:\s*)+/iu', '', $s);
-
-        return mb_strtolower(trim($s));
     }
 
     /**
