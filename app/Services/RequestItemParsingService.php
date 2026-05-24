@@ -174,7 +174,10 @@ class RequestItemParsingService
             'items_brief' => $itemsBrief,
         ]);
 
-        return array_map(fn(array $item) => $this->normalizeParsedItem($item), $items);
+        return array_values(array_filter(
+            array_map(fn(array $item) => $this->normalizeParsedItem($item), $items),
+            fn ($i) => $i !== null,
+        ));
     }
 
     /**
@@ -269,15 +272,104 @@ class RequestItemParsingService
         $parsed = json_decode($raw, true);
         $items = $parsed['items'] ?? [];
 
-        return array_map(fn(array $item) => $this->normalizeParsedItem($item), $items);
+        return array_values(array_filter(
+            array_map(fn(array $item) => $this->normalizeParsedItem($item), $items),
+            fn ($i) => $i !== null,
+        ));
+    }
+
+    /**
+     * Список prefix-patterns для определения услуг (доставка, монтаж, и т.п.).
+     * Регистро-независимо, по началу name. Negative-exclusions («комплект»,
+     * «материал») обрабатываются отдельно — это ТМЦ даже если в названии
+     * есть service-слово.
+     *
+     * Используется в isServiceItem() для жёсткой код-side фильтрации
+     * позиций-услуг, которые LLM иногда извлекает несмотря на промпт-правило.
+     */
+    private const SERVICE_PREFIX_PATTERNS = [
+        '/^доставк/u',
+        '/^транспортир/u',
+        '/^экспедир/u',
+        '/^логист/u',
+        '/^самовывоз/u',
+        '/^курьер/u',
+        '/^погруз(к|ч)/u',
+        '/^разгруз/u',
+        '/^упаковк/u',
+        '/^жёстк(ая|их|ой) упаковк/u',
+        '/^обрешётк/u',
+        '/^паллет/u',
+        '/^палетир/u',
+        '/^маркировк[ао] груза/u',
+        '/^страхован/u',
+        '/^страховк/u',
+        '/^каско /u',
+        '/^оформлени/u',
+        '/^сертификаци/u',
+        '/^таможен/u',
+        '/^монтаж\b/u',
+        '/^демонтаж\b/u',
+        '/^пусконаладк/u',
+        '/^установк[ао]\b/u',
+        '/^шефмонтаж/u',
+        '/^техобслуж/u',
+        '/^то\b/u',
+        '/^сервис/u',
+        '/^диагностик/u',
+        '/^освидетельствован/u',
+        '/^экспертиз/u',
+        '/^замер/u',
+        '/^подъ[её]м (на|до) этаж/u',
+        '/^забор груза/u',
+        '/^терминал (отправит|получат)/u',
+    ];
+
+    /**
+     * Определить, является ли позиция услугой (не-ТМЦ).
+     *
+     * LLM иногда извлекает строки «Доставка», «Монтаж», «Упаковка» из
+     * счёта/КП как товарные позиции, несмотря на промпт-правило. Жёсткий
+     * regex-фильтр надёжнее.
+     *
+     * Negative-exclusions (ТМЦ даже если в названии service-слово):
+     *   - «комплект» / «ремкомплект» — это набор крепежа/деталей;
+     *   - «материал» / «материалы» — клиент покупает материал, не услугу.
+     */
+    private function isServiceItem(?string $name): bool
+    {
+        $name = mb_strtolower(trim((string) $name));
+        if ($name === '') {
+            return false;
+        }
+        if (preg_match('/\b(комплект|ремкомплект|материал)\b/u', $name)) {
+            return false;
+        }
+        foreach (self::SERVICE_PREFIX_PATTERNS as $p) {
+            if (preg_match($p, $name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
      * Нормализация одной позиции перед возвратом в UI/БД.
      * name ≤ 250 символов — ограничение varchar(255) в БД.
+     * Возвращает null если позиция — услуга (доставка/монтаж/упаковка) —
+     * такие отфильтровываются на стороне caller'а (см. callers
+     * array_map → array_filter null).
      */
-    private function normalizeParsedItem(array $item): array
+    private function normalizeParsedItem(array $item): ?array
     {
+        $rawName = trim((string) ($item['name'] ?? ''));
+        if ($this->isServiceItem($rawName)) {
+            Log::info('normalizeParsedItem: service item filtered', [
+                'name' => mb_substr($rawName, 0, 100),
+            ]);
+            return null;
+        }
+
         // Phase 2.0+ : `category` (coarse, 19 значений) идёт от ParseItemsPrompt.
         // Валидируем против CoarseCategories::ALL — мусорные / новые значения
         // ставим в null, чтобы CategoryRefinementService уехал в fallback,
@@ -1122,20 +1214,26 @@ PROMPT;
             ), fn ($v) => $v !== null)),
         ]);
 
-        $normalizedItems = array_map(function (array $item) use ($attachmentIds) {
-            $normalized = $this->normalizeParsedItem($item);
-            // Phase 2: резолв image_index → конкретный email_attachments.id.
-            // Если Vision не вернул index, вернул не-int, или out-of-range —
-            // FK остаётся null (заглушка в UI).
-            $idx = $item['image_index'] ?? null;
-            $attId = null;
-            if (is_int($idx) && $idx >= 0 && $idx < count($attachmentIds)) {
-                $attId = $attachmentIds[$idx] ?? null;
-            }
-            $normalized['email_attachment_id'] = $attId;
+        $normalizedItems = array_values(array_filter(
+            array_map(function (array $item) use ($attachmentIds) {
+                $normalized = $this->normalizeParsedItem($item);
+                if ($normalized === null) {
+                    return null; // service item — отфильтруется ниже
+                }
+                // Phase 2: резолв image_index → конкретный email_attachments.id.
+                // Если Vision не вернул index, вернул не-int, или out-of-range —
+                // FK остаётся null (заглушка в UI).
+                $idx = $item['image_index'] ?? null;
+                $attId = null;
+                if (is_int($idx) && $idx >= 0 && $idx < count($attachmentIds)) {
+                    $attId = $attachmentIds[$idx] ?? null;
+                }
+                $normalized['email_attachment_id'] = $attId;
 
-            return $normalized;
-        }, $items);
+                return $normalized;
+            }, $items),
+            fn ($i) => $i !== null,
+        ));
 
         // Phase 2.4b fallback: тривиальный случай 1×1.
         // Vision-промпт «лучше null чем угадывать» (CoT a39e314) иногда
