@@ -35,7 +35,14 @@ class MailRebuildAttachmentNamesCommand extends Command
 
     protected $description = 'Backfill email_attachments.filename через Webklex MimeMessage + новый decoder (RawFilename + repair base64).';
 
-    private const SIZE_TOLERANCE_BYTES = 64;
+    /**
+     * Размер по mime_type — допустимое расхождение в долях.
+     * Webklex getSize() возвращает decoded body size, БД size_bytes исторически
+     * хранила encoded (base64 ~33% больше) → если одинаковый mime даёт ровно
+     * одного кандидата, мы берём его без size-проверки вообще.
+     * При нескольких кандидатах по mime — фильтруем по best size match.
+     */
+    private const SIZE_TOLERANCE_RATIO = 0.5;
 
     public function __construct(private readonly MessagePersister $persister)
     {
@@ -193,33 +200,59 @@ class MailRebuildAttachmentNamesCommand extends Command
     }
 
     /**
-     * Найти в коллекции Webklex-attachment'ов один соответствующий записи в БД
-     * по mime_type + size_bytes (с tolerance ±SIZE_TOLERANCE_BYTES).
+     * Найти в коллекции Webklex-attachment'ов один соответствующий записи в БД.
      *
-     * Если кандидатов несколько — берём первый. Если ни одного — null.
+     * Алгоритм:
+     *   1. Filter по mime_type (если оба заполнены — должны совпадать).
+     *   2. Если после filter ровно один кандидат — берём его (size не сверяем,
+     *      БД хранила encoded size исторически, Webklex отдаёт decoded —
+     *      расхождение ~33% в base64-случае).
+     *   3. Если несколько — выбираем тот, у кого size ближе всего к
+     *      dbSize (по ratio, tolerance 0.5).
+     *   4. Если ни одного по mime — null.
      */
     private function matchAttachmentToParts(EmailAttachment $dbAtt, \Webklex\PHPIMAP\Support\AttachmentCollection $msgAtts): ?\Webklex\PHPIMAP\Attachment
     {
         $dbMime = mb_strtolower(trim((string) $dbAtt->mime_type));
         $dbSize = (int) $dbAtt->size_bytes;
 
-        $matches = [];
+        $sameMime = [];
         foreach ($msgAtts as $att) {
             $partMime = mb_strtolower(trim((string) $att->getMimeType()));
-            $partSize = (int) $att->getSize();
-
             if ($dbMime !== '' && $partMime !== '' && $dbMime !== $partMime) {
                 continue;
             }
-            if ($dbSize > 0 && abs($partSize - $dbSize) > self::SIZE_TOLERANCE_BYTES) {
-                continue;
-            }
-            $matches[] = $att;
+            $sameMime[] = $att;
         }
 
-        // Если ровно один — возвращаем. Если несколько с одинаковым mime+size —
-        // тоже первый (других различающих свойств нет).
-        return $matches[0] ?? null;
+        if (count($sameMime) === 0) {
+            return null;
+        }
+        if (count($sameMime) === 1) {
+            return $sameMime[0];
+        }
+
+        // Несколько кандидатов с одинаковым mime — ищем по size proximity.
+        if ($dbSize <= 0) {
+            return $sameMime[0]; // фолбэк: первый
+        }
+
+        $best = null;
+        $bestDelta = PHP_INT_MAX;
+        foreach ($sameMime as $att) {
+            $partSize = (int) $att->getSize();
+            $delta = abs($partSize - $dbSize);
+            // tolerance: 50% от max(dbSize, partSize). Allows base64 inflation.
+            $threshold = (int) (max($dbSize, $partSize) * self::SIZE_TOLERANCE_RATIO);
+            if ($delta > $threshold) {
+                continue;
+            }
+            if ($delta < $bestDelta) {
+                $bestDelta = $delta;
+                $best = $att;
+            }
+        }
+        return $best;
     }
 
     /**
