@@ -1620,27 +1620,41 @@ class Detail extends Component
 
     public function render()
     {
-        // TEMP profiling: засекаем SQL count + time в фазе render Livewire'а.
-        // НЕ дёргаем $view->render() — это ломает Livewire pipeline (500).
-        // Вместо этого — register listener'а до view, и считаем при booted-завершении
-        // через хелпер микросекундного timestamp'а.
-        \Illuminate\Support\Facades\DB::enableQueryLog();
+        return view('livewire.requests.detail');
+    }
+
+    // TEMP profiling — измеряем полный wire-request lifecycle.
+    // booted() = после hydrate state из incoming payload.
+    // dehydrate() = после render template, перед отдачей response.
+    // Разница = всё что Livewire делает за один update.
+    //
+    // SQL count показывает суммарно queries (mount + computed + render).
+    // Это позволит увидеть выпадает ли N+1 в blade-traversal'е,
+    // а не только в mount-eager-load.
+    private float $profileStartTime = 0;
+
+    public function booted(): void
+    {
+        $this->profileStartTime = microtime(true);
         \Illuminate\Support\Facades\DB::flushQueryLog();
-        $t0 = microtime(true);
+        \Illuminate\Support\Facades\DB::enableQueryLog();
+    }
 
-        $view = view('livewire.requests.detail');
-
-        // На этом этапе template ещё НЕ выполнился (Livewire compile позже).
-        // Но SQL внутри computed (которые могут дёрнуться при view init) —
-        // уже залогирован. Записываем то что есть.
-        \Illuminate\Support\Facades\Log::info('Detail::render profile (start)', [
-            'request_id' => $this->request->id,
-            'internal_code' => $this->request->internal_code,
+    public function dehydrate(): void
+    {
+        if ($this->profileStartTime <= 0) {
+            return;
+        }
+        $ms = round((microtime(true) - $this->profileStartTime) * 1000);
+        $queries = \Illuminate\Support\Facades\DB::getQueryLog();
+        $sqlTime = array_sum(array_map(fn ($q) => (float) ($q['time'] ?? 0), $queries));
+        \Illuminate\Support\Facades\Log::info('Detail wire-request profile', [
+            'request_id' => $this->request->id ?? null,
+            'internal_code' => $this->request->internal_code ?? null,
             'tab' => $this->tab,
-            'view_create_ms' => round((microtime(true) - $t0) * 1000),
-            'sql_count_so_far' => count(\Illuminate\Support\Facades\DB::getQueryLog()),
+            'total_ms' => $ms,
+            'sql_count' => count($queries),
+            'sql_time_ms' => round($sqlTime, 1),
         ]);
-
-        return $view;
     }
 }
