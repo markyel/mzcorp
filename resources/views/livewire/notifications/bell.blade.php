@@ -37,24 +37,29 @@
                                 'request_assigned' => '📥',
                                 'attention_overdue' => '⚡',
                                 'openai_circuit_opened' => '⛔',
+                                'support_reply' => '✉',
                                 default => '🔔',
                             };
                             $title = match($kind) {
                                 'request_assigned' => 'Новая заявка ' . ($data['internal_code'] ?? ''),
                                 'attention_overdue' => 'Просрочено: ' . ($data['internal_code'] ?? ''),
                                 'openai_circuit_opened' => 'OpenAI недоступен — категоризатор на паузе',
+                                'support_reply' => 'Ответ создателя по тикету #' . ($data['ticket_id'] ?? ''),
                                 default => 'Уведомление',
                             };
                             $subtitle = match($kind) {
                                 'request_assigned' => ($data['client_name'] ?? '') . ' · ' . ($data['subject'] ?? ''),
                                 'attention_overdue' => ($data['status_label'] ?? '') . ' · ' . ($data['attention_reason'] ?? ''),
                                 'openai_circuit_opened' => 'Подряд ошибок: ' . ($data['fail_count'] ?? 0) . ' · пауза ' . ($data['cooldown_minutes'] ?? 15) . ' мин',
+                                'support_reply' => ($data['subject'] ?? '') . ' · ' . \Illuminate\Support\Str::limit($data['reply_preview'] ?? '', 60),
                                 default => '',
                             };
                             $reqId = $data['request_id'] ?? null;
-                            $href = $kind === 'openai_circuit_opened'
-                                ? 'https://platform.openai.com/account/billing'
-                                : ($reqId ? route('requests.show', $reqId) : '#');
+                            $href = match($kind) {
+                                'openai_circuit_opened' => 'https://platform.openai.com/account/billing',
+                                'support_reply' => $data['ticket_id'] ?? null ? route('support.show', $data['ticket_id']) : '#',
+                                default => $reqId ? route('requests.show', $reqId) : '#',
+                            };
                         @endphp
                         <li wire:key="notif-{{ $n->id }}" class="border-b border-border-subtle last:border-b-0 {{ $isUnread ? 'bg-[var(--sky-50)]' : '' }}">
                             <a href="{{ $href }}"

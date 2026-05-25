@@ -3,6 +3,7 @@
 namespace App\Livewire\Support;
 
 use App\Services\Support\SupportTicketService;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
@@ -88,6 +89,46 @@ class NewTicketModal extends Component
             'user_agent' => isset($raw['user_agent']) ? mb_substr((string) $raw['user_agent'], 0, 500) : null,
             'referrer' => isset($raw['referrer']) ? mb_substr((string) $raw['referrer'], 0, 500) : null,
         ];
+    }
+
+    /**
+     * Последние 5 обращений текущего пользователя — для блока «Мои обращения»
+     * наверху модалки. С маркером непрочитанного ответа админа (через
+     * notifications-таблицу: kind=support_reply без read_at).
+     */
+    #[Computed]
+    public function recentTickets()
+    {
+        $user = auth()->user();
+        if (! $user) {
+            return collect();
+        }
+        $tickets = \App\Models\SupportTicket::query()
+            ->where('user_id', $user->id)
+            ->orderByDesc('id')
+            ->limit(5)
+            ->get();
+        if ($tickets->isEmpty()) {
+            return collect();
+        }
+
+        // Считаем unread support_reply notifications per ticket.
+        $unreadByTicket = $user->notifications()
+            ->where('type', \App\Notifications\SupportTicketReplyNotification::class)
+            ->whereNull('read_at')
+            ->get()
+            ->groupBy(fn ($n) => (int) ($n->data['ticket_id'] ?? 0))
+            ->map->count();
+
+        return $tickets->map(function ($t) use ($unreadByTicket) {
+            return (object) [
+                'id' => $t->id,
+                'subject' => $t->subject,
+                'status' => $t->status,
+                'created_at' => $t->created_at,
+                'unread' => (int) ($unreadByTicket[$t->id] ?? 0),
+            ];
+        });
     }
 
     public function render()

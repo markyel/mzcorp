@@ -156,25 +156,11 @@
                 </svg>
             </a>
 
-            {{-- «Связь с создателем» — открывает Livewire-модалку
-                 NewTicketModal с собранным на клиенте контекстом
-                 (текущий URL / route_name / viewport / user-agent).
-                 Иконка триангл+глаз: визуальная identity «создатель». --}}
-            <button type="button"
-                    data-support-trigger
-                    data-route-name="{{ request()->route()?->getName() ?? '' }}"
-                    class="relative inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-[var(--bg-surface-2)]"
-                    style="color: var(--accent);"
-                    title="Связь с создателем">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
-                     fill="none" stroke="currentColor" stroke-width="1.75"
-                     stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">
-                    <path d="M12 3 L21 20 L3 20 Z"/>
-                    <line x1="6.5" y1="17.2" x2="17.5" y2="17.2"/>
-                    <path d="M7.2 12.2 C 9 10.6, 15 10.6, 16.8 12.2 C 15 13.9, 9 13.9, 7.2 12.2 Z"/>
-                    <circle cx="12" cy="12.2" r="1.25" fill="currentColor" stroke="none"/>
-                </svg>
-            </button>
+            {{-- «Связь с создателем» — иконка ▲ с badge непрочитанных ответов.
+                 Сам Livewire-компонент рендерит кнопку с data-support-trigger;
+                 глобальный JS-делегат в layouts/app.blade.php собирает context
+                 и диспатчит open-support-modal. --}}
+            <livewire:support.trigger wire:key="support-trigger-{{ $user->id ?? 'guest' }}" />
         @endauth
 
         {{-- User avatar dropdown --}}

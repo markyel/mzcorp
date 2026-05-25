@@ -192,6 +192,21 @@ class SupportTicketService
     {
         // Если ответил автор — шлём админу. Если админ — шлём автору.
         $isAuthorReply = $message->user_id === $ticket->user_id;
+
+        // In-app нотификация автору тикета — для bell-dropdown и badge на
+        // иконке «связь с создателем». Email — отдельным путём ниже.
+        if (! $isAuthorReply) {
+            try {
+                $ticket->user->notify(new \App\Notifications\SupportTicketReplyNotification($ticket, $message));
+            } catch (\Throwable $e) {
+                Log::warning('SupportTicketReplyNotification dispatch failed (non-fatal)', [
+                    'ticket_id' => $ticket->id,
+                    'message_id' => $message->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         $to = $isAuthorReply
             ? config('support.developer_email')
             : $ticket->user->email;

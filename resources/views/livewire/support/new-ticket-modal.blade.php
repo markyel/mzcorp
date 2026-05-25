@@ -43,6 +43,38 @@
                     </div>
                 </div>
 
+                {{-- Mini-список последних обращений с маркером непрочитанных
+                     ответов. Если их вообще нет — блок скрыт. --}}
+                @php $recent = $this->recentTickets; @endphp
+                @if($recent->isNotEmpty())
+                    <div class="px-5 pt-3 pb-2 border-b border-border-subtle"
+                         style="background: var(--bg-app);">
+                        <div class="flex items-center gap-2 mb-1.5">
+                            <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">Мои обращения</span>
+                            <span class="flex-1"></span>
+                            <a href="{{ route('support.my') }}" class="text-[12px] text-sky-700 hover:underline">все →</a>
+                        </div>
+                        <ul class="space-y-0.5">
+                            @foreach($recent as $t)
+                                <li class="flex items-center gap-2 text-[12.5px] py-0.5">
+                                    <a href="{{ route('support.show', $t->id) }}"
+                                       class="flex-1 min-w-0 truncate hover:underline {{ $t->unread > 0 ? 'text-fg-1 font-semibold' : 'text-fg-2' }}">
+                                        #{{ $t->id }} · {{ $t->subject }}
+                                    </a>
+                                    @if($t->unread > 0)
+                                        <span class="chip chip-attn" style="font-size: 10.5px; padding: 1px 6px;" title="Новых ответов: {{ $t->unread }}">
+                                            {{ $t->unread }} {{ \Illuminate\Support\Str::plural('ответ', $t->unread) }}
+                                        </span>
+                                    @endif
+                                    <span class="chip {{ $t->status->chipClass() }}" style="font-size: 10.5px; padding: 1px 6px;">
+                                        {{ $t->status->label() }}
+                                    </span>
+                                </li>
+                            @endforeach
+                        </ul>
+                    </div>
+                @endif
+
                 @if($sentSuccess)
                     {{-- Success state --}}
                     <div class="px-5 py-5">

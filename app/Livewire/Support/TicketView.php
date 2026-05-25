@@ -38,6 +38,19 @@ class TicketView extends Component
     {
         $this->authorize_($ticket);
         $this->ticketId = $ticket->id;
+
+        // Пометить непрочитанные support_reply-нотификации этого тикета
+        // как read для текущего пользователя — снимет цифру с badge ▲
+        // в шапке и с маркера в bell. Для админа (он не получает
+        // support_reply, только email) — no-op.
+        $user = auth()->user();
+        if ($user && $user->id === $ticket->user_id) {
+            $user->notifications()
+                ->where('type', \App\Notifications\SupportTicketReplyNotification::class)
+                ->whereNull('read_at')
+                ->whereRaw("(data::jsonb->>'ticket_id')::int = ?", [$ticket->id])
+                ->update(['read_at' => now()]);
+        }
     }
 
     #[Computed]
