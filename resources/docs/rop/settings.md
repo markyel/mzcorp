@@ -1,7 +1,7 @@
 ---
 title: Настройки
 order: 60
-excerpt: Override параметров: матчинг каталога, дедлайны SLA, AI-детектор, дилеры.
+excerpt: "Override параметров: матчинг каталога, дедлайны SLA, AI-детектор, дилеры."
 roles: [head_of_sales]
 ---
 
