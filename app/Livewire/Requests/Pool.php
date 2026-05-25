@@ -373,8 +373,18 @@ class Pool extends Component
 
         // Фильтр «нераспределённые» — assigned_user_id IS NULL. Работает
         // независимо от scope/status, для пункта навигации «Нераспределённые».
+        //
+        // 2026-05-26: отрезаем terminal-статусы (closed_*). Для автозакрытых
+        // заявок (parser_no_content) есть отдельный пул /dashboard/requests/
+        // auto-closed — там их можно восстановить. В «Нераспределённых» им
+        // делать нечего: это не открытые заявки, а уже закрытые системой,
+        // их не надо никому распределять.
         if ($this->unassignedOnly) {
-            $query->whereNull('assigned_user_id');
+            $query->whereNull('assigned_user_id')
+                ->whereIn('status', array_map(
+                    fn (RequestStatus $s) => $s->value,
+                    array_filter(RequestStatus::cases(), fn (RequestStatus $s) => ! $s->isTerminal()),
+                ));
         }
 
         if ($this->search !== '') {
@@ -543,8 +553,17 @@ class Pool extends Component
                 array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
             ))
             ->count();
+        // Counter «Нераспределённые» — только реально открытые (не closed_*).
+        // Автозакрытые системой заявки имеют отдельный пул и не должны
+        // подсвечивать этот счётчик.
         $unassigned = $this->canSeeAll
-            ? Request::query()->whereNull('assigned_user_id')->count()
+            ? Request::query()
+                ->whereNull('assigned_user_id')
+                ->whereIn('status', array_map(
+                    fn (RequestStatus $s) => $s->value,
+                    array_filter(RequestStatus::cases(), fn (RequestStatus $s) => ! $s->isTerminal()),
+                ))
+                ->count()
             : null;
         $allOpen = $this->canSeeAll
             ? Request::query()
