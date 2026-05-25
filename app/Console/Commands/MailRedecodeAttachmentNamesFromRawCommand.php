@@ -40,7 +40,9 @@ class MailRedecodeAttachmentNamesFromRawCommand extends Command
     protected $signature = 'mail:redecode-attachment-names-from-raw
         {--dry-run : Показать что будет переименовано без записи}
         {--limit=1000 : Максимум email-message обработать за прогон}
-        {--attachment= : Точечный режим: ID конкретного attachment\'а}';
+        {--attachment= : Точечный режим: ID конкретного attachment\'а}
+        {--name-prefix= : Применять только если НОВОЕ имя начинается с подстроки (case-insensitive)}
+        {--since-hours= : Применять только если created_at attachment\'а позже now()-N часов}';
 
     protected $description = 'Backfill email_attachments.filename из raw_source писем (RFC 2231 continuation).';
 
@@ -49,6 +51,13 @@ class MailRedecodeAttachmentNamesFromRawCommand extends Command
         $dry = (bool) $this->option('dry-run');
         $limit = (int) $this->option('limit');
         $singleAttachmentId = $this->option('attachment') ? (int) $this->option('attachment') : null;
+        $namePrefixes = $this->option('name-prefix')
+            ? array_filter(array_map('trim', explode('|', (string) $this->option('name-prefix'))))
+            : [];
+        $sinceHours = $this->option('since-hours') !== null
+            ? (int) $this->option('since-hours')
+            : null;
+        $cutoff = $sinceHours !== null ? now()->subHours($sinceHours) : null;
 
         // Кандидаты на ре-декод: filename содержит подозрительные паттерны.
         // Не дёргаем нормальные имена — только явно битые.
@@ -83,7 +92,7 @@ class MailRedecodeAttachmentNamesFromRawCommand extends Command
             $byMessage->count(),
         ));
 
-        $stats = ['ok' => 0, 'unchanged' => 0, 'no_raw' => 0, 'no_match' => 0];
+        $stats = ['ok' => 0, 'unchanged' => 0, 'no_raw' => 0, 'no_match' => 0, 'filtered' => 0];
         $messageCount = 0;
 
         foreach ($byMessage as $msgId => $atts) {
@@ -135,6 +144,30 @@ class MailRedecodeAttachmentNamesFromRawCommand extends Command
                     continue;
                 }
 
+                // Safety-фильтры (опциональные): применять только если
+                //   - newName начинается с одного из --name-prefix (через | разделитель)
+                //   - И/ИЛИ attachment свежее --since-hours
+                if (!empty($namePrefixes)) {
+                    $matched = false;
+                    foreach ($namePrefixes as $p) {
+                        if ($p !== '' && mb_stripos($newName, $p) === 0) {
+                            $matched = true;
+                            break;
+                        }
+                    }
+                    if (!$matched) {
+                        $stats['filtered']++;
+                        continue;
+                    }
+                }
+                if ($cutoff !== null) {
+                    $attRow = EmailAttachment::find($att->id);
+                    if (!$attRow || !$attRow->created_at || $attRow->created_at->lt($cutoff)) {
+                        $stats['filtered']++;
+                        continue;
+                    }
+                }
+
                 if (! $dry) {
                     EmailAttachment::query()->where('id', $att->id)->update(['filename' => $newName]);
                 }
@@ -150,8 +183,8 @@ class MailRedecodeAttachmentNamesFromRawCommand extends Command
 
         $this->line('');
         $this->info(sprintf(
-            'Готово: переименовано=%d · без_изменений=%d · нет_raw=%d · нет_блока=%d',
-            $stats['ok'], $stats['unchanged'], $stats['no_raw'], $stats['no_match'],
+            'Готово: переименовано=%d · без_изменений=%d · нет_raw=%d · нет_блока=%d · отфильтровано=%d',
+            $stats['ok'], $stats['unchanged'], $stats['no_raw'], $stats['no_match'], $stats['filtered'],
         ));
         if ($dry) {
             $this->warn('--dry-run: изменения НЕ записаны в БД.');
