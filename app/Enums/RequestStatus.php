@@ -51,7 +51,7 @@ enum RequestStatus: string
             self::Quoted => 'КП отправлено',
             self::UnderReview => 'На согласовании',
             self::PostponedUntil => 'Отложена',
-            self::AwaitingInvoice => 'Ждём счёт',
+            self::AwaitingInvoice => 'Согласован / ждёт счёт',
             self::Invoiced => 'Счёт отправлен',
             self::Paid => 'Оплачено',
             self::Paused => 'На паузе',
