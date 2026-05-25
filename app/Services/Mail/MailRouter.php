@@ -72,9 +72,24 @@ class MailRouter
                     // filename/keyword) → LLM fallback (gpt-4o-mini, добивает
                     // edge-cases типа «Предложение МЗ-355319.pdf» / body=«КП»
                     // / HTML-only через portal).
+                    //
+                    // 2026-05-25 (M-2026-1589): расширили fallback. Раньше LLM
+                    // дёргался только если rule-based вернул null. Но при
+                    // body-keyword без filename rule-based даёт слабые 0.60 —
+                    // ниже auto-apply threshold (0.85), decision застревает
+                    // в suggested. LLM (gpt-4o-mini) ВИДИТ attachment-список,
+                    // body, контекст заявки — может подтвердить КП/счёт с
+                    // 0.85+ → auto-apply сработает. Если LLM сам не уверен
+                    // (null или ≤ rule-based) — остаёмся на rule-based 0.60.
                     $detected = $this->outboundDetector->analyze($message->fresh(), $linkedRequest);
-                    if ($detected === null) {
-                        $detected = $this->outboundLlmClassifier->classify($message->fresh(), $linkedRequest);
+                    $autoApplyThreshold = (float) app_setting('detector.confidence_threshold', 0.85);
+                    if ($detected === null || $detected['confidence'] < $autoApplyThreshold) {
+                        $llm = $this->outboundLlmClassifier->classify($message->fresh(), $linkedRequest);
+                        if ($llm !== null
+                            && ($detected === null || $llm['confidence'] > $detected['confidence'])
+                        ) {
+                            $detected = $llm;
+                        }
                     }
                     if ($detected !== null) {
                         $this->aiDecisions->recordSuggestion(
