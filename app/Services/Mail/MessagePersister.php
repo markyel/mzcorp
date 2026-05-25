@@ -304,14 +304,35 @@ class MessagePersister
             if (method_exists($att, 'getHeader')) {
                 $header = $att->getHeader();
                 if ($header !== null && isset($header->raw) && (string) $header->raw !== '') {
-                    $extracted = $this->extractFilenameFromRawHeader((string) $header->raw);
+                    $raw = (string) $header->raw;
+
+                    // (1) Primary: parseRfc2231Filename — superset:
+                    //     - RFC 2231 continuation (`filename*0*=`, `*1*=`, …)
+                    //     - RFC 5987 single-shot (`filename*=charset''encoded`)
+                    //     - Plain `filename=` / `name=`
+                    //
+                    //     Кейс M-2026-1589 / att#4312: Thunderbird шлёт PDF
+                    //     с Content-Disposition `filename*0*=...` continuation
+                    //     (имя длиннее 78 символов). extractFilenameFromRawHeader
+                    //     не умеет continuation и матчил только первый кусок
+                    //     `Content-Type:name=` → мусор «Д`4-t-4.?/?...».
+                    //     parseRfc2231Filename собирает все *N* индексы.
+                    $parsed = self::parseRfc2231Filename($raw);
+                    if ($parsed !== null && $parsed !== '') {
+                        return $parsed;
+                    }
+
+                    // (2) Fallback: extractFilenameFromRawHeader — обрабатывает
+                    //     RFC 2047 encoded-words без continuation (`=?UTF-8?B?...?=`)
+                    //     и corrupted base64 (Webklex sanitizeName удаляет `/`).
+                    $extracted = $this->extractFilenameFromRawHeader($raw);
                     if ($extracted !== null && $extracted !== '') {
                         return $extracted;
                     }
                 }
             }
         } catch (\Throwable) {
-            // не критично — упадём в fallback
+            // не критично — упадём в final fallback на getName().
         }
 
         return trim((string) ($att->getName() ?? ''));
