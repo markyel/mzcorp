@@ -398,6 +398,8 @@
                                     <tr class="text-[10.5px] uppercase tracking-wider font-semibold text-fg-3 border-b border-border-subtle">
                                         <th class="text-left px-[18px] py-2">Менеджер</th>
                                         <th class="text-right px-2 py-2" title="Открытых заявок прямо сейчас">сейчас</th>
+                                        <th class="text-right px-2 py-2" title="Всего заявок за всё время (включая закрытые)">всего</th>
+                                        <th class="text-right px-2 py-2" title="Сколько из «всего» пришло через info@myzip.ru">info@</th>
                                         <th class="text-right px-2 py-2" title="Суммарный complexity_score активных заявок">слжн</th>
                                         <th class="text-right px-2 py-2" title="Hard + very_hard заявок в работе">hard</th>
                                         <th class="text-right px-2 py-2" title="Назначений за 14 дней">14дн</th>
@@ -412,6 +414,8 @@
                                                 <div class="text-[11.5px] text-fg-3 mono">{{ $m['email'] }}</div>
                                             </td>
                                             <td class="px-2 py-2 text-right mono tnum {{ $m['total'] > 0 ? 'text-fg-1 font-semibold' : 'text-fg-3' }}">{{ $m['total'] }}</td>
+                                            <td class="px-2 py-2 text-right mono tnum {{ ($m['total_all_time'] ?? 0) > 0 ? 'text-fg-2' : 'text-fg-3' }}">{{ $m['total_all_time'] ?? 0 }}</td>
+                                            <td class="px-2 py-2 text-right mono tnum {{ ($m['from_info'] ?? 0) > 0 ? 'text-fg-3' : 'text-fg-4' }}" title="Из них через info@myzip.ru">{{ $m['from_info'] ?? 0 }}</td>
                                             <td class="px-2 py-2 text-right mono tnum {{ ($m['active_complexity'] ?? 0) > 0 ? 'text-fg-1' : 'text-fg-3' }}">{{ $m['active_complexity'] ?? 0 }}</td>
                                             <td class="px-2 py-2 text-right mono tnum {{ ($m['hard_count'] ?? 0) > 0 ? 'text-amber-700 font-semibold' : 'text-fg-3' }}">{{ $m['hard_count'] ?? 0 }}</td>
                                             <td class="px-2 py-2 text-right mono tnum {{ $m['sum14'] > 0 ? 'text-fg-2' : 'text-fg-3' }}">{{ $m['sum14'] }}</td>

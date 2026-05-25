@@ -592,6 +592,32 @@ class Index extends Component
             ->get()
             ->keyBy('assigned_user_id');
 
+        // Общее количество заявок за всё время (включая closed_*, paused) —
+        // для понимания исторического распределения. Справочно: сколько из
+        // этих заявок пришли через info@myzip.ru (главный shared ящик
+        // клиентских заявок).
+        $infoMailboxId = \App\Models\Mailbox::query()
+            ->whereRaw('LOWER(email) = ?', ['info@myzip.ru'])
+            ->value('id');
+
+        $totalAllTime = Request::query()
+            ->whereIn('assigned_user_id', $managers->pluck('id'))
+            ->groupBy('assigned_user_id')
+            ->selectRaw('assigned_user_id, COUNT(*) AS c')
+            ->get()
+            ->keyBy('assigned_user_id');
+
+        $totalFromInfo = collect();
+        if ($infoMailboxId !== null) {
+            $totalFromInfo = Request::query()
+                ->whereIn('assigned_user_id', $managers->pluck('id'))
+                ->whereHas('emailMessage', fn ($q) => $q->where('mailbox_id', $infoMailboxId))
+                ->groupBy('assigned_user_id')
+                ->selectRaw('assigned_user_id, COUNT(*) AS c')
+                ->get()
+                ->keyBy('assigned_user_id');
+        }
+
         $result = [];
         foreach ($managers as $u) {
             $points = [];
@@ -611,6 +637,10 @@ class Index extends Component
                 'points' => $points,
                 'active_complexity' => (int) ($row->active_complexity ?? 0),
                 'hard_count' => (int) ($row->hard_count ?? 0),
+                // Общее всего (закрытые включительно), и сколько из них
+                // пришло через info@ — справочный signal распределения.
+                'total_all_time' => (int) ($totalAllTime->get($u->id)?->c ?? 0),
+                'from_info' => (int) ($totalFromInfo->get($u->id)?->c ?? 0),
             ];
         }
 
