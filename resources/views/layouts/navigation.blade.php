@@ -10,35 +10,46 @@
      */
     $user = auth()->user();
 
-    $mailboxesActive = \App\Models\Mailbox::query()->where('is_active', true)->count();
-    $mailboxesError  = \App\Models\Mailbox::query()
-        ->where('is_active', true)
-        ->whereNotNull('last_error_at')
-        ->whereColumn('last_error_at', '>', \Illuminate\Support\Facades\DB::raw('COALESCE(last_synced_at, \'1970-01-01\')'))
-        ->count();
-    $primaryMailbox = \App\Models\Mailbox::query()
-        ->where('is_active', true)
-        ->orderBy('id')
-        ->value('email');
-    $workspaceDot = $mailboxesError > 0
-        ? 'bg-amber-600'
-        : ($mailboxesActive > 0 ? 'bg-emerald-600' : 'bg-neutral-400');
+    // Workspace-pill = «здоровье системы по общим ящикам». Показываем
+    // только привилегированным ролям; менеджеру не нужен — он видит
+    // чужой info@ и счётчик, который к нему отношения не имеет.
+    $showWorkspacePill = $user?->hasAnyRole(['head_of_sales', 'director', 'secretary', 'admin']) ?? false;
 
-    // Склонение «ящик» — Russian plural rules.
-    $boxLabel = (function (int $n): string {
-        $mod10  = $n % 10;
-        $mod100 = $n % 100;
-        if ($mod100 >= 11 && $mod100 <= 14) return 'ящиков';
-        if ($mod10 === 1) return 'ящик';
-        if ($mod10 >= 2 && $mod10 <= 4) return 'ящика';
-        return 'ящиков';
-    })($mailboxesActive);
+    $workspaceLabel = null;
+    $workspaceDot = 'bg-neutral-400';
+    $mailboxesActive = 0;
+    $mailboxesError = 0;
+    if ($showWorkspacePill) {
+        $mailboxesActive = \App\Models\Mailbox::query()->where('is_active', true)->count();
+        $mailboxesError  = \App\Models\Mailbox::query()
+            ->where('is_active', true)
+            ->whereNotNull('last_error_at')
+            ->whereColumn('last_error_at', '>', \Illuminate\Support\Facades\DB::raw('COALESCE(last_synced_at, \'1970-01-01\')'))
+            ->count();
+        $primaryMailbox = \App\Models\Mailbox::query()
+            ->where('is_active', true)
+            ->orderBy('id')
+            ->value('email');
+        $workspaceDot = $mailboxesError > 0
+            ? 'bg-amber-600'
+            : ($mailboxesActive > 0 ? 'bg-emerald-600' : 'bg-neutral-400');
 
-    $workspaceLabel = $primaryMailbox
-        ? $primaryMailbox . ' · +' . max($mailboxesActive - 1, 0) . ' ' . $boxLabel
-        : $mailboxesActive . ' ' . $boxLabel;
-    if ($primaryMailbox && $mailboxesActive <= 1) {
-        $workspaceLabel = $primaryMailbox;
+        // Склонение «ящик» — Russian plural rules.
+        $boxLabel = (function (int $n): string {
+            $mod10  = $n % 10;
+            $mod100 = $n % 100;
+            if ($mod100 >= 11 && $mod100 <= 14) return 'ящиков';
+            if ($mod10 === 1) return 'ящик';
+            if ($mod10 >= 2 && $mod10 <= 4) return 'ящика';
+            return 'ящиков';
+        })($mailboxesActive);
+
+        $workspaceLabel = $primaryMailbox
+            ? $primaryMailbox . ' · +' . max($mailboxesActive - 1, 0) . ' ' . $boxLabel
+            : $mailboxesActive . ' ' . $boxLabel;
+        if ($primaryMailbox && $mailboxesActive <= 1) {
+            $workspaceLabel = $primaryMailbox;
+        }
     }
 
     $navLinks = [];
@@ -77,14 +88,18 @@
             <img src="{{ asset('images/mylift-wordmark.svg') }}" alt="MyLift CRM" class="h-6 w-auto">
         </a>
 
-        {{-- Workspace pill --}}
+        {{-- Workspace pill — только для привилегированных ролей.
+             Менеджер видит только nav-links (Дашборд / Заявки), без счётчика
+             общих ящиков, который к нему отношения не имеет. --}}
         @auth
-            <div class="hidden sm:inline-flex items-center gap-1.5 px-2.5 h-[26px] border border-[var(--border)] rounded-md text-[var(--fg-2)] whitespace-nowrap"
-                 style="font-size: 12.5px"
-                 title="Активных ящиков: {{ $mailboxesActive }}{{ $mailboxesError ? ', с ошибкой: '.$mailboxesError : '' }}">
-                <span class="inline-block w-1.5 h-1.5 rounded-full {{ $workspaceDot }}"></span>
-                <span>{{ $workspaceLabel }}</span>
-            </div>
+            @if($showWorkspacePill && $workspaceLabel !== null)
+                <div class="hidden sm:inline-flex items-center gap-1.5 px-2.5 h-[26px] border border-[var(--border)] rounded-md text-[var(--fg-2)] whitespace-nowrap"
+                     style="font-size: 12.5px"
+                     title="Активных ящиков: {{ $mailboxesActive }}{{ $mailboxesError ? ', с ошибкой: '.$mailboxesError : '' }}">
+                    <span class="inline-block w-1.5 h-1.5 rounded-full {{ $workspaceDot }}"></span>
+                    <span>{{ $workspaceLabel }}</span>
+                </div>
+            @endif
         @endauth
 
         {{-- Nav links --}}
