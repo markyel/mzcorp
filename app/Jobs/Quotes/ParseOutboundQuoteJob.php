@@ -289,6 +289,23 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
 
             $enrichStats = $enricher->enrich($quote);
 
+            // Если это счёт — создаём parallel Invoice-запись, чтобы документ
+            // попал на таб «Счета» и в /dashboard/invoices с возможностью
+            // отметить оплаченным. Идемпотентно. Non-fatal: парсинг уже
+            // успешно завершён, инвойс — отдельная сущность.
+            if ($this->documentType === \App\Enums\DetectorType::OutboundInvoice->value) {
+                try {
+                    app(\App\Services\Invoices\InvoiceService::class)
+                        ->autoIssueFromOutboundQuote($quote->fresh());
+                } catch (\Throwable $e) {
+                    Log::warning('ParseOutboundQuoteJob: auto-issue invoice failed (non-fatal)', [
+                        'quote_id' => $quote->id,
+                        'request_id' => $request->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
             Log::info('ParseOutboundQuoteJob: success', [
                 'quote_id' => $quote->id,
                 'request_id' => $request->id,

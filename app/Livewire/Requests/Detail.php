@@ -115,7 +115,15 @@ class Detail extends Component
             'stateChanges.byUser:id,name',
             // Phase 7 — snapshot'ы отправленных КП/счетов. В таб «КП»
             // загружаем полные item'ы + catalog/request relations для drill-down.
+            // Таб «КП» отображает только КП-документы. Распарсенные
+            // исходящие счета (document_type=outbound_invoice) автоматически
+            // оборачиваются в Invoice (InvoiceService::autoIssueFromOutboundQuote)
+            // и показываются на отдельном табе «Счета» + в /dashboard/invoices.
             'outboundQuotes' => fn ($q) => $q->where('status', \App\Models\OutboundQuote::STATUS_MATCHED)
+                ->where(function ($qq) {
+                    $qq->whereNull('document_type')
+                        ->orWhere('document_type', '!=', \App\Enums\DetectorType::OutboundInvoice->value);
+                })
                 ->orderByDesc('id'),
             'outboundQuotes.items' => fn ($q) => $q->orderBy('position'),
             'outboundQuotes.items.catalogItem:id,sku,name,brand,brand_article,price',

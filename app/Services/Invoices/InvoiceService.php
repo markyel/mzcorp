@@ -107,6 +107,134 @@ class InvoiceService
     }
 
     /**
+     * Автосоздать счёт из распарсенного исходящего документа
+     * (OutboundQuote с document_type=outbound_invoice).
+     *
+     * Идемпотентно: если для заявки уже есть Invoice по этому email-сообщению
+     * или с таким же invoice_number — возвращает существующий, ничего не пишет.
+     * Если document_number пуст (парсер не вытащил номер) — пропускает
+     * с лог-warning'ом: менеджеру лучше выставить вручную.
+     *
+     * Перевод Request → Invoiced — best-effort: если карта переходов
+     * не разрешает (заявка уже Paid/Closed), оставляем Invoice созданным,
+     * статус не трогаем.
+     */
+    public function autoIssueFromOutboundQuote(\App\Models\OutboundQuote $quote): ?Invoice
+    {
+        $documentType = $quote->document_type?->value ?? null;
+        if ($documentType !== \App\Enums\DetectorType::OutboundInvoice->value) {
+            return null;
+        }
+        $number = trim((string) ($quote->document_number ?? ''));
+        if ($number === '') {
+            Log::warning('InvoiceService::autoIssueFromOutboundQuote: skip — no document_number', [
+                'outbound_quote_id' => $quote->id,
+                'request_id' => $quote->request_id,
+            ]);
+            return null;
+        }
+        $request = $quote->request;
+        if (! $request) {
+            return null;
+        }
+
+        // Идемпотентность: тот же email-источник или тот же номер у этой заявки.
+        $existing = Invoice::where('request_id', $request->id)
+            ->where(function ($q) use ($quote, $number) {
+                if ($quote->email_message_id) {
+                    $q->where('email_message_id', $quote->email_message_id);
+                }
+                $q->orWhere('invoice_number', $number);
+            })
+            ->first();
+        if ($existing) {
+            return $existing;
+        }
+
+        $issuedAt = $quote->document_date
+            ? Carbon::parse((string) $quote->document_date)
+            : now();
+
+        // Author: менеджер заявки (если есть), иначе первый admin для audit.
+        $author = $request->assignedUser
+            ?? \App\Models\User::role(\App\Enums\Role::Admin->value)->first();
+        if (! $author) {
+            Log::warning('InvoiceService::autoIssueFromOutboundQuote: skip — no author', [
+                'outbound_quote_id' => $quote->id,
+                'request_id' => $request->id,
+            ]);
+            return null;
+        }
+
+        $validityDays = (int) config('services.invoices.default_validity_business_days', 5);
+        $expiresAt = $this->calendar->addBusinessDays($issuedAt, $validityDays)
+            ->endOfDay()
+            ->setTimezone(config('app.timezone'));
+
+        $amountSnapshot = $quote->total_amount !== null
+            ? (float) $quote->total_amount
+            : $this->resolveAmountSnapshot($request);
+
+        return DB::transaction(function () use (
+            $request, $quote, $number, $issuedAt, $expiresAt, $validityDays, $author, $amountSnapshot
+        ) {
+            $invoice = Invoice::create([
+                'request_id' => $request->id,
+                'invoice_number' => mb_substr($number, 0, 128),
+                'issued_at' => $issuedAt,
+                'expires_at' => $expiresAt,
+                'validity_days' => $validityDays,
+                'status' => InvoiceStatus::Pending->value,
+                'comment' => sprintf(
+                    'Автосоздан из исходящего письма (документ #%d, %s от %s, %s ₽).',
+                    $quote->id,
+                    $number,
+                    $issuedAt->format('d.m.Y'),
+                    $amountSnapshot !== null ? number_format($amountSnapshot, 2, '.', ' ') : '—'
+                ),
+                'created_by_user_id' => $author->id,
+                'email_message_id' => $quote->email_message_id,
+                'amount_snapshot' => $amountSnapshot,
+            ]);
+
+            // Перевод Request → Invoiced если карта переходов разрешает.
+            try {
+                $this->stateService->transitionTo(
+                    $request,
+                    RequestStatus::Invoiced,
+                    $author,
+                    [
+                        'event' => 'invoice_auto_issued',
+                        'comment' => sprintf('Автосоздан счёт №%s из исходящего письма.', $number),
+                        'payload' => [
+                            'invoice_id' => $invoice->id,
+                            'invoice_number' => $number,
+                            'outbound_quote_id' => $quote->id,
+                        ],
+                    ],
+                );
+            } catch (\Throwable $e) {
+                Log::info('InvoiceService::autoIssueFromOutboundQuote: transitionTo skipped', [
+                    'request_id' => $request->id,
+                    'current_status' => is_object($request->status) ? $request->status->value : $request->status,
+                    'invoice_id' => $invoice->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            Log::info('InvoiceService: auto-issued invoice from outbound quote', [
+                'invoice_id' => $invoice->id,
+                'invoice_number' => $invoice->invoice_number,
+                'outbound_quote_id' => $quote->id,
+                'request_id' => $request->id,
+                'amount' => $amountSnapshot,
+            ]);
+
+            return $invoice->fresh();
+        });
+    }
+
+    /**
      * Пометить счёт оплаченным + перевести Request → Paid.
      */
     public function markPaid(Invoice $invoice, User $author): Invoice
