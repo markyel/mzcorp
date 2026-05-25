@@ -92,6 +92,17 @@ Schedule::command('invoices:check-expiry')
     ->withoutOverlapping()
     ->onOneServer();
 
+// Self-healing: добить boost для AiDecision'ов, чьи OutboundQuote
+// успешно сматчили позиции, но boost не сработал (race-condition с
+// recordSuggestion, OpenAI-fail во время ParseOutboundQuoteJob и т.п.).
+// См. App\Console\Commands\QuotesReboostStuckDecisionsCommand —
+// кейс M-2026-1558.
+Schedule::command('quotes:reboost-stuck-decisions --apply --limit=50')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Self-healing: подобрать письма, у которых категоризатор упал
 // (OpenAI 503/timeout / invalid JSON). Без этого письмо застревает
 // без category и не превращается в Request — кейс 25.05.2026 #3681.

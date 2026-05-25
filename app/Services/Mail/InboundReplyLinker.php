@@ -105,26 +105,64 @@ class InboundReplyLinker
         $matchedBy = null;
 
         if (! empty($candidateIds)) {
-            $matched = EmailMessage::query()
+            // Сначала смотрим всех parent'ов с этим Message-ID, чтобы отличить
+            // три кейса: матч в активную Request / orphan-без-request_id /
+            // parent-с-terminal-request.
+            $parents = EmailMessage::query()
                 ->whereIn('message_id', $candidateIds)
-                ->whereNotNull('related_request_id')
                 ->orderByDesc('id')
-                ->first();
+                ->get();
+
+            // Кейс 1 (happy path): parent есть и его Request не terminal —
+            // привязываемся к ней.
+            $matched = $parents
+                ->first(function (EmailMessage $p): bool {
+                    if ($p->related_request_id === null) {
+                        return false;
+                    }
+                    $req = Request::find($p->related_request_id);
+                    return $req && ! $req->status->isTerminal();
+                });
             $matchedBy = $matched ? 'in_reply_to_or_references' : null;
 
-            // Гейт: если parent с этим Message-ID ЕСТЬ в БД, но БЕЗ
-            // related_request_id (застрял в категоризации / упал OpenAI),
-            // НЕ падать в fallback `from_email_open_request` — иначе
-            // reply прицепится к ЧУЖОЙ открытой заявке того же клиента
-            // (кейс 25.05 #3684 → M-2026-1654). Возвращаем null, ждём
-            // пока parent обработается. Cron `mail:relink-deferred`
-            // подберёт этот reply повторно.
             if (! $matched) {
-                $orphanParent = EmailMessage::query()
-                    ->whereIn('message_id', $candidateIds)
-                    ->whereNull('related_request_id')
-                    ->orderByDesc('id')
-                    ->first();
+                // Кейс 2: parent найден, но его Request в terminal (closed_won/
+                // closed_lost). Это «реанимация» — клиент молчал, передумал.
+                // В fallback `from_email_open_request` падать нельзя — оттуда
+                // reply попадёт к ЧУЖОЙ открытой заявке клиента (кейс
+                // M-2026-1558: reply на КП по закрытому КВШ-480 прицепился
+                // к открытому Тросу того же клиента). Записываем inheritance
+                // candidate (для UI «↻ Реанимировать»), возвращаем null.
+                $terminalParent = $parents
+                    ->first(function (EmailMessage $p): bool {
+                        if ($p->related_request_id === null) {
+                            return false;
+                        }
+                        $req = Request::find($p->related_request_id);
+                        return $req && $req->status->isTerminal();
+                    });
+                if ($terminalParent) {
+                    $terminalRequest = Request::find($terminalParent->related_request_id);
+                    $this->rememberInheritanceCandidate(
+                        $message,
+                        $terminalRequest,
+                        'in_reply_to_terminal_request',
+                    );
+                    Log::info('InboundReplyLinker: deferred — parent in terminal Request, inheritance candidate recorded', [
+                        'email_message_id' => $message->id,
+                        'parent_email_id' => $terminalParent->id,
+                        'terminal_request_id' => $terminalRequest->id,
+                        'terminal_status' => $terminalRequest->status->value,
+                    ]);
+                    return null;
+                }
+
+                // Кейс 3: parent есть, но БЕЗ related_request_id (parent
+                // застрял в категоризации / упал OpenAI). НЕ падать в
+                // fallback — ждём пока parent обработается, cron
+                // `mail:relink-deferred` подберёт reply повторно.
+                // Кейс 25.05 #3684 → M-2026-1654.
+                $orphanParent = $parents->first(fn (EmailMessage $p): bool => $p->related_request_id === null);
                 if ($orphanParent) {
                     Log::info('InboundReplyLinker: deferred — parent exists but not yet linked to Request', [
                         'email_message_id' => $message->id,
