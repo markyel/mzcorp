@@ -12,4 +12,10 @@ return [
      */
     'developer_email' => env('SUPPORT_DEVELOPER_EMAIL'),
 
+    /*
+     * Имя для подписи в footer'е модалки «связь с создателем»:
+     * «Отвечает {имя}, обычно в течение дня». Пусто — подпись скрыта.
+     */
+    'developer_name' => env('SUPPORT_DEVELOPER_NAME'),
+
 ];

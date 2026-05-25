@@ -143,17 +143,21 @@
 
             {{-- «Связь с создателем» — открывает Livewire-модалку
                  NewTicketModal с собранным на клиенте контекстом
-                 (текущий URL / route_name / viewport / user-agent). --}}
+                 (текущий URL / route_name / viewport / user-agent).
+                 Иконка триангл+глаз: визуальная identity «создатель». --}}
             <button type="button"
                     data-support-trigger
                     data-route-name="{{ request()->route()?->getName() ?? '' }}"
-                    class="relative inline-flex items-center justify-center w-8 h-8 rounded-md text-fg-2 hover:text-fg-1 hover:bg-[var(--bg-surface-2)]"
+                    class="relative inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-[var(--bg-surface-2)]"
+                    style="color: var(--accent);"
                     title="Связь с создателем">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
-                     fill="none" stroke="currentColor" stroke-width="1.5"
-                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z"/>
-                    <path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="1.75"
+                     stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">
+                    <path d="M12 3 L21 20 L3 20 Z"/>
+                    <line x1="6.5" y1="17.2" x2="17.5" y2="17.2"/>
+                    <path d="M7.2 12.2 C 9 10.6, 15 10.6, 16.8 12.2 C 15 13.9, 9 13.9, 7.2 12.2 Z"/>
+                    <circle cx="12" cy="12.2" r="1.25" fill="currentColor" stroke="none"/>
                 </svg>
             </button>
         @endauth
