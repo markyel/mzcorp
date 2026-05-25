@@ -129,4 +129,38 @@ enum RequestActivityType: string
             default => false,
         };
     }
+
+    /**
+     * Активность по факту = переходу статуса: рендер activity-строки в UI
+     * дублирует статус-чип (одинаковые лейблы / иконки). Пары:
+     *   - QuoteSent        ↔ Quoted
+     *   - InvoiceSent      ↔ Invoiced
+     *   - Paid             ↔ Paid
+     *   - ClosedWon        ↔ ClosedWon
+     *   - ClosedLost       ↔ ClosedLost
+     *   - Paused           ↔ Paused
+     *   - ClarificationSent ↔ AwaitingClientClarification
+     *   - Assigned         ↔ Assigned (при свежем назначении)
+     *
+     * Кейс M-2026-1525: после auto-detect счёта status=Invoiced + activity=
+     * InvoiceSent → две строки «Счёт отправлен» в Pool-листе. С isRedundant
+     * UI прячет нижнюю.
+     */
+    public function isRedundantWithStatus(?RequestStatus $status): bool
+    {
+        if ($status === null) {
+            return false;
+        }
+        return match ($this) {
+            self::QuoteSent => $status === RequestStatus::Quoted,
+            self::InvoiceSent => $status === RequestStatus::Invoiced,
+            self::Paid => $status === RequestStatus::Paid,
+            self::ClosedWon => $status === RequestStatus::ClosedWon,
+            self::ClosedLost => $status === RequestStatus::ClosedLost,
+            self::Paused => $status === RequestStatus::Paused,
+            self::ClarificationSent => $status === RequestStatus::AwaitingClientClarification,
+            self::Assigned => $status === RequestStatus::Assigned,
+            default => false,
+        };
+    }
 }

@@ -716,7 +716,11 @@
                                         <span class="dot"></span>{{ $badge['icon'] ? $badge['icon'].' ' : '' }}{{ $badge['label'] }}
                                     </span>
                                 </div>
-                                @if($actType)
+                                {{-- Не рендерим activity-строку если она дублирует
+                                     статус-чип (например status=Invoiced +
+                                     activity=InvoiceSent → оба «Счёт отправлен»).
+                                     См. RequestActivityType::isRedundantWithStatus. --}}
+                                @if($actType && !$actType->isRedundantWithStatus($req->status))
                                     <div class="text-[11px] mt-0.5 truncate {{ $actAccent ? 'text-[var(--amber-800)]' : 'text-[var(--fg-3)]' }}"
                                          title="{{ $actType->label() }}{{ $actAt ? ' · ' . $actAt->format('d.m.Y H:i') : '' }}">
                                         <span>{{ $actType->icon() }}</span>
