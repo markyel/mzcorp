@@ -50,7 +50,45 @@ class UnintendedRecipientDetector
             return null;
         }
 
+        // BCC-рассылка от клиента нескольким поставщикам: все видимые
+        // получатели в to/cc — это псевдо-адреса (`undisclosed-recipients:;`
+        // / пустой group-syntax / просто не-email). MUA пишет такое когда
+        // ВСЕ реальные адреса в BCC. Это легитимная клиентская заявка
+        // (типовая практика: клиент шлёт «прошу цены и сроки» сразу 5
+        // поставщикам, скрывая конкурентов). Bypass'им детектор и отдаём
+        // решение LLM-классификатору.
+        // Грань с M-2026-1491: там to содержал реальный email третьего
+        // лица (valentina.larosa@moris.it) — этот случай продолжает
+        // ловиться unintended-веткой.
+        // Кейсы (2026-05-25): meteor.ru OGrigorieva / AMustafin.
+        if ($this->recipientsLookLikeUndisclosedBcc($message)) {
+            return null;
+        }
+
         return 'not_in_to_cc + unknown_thread';
+    }
+
+    /**
+     * Все собранные to/cc «адреса» — псевдо-маркеры (`undisclosed-recipients:;`,
+     * group-syntax без членов, строка без `@`). Иными словами, в видимых
+     * получателях вообще нет ни одного реального email.
+     */
+    private function recipientsLookLikeUndisclosedBcc(EmailMessage $message): bool
+    {
+        $emails = $this->collectRecipientEmails($message);
+        if ($emails === []) {
+            return false;
+        }
+        foreach ($emails as $email) {
+            // Реальный email — содержит `@` и не похож на group-syntax/маркер.
+            if (str_contains($email, '@')
+                && !str_contains($email, 'undisclosed-recipients')
+                && !str_ends_with($email, ':;')
+            ) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private function anyRecipientIsOurs(EmailMessage $message): bool
