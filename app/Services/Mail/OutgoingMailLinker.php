@@ -207,25 +207,30 @@ class OutgoingMailLinker
     }
 
     /**
-     * L4: ищем открытые заявки по адресам получателей.
+     * L4: ищем НЕ-архивные заявки клиента по получателям и subject-similarity.
      *
-     * 2026-05-22: переписано после кейса mbox=6 (alexander.rodenkov, см.
-     * MEMORY.md «Phantom outbound через L4»). Старая логика была слишком
-     * жадной — 62 outbound-письма директора прилипли к 10 Request через
-     * совпадение to/cc и client_email коллеги (`@myzip.ru` как client_email
-     * или supplier-домен у фантомной Request).
+     * 2026-05-25: переписано после кейса M-2026-1549 (Yakubovich-ответ на
+     * Fwd «Фотобарьер 356106» приклеился к «Блок управления БУТ-01» того же
+     * клиента). Правильная заявка про «Фотобарьер» (M-2026-1437) оказалась
+     * `closed_lost`, единственная открытая 1549 была про другой товар.
+     * Старый L4 брал её как единственного кандидата — false-link с каскадом
+     * в AiDecision «КП отправлено».
      *
-     * Новые guard'ы (все обязательны):
-     *  1. Recipient-фильтр: исключаем внутренние адреса из to/cc через
-     *     `InternalSenderDetector::detect`. Письмо коллеге не должно
-     *     привязываться к заявке только потому, что у заявки случайно
-     *     client_email = этот коллега.
-     *  2. Time-window: только заявки, созданные в окне последних N дней
-     *     (`config('services.mail.outbound_link_window_days')`, default 90).
-     *     Outbound на адрес «древнего» клиента — почти всегда новый thread.
-     *  3. Refuse-on-ambiguity: при 2+ кандидатах — null + WARNING.
-     *     Старая логика тихо брала «самую свежую», что создаёт ложные связи.
-     *     РОП руками решит, если оператору это нужно.
+     * Новая логика:
+     *  1. Recipient-фильтр: убираем внутренние адреса из to/cc.
+     *  2. Кандидаты — НЕ-архивные заявки клиента (`!isTerminal()`).
+     *     Архивные closed_won / closed_lost не рассматриваются: если КП
+     *     ушло по архивной заявке — это новый тред, менеджер привяжет
+     *     вручную / переоткроет старую.
+     *  3. Subject-similarity (Jaccard на токенах после нормализации) ранжирует
+     *     кандидатов. Линкуем ТОЛЬКО при similarity ≥ порога
+     *     (`outbound_link_subject_similarity_threshold`, default 0.5).
+     *     Ниже порога — refuse (не угадываем «самую свежую»).
+     *
+     * 2026-05-22 guards про phantom-outbound (mbox=6 alexander.rodenkov) и
+     * Refuse-on-ambiguity сохраняются естественным образом: внутренние
+     * получатели отфильтрованы (1), низкий similarity при разных subject
+     * автоматически отсекает мисматчи (3).
      */
     private function matchByOpenRequestForRecipients(EmailMessage $message): ?Request
     {
@@ -234,36 +239,7 @@ class OutgoingMailLinker
             return null;
         }
 
-        // Guard-0: outbound — reply к НЕИЗВЕСТНОМУ нам треду.
-        // Если in_reply_to / references указаны (это НЕ свежий compose, а
-        // продолжение чужого треда), но ни одного из этих message_id нет
-        // в нашей БД — мы НЕ видели этот тред. L4 fallback по получателю
-        // создаст false-link на любую открытую заявку клиента (типичный
-        // кейс M-2026-1549: Yakubovich ответил на «Фотобарьер 356106»,
-        // тред не реплицирован, L4 приклеил КП к «Блок управления БУТ-01»
-        // того же клиента). Лучше оставить outbound без привязки.
-        //
-        // Свежий compose (новый thread от менеджера) — in_reply_to пуст,
-        // этот guard ничего не блокирует, L4 работает как раньше.
-        $candidateIds = $this->collectCandidateMessageIds($message);
-        if (!empty($candidateIds)) {
-            $knownAny = EmailMessage::query()
-                ->whereIn('message_id', $candidateIds)
-                ->exists();
-            if (!$knownAny) {
-                Log::warning('OutgoingMailLinker L4: outbound replies to unknown thread, skip', [
-                    'email_message_id' => $message->id,
-                    'in_reply_to' => $message->in_reply_to,
-                    'recipients' => $emails,
-                    'candidate_ids_unmatched' => $candidateIds,
-                ]);
-                return null;
-            }
-        }
-
         // Guard-1: убрать внутренние/наши адреса из набора получателей.
-        // Если после фильтра ничего не осталось — это внутренняя переписка,
-        // не привязываем.
         $externalRecipients = $this->filterExternal($emails);
         if (empty($externalRecipients)) {
             Log::debug('OutgoingMailLinker L4: all recipients internal, skip', [
@@ -273,43 +249,131 @@ class OutgoingMailLinker
             return null;
         }
 
-        $openStatuses = [
-            RequestStatus::Pending->value,
-            RequestStatus::New->value,
-            RequestStatus::Assigned->value,
+        // Не-архивные кандидаты клиента.
+        $archivedStatuses = [
+            RequestStatus::ClosedWon->value,
+            RequestStatus::ClosedLost->value,
         ];
 
-        // Guard-2: time-window. По умолчанию 90 дней.
-        $windowDays = (int) config('services.mail.outbound_link_window_days', 90);
-        $cutoff = $windowDays > 0 ? now()->subDays($windowDays) : null;
-
-        $query = Request::query()
+        $candidates = Request::query()
             ->whereIn('client_email', $externalRecipients)
-            ->whereIn('status', $openStatuses);
-        if ($cutoff !== null) {
-            $query->where('created_at', '>=', $cutoff);
-        }
-        $candidates = $query->orderByDesc('created_at')->get();
+            ->whereNotIn('status', $archivedStatuses)
+            ->orderByDesc('created_at')
+            ->get();
 
         if ($candidates->isEmpty()) {
             return null;
         }
 
-        if ($candidates->count() === 1) {
-            return $candidates->first();
+        // Score каждого кандидата subject-similarity'ем.
+        $outboundTokens = $this->normalizeSubjectTokens((string) $message->subject);
+        if (empty($outboundTokens)) {
+            Log::debug('OutgoingMailLinker L4: outbound subject normalized to empty, skip', [
+                'email_message_id' => $message->id,
+                'subject' => $message->subject,
+            ]);
+            return null;
         }
 
-        // Guard-3: 2+ кандидата — отказ. Не угадываем «самую свежую».
-        // Лучше оставить outbound без привязки и попросить РОПа руками,
-        // чем тихо создать ложную связь, которая потом распространяется
-        // через References-каскад в L1/L2.
-        Log::warning('OutgoingMailLinker L4: ambiguous, refusing to auto-link', [
+        $scored = [];
+        foreach ($candidates as $c) {
+            $candidateTokens = $this->normalizeSubjectTokens((string) $c->subject);
+            $similarity = $this->jaccard($outboundTokens, $candidateTokens);
+            $scored[] = ['request' => $c, 'similarity' => $similarity];
+        }
+        usort($scored, fn ($a, $b) => $b['similarity'] <=> $a['similarity']);
+        $best = $scored[0];
+
+        $threshold = (float) config('services.mail.outbound_link_subject_similarity_threshold', 0.5);
+
+        if ($best['similarity'] < $threshold) {
+            Log::warning('OutgoingMailLinker L4: best candidate subject below threshold, refuse', [
+                'email_message_id' => $message->id,
+                'recipients' => $externalRecipients,
+                'best_request_id' => $best['request']->id,
+                'best_similarity' => $best['similarity'],
+                'threshold' => $threshold,
+                'candidates' => array_map(
+                    fn ($s) => ['id' => $s['request']->id, 'sim' => round($s['similarity'], 3), 'subj' => mb_substr((string) $s['request']->subject, 0, 50)],
+                    $scored,
+                ),
+            ]);
+            return null;
+        }
+
+        Log::info('OutgoingMailLinker L4: subject-similarity matched', [
             'email_message_id' => $message->id,
-            'recipients' => $externalRecipients,
-            'candidate_request_ids' => $candidates->pluck('id')->all(),
+            'request_id' => $best['request']->id,
+            'similarity' => $best['similarity'],
+            'threshold' => $threshold,
         ]);
 
-        return null;
+        return $best['request'];
+    }
+
+    /**
+     * Нормализация subject в набор токенов для Jaccard.
+     *
+     *   - lowercase
+     *   - убираем префиксы Re:/Fwd:/Re[2]:/Fw: (рекурсивно)
+     *   - убираем [...] квадратные префиксы (типа [MyLift forward])
+     *   - разбиваем на токены по пробелам и пунктуации
+     *   - откидываем токены короче 3 символов (стопворды + союзы естественно)
+     *   - откидываем чисто-числовые токены > 4 символов (это коды
+     *     заказов / serial / external trackers, дают ложные совпадения)
+     *
+     * @return array<int, string>
+     */
+    private function normalizeSubjectTokens(string $subject): array
+    {
+        $s = mb_strtolower(trim($subject));
+        if ($s === '') {
+            return [];
+        }
+
+        // Рекурсивно режем префиксы.
+        $prev = null;
+        while ($prev !== $s) {
+            $prev = $s;
+            $s = preg_replace('/^(re|fw|fwd|forward|re\[\d+\])\s*:\s*/u', '', $s);
+            $s = preg_replace('/^\[[^\]]*\]\s*/u', '', $s);
+            $s = trim($s);
+        }
+
+        // Разбиваем на токены — буквы/цифры в Unicode.
+        $tokens = preg_split('/[^\p{L}\p{N}]+/u', $s, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        $clean = [];
+        foreach ($tokens as $t) {
+            if (mb_strlen($t) < 3) {
+                continue;
+            }
+            // Чисто числовой токен длиной >4 — внешний код, мусор для сравнения.
+            if (mb_strlen($t) > 4 && preg_match('/^\d+$/u', $t)) {
+                continue;
+            }
+            $clean[$t] = true;
+        }
+
+        return array_keys($clean);
+    }
+
+    /**
+     * Jaccard similarity = |A ∩ B| / |A ∪ B|.
+     *
+     * @param  array<int, string>  $a
+     * @param  array<int, string>  $b
+     */
+    private function jaccard(array $a, array $b): float
+    {
+        if (empty($a) || empty($b)) {
+            return 0.0;
+        }
+        $setA = array_flip($a);
+        $setB = array_flip($b);
+        $inter = count(array_intersect_key($setA, $setB));
+        $union = count($setA + $setB);
+        return $union > 0 ? $inter / $union : 0.0;
     }
 
     /**
