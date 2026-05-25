@@ -71,6 +71,23 @@ class MailboxOauth extends Component
 
     public function createMailbox(): void
     {
+        // Guard: личные ящики подключаются только для request-handler ролей
+        // (manager / head_of_sales). Дублирует логику Mailbox::scopeSyncable,
+        // ловит обходы UI (например, прямой POST). Кейс M-2026-1723:
+        // личный ящик директора был активен → закупочная переписка с
+        // поставщиками попадала как client_request.
+        $owner = $this->user();
+        if (! $owner->hasAnyRole(\App\Enums\Role::requestHandlerRoles())) {
+            $this->addError(
+                'mailboxEmail',
+                'Личный ящик подключается только для менеджера или РОПа. Для текущей роли ('
+                    . ($owner->roles->first()?->name ?? '—')
+                    . ') синхронизация не работает.',
+            );
+
+            return;
+        }
+
         if (! filter_var($this->mailboxEmail, FILTER_VALIDATE_EMAIL)) {
             $this->addError('mailboxEmail', 'Некорректный email.');
 

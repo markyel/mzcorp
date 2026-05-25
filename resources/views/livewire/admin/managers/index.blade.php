@@ -66,7 +66,15 @@
                             default => '—',
                         };
                         $personal = $u->ownedMailboxes->first();
+                        // Личный ящик подключается только для ролей-исполнителей
+                        // (manager / head_of_sales). У director / secretary /
+                        // admin отсутствие ящика — это норма (Mailbox::scopeSyncable
+                        // их исключает, sync не работает), показываем отдельной
+                        // меткой чтобы не путать с «забыли подключить».
+                        $canHaveMailbox = $u->hasAnyRole(\App\Enums\Role::requestHandlerRoles());
                         $personalChip = match (true) {
+                            ! $canHaveMailbox && ! $personal => ['не для этой роли', 'text-fg-4'],
+                            ! $canHaveMailbox && $personal => ['не должен синкаться', 'text-amber-700'],
                             ! $personal => ['—', 'text-fg-3'],
                             ! $personal->is_active => ['отвязан', 'text-amber-700'],
                             $personal->last_error_at && (! $personal->last_synced_at || $personal->last_error_at > $personal->last_synced_at) => ['ошибка sync', 'text-red-700'],
