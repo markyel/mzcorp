@@ -65,6 +65,22 @@
         $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];
         $navLinks[] = ['route' => 'settings.index', 'label' => 'Настройки', 'pattern' => 'settings.*'];
     }
+    if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin', 'secretary'])) {
+        // Заявки, автозакрытые LLM-фильтром (parser_no_content): можно
+        // восстановить и запустить в работу через autoAssign.
+        $autoClosedCount = \App\Models\Request::query()
+            ->whereNull('assigned_user_id')
+            ->where('status', \App\Enums\RequestStatus::ClosedLost->value)
+            ->where('closed_lost_reason', \App\Enums\ClosedLostReason::ParserNoContent->value)
+            ->where('closed_at', '>=', now()->subDays(30))
+            ->count();
+        $navLinks[] = [
+            'route' => 'requests.auto-closed',
+            'label' => 'Автозакрытые',
+            'pattern' => 'requests.auto-closed',
+            'badge' => $autoClosedCount > 0 ? $autoClosedCount : null,
+        ];
+    }
     if ($user?->hasRole('admin')) {
         // Подключение основной почты и активация/деактивация маршрутизации —
         // только для админа. Скрыто от РОПа/директора, чтобы случайно
@@ -111,6 +127,9 @@
                        class="relative px-3 py-2 text-[13px] rounded-md transition-colors
                               {{ $active ? 'text-[var(--fg-1)] font-semibold' : 'text-[var(--fg-2)] hover:text-[var(--fg-1)] hover:bg-[var(--bg-hover)]' }}">
                         {{ $link['label'] }}
+                        @if(!empty($link['badge']))
+                            <span class="ml-1 inline-flex items-center justify-center px-1.5 h-[16px] min-w-[16px] text-[10px] font-semibold rounded-full bg-amber-100 text-amber-800">{{ $link['badge'] }}</span>
+                        @endif
                         @if($active)
                             <span class="absolute left-3 right-3 -bottom-px h-0.5 bg-[var(--accent)] rounded-full"></span>
                         @endif

@@ -7,6 +7,7 @@ use App\Enums\RequestStatus;
 use App\Models\Request;
 use App\Models\RequestStateChange;
 use App\Services\Request\AssignmentService;
+use App\Services\Request\AutoCloseDecisionService;
 use App\Services\Request\RequestStateService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -42,8 +43,11 @@ class RequestsRecoverUnassignedCommand extends Command
 
     protected $description = 'Восстановить нераспределённые Pending-заявки: autoAssign если есть items, close_lost если пусто >threshold часов.';
 
-    public function handle(AssignmentService $assignment, RequestStateService $state): int
-    {
+    public function handle(
+        AssignmentService $assignment,
+        RequestStateService $state,
+        AutoCloseDecisionService $autoClose,
+    ): int {
         $dryRun = (bool) $this->option('dry-run');
         $thresholdHours = max(1, (int) $this->option('threshold'));
         $cutoff = now()->subHours($thresholdHours);
@@ -103,7 +107,7 @@ class RequestsRecoverUnassignedCommand extends Command
 
         if ($emptyOld->isNotEmpty()) {
             $this->line('');
-            $this->line('— Close as parser_no_content (пусто, старше threshold) —');
+            $this->line('— Empty + older than threshold (will ask LLM) —');
             $this->table(
                 ['Code', 'Email', 'Created', 'Age(h)'],
                 $emptyOld->map(fn ($r) => [
@@ -176,27 +180,140 @@ class RequestsRecoverUnassignedCommand extends Command
             }
         }
 
+        // LLM-валидатор перед автозакрытием. Для каждой «пустой+старой»
+        // заявки спрашиваем gpt-4o-mini: реально ли это запрос (keep) или
+        // безопасно автозакрыть (close). При сомнении / падении LLM —
+        // keep (safe fallback), менеджер разберёт.
+        $kept = 0;
+        $keepFail = 0;
         foreach ($emptyOld as $row) {
             $r = Request::find($row->id);
             if (! $r) {
                 continue;
             }
+            $email = $r->emailMessage;
+            if (! $email) {
+                // Нет email — нечего показать LLM, закрываем как раньше.
+                try {
+                    $state->systemCloseLost(
+                        $r,
+                        ClosedLostReason::ParserNoContent,
+                        sprintf('Парсер не нашёл позиций за %dч + email_message отсутствует. Автозакрытие.', $thresholdHours),
+                    );
+                    $closedOk++;
+                    $this->info(sprintf('  ✓ %s → close (no email)', $r->internal_code));
+                } catch (\Throwable $e) {
+                    $closedFail++;
+                    $this->error(sprintf('  ✗ %s → close exception: %s', $r->internal_code, $e->getMessage()));
+                }
+                continue;
+            }
+
             try {
-                $state->systemCloseLost(
-                    $r,
-                    ClosedLostReason::ParserNoContent,
-                    sprintf(
-                        'Парсер не нашёл позиций за %dч после поступления. Автозакрытие. '
-                        .'При необходимости реанимировать вручную из карточки.',
-                        $thresholdHours,
-                    ),
-                );
-                $closedOk++;
-                $this->info(sprintf('  ✓ %s → closed_lost (parser_no_content)', $r->internal_code));
+                $decision = $autoClose->decide($r, $email);
             } catch (\Throwable $e) {
-                $closedFail++;
-                $this->error(sprintf('  ✗ %s → exception: %s', $r->internal_code, $e->getMessage()));
-                Log::error('RequestsRecoverUnassignedCommand: closeLost exception', [
+                // Defensive: AutoCloseDecisionService сам должен ловить и
+                // возвращать keep при ошибке, но catch и здесь.
+                $decision = [
+                    'verdict' => 'keep',
+                    'confidence' => 0.0,
+                    'reasoning' => 'Exception в AutoCloseDecisionService: ' . $e->getMessage(),
+                ];
+            }
+
+            $confPct = (int) round(($decision['confidence'] ?? 0) * 100);
+
+            if ($decision['verdict'] === 'close') {
+                try {
+                    $state->systemCloseLost(
+                        $r,
+                        ClosedLostReason::ParserNoContent,
+                        sprintf(
+                            'Авто-LLM закрытие (%d%%): %s',
+                            $confPct,
+                            $decision['reasoning'],
+                        ),
+                    );
+                    // Audit в state_change.payload — для пула «Автозакрытые».
+                    RequestStateChange::where('request_id', $r->id)
+                        ->where('event', 'system_close_lost')
+                        ->latest('id')
+                        ->first()
+                        ?->update([
+                            'payload' => [
+                                'closed_lost_reason' => ClosedLostReason::ParserNoContent->value,
+                                'llm_verdict' => 'close',
+                                'llm_confidence' => $decision['confidence'],
+                                'llm_reasoning' => $decision['reasoning'],
+                            ],
+                        ]);
+                    $closedOk++;
+                    $this->info(sprintf(
+                        '  ✓ %s → close [%d%%] %s',
+                        $r->internal_code,
+                        $confPct,
+                        mb_substr($decision['reasoning'], 0, 80),
+                    ));
+                } catch (\Throwable $e) {
+                    $closedFail++;
+                    $this->error(sprintf('  ✗ %s → close exception: %s', $r->internal_code, $e->getMessage()));
+                    Log::error('RequestsRecoverUnassignedCommand: closeLost exception', [
+                        'request_id' => $r->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+                continue;
+            }
+
+            // verdict === 'keep' — LLM считает что это похоже на запрос,
+            // отдаём менеджеру через autoAssign. Если autoAssign ничего не
+            // вернёт (нет доступных менеджеров) — заявка останется Pending,
+            // следующий tick попробует снова (LLM кэш не делаем — повторный
+            // вызов через час недорог).
+            try {
+                $mgr = $assignment->autoAssign($r);
+                if ($mgr) {
+                    $kept++;
+                    RequestStateChange::create([
+                        'request_id' => $r->id,
+                        'from_status' => RequestStatus::Pending->value,
+                        'to_status' => $r->fresh()->status->value,
+                        'by_user_id' => null,
+                        'event' => 'auto_recovery_llm_kept',
+                        'comment' => sprintf(
+                            'LLM keep (%d%%): %s · Назначен #%d %s.',
+                            $confPct,
+                            $decision['reasoning'],
+                            $mgr->id,
+                            $mgr->name,
+                        ),
+                        'payload' => [
+                            'assigned_to_user_id' => $mgr->id,
+                            'llm_verdict' => 'keep',
+                            'llm_confidence' => $decision['confidence'],
+                            'llm_reasoning' => $decision['reasoning'],
+                        ],
+                    ]);
+                    $this->info(sprintf(
+                        '  ↻ %s → keep [%d%%] → #%d %s | %s',
+                        $r->internal_code,
+                        $confPct,
+                        $mgr->id,
+                        $mgr->name,
+                        mb_substr($decision['reasoning'], 0, 60),
+                    ));
+                } else {
+                    $keepFail++;
+                    $this->warn(sprintf(
+                        '  ? %s → keep [%d%%] но autoAssign=NULL (нет available менеджеров?)',
+                        $r->internal_code,
+                        $confPct,
+                    ));
+                }
+            } catch (\Throwable $e) {
+                $keepFail++;
+                $this->error(sprintf('  ✗ %s → keep exception: %s', $r->internal_code, $e->getMessage()));
+                Log::error('RequestsRecoverUnassignedCommand: keep autoAssign exception', [
                     'request_id' => $r->id,
                     'error' => $e->getMessage(),
                 ]);
@@ -205,9 +322,11 @@ class RequestsRecoverUnassignedCommand extends Command
 
         $this->line('');
         $this->info(sprintf(
-            'Итого: assign ok=%d / fail=%d, close ok=%d / fail=%d.',
+            'Итого: assign(items) ok=%d/fail=%d · LLM-keep ok=%d/fail=%d · LLM-close ok=%d/fail=%d.',
             $assignedOk,
             $assignedFail,
+            $kept,
+            $keepFail,
             $closedOk,
             $closedFail,
         ));

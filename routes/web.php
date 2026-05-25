@@ -130,6 +130,15 @@ Route::middleware('auth')->group(function () {
         })->name('mail-review.index');
     });
 
+    // Автозакрытые заявки (parser_no_content + LLM verdict=close). Видят
+    // head_of_sales, director, admin, secretary — могут восстановить заявку
+    // и запустить её в работу (autoAssign).
+    Route::middleware('role:head_of_sales,director,admin,secretary')->group(function () {
+        Route::get('/dashboard/requests/auto-closed', function () {
+            return view('admin.auto-closed.index');
+        })->name('requests.auto-closed');
+    });
+
     // Общие почтовые ящики (mail@myzip.ru, info@myzip.ru и т.п.) —
     // подключение, OAuth/app-password, активация/деактивация
     // распределения заявок. Доступно ТОЛЬКО админу: критично, что
