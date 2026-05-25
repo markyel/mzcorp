@@ -1317,6 +1317,48 @@ class Detail extends Component
     /* ---------------- Phase 4 — inline Invoices section --------------------- */
 
     /**
+     * Перезапустить парсер позиций для триггерного email заявки.
+     *
+     * Кейс: парсер в момент IMAP-sync упал на transient OpenAI ошибке
+     * (429/503/timeout), пометил parser_finished_at, items остались = 0.
+     * После того как OpenAI ожил, никто автоматически не делает retry.
+     * РОП/админ/owner жмёт кнопку → ParseRequestItemsJob(force=true,
+     * reset=true) — Vision повторно пробует фото+текст.
+     *
+     * reset=true стирает existing items перед persist'ом — на случай если
+     * прошлый прогон оставил «склеенный» мусор.
+     */
+    public function reparseItems(): void
+    {
+        $user = auth()->user();
+        $privileged = $user?->hasAnyRole([
+            Role::HeadOfSales->value,
+            Role::Director->value,
+            Role::Admin->value,
+        ]) ?? false;
+        if (! $user || (! $privileged && ! $this->request->isAccessibleBy($user))) {
+            $this->dispatch('toast', message: 'Нет прав.', type: 'error');
+            return;
+        }
+        $emailId = $this->request->email_message_id;
+        if (! $emailId) {
+            $this->dispatch('toast', message: 'У заявки нет триггерного письма.', type: 'error');
+            return;
+        }
+
+        // Снять отметку «парсер закончил», чтобы isParsingInFlight() снова
+        // дал true и chip «парсится…» появился, wire:poll начал крутиться.
+        $meta = is_array($this->request->parsing_meta) ? $this->request->parsing_meta : [];
+        unset($meta['parser_finished_at']);
+        $this->request->forceFill(['parsing_meta' => $meta])->save();
+
+        \App\Jobs\Mail\ParseRequestItemsJob::dispatch($emailId, force: true, reset: true);
+
+        $this->dispatch('toast', message: 'Парсер перезапущен. Карточка обновится автоматически.', type: 'success');
+        unset($this->request);
+    }
+
+    /**
      * Счета заявки (inline-секция в action-panel). Эта computed-prop
      * — не для отдельного pagination, а для компактного списка из 3-5
      * последних invoice'ов. Полный листинг — на /dashboard/invoices.

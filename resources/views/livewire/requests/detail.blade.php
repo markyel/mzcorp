@@ -1077,8 +1077,13 @@
                             <div class="ds-card-body p-0">
                                 @if($items->isEmpty())
                                     <div class="px-[18px] py-6 text-center text-fg-3 text-sm">
-                                        Парсер позиций ещё не отработал.
-                                        <div class="text-[11.5px] mt-1 text-fg-4">Задача в очереди — обновите страницу через минуту.</div>
+                                        @if($req->isParsingInFlight())
+                                            Парсер позиций ещё работает.
+                                            <div class="text-[11.5px] mt-1 text-fg-4">Карточка обновится автоматически.</div>
+                                        @else
+                                            Парсер не нашёл позиций в письме.
+                                            <div class="text-[11.5px] mt-1 text-fg-4">Откройте таб «Позиции» — там можно перезапустить парсер или добавить позицию вручную.</div>
+                                        @endif
                                     </div>
                                 @else
                                     <div class="divide-y divide-[var(--border-subtle)]">
@@ -1660,10 +1665,29 @@
 
                     @if($items->isEmpty())
                         <div class="ds-card-body text-center text-fg-3 py-8">
-                            Парсер позиций ещё не отработал.
-                            <div class="text-[12px] mt-2 text-fg-4">
-                                Задача в очереди — обновите страницу через минуту, либо РОП может перезапустить парсер.
-                            </div>
+                            @if($req->isParsingInFlight())
+                                <svg class="animate-spin inline-block mr-1.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align: -2px">
+                                    <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                                </svg>
+                                Парсер позиций ещё работает.
+                                <div class="text-[12px] mt-2 text-fg-4">
+                                    Карточка обновится автоматически через 10 секунд.
+                                </div>
+                            @else
+                                Парсер не нашёл ни одной позиции в письме.
+                                <div class="text-[12px] mt-2 text-fg-4">
+                                    Бывает, когда письмо содержит только фото без структурированного списка,
+                                    или внешний AI-сервис был временно недоступен.
+                                </div>
+                                <div class="flex items-center justify-center gap-2 mt-4">
+                                    <button type="button" wire:click="reparseItems"
+                                            wire:confirm="Перезапустить парсер для этого письма?"
+                                            class="btn btn-sm">
+                                        ↻ Перезапустить парсер
+                                    </button>
+                                    <span class="text-[11.5px] text-fg-4">или добавьте позицию вручную ниже</span>
+                                </div>
+                            @endif
                         </div>
                     @else
                         <div>
