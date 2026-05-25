@@ -42,7 +42,9 @@
         : '';
 @endphp
 
-<div class="max-w-[1320px] mx-auto px-6 pt-3 pb-8">
+<div class="max-w-[1320px] mx-auto px-6 pt-3 pb-8"
+     @if($req->isParsingInFlight()) wire:poll.10s @endif>
+
 
     {{-- ────────── SUBNAV ────────── --}}
     <div class="flex items-center gap-3 mb-3 text-[12.5px]">
@@ -229,9 +231,17 @@
             </div>
 
             {{-- Title --}}
-            <h1 class="text-[22px] leading-tight font-semibold text-fg-1 mb-1.5"
+            <h1 class="text-[22px] leading-tight font-semibold text-fg-1 mb-1.5 flex items-center gap-2 flex-wrap"
                 style="letter-spacing: -0.005em">
-                {{ $req->subject ?: '(без темы)' }}{{ $titleSuffix }}
+                <span>{{ $req->subject ?: '(без темы)' }}{{ $titleSuffix }}</span>
+                @if($req->isParsingInFlight())
+                    <span class="chip chip-info" title="Парсер позиций ещё работает. Карточка обновится автоматически.">
+                        <svg class="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                        </svg>
+                        парсится…
+                    </span>
+                @endif
             </h1>
 
             {{-- Sub: client / email / mailbox --}}
@@ -1053,6 +1063,14 @@
                             <div class="ds-card-header">
                                 <h3>Позиции запроса</h3>
                                 <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $items->count() }}</span>
+                                @if($req->isParsingInFlight())
+                                    <span class="chip chip-info" title="Парсер позиций ещё работает. Подождите 10–60 секунд.">
+                                        <svg class="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                                        </svg>
+                                        парсится…
+                                    </span>
+                                @endif
                                 <span class="flex-1"></span>
                                 <button type="button" wire:click="setTab('items')" class="text-sky-700 text-xs hover:underline">все позиции →</button>
                             </div>
@@ -1590,6 +1608,14 @@
                     <div class="ds-card-header">
                         <h3>Позиции запроса</h3>
                         <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $items->count() }}</span>
+                        @if($req->isParsingInFlight())
+                            <span class="chip chip-info" title="Парсер позиций ещё работает. Подождите 10–60 секунд — карточка обновится автоматически.">
+                                <svg class="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                                </svg>
+                                парсится…
+                            </span>
+                        @endif
                         <span class="flex-1"></span>
                         <span class="text-[11.5px] text-fg-3">источник: {{ $items->first()?->data_source ?? '—' }}</span>
                         @if($deletedCount > 0)

@@ -109,6 +109,37 @@ class Request extends Model
     }
 
     /**
+     * Парсер позиций ещё не завершил работу для этой заявки.
+     *
+     * Условие:
+     *   - status === Pending (заявка не сдвинулась дальше) И
+     *   - parsing_meta.parser_finished_at не проставлен ParseRequestItemsJob И
+     *   - заявке меньше 30 минут (отсечка для исторических Pending без
+     *     parser_finished_at — backfill не делаем, через 30 мин «крутиться»
+     *     индикатор перестаёт, менеджер видит «0 позиций» и работает руками).
+     *
+     * Используется в UI карточки (детальная страница заявки) для рендера
+     * chip'а «парсится…» вместо «0 позиций» и для wire:poll'а компонента
+     * пока парсер не отработает.
+     */
+    public function isParsingInFlight(): bool
+    {
+        if ($this->status !== RequestStatus::Pending) {
+            return false;
+        }
+        $finished = is_array($this->parsing_meta ?? null)
+            ? ($this->parsing_meta['parser_finished_at'] ?? null)
+            : null;
+        if ($finished !== null) {
+            return false;
+        }
+        if ($this->created_at === null) {
+            return false;
+        }
+        return $this->created_at->greaterThan(now()->subMinutes(30));
+    }
+
+    /**
      * Статус для отображения в UI (чип в пуле, header заявки, дашборд).
      *
      * Логика: state-machine разрешает «откаты» (Quoted → InProgress

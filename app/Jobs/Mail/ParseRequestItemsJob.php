@@ -86,6 +86,51 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
             return;
         }
 
+        // Метим связанную Request как «парсер закончил» — независимо от исхода.
+        // UI карточки по этому полю снимает индикатор «парсится…» и
+        // прекращает wire:poll. Вызов идёт в finally-стиле через try/finally
+        // ниже, обёрнутый ниже основной логики.
+        $markFinished = function () use ($message): void {
+            if (! $message->related_request_id) {
+                return;
+            }
+            $req = \App\Models\Request::find($message->related_request_id);
+            if (! $req) {
+                return;
+            }
+            $meta = is_array($req->parsing_meta) ? $req->parsing_meta : [];
+            $meta['parser_finished_at'] = now()->toIso8601String();
+            $req->forceFill(['parsing_meta' => $meta])->save();
+        };
+
+        try {
+            $this->doParse($message, $parser, $persister, $freeTextEnricher);
+        } finally {
+            // Снимаем индикатор «парсится…» с карточки в любом случае:
+            // успех, empty, парсер упал — отметка «job отработал» нужна
+            // одинаково. Свой fail-soft try внутри — чтобы исключение в
+            // markFinished не подменило исходное исключение из doParse.
+            try {
+                $markFinished();
+            } catch (\Throwable $e) {
+                Log::warning('ParseRequestItemsJob: markFinished failed', [
+                    'email_message_id' => $this->emailMessageId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Тело job'а, вынесенное чтобы handle() мог обернуть его в try/finally
+     * и одинаково для всех исходов проставить parsing_meta.parser_finished_at.
+     */
+    private function doParse(
+        EmailMessage $message,
+        RequestItemParsingService $parser,
+        RequestItemPersister $persister,
+        \App\Services\Mail\FreeTextReplyEnricher $freeTextEnricher,
+    ): void {
         // Идемпотентность: если у привязанного Request уже есть items
         // и не задан force — пропускаем (повторный dispatch не вредит).
         if (! $this->force && $message->related_request_id) {
