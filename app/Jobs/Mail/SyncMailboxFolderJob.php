@@ -99,6 +99,25 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
             return;
         }
 
+        // Guard 2: даже если is_active=true, ящик должен быть syncable
+        // (shared ИЛИ personal с владельцем-request_handler). Личные ящики
+        // директора/секретаря/админа не должны синкаться — там не клиентская
+        // переписка, а закупки оборудования / внутренняя коммуникация
+        // (кейс M-2026-1723 alexander.rodenkov@myzip.ru: ответ от поставщика
+        // станка попал как клиентская заявка). Прямой dispatch с
+        // `--mailbox=N` обходит scopeSyncable в mail:sync — этот guard
+        // ловит такие случаи на стороне worker'а.
+        if (! Mailbox::query()->syncable()->whereKey($mailbox->id)->exists()) {
+            Log::warning('SyncMailboxFolderJob: mailbox not syncable (owner role или type) — skip.', [
+                'mailbox_id' => $mailbox->id,
+                'email' => $mailbox->email,
+                'type' => $mailbox->type?->value,
+                'owner_user_id' => $mailbox->owner_user_id,
+            ]);
+
+            return;
+        }
+
         try {
             $client = $connector->imapClient($mailbox);
         } catch (\Throwable $e) {
