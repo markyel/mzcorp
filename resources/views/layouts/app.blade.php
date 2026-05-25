@@ -62,6 +62,35 @@
                     {{ $slot }}
                 </main>
             @endauth
+
+            {{-- Глобальная модалка «связь с создателем». Открывается из шапки
+                 через Livewire-событие `open-support-modal` с контекстом. --}}
+            @auth
+                <livewire:support.new-ticket-modal wire:key="support-modal-{{ auth()->id() }}" />
+            @endauth
         </div>
+
+        @auth
+            <script>
+                // Триггер «связь с создателем»: собирает на клике URL/route/viewport/UA
+                // и диспатчит Livewire-событие, которое ловит NewTicketModal.
+                // Делегирование — чтобы Livewire-перерисовки шапки не ломали handler.
+                document.addEventListener('click', function (e) {
+                    const btn = e.target.closest('[data-support-trigger]');
+                    if (!btn) return;
+                    e.preventDefault();
+                    if (typeof Livewire === 'undefined') return;
+                    Livewire.dispatch('open-support-modal', {
+                        context: {
+                            url: window.location.href,
+                            route_name: btn.dataset.routeName || '',
+                            viewport: window.innerWidth + 'x' + window.innerHeight,
+                            user_agent: navigator.userAgent || '',
+                            referrer: document.referrer || '',
+                        }
+                    });
+                });
+            </script>
+        @endauth
     </body>
 </html>

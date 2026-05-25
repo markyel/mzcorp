@@ -3,6 +3,7 @@
 use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\OAuthYandexController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\SupportAttachmentController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -136,6 +137,26 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/mailboxes', function () {
             return view('admin.mailboxes.index');
         })->name('mailboxes.index');
+    });
+
+    // Связь с создателем — тикет-система. Открыта всем авторизованным:
+    // любой может создать тикет, видеть СВОИ обращения и скачивать
+    // вложения из своих. Админский инбокс — только role:admin.
+    Route::prefix('support')->name('support.')->group(function () {
+        Route::get('/my', fn () => view('support.my'))->name('my');
+
+        Route::get('/attachments/{attachment}', [SupportAttachmentController::class, 'download'])
+            ->name('attachment.download');
+
+        Route::middleware('role:admin')->group(function () {
+            Route::get('/', fn () => view('support.inbox'))->name('inbox');
+        });
+
+        // Динамическая страница тикета — после статичных, иначе
+        // /my / /attachments / / могут схлопнуться в {ticket}.
+        Route::get('/{ticket}', function (\App\Models\SupportTicket $ticket) {
+            return view('support.show', ['ticket' => $ticket]);
+        })->name('show');
     });
 });
 
