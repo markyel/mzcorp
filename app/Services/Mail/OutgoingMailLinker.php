@@ -234,6 +234,33 @@ class OutgoingMailLinker
             return null;
         }
 
+        // Guard-0: outbound — reply к НЕИЗВЕСТНОМУ нам треду.
+        // Если in_reply_to / references указаны (это НЕ свежий compose, а
+        // продолжение чужого треда), но ни одного из этих message_id нет
+        // в нашей БД — мы НЕ видели этот тред. L4 fallback по получателю
+        // создаст false-link на любую открытую заявку клиента (типичный
+        // кейс M-2026-1549: Yakubovich ответил на «Фотобарьер 356106»,
+        // тред не реплицирован, L4 приклеил КП к «Блок управления БУТ-01»
+        // того же клиента). Лучше оставить outbound без привязки.
+        //
+        // Свежий compose (новый thread от менеджера) — in_reply_to пуст,
+        // этот guard ничего не блокирует, L4 работает как раньше.
+        $candidateIds = $this->collectCandidateMessageIds($message);
+        if (!empty($candidateIds)) {
+            $knownAny = EmailMessage::query()
+                ->whereIn('message_id', $candidateIds)
+                ->exists();
+            if (!$knownAny) {
+                Log::warning('OutgoingMailLinker L4: outbound replies to unknown thread, skip', [
+                    'email_message_id' => $message->id,
+                    'in_reply_to' => $message->in_reply_to,
+                    'recipients' => $emails,
+                    'candidate_ids_unmatched' => $candidateIds,
+                ]);
+                return null;
+            }
+        }
+
         // Guard-1: убрать внутренние/наши адреса из набора получателей.
         // Если после фильтра ничего не осталось — это внутренняя переписка,
         // не привязываем.
