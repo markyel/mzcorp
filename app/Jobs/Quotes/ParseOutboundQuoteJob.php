@@ -2,11 +2,15 @@
 
 namespace App\Jobs\Quotes;
 
+use App\Enums\AiDecisionStatus;
+use App\Enums\DetectorType;
+use App\Models\AiDecision;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\OutboundQuote;
 use App\Models\OutboundQuoteItem;
 use App\Models\Request;
+use App\Services\DocumentDetector\AiDecisionService;
 use App\Services\Quotes\OutboundQuoteCatalogEnricher;
 use App\Services\Quotes\OutboundQuoteItemMatcher;
 use App\Services\Quotes\OutboundQuoteParsingService;
@@ -294,6 +298,17 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
                 'match_stats' => $matchStats,
                 'enrich_stats' => $enrichStats,
             ]);
+
+            // Feedback к AiDecision: успешный matching items↔request_items —
+            // сильнейший сигнал «это действительно КП/счёт». Если detector
+            // ранее дал слабый confidence (rule-based 0.6, body-keyword-only,
+            // filename битый из-за MIME-decode bug), AiDecision застрял в
+            // 'suggested'. Бустим до 0.95 и триггерим auto-apply если auto_mode
+            // включён. См. M-2026-1589.
+            $matchedRequestCount = (int) ($matchStats['matched_request'] ?? 0);
+            if ($matchedRequestCount > 0) {
+                $this->boostAiDecisionFromQuoteMatch($request, $message, $matchStats);
+            }
         } catch (\Throwable $e) {
             $quote->status = OutboundQuote::STATUS_FAILED;
             $quote->parse_error = mb_substr($e->getMessage(), 0, 1000);
@@ -304,6 +319,80 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
                 'attachment_id' => $attachment->id,
                 'error' => $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Boost confidence соответствующего AiDecision и auto-apply, когда
+     * quote-парсер успешно сматчил позиции КП с RequestItem'ами заявки.
+     *
+     * Кейс M-2026-1589: detector нашёл только body-keyword «коммерческое
+     * предложение» (без filename match — MIME-decode испорчен), confidence
+     * 0.6, ниже auto-apply threshold (0.85), decision застрял в suggested.
+     * После Vision-парсинга PDF и матчинга позиции к заявке — это уже
+     * точно КП. Бустим до 0.95 → auto-apply триггерится.
+     */
+    private function boostAiDecisionFromQuoteMatch(
+        Request $request,
+        EmailMessage $message,
+        array $matchStats,
+    ): void {
+        $detectorType = match ($this->documentType) {
+            'outbound_quotation_full', DetectorType::OutboundQuotationFull->value => DetectorType::OutboundQuotationFull,
+            'outbound_quotation_partial', DetectorType::OutboundQuotationPartial->value => DetectorType::OutboundQuotationPartial,
+            'outbound_invoice', DetectorType::OutboundInvoice->value => DetectorType::OutboundInvoice,
+            default => null,
+        };
+        if ($detectorType === null) {
+            return;
+        }
+
+        $decision = AiDecision::query()
+            ->where('request_id', $request->id)
+            ->where('email_message_id', $message->id)
+            ->where('detector_type', $detectorType->value)
+            ->where('status', AiDecisionStatus::Suggested->value)
+            ->orderByDesc('id')
+            ->first();
+        if (! $decision) {
+            return;
+        }
+
+        $oldConfidence = (float) $decision->confidence;
+        $newConfidence = max($oldConfidence, 0.95);
+        $payload = is_array($decision->payload) ? $decision->payload : [];
+        $payload['quote_parser_boost'] = [
+            'matched_request_count' => $matchStats['matched_request'] ?? 0,
+            'matched_catalog_count' => $matchStats['matched_catalog'] ?? 0,
+            'old_confidence' => $oldConfidence,
+            'new_confidence' => $newConfidence,
+            'boosted_at' => now()->toIso8601String(),
+        ];
+        $decision->update([
+            'confidence' => $newConfidence,
+            'payload' => $payload,
+        ]);
+
+        Log::info('ParseOutboundQuoteJob: boosted AiDecision confidence', [
+            'decision_id' => $decision->id,
+            'detector_type' => $detectorType->value,
+            'old_confidence' => $oldConfidence,
+            'new_confidence' => $newConfidence,
+            'matched_request_count' => $matchStats['matched_request'] ?? 0,
+        ]);
+
+        // Триггер auto-apply если разрешено настройками.
+        $autoEnabled = (bool) app_setting('detector.auto_mode.' . $detectorType->value, false);
+        $threshold = (float) app_setting('detector.confidence_threshold', 0.85);
+        if ($autoEnabled && $newConfidence >= $threshold) {
+            try {
+                app(AiDecisionService::class)->apply($decision->refresh(), null, ['auto' => true]);
+            } catch (\Throwable $e) {
+                Log::warning('ParseOutboundQuoteJob: auto-apply after boost failed (non-fatal)', [
+                    'decision_id' => $decision->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 }
