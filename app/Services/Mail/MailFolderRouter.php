@@ -2,6 +2,7 @@
 
 namespace App\Services\Mail;
 
+use App\Enums\MailboxType;
 use App\Exceptions\Mail\TransientImapException;
 use App\Models\EmailMessage;
 use App\Models\User;
@@ -39,6 +40,28 @@ class MailFolderRouter
     {
         $mailbox = $message->mailbox;
         if (! $mailbox) {
+            return null;
+        }
+
+        // MZ|<Lastname> подпапки имеют смысл ТОЛЬКО на общем ящике
+        // (info@myzip.ru): они нужны секретарю чтобы видеть распределение
+        // заявок по менеджерам через Yandex Web UI. В личных ящиках
+        // менеджеров эта раскладка бесполезна — там и так весь поток
+        // принадлежит одному пользователю, и письма должны лежать в его
+        // обычном Inbox (где он их и ждёт).
+        //
+        // Без этого гарда: cross-mailbox copy в personal mailbox (создаётся
+        // MailDeliverToManagerService::deliver pre-create row) тоже
+        // триггерит RouteMailToManagerJob → routeToManager создавал
+        // MZ|<Lastname> в личном ящике менеджера и тащил туда письмо из
+        // INBOX. Все менеджеры жаловались что заявки оказываются в
+        // непонятной подпапке, а не во входящих.
+        if ($mailbox->type !== MailboxType::Shared) {
+            Log::info('MailFolderRouter: skip — personal mailbox', [
+                'email_message_id' => $message->id,
+                'mailbox_id' => $mailbox->id,
+                'mailbox_type' => $mailbox->type->value,
+            ]);
             return null;
         }
 
