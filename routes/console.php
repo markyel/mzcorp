@@ -91,3 +91,14 @@ Schedule::command('invoices:check-expiry')
     ->timezone('Europe/Moscow')
     ->withoutOverlapping()
     ->onOneServer();
+
+// Self-healing: backfill пропущенных IMAP APPEND в личные ящики менеджеров.
+// DeliverToManagerInboxJob иногда теряется (queue:restart в-флайт, worker
+// crash, manual processIfRequest пропускающий auto-assign-chain). Каждые
+// 30 минут команда находит активные Request без artifact'а inbox_delivery
+// и вызывает MailDeliverToManagerService::deliver напрямую. Идемпотентно.
+Schedule::command('mail:backfill-manager-deliveries --apply')
+    ->everyThirtyMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
