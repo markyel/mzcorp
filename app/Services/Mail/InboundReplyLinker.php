@@ -413,63 +413,51 @@ class InboundReplyLinker
             RequestStatus::Assigned->value,
         ];
 
-        $candidates = Request::query()
+        $openCandidates = Request::query()
             ->where('client_email', $message->from_email)
             ->whereIn('status', $openStatuses)
             ->orderByDesc('created_at')
             ->get();
 
-        if ($candidates->isNotEmpty()) {
-            if ($candidates->count() === 1) {
-                return $candidates->first();
-            }
-            // 5-й уровень: AI multi-choice. На сбое clarifier возвращает либо
-            // самую свежую (fallback), либо null (если AI решил что это новая тема).
-            return $this->clarifier->chooseRequest($message, $candidates);
-        }
-
-        // Level 4-bis: если открытых заявок нет — ищем кандидата среди
-        // закрытых (Phase 2.1 «наследование»). НЕ реанимируем —
-        // tryLink() запишет hint, после парсинга позиций async LLM-check
-        // решит, стоит ли линковать как наследника.
-        //
-        // Guards A/B остаются как фильтры качества кандидата: даже на
-        // стадии «найти hint» массово-закрытые (Pre-launch cleanup) и
-        // совсем другие subject'ы — не стоит подсовывать LLM.
+        // Phase 2.1+ (M-2026-1558): closed-кандидаты тоже подкладываем в LLM
+        // clarifier, не только когда открытых нет. Иначе reply на КП по
+        // закрытой заявке (клиент молчал → передумал) у клиента с >0
+        // открытыми темами всегда уходит к КАКОЙ-ТО открытой через clarifier,
+        // никогда не доходит до закрытой. С единым пулом LLM видит обе
+        // группы и по subject/body может выбрать закрытую — дальше
+        // tryLink() терминал-ветка → rememberInheritanceCandidate →
+        // CheckInheritanceJob.
         $lookbackDate = now()->subDays(self::ARCHIVE_CANDIDATE_LOOKBACK_DAYS);
-        $closedCandidate = Request::query()
+        $closedCandidates = Request::query()
             ->where('client_email', $message->from_email)
             ->where('status', RequestStatus::ClosedLost->value)
             ->where('closed_at', '>=', $lookbackDate)
+            // Guard A: массово-закрытые без явного клиентского триггера
+            // (closed_lost_source_message_id IS NULL) — административные
+            // действия (Pre-launch cleanup, cron-recovery), исходный
+            // контекст потерян, наследовать бессмысленно.
+            ->whereNotNull('closed_lost_source_message_id')
             ->orderByDesc('closed_at')
-            ->first();
+            ->limit(5)
+            ->get();
 
-        if ($closedCandidate === null) {
+        $candidates = $openCandidates->merge($closedCandidates);
+
+        if ($candidates->isEmpty()) {
             return null;
         }
 
-        // Guard A: массово-закрытые без явного клиентского триггера —
-        // не подсовываем LLM. Mass-closed (Pre-launch cleanup, cron-
-        // recovery) — это административные действия без участия клиента,
-        // наследовать от них бессмысленно: оригинальный контекст потерян
-        // (closed_lost_source_message_id IS NULL).
-        if ($closedCandidate->closed_lost_source_message_id === null) {
-            return null;
+        if ($candidates->count() === 1) {
+            // Один кандидат — возвращаем напрямую (LLM не нужен).
+            // Если он terminal — tryLink() ниже сам пойдёт по
+            // rememberInheritanceCandidate-ветке.
+            return $candidates->first();
         }
 
-        // Guard B (subject mismatch) — СНЯТ. Изначально был эвристикой
-        // экономии LLM-вызовов, но получилось слишком грубо: forward'ы
-        // / новые темы того же клиента отрезались до LLM-проверки.
-        // По дизайну наследования — LLM check должен решать по позициям
-        // и контексту письма, не по subject (он часто не совпадает в
-        // forward'ах). LLM-вызов дёшев (gpt-4o-mini), false-positive
-        // случаи отсекутся уже при confidence-проверке (≥0.7).
-
-        // Возвращаем кандидата — статус ClosedLost, поэтому tryLink()
-        // пойдёт по terminal-ветке: запишет hint, вернёт null. Новая
-        // Request будет создана IncomingMailProcessor'ом; CheckInheritanceJob
-        // решит, линковать ли как наследника.
-        return $closedCandidate;
+        // 5-й уровень: AI multi-choice. Выбирает между всеми (open +
+        // closed) по subject/body. На сбое clarifier возвращает либо
+        // самую свежую открытую (fallback), либо null (новая тема).
+        return $this->clarifier->chooseRequest($message, $candidates);
     }
 
     /**
