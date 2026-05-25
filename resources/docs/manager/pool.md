@@ -9,8 +9,6 @@ roles: [manager, head_of_sales]
 
 Раздел **Заявки** — это таблица с группировкой по статусам. Слева — узкая навигация с сохранёнными запросами и счётчиками, сверху — фильтры и поиск. Клик по строке открывает карточку заявки на отдельной странице.
 
-> ⚠ Здесь нет split-pane «список слева — превью справа». Карточка — это отдельный экран `/dashboard/requests/{id}`.
-
 ## Что в пуле
 
 В пул попадают все заявки, у которых вы — текущий ответственный (включая временные делегации, если коллега в отпуске передал свою заявку на вас).
@@ -46,6 +44,19 @@ roles: [manager, head_of_sales]
 | **Все** | Всё, что вам видно (менеджеру — без «В обработке»). |
 
 Рядом со счётчиком каждого bucket'а можно дополнительно отфильтровать по конкретному статусу — chips с count'ами внутри выбранного bucket'а.
+
+<div class="doc-preview">
+  <div class="doc-preview-label">Bucket-chips сверху таблицы</div>
+  <div class="doc-preview-body">
+    <div class="doc-preview-row">
+      <span class="chip chip-info" style="cursor:default">Активные · 42</span>
+      <span class="chip chip-attn" style="cursor:default">Просрочено · 5</span>
+      <span class="chip chip-paused" style="cursor:default">На паузе · 3</span>
+      <span class="chip chip-ok" style="cursor:default">Закрытые · 127</span>
+      <span class="chip chip-neutral" style="cursor:default">Все · 177</span>
+    </div>
+  </div>
+</div>
 
 ## Поиск
 

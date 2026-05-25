@@ -135,6 +135,64 @@
         border-radius: var(--r-md);
         box-shadow: 0 1px 2px rgba(15,18,23,0.04);
     }
+
+    /* Inline HTML-превью в гайдах: рамка + меточный label сверху + контент.
+       Идея — показывать реальные элементы UI (chip'ы, кнопки, иконки)
+       с теми же классами, что в приложении, чтобы превью не разъезжалось
+       с дизайн-системой. Используется как:
+         <div class="doc-preview">
+           <div class="doc-preview-label">Подпись</div>
+           <div class="doc-preview-body"> … HTML … </div>
+         </div> */
+    .doc-content .doc-preview {
+        margin: 14px 0;
+        border: 1px solid var(--border);
+        border-radius: var(--r-md);
+        background: var(--bg-app);
+        overflow: hidden;
+    }
+    .doc-content .doc-preview-label {
+        padding: 6px 12px;
+        font: 600 10.5px/1.2 var(--font-sans);
+        text-transform: uppercase; letter-spacing: 0.05em;
+        color: var(--fg-3);
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border-subtle);
+    }
+    .doc-content .doc-preview-body {
+        padding: 14px 16px;
+        background: var(--bg-surface);
+    }
+    /* Горизонтальная раскладка элементов в превью с обёрткой. */
+    .doc-content .doc-preview-row {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    }
+    .doc-content .doc-preview-stack {
+        display: flex; flex-direction: column; gap: 6px;
+    }
+    /* Мини-топбар для превью шапки — узкая полоса как в приложении. */
+    .doc-content .doc-mini-topbar {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 6px 8px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: var(--r-md);
+    }
+    .doc-content .doc-mini-topbar button,
+    .doc-content .doc-mini-topbar a {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 32px; height: 32px;
+        border-radius: var(--r-md);
+        color: var(--fg-2);
+        background: transparent; border: 0; cursor: default;
+    }
+    .doc-content .doc-mini-topbar .accent { color: var(--accent); }
+    /* Превью одного status-chip с лейблом сбоку. */
+    .doc-content .doc-chip-grid {
+        display: grid; gap: 6px 14px;
+        grid-template-columns: max-content 1fr;
+        align-items: center;
+    }
     /* «*Курсив сразу после картинки*» — это её caption.
        Markdown сам делает <p><em>…</em></p>, нам нужно прижать caption
        к картинке (убрать верхний margin у соседнего абзаца). */

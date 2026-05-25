@@ -25,6 +25,26 @@ roles: [manager, head_of_sales, secretary, director]
 | **▲ треугольник с глазом** (красный, справа) | **Связь с создателем.** Открывает форму обращения. |
 | **Аватар** | Профиль, Документация, Мои обращения, Выход. У админа — ещё «Обращения · инбокс». |
 
+<div class="doc-preview">
+  <div class="doc-preview-label">Правая часть шапки — те же иконки, что в живой системе</div>
+  <div class="doc-preview-body">
+    <div class="doc-mini-topbar">
+      <button type="button" title="Уведомления">
+        <span style="font-size:16px">🔔</span>
+      </button>
+      <a href="#" title="Документация">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
+      </a>
+      <button type="button" class="accent" title="Связь с создателем">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3 L21 20 L3 20 Z"/><line x1="6.5" y1="17.2" x2="17.5" y2="17.2"/><path d="M7.2 12.2 C 9 10.6, 15 10.6, 16.8 12.2 C 15 13.9, 9 13.9, 7.2 12.2 Z"/><circle cx="12" cy="12.2" r="1.25" fill="currentColor" stroke="none"/></svg>
+      </button>
+      <button type="button" title="Профиль">
+        <span style="display:inline-flex;width:28px;height:28px;border-radius:9999px;background:var(--neutral-300);color:var(--fg-1);font-weight:600;font-size:11px;align-items:center;justify-content:center;">ИИ</span>
+      </button>
+    </div>
+  </div>
+</div>
+
 ## Левый рейл (56 px)
 
 Иконки сверху вниз:

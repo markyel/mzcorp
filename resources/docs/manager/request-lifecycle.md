@@ -13,6 +13,19 @@ roles: [manager, head_of_sales]
 
 **Сверху — hero-блок**: тема, статус-чип, код заявки (`M-2026-1488`), клиент, основные метрики (сумма по сматченным позициям, возраст, кто менеджер). Если парсер ещё работает — рядом с темой висит chip «парсится…», карточка сама обновится через 10 секунд.
 
+<div class="doc-preview">
+  <div class="doc-preview-label">Hero-блок с chip «парсится…» (только пока работает парсер)</div>
+  <div class="doc-preview-body">
+    <div class="doc-preview-row" style="font-size:18px; font-weight:600">
+      <span>КВа D320 + плита LCEFGB G/1 для KONE MonoSpace · 4 позиции</span>
+      <span class="chip chip-info">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+        парсится…
+      </span>
+    </div>
+  </div>
+</div>
+
 **Ниже — табы.** Активные сейчас:
 
 | Таб | Что показывает |
@@ -26,6 +39,23 @@ roles: [manager, head_of_sales]
 | **Файлы** | Все вложения по заявке в одном списке. |
 
 Отдельно в наборе видны **Поставщики** и **Связанные** — они помечены как `disabled` (Phase 2).
+
+<div class="doc-preview">
+  <div class="doc-preview-label">Ряд табов в карточке</div>
+  <div class="doc-preview-body">
+    <div class="doc-preview-row" style="gap:0; border-bottom:1px solid var(--border); padding-bottom:0">
+      <span style="padding:8px 14px; border-bottom:2px solid var(--accent); color:var(--fg-1); font-weight:600; font-size:13px">Обзор</span>
+      <span style="padding:8px 14px; color:var(--fg-2); font-size:13px">Переписка <span style="color:var(--fg-3); font-size:11px">12</span></span>
+      <span style="padding:8px 14px; color:var(--fg-2); font-size:13px">Позиции <span style="color:var(--fg-3); font-size:11px">4</span></span>
+      <span style="padding:8px 14px; color:var(--fg-2); font-size:13px">КП <span style="color:var(--fg-3); font-size:11px">1</span></span>
+      <span style="padding:8px 14px; color:var(--fg-2); font-size:13px">Счета</span>
+      <span style="padding:8px 14px; color:var(--fg-4); font-size:13px; opacity:0.5" title="Phase 2">Поставщики</span>
+      <span style="padding:8px 14px; color:var(--fg-2); font-size:13px">Активность <span style="color:var(--fg-3); font-size:11px">8</span></span>
+      <span style="padding:8px 14px; color:var(--fg-2); font-size:13px">Файлы <span style="color:var(--fg-3); font-size:11px">3</span></span>
+      <span style="padding:8px 14px; color:var(--fg-4); font-size:13px; opacity:0.5" title="Phase 2">Связанные</span>
+    </div>
+  </div>
+</div>
 
 **Справа — action-panel**: смена статуса, пауза, переподчинение (только РОП/админ), отправить ответ.
 
@@ -49,6 +79,28 @@ roles: [manager, head_of_sales]
 | **На паузе** | Заморожена до конкретной даты (мета-статус). |
 | **Закрыто · успех** | Сделка завершилась продажей. |
 | **Закрыто · потеря** | Сделка не состоялась (с причиной). |
+
+<div class="doc-preview">
+  <div class="doc-preview-label">Чипы статусов — те же цвета, что в пуле и hero</div>
+  <div class="doc-preview-body">
+    <div class="doc-chip-grid">
+      <span class="chip chip-paused">В обработке</span><span style="color:var(--fg-3); font-size:12px">парсер ещё разбирает письмо</span>
+      <span class="chip chip-attn">Новая</span><span style="color:var(--fg-3); font-size:12px">назначена, не открывали</span>
+      <span class="chip chip-info">Назначена</span><span style="color:var(--fg-3); font-size:12px">открывали, к работе не приступили</span>
+      <span class="chip chip-info">В работе</span><span style="color:var(--fg-3); font-size:12px">ведёте активно</span>
+      <span class="chip chip-attn">Жду клиента</span><span style="color:var(--fg-3); font-size:12px">отправили вопрос — ждём ответ</span>
+      <span class="chip chip-ok">КП отправлено</span><span style="color:var(--fg-3); font-size:12px">коммерческое ушло</span>
+      <span class="chip chip-attn">На согласовании</span><span style="color:var(--fg-3); font-size:12px">«обсуждаем внутри»</span>
+      <span class="chip chip-attn">Отложена</span><span style="color:var(--fg-3); font-size:12px">клиент попросил позже</span>
+      <span class="chip chip-attn">Согласован / ждёт счёт</span><span style="color:var(--fg-3); font-size:12px">клиент согласился</span>
+      <span class="chip chip-info">Счёт отправлен</span><span style="color:var(--fg-3); font-size:12px">ждём оплату</span>
+      <span class="chip chip-ok">Оплачено</span><span style="color:var(--fg-3); font-size:12px">деньги пришли</span>
+      <span class="chip chip-paused">На паузе</span><span style="color:var(--fg-3); font-size:12px">заморожена до даты</span>
+      <span class="chip chip-ok">Закрыто · успех</span><span style="color:var(--fg-3); font-size:12px">сделка завершилась продажей</span>
+      <span class="chip chip-attn">Закрыто · потеря</span><span style="color:var(--fg-3); font-size:12px">отказ / не наша тема</span>
+    </div>
+  </div>
+</div>
 
 ## Переходы
 
