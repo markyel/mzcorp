@@ -96,15 +96,15 @@ class AssignmentService
         } else {
             $rr = $this->pickWeightedLeastLoadedManager($managers);
             $manager = $rr['user'] ?? null;
-            // Сохраняем веса/нагрузки/boost в reason — РОПу видно почему
-            // именно этому менеджеру досталась заявка (вероятностно).
-            // Формат: auto_round_robin:{"boost":2,"loads":{1:5,2:8},"weights":{1:1.5,2:1.0}}
+            // Сохраняем загрузки + lru-pool в reason — РОПу видно почему
+            // именно этому менеджеру досталась заявка (детерминированно).
+            // Формат: auto_round_robin:{"loads":{1:5,2:8},"min_load":5,"lru_pool":[1]}
             $reason = $rr
                 ? 'auto_round_robin:' . json_encode(
                     [
-                        'boost' => $rr['boost'],
                         'loads' => $rr['loads'],
-                        'weights' => $rr['weights'],
+                        'min_load' => $rr['min_load'],
+                        'lru_pool' => $rr['lru_pool'],
                     ],
                     JSON_UNESCAPED_UNICODE,
                 )
@@ -475,13 +475,6 @@ class AssignmentService
             return null;
         }
 
-        // Скорость догона. Не меньше 1 — иначе формула даст обратный эффект
-        // (отстающие получают меньше). Дробные значения (1.5, 2.5) допустимы.
-        $boost = max(1.0, (float) app_setting(
-            'assignment.newbie_boost',
-            config('services.assignment.newbie_boost', 2.0),
-        ));
-
         // Phase 1.10: load = все open-статусы (не-terminal, не-paused).
         $openStatusValues = array_map(
             fn (RequestStatus $s) => $s->value,
@@ -505,54 +498,31 @@ class AssignmentService
             ];
         })->values();
 
-        $maxLoad = (int) $candidates->max('load');
+        // 2026-05-25: переход с weighted-random + boost на детерминированный
+        // least-loaded + LRU tiebreak. Кейс: weighted random при boost=2 и
+        // N≈50 раздач давал стат-разброс 14 vs 4 (Якубович vs Румянцев) —
+        // менеджер РОП'а просил предсказуемого распределения.
+        //
+        // Новый алгоритм:
+        //   1. Берём кандидатов с min(load).
+        //   2. Среди них tiebreak по last_assigned_at (NULL — first, иначе
+        //      кто давнее получал — first).
+        //
+        // Эффект: каждая раздача идёт самому отстающему. Когда у всех
+        // одинаковый load — round-robin строгий по очереди.
         $minLoad = (int) $candidates->min('load');
-        $spread = max($maxLoad - $minLoad, 1); // защита от деления на 0
-        // Коэффициент: 1.0 для самого загруженного, X для самого отстающего,
-        // линейно для промежуточных. Если все нагрузки одинаковые — spread=1
-        // и (max-load)=0 → coef=1 для всех (равная раздача, tiebreak LRU).
-        $weighted = $candidates->map(function (array $c) use ($maxLoad, $spread, $boost) {
-            $c['coef'] = 1.0 + ($boost - 1.0) * ($maxLoad - $c['load']) / $spread;
+        $leastLoaded = $candidates->filter(fn ($c) => $c['load'] === $minLoad)->values();
 
-            return $c;
-        });
-
-        // Если все coef равны 1.0 (загрузка одинаковая) — выбираем по LRU,
-        // чтобы не было «случайностей» при равенстве. Случай новых
-        // менеджеров с 0 нагрузок попадёт сюда тоже.
-        $allEqual = $weighted->every(fn ($c) => abs($c['coef'] - 1.0) < 0.0001);
-        if ($allEqual) {
-            $manager = $this->pickByLruTiebreak($candidates);
-
-            return $manager ? [
-                'user' => $manager,
-                'weights' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => round($c['coef'], 3)])->all(),
-                'loads' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => (int) $c['load']])->all(),
-                'boost' => $boost,
-            ] : null;
+        $manager = $this->pickByLruTiebreak($leastLoaded);
+        if (! $manager) {
+            return null;
         }
-
-        // random_int не работает с float — масштабируем coef × 1000 в int.
-        $intWeights = $weighted->map(fn ($c) => max(1, (int) round($c['coef'] * 1000)));
-        $totalWeight = (int) $intWeights->sum();
-
-        $roll = random_int(1, $totalWeight);
-        $accum = 0;
-        $chosen = null;
-        foreach ($weighted as $idx => $c) {
-            $accum += $intWeights[$idx];
-            if ($roll <= $accum) {
-                $chosen = $c;
-                break;
-            }
-        }
-        $chosen ??= $weighted->last();
 
         return [
-            'user' => $chosen['user'],
-            'weights' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => round($c['coef'], 3)])->all(),
-            'loads' => $weighted->mapWithKeys(fn ($c) => [$c['user']->id => (int) $c['load']])->all(),
-            'boost' => $boost,
+            'user' => $manager,
+            'loads' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => (int) $c['load']])->all(),
+            'min_load' => $minLoad,
+            'lru_pool' => $leastLoaded->pluck('user.id')->all(),
         ];
     }
 
