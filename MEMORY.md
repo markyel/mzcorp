@@ -302,6 +302,82 @@ sudo supervisorctl restart mzcorp-worker:*
 
 ## Журнал сессий
 
+### Сессия 2026-05-25 — support tickets + docs + load_weight + mail self-healing + circuit-breaker
+
+**Контекст:** широкая сессия после Foundation-feedback'а на тему пропавших/потерянных писем и фейковых заявок. 24 коммита, 14 фич в одном дне. Параллельно: построена тикет-система «связь с создателем», рукописная документация по 4 ролям, фикс распределения заявок (load_weight), круг защит от OpenAI fail + неправильно подключённых ящиков.
+
+#### Что задеплоено
+
+| Модуль | Что | Ключевые коммиты |
+|---|---|---|
+| **Support tickets** | `/support/my` + `/support` admin + `/support/{id}`. 3 миграции, enum SupportTicketStatus, SupportTicketService (createTicket/addReply/changeStatus с auto-переходами), 2 Mailable + markdown views, 4 Livewire (NewTicketModal / MyTickets / Inbox / TicketView). Auto-context: url/route/viewport/UA/roles_snapshot. Бэлл-нотификация автору при ответе админа (SupportTicketReplyNotification), badge на ▲ через `Livewire Support\Trigger` с `wire:poll.30s`, mark-read при открытии тикета. Mini-list «Мои обращения» в модалке нового тикета. | `4dbcdee`, `8c27d9e`, `bb9eab2` |
+| **Иконка-око** | Заменил sparkles на triangle+eye (всевидящее око, accent-цвет) — по утверждённому макету `09-contact-creator.html`. SVG inline в шапке + большая в баннере модалки (`public/images/contact-creator*.svg`). Подпись в footer «Отвечает {name}» — `SUPPORT_DEVELOPER_NAME` env. | `8c27d9e` |
+| **Документация `/docs`** | DocsService (markdown + YAML frontmatter + кэш по mtime), DocsController с role-gate, 3-колоночный layout (rail + 260px sidebar + контент), CSS `.doc-content` + `.doc-preview`. Иконка `circle-help` в шапке. 14 страниц: `common/` (roles, glossary), `manager/` (navigation, pool, request-lifecycle с HTML-превью), `rop/` (navigation, distribution, mail-rules, mail-review, managers, settings), `director/` (navigation, dashboard, oversight). `league/commonmark ^2.8` уже был в зависимостях. | `75f3fa9`, `0d21c4d`, `7debfbb`, `35057b4`, `c25fbb7`, `68ae8dd` |
+| **Парсер UX** | `parsing_meta.parser_finished_at` в `ParseRequestItemsJob` finally, `Request::isParsingInFlight()` (status===Pending && finished_at===null && created<30min). Chip «парсится…» в hero/items-tab/overview с `wire:poll.10s` на корневом div'е. Кнопка «↻ Перезапустить парсер» (`Detail::reparseItems`) для owner/acting/privileged — сбрасывает finished_at + dispatch `force=true reset=true`. Условный текст: «парсер ещё работает» vs «парсер не нашёл позиций — перезапустите или добавьте вручную». | `ffdafec`, `39a2b3c`, `e3f1868` |
+| **Invoice автосоздание** | `InvoiceService::autoIssueFromOutboundQuote()` — из OutboundQuote с `document_type=outbound_invoice` создаёт Invoice (Pending) + transitionTo Invoiced. Идемпотентно по `email_message_id` или `invoice_number`. `ParseOutboundQuoteJob` вызывает после успешного match'а. `Detail.php` фильтр `outboundQuotes` — таб «КП» больше не показывает invoice'ы. Backfill: M-2026-1496 OutboundQuote #124 → Invoice #2. | `116cf1e` |
+| **Mail self-healing** | (1) `InboundReplyLinker` — defer-gate: parent с тем же Message-ID в БД, но без request_id → return null (не падать в from_email_open_request fallback). (2) Терминал-parent → `rememberInheritanceCandidate` + return null → старая ветка Phase 2.1 inheritance работает корректно. (3) Level-4 LLM clarifier теперь получает в `$candidates` ещё и closed_lost-кандидатов клиента (lookback `ARCHIVE_CANDIDATE_LOOKBACK_DAYS`, Guard A: `closed_lost_source_message_id NOT NULL`) — LLM может выбрать closed → ветка inheritance. (4) `CategorizeIncomingPrompt::resolveBody` через `EmailTextCleanerService::htmlToText` вместо `strip_tags` — починен parsing HTML-only писем. (5) Scheduler `mail:categorize --all --limit=50` каждые 5 минут. (6) Новая команда `mail:relink-deferred --apply --limit=50` + scheduler 5 мин — повторно вызывает linker для висящих категоризованных reply'ев с in_reply_to/references. | `e4ea402`, `3b4f19a`, `9c93014` |
+| **OpenAI circuit-breaker** | `App\Services\AI\OpenAiCircuitBreaker` — state в cache (fail_count/opened_at/notified_at). При N=3 подряд transient-ошибок (429/insufficient_quota/503/502/504/timeout/rate_limit) circuit «открывается» на M=15 мин. Первый успешный вызов снимает паузу. `OpenAiCircuitOpenedNotification` (db + mail если `SUPPORT_DEVELOPER_EMAIL`) — bell с иконкой ⛔, заголовок «OpenAI недоступен», клик ведёт на `platform.openai.com/account/billing`. Интеграция в `MailCategoryClassifier` (isOpen-gate + recordSuccess/Failure). Параметры в `services.openai.circuit_breaker` (`OPENAI_CB_*` env). Carbon 3 особенность: `diffInMinutes` signed — нужен `abs()` в `remainingMinutes()`. | `582db03`, `80462d4` |
+| **Weighted assignment (load_weight %)** | Миграция `users.load_weight smallint DEFAULT 100 + CHECK (10..500)`. `AssignmentService::pickWeightedLeastLoadedManager`: `effective_load = load / (weight/100)` + LRU-tiebreak. Поле «Плановая нагрузка %» в `Admin\Managers\Editor` (только для request-handler ролей). UI-подсказка live «обычная доля / 2× меньше / 2× больше». Эффект накопительный (не нормализуем historical load) — REKOMENDOVANO «A» (см. обсуждение). | `23dd257` |
+| **AiDecision boost-fallback** | Новая команда `quotes:reboost-stuck-decisions --apply --limit=N` — находит `OutboundQuote.status=matched AND payload.match_stats.matched_request > 0` (jsonpath), бустит соответствующий AiDecision (status=suggested, conf<0.95) до 0.95 + auto-apply через `AiDecisionService::apply` если `detector.auto_mode.<type>` включён. Scheduler каждые 15 минут. Backfill: 13 заявок переведены в Quoted автоматически. | `b6476b9` |
+| **Director-mailbox guard** | `SyncMailboxFolderJob::handle()` — после `is_active` check добавлен `Mailbox::query()->syncable()->whereKey($id)->exists()`. Прямой dispatch с `mail:sync --mailbox=N` теперь не обходит scope (фильтрует личные ящики director/secretary/admin). UI: `edit.blade.php` — условный MailboxOauth (info-плашка для не-handler ролей), `MailboxOauth::createMailbox()` — server-side guard, `managers/index` — chip «не для этой роли» / «не должен синкаться» (амбер). Cleanup: Mailbox #6 `alexander.rodenkov@myzip.ru` → `is_active=false`, 3 заявки от него (M-2026-1723 Мирзоева/Перемотка, 1717 Vecta, 1722 Zagro) → closed_lost `off_topic`. | `0b87395`, `87abba4` |
+| **Прятать workspace-pill от менеджера** | `navigation.blade.php` — pill только для head_of_sales/director/secretary/admin. Менеджер видел чужой `man2@myzip.ru · +13 ящиков` — сбивало. Бонус: убраны 3 SQL-запроса на каждый рендер шапки для менеджера. | `cb2cfc0` |
+
+#### Backfill-операции (выполнены за сессию)
+
+- `mail:categorize --all --limit=100` × 2 → **230 писем** категоризованы (133 client_request / 19 thread_reply / 78 irrelevant), 0 fail. До этого backlog накопился из-за OpenAI 429.
+- `IncomingMailProcessor::processIfRequest` руками по 200 категоризованным без related_request_id → **48 Request созданы** (33 + 15).
+- `quotes:reboost-stuck-decisions --apply --limit=100` → **13 застрявших AiDecision переведены в Quoted** (M-1505, 1542, 1522, 1556, 1564, 1587, 1586, 1589, 1593, и ещё 4).
+- Manual recovery M-2026-1690 («901» Краснова): руками `category=client_request`, processIfRequest → создан Request, привязан #3681 и #3684, удалена ошибочно добавленная позиция «Аварийный тормоз XAR 330C3» из M-2026-1654 (RequestItem #3267).
+- Manual cleanup от mailbox=6 (alexander.rodenkov): 3 заявки → `closed_lost off_topic`, mailbox `is_active=false`.
+
+#### Известные грабли, всплывшие за сессию
+
+- **`unset($this->request)` на Livewire 4 валит 500** при следующей перерисовке blade (null pointer). Правильно — `$this->reloadRequest()` (есть в `Detail.php` как helper). Кейс: `Detail::reparseItems` — парсер диспатчился, ответ 500. Поправлено `e3f1868`.
+- **Carbon 3 `diffInMinutes` возвращает signed diff** (отрицательный, если первый аргумент в будущем). `max(0, ceil(-15)) = 0` — нужно `abs()`. Поправлено `80462d4`.
+- **Symfony YAML падает на `excerpt: текст с двоеточием: ещё текст`** без кавычек. `splitFrontmatter` ловит throwable → возвращает `[]` → title использует slug-fallback. Поправлено `68ae8dd` — обязательно "" вокруг значений с `:`.
+- **`{{ $slot }}` через `@include` data-массивом HTML-эскейпит View-объект.** На `{{ $slot }}` Blade автоматически делает `e($slot)` → HTML-теги превращаются в текст. Правильно — `{!! $slot !!}`. Кейс: `_layout.blade.php` для docs выводил голый HTML вместо рендера. Поправлено `0d21c4d`.
+- **OpenAI 429 insufficient_quota — основной фактор хаоса в течение дня.** Категоризатор молча возвращал empty (без error-лога), все письма копились в backlog. Решено циркуит-брейкером + bell-алертом. **TODO для оператора:** проверять `platform.openai.com/account/billing` при первом ⛔.
+- **`scopeSyncable` правильно фильтрует на scheduler'е**, но `mail:sync --mailbox=N` обходит. Личный ящик директора стабильно подключался и синкал закупочную переписку → фейковые клиентские заявки. Двойная защита: guard в Job + UI запрет.
+- **3-я по счёту повторная встреча с `git pull от root → owner=root → permission denied`** (см. MEMORY 2026-05-15 уже зафиксировано). За сессию словил 3 раза, лечил `chown -R www-data:www-data <субдиректория>` + `git reset --hard origin/main`. TODO: всё-таки сделать pre-hook на проде, в одном из последующих deploy.
+- **`Request::isAccessibleBy` есть** (`app/Models/Request.php:443`) — проверка прошла, метод корректно работает.
+
+#### Что вынесено в scheduled (`routes/console.php`)
+
+- `mail:categorize --all --limit=50` — каждые 5 минут.
+- `mail:relink-deferred --apply --limit=50` — каждые 5 минут.
+- `quotes:reboost-stuck-decisions --apply --limit=50` — каждые 15 минут.
+
+#### Открытые вопросы / TODO
+
+- Скриншоты в гайдах остаются текстовыми описаниями + `.doc-preview` HTML-блоки. Реальные скриншоты от пользователя — на будущее.
+- Гайд для секретаря не написан. Сейчас секретарь видит общие гайды + `rop/mail-review`. Возможно, нужен отдельный `secretary/inbox.md`.
+- KB-гайд (для директора) — нечего писать, KB-модуль не задеплоен (Phase 2 LazyLift drop-in).
+- Smoke-тест weighted-распределения — `Курзаев weight=200 load=39 effective=19.5` минимум, побеждает. Пользователь принял подход A (накопительный эффект, без принудительной нормализации).
+
+#### Файлы / структура
+
+Новые директории:
+- `app/Services/Support/` (SupportTicketService)
+- `app/Services/AI/` (OpenAiCircuitBreaker)
+- `app/Services/Docs/` (DocsService)
+- `app/Support/Docs/` (DocPage, DocSection)
+- `app/Notifications/` (SupportTicketReplyNotification, OpenAiCircuitOpenedNotification)
+- `app/Livewire/Support/` (NewTicketModal, MyTickets, Inbox, TicketView, Trigger)
+- `resources/docs/{common,manager,rop,director}/` — 14 markdown
+- `resources/views/livewire/support/` — 5 blade
+- `resources/views/docs/` — 5 blade (index, show, _layout, _index-content, _show-content)
+- `public/images/contact-creator{,-banner}.svg`
+
+Новые миграции:
+- `2026_05_30_120000_create_support_tickets_table.php` (+ messages, attachments)
+- `2026_05_30_180000_add_load_weight_to_users_table.php`
+
+Новые env:
+- `SUPPORT_DEVELOPER_EMAIL`, `SUPPORT_DEVELOPER_NAME`
+- `OPENAI_CB_FAIL_THRESHOLD=3`, `OPENAI_CB_COOLDOWN_MINUTES=15`, `OPENAI_CB_NOTIFY_COOLDOWN_MINUTES=60`
+
+---
+
 ### Сессия 2026-05-22 — Mailbox::syncable, first-time watermark, phantom link bug cleanup
 
 **Контекст:** Александр Роденков (директор) был замечен как «магнит» для фантомных заявок. UI заявки M-2026-0019 показывал «через alexander.rodenkov@myzip.ru», хотя по бизнес-роли его почту синкать не нужно. Расследование вскрыло три независимых проблемы и привело к большому cleanup'у.
