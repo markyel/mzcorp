@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AttachmentController;
+use App\Http\Controllers\DocsController;
 use App\Http\Controllers\OAuthYandexController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SupportAttachmentController;
@@ -137,6 +138,15 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/mailboxes', function () {
             return view('admin.mailboxes.index');
         })->name('mailboxes.index');
+    });
+
+    // Документация — рукописные гайды по ролям (resources/docs/{section}/*.md).
+    // Доступ к разделам фильтруется DocsService по ролям пользователя; admin видит всё.
+    Route::prefix('docs')->name('docs.')->group(function () {
+        Route::get('/', [DocsController::class, 'index'])->name('index');
+        Route::get('/{section}/{slug}', [DocsController::class, 'show'])
+            ->where(['section' => '[a-z_-]+', 'slug' => '[a-z0-9_-]+'])
+            ->name('show');
     });
 
     // Связь с создателем — тикет-система. Открыта всем авторизованным:

@@ -102,4 +102,61 @@
     /* Mono / tnum helpers */
     .mono { font-family: var(--font-mono); font-feature-settings: 'tnum'; }
     .tnum { font-feature-settings: 'tnum'; }
+
+    /* Documentation prose — стили под markdown-рендер DocsService */
+    .doc-content { color: var(--fg-1); font-size: 14px; line-height: 1.55; }
+    .doc-content h1 { font-size: 22px; font-weight: 600; margin: 0 0 16px; line-height: 1.25; }
+    .doc-content h2 { font-size: 18px; font-weight: 600; margin: 28px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle); line-height: 1.3; }
+    .doc-content h3 { font-size: 15px; font-weight: 600; margin: 22px 0 8px; line-height: 1.3; }
+    .doc-content h4 { font-size: 13.5px; font-weight: 600; margin: 18px 0 6px; color: var(--fg-1); text-transform: uppercase; letter-spacing: 0.04em; }
+    .doc-content p { margin: 0 0 12px; color: var(--fg-1); }
+    .doc-content ul, .doc-content ol { margin: 0 0 12px; padding-left: 22px; }
+    .doc-content li { margin: 4px 0; }
+    .doc-content li > p { margin: 0 0 4px; }
+    .doc-content a { color: var(--sky-700, #0369a1); text-decoration: underline; text-underline-offset: 2px; }
+    .doc-content a:hover { color: var(--sky-800, #075985); }
+    .doc-content code {
+        font-family: var(--font-mono); font-size: 12.5px;
+        padding: 1px 5px; border: 1px solid var(--border);
+        background: var(--bg-app); border-radius: var(--r-sm);
+    }
+    .doc-content pre {
+        font-family: var(--font-mono); font-size: 12.5px;
+        padding: 12px 14px; border: 1px solid var(--border);
+        background: var(--bg-app); border-radius: var(--r-md);
+        overflow-x: auto; margin: 0 0 14px;
+    }
+    .doc-content pre code { padding: 0; border: 0; background: transparent; }
+    .doc-content blockquote {
+        margin: 0 0 14px; padding: 8px 14px;
+        border-left: 3px solid var(--sky-500);
+        background: var(--bg-app); color: var(--fg-2);
+        border-radius: 0 var(--r-md) var(--r-md) 0;
+    }
+    .doc-content blockquote p:last-child { margin: 0; }
+    .doc-content table {
+        border-collapse: collapse; width: 100%;
+        font-size: 13px; margin: 0 0 14px;
+    }
+    .doc-content table th, .doc-content table td {
+        border: 1px solid var(--border);
+        padding: 6px 10px; text-align: left; vertical-align: top;
+    }
+    .doc-content table th { background: var(--bg-app); font-weight: 600; }
+    .doc-content hr { border: 0; border-top: 1px solid var(--border-subtle); margin: 20px 0; }
+    .doc-content kbd {
+        font-family: var(--font-mono); font-size: 11.5px;
+        padding: 1px 5px; border: 1px solid var(--border);
+        background: var(--bg-surface); border-radius: var(--r-sm);
+        box-shadow: 0 1px 0 var(--border);
+    }
+    .doc-content .doc-anchor {
+        color: var(--fg-3); text-decoration: none;
+        margin-left: 8px; opacity: 0; transition: opacity 120ms;
+        font-weight: 400;
+    }
+    .doc-content h1:hover .doc-anchor,
+    .doc-content h2:hover .doc-anchor,
+    .doc-content h3:hover .doc-anchor,
+    .doc-content h4:hover .doc-anchor { opacity: 1; }
 }

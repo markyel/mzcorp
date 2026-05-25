@@ -127,6 +127,20 @@
             {{-- Bell — Foundation Фаза 2 in-app notifications. --}}
             <livewire:notifications.bell wire:key="notif-bell-{{ $user->id ?? 'guest' }}" />
 
+            {{-- Документация — Lucide circle-help. Открывает /docs (Controller
+                 редиректит на профильный раздел роли, если есть). --}}
+            <a href="{{ route('docs.index') }}"
+               class="relative inline-flex items-center justify-center w-8 h-8 rounded-md text-fg-2 hover:text-fg-1 hover:bg-[var(--bg-surface-2)]"
+               title="Документация">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="1.5"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                    <line x1="12" x2="12.01" y1="17" y2="17"/>
+                </svg>
+            </a>
+
             {{-- «Связь с создателем» — открывает Livewire-модалку
                  NewTicketModal с собранным на клиенте контекстом
                  (текущий URL / route_name / viewport / user-agent). --}}
@@ -160,6 +174,7 @@
                 </x-slot>
                 <x-slot name="content">
                     <x-dropdown-link :href="route('profile.edit')">{{ __('Profile') }}</x-dropdown-link>
+                    <x-dropdown-link :href="route('docs.index')">Документация</x-dropdown-link>
                     <x-dropdown-link :href="route('support.my')">Мои обращения</x-dropdown-link>
                     @if($user?->hasRole('admin'))
                         <x-dropdown-link :href="route('support.inbox')">Обращения · инбокс</x-dropdown-link>
