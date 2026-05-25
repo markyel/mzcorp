@@ -140,6 +140,16 @@ class IncomingMailProcessor
         if ($plain === '' || $this->cleaner->bodyPlainLooksBroken($plain)) {
             $plain = $this->cleaner->htmlToText((string) $message->body_html);
         }
+
+        // M-артикул в теле — внутренний SKU MyZip, сильнейший сигнал
+        // товарной заявки. Если он есть — НЕ считаем тело пустым, даже
+        // если оно короче threshold. Кейс M-2026 (Liftway):
+        // subject=«Счёт», body=«M04990 - 1шт.» (12 симв) → guard ловил
+        // как irrelevant, а это реальная заявка на счёт по конкретному SKU.
+        if (preg_match('/\bM\d{4,}\b/u', $plain)) {
+            return false;
+        }
+
         $cleaned = $this->cleaner->cleanInboundReferenceText($plain);
 
         // Срезаем external-маркеры (LZ-REQ-NNNN и т.п.) — они header, не контент.
