@@ -43,6 +43,9 @@ class User extends Authenticatable
         'unavailable_until',
         'unavailable_reason',
         'unavailable_auto_delegate',
+        // Плановая нагрузка в %; 100 — норма, 50 — в 2 раза меньше, 200 — в 2 раза больше.
+        // См. App\Services\Request\AssignmentService::pickWeightedLeastLoadedManager.
+        'load_weight',
     ];
 
     /**
@@ -68,6 +71,7 @@ class User extends Authenticatable
             'unavailable_from' => 'datetime',
             'unavailable_until' => 'datetime',
             'unavailable_auto_delegate' => 'boolean',
+            'load_weight' => 'integer',
             'password' => 'hashed',
         ];
     }

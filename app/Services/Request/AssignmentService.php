@@ -490,10 +490,20 @@ class AssignmentService
 
         $candidates = $managers->map(function (User $u) use ($loadByUser) {
             $row = $loadByUser->get($u->id);
-
+            $load = (int) ($row->load_count ?? 0);
+            // load_weight — плановая доля относительно стандарта (100=норма).
+            // Защита от 0 / NULL — clamp 10..500 (то же что в CHECK миграции).
+            $weight = max(10, min(500, (int) ($u->load_weight ?? 100)));
+            // Effective load: фактическая нагрузка нормализованная на квоту.
+            // Менеджер с weight=200 при load=10 имеет effective=5 —
+            // дольше остаётся «отстающим» → берёт следующую заявку первым.
+            // Менеджер с weight=50 при load=4 имеет effective=8 — наоборот.
+            $effective = $load / ($weight / 100.0);
             return [
                 'user' => $u,
-                'load' => (int) ($row->load_count ?? 0),
+                'load' => $load,
+                'weight' => $weight,
+                'effective_load' => $effective,
                 'last_assigned_at' => $row->last_assigned_at ?? null,
             ];
         })->values();
@@ -503,15 +513,15 @@ class AssignmentService
         // N≈50 раздач давал стат-разброс 14 vs 4 (Якубович vs Румянцев) —
         // менеджер РОП'а просил предсказуемого распределения.
         //
-        // Новый алгоритм:
-        //   1. Берём кандидатов с min(load).
-        //   2. Среди них tiebreak по last_assigned_at (NULL — first, иначе
-        //      кто давнее получал — first).
-        //
-        // Эффект: каждая раздача идёт самому отстающему. Когда у всех
-        // одинаковый load — round-robin строгий по очереди.
-        $minLoad = (int) $candidates->min('load');
-        $leastLoaded = $candidates->filter(fn ($c) => $c['load'] === $minLoad)->values();
+        // 2026-05-30: добавлен load_weight (плановый % нагрузки). Min теперь
+        // считаем по effective_load = load / (weight/100). При weight=100
+        // у всех — поведение идентично прежнему (effective=load).
+        $minEffective = (float) $candidates->min('effective_load');
+        // float-сравнение с эпсилоном — два менеджера могут иметь близкие
+        // effective_load (например 4.0 и 4.0000001 из-за float-аритметики).
+        $leastLoaded = $candidates
+            ->filter(fn ($c) => abs($c['effective_load'] - $minEffective) < 0.0001)
+            ->values();
 
         $manager = $this->pickByLruTiebreak($leastLoaded);
         if (! $manager) {
@@ -520,8 +530,10 @@ class AssignmentService
 
         return [
             'user' => $manager,
-            'loads' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => (int) $c['load']])->all(),
-            'min_load' => $minLoad,
+            'loads' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => $c['load']])->all(),
+            'weights' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => $c['weight']])->all(),
+            'effective_loads' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => round($c['effective_load'], 2)])->all(),
+            'min_load' => $minEffective,
             'lru_pool' => $leastLoaded->pluck('user.id')->all(),
         ];
     }
@@ -535,8 +547,12 @@ class AssignmentService
     private function pickByLruTiebreak(Collection $candidates): ?User
     {
         $sorted = $candidates->sort(function ($a, $b) {
-            if ($a['load'] !== $b['load']) {
-                return $a['load'] <=> $b['load'];
+            // Сначала по effective_load (учёт load_weight, см.
+            // pickWeightedLeastLoadedManager), потом по LRU.
+            $aEff = $a['effective_load'] ?? $a['load'] ?? 0;
+            $bEff = $b['effective_load'] ?? $b['load'] ?? 0;
+            if (abs($aEff - $bEff) > 0.0001) {
+                return $aEff <=> $bEff;
             }
             if ($a['last_assigned_at'] === null) {
                 return -1;

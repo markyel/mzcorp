@@ -33,6 +33,15 @@ class Editor extends Component
     #[Validate('required|in:manager,head_of_sales,secretary,director,admin')]
     public string $role = 'manager';
 
+    /**
+     * Плановая нагрузка в % (100 — норма, 50 — в 2 раза меньше, 200 — в 2 раза больше).
+     * Применяется только для ролей-исполнителей (manager / head_of_sales);
+     * для secretary / director / admin поле скрыто, значение хранится но игнорируется
+     * в AssignmentService (они не попадают в available()).
+     */
+    #[Validate('required|integer|between:10,500')]
+    public int $loadWeight = 100;
+
     public function mount(?User $user = null): void
     {
         if ($user && $user->exists) {
@@ -40,6 +49,7 @@ class Editor extends Component
             $this->name = $user->name;
             $this->email = $user->email;
             $this->role = $user->roles->first()?->name ?? 'manager';
+            $this->loadWeight = (int) ($user->load_weight ?? 100);
 
             // Защита: не-админ не может открывать страницу редактирования
             // admin-юзера. РОП/директор не должны даже видеть, что такой есть.
@@ -129,7 +139,11 @@ class Editor extends Component
 
         if ($this->userId) {
             $user = User::findOrFail($this->userId);
-            $user->fill(['name' => $this->name, 'email' => $this->email]);
+            $user->fill([
+                'name' => $this->name,
+                'email' => $this->email,
+                'load_weight' => $this->loadWeight,
+            ]);
             if ($this->password !== '') {
                 $user->password = $this->password; // hash через cast
             }
@@ -145,6 +159,7 @@ class Editor extends Component
             'name' => $this->name,
             'email' => $this->email,
             'password' => $this->password, // hash через cast
+            'load_weight' => $this->loadWeight,
         ]);
         $user->assignRole($this->role);
 
