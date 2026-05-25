@@ -35,6 +35,7 @@ class MailCategoryClassifier
         private readonly TrustedPartnerOverride $partnerOverride,
         private readonly InternalSenderDetector $internalSender,
         private readonly UnintendedRecipientDetector $unintendedRecipient,
+        private readonly \App\Services\AI\OpenAiCircuitBreaker $circuitBreaker,
     ) {
     }
 
@@ -155,6 +156,18 @@ class MailCategoryClassifier
             return $this->emptyResult();
         }
 
+        // Circuit-breaker гейт: если N подряд OpenAI-вызовов упали на 429/503/
+        // insufficient_quota, не лезем в API ещё M минут (см. OpenAiCircuitBreaker).
+        // Это экономит лишние списания у прокси-провайдера + не путает scheduler
+        // mail:categorize --all (он подберёт письмо когда circuit закроется).
+        if ($this->circuitBreaker->isOpen()) {
+            Log::info('MailCategoryClassifier: skip — circuit breaker open', [
+                'email_message_id' => $message->id,
+                'remaining_minutes' => $this->circuitBreaker->remainingMinutes(),
+            ]);
+            return $this->emptyResult();
+        }
+
         // Eager-load attachments + mailbox для prompt builder.
         $message->loadMissing(['attachments', 'mailbox']);
 
@@ -167,11 +180,18 @@ class MailCategoryClassifier
                 'max_tokens' => 400,
                 'response_format' => ['type' => 'json_object'],
             ]);
+            $this->circuitBreaker->recordSuccess();
         } catch (\Throwable $e) {
             Log::error('MailCategoryClassifier: OpenAI call failed', [
                 'email_message_id' => $message->id,
                 'error' => $e->getMessage(),
             ]);
+            if ($this->circuitBreaker->isTransientError($e)) {
+                $this->circuitBreaker->recordFailure($e->getMessage(), [
+                    'email_message_id' => $message->id,
+                    'model' => $model,
+                ]);
+            }
 
             return $this->emptyResult();
         }

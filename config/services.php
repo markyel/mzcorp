@@ -105,6 +105,17 @@ return [
         // Phase 2.1 inheritance: финальный валидатор гипотезы «новая Request —
         // продолжение архивной closed_lost». Бинарная задача yes/no — mini.
         'inheritance_check_model' => env('OPENAI_INHERITANCE_CHECK_MODEL', 'gpt-4o-mini'),
+
+        // Circuit-breaker для OpenAI вызовов. При N подряд transient-ошибок
+        // (429 insufficient_quota / 503 / timeout) категоризатор отключается
+        // на K минут — не жечь лишние списания у прокси-провайдера + bell-
+        // нотификация админу с ссылкой на billing. См. App\Services\AI\
+        // OpenAiCircuitBreaker.
+        'circuit_breaker' => [
+            'fail_threshold' => (int) env('OPENAI_CB_FAIL_THRESHOLD', 3),
+            'cooldown_minutes' => (int) env('OPENAI_CB_COOLDOWN_MINUTES', 15),
+            'notify_cooldown_minutes' => (int) env('OPENAI_CB_NOTIFY_COOLDOWN_MINUTES', 60),
+        ],
     ],
 
     /*

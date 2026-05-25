@@ -36,23 +36,29 @@
                             $icon = match($kind) {
                                 'request_assigned' => '📥',
                                 'attention_overdue' => '⚡',
+                                'openai_circuit_opened' => '⛔',
                                 default => '🔔',
                             };
                             $title = match($kind) {
                                 'request_assigned' => 'Новая заявка ' . ($data['internal_code'] ?? ''),
                                 'attention_overdue' => 'Просрочено: ' . ($data['internal_code'] ?? ''),
+                                'openai_circuit_opened' => 'OpenAI недоступен — категоризатор на паузе',
                                 default => 'Уведомление',
                             };
                             $subtitle = match($kind) {
                                 'request_assigned' => ($data['client_name'] ?? '') . ' · ' . ($data['subject'] ?? ''),
                                 'attention_overdue' => ($data['status_label'] ?? '') . ' · ' . ($data['attention_reason'] ?? ''),
+                                'openai_circuit_opened' => 'Подряд ошибок: ' . ($data['fail_count'] ?? 0) . ' · пауза ' . ($data['cooldown_minutes'] ?? 15) . ' мин',
                                 default => '',
                             };
                             $reqId = $data['request_id'] ?? null;
-                            $href = $reqId ? route('requests.show', $reqId) : '#';
+                            $href = $kind === 'openai_circuit_opened'
+                                ? 'https://platform.openai.com/account/billing'
+                                : ($reqId ? route('requests.show', $reqId) : '#');
                         @endphp
                         <li wire:key="notif-{{ $n->id }}" class="border-b border-border-subtle last:border-b-0 {{ $isUnread ? 'bg-[var(--sky-50)]' : '' }}">
                             <a href="{{ $href }}"
+                               @if(str_starts_with($href, 'http')) target="_blank" rel="noopener" @endif
                                wire:click="markRead('{{ $n->id }}')"
                                class="block px-3 py-2 hover:bg-surface-2">
                                 <div class="flex items-start gap-2">
