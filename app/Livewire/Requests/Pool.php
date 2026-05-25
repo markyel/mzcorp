@@ -574,6 +574,19 @@ class Pool extends Component
                 ->count()
             : null;
 
+        // Автозакрытые системой заявки (parser_no_content + LLM verdict=close)
+        // за последние 30 дней. Видят head_of_sales / director / admin /
+        // secretary — ссылка ведёт на /dashboard/requests/auto-closed
+        // где можно восстановить и запустить в работу.
+        $autoClosed = (auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'admin', 'secretary']))
+            ? Request::query()
+                ->whereNull('assigned_user_id')
+                ->where('status', RequestStatus::ClosedLost->value)
+                ->where('closed_lost_reason', \App\Enums\ClosedLostReason::ParserNoContent->value)
+                ->where('closed_at', '>=', now()->subDays(30))
+                ->count()
+            : null;
+
         // Phase: per-manager счётчик открытых заявок для секции «Команда»
         // в Aside. Только для canSeeAll. Один GROUP BY вместо N запросов.
         $managerOpenCounts = [];
@@ -605,6 +618,7 @@ class Pool extends Component
                 'mine_open' => $myAssigned,
                 'unassigned' => $unassigned,
                 'all_open' => $allOpen,
+                'auto_closed' => $autoClosed,
             ],
             'statusCounts' => $statusCounts,
             'bucketCounts' => $bucketCounts,

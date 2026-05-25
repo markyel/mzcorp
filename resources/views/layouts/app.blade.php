@@ -31,13 +31,12 @@
             @php
                 // Auto-detect active по route name если не передано явно.
                 $resolvedRailActive = ($railActive ?? null) ?: match (true) {
-                    request()->routeIs('dashboard')              => 'dashboard',
-                    request()->routeIs('requests.auto-closed')   => 'auto-closed',
-                    request()->routeIs('requests.*')             => 'requests',
-                    request()->routeIs('catalog.*')              => 'catalog',
-                    request()->routeIs('mail.index')             => 'mail',
-                    request()->routeIs('invoices.*')             => 'invoices',
-                    default                                       => null,
+                    request()->routeIs('dashboard')         => 'dashboard',
+                    request()->routeIs('requests.*')        => 'requests',
+                    request()->routeIs('catalog.*')         => 'catalog',
+                    request()->routeIs('mail.index')        => 'mail',
+                    request()->routeIs('invoices.*')        => 'invoices',
+                    default                                  => null,
                 };
                 $showRail = ($rail ?? true);
             @endphp

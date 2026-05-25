@@ -188,6 +188,25 @@
                 <span class="flex-1">Сохранить текущий вид…</span>
             </div>
         </div>
+
+        {{-- Автозакрытые: ссылка вниз сайдбара. Виден только привилегированным
+             ролям, считаем за последние 30 дней. Уходим со страницы Pool
+             на отдельный экран с таблицей+«↻ Восстановить». --}}
+        @if(! is_null($totals['auto_closed'] ?? null))
+            <div class="mt-auto px-2 pb-3 pt-2 border-t border-[var(--border)]">
+                <a href="{{ route('requests.auto-closed') }}"
+                   class="flex items-center gap-2 px-2 py-1.5 rounded-md text-[12.5px] text-[var(--fg-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--fg-1)]"
+                   title="Заявки, автоматически закрытые системой (parser_no_content). Можно восстановить.">
+                    <span class="w-3.5 text-center text-[var(--fg-3)]">↺</span>
+                    <span class="flex-1">Автозакрытые</span>
+                    @if($totals['auto_closed'] > 0)
+                        <span class="font-mono text-[11.5px] px-1.5 rounded-full bg-amber-100 text-amber-800">{{ $totals['auto_closed'] }}</span>
+                    @else
+                        <span class="font-mono text-[11.5px] text-[var(--fg-3)]">0</span>
+                    @endif
+                </a>
+            </div>
+        @endif
     </aside>
 
     {{-- ============== MAIN ============== --}}
