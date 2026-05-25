@@ -4,6 +4,7 @@ namespace App\Prompts\Mail;
 
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
+use App\Services\Mail\EmailTextCleanerService;
 
 /**
  * Промпт категоризации входящего письма (Phase 1.8c).
@@ -26,12 +27,17 @@ class CategorizeIncomingPrompt
 {
     private const MAX_BODY_CHARS = 8000;
 
+    public function __construct(
+        private readonly EmailTextCleanerService $cleaner = new EmailTextCleanerService(),
+    ) {
+    }
+
     /**
      * @return array<int, array{role: string, content: string}>
      */
     public function build(EmailMessage $message): array
     {
-        $body = (string) ($message->body_plain ?: strip_tags((string) $message->body_html));
+        $body = $this->resolveBody($message);
         $body = mb_substr(trim($body), 0, self::MAX_BODY_CHARS);
 
         $subject = (string) ($message->subject ?? '(без темы)');
@@ -80,6 +86,31 @@ class CategorizeIncomingPrompt
             ['role' => 'system', 'content' => $this->systemPrompt($ourAddresses)],
             ['role' => 'user', 'content' => $userPrompt],
         ];
+    }
+
+    /**
+     * Получить тело письма для prompt. body_plain в реальности часто
+     * пуст (HTML-only письма с Outlook / web-форм / outbox без plain-
+     * alternative). Раньше fallback был через strip_tags() — он оставлял
+     * CSS из <style>, не делал переносов между блоками, не декодировал
+     * entities. На пустом body_plain + сложном HTML классификатор получал
+     * мусор и молча отвечал invalid JSON / unknown category.
+     *
+     * Теперь та же логика, что и в RequestItemParsingService:
+     *   body_plain если есть и не «broken», иначе htmlToText() из cleaner'а.
+     */
+    private function resolveBody(EmailMessage $message): string
+    {
+        $plain = (string) ($message->body_plain ?? '');
+        $html = (string) ($message->body_html ?? '');
+
+        if ($plain !== '' && ! $this->cleaner->bodyPlainLooksBroken($plain)) {
+            return $plain;
+        }
+        if (trim($html) !== '') {
+            return $this->cleaner->htmlToText($html);
+        }
+        return $plain;
     }
 
     /**
