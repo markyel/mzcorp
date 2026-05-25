@@ -185,42 +185,49 @@ enum RequestStatus: string
             //     → ClosedWon (cash без формальной цепочки счёт→оплата).
             //   — обратный путь (InProgress) сохранён для возврата к работе.
             //   — ClosedLost везде доступен.
+            //
+            // 2026-05-25 продление: добавлен прямой Invoiced. Кейс M-2026-1525:
+            // detector распознал счёт в outbound (confidence 0.9), но AI-decision
+            // dismiss'нулся «assigned → invoiced запрещён». В жизни менеджер
+            // часто шлёт счёт сразу — клиент знает что хочет (повторный заказ)
+            // или КП обсудили устно/в WhatsApp вне MyLift. Симметрично с
+            // AwaitingInvoice разрешаем напрямую.
             self::New => [
                 self::Assigned, self::InProgress,
                 self::AwaitingClientClarification,
-                self::Quoted, self::AwaitingInvoice,
+                self::Quoted, self::AwaitingInvoice, self::Invoiced,
                 self::ClosedWon, self::ClosedLost,
             ],
             self::Assigned => [
                 self::InProgress, self::AwaitingClientClarification,
-                self::Quoted, self::AwaitingInvoice,
+                self::Quoted, self::AwaitingInvoice, self::Invoiced,
                 self::ClosedWon, self::ClosedLost,
             ],
             self::InProgress => [
                 self::AwaitingClientClarification,
-                self::Quoted, self::AwaitingInvoice,
+                self::Quoted, self::AwaitingInvoice, self::Invoiced,
                 self::ClosedWon, self::ClosedLost,
             ],
             self::AwaitingClientClarification => [
                 self::InProgress,
-                self::Quoted, self::AwaitingInvoice,
+                self::Quoted, self::AwaitingInvoice, self::Invoiced,
                 self::ClosedWon, self::ClosedLost,
             ],
             self::Quoted => [
                 self::UnderReview, self::PostponedUntil,
-                self::AwaitingInvoice,
+                self::AwaitingInvoice, self::Invoiced,
                 self::InProgress, // возврат на правки
                 self::AwaitingClientClarification, // клиент уточняет после КП
                 self::ClosedWon, self::ClosedLost,
             ],
             self::UnderReview => [
                 self::InProgress,
-                self::AwaitingInvoice,
+                self::AwaitingInvoice, self::Invoiced,
                 self::ClosedWon, self::ClosedLost,
             ],
             self::PostponedUntil => [
                 self::InProgress,
-                self::Quoted, self::AwaitingInvoice,
+                self::Quoted, self::AwaitingInvoice, self::Invoiced,
                 self::ClosedWon, self::ClosedLost,
             ],
             self::AwaitingInvoice => [
