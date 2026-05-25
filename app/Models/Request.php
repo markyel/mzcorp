@@ -146,17 +146,25 @@ class Request extends Model
     }
 
     /**
-     * Расширенный «бейдж статуса» для UI — это displayedStatus + накладка
-     * activity (ClientReplied / SupplierReplied), чтобы менеджер сразу видел
-     * «ход за мной» с амбер-сигналом.
+     * Бейдж статуса для UI — отображаемый статус по воронке (peak milestone
+     * или current).
      *
-     * Возвращает массив {label, chipClass, icon, isAttention}:
-     *   - Terminal / Paused → как обычно (current).
-     *   - last_activity_type требует внимания И current не AwaitingClient
-     *     Clarification (т.е. мы уже не висим в «жду клиента») — показываем
-     *     activity-label «📨 Клиент ответил» / «Ответ поставщика» с warn-чипом.
-     *     Это явный сигнал что ход за менеджером.
-     *   - Иначе fallback на displayedStatus (peak или current).
+     * 2026-05-25: разделили со «статусом события». Раньше badge накладывал
+     * activity (ClientReplied → «Ответ клиента») поверх chip'а, чтобы дать
+     * амбер-сигнал «ход за нами». Это путало: chip показывал «Ответ клиента»,
+     * а реальный статус Invoiced («Счёт отправлен») терялся. Менеджеры/РОП
+     * сообщали что статус и flag внимания смешаны:
+     *
+     *   STATUS chip      — куда заявка ДОВЕДЕНА по воронке (Quoted/Invoiced/...)
+     *   ACTIVITY row     — последнее событие требующее внимания
+     *                      (ClientReplied/SupplierReplied/etc.)
+     *
+     * Activity row рендерится отдельно в pool.blade.php / detail.blade.php
+     * c amber-стилизацией если requiresAttention. RequestActivityType::
+     * isRedundantWithStatus() прячет когда дублирует.
+     *
+     * Shape сохранён для обратной совместимости, но `isAttention` теперь
+     * всегда false — chip больше не отражает attention.
      *
      * @return array{label: string, chipClass: string, icon: ?string, isAttention: bool}
      */
@@ -169,29 +177,6 @@ class Request extends Model
                 'chipClass' => RequestStatus::Pending->chipClass(),
                 'icon' => null,
                 'isAttention' => false,
-            ];
-        }
-        // Terminal / Paused — без overlay'а.
-        if ($current->isTerminal() || $current === RequestStatus::Paused) {
-            return [
-                'label' => $current->label(),
-                'chipClass' => $current->chipClass(),
-                'icon' => null,
-                'isAttention' => false,
-            ];
-        }
-        // Активность «ход за нами» имеет приоритет над milestone-чипом —
-        // менеджеру важнее знать что КЛИЕНТ только что ответил, чем что
-        // заявка дошла до Quoted (это он и так помнит).
-        $activity = $this->last_activity_type;
-        if ($activity instanceof \App\Enums\RequestActivityType
-            && $activity->requiresAttention()
-            && $current !== RequestStatus::AwaitingClientClarification) {
-            return [
-                'label' => $activity->label(),
-                'chipClass' => 'chip-warn',
-                'icon' => $activity->icon(),
-                'isAttention' => true,
             ];
         }
         $displayed = $this->displayedStatus;
