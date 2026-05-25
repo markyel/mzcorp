@@ -111,6 +111,30 @@ class InboundReplyLinker
                 ->orderByDesc('id')
                 ->first();
             $matchedBy = $matched ? 'in_reply_to_or_references' : null;
+
+            // Гейт: если parent с этим Message-ID ЕСТЬ в БД, но БЕЗ
+            // related_request_id (застрял в категоризации / упал OpenAI),
+            // НЕ падать в fallback `from_email_open_request` — иначе
+            // reply прицепится к ЧУЖОЙ открытой заявке того же клиента
+            // (кейс 25.05 #3684 → M-2026-1654). Возвращаем null, ждём
+            // пока parent обработается. Cron `mail:relink-deferred`
+            // подберёт этот reply повторно.
+            if (! $matched) {
+                $orphanParent = EmailMessage::query()
+                    ->whereIn('message_id', $candidateIds)
+                    ->whereNull('related_request_id')
+                    ->orderByDesc('id')
+                    ->first();
+                if ($orphanParent) {
+                    Log::info('InboundReplyLinker: deferred — parent exists but not yet linked to Request', [
+                        'email_message_id' => $message->id,
+                        'orphan_parent_id' => $orphanParent->id,
+                        'parent_message_id' => $orphanParent->message_id,
+                        'parent_categorized_at' => $orphanParent->categorized_at,
+                    ]);
+                    return null;
+                }
+            }
         }
 
         if (! $matched) {

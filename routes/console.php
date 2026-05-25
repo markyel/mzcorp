@@ -92,6 +92,31 @@ Schedule::command('invoices:check-expiry')
     ->withoutOverlapping()
     ->onOneServer();
 
+// Self-healing: подобрать письма, у которых категоризатор упал
+// (OpenAI 503/timeout / invalid JSON). Без этого письмо застревает
+// без category и не превращается в Request — кейс 25.05.2026 #3681.
+// Limit=50 покрывает обычный пик после простоя OpenAI;
+// идемпотентно по categorized_at IS NULL.
+Schedule::command('mail:categorize --all --limit=50')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
+// Self-healing: повторная привязка inbound reply'ев, которые в момент
+// route() оказались без parent'а (parent застрял в категоризации).
+// Кейс 25.05 #3684: пришёл «Re: 901» когда «901» #3681 ещё не имел
+// related_request_id из-за упавшей категоризации → linker fallback
+// «from_email_open_request» приклеил reply к ЧУЖОЙ открытой заявке.
+// Команда берёт категоризованные reply'и без request_id с in_reply_to
+// или references и повторяет tryLink — на этот раз parent уже обработан
+// предыдущим mail:categorize, level-1 матчит корректно.
+Schedule::command('mail:relink-deferred --limit=50')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Self-healing: backfill пропущенных IMAP APPEND в личные ящики менеджеров.
 // DeliverToManagerInboxJob иногда теряется (queue:restart в-флайт, worker
 // crash, manual processIfRequest пропускающий auto-assign-chain). Каждые
