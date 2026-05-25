@@ -58,7 +58,9 @@ class OpenAiCircuitBreaker
             return 0;
         }
         $closes = Carbon::parse($openedAt)->addMinutes($this->cooldownMinutes());
-        return max(0, (int) ceil($closes->diffInMinutes(now())));
+        // Carbon 3 returns signed diff; берём abs, чтобы не получить 0 когда
+        // $closes в будущем (now()->diffInMinutes($closes) < 0 в Carbon 3).
+        return max(0, (int) ceil(abs($closes->diffInMinutes(now()))));
     }
 
     /**
