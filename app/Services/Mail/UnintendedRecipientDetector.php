@@ -50,18 +50,26 @@ class UnintendedRecipientDetector
             return null;
         }
 
-        // BCC-рассылка от клиента нескольким поставщикам: все видимые
-        // получатели в to/cc — это псевдо-адреса (`undisclosed-recipients:;`
-        // / пустой group-syntax / просто не-email). MUA пишет такое когда
-        // ВСЕ реальные адреса в BCC. Это легитимная клиентская заявка
-        // (типовая практика: клиент шлёт «прошу цены и сроки» сразу 5
-        // поставщикам, скрывая конкурентов). Bypass'им детектор и отдаём
-        // решение LLM-классификатору.
-        // Грань с M-2026-1491: там to содержал реальный email третьего
-        // лица (valentina.larosa@moris.it) — этот случай продолжает
-        // ловиться unintended-веткой.
-        // Кейсы (2026-05-25): meteor.ru OGrigorieva / AMustafin.
-        if ($this->recipientsLookLikeUndisclosedBcc($message)) {
+        // BCC-рассылка от клиента нескольким поставщикам — два паттерна:
+        //
+        //   (а) все видимые получатели в to/cc — псевдо-адреса
+        //       (`undisclosed-recipients:;` / group-syntax без членов /
+        //       просто не-email). MUA пишет такое когда ВСЕ реальные
+        //       адреса в BCC. Кейсы: meteor.ru OGrigorieva / AMustafin.
+        //
+        //   (б) клиент ставит САМОГО СЕБЯ в `to` (или в cc), а реальных
+        //       получателей в BCC. Тогда `from == to`. MUA так делает у
+        //       клиентов, которые «отправляют письмо себе и в BCC всем
+        //       поставщикам». Кейс: modtfil.abasov@mail.ru → himself.
+        //
+        // Оба паттерна — легитимная клиентская заявка (типовая практика:
+        // клиент шлёт «прошу цены и сроки» сразу 5 поставщикам, скрывая
+        // конкурентов). Bypass'им детектор и отдаём решение LLM-классификатору.
+        //
+        // Грань с M-2026-1491 сохранена: там to содержал реальный email
+        // ТРЕТЬЕГО лица (`valentina.larosa@moris.it`, ≠ from), и from с to
+        // разные. Этот случай продолжает ловиться unintended-веткой.
+        if ($this->looksLikeBccBlast($message)) {
             return null;
         }
 
@@ -69,26 +77,42 @@ class UnintendedRecipientDetector
     }
 
     /**
-     * Все собранные to/cc «адреса» — псевдо-маркеры (`undisclosed-recipients:;`,
-     * group-syntax без членов, строка без `@`). Иными словами, в видимых
-     * получателях вообще нет ни одного реального email.
+     * Письмо похоже на BCC-рассылку клиента нескольким поставщикам.
+     *
+     * Два независимых сигнала:
+     *   (а) все собранные to/cc — псевдо-адреса (нет `@`, или
+     *       `undisclosed-recipients`, или `…:;`);
+     *   (б) `from_email` присутствует в to/cc (отправитель сам себе).
      */
-    private function recipientsLookLikeUndisclosedBcc(EmailMessage $message): bool
+    private function looksLikeBccBlast(EmailMessage $message): bool
     {
         $emails = $this->collectRecipientEmails($message);
         if ($emails === []) {
             return false;
         }
+
+        // (а) ни одного реального email в видимых получателях.
+        $hasRealRecipient = false;
         foreach ($emails as $email) {
-            // Реальный email — содержит `@` и не похож на group-syntax/маркер.
             if (str_contains($email, '@')
                 && !str_contains($email, 'undisclosed-recipients')
                 && !str_ends_with($email, ':;')
             ) {
-                return false;
+                $hasRealRecipient = true;
+                break;
             }
         }
-        return true;
+        if (!$hasRealRecipient) {
+            return true;
+        }
+
+        // (б) отправитель сам в to/cc.
+        $from = mb_strtolower(trim((string) $message->from_email));
+        if ($from !== '' && in_array($from, $emails, true)) {
+            return true;
+        }
+
+        return false;
     }
 
     private function anyRecipientIsOurs(EmailMessage $message): bool
