@@ -103,15 +103,35 @@ class MessagePersister
                 'imap_flags' => $this->extractFlags($msg),
             ]);
 
-            foreach ($msg->getAttachments() as $att) {
-                $this->persistAttachment($att, $email);
+            // Главный путь имени аттача: парсим filename'ы напрямую из raw
+            // RFC822 body, обходя Webklex sanitizeName() (который ломает
+            // base64 в MIME-encoded словах) и пустой `$att->getHeader()`
+            // (для outbound sync из Sent). См. extractFilenamesFromRawBody.
+            //
+            // Гард: если count расходится с числом attachment'ов webklex'а
+            // (типичный кейс — пересланный message/rfc822 с вложенным MIME
+            // tree'ем), ordinal-mapping ненадёжен → каждому атачу передадим
+            // null, persistAttachment упадёт на старую resolveRawFilename
+            // цепочку.
+            $attachments = $msg->getAttachments();
+            $rawBodyFilenames = self::extractFilenamesFromRawBody((string) $msg->getRawBody());
+            $useRawBodyNames = (count($rawBodyFilenames) === count($attachments));
+
+            foreach ($attachments as $i => $att) {
+                $rawNameFromBody = $useRawBodyNames ? ($rawBodyFilenames[$i] ?? null) : null;
+                $this->persistAttachment($att, $email, $rawNameFromBody !== '' ? $rawNameFromBody : null);
             }
 
             return $email;
         });
     }
 
-    private function persistAttachment(Attachment $att, EmailMessage $email): void
+    /**
+     * @param  string|null  $rawNameFromBody  Имя из raw RFC822 body (приоритет),
+     *                                         см. extractFilenamesFromRawBody.
+     *                                         null → fallback на Webklex.
+     */
+    private function persistAttachment(Attachment $att, EmailMessage $email, ?string $rawNameFromBody = null): void
     {
         // Phase 2.4a fallback: getName() возвращает null ИЛИ пустую строку
         // (iPhone-фотки часто шлются как Content-Type: image/jpeg без
@@ -119,13 +139,18 @@ class MessagePersister
         // отдельно проверяем после trim. Синтезируем читаемое имя на
         // основе MIME — `inline-a3b2c1d4.jpg` понятнее чем UUID-storage-key.
         //
-        // 2026-05-23: до getName() пробуем raw MIME header — Webklex
-        // sanitizeName() стрипает `/` из base64 в MIME-encoded словах,
-        // что ломает декодирование (length не-кратна 4 → base64_decode
-        // выдаёт мусор + control bytes). Кейс M-2026-1471/att#3985.
-        // resolveRawFilename() обходит sanitizeName и берёт значение
-        // прямо из raw header'а парта.
-        $rawName = $this->resolveRawFilename($att);
+        // 2026-05-25: главный путь — $rawNameFromBody, передан из persist()
+        // после parse'а raw RFC822 body (см. extractFilenamesFromRawBody).
+        // Обходит Webklex sanitizeName() который стрипает `/` из base64 и
+        // ломает декодирование MIME-encoded имён. Если null — fallback на
+        // resolveRawFilename → decodeMimeHeader → repair → getName(), как
+        // раньше.
+        //
+        // 2026-05-23 (legacy fallback): resolveRawFilename берёт значение
+        // из $att->getHeader()->raw если оно доступно. Для outbound sync
+        // из Sent — обычно NULL, поэтому без $rawNameFromBody мы падали
+        // в getName() с corrupted base64. См. M-2026-1471/att#3985.
+        $rawName = $rawNameFromBody ?? $this->resolveRawFilename($att);
         if ($rawName === '') {
             $ext = $this->guessExtension((string) $att->getMimeType()) ?: 'bin';
             $disposition = $att->getDisposition() === 'inline' ? 'inline' : 'attachment';
@@ -454,6 +479,106 @@ class MessagePersister
     }
 
     /**
+     * Извлечь filename'ы всех «attachment-like» MIME-партов из raw RFC822
+     * body в порядке появления.
+     *
+     * Главный путь имени аттача (2026-05-25): обходит Webklex полностью,
+     * читая `Content-Disposition: filename*N*=...` напрямую из сырца. Это
+     * единственный способ получить имя без потерь, потому что:
+     *
+     *   - `$att->getName()` пропускает значение через `Attachment::sanitizeName()`,
+     *     который стрипает `/` (опасный char для FS). Но в base64 внутри
+     *     MIME-encoded-word'а (`name="=?UTF-8?B?...?="`) `/` — валидный символ
+     *     алфавита. Удаление ломает длину base64 → декодер выдаёт мусор
+     *     («Д`4-t-4.?/?-?-t/t.4-H4'4%?L?M???4/?`??.pdf»).
+     *   - `$att->getHeader()` для outbound writes (sync из Sent после отправки
+     *     через Thunderbird/Yandex Web) возвращает NULL — Webklex не запрашивает
+     *     per-part headers по умолчанию, и весь fallback через resolveRawFilename
+     *     остаётся без сырья.
+     *
+     * Алгоритм:
+     *   1. Найти все `^--<boundary>` маркеры (CRLF-tolerant regex).
+     *   2. Для каждого парта прочитать header-блок до пустой строки.
+     *   3. Пропустить multipart/* (их nested children визитируем отдельно).
+     *   4. Пропустить парты без filename=/name= параметра (text body parts).
+     *   5. Прогнать через parseRfc2231Filename — собирает continuation parts
+     *      и RFC 5987 single-shot, decode'ит percent-encoded UTF-8 байты.
+     *
+     * Limitation: walker НЕ распознаёт вложенные `message/rfc822` — boundaries
+     * внутри пересланного сообщения попадут в список. Caller'у нужно проверять
+     * count(result) === count($msg->getAttachments()) и НЕ применять override
+     * при расхождении (gate против неверного ordinal-матчинга).
+     *
+     * @return list<string>  Список filename'ов в документ-ордере; пустая строка
+     *                       для парта где filename-параметр есть, но парсер
+     *                       вернул null (зарезервировано под caller fallback
+     *                       на Webklex'ово getName()).
+     */
+    public static function extractFilenamesFromRawBody(string $rawBody): array
+    {
+        if ($rawBody === '') {
+            return [];
+        }
+
+        // Boundary marker — строка, начинающаяся с `--<non-ws>`. `/m` mode
+        // не подходит из-за CRLF (см. PHP issue: `$` в /m матчит ПЕРЕД `\n`,
+        // но `\r` остаётся в захвате и ломает `[^\r\n]*$`). Поэтому явный
+        // anchor `(?:^|\n)`.
+        if (! preg_match_all(
+            '/(?:^|\n)(--[^\s\r\n][^\r\n]*)/',
+            $rawBody,
+            $m,
+            PREG_OFFSET_CAPTURE,
+        )) {
+            return [];
+        }
+
+        $filenames = [];
+        $boundaries = $m[1];
+        $n = count($boundaries);
+
+        for ($i = 0; $i < $n; $i++) {
+            [$line, $offset] = $boundaries[$i];
+            $lineClean = rtrim($line, "\r");
+
+            // End-of-multipart marker (`--<boundary>--`) — между ним и следующим
+            // boundary'ем тела парта нет.
+            if (str_ends_with($lineClean, '--')) {
+                continue;
+            }
+
+            $partStart = $offset + strlen($line);
+            $nextBoundaryOffset = ($i + 1 < $n) ? $boundaries[$i + 1][1] : strlen($rawBody);
+
+            // Конец заголовков парта — первая пустая строка.
+            $bodyStart = strpos($rawBody, "\r\n\r\n", $partStart);
+            if ($bodyStart === false || $bodyStart >= $nextBoundaryOffset) {
+                $bodyStart = strpos($rawBody, "\n\n", $partStart);
+            }
+            if ($bodyStart === false || $bodyStart >= $nextBoundaryOffset) {
+                continue;
+            }
+
+            $headerBlock = substr($rawBody, $partStart, $bodyStart - $partStart);
+
+            // Skip multipart parts — их nested children посетим отдельно.
+            if (preg_match('/Content-Type:\s*multipart\//i', $headerBlock)) {
+                continue;
+            }
+
+            // Skip text body parts (Content-Type: text/plain без filename/name).
+            if (! preg_match('/\b(?:filename|name)\s*[*=]/i', $headerBlock)) {
+                continue;
+            }
+
+            $fn = self::parseRfc2231Filename($headerBlock);
+            $filenames[] = ($fn !== null && $fn !== '') ? $fn : '';
+        }
+
+        return $filenames;
+    }
+
+    /**
      * Парсит filename из multi-line Content-Disposition / Content-Type
      * header-блока с поддержкой:
      *   - RFC 2231 continuation (`filename*0*=`, `filename*1*=`, …)
@@ -512,7 +637,12 @@ class MessagePersister
         }
 
         // (2) RFC 5987 single-shot без continuation: filename*=charset''encoded
-        if (preg_match('/\bfilename\*=\s*((?:"[^"]*"|[^;]+))/i', $unfolded, $m)) {
+        //     Apple Mail (и др.) шлёт filename*= БЕЗ trailing `;` — следующий
+        //     заголовок (Content-Type) идёт на новой строке. Без `\r\n` в
+        //     запрете regex `[^;]+` съел бы значение до `;` внутри Content-Type
+        //     («image/png;») и вернул мусор «...png\nContent-Type: image/png».
+        //     Кейс msg=3901 / att#4762 (Снимок экрана ... в 17.38.09.png).
+        if (preg_match('/\bfilename\*=\s*((?:"[^"]*"|[^;\r\n]+))/i', $unfolded, $m)) {
             $raw = trim(trim($m[1]), '"');
             if (str_contains($raw, "''")) {
                 [$cs, , $rest] = array_pad(explode("'", $raw, 3), 3, '');
