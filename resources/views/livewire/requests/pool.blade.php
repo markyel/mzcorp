@@ -189,11 +189,14 @@
             </div>
         </div>
 
-        {{-- Автозакрытые: ссылка вниз сайдбара. Виден только привилегированным
-             ролям, считаем за последние 30 дней. Уходим со страницы Pool
-             на отдельный экран с таблицей+«↻ Восстановить». --}}
+        {{-- Автозакрытые: ссылка в самом низу сайдбара. Виден только
+             привилегированным ролям, считаем за последние 30 дней. Уходим
+             со страницы Pool на отдельный экран с таблицей+«↻ Восстановить».
+             mt-auto не используем — aside имеет overflow-y-auto и mt-auto
+             в нём не прижимает к низу видимой области, прижимает к низу
+             прокручиваемого контента. Простой border-t + следующий блок. --}}
         @if(! is_null($totals['auto_closed'] ?? null))
-            <div class="mt-auto px-2 pb-3 pt-2 border-t border-[var(--border)]">
+            <div class="px-2 py-3 mt-3 border-t border-[var(--border)]">
                 <a href="{{ route('requests.auto-closed') }}"
                    class="flex items-center gap-2 px-2 py-1.5 rounded-md text-[12.5px] text-[var(--fg-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--fg-1)]"
                    title="Заявки, автоматически закрытые системой (parser_no_content). Можно восстановить.">
