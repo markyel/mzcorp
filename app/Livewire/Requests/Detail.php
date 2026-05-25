@@ -1346,16 +1346,30 @@ class Detail extends Component
             return;
         }
 
-        // Снять отметку «парсер закончил», чтобы isParsingInFlight() снова
-        // дал true и chip «парсится…» появился, wire:poll начал крутиться.
-        $meta = is_array($this->request->parsing_meta) ? $this->request->parsing_meta : [];
-        unset($meta['parser_finished_at']);
-        $this->request->forceFill(['parsing_meta' => $meta])->save();
+        try {
+            // Снять отметку «парсер закончил», чтобы isParsingInFlight() снова
+            // дал true и chip «парсится…» появился, wire:poll начал крутиться.
+            $meta = is_array($this->request->parsing_meta) ? $this->request->parsing_meta : [];
+            unset($meta['parser_finished_at']);
+            $this->request->forceFill(['parsing_meta' => $meta])->save();
 
-        \App\Jobs\Mail\ParseRequestItemsJob::dispatch($emailId, force: true, reset: true);
+            \App\Jobs\Mail\ParseRequestItemsJob::dispatch($emailId, force: true, reset: true);
 
-        $this->dispatch('toast', message: 'Парсер перезапущен. Карточка обновится автоматически.', type: 'success');
-        unset($this->request);
+            // Перезагружаем модель через стандартный паттерн (не unset — он
+            // ломает Livewire public-property и при перерисовке blade падает
+            // в 500, хотя dispatch parsler уже улетел в очередь).
+            $this->reloadRequest();
+
+            $this->dispatch('toast', message: 'Парсер перезапущен. Карточка обновится автоматически.', type: 'success');
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Detail::reparseItems failed', [
+                'request_id' => $this->request->id ?? null,
+                'email_message_id' => $emailId,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+            $this->dispatch('toast', message: 'Не удалось перезапустить: ' . $e->getMessage(), type: 'error');
+        }
     }
 
     /**
