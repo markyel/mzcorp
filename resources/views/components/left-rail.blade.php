@@ -14,6 +14,18 @@
     // (только свои Invoice через request.assigned_user_id), привилегированные
     // — scope='all'. Фильтр scope принудительно ограничивается в Livewire.
     $canSeeInvoices = $railUser?->hasAnyRole(['manager', 'head_of_sales', 'secretary', 'director', 'admin']);
+    // «Автозакрытые» — пул заявок, которые LLM закрыл как parser_no_content.
+    // Видят head_of_sales / director / admin / secretary — могут восстановить.
+    $canSeeAutoClosed = $railUser?->hasAnyRole(['head_of_sales', 'director', 'admin', 'secretary']);
+    $autoClosedCount = 0;
+    if ($canSeeAutoClosed) {
+        $autoClosedCount = \App\Models\Request::query()
+            ->whereNull('assigned_user_id')
+            ->where('status', \App\Enums\RequestStatus::ClosedLost->value)
+            ->where('closed_lost_reason', \App\Enums\ClosedLostReason::ParserNoContent->value)
+            ->where('closed_at', '>=', now()->subDays(30))
+            ->count();
+    }
 
     // Единый список левого rail для всех страниц с 3-col shell.
     // active маркируется по значению атрибута компонента, не по route()
@@ -23,8 +35,19 @@
     $rail = [
         ['icon' => '⌂', 'label' => 'Дашборд',          'href' => route('dashboard'),        'key' => 'dashboard'],
         ['icon' => '≡', 'label' => 'Заявки',           'href' => route('requests.index'),   'key' => 'requests'],
-        ['icon' => '⌕', 'label' => 'Поиск по каталогу', 'href' => route('catalog.search'),   'key' => 'catalog'],
     ];
+
+    if ($canSeeAutoClosed) {
+        $rail[] = [
+            'icon' => '↺',
+            'label' => 'Автозакрытые' . ($autoClosedCount > 0 ? ' (' . $autoClosedCount . ')' : ''),
+            'href' => route('requests.auto-closed'),
+            'key' => 'auto-closed',
+            'badge' => $autoClosedCount,
+        ];
+    }
+
+    $rail[] = ['icon' => '⌕', 'label' => 'Поиск по каталогу', 'href' => route('catalog.search'),   'key' => 'catalog'];
 
     if ($canSeeMail) {
         $rail[] = ['icon' => '✉', 'label' => 'Почта', 'href' => route('mail.index'), 'key' => 'mail'];
@@ -57,6 +80,9 @@
         <a href="{{ $r['href'] }}" class="{{ $cls }}" title="{{ $r['label'] }}">
             @if($isActive)<span class="absolute -left-2 top-2 bottom-2 w-0.5 bg-[var(--accent)] rounded-r"></span>@endif
             {{ $r['icon'] }}
+            @if(!empty($r['badge']))
+                <span class="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">{{ $r['badge'] > 99 ? '99+' : $r['badge'] }}</span>
+            @endif
         </a>
     @endforeach
 

@@ -33,6 +33,18 @@ Route::middleware('auth')->group(function () {
             return view('requests.index');
         })->name('requests.index');
 
+        // ВАЖНО: статичные роуты должны быть ОБЪЯВЛЕНЫ ДО `{request}`-биндинга,
+        // иначе Laravel матчит `auto-closed` как ID модели → invalid integer
+        // → 500. Доступ внутри страницы дополнительно фильтруется в Livewire
+        // через canSeeAll/role-check.
+        Route::get('/dashboard/requests/auto-closed', function () {
+            abort_unless(
+                auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'admin', 'secretary']),
+                403,
+            );
+            return view('admin.auto-closed.index');
+        })->name('requests.auto-closed');
+
         Route::get('/dashboard/requests/{request}', function (\App\Models\Request $request) {
             return view('requests.show', ['request' => $request]);
         })->name('requests.show');
@@ -130,14 +142,6 @@ Route::middleware('auth')->group(function () {
         })->name('mail-review.index');
     });
 
-    // Автозакрытые заявки (parser_no_content + LLM verdict=close). Видят
-    // head_of_sales, director, admin, secretary — могут восстановить заявку
-    // и запустить её в работу (autoAssign).
-    Route::middleware('role:head_of_sales,director,admin,secretary')->group(function () {
-        Route::get('/dashboard/requests/auto-closed', function () {
-            return view('admin.auto-closed.index');
-        })->name('requests.auto-closed');
-    });
 
     // Общие почтовые ящики (mail@myzip.ru, info@myzip.ru и т.п.) —
     // подключение, OAuth/app-password, активация/деактивация
