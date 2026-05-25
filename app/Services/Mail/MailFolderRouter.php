@@ -265,7 +265,12 @@ class MailFolderRouter
      *
      * $imapPath — уже MUTF-7 encoded (мы кодируем целиком в caller'е).
      */
-    private function ensureFolder(Client $client, string $imapPath, string $delimiter): void
+    /**
+     * @internal Public для переиспользования из MailReassignArchiverService
+     *           (та же логика создания папки + SUBSCRIBE применяется в личных
+     *           ящиках при архивации старой копии после переподчинения).
+     */
+    public function ensureFolder(Client $client, string $imapPath, string $delimiter): void
     {
         $parts = explode($delimiter, $imapPath);
         $current = '';
@@ -301,8 +306,10 @@ class MailFolderRouter
     /**
      * Определить разделитель иерархии для текущего сервера/папки.
      * Yandex 360 использует '|' для своих ящиков, не RFC-стандартный '/'.
+     *
+     * @internal Public для переиспользования из MailReassignArchiverService.
      */
-    private function detectDelimiter(Client $client, string $sourceFolderPath): string
+    public function detectDelimiter(Client $client, string $sourceFolderPath): string
     {
         $folder = $client->getFolderByPath($sourceFolderPath, soft_fail: true);
         if ($folder && ! empty($folder->delimiter)) {
@@ -335,7 +342,10 @@ class MailFolderRouter
      *
      * @param mixed $validatedData Ответ webklex Response::validatedData().
      */
-    private function parseCopyUid(mixed $validatedData): ?int
+    /**
+     * @internal Public для переиспользования из MailReassignArchiverService.
+     */
+    public function parseCopyUid(mixed $validatedData): ?int
     {
         if (! is_array($validatedData)) {
             return null;

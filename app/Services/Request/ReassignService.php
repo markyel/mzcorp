@@ -3,6 +3,7 @@
 namespace App\Services\Request;
 
 use App\Enums\RequestStatus;
+use App\Jobs\Mail\ArchiveFromOldManagerInboxJob;
 use App\Jobs\Mail\DeliverToManagerInboxJob;
 use App\Jobs\Mail\RouteMailToManagerJob;
 use App\Models\Request as RequestModel;
@@ -32,6 +33,10 @@ class ReassignService
         ?string $reason,
         User $by,
     ): RequestAssignment {
+        // Snapshot ДО транзакции: внутри замыкания мы перепишем
+        // assigned_user_id, и после dispatch'а доступа к старому ID уже нет.
+        $oldAssigneeId = $request->assigned_user_id;
+
         $assignment = DB::transaction(function () use ($request, $newAssignee, $reason, $by): RequestAssignment {
             $request->assigned_user_id = $newAssignee->id;
             // Если заявка была в Pending (без позиций) — оставляем в Pending,
@@ -52,16 +57,25 @@ class ReassignService
             ]);
         });
 
-        // Два IMAP job'а async:
+        // Три IMAP job'а async:
         //   - RouteMailToManagerJob — COPY в подпапку MZ|<Фамилия> общего
-        //     ящика (для секретаря, web UI видит распределение);
+        //     ящика (для секретаря, web UI видит распределение).
         //   - DeliverToManagerInboxJob — APPEND в INBOX личного ящика
-        //     менеджера (рабочий поток менеджера).
-        // Оба идемпотентны: повторный dispatch не задвоит.
+        //     НОВОГО менеджера (рабочий поток нового менеджера).
+        //   - ArchiveFromOldManagerInboxJob — UID MOVE копии из INBOX
+        //     личного ящика СТАРОГО менеджера в MZ/Reassigned + STORE \Seen.
+        //     Старая копия физически остаётся (Yandex quirk без EXPUNGE)
+        //     либо переезжает (если Yandex EXPUNGE прошёл), но из INBOX
+        //     visually уходит из счётчика непрочитанных.
+        // Все три идемпотентны: повторный dispatch не задвоит.
         $email = $request->emailMessage;
         if ($email) {
             RouteMailToManagerJob::dispatch($email->id, $newAssignee->id);
             DeliverToManagerInboxJob::dispatch($email->id, $newAssignee->id);
+
+            if ($oldAssigneeId !== null && $oldAssigneeId !== $newAssignee->id) {
+                ArchiveFromOldManagerInboxJob::dispatch($email->id, $oldAssigneeId);
+            }
         }
 
         return $assignment;
