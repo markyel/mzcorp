@@ -450,6 +450,14 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                 $assignment = app(\App\Services\Request\AssignmentService::class);
                 $assignment->autoAssign($child);
                 $child = $child->fresh();
+            } elseif ($child->status === \App\Enums\RequestStatus::Pending) {
+                // Уже был назначен раньше (через предыдущий проход
+                // парсера / ручной reparse) но статус застрял в Pending,
+                // потому что Persister не вызывался (items=0). Теперь
+                // позиции унаследовали — двигаем статус вручную.
+                // Менеджера не меняем.
+                $child->update(['status' => \App\Enums\RequestStatus::Assigned]);
+                $child = $child->fresh();
             }
             if ($child->assigned_user_id) {
                 $manager = \App\Models\User::find($child->assigned_user_id);
