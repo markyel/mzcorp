@@ -610,6 +610,31 @@
                                 : '?';
                             $clientLine1 = $req->client_name ?: $req->client_email;
                             $clientLine2 = $req->client_name ? $req->client_email : null;
+
+                            // Источник заявки — общий или личный ящик, в который
+                            // пришло seed-письмо. Видно через Request → emailMessage
+                            // → mailbox (type Shared/Personal). Foundation §1:
+                            // общий поток (info@/mail@/sales@) vs прямые письма
+                            // на личный ящик менеджера. Для секретаря и РОПа —
+                            // быстрый сигнал, по какому каналу пришло.
+                            $sourceMailbox = $req->emailMessage?->mailbox;
+                            $sourceLabel = null;
+                            $sourceTooltip = null;
+                            if ($sourceMailbox) {
+                                if ($sourceMailbox->type === \App\Enums\MailboxType::Shared) {
+                                    $local = strstr((string) $sourceMailbox->email, '@', true);
+                                    $sourceLabel = ($local !== false && $local !== '')
+                                        ? $local . '@'
+                                        : (string) $sourceMailbox->email;
+                                    $sourceTooltip = 'Общий ящик: ' . $sourceMailbox->email;
+                                } else {
+                                    $sourceLabel = 'личный';
+                                    $sourceTooltip = 'Личный ящик: ' . $sourceMailbox->email;
+                                    if ($sourceMailbox->owner?->name) {
+                                        $sourceTooltip .= ' · ' . $sourceMailbox->owner->name;
+                                    }
+                                }
+                            }
                         @endphp
 
                         @php
@@ -678,11 +703,17 @@
                                 @endif
                             </span>
 
-                            {{-- client (перемещён до title — 2026-05-21) --}}
+                            {{-- client (перемещён до title — 2026-05-21) + источник --}}
                             <span class="min-w-0 overflow-hidden">
                                 <div class="font-medium text-[var(--fg-1)] truncate">{{ $clientLine1 ?: '—' }}</div>
                                 @if($clientLine2)
                                     <div class="text-[11.5px] text-[var(--fg-3)] mt-0.5 truncate">{{ $clientLine2 }}</div>
+                                @endif
+                                @if($sourceLabel)
+                                    <div class="text-[10.5px] text-[var(--fg-4)] mt-0.5 truncate font-mono"
+                                         title="{{ $sourceTooltip }}">
+                                        ← {{ $sourceLabel }}
+                                    </div>
                                 @endif
                             </span>
 

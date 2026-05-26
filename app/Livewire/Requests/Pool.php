@@ -288,8 +288,9 @@ class Pool extends Component
             ->with([
                 'assignedUser:id,name',
                 'emailMessage' => fn ($q) => $q
-                    ->select(['id', 'from_email', 'from_name'])
-                    ->withCount('attachments'),
+                    ->select(['id', 'from_email', 'from_name', 'mailbox_id'])
+                    ->withCount('attachments')
+                    ->with(['mailbox:id,email,type,owner_user_id', 'mailbox.owner:id,name']),
                 'items:id,request_id,parsed_name,parsed_brand,position,match_path,is_active',
                 // latestAssignment без partial-select — `latestOfMany` делает
                 // self-join, и колонки без префикса (request_id) дают
