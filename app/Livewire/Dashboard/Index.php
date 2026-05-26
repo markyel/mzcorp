@@ -177,18 +177,124 @@ class Index extends Component
     }
 
     /**
-     * Период (в днях) для menager sparklines — отдельный от верхнего,
-     * чтобы sparkline не сжимался до 1 точки и не размазывался на 90.
-     * Чипы 7/14/30/60.
+     * Период менеджерского sparkline'а — независимый от верхнего.
+     * Режимы:
+     *   today     — сегодня от 00:00 МСК до now (1 точка)
+     *   yesterday — вчера 00:00..23:59:59 МСК (1 точка)
+     *   custom    — кастомный диапазон по mgr_from / mgr_to
      */
-    #[Url(as: 'mgr_period', except: 14)]
-    public int $sparklinePeriodDays = 14;
+    #[Url(as: 'mgr_mode', except: 'today')]
+    public string $sparklineMode = 'today';
 
-    public function setSparklinePeriod(int $days): void
+    /**
+     * Начало кастомного периода для sparkline (Y-m-d, МСК).
+     */
+    #[Url(as: 'mgr_from', except: '')]
+    public string $sparklineFrom = '';
+
+    /**
+     * Конец кастомного периода для sparkline (включительно).
+     */
+    #[Url(as: 'mgr_to', except: '')]
+    public string $sparklineTo = '';
+
+    /**
+     * Раскрыт ли inline date-picker для custom-периода sparkline'а.
+     */
+    public bool $sparklinePickerOpen = false;
+
+    public function setSparklineMode(string $mode): void
     {
-        if (in_array($days, [7, 14, 30, 60], true)) {
-            $this->sparklinePeriodDays = $days;
+        if (in_array($mode, ['today', 'yesterday'], true)) {
+            $this->sparklineMode = $mode;
+            $this->sparklineFrom = '';
+            $this->sparklineTo = '';
+            $this->sparklinePickerOpen = false;
         }
+    }
+
+    public function toggleSparklinePicker(): void
+    {
+        $this->sparklinePickerOpen = ! $this->sparklinePickerOpen;
+        if ($this->sparklinePickerOpen && $this->sparklineFrom === '' && $this->sparklineTo === '') {
+            // Префилл: последние 14 дней.
+            $today = CarbonImmutable::now('Europe/Moscow');
+            $this->sparklineFrom = $today->subDays(13)->format('Y-m-d');
+            $this->sparklineTo = $today->format('Y-m-d');
+        }
+    }
+
+    public function applySparklinePeriod(): void
+    {
+        try {
+            $from = CarbonImmutable::createFromFormat('Y-m-d', $this->sparklineFrom, 'Europe/Moscow');
+            $to = CarbonImmutable::createFromFormat('Y-m-d', $this->sparklineTo, 'Europe/Moscow');
+            if (! $from || ! $to || $from->gt($to)) {
+                throw new \InvalidArgumentException('bad range');
+            }
+            $this->sparklineMode = 'custom';
+            $this->sparklinePickerOpen = false;
+        } catch (\Throwable) {
+            $this->sparklineFrom = '';
+            $this->sparklineTo = '';
+        }
+    }
+
+    /**
+     * Подпись текущего sparkline-периода для UI (заголовок карточки,
+     * tooltip колонки).
+     */
+    #[Computed]
+    public function sparklineLabel(): string
+    {
+        if ($this->sparklineMode === 'today') {
+            return 'сегодня';
+        }
+        if ($this->sparklineMode === 'yesterday') {
+            return 'вчера';
+        }
+        if ($this->sparklineMode === 'custom' && $this->sparklineFrom !== '' && $this->sparklineTo !== '') {
+            try {
+                $from = CarbonImmutable::createFromFormat('Y-m-d', $this->sparklineFrom);
+                $to = CarbonImmutable::createFromFormat('Y-m-d', $this->sparklineTo);
+                return $from->format('d.m') . ' – ' . $to->format('d.m.Y');
+            } catch (\Throwable) {
+                // fallthrough
+            }
+        }
+        return 'сегодня';
+    }
+
+    /**
+     * Диапазон дней [startMsk, days] для построения sparkline.
+     *   - today  → [today 00:00, 1 day]
+     *   - yesterday → [yesterday 00:00, 1 day]
+     *   - custom → [from 00:00, ceil(to - from) + 1 days]
+     *
+     * @return array{0: CarbonImmutable, 1: int}  start (МСК 00:00), кол-во дней
+     */
+    private function sparklineWindow(): array
+    {
+        $todayMsk = CarbonImmutable::now('Europe/Moscow')->startOfDay();
+        if ($this->sparklineMode === 'yesterday') {
+            return [$todayMsk->subDay(), 1];
+        }
+        if ($this->sparklineMode === 'custom' && $this->sparklineFrom !== '' && $this->sparklineTo !== '') {
+            try {
+                $from = CarbonImmutable::createFromFormat('Y-m-d', $this->sparklineFrom, 'Europe/Moscow')->startOfDay();
+                $to = CarbonImmutable::createFromFormat('Y-m-d', $this->sparklineTo, 'Europe/Moscow')->startOfDay();
+                if ($from->lte($to)) {
+                    $days = $from->diffInDays($to) + 1;
+                    // Защита от слишком длинных диапазонов в sparkline (UI cramps на 100+).
+                    $days = (int) min(366, max(1, $days));
+                    return [$from, $days];
+                }
+            } catch (\Throwable) {
+                // fallthrough to today
+            }
+        }
+        // today (default)
+        return [$todayMsk, 1];
     }
 
     #[Computed]
@@ -688,9 +794,7 @@ class Index extends Component
             return [];
         }
 
-        $days = $this->sparklinePeriodDays;
-        // Boundary: «сегодня по Москве» — последняя ячейка sparkline.
-        $startMsk = CarbonImmutable::now('Europe/Moscow')->startOfDay()->subDays($days - 1);
+        [$startMsk, $days] = $this->sparklineWindow();
 
         $rows = DB::table('request_assignments')
             ->whereIn('user_id', $managers->pluck('id'))

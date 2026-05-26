@@ -429,25 +429,61 @@
                             . '</svg>';
                     };
                 @endphp
-                @php $sparkPeriod = $this->sparklinePeriodDays; @endphp
+                @php
+                    $sparkLabel = $this->sparklineLabel;
+                    $sparkMode = $this->sparklineMode;
+                    $sparkPickerOpen = $this->sparklinePickerOpen;
+                    $sparkIsCustom = $sparkMode === 'custom';
+                @endphp
                 <div class="ds-card">
                     <div class="ds-card-header">
-                        <h3>Менеджеры · нагрузка + {{ $sparkPeriod }}-дн поток</h3>
+                        <h3>Менеджеры · нагрузка · {{ $sparkLabel }}</h3>
                         <span class="flex-1"></span>
                         <span class="flex items-center gap-1.5 text-[11.5px]">
                             <span class="text-fg-3 mr-1">период:</span>
-                            @foreach([7, 14, 30, 60] as $d)
-                                @php $active = $sparkPeriod === $d; @endphp
-                                <button type="button" wire:click="setSparklinePeriod({{ $d }})"
+                            @foreach(['today' => 'сегодня', 'yesterday' => 'вчера'] as $modeKey => $modeLabel)
+                                @php $active = ! $sparkIsCustom && $sparkMode === $modeKey; @endphp
+                                <button type="button" wire:click="setSparklineMode('{{ $modeKey }}')"
                                         class="px-1.5 py-0.5 rounded border text-[11px] transition-colors
                                                {{ $active
                                                    ? 'border-sky-500 bg-sky-50 text-sky-800 font-semibold'
                                                    : 'border-border bg-surface text-fg-3 hover:bg-surface-2' }}">
-                                    {{ $d }}дн
+                                    {{ $modeLabel }}
                                 </button>
                             @endforeach
+                            <button type="button" wire:click="toggleSparklinePicker"
+                                    class="px-1.5 py-0.5 rounded border text-[11px] transition-colors
+                                           {{ $sparkIsCustom
+                                               ? 'border-sky-500 bg-sky-50 text-sky-800 font-semibold'
+                                               : 'border-border bg-surface text-fg-3 hover:bg-surface-2' }}">
+                                {{ $sparkIsCustom ? $sparkLabel : 'период…' }}
+                            </button>
                         </span>
                     </div>
+                    @if($sparkPickerOpen)
+                        <div class="px-[18px] py-2.5 flex flex-wrap items-end gap-2 text-[12px] border-b border-border-subtle bg-surface-2">
+                            <label class="flex flex-col gap-1">
+                                <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">С</span>
+                                <input type="date" wire:model="sparklineFrom"
+                                       class="px-2 py-1 border border-border rounded bg-surface text-fg-1 text-[12.5px] tnum"
+                                       max="{{ now()->format('Y-m-d') }}">
+                            </label>
+                            <label class="flex flex-col gap-1">
+                                <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">По</span>
+                                <input type="date" wire:model="sparklineTo"
+                                       class="px-2 py-1 border border-border rounded bg-surface text-fg-1 text-[12.5px] tnum"
+                                       max="{{ now()->format('Y-m-d') }}">
+                            </label>
+                            <button type="button" wire:click="applySparklinePeriod"
+                                    class="px-3 py-1 rounded border border-sky-500 bg-sky-50 text-sky-800 font-semibold text-[12px] hover:bg-sky-100">
+                                Применить
+                            </button>
+                            <button type="button" wire:click="toggleSparklinePicker"
+                                    class="px-2.5 py-1 rounded border border-border bg-surface text-fg-2 hover:bg-surface-2 text-[12px]">
+                                Отмена
+                            </button>
+                        </div>
+                    @endif
                     <div class="ds-card-body p-0">
                         @if(empty($sparks))
                             <div class="px-[18px] py-4 text-sm text-fg-3">В системе нет пользователей с ролью «менеджер».</div>
@@ -461,7 +497,7 @@
                                         <th class="text-right px-2 py-2" title="Сколько из «всего» пришло через info@myzip.ru">info@</th>
                                         <th class="text-right px-2 py-2" title="Суммарный complexity_score активных заявок">слжн</th>
                                         <th class="text-right px-2 py-2" title="Hard + very_hard заявок в работе">hard</th>
-                                        <th class="text-right px-2 py-2" title="Назначений за выбранный период">{{ $sparkPeriod }}дн</th>
+                                        <th class="text-right px-2 py-2" title="Назначений за выбранный период ({{ $sparkLabel }})">за период</th>
                                         <th class="text-left px-[18px] py-2">поток</th>
                                     </tr>
                                 </thead>
