@@ -177,14 +177,17 @@ class Index extends Component
     }
 
     /**
-     * Период менеджерского sparkline'а — независимый от верхнего.
-     * Режимы:
-     *   today     — сегодня от 00:00 МСК до now (1 точка)
-     *   yesterday — вчера 00:00..23:59:59 МСК (1 точка)
-     *   custom    — кастомный диапазон по mgr_from / mgr_to
+     * Режим менеджерской таблицы.
+     *   current   — снимок текущей нагрузки (default, без period)
+     *   today     — назначено сегодня от 00:00 МСК (1 точка sparkline)
+     *   yesterday — назначено вчера 00:00..23:59 МСК (1 точка)
+     *   custom    — назначено за custom-диапазон по mgr_from / mgr_to
+     *
+     * Default `current` показывает снимок (активные/слжн/hard/всего/info@).
+     * Остальные три — period-табличку (назначено/info@-период/sparkline).
      */
-    #[Url(as: 'mgr_mode', except: 'today')]
-    public string $sparklineMode = 'today';
+    #[Url(as: 'mgr_mode', except: 'current')]
+    public string $sparklineMode = 'current';
 
     /**
      * Начало кастомного периода для sparkline (Y-m-d, МСК).
@@ -205,7 +208,7 @@ class Index extends Component
 
     public function setSparklineMode(string $mode): void
     {
-        if (in_array($mode, ['today', 'yesterday'], true)) {
+        if (in_array($mode, ['current', 'today', 'yesterday'], true)) {
             $this->sparklineMode = $mode;
             $this->sparklineFrom = '';
             $this->sparklineTo = '';
@@ -247,6 +250,9 @@ class Index extends Component
     #[Computed]
     public function sparklineLabel(): string
     {
+        if ($this->sparklineMode === 'current') {
+            return 'текущая загрузка';
+        }
         if ($this->sparklineMode === 'today') {
             return 'сегодня';
         }
@@ -262,7 +268,7 @@ class Index extends Component
                 // fallthrough
             }
         }
-        return 'сегодня';
+        return 'текущая загрузка';
     }
 
     /**
