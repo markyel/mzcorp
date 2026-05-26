@@ -38,7 +38,7 @@ if (!PASSWORD) {
 const captures = [
     {
         name: 'requests-pool',
-        url: '/dashboard/requests?bucket=active',
+        url: '/dashboard/requests?scope=all&bucket=active',
         label: 'Список заявок · общий вид',
         wait: 2000,
     },
