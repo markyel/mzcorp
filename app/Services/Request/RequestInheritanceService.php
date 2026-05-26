@@ -210,6 +210,129 @@ class RequestInheritanceService
     }
 
     /**
+     * Усыновить child из parent: для случая когда у child НЕТ позиций
+     * (типичный partner-reminder: subject «Re: …», body «Напоминаем…»,
+     * парсер правильно возвращает items=[] по правилу промпта Пример 8).
+     * Копируем активные позиции parent в child + сразу регистрируем
+     * RequestItemLink + связываем inheritance_parent_id.
+     *
+     * Отличие от `linkChild`: тот ожидает что child УЖЕ имеет items и
+     * мапит их к parent items. `adoptFromParent` создаёт items в child
+     * из parent (clone) и сразу же связывает 1:1.
+     *
+     * Кейсы: Liftway reminder'ы по `LZ-REQ-NNNN` на закрытые заявки
+     * (M-2026-1839, 1838, …) — реальный товар уже в parent, body reminder'а
+     * содержит только напоминание + HTML-таблицу с теми же позициями,
+     * парсер их не дублирует, child остаётся пустым.
+     *
+     * @return Request fresh child
+     */
+    public function adoptFromParent(
+        Request $child,
+        Request $parent,
+        string $linkedBy = 'system',
+    ): Request {
+        $this->assertCanLink($parent, $child);
+
+        $existingChildItems = RequestItem::query()
+            ->where('request_id', $child->id)
+            ->exists();
+        if ($existingChildItems) {
+            throw new \InvalidArgumentException(
+                "Child {$child->internal_code} уже имеет позиции — используй linkChild() вместо adoptFromParent()"
+            );
+        }
+
+        $parentItems = RequestItem::query()
+            ->where('request_id', $parent->id)
+            ->where('is_active', true)
+            ->orderBy('position')
+            ->orderBy('id')
+            ->get();
+        if ($parentItems->isEmpty()) {
+            Log::info('RequestInheritanceService::adoptFromParent skipped — parent has no active items', [
+                'parent_request_id' => $parent->id,
+                'child_request_id' => $child->id,
+            ]);
+            return $child->fresh();
+        }
+
+        return DB::transaction(function () use ($child, $parent, $parentItems, $linkedBy) {
+            $groupId = $parent->inheritance_group_id ?? (string) Str::uuid();
+
+            $parent->update([
+                'inheritance_group_id' => $groupId,
+                'inheritance_role' => $parent->inheritance_role ?? 'parent',
+            ]);
+
+            $child->update([
+                'inheritance_group_id' => $groupId,
+                'inheritance_role' => 'child',
+                'inheritance_parent_id' => $parent->id,
+            ]);
+
+            $position = 0;
+            $linksCreated = 0;
+            foreach ($parentItems as $pi) {
+                $position++;
+
+                // Clone item с фокусом на data fields. image_attachment_id
+                // НЕ копируем (вложение принадлежит parent-письму, не нашему).
+                // KB-резолв (quality_assessment_*) копируем — артикул/бренд
+                // те же, повторный LLM-проход не нужен.
+                $childItem = RequestItem::create([
+                    'request_id' => $child->id,
+                    'position' => $position,
+                    'parsed_name' => $pi->parsed_name,
+                    'parsed_brand' => $pi->parsed_brand,
+                    'parsed_article' => $pi->parsed_article,
+                    'parsed_qty' => $pi->parsed_qty,
+                    'parsed_unit' => $pi->parsed_unit,
+                    'parsed_length' => $pi->parsed_length,
+                    'parsed_length_unit' => $pi->parsed_length_unit,
+                    'billing_unit' => $pi->billing_unit,
+                    'supplier_note' => $pi->supplier_note,
+                    'data_source' => 'inherited_from_parent',
+                    'status' => 'active',
+                    'is_active' => true,
+                    'identification_category_id' => $pi->identification_category_id,
+                    'manufacturer_brand_id' => $pi->manufacturer_brand_id,
+                    'equipment_unit_id' => $pi->equipment_unit_id,
+                    'category' => $pi->category,
+                    'catalog_item_id' => $pi->catalog_item_id,
+                    'quality_assessment_status' => $pi->quality_assessment_status,
+                    'quality_assessment_payload' => $pi->quality_assessment_payload,
+                    'match_path' => $pi->match_path,
+                ]);
+
+                RequestItemLink::create([
+                    'child_item_id' => $childItem->id,
+                    'parent_item_id' => $pi->id,
+                    'qty_ratio' => 1.0,
+                    'mapping_source' => 'adopt_from_parent',
+                    'mapping_confidence' => 1.0,
+                    'is_active' => true,
+                    'linked_by' => $linkedBy,
+                ]);
+                $linksCreated++;
+            }
+
+            Log::info('Request inheritance adopted (items cloned)', [
+                'parent_request_id' => $parent->id,
+                'parent_code' => $parent->internal_code,
+                'child_request_id' => $child->id,
+                'child_code' => $child->internal_code,
+                'items_cloned' => $parentItems->count(),
+                'links_created' => $linksCreated,
+                'group_id' => $groupId,
+                'linked_by' => $linkedBy,
+            ]);
+
+            return $child->fresh();
+        });
+    }
+
+    /**
      * Отвязать child от родителя: деактивирует все item-связи,
      * очищает inheritance_parent_id. group_id оставляем для истории.
      */

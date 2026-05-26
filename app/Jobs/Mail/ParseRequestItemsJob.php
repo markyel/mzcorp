@@ -174,6 +174,22 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                 'request_id' => $message->related_request_id,
             ]);
 
+            // Inheritance fallback (2026-05-26): linker нашёл terminal parent
+            // (typically Liftway-style partner reminder: subject «Re: …
+            // — #LZ-REQ-NNNN», parent closed_lost), parser вернул []
+            // (промпт Пример 8: «reply-напоминание → пусто»). Без этого
+            // child Request висит pending без позиций.
+            //
+            // Если в detected_artifacts.inheritance_candidate_id есть parent
+            // и child пустой — клонируем активные items + связываем как
+            // inheritance child + dispatch assignment + folder routing.
+            if ($message->related_request_id && ! $this->reset) {
+                $adopted = $this->tryAdoptFromInheritanceCandidate($message);
+                if ($adopted) {
+                    return; // успешно унаследовали — free-text enrichment пропускаем
+                }
+            }
+
             // Path C (2026-05-21): для reply-сообщения без структурированных
             // позиций пробуем извлечь контекстные уточнения к существующим
             // позициям («масленка на противовесе», «по плате — модель ABC»).
@@ -378,5 +394,96 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Унаследовать позиции из inheritance candidate (terminal parent),
+     * если linker такое зафиксировал в detected_artifacts.
+     *
+     * Дёргается из doParse() когда парсер вернул [] И related_request_id
+     * есть (Request 1839, 1838, ... — Liftway-style reminders).
+     *
+     * @return bool true — успешно унаследовали (вызвали adoptFromParent
+     *              + AssignmentService + MailFolderRouter); false — кандидата
+     *              нет / parent невалиден / child уже имеет items / ошибка.
+     */
+    private function tryAdoptFromInheritanceCandidate(EmailMessage $message): bool
+    {
+        $artifacts = is_array($message->detected_artifacts) ? $message->detected_artifacts : [];
+        $candidateId = (int) ($artifacts['inheritance_candidate_id'] ?? 0);
+        if ($candidateId <= 0) {
+            return false;
+        }
+
+        $child = \App\Models\Request::find($message->related_request_id);
+        if (! $child) {
+            return false;
+        }
+        // Идемпотентность: если уже привязан к родителю — пропускаем.
+        if ($child->inheritance_parent_id) {
+            return false;
+        }
+        $parent = \App\Models\Request::find($candidateId);
+        if (! $parent) {
+            return false;
+        }
+
+        try {
+            $inheritance = app(\App\Services\Request\RequestInheritanceService::class);
+            $inheritance->adoptFromParent($child, $parent, linkedBy: 'system_reminder_fallback');
+        } catch (\Throwable $e) {
+            Log::warning('ParseRequestItemsJob: adoptFromParent failed', [
+                'email_message_id' => $message->id,
+                'child_request_id' => $child->id,
+                'parent_request_id' => $parent->id,
+                'error' => $e->getMessage(),
+            ]);
+            return false;
+        }
+
+        // Assignment + routing: child Request теперь имеет позиции, его
+        // нужно назначить (sticky подтянет parent's manager) + положить
+        // оригинал письма в личный ящик менеджера.
+        try {
+            $child = $child->fresh();
+            if (! $child->assigned_user_id) {
+                $assignment = app(\App\Services\Request\AssignmentService::class);
+                $assignment->autoAssign($child);
+                $child = $child->fresh();
+            }
+            if ($child->assigned_user_id) {
+                $manager = \App\Models\User::find($child->assigned_user_id);
+                if ($manager) {
+                    try {
+                        app(\App\Services\Mail\MailFolderRouter::class)
+                            ->routeToManager($message->fresh(), $manager);
+                    } catch (\App\Exceptions\Mail\TransientImapException $e) {
+                        \App\Jobs\Mail\RouteMailToManagerJob::dispatch($message->id, $manager->id)
+                            ->delay(now()->addSeconds(30));
+                    } catch (\Throwable $e) {
+                        Log::warning('ParseRequestItemsJob: adopt routing failed (non-fatal)', [
+                            'email_message_id' => $message->id,
+                            'manager_id' => $manager->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('ParseRequestItemsJob: adopt post-assignment failed', [
+                'email_message_id' => $message->id,
+                'child_request_id' => $child->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        Log::info('ParseRequestItemsJob: adopted from inheritance candidate', [
+            'email_message_id' => $message->id,
+            'child_request_id' => $child->id,
+            'parent_request_id' => $parent->id,
+            'parent_status' => is_object($parent->status) ? $parent->status->value : $parent->status,
+        ]);
+
+        return true;
     }
 }
