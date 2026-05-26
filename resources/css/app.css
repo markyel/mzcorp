@@ -188,13 +188,19 @@
     }
     .doc-content .doc-mini-topbar .accent { color: var(--accent); }
     /* Iframe-превью UI-экранов из design/ui_kits/crm/.
-       Маршрут /docs/preview/{name} отдаёт HTML-мокап целиком.
-       Подгоняем размер по контенту, скрываем скроллбар самого iframe.
+       Маршрут /docs/preview/{name} отдаёт HTML-мокап целиком (designed
+       for 1280px viewport). Чтобы мокап не схлопывался в мобильную
+       раскладку на узком doc-content (~948px), рендерим iframe на
+       1280px нативно и визуально масштабируем через transform: scale().
+       Контейнер overflow:hidden + фикс. высота обрезает scaled-overflow.
        Используется как:
-         <div class="doc-preview-frame" data-label="Пул заявок">
+         <div class="doc-preview-frame" data-label="Пул заявок" data-height="tall">
            <iframe src="/docs/preview/pool" loading="lazy"></iframe>
          </div> */
     .doc-content .doc-preview-frame {
+        --frame-w: 1280px;
+        --frame-h: 900px;
+        --frame-scale: 0.70;
         margin: 14px 0;
         border: 1px solid var(--border);
         border-radius: var(--r-md);
@@ -213,13 +219,17 @@
     }
     .doc-content .doc-preview-frame iframe {
         display: block;
-        width: 100%;
-        height: 560px;
         border: 0;
         background: var(--bg-surface);
+        width: var(--frame-w);
+        height: var(--frame-h);
+        transform: scale(var(--frame-scale));
+        transform-origin: top left;
     }
-    .doc-content .doc-preview-frame[data-height="tall"] iframe { height: 780px; }
-    .doc-content .doc-preview-frame[data-height="short"] iframe { height: 380px; }
+    /* Контейнер высоты под scaled-iframe: 900*0.7 = 630 + 26px (label). */
+    .doc-content .doc-preview-frame { height: calc(var(--frame-h) * var(--frame-scale) + 26px); }
+    .doc-content .doc-preview-frame[data-height="tall"]  { --frame-h: 1100px; }
+    .doc-content .doc-preview-frame[data-height="short"] { --frame-h: 600px; }
 
     /* Превью одного status-chip с лейблом сбоку. */
     .doc-content .doc-chip-grid {
