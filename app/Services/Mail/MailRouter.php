@@ -249,11 +249,19 @@ class MailRouter
             // используются при назначении менеджера.
             if ($linkedRequest->assigned_user_id) {
                 try {
-                    \App\Jobs\Mail\RouteMailToManagerJob::dispatch(
+                    // ВАЖНО: Deliver ПЕРВЫМ — он re-fetch'ит полный RFC822
+                    // из source-папки по imap_uid. Если Route отработает
+                    // раньше (UID MOVE в MZ|*), исходный UID в INBOX
+                    // становится невалидным, и Deliver падает на re-fetch
+                    // failed → cannot reconstruct RFC822 → skip APPEND (молча,
+                    // без retry — fetchFullRfc822 не throw'ит).
+                    // FIFO в очереди не строгий, но dispatch порядок даёт
+                    // приоритет первому job'у. Кейс M-2026-1928 msg#4712.
+                    \App\Jobs\Mail\DeliverToManagerInboxJob::dispatch(
                         $message->id,
                         $linkedRequest->assigned_user_id,
                     );
-                    \App\Jobs\Mail\DeliverToManagerInboxJob::dispatch(
+                    \App\Jobs\Mail\RouteMailToManagerJob::dispatch(
                         $message->id,
                         $linkedRequest->assigned_user_id,
                     );
