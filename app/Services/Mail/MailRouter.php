@@ -236,6 +236,37 @@ class MailRouter
                 \App\Jobs\Mail\ParseRequestItemsJob::dispatch($message->id, true);
             }
 
+            // Routing reply'я в подпапку MZ|{Lastname} общего ящика +
+            // доставка в личный INBOX менеджера. Раньше эти шаги отрабатывали
+            // только при создании Request (AssignmentService) и в success-
+            // ветке Persister'а после парсинга. Для reply'ев без новых
+            // позиций (типа «выставите счёт», forward'ы с уточнениями)
+            // парсер заканчивал с items=[], routing-fallback не дёргался,
+            // и письмо застревало в INBOX общего ящика без копии в личный.
+            // Кейс M-2026-1928: msg#4712, msg#4806 от pto@trastlift.ru —
+            // Васюхно получил только первое письмо, остальные висели
+            // непрочитанными на info@. Делаем async через те же jobs что
+            // используются при назначении менеджера.
+            if ($linkedRequest->assigned_user_id) {
+                try {
+                    \App\Jobs\Mail\RouteMailToManagerJob::dispatch(
+                        $message->id,
+                        $linkedRequest->assigned_user_id,
+                    );
+                    \App\Jobs\Mail\DeliverToManagerInboxJob::dispatch(
+                        $message->id,
+                        $linkedRequest->assigned_user_id,
+                    );
+                } catch (\Throwable $e) {
+                    Log::warning('MailRouter: dispatch reply routing/delivery failed (non-fatal)', [
+                        'email_message_id' => $message->id,
+                        'request_id' => $linkedRequest->id,
+                        'manager_id' => $linkedRequest->assigned_user_id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
             // Attention «📨 Ответ от клиента» — пометить заявку «есть новости»
             // на любом не-терминальном статусе. onClientReplied сам пропустит
             // silent-статусы (Pending/Paused/Closed*/Paid). Если ниже
