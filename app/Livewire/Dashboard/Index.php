@@ -773,18 +773,18 @@ class Index extends Component
     }
 
     /**
-     * Sparklines per менеджер: ежедневное число НАЗНАЧЕНИЙ за последние
-     * 14 дней (всегда 14, независимо от $periodDays — sparkline это «недавняя
-     * динамика», период не имеет смысла растягивать).
+     * Снимок текущей нагрузки менеджера: число активных заявок прямо
+     * сейчас, complexity_score sum, hard_count, all-time totals.
+     * **Не зависит от period** — это «фото на сейчас».
      *
-     * Источник — `request_assignments.created_at` (audit-таблица), а не
-     * `requests.assigned_user_id` — последняя показывает только текущий
-     * snapshot, а нам нужен поток назначений во времени.
+     * Используется для карточки «Менеджеры · нагрузка сейчас».
      *
-     * @return array<int, array{name: string, email: string, total: int, points: array<int, int>, sum14: int}>
+     * @return array<int, array{name:string, email:string, active:int,
+     *     active_complexity:int, hard_count:int, total_all_time:int,
+     *     from_info_total:int}>
      */
     #[Computed]
-    public function managerSparklines(): array
+    public function managersCurrentLoad(): array
     {
         if (! $this->isPrivileged) {
             return [];
@@ -794,28 +794,6 @@ class Index extends Component
             return [];
         }
 
-        [$startMsk, $days] = $this->sparklineWindow();
-
-        $rows = DB::table('request_assignments')
-            ->whereIn('user_id', $managers->pluck('id'))
-            ->where('assigned_at', '>=', $startMsk->utc())
-            ->selectRaw("
-                user_id,
-                DATE(assigned_at AT TIME ZONE 'Europe/Moscow') AS day,
-                COUNT(*) AS c
-            ")
-            ->groupBy('user_id', 'day')
-            ->get();
-
-        // user_id → 'Y-m-d' → count
-        $byUser = [];
-        foreach ($rows as $r) {
-            $byUser[(int) $r->user_id][(string) $r->day] = (int) $r->c;
-        }
-
-        // current load (для сортировки + чтобы рядом со sparkline видеть).
-        // Phase complexity: добавляем SUM(complexity_score) и hard_count для
-        // отображения в той же строке — сложность важнее чем «просто N заявок».
         $activeStatuses = array_map(
             fn (RequestStatus $s) => $s->value,
             array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
@@ -833,10 +811,6 @@ class Index extends Component
             ->get()
             ->keyBy('assigned_user_id');
 
-        // Общее количество заявок за всё время (включая closed_*, paused) —
-        // для понимания исторического распределения. Справочно: сколько из
-        // этих заявок пришли через info@myzip.ru (главный shared ящик
-        // клиентских заявок).
         $infoMailboxId = \App\Models\Mailbox::query()
             ->whereRaw('LOWER(email) = ?', ['info@myzip.ru'])
             ->value('id');
@@ -861,6 +835,91 @@ class Index extends Component
 
         $result = [];
         foreach ($managers as $u) {
+            $row = $currentLoad->get($u->id);
+            $result[] = [
+                'name' => $u->name,
+                'email' => $u->email,
+                'active' => (int) ($row->c ?? 0),
+                'active_complexity' => (int) ($row->active_complexity ?? 0),
+                'hard_count' => (int) ($row->hard_count ?? 0),
+                'total_all_time' => (int) ($totalAllTime->get($u->id)?->c ?? 0),
+                'from_info_total' => (int) ($totalFromInfo->get($u->id)?->c ?? 0),
+            ];
+        }
+
+        // Сортировка: по активной нагрузке убыв., затем по complexity.
+        usort($result, fn ($a, $b) => ($b['active'] <=> $a['active'])
+            ?: ($b['active_complexity'] <=> $a['active_complexity']));
+
+        return $result;
+    }
+
+    /**
+     * Назначено per менеджер за выбранный период (sparkline + numerical sum).
+     * **Зависит от sparklineMode** (today / yesterday / custom).
+     *
+     * Источник — `request_assignments` (audit). Считаем число событий
+     * назначения В ОКНЕ + sparkline-точки по дням. Дополнительно:
+     * сколько из них через info@ shared ящик за тот же период.
+     *
+     * @return array<int, array{name:string, email:string, assigned:int,
+     *     from_info_period:int, points:array<int,int>}>
+     */
+    #[Computed]
+    public function managersAssignedInPeriod(): array
+    {
+        if (! $this->isPrivileged) {
+            return [];
+        }
+        $managers = User::active()->role(RoleEnum::requestHandlerRoles())->get();
+        if ($managers->isEmpty()) {
+            return [];
+        }
+
+        [$startMsk, $days] = $this->sparklineWindow();
+        // Граница ВЕРХНЯЯ — start + days (exclusive). Для today/yesterday
+        // отрезает «всё что после конца окна», иначе вчерашний sparkline
+        // будет ловить и сегодняшние назначения.
+        $endMsk = $startMsk->addDays($days);
+
+        $rows = DB::table('request_assignments')
+            ->whereIn('user_id', $managers->pluck('id'))
+            ->whereBetween('assigned_at', [$startMsk->utc(), $endMsk->utc()])
+            ->selectRaw("
+                user_id,
+                DATE(assigned_at AT TIME ZONE 'Europe/Moscow') AS day,
+                COUNT(*) AS c
+            ")
+            ->groupBy('user_id', 'day')
+            ->get();
+
+        $byUser = [];
+        foreach ($rows as $r) {
+            $byUser[(int) $r->user_id][(string) $r->day] = (int) $r->c;
+        }
+
+        // info@ через тот же window: связываем request_assignment.request_id
+        // → requests.email_message_id → email_messages.mailbox_id.
+        $infoMailboxId = \App\Models\Mailbox::query()
+            ->whereRaw('LOWER(email) = ?', ['info@myzip.ru'])
+            ->value('id');
+
+        $fromInfoPeriod = collect();
+        if ($infoMailboxId !== null) {
+            $fromInfoPeriod = DB::table('request_assignments as ra')
+                ->join('requests as r', 'r.id', '=', 'ra.request_id')
+                ->join('email_messages as em', 'em.id', '=', 'r.email_message_id')
+                ->whereIn('ra.user_id', $managers->pluck('id'))
+                ->whereBetween('ra.assigned_at', [$startMsk->utc(), $endMsk->utc()])
+                ->where('em.mailbox_id', $infoMailboxId)
+                ->groupBy('ra.user_id')
+                ->selectRaw('ra.user_id, COUNT(*) AS c')
+                ->get()
+                ->keyBy('user_id');
+        }
+
+        $result = [];
+        foreach ($managers as $u) {
             $points = [];
             $sum = 0;
             for ($i = 0; $i < $days; $i++) {
@@ -869,24 +928,17 @@ class Index extends Component
                 $points[] = $v;
                 $sum += $v;
             }
-            $row = $currentLoad->get($u->id);
             $result[] = [
                 'name' => $u->name,
                 'email' => $u->email,
-                'total' => (int) ($row->c ?? 0),
-                'sum14' => $sum,
+                'assigned' => $sum,
+                'from_info_period' => (int) ($fromInfoPeriod->get($u->id)?->c ?? 0),
                 'points' => $points,
-                'active_complexity' => (int) ($row->active_complexity ?? 0),
-                'hard_count' => (int) ($row->hard_count ?? 0),
-                // Общее всего (закрытые включительно), и сколько из них
-                // пришло через info@ — справочный signal распределения.
-                'total_all_time' => (int) ($totalAllTime->get($u->id)?->c ?? 0),
-                'from_info' => (int) ($totalFromInfo->get($u->id)?->c ?? 0),
             ];
         }
 
-        // Сортируем по текущей нагрузке убыв., затем по sum14.
-        usort($result, fn ($a, $b) => ($b['total'] <=> $a['total']) ?: ($b['sum14'] <=> $a['sum14']));
+        // Сортировка: по числу назначений убыв.
+        usort($result, fn ($a, $b) => $b['assigned'] <=> $a['assigned']);
 
         return $result;
     }

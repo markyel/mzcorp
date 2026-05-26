@@ -390,28 +390,85 @@
                     </div>
                 </div>
 
-                {{-- ───────── Менеджеры: текущая нагрузка + N-дн sparkline ─────────
-                     sum14 = сколько назначено за выбранный sparkline-период
-                     (request_assignments). Период 7/14/30/60 переключается чипами.
-                     points → inline SVG polyline (no Chart.js).
-                     Sparkline даёт визуальный паттерн: ровный поток, спайки, тишина. --}}
+                {{-- ───────── Менеджеры: 2 карточки — снимок «сейчас» + поток «за период» ─────────
+                     Карточка 1 «Нагрузка сейчас» — снимок текущей нагрузки (period не имеет
+                     смысла, цифры не меняются от выбора режима).
+                     Карточка 2 «Назначено за период» — суммы + sparkline по выбранному окну
+                     (сегодня / вчера / произвольный диапазон). --}}
+
+                {{-- Карточка 1: Нагрузка сейчас --}}
+                @php $currentLoad = $this->managersCurrentLoad; @endphp
+                <div class="ds-card">
+                    <div class="ds-card-header">
+                        <h3>Менеджеры · нагрузка сейчас</h3>
+                        <span class="flex-1"></span>
+                        <span class="text-[11.5px] text-fg-3">снимок · обновляется при каждом заходе</span>
+                    </div>
+                    <div class="ds-card-body p-0">
+                        @if(empty($currentLoad))
+                            <div class="px-[18px] py-4 text-sm text-fg-3">В системе нет пользователей с ролью «менеджер».</div>
+                        @else
+                            <table class="w-full text-[12.5px] border-collapse">
+                                <thead>
+                                    <tr class="text-[10.5px] uppercase tracking-wider font-semibold text-fg-3 border-b border-border-subtle">
+                                        <th class="text-left px-[18px] py-2">Менеджер</th>
+                                        <th class="text-right px-2 py-2" title="Открытых заявок прямо сейчас">активные</th>
+                                        <th class="text-right px-2 py-2" title="Суммарный complexity_score активных">слжн</th>
+                                        <th class="text-right px-2 py-2" title="Hard + very_hard в работе">hard</th>
+                                        <th class="text-right px-2 py-2" title="Всего заявок за всё время (включая закрытые)">всего ист.</th>
+                                        <th class="text-right px-[18px] py-2" title="Сколько из «всего» пришло через info@myzip.ru">info@</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($currentLoad as $m)
+                                        <tr class="border-b border-border-subtle last:border-b-0">
+                                            <td class="px-[18px] py-2">
+                                                <div class="text-fg-1">{{ $m['name'] }}</div>
+                                                <div class="text-[11.5px] text-fg-3 mono">{{ $m['email'] }}</div>
+                                            </td>
+                                            <td class="px-2 py-2 text-right mono tnum {{ $m['active'] > 0 ? 'text-fg-1 font-semibold' : 'text-fg-3' }}">{{ $m['active'] }}</td>
+                                            <td class="px-2 py-2 text-right mono tnum {{ $m['active_complexity'] > 0 ? 'text-fg-1' : 'text-fg-3' }}">{{ $m['active_complexity'] }}</td>
+                                            <td class="px-2 py-2 text-right mono tnum {{ $m['hard_count'] > 0 ? 'text-amber-700 font-semibold' : 'text-fg-3' }}">{{ $m['hard_count'] }}</td>
+                                            <td class="px-2 py-2 text-right mono tnum {{ $m['total_all_time'] > 0 ? 'text-fg-2' : 'text-fg-3' }}">{{ $m['total_all_time'] }}</td>
+                                            <td class="px-[18px] py-2 text-right mono tnum {{ $m['from_info_total'] > 0 ? 'text-fg-3' : 'text-fg-4' }}">{{ $m['from_info_total'] }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        @endif
+                    </div>
+                </div>
+
+                {{-- Карточка 2: Назначено за период (с период-чипами) --}}
                 @php
-                    $sparks = $this->managerSparklines;
-                    // Общий max по всем менеджерам для согласованного масштаба
-                    // — иначе у самого нагруженного «потолок», у новичка тоже
-                    // «потолок», и спайки выглядят одинаково высокими.
+                    $assigned = $this->managersAssignedInPeriod;
+                    $sparkLabel = $this->sparklineLabel;
+                    $sparkMode = $this->sparklineMode;
+                    $sparkPickerOpen = $this->sparklinePickerOpen;
+                    $sparkIsCustom = $sparkMode === 'custom';
+                    // Общий max sparkline для согласованного scale между менеджерами.
                     $sparkMax = 0;
-                    foreach ($sparks as $row) {
+                    foreach ($assigned as $row) {
                         foreach ($row['points'] as $p) {
                             if ($p > $sparkMax) $sparkMax = $p;
                         }
                     }
                     $sparkMax = max(1, $sparkMax);
-                    // Renderer: 14 точек, ширина 84px, высота 18px, padding 1px.
                     $renderSpark = function (array $points) use ($sparkMax): string {
                         $W = 84; $H = 18; $pad = 1;
                         $n = count($points);
-                        if ($n < 2) return '';
+                        if ($n < 1) return '';
+                        if ($n === 1) {
+                            // Одна точка — рисуем bullet по центру, плюс «base line» снизу
+                            // чтобы было ясно, что это значение, а не пустота.
+                            $v = $points[0];
+                            $cx = $W / 2;
+                            $cy = $H - $pad - ($v / $sparkMax) * ($H - 2 * $pad);
+                            return '<svg width="' . $W . '" height="' . $H . '" style="display:block">'
+                                . '<line x1="' . ($pad + 8) . '" y1="' . ($H - $pad) . '" x2="' . ($W - $pad - 8) . '" y2="' . ($H - $pad) . '" stroke="#cbd5e1" stroke-width="0.5"/>'
+                                . '<circle cx="' . round($cx, 1) . '" cy="' . round($cy, 1) . '" r="2.5" fill="#0284c7"/>'
+                                . '</svg>';
+                        }
                         $stepX = ($W - 2 * $pad) / ($n - 1);
                         $coords = [];
                         foreach ($points as $i => $v) {
@@ -420,7 +477,6 @@
                             $coords[] = round($x, 1) . ',' . round($y, 1);
                         }
                         $line = implode(' ', $coords);
-                        // last point — bullet (где мы сейчас)
                         $lastX = $pad + ($n - 1) * $stepX;
                         $lastY = $H - $pad - (end($points) / $sparkMax) * ($H - 2 * $pad);
                         return '<svg width="' . $W . '" height="' . $H . '" style="display:block">'
@@ -429,15 +485,9 @@
                             . '</svg>';
                     };
                 @endphp
-                @php
-                    $sparkLabel = $this->sparklineLabel;
-                    $sparkMode = $this->sparklineMode;
-                    $sparkPickerOpen = $this->sparklinePickerOpen;
-                    $sparkIsCustom = $sparkMode === 'custom';
-                @endphp
                 <div class="ds-card">
                     <div class="ds-card-header">
-                        <h3>Менеджеры · нагрузка · {{ $sparkLabel }}</h3>
+                        <h3>Менеджеры · назначено · {{ $sparkLabel }}</h3>
                         <span class="flex-1"></span>
                         <span class="flex items-center gap-1.5 text-[11.5px]">
                             <span class="text-fg-3 mr-1">период:</span>
@@ -485,35 +535,27 @@
                         </div>
                     @endif
                     <div class="ds-card-body p-0">
-                        @if(empty($sparks))
-                            <div class="px-[18px] py-4 text-sm text-fg-3">В системе нет пользователей с ролью «менеджер».</div>
+                        @if(empty($assigned))
+                            <div class="px-[18px] py-4 text-sm text-fg-3">Нет данных за выбранный период.</div>
                         @else
                             <table class="w-full text-[12.5px] border-collapse">
                                 <thead>
                                     <tr class="text-[10.5px] uppercase tracking-wider font-semibold text-fg-3 border-b border-border-subtle">
                                         <th class="text-left px-[18px] py-2">Менеджер</th>
-                                        <th class="text-right px-2 py-2" title="Открытых заявок прямо сейчас">сейчас</th>
-                                        <th class="text-right px-2 py-2" title="Всего заявок за всё время (включая закрытые)">всего</th>
-                                        <th class="text-right px-2 py-2" title="Сколько из «всего» пришло через info@myzip.ru">info@</th>
-                                        <th class="text-right px-2 py-2" title="Суммарный complexity_score активных заявок">слжн</th>
-                                        <th class="text-right px-2 py-2" title="Hard + very_hard заявок в работе">hard</th>
-                                        <th class="text-right px-2 py-2" title="Назначений за выбранный период ({{ $sparkLabel }})">за период</th>
+                                        <th class="text-right px-2 py-2" title="Назначений за выбранный период ({{ $sparkLabel }})">назначено</th>
+                                        <th class="text-right px-2 py-2" title="Из них через info@myzip.ru в тот же период">info@</th>
                                         <th class="text-left px-[18px] py-2">поток</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach($sparks as $m)
+                                    @foreach($assigned as $m)
                                         <tr class="border-b border-border-subtle last:border-b-0">
                                             <td class="px-[18px] py-2">
                                                 <div class="text-fg-1">{{ $m['name'] }}</div>
                                                 <div class="text-[11.5px] text-fg-3 mono">{{ $m['email'] }}</div>
                                             </td>
-                                            <td class="px-2 py-2 text-right mono tnum {{ $m['total'] > 0 ? 'text-fg-1 font-semibold' : 'text-fg-3' }}">{{ $m['total'] }}</td>
-                                            <td class="px-2 py-2 text-right mono tnum {{ ($m['total_all_time'] ?? 0) > 0 ? 'text-fg-2' : 'text-fg-3' }}">{{ $m['total_all_time'] ?? 0 }}</td>
-                                            <td class="px-2 py-2 text-right mono tnum {{ ($m['from_info'] ?? 0) > 0 ? 'text-fg-3' : 'text-fg-4' }}" title="Из них через info@myzip.ru">{{ $m['from_info'] ?? 0 }}</td>
-                                            <td class="px-2 py-2 text-right mono tnum {{ ($m['active_complexity'] ?? 0) > 0 ? 'text-fg-1' : 'text-fg-3' }}">{{ $m['active_complexity'] ?? 0 }}</td>
-                                            <td class="px-2 py-2 text-right mono tnum {{ ($m['hard_count'] ?? 0) > 0 ? 'text-amber-700 font-semibold' : 'text-fg-3' }}">{{ $m['hard_count'] ?? 0 }}</td>
-                                            <td class="px-2 py-2 text-right mono tnum {{ $m['sum14'] > 0 ? 'text-fg-2' : 'text-fg-3' }}">{{ $m['sum14'] }}</td>
+                                            <td class="px-2 py-2 text-right mono tnum {{ $m['assigned'] > 0 ? 'text-fg-1 font-semibold' : 'text-fg-3' }}">{{ $m['assigned'] }}</td>
+                                            <td class="px-2 py-2 text-right mono tnum {{ $m['from_info_period'] > 0 ? 'text-fg-2' : 'text-fg-3' }}">{{ $m['from_info_period'] }}</td>
                                             <td class="px-[18px] py-2">{!! $renderSpark($m['points']) !!}</td>
                                         </tr>
                                     @endforeach
