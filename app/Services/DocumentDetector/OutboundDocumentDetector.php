@@ -75,6 +75,52 @@ class OutboundDocumentDetector
     ];
 
     /**
+     * Менеджер отказывает «не наш профиль / не наша номенклатура».
+     * Точные короткие фразы. Сравнение по str_contains после ё→е fold.
+     * Если рядом есть DECLINE_FOLLOWUP_KEYWORDS — это не отказ, это
+     * clarification (продолжение работы).
+     */
+    private const DECLINE_KEYWORDS = [
+        'не наша номенклатура',
+        'не наш профиль',
+        'не наша тема',
+        'не наш ассортимент',
+        'не работаем с этой',
+        'не работаем с этим',
+        'мы не работаем с',
+        'не занимаемся',
+        'не делаем',
+        'не торгуем',
+        'не поставляем',
+        'не наше направление',
+        'этого у нас нет',
+        'не наш сегмент',
+        'ничем не можем помочь',
+        'ничем помочь не можем',
+    ];
+
+    /**
+     * Если в письме рядом с decline-фразой есть один из этих маркеров —
+     * это НЕ отказ (менеджер просит дополнительную информацию или предлагает
+     * альтернативу). Возвращаем clarification / other вместо declined.
+     */
+    private const DECLINE_FOLLOWUP_KEYWORDS = [
+        'но я',
+        'но мы',
+        'но могу',
+        'но можем',
+        'попробую',
+        'попробуем',
+        'пришлите',
+        'можете прислать',
+        'уточните',
+        'фото',
+        'альтернатив',
+        'предложить аналог',
+        'попробую найти',
+    ];
+
+    /**
      * Filename-паттерны КП. Срабатывают на pdf/xlsx/docx.
      */
     private const QUOTATION_FILENAME_RE = [
@@ -125,6 +171,10 @@ class OutboundDocumentDetector
         $hasQuotationKeyword = $this->matchAnyKeyword($text, self::QUOTATION_KEYWORDS);
         $hasInvoiceKeyword = $this->matchAnyKeyword($text, self::INVOICE_KEYWORDS);
         $hasClarificationKeyword = $this->matchAnyKeyword($text, self::CLARIFICATION_KEYWORDS);
+        $hasDeclineKeyword = $this->matchAnyKeyword($text, self::DECLINE_KEYWORDS);
+        $hasDeclineFollowup = $hasDeclineKeyword !== null
+            ? $this->matchAnyKeyword($text, self::DECLINE_FOLLOWUP_KEYWORDS)
+            : null;
 
         if ($hasQuotationKeyword) {
             $signals['quotation_keyword'] = $hasQuotationKeyword;
@@ -135,8 +185,14 @@ class OutboundDocumentDetector
         if ($hasClarificationKeyword) {
             $signals['clarification_keyword'] = $hasClarificationKeyword;
         }
+        if ($hasDeclineKeyword) {
+            $signals['decline_keyword'] = $hasDeclineKeyword;
+        }
+        if ($hasDeclineFollowup) {
+            $signals['decline_followup'] = $hasDeclineFollowup;
+        }
 
-        // Шаг 3 — финальное решение. Приоритет invoice > quotation > clarification.
+        // Шаг 3 — финальное решение. Приоритет invoice > quotation > declined > clarification.
         $hasInvoiceFilename = ! empty($attachmentMatches['invoice']);
         $hasQuotationFilename = ! empty($attachmentMatches['quotation']);
 
@@ -160,6 +216,30 @@ class OutboundDocumentDetector
             ];
         }
 
+        // Decline — менеджер сказал «не наш профиль / не наша номенклатура»
+        // и нет follow-up'а (просьбы прислать фото и т.п.). Confidence
+        // ниже filename-сигналов (0.75), но достаточно для suggestion.
+        // Если auto-mode выключен в Settings — менеджер увидит плашку
+        // и одним кликом закроет заявку. Phrase + body без followup +
+        // отсутствие relevant-вложений = чистый decline.
+        if ($hasDeclineKeyword !== null
+            && $hasDeclineFollowup === null
+            && ! $hasInvoiceFilename
+            && ! $hasQuotationFilename
+        ) {
+            // Cited_phrase: вырезаем строку body содержащую keyword
+            // (≤200 симв) для closed_lost_quote в карточке.
+            $citedPhrase = $this->extractContainingLine($message, $hasDeclineKeyword);
+
+            return [
+                'type' => DetectorType::OutboundDeclined,
+                'confidence' => 0.85,
+                'signals' => $signals,
+                'suggested_closed_lost_reason' => 'off_topic',
+                'cited_phrase' => $citedPhrase,
+            ];
+        }
+
         // Clarification — только если есть body-keyword И нет relevant-вложений.
         // КП/счёт с приложением обычно явно подписаны; «уточните…» без файла —
         // запрос менеджера.
@@ -174,6 +254,27 @@ class OutboundDocumentDetector
             ];
         }
 
+        return null;
+    }
+
+    /**
+     * Вырезать строку body содержащую keyword — для closed_lost_quote.
+     * Возвращает trim'нутую строку до 200 символов.
+     */
+    private function extractContainingLine(EmailMessage $message, string $keyword): ?string
+    {
+        $body = (string) ($message->body_plain ?? '');
+        if ($body === '') {
+            return null;
+        }
+        $needle = mb_strtolower(str_replace('ё', 'е', $keyword));
+        foreach (preg_split('/\r?\n/', $body) as $line) {
+            $hay = mb_strtolower(str_replace('ё', 'е', $line));
+            if (str_contains($hay, $needle)) {
+                $line = trim($line);
+                return $line !== '' ? mb_substr($line, 0, 200) : null;
+            }
+        }
         return null;
     }
 

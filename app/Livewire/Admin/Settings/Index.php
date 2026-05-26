@@ -248,6 +248,13 @@ class Index extends Component
                 'type' => AppSetting::TYPE_BOOL,
                 'default' => false,
             ],
+            'detector.auto_mode.outbound_declined' => [
+                'group' => 'DocumentDetector · auto-mode',
+                'label' => 'Auto: Менеджер отказал «не наш профиль» → closed_lost (off_topic)',
+                'help' => 'Опасно — закрывает заявку с reason=off_topic при коротком отказе менеджера («не наша номенклатура», «не наш профиль» и т.п.). Detector проверяет анти-followup: если рядом есть «но я попробую», «пришлите фото», «предложить аналог» — НЕ срабатывает (это clarification). Включать после проверки precision на исторических кейсах.',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
             'detector.auto_mode.inbound_under_review' => [
                 'group' => 'DocumentDetector · auto-mode',
                 'label' => 'Auto: Клиент «на согласовании» → under_review',

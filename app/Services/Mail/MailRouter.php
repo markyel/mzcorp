@@ -92,12 +92,22 @@ class MailRouter
                         }
                     }
                     if ($detected !== null) {
+                        // Для outbound_declined пробрасываем suggested_closed_lost_reason
+                        // и cited_phrase в payload — AiDecisionService::apply
+                        // прочитает их при ClosedLost-переходе (reason + цитата).
+                        $suggestionPayload = ['signals' => $detected['signals']];
+                        if (isset($detected['suggested_closed_lost_reason'])) {
+                            $suggestionPayload['suggested_closed_lost_reason'] = $detected['suggested_closed_lost_reason'];
+                        }
+                        if (isset($detected['cited_phrase']) && $detected['cited_phrase'] !== null) {
+                            $suggestionPayload['cited_phrase'] = $detected['cited_phrase'];
+                        }
                         $this->aiDecisions->recordSuggestion(
                             $detected['type'],
                             $linkedRequest,
                             $message,
                             (float) $detected['confidence'],
-                            ['signals' => $detected['signals']],
+                            $suggestionPayload,
                         );
 
                         // Парсер исходящего КП/счёта — distill позиций+цен из PDF/XLSX/DOCX

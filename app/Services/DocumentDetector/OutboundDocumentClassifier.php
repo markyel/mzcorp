@@ -108,7 +108,7 @@ class OutboundDocumentClassifier
             'usage' => $response['usage'] ?? [],
         ]);
 
-        return [
+        $result = [
             'type' => $type,
             'confidence' => $confidence,
             'signals' => [
@@ -116,6 +116,24 @@ class OutboundDocumentClassifier
                 'reasoning' => $reasoning,
             ],
         ];
+
+        // Для type=declined — пробрасываем suggested_closed_lost_reason
+        // и cited_phrase на верхний уровень result'а, чтобы MailRouter
+        // положил их в payload жадно (AiDecisionService::apply читает
+        // payload[suggested_closed_lost_reason] / [cited_phrase] для
+        // ClosedLost-перехода).
+        if ($type === DetectorType::OutboundDeclined) {
+            $reason = isset($parsed['suggested_closed_lost_reason'])
+                && is_string($parsed['suggested_closed_lost_reason'])
+                ? trim($parsed['suggested_closed_lost_reason'])
+                : 'off_topic';
+            $result['suggested_closed_lost_reason'] = $reason !== '' ? $reason : 'off_topic';
+            if (isset($parsed['cited_phrase']) && is_string($parsed['cited_phrase'])) {
+                $result['cited_phrase'] = mb_substr(trim($parsed['cited_phrase']), 0, 500);
+            }
+        }
+
+        return $result;
     }
 
     private function mapType(string $raw): ?DetectorType
@@ -124,6 +142,7 @@ class OutboundDocumentClassifier
             'quotation' => DetectorType::OutboundQuotationFull,
             'invoice' => DetectorType::OutboundInvoice,
             'clarification' => DetectorType::OutboundClarification,
+            'declined' => DetectorType::OutboundDeclined,
             default => null, // other, unknown
         };
     }

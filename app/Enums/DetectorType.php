@@ -16,6 +16,7 @@ enum DetectorType: string
     case OutboundQuotationPartial = 'outbound_quotation_partial';
     case OutboundInvoice = 'outbound_invoice';
     case OutboundClarification = 'outbound_clarification';
+    case OutboundDeclined = 'outbound_declined';
 
     // ─── inbound: ответ клиента после КП ─────────────────
     case InboundUnderReview = 'inbound_under_review';
@@ -32,6 +33,7 @@ enum DetectorType: string
             self::OutboundQuotationPartial => 'Отправлено частичное КП',
             self::OutboundInvoice => 'Отправлен счёт',
             self::OutboundClarification => 'Запрос уточнения клиенту',
+            self::OutboundDeclined => 'Менеджер отказал: не наш профиль',
             self::InboundUnderReview => 'Клиент: на согласовании',
             self::InboundPostponed => 'Клиент: отложил',
             self::InboundInvoiceRequest => 'Клиент: запросил счёт',
@@ -63,6 +65,7 @@ enum DetectorType: string
             self::OutboundQuotationPartial => RequestStatus::Quoted, // partial-флаг — Phase позже
             self::OutboundInvoice => RequestStatus::Invoiced,
             self::OutboundClarification => RequestStatus::AwaitingClientClarification,
+            self::OutboundDeclined => RequestStatus::ClosedLost,
             self::InboundUnderReview => RequestStatus::UnderReview,
             self::InboundPostponed => RequestStatus::PostponedUntil,
             self::InboundInvoiceRequest => RequestStatus::AwaitingInvoice,
