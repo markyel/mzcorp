@@ -8,21 +8,66 @@
 
 <div class="space-y-4">
 
-    {{-- ───────── Period switcher (для funnel / heatmap / sparklines) ─────────
-         Сохраняется в URL ?period=N через #[Url]. --}}
+    {{-- ───────── Period switcher (для funnel / heatmap) ─────────
+         Сохраняется в URL ?period=N (preset) или ?from=Y-m-d&to=Y-m-d (custom). --}}
     @if($this->isPrivileged)
-        <div class="flex items-center gap-2 text-[12px]">
+        @php
+            $isCustom = $this->isCustomPeriod;
+            $pickerOpen = $this->customPickerOpen;
+        @endphp
+        <div class="flex flex-wrap items-center gap-2 text-[12px]">
             <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">Период:</span>
-            @foreach([7 => '7 дн.', 30 => '30 дн.', 90 => '90 дн.'] as $d => $label)
+            @foreach([1 => '1 дн.', 7 => '7 дн.', 30 => '30 дн.', 90 => '90 дн.'] as $d => $label)
+                @php $active = ! $isCustom && $periodDays === $d; @endphp
                 <button type="button" wire:click="setPeriod({{ $d }})"
                         class="px-2.5 py-1 rounded border text-[12px] transition-colors
-                               {{ $periodDays === $d
+                               {{ $active
                                    ? 'border-sky-500 bg-sky-50 text-sky-800 font-semibold'
                                    : 'border-border bg-surface text-fg-2 hover:bg-surface-2' }}">
                     {{ $label }}
                 </button>
             @endforeach
+
+            {{-- Custom period chip — раскрывает inline picker --}}
+            <button type="button" wire:click="toggleCustomPicker"
+                    class="px-2.5 py-1 rounded border text-[12px] transition-colors
+                           {{ $isCustom
+                               ? 'border-sky-500 bg-sky-50 text-sky-800 font-semibold'
+                               : 'border-border bg-surface text-fg-2 hover:bg-surface-2' }}">
+                {{ $isCustom ? $this->periodLabel : 'период…' }}
+            </button>
+
+            @if($isCustom)
+                <button type="button" wire:click="clearCustomPeriod"
+                        class="text-[11px] text-fg-3 hover:text-fg-1 underline decoration-dotted"
+                        title="Вернуться к preset-периоду">сбросить</button>
+            @endif
         </div>
+
+        @if($pickerOpen)
+            <div class="ds-card p-3 flex flex-wrap items-end gap-2 text-[12px]">
+                <label class="flex flex-col gap-1">
+                    <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">С</span>
+                    <input type="date" wire:model="customFrom"
+                           class="px-2 py-1 border border-border rounded bg-surface text-fg-1 text-[12.5px] tnum"
+                           max="{{ now()->format('Y-m-d') }}">
+                </label>
+                <label class="flex flex-col gap-1">
+                    <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">По</span>
+                    <input type="date" wire:model="customTo"
+                           class="px-2 py-1 border border-border rounded bg-surface text-fg-1 text-[12.5px] tnum"
+                           max="{{ now()->format('Y-m-d') }}">
+                </label>
+                <button type="button" wire:click="applyCustomPeriod"
+                        class="px-3 py-1 rounded border border-sky-500 bg-sky-50 text-sky-800 font-semibold text-[12px] hover:bg-sky-100">
+                    Применить
+                </button>
+                <button type="button" wire:click="toggleCustomPicker"
+                        class="px-2.5 py-1 rounded border border-border bg-surface text-fg-2 hover:bg-surface-2 text-[12px]">
+                    Отмена
+                </button>
+            </div>
+        @endif
     @endif
 
     {{-- ───────── Attention strip (Phase 1.11, Foundation §5.3) ───────── --}}
@@ -112,7 +157,7 @@
         @endphp
         <div class="ds-card">
             <div class="ds-card-header">
-                <h3>Воронка · {{ $periodDays }} дн.</h3>
+                <h3>Воронка · {{ $this->periodLabel }}</h3>
                 <span class="flex-1"></span>
                 <span class="text-[11.5px] text-fg-3">
                     quote-rate
@@ -193,7 +238,7 @@
                 @endphp
                 <div class="ds-card">
                     <div class="ds-card-header">
-                        <h3>Поток заявок · {{ $periodDays }} дн.</h3>
+                        <h3>Поток заявок · {{ $this->periodLabel }}</h3>
                         <span class="flex-1"></span>
                         <span class="text-[11.5px] text-fg-3">всего <span class="mono tnum text-fg-1 font-semibold">{{ $hmTotal }}</span> · максимум <span class="mono tnum text-fg-1 font-semibold">{{ $hmMax }}</span>/час</span>
                     </div>
@@ -345,8 +390,9 @@
                     </div>
                 </div>
 
-                {{-- ───────── Менеджеры: текущая нагрузка + 14-дн sparkline ─────────
-                     sum14 = сколько назначено за последние 14 дней (request_assignments).
+                {{-- ───────── Менеджеры: текущая нагрузка + N-дн sparkline ─────────
+                     sum14 = сколько назначено за выбранный sparkline-период
+                     (request_assignments). Период 7/14/30/60 переключается чипами.
                      points → inline SVG polyline (no Chart.js).
                      Sparkline даёт визуальный паттерн: ровный поток, спайки, тишина. --}}
                 @php
@@ -383,11 +429,24 @@
                             . '</svg>';
                     };
                 @endphp
+                @php $sparkPeriod = $this->sparklinePeriodDays; @endphp
                 <div class="ds-card">
                     <div class="ds-card-header">
-                        <h3>Менеджеры · нагрузка + 14-дн поток</h3>
+                        <h3>Менеджеры · нагрузка + {{ $sparkPeriod }}-дн поток</h3>
                         <span class="flex-1"></span>
-                        <span class="text-[11.5px] text-fg-3">текущая · sparkline = назначения/день</span>
+                        <span class="flex items-center gap-1.5 text-[11.5px]">
+                            <span class="text-fg-3 mr-1">период:</span>
+                            @foreach([7, 14, 30, 60] as $d)
+                                @php $active = $sparkPeriod === $d; @endphp
+                                <button type="button" wire:click="setSparklinePeriod({{ $d }})"
+                                        class="px-1.5 py-0.5 rounded border text-[11px] transition-colors
+                                               {{ $active
+                                                   ? 'border-sky-500 bg-sky-50 text-sky-800 font-semibold'
+                                                   : 'border-border bg-surface text-fg-3 hover:bg-surface-2' }}">
+                                    {{ $d }}дн
+                                </button>
+                            @endforeach
+                        </span>
                     </div>
                     <div class="ds-card-body p-0">
                         @if(empty($sparks))
@@ -402,7 +461,7 @@
                                         <th class="text-right px-2 py-2" title="Сколько из «всего» пришло через info@myzip.ru">info@</th>
                                         <th class="text-right px-2 py-2" title="Суммарный complexity_score активных заявок">слжн</th>
                                         <th class="text-right px-2 py-2" title="Hard + very_hard заявок в работе">hard</th>
-                                        <th class="text-right px-2 py-2" title="Назначений за 14 дней">14дн</th>
+                                        <th class="text-right px-2 py-2" title="Назначений за выбранный период">{{ $sparkPeriod }}дн</th>
                                         <th class="text-left px-[18px] py-2">поток</th>
                                     </tr>
                                 </thead>

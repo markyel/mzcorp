@@ -32,26 +32,163 @@ use Livewire\Component;
 class Index extends Component
 {
     /**
-     * Период (в днях) для funnel, conversion, heatmap, sparklines.
-     * Переключается чипами 7/30/90 в шапке dashboard.
+     * Период (в днях) для funnel, conversion, heatmap.
+     * Переключается чипами 1/7/30/90 в шапке dashboard.
+     * `1` = сегодня с 00:00 МСК; 7/30/90 = `subDays(N)..now()`.
+     * Если customFrom + customTo заданы — они override'ят preset.
      */
     #[Url(as: 'period', except: 30)]
     public int $periodDays = 30;
 
+    /**
+     * Произвольный период: дата начала (Y-m-d, локально МСК).
+     * Когда оба customFrom + customTo заданы — игнорируем periodDays.
+     */
+    #[Url(as: 'from', except: '')]
+    public string $customFrom = '';
+
+    /**
+     * Произвольный период: дата окончания (Y-m-d, включительно).
+     */
+    #[Url(as: 'to', except: '')]
+    public string $customTo = '';
+
+    /**
+     * Флаг для UI: раскрыт ли date-range picker для custom-периода.
+     * Не персистится в URL (cosmetic state).
+     */
+    public bool $customPickerOpen = false;
+
     public function setPeriod(int $days): void
     {
-        if (in_array($days, [7, 30, 90], true)) {
+        if (in_array($days, [1, 7, 30, 90], true)) {
             $this->periodDays = $days;
+            // Переключение на preset очищает custom.
+            $this->customFrom = '';
+            $this->customTo = '';
+            $this->customPickerOpen = false;
         }
     }
 
+    public function toggleCustomPicker(): void
+    {
+        $this->customPickerOpen = ! $this->customPickerOpen;
+        if ($this->customPickerOpen && $this->customFrom === '' && $this->customTo === '') {
+            // Префилл: последние 14 дней, чтобы стартовать с разумного диапазона.
+            $today = CarbonImmutable::now('Europe/Moscow');
+            $this->customFrom = $today->subDays(13)->format('Y-m-d');
+            $this->customTo = $today->format('Y-m-d');
+        }
+    }
+
+    public function applyCustomPeriod(): void
+    {
+        // Защита: from <= to, оба валидны.
+        try {
+            $from = CarbonImmutable::createFromFormat('Y-m-d', $this->customFrom, 'Europe/Moscow');
+            $to = CarbonImmutable::createFromFormat('Y-m-d', $this->customTo, 'Europe/Moscow');
+            if (! $from || ! $to || $from->gt($to)) {
+                throw new \InvalidArgumentException('bad range');
+            }
+            $this->customPickerOpen = false;
+        } catch (\Throwable $e) {
+            // Не применяем — оставляем picker открытым, dashboard продолжает
+            // показывать данные по текущему periodDays.
+            $this->customFrom = '';
+            $this->customTo = '';
+        }
+    }
+
+    public function clearCustomPeriod(): void
+    {
+        $this->customFrom = '';
+        $this->customTo = '';
+        $this->customPickerOpen = false;
+    }
+
     /**
-     * Начало периода в moscow-tz (timestamps пишутся в UTC, но мы
-     * группируем по локальному календарю РОПа для heatmap/funnel).
+     * Активен ли custom-период (оба значения валидны).
+     */
+    #[Computed]
+    public function isCustomPeriod(): bool
+    {
+        return $this->customFrom !== '' && $this->customTo !== '';
+    }
+
+    /**
+     * Текст для подписи периода в заголовках виджетов («Воронка · ...»).
+     */
+    #[Computed]
+    public function periodLabel(): string
+    {
+        if ($this->isCustomPeriod) {
+            try {
+                $from = CarbonImmutable::createFromFormat('Y-m-d', $this->customFrom);
+                $to = CarbonImmutable::createFromFormat('Y-m-d', $this->customTo);
+                return $from->format('d.m') . ' – ' . $to->format('d.m.Y');
+            } catch (\Throwable) {
+                return 'произвольный';
+            }
+        }
+        return $this->periodDays === 1
+            ? 'сегодня'
+            : $this->periodDays . ' дн.';
+    }
+
+    /**
+     * Начало периода — для совместимости с старым кодом, дёрнет periodRange()[0].
      */
     private function periodStart(): CarbonImmutable
     {
-        return CarbonImmutable::now()->subDays($this->periodDays);
+        return $this->periodRange()[0];
+    }
+
+    /**
+     * Диапазон периода [from, to) для where between.
+     *  - custom: customFrom 00:00 МСК → customTo+1 00:00 МСК (включает весь день to)
+     *  - preset 1: сегодня 00:00 МСК → now (календарный «сегодня»)
+     *  - preset 7/30/90: now-N → now (rolling)
+     *
+     * @return array{0: CarbonImmutable, 1: CarbonImmutable}
+     */
+    private function periodRange(): array
+    {
+        if ($this->isCustomPeriod) {
+            try {
+                $from = CarbonImmutable::createFromFormat('Y-m-d', $this->customFrom, 'Europe/Moscow')
+                    ->startOfDay();
+                $to = CarbonImmutable::createFromFormat('Y-m-d', $this->customTo, 'Europe/Moscow')
+                    ->endOfDay();
+                return [$from, $to];
+            } catch (\Throwable) {
+                // fallthrough to preset
+            }
+        }
+        if ($this->periodDays === 1) {
+            return [
+                CarbonImmutable::now('Europe/Moscow')->startOfDay(),
+                CarbonImmutable::now('Europe/Moscow'),
+            ];
+        }
+        return [
+            CarbonImmutable::now()->subDays($this->periodDays),
+            CarbonImmutable::now(),
+        ];
+    }
+
+    /**
+     * Период (в днях) для menager sparklines — отдельный от верхнего,
+     * чтобы sparkline не сжимался до 1 точки и не размазывался на 90.
+     * Чипы 7/14/30/60.
+     */
+    #[Url(as: 'mgr_period', except: 14)]
+    public int $sparklinePeriodDays = 14;
+
+    public function setSparklinePeriod(int $days): void
+    {
+        if (in_array($days, [7, 14, 30, 60], true)) {
+            $this->sparklinePeriodDays = $days;
+        }
     }
 
     #[Computed]
@@ -442,19 +579,19 @@ class Index extends Component
             return ['received' => 0, 'quoted' => 0, 'won' => 0, 'lost' => 0,
                     'quote_rate' => null, 'conversion' => null];
         }
-        $since = $this->periodStart();
+        [$from, $to] = $this->periodRange();
 
         $received = Request::query()
-            ->where('created_at', '>=', $since)
+            ->whereBetween('created_at', [$from, $to])
             ->count();
 
         // distinct request_id — заявка могла переходить в Quoted несколько
         // раз (например, через ClientReplied → Quoted снова). Нас интересует
         // «попала ли вообще в КП за период».
-        $countByStatus = function (string $status) use ($since): int {
+        $countByStatus = function (string $status) use ($from, $to): int {
             return RequestStateChange::query()
                 ->where('to_status', $status)
-                ->where('created_at', '>=', $since)
+                ->whereBetween('created_at', [$from, $to])
                 ->distinct('request_id')
                 ->count('request_id');
         };
@@ -492,11 +629,11 @@ class Index extends Component
         if (! $this->isPrivileged) {
             return ['matrix' => [], 'max' => 0, 'total' => 0];
         }
-        $since = $this->periodStart();
+        [$from, $to] = $this->periodRange();
 
         // Postgres ISODOW: 1=Mon ... 7=Sun. Удобно для русского weekly view.
         $rows = DB::table('requests')
-            ->where('created_at', '>=', $since)
+            ->whereBetween('created_at', [$from, $to])
             ->selectRaw("
                 EXTRACT(ISODOW FROM (created_at AT TIME ZONE 'Europe/Moscow'))::int AS dow,
                 EXTRACT(HOUR    FROM (created_at AT TIME ZONE 'Europe/Moscow'))::int AS hr,
@@ -551,7 +688,7 @@ class Index extends Component
             return [];
         }
 
-        $days = 14;
+        $days = $this->sparklinePeriodDays;
         // Boundary: «сегодня по Москве» — последняя ячейка sparkline.
         $startMsk = CarbonImmutable::now('Europe/Moscow')->startOfDay()->subDays($days - 1);
 
