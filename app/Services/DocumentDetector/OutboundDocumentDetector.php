@@ -6,6 +6,7 @@ use App\Enums\DetectorType;
 use App\Enums\RequestStatus;
 use App\Models\EmailMessage;
 use App\Models\Request;
+use App\Services\Mail\EmailTextCleanerService;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -26,6 +27,11 @@ use Illuminate\Support\Facades\Log;
  */
 class OutboundDocumentDetector
 {
+    public function __construct(
+        private readonly EmailTextCleanerService $cleaner,
+    ) {
+    }
+
     /**
      * RU/EN-фразы маркеров КП в теле/теме письма.
      */
@@ -259,7 +265,9 @@ class OutboundDocumentDetector
 
     /**
      * Вырезать строку body содержащую keyword — для closed_lost_quote.
-     * Возвращает trim'нутую строку до 200 символов.
+     * Возвращает trim'нутую строку до 200 символов. Поиск идёт по уже
+     * очищенному от цитат body (чтобы не зацепить keyword из цитируемого
+     * письма клиента).
      */
     private function extractContainingLine(EmailMessage $message, string $keyword): ?string
     {
@@ -267,6 +275,7 @@ class OutboundDocumentDetector
         if ($body === '') {
             return null;
         }
+        $body = $this->cleaner->cleanInboundReferenceText($body);
         $needle = mb_strtolower(str_replace('ё', 'е', $keyword));
         foreach (preg_split('/\r?\n/', $body) as $line) {
             $hay = mb_strtolower(str_replace('ё', 'е', $line));
@@ -313,9 +322,19 @@ class OutboundDocumentDetector
 
     private function buildSearchableText(EmailMessage $message): string
     {
+        // ВАЖНО: режем quoted-часть письма ДО keyword match.
+        // Body_plain включает оригинальное письмо клиента в цитате
+        // («> Запрашиваем коммерческое предложение…»), и без очистки
+        // выходящий ответ менеджера «Не наша номенклатура» классифицировался
+        // как outbound_quotation (keyword «коммерческое предложение» из
+        // цитаты клиента). Кейс M-2026-1866.
+        $rawBody = (string) ($message->body_plain ?? '');
+        $cleanBody = $rawBody !== ''
+            ? $this->cleaner->cleanInboundReferenceText($rawBody)
+            : '';
         $parts = [
             (string) ($message->subject ?? ''),
-            (string) ($message->body_plain ?? ''),
+            $cleanBody,
         ];
         $text = mb_strtolower(implode(' ', array_filter($parts)));
         // unify ё→е для recall — пишут и так и так.
