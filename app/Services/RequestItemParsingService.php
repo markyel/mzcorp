@@ -109,6 +109,7 @@ class RequestItemParsingService
         $text = match ($ext) {
             'pdf' => $this->extractFromPdf($file),
             'docx' => $this->extractFromDocx($file),
+            'doc' => $this->extractFromDoc($file),
             'xlsx', 'xls' => $this->extractFromExcel($file),
             default => throw new \RuntimeException("Неподдерживаемый формат: {$ext}"),
         };
@@ -837,7 +838,7 @@ PROMPT;
         // split pipeline ниже — там document-extraction отдельным слоем
         // надёжнее и vision-контекст не разрывает потолок.
         $structuredAttachments = $attachments->filter(function ($a) {
-            return preg_match('/\.(pdf|docx|xlsx|xls)$/i', (string) $a->filename) === 1;
+            return preg_match('/\.(pdf|docx|xlsx|xls|doc)$/i', (string) $a->filename) === 1;
         });
         $canUseUnified = $imageAttachments->count() > 0
             && $imageAttachments->count() <= 3
@@ -2136,6 +2137,139 @@ PROMPT;
             'preview' => mb_substr($text, 0, 1500),
         ]);
         return $text;
+    }
+
+    /**
+     * Извлечь текст из legacy .doc (OLE Compound Document V2 = MS Word ≤ 2003).
+     *
+     * Pipeline:
+     *   1. `antiword -w 200` — основной путь. Хорошо справляется с табличными
+     *      перечнями позиций (форма «Запрос КП» от клиник, тендеров).
+     *   2. `catdoc` — fallback на странных кодировках / поврежденных file table.
+     *   3. RuntimeException — пусть инвокер пометит attachment не-парсимым.
+     *
+     * abiword тоже умеет .doc → .docx → text, но antiword выдаёт чище
+     * (специализирован под .doc), плюс быстрее. PhpWord не поддерживает
+     * binary .doc — только .docx (zip XML).
+     */
+    private function extractFromDoc(UploadedFile $file): string
+    {
+        try {
+            $text = $this->antiwordDocToText($file);
+            if ($text !== null && mb_strlen(trim($text)) >= 20) {
+                Log::info('DOC extracted via antiword', [
+                    'file' => $file->getClientOriginalName(),
+                    'chars' => mb_strlen($text),
+                    'preview' => mb_substr($text, 0, 1500),
+                ]);
+                return $text;
+            }
+            Log::info('DOC antiword empty, falling back to catdoc', [
+                'file' => $file->getClientOriginalName(),
+                'chars' => $text !== null ? mb_strlen(trim($text)) : 'null',
+            ]);
+        } catch (\Throwable $e) {
+            Log::info('DOC antiword failed, falling back to catdoc', [
+                'file' => $file->getClientOriginalName(),
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        try {
+            $text = $this->catdocDocToText($file);
+            if ($text !== null && mb_strlen(trim($text)) >= 20) {
+                Log::info('DOC extracted via catdoc fallback', [
+                    'file' => $file->getClientOriginalName(),
+                    'chars' => mb_strlen($text),
+                    'preview' => mb_substr($text, 0, 1500),
+                ]);
+                return $text;
+            }
+        } catch (\Throwable $e) {
+            Log::info('DOC catdoc failed', [
+                'file' => $file->getClientOriginalName(),
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        throw new \RuntimeException('Не удалось извлечь текст из .doc файла (antiword + catdoc)');
+    }
+
+    /**
+     * antiword: legacy .doc → plain UTF-8 text. `-w 200` — широкие колонки,
+     * чтобы табличные строки не переносились (qty остаётся в одной строке
+     * с описанием для GPT-парсинга).
+     */
+    private function antiwordDocToText(UploadedFile $file): ?string
+    {
+        if (!function_exists('exec')
+            || in_array('exec', array_map('trim', explode(',', ini_get('disable_functions'))))) {
+            return null;
+        }
+
+        $antiword = $this->findBinary('antiword', ['/usr/bin/antiword', '/usr/local/bin/antiword']);
+        if (!$antiword) {
+            return null;
+        }
+
+        // ANTIWORDHOME иногда требуется для маппингов; на Ubuntu обычно
+        // подхватывает дефолтный /usr/share/antiword автоматически.
+        $cmd = sprintf(
+            '%s -t -w 200 %s 2>&1',
+            escapeshellcmd($antiword),
+            escapeshellarg($file->getRealPath()),
+        );
+        $out = [];
+        $exit = -1;
+        exec($cmd, $out, $exit);
+
+        if ($exit !== 0) {
+            Log::info('antiwordDocToText: non-zero exit', [
+                'exit' => $exit,
+                'stdout_tail' => implode("\n", array_slice($out, -5)),
+            ]);
+            return null;
+        }
+
+        return $this->cleanText(implode("\n", $out));
+    }
+
+    /**
+     * catdoc: альтернативный extractor для legacy .doc. Используется если
+     * antiword не справился (поврежденный file allocation table и т.п.).
+     */
+    private function catdocDocToText(UploadedFile $file): ?string
+    {
+        if (!function_exists('exec')
+            || in_array('exec', array_map('trim', explode(',', ini_get('disable_functions'))))) {
+            return null;
+        }
+
+        $catdoc = $this->findBinary('catdoc', ['/usr/bin/catdoc', '/usr/local/bin/catdoc']);
+        if (!$catdoc) {
+            return null;
+        }
+
+        // -d utf-8 — целевая кодировка вывода (catdoc auto-detects source).
+        // -w — не переносить длинные строки (qty в одной строке с описанием).
+        $cmd = sprintf(
+            '%s -d utf-8 -w %s 2>&1',
+            escapeshellcmd($catdoc),
+            escapeshellarg($file->getRealPath()),
+        );
+        $out = [];
+        $exit = -1;
+        exec($cmd, $out, $exit);
+
+        if ($exit !== 0) {
+            Log::info('catdocDocToText: non-zero exit', [
+                'exit' => $exit,
+                'stdout_tail' => implode("\n", array_slice($out, -5)),
+            ]);
+            return null;
+        }
+
+        return $this->cleanText(implode("\n", $out));
     }
 
     /**
