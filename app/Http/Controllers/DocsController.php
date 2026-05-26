@@ -4,9 +4,23 @@ namespace App\Http\Controllers;
 
 use App\Services\Docs\DocsService;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response as SfResponse;
 
 class DocsController extends Controller
 {
+    /**
+     * Карта дружелюбных имён → файлы мокапов в design/ui_kits/crm/.
+     * Используется в `preview()` для встраивания через iframe в гайды.
+     */
+    private const PREVIEW_MAP = [
+        'pool' => '01-pool',
+        'dashboard' => '02-dashboard',
+        'requests' => '03-requests',
+        'request-detail' => '04-request-detail',
+        'request-positions' => '04b-request-positions',
+        'request-answered' => '04c-request-answered',
+    ];
+
     public function __construct(private readonly DocsService $docs)
     {
     }
@@ -48,6 +62,30 @@ class DocsController extends Controller
             'sections' => $this->docs->visibleSections($user),
             'page' => $page,
             'html' => $this->docs->renderHtml($page),
+        ]);
+    }
+
+    /**
+     * Отдать HTML-мокап UI-экрана из `design/ui_kits/crm/` для встраивания
+     * в гайды через iframe. Доступ — только авторизованным (route защищён
+     * `auth` middleware). Контент-Type text/html, inline; X-Frame-Options
+     * SAMEORIGIN для безопасности iframe'ов на нашем же домене.
+     */
+    public function preview(string $name): SfResponse
+    {
+        if (! isset(self::PREVIEW_MAP[$name])) {
+            abort(404);
+        }
+        $file = self::PREVIEW_MAP[$name];
+        $path = base_path("design/ui_kits/crm/{$file}.html");
+        if (! file_exists($path) || ! is_readable($path)) {
+            abort(404);
+        }
+
+        return response()->file($path, [
+            'Content-Type' => 'text/html; charset=utf-8',
+            'X-Frame-Options' => 'SAMEORIGIN',
+            'Cache-Control' => 'private, max-age=300',
         ]);
     }
 

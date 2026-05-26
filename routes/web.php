@@ -157,6 +157,12 @@ Route::middleware('auth')->group(function () {
     // Доступ к разделам фильтруется DocsService по ролям пользователя; admin видит всё.
     Route::prefix('docs')->name('docs.')->group(function () {
         Route::get('/', [DocsController::class, 'index'])->name('index');
+        // Preview UI-мокапы из design/ui_kits/crm/ — для iframe-вставок
+        // в гайды. Поставлен ДО show, иначе show ловил бы /preview/{x}
+        // как section=preview/slug=x.
+        Route::get('/preview/{name}', [DocsController::class, 'preview'])
+            ->where('name', '[a-z0-9-]+')
+            ->name('preview');
         Route::get('/{section}/{slug}', [DocsController::class, 'show'])
             ->where(['section' => '[a-z_-]+', 'slug' => '[a-z0-9_-]+'])
             ->name('show');
