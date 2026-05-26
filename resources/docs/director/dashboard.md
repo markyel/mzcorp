@@ -9,7 +9,13 @@ roles: [director, head_of_sales]
 
 `/dashboard` — сводный экран. Для директора и РОПа — полная версия с командными метриками. Для менеджера — урезанная (только свои показатели + общий health).
 
-Период переключается в шапке: **7 / 30 / 90 дней**.
+Период переключается в шапке: **1 / 7 / 30 / 90 дн.** или произвольный диапазон через **«период…»**.
+
+<div class="doc-screenshot" data-label="Дашборд · общий вид">
+  <a href="/docs/screenshots/dashboard.png" target="_blank" rel="noopener">
+    <img src="/docs/screenshots/dashboard.png" alt="Дашборд" loading="lazy">
+  </a>
+</div>
 
 ## Верхний ряд KPI
 

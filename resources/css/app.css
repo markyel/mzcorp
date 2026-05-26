@@ -187,6 +187,44 @@
         background: transparent; border: 0; cursor: default;
     }
     .doc-content .doc-mini-topbar .accent { color: var(--accent); }
+    /* Screenshot-превью: реальные скрины из public/docs/screenshots/.
+       Снимаются автоматически скриптом scripts/capture-docs-screenshots.mjs
+       (puppeteer-core + Google Chrome stable на VPS).
+       Используется как:
+         <div class="doc-screenshot" data-label="Подпись">
+           <img src="/docs/screenshots/{name}.png" alt="Подпись" loading="lazy">
+         </div>
+       Для click-to-zoom стиль обёртки `<a target="_blank">` сохраняет
+       плотность layout (без zoom плагина — просто открыть в новой вкладке). */
+    .doc-content .doc-screenshot {
+        margin: 14px 0;
+        border: 1px solid var(--border);
+        border-radius: var(--r-md);
+        background: var(--bg-app);
+        overflow: hidden;
+    }
+    .doc-content .doc-screenshot::before {
+        content: attr(data-label);
+        display: block;
+        padding: 6px 12px;
+        font: 600 10.5px/1.2 var(--font-sans);
+        text-transform: uppercase; letter-spacing: 0.05em;
+        color: var(--fg-3);
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border-subtle);
+    }
+    .doc-content .doc-screenshot img,
+    .doc-content .doc-screenshot a img {
+        display: block;
+        width: 100%;
+        height: auto;
+        background: var(--bg-surface);
+    }
+    .doc-content .doc-screenshot a {
+        display: block;
+        cursor: zoom-in;
+    }
+
     /* Iframe-превью UI-экранов из design/ui_kits/crm/.
        Маршрут /docs/preview/{name} отдаёт HTML-мокап целиком (designed
        for 1280px viewport). Чтобы мокап не схлопывался в мобильную

@@ -90,6 +90,12 @@ roles: [manager, head_of_sales]
 
 **Система:** в фоне продолжает резолвить KB и подтягивать каталог по новым данным.
 
+<div class="doc-screenshot" data-label="Вкладка «Позиции» · разобранный список">
+  <a href="/docs/screenshots/request-positions.png" target="_blank" rel="noopener">
+    <img src="/docs/screenshots/request-positions.png" alt="Вкладка Позиции" loading="lazy">
+  </a>
+</div>
+
 ### Шаг 3. Уточнили у клиента (если позиций «🟡» или «🔴»)
 
 Не пишите клиенту вручную каждый раз — система собирает вопросы по всем позициям в **одно общее письмо**.
