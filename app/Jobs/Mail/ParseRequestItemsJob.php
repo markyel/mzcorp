@@ -190,6 +190,19 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                 }
             }
 
+            // Empty-items fallback (2026-05-26): inheritance candidate
+            // отсутствует, парсер вернул []. Для personal mailbox — Level 0
+            // sticky direct_mailbox автоматически назначит owner ящика
+            // (типичный кейс: давний клиент пишет менеджеру лично «Илья,
+            // обнови КП №NNN», парсеру нечего извлечь). Без этого Request
+            // висит pending без assignee и не виден менеджеру в пуле
+            // (Pending скрыт от menager UI). Для shared mailbox autoAssign
+            // отработает sticky-по-client_email или round-robin. Поза
+            // позиций — менеджер добавит руками после открытия.
+            if ($message->related_request_id && ! $this->reset) {
+                $this->assignIfStuckPending($message);
+            }
+
             // Path C (2026-05-21): для reply-сообщения без структурированных
             // позиций пробуем извлечь контекстные уточнения к существующим
             // позициям («масленка на противовесе», «по плате — модель ABC»).
@@ -493,5 +506,75 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
         ]);
 
         return true;
+    }
+
+    /**
+     * Запасной assignment для empty-items pending заявок (без inheritance).
+     *
+     * Дёргается из doParse() когда парсер вернул [] И tryAdoptFromInheritanceCandidate
+     * не сработал (нет inheritance_candidate_id). Без этого Request остаётся
+     * status=pending, assigned_user_id=NULL — менеджеру не видна.
+     *
+     * Логика:
+     *   - Если уже assigned — просто двинуть status pending → assigned.
+     *   - Если нет assignee — вызвать AssignmentService::autoAssign. Level 0
+     *     sticky direct_mailbox для personal mailbox; sticky/round-robin
+     *     для shared.
+     *   - После назначения — IMAP folder routing (письмо в личный ящик),
+     *     если ящик-источник shared.
+     *
+     * Кейс M-2026-1880: Виктория Романова (romanova@liftremont.ru, давний
+     * клиент Курзаева) пишет напрямую в личный ящик: subject=«775», body=
+     * «Илья, обнови КП №352836». Парсеру нечего извлечь. Без autoAssign
+     * заявка висит pending без assignee, Курзаев в своём пуле её не видит.
+     */
+    private function assignIfStuckPending(EmailMessage $message): void
+    {
+        $request = \App\Models\Request::find($message->related_request_id);
+        if (! $request || $request->status !== \App\Enums\RequestStatus::Pending) {
+            return;
+        }
+
+        try {
+            if (! $request->assigned_user_id) {
+                $assignment = app(\App\Services\Request\AssignmentService::class);
+                $manager = $assignment->autoAssign($request);
+                if ($manager) {
+                    Log::info('ParseRequestItemsJob: empty-items pending → autoAssign', [
+                        'email_message_id' => $message->id,
+                        'request_id' => $request->id,
+                        'manager_id' => $manager->id,
+                    ]);
+                    // Routing — owner получит письмо в личный ящик.
+                    try {
+                        app(\App\Services\Mail\MailFolderRouter::class)
+                            ->routeToManager($message->fresh(), $manager);
+                    } catch (\App\Exceptions\Mail\TransientImapException $e) {
+                        \App\Jobs\Mail\RouteMailToManagerJob::dispatch($message->id, $manager->id)
+                            ->delay(now()->addSeconds(30));
+                    } catch (\Throwable $e) {
+                        Log::warning('ParseRequestItemsJob: empty-items routing failed (non-fatal)', [
+                            'email_message_id' => $message->id,
+                            'manager_id' => $manager->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            } else {
+                // Уже назначен — двинуть pending → assigned.
+                $request->update(['status' => \App\Enums\RequestStatus::Assigned]);
+                Log::info('ParseRequestItemsJob: empty-items pending → assigned (manager pre-set)', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $request->id,
+                    'manager_id' => $request->assigned_user_id,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('ParseRequestItemsJob: assignIfStuckPending failed', [
+                'email_message_id' => $message->id,
+                'request_id' => $request->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }
