@@ -80,39 +80,50 @@ class UnintendedRecipientDetector
      * Письмо похоже на BCC-рассылку клиента нескольким поставщикам.
      *
      * Два независимых сигнала:
-     *   (а) все собранные to/cc — псевдо-адреса (нет `@`, или
-     *       `undisclosed-recipients`, или `…:;`);
-     *   (б) `from_email` присутствует в to/cc (отправитель сам себе).
+     *   (а) поле `to` пусто или состоит ТОЛЬКО из псевдо-адресов
+     *       (нет `@`, или `undisclosed-recipients`, или `…:;`).
+     *       CC игнорируется — там бывают коллеги отправителя
+     *       (для info), что не делает письмо адресованным «не нам».
+     *       Кейс at@stein.ru: to=<undisclosed-recipients:;>,
+     *       cc=av@stein.ru (Виноградов — коллега Березовского).
+     *       Раньше один реальный email в CC закрывал детектор и
+     *       заявка терялась как «unintended».
+     *   (б) `from_email` присутствует в to/cc — клиент пишет себе
+     *       и в скрытую копию поставщикам. Кейс modtfil.abasov.
      */
     private function looksLikeBccBlast(EmailMessage $message): bool
     {
-        $emails = $this->collectRecipientEmails($message);
-        if ($emails === []) {
-            return false;
-        }
-
-        // (а) ни одного реального email в видимых получателях.
-        $hasRealRecipient = false;
-        foreach ($emails as $email) {
-            if (str_contains($email, '@')
-                && !str_contains($email, 'undisclosed-recipients')
-                && !str_ends_with($email, ':;')
-            ) {
-                $hasRealRecipient = true;
+        // (а) только поле `to`.
+        $toEmails = $this->emailsFromList((array) $message->to_recipients);
+        $hasRealTo = false;
+        foreach ($toEmails as $email) {
+            if ($this->isRealEmail($email)) {
+                $hasRealTo = true;
                 break;
             }
         }
-        if (!$hasRealRecipient) {
+        if (!$hasRealTo) {
             return true;
         }
 
         // (б) отправитель сам в to/cc.
+        $emails = $this->collectRecipientEmails($message);
+        if ($emails === []) {
+            return false;
+        }
         $from = mb_strtolower(trim((string) $message->from_email));
         if ($from !== '' && in_array($from, $emails, true)) {
             return true;
         }
 
         return false;
+    }
+
+    private function isRealEmail(string $email): bool
+    {
+        return str_contains($email, '@')
+            && !str_contains($email, 'undisclosed-recipients')
+            && !str_ends_with($email, ':;');
     }
 
     private function anyRecipientIsOurs(EmailMessage $message): bool
@@ -160,17 +171,27 @@ class UnintendedRecipientDetector
      */
     private function collectRecipientEmails(EmailMessage $message): array
     {
+        return array_values(array_unique(array_merge(
+            $this->emailsFromList((array) $message->to_recipients),
+            $this->emailsFromList((array) $message->cc_recipients),
+        )));
+    }
+
+    /**
+     * @param  array<int, array{email?: string, name?: string}>  $list
+     * @return array<int, string> lower-case, дедуп
+     */
+    private function emailsFromList(array $list): array
+    {
         $out = [];
-        foreach ([(array) $message->to_recipients, (array) $message->cc_recipients] as $list) {
-            foreach ($list as $entry) {
-                $email = is_array($entry) ? ($entry['email'] ?? null) : null;
-                if (! is_string($email)) {
-                    continue;
-                }
-                $email = mb_strtolower(trim($email));
-                if ($email !== '') {
-                    $out[$email] = true;
-                }
+        foreach ($list as $entry) {
+            $email = is_array($entry) ? ($entry['email'] ?? null) : null;
+            if (! is_string($email)) {
+                continue;
+            }
+            $email = mb_strtolower(trim($email));
+            if ($email !== '') {
+                $out[$email] = true;
             }
         }
 

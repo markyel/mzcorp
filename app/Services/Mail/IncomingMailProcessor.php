@@ -141,12 +141,26 @@ class IncomingMailProcessor
             $plain = $this->cleaner->htmlToText((string) $message->body_html);
         }
 
-        // M-артикул в теле — внутренний SKU MyZip, сильнейший сигнал
-        // товарной заявки. Если он есть — НЕ считаем тело пустым, даже
-        // если оно короче threshold. Кейс M-2026 (Liftway):
-        // subject=«Счёт», body=«M04990 - 1шт.» (12 симв) → guard ловил
-        // как irrelevant, а это реальная заявка на счёт по конкретному SKU.
-        if (preg_match('/\bM\d{4,}\b/u', $plain)) {
+        // Тема + тело — часть клиентов пишет всю заявку одной строкой
+        // в subject (артикул + qty), body содержит только подпись или
+        // вообще пуст. Раньше guard смотрел только в body и резал такие
+        // письма. Кейсы M-2026-1815 (MAA250AY301 1 штука), M-2026-1816
+        // (GAA737AA1 6 штук).
+        $combined = (string) $message->subject . "\n" . $plain;
+
+        // M-артикул — внутренний SKU MyZip, сильнейший сигнал
+        // товарной заявки. Кейс M-2026 (Liftway): subject=«Счёт»,
+        // body=«M04990 - 1шт.» (12 симв) — реальная заявка на счёт.
+        if (preg_match('/\bM\d{4,}\b/u', $combined)) {
+            return false;
+        }
+
+        // Артикул-подобный токен: uppercase ASCII letters + digits.
+        // Ловит KONE/OTIS-style codes (MAA250AY301, GAA737AA1,
+        // KM713857G01), стандартные подшипники (6308-2RS1 — нет, тут
+        // нет uppercase letters, OK), и пр. Cyrillic буквы не попадают
+        // (паттерн ASCII-only), русский текст не триггерит false-positive.
+        if (preg_match('/\b[A-Z]{1,4}\d{2,}[A-Z0-9]*\b/u', $combined)) {
             return false;
         }
 
