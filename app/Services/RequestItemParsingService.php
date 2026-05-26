@@ -703,11 +703,19 @@ PROMPT;
         //     вытаскивает CSS из `<style>` блока. В этом случае реальные
         //     позиции лежат в body_html (table > tr > td) и нужен
         //     htmlToText с сохранением табличной структуры.
+        //   - Или body_plain содержит «развёрнутую по столбцам» таблицу
+        //     Outlook (article\n\ndescription\n\nqty\n\n× N строк),
+        //     а body_html имеет настоящую table-структуру — тоже идём
+        //     через htmlToText. Кейс M-2026-1961.
         $plain = (string) ($message->body_plain ?? '');
         $html  = (string) ($message->body_html ?? '');
 
         $rawBody = $plain;
-        if ($this->cleaner->bodyPlainLooksBroken($plain) && trim($html) !== '') {
+        $useHtml = trim($html) !== '' && (
+            $this->cleaner->bodyPlainLooksBroken($plain)
+            || $this->cleaner->htmlHasStructuredTable($html)
+        );
+        if ($useHtml) {
             $rawBody = $this->cleaner->htmlToText($html);
         }
 

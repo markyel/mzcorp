@@ -72,6 +72,48 @@ class EmailTextCleanerService
      * В таких случаях `parseItemsFromInboundMessage` должен переключиться
      * на `htmlToText(body_html)`.
      */
+    /**
+     * Есть ли в HTML «структурная» таблица — минимум 2 строки <tr> с >=2
+     * cells (<td>/<th>) в каждой. Маркетинговые wrapper-таблицы и
+     * single-cell layout-обёртки Outlook этому условию не подходят.
+     *
+     * Используется парсером чтобы предпочитать htmlToText когда body_plain
+     * содержит уже разложенную по столбцам версию таблицы (Outlook
+     * экспортирует обычно ОБА варианта — структурный HTML + flatten-plain).
+     * Кейс M-2026-1961: body_plain — последовательные строки артикул /
+     * описание / qty с пустыми разделителями, body_html — корректная
+     * 3×2 таблица.
+     */
+    public function htmlHasStructuredTable(string $html): bool
+    {
+        if (trim($html) === '') {
+            return false;
+        }
+        if (! preg_match_all('/<table\b[^>]*>(.*?)<\/table>/is', $html, $tables)) {
+            return false;
+        }
+        foreach ($tables[1] as $tableHtml) {
+            if (! preg_match_all('/<tr\b[^>]*>(.*?)<\/tr>/is', $tableHtml, $rows)) {
+                continue;
+            }
+            if (count($rows[1]) < 2) {
+                continue;
+            }
+            // Для каждой row — посчитать число cells. Принимаем таблицу,
+            // если МИНИМУМ во всех row'ах >= 2 cells (т.е. это не одна
+            // wrap-cell на row).
+            $minCells = PHP_INT_MAX;
+            foreach ($rows[1] as $rowHtml) {
+                $count = preg_match_all('/<t[dh]\b/i', $rowHtml);
+                $minCells = min($minCells, $count);
+            }
+            if ($minCells >= 2) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public function bodyPlainLooksBroken(string $bodyPlain): bool
     {
         $trimmed = trim($bodyPlain);
@@ -112,7 +154,43 @@ class EmailTextCleanerService
 
         $text = $html;
 
-        // Табличные разделители — ДО общего strip_tags.
+        // Таблицы — ПЕРВЫМ: каждая <tr> → одна строка с pipe-разделителем
+        // между cells. Делаем regex-callback'ом ДО общего strip_tags, чтобы
+        // вложенные <p>/<div>/<br> внутри <td> не вставили \n которые порвут
+        // row на несколько строк. Кейс M-2026-1961 (Outlook table 3×2:
+        // article | description | qty — раньше выходила «article\n |
+        // \ndescription\n | \nqty\n», LLM делил по cells, появлялось 4
+        // позиции из 2 реальных).
+        $text = preg_replace_callback(
+            '/<table\b[^>]*>(.*?)<\/table>/is',
+            function ($m) {
+                $tableHtml = $m[1];
+                $rows = [];
+                if (preg_match_all('/<tr\b[^>]*>(.*?)<\/tr>/is', $tableHtml, $rs)) {
+                    foreach ($rs[1] as $rowHtml) {
+                        $cells = [];
+                        if (preg_match_all('/<t[dh]\b[^>]*>(.*?)<\/t[dh]>/is', $rowHtml, $cs)) {
+                            foreach ($cs[1] as $cellHtml) {
+                                $cell = strip_tags($cellHtml);
+                                $cell = html_entity_decode($cell, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                                $cell = preg_replace('/\s+/u', ' ', $cell) ?? $cell;
+                                $cells[] = trim($cell);
+                            }
+                        }
+                        if (count($cells) > 0) {
+                            $rows[] = implode(' | ', $cells);
+                        }
+                    }
+                }
+                return $rows === [] ? '' : "\n" . implode("\n", $rows) . "\n";
+            },
+            $text
+        ) ?? $text;
+
+        // Прочие табличные/блочные разделители — на случай если таблица
+        // была повреждена или используется без <table> (раньше работали
+        // эти три замены). После table-callback'а они применятся только к
+        // tail-фрагментам без table-обёртки.
         $text = preg_replace('/<\/th>/iu', ' | ', $text) ?? $text;
         $text = preg_replace('/<\/td>/iu', ' | ', $text) ?? $text;
         $text = preg_replace('/<\/tr>/iu', "\n", $text) ?? $text;
