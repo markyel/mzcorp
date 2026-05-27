@@ -177,6 +177,32 @@ class RequestStateService
             'event' => $context['event'] ?? 'manual',
         ]);
 
+        // Paid — финальный позитивный исход. Разделение Paid / ClosedWon
+        // оставалось из соображений «оплата получена ≠ товар отгружен», но
+        // в реальной работе менеджеры воспринимают «оплачено» = «успех».
+        // Автоматически закрываем как ClosedWon, чтобы заявка ушла из active
+        // пула в архив успехов. Идёт ПЕРЕД ClosedLost notification hook —
+        // чтобы при цепочке Paid → ClosedWon финальное состояние было сразу.
+        if ($to === RequestStatus::Paid && $request->status === RequestStatus::Paid) {
+            try {
+                $this->transitionTo(
+                    $request->fresh(),
+                    RequestStatus::ClosedWon,
+                    $author,
+                    [
+                        'event' => 'auto_close_won_after_paid',
+                        'comment' => 'Авто-закрытие как «успех» после оплаты счёта',
+                    ],
+                    systemTransition: true,
+                );
+            } catch (\Throwable $e) {
+                Log::warning('RequestStateService: auto close_won after paid failed (non-fatal)', [
+                    'request_id' => $request->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         // Phase 6: уведомление клиенту при закрытии. Sync, post-transaction.
         // ClientNotificationService::sendOrderClosedLost сам проверит:
         //  - is_enabled шаблона;
