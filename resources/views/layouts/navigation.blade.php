@@ -63,8 +63,9 @@
         $navLinks[] = ['route' => 'mail-rules.index', 'label' => 'Правила почты', 'pattern' => 'mail-rules.*'];
         $navLinks[] = ['route' => 'mail-review.index', 'label' => 'Авто-отклонённые', 'pattern' => 'mail-review.*'];
         $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];
-        $navLinks[] = ['route' => 'settings.index', 'label' => 'Настройки', 'pattern' => 'settings.*'];
-        $navLinks[] = ['route' => 'notifications.index', 'label' => 'Уведомления', 'pattern' => 'notifications.*'];
+        // Уведомления клиенту вынесены в подпункт страницы «Настройки»,
+        // не дублируем в горизонтальном топбаре (Phase 6).
+        $navLinks[] = ['route' => 'settings.index', 'label' => 'Настройки', 'pattern' => 'settings.*|notifications.*'];
     }
     if ($user?->hasRole('admin')) {
         // Подключение основной почты и активация/деактивация маршрутизации —

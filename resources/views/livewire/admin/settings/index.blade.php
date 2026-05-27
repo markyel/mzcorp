@@ -17,6 +17,28 @@
         </div>
     @endif
 
+    {{-- Подразделы настроек — переход к специальным экранам.
+         Сейчас только Уведомления; в будущем сюда могут попасть Mailboxes,
+         Detector auto-mode UI и т.п. --}}
+    <div class="ds-card mb-3">
+        <div class="ds-card-header">
+            <h3>Подразделы</h3>
+        </div>
+        <a href="{{ route('notifications.index') }}"
+           class="block px-[18px] py-3 hover:bg-neutral-50 transition-colors border-t border-[var(--border-subtle)] first:border-t-0">
+            <div class="flex items-center justify-between gap-4">
+                <div class="min-w-0">
+                    <div class="text-[13px] text-fg-1 font-medium">Уведомления клиенту →</div>
+                    <div class="text-[11.5px] text-fg-3 mt-0.5 leading-snug">
+                        Шаблоны автоматических писем: «заявка принята», «напоминание об уточнении», «КП без ответа», «срок счёта», «заявка закрыта». Toggle и редактирование текстов.
+                    </div>
+                </div>
+                <div class="text-[11px] text-fg-3 whitespace-nowrap">6 типов</div>
+            </div>
+        </a>
+    </div>
+
+
     <form wire:submit.prevent="save">
         @foreach($this->grouped as $group => $items)
             <div class="ds-card mb-3">

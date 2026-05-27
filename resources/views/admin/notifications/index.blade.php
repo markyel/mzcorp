@@ -7,6 +7,10 @@
 
     <div class="py-6">
         <div class="max-w-5xl mx-auto sm:px-6 lg:px-8">
+            <div class="mb-4">
+                <a href="{{ route('settings.index') }}" class="text-sm text-gray-600 hover:text-gray-900">← К настройкам</a>
+            </div>
+
             @if(session('status'))
                 <div class="mb-4 p-3 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
                     {{ session('status') }}

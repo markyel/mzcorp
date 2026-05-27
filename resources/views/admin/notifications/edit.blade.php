@@ -13,8 +13,12 @@
                 </div>
             @endif
 
-            <div class="mb-4">
-                <a href="{{ route('notifications.index') }}" class="text-sm text-gray-600 hover:text-gray-900">← К списку</a>
+            <div class="mb-4 flex items-center gap-3 text-sm text-gray-600">
+                <a href="{{ route('settings.index') }}" class="hover:text-gray-900">Настройки</a>
+                <span class="text-gray-400">/</span>
+                <a href="{{ route('notifications.index') }}" class="hover:text-gray-900">Уведомления клиенту</a>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-900">{{ $template->type->label() }}</span>
             </div>
 
             <livewire:admin.notifications.edit :template="$template" />
