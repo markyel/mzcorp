@@ -62,6 +62,31 @@ class MailDeliverToManagerService
         ]);
 
         try {
+            // Archived user — не доставляем в его mailbox.
+            //
+            // Сценарий: тестовые user#5/6/7 (man1/man2/man3) архивированы 22.05,
+            // но (а) их personal-mailbox'ы остались is_active=true в БД,
+            // (б) у них всё ещё было 2-3 active Request с assigned_user_id=archived,
+            // (в) `mail:backfill-manager-deliveries` cron каждые 30 мин ходил по
+            // active Request, видел «не доставлено assigned-у» → диспатчил
+            // deliver к archived user'у → APPEND в orphan-ящик → 246 писем в
+            // тестовых inbox'ах. См. MEMORY 2026-05-27.
+            //
+            // Этот guard — последняя линия защиты. Также UserObserver
+            // автоматически deactivates personal mailbox'ы при archive,
+            // и MailBackfillManagerDeliveriesCommand фильтрует archived users
+            // в whereHas join'е.
+            if ($manager->archived_at !== null) {
+                Log::info('MailDeliverToManagerService: skip — manager archived', [
+                    'email_message_id' => $message->id,
+                    'manager_id' => $manager->id,
+                    'archived_at' => $manager->archived_at,
+                ]);
+                $audit->update(['status' => MailAppendAudit::STATUS_SKIPPED, 'skip_reason' => 'manager_archived']);
+
+                return false;
+            }
+
             $managerEmail = mb_strtolower(trim((string) $manager->email));
             if ($managerEmail === '') {
                 Log::info('MailDeliverToManagerService: manager email empty, skip', [

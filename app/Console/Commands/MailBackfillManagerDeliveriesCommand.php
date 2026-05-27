@@ -44,7 +44,12 @@ class MailBackfillManagerDeliveriesCommand extends Command
         $query = RequestModel::query()
             ->whereNotNull('assigned_user_id')
             ->whereNotNull('email_message_id')
-            ->whereIn('status', $activeStatuses);
+            ->whereIn('status', $activeStatuses)
+            // НЕ доставляем archived-юзерам — их mailbox мог уже быть
+            // деактивирован UserObserver'ом, и даже если нет, APPEND
+            // в orphan-ящик создаёт «дубли» в неиспользуемом inbox'е.
+            // См. MEMORY 2026-05-27.
+            ->whereHas('assignedUser', fn ($q) => $q->whereNull('archived_at'));
         if ($managerFilter !== null) {
             $query->where('assigned_user_id', $managerFilter);
         }
