@@ -65,6 +65,18 @@ class InboundReplyLinker
             return Request::find($message->related_request_id);
         }
 
+        // Foundation §1.5 жёсткое правило «личный ящик X → Request у X».
+        // Если письмо пришло в личный ящик менеджера — все matched Request'ы
+        // должны быть из его пула (текущий или исторический assigned).
+        // Уровни линкера 1-5 продолжают работать, но если matched Request не
+        // в scope, идём дальше — а в конце, если ни один уровень не дал
+        // совпадение в scope, возвращаем null и IncomingMailProcessor создаст
+        // НОВУЮ Request у этого менеджера через sticky direct_mailbox.
+        //
+        // Для shared-mailbox ($ownerScopeUserId = null) — scope-фильтра нет,
+        // linker работает глобально как раньше.
+        $ownerScopeUserId = $this->resolveOwnerScopeUserId($message);
+
         // Level 0: cross-mailbox дедуп по Message-ID. Одно и то же физическое
         // письмо может появиться в двух Mailbox'ах — например, мы APPEND'ули
         // оригинал в личный ящик менеджера (DeliverToManagerInboxJob),
@@ -114,14 +126,21 @@ class InboundReplyLinker
                 ->get();
 
             // Кейс 1 (happy path): parent есть и его Request не terminal —
-            // привязываемся к ней.
+            // привязываемся к ней. Для personal-ящика — только Request в
+            // scope менеджера (см. resolveOwnerScopeUserId).
             $matched = $parents
-                ->first(function (EmailMessage $p): bool {
+                ->first(function (EmailMessage $p) use ($ownerScopeUserId): bool {
                     if ($p->related_request_id === null) {
                         return false;
                     }
                     $req = Request::find($p->related_request_id);
-                    return $req && ! $req->status->isTerminal();
+                    if (! $req || $req->status->isTerminal()) {
+                        return false;
+                    }
+                    if ($ownerScopeUserId !== null && ! $this->isRequestInScope($req, $ownerScopeUserId)) {
+                        return false;
+                    }
+                    return true;
                 });
             $matchedBy = $matched ? 'in_reply_to_or_references' : null;
 
@@ -133,13 +152,23 @@ class InboundReplyLinker
                 // M-2026-1558: reply на КП по закрытому КВШ-480 прицепился
                 // к открытому Тросу того же клиента). Записываем inheritance
                 // candidate (для UI «↻ Реанимировать»), возвращаем null.
+                //
+                // Для personal-ящика — terminal Request должна быть в scope
+                // менеджера. Чужая закрытая Request НЕ блокирует наш linker —
+                // даём шанс другим уровням найти что-то у этого менеджера.
                 $terminalParent = $parents
-                    ->first(function (EmailMessage $p): bool {
+                    ->first(function (EmailMessage $p) use ($ownerScopeUserId): bool {
                         if ($p->related_request_id === null) {
                             return false;
                         }
                         $req = Request::find($p->related_request_id);
-                        return $req && $req->status->isTerminal();
+                        if (! $req || ! $req->status->isTerminal()) {
+                            return false;
+                        }
+                        if ($ownerScopeUserId !== null && ! $this->isRequestInScope($req, $ownerScopeUserId)) {
+                            return false;
+                        }
+                        return true;
                     });
                 if ($terminalParent) {
                     $terminalRequest = Request::find($terminalParent->related_request_id);
@@ -202,6 +231,23 @@ class InboundReplyLinker
             ?: ($matched && $matched->related_request_id ? Request::find($matched->related_request_id) : null);
 
         if (! $request) {
+            return null;
+        }
+
+        // Финальный scope-check для уровней 2-5 (subject_code / external_code /
+        // from_email_open_request / AI). Level 1 уже отфильтрован внутри.
+        // Если линкер нашёл Request не в scope менеджера-владельца ящика —
+        // игнорируем: IncomingMailProcessor создаст новую Request у этого
+        // менеджера через sticky direct_mailbox. Уважаем выбор клиента.
+        if ($ownerScopeUserId !== null && ! $this->isRequestInScope($request, $ownerScopeUserId)) {
+            Log::info('InboundReplyLinker: matched Request out of personal-mailbox scope — ignoring link', [
+                'email_message_id' => $message->id,
+                'matched_request_id' => $request->id,
+                'matched_request_assigned_user_id' => $request->assigned_user_id,
+                'mailbox' => $message->mailbox?->email,
+                'scope_owner_user_id' => $ownerScopeUserId,
+                'matched_by' => $matchedBy,
+            ]);
             return null;
         }
 
@@ -489,5 +535,47 @@ class InboundReplyLinker
         }
 
         return preg_match('/^\s*(re|fwd|fw)\s*:/iu', $subject) === 1;
+    }
+
+    /**
+     * Foundation §1.5 scope для personal-mailbox.
+     *
+     * Возвращает user_id владельца ящика, в который пришло письмо, если
+     * это personal-ящик. Linker тогда ограничивает все matched Request'ы
+     * до пула этого менеджера (текущий или исторический assigned).
+     *
+     * Для shared-mailbox (info@/mail@/notifications@) возвращает null —
+     * linker работает глобально, как раньше.
+     */
+    private function resolveOwnerScopeUserId(EmailMessage $message): ?int
+    {
+        $mailbox = $message->mailbox;
+        if (! $mailbox) {
+            return null;
+        }
+        if ($mailbox->type !== \App\Enums\MailboxType::Personal) {
+            return null;
+        }
+        return $mailbox->owner_user_id ?: null;
+    }
+
+    /**
+     * Request «в scope» менеджера, если:
+     *  - текущий assigned_user_id == userId, ИЛИ
+     *  - есть запись в request_assignments с user_id=userId (история).
+     *
+     * Включает делегации/реассайны: если заявка когда-то была у менеджера,
+     * клиент имеет право ему о ней написать.
+     */
+    private function isRequestInScope(Request $request, int $userId): bool
+    {
+        if ((int) $request->assigned_user_id === $userId) {
+            return true;
+        }
+
+        return \App\Models\RequestAssignment::query()
+            ->where('request_id', $request->id)
+            ->where('user_id', $userId)
+            ->exists();
     }
 }
