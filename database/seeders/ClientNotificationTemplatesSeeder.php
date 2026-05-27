@@ -23,8 +23,12 @@ class ClientNotificationTemplatesSeeder extends Seeder
 {
     public function run(): void
     {
+        // firstOrCreate: для НОВЫХ типов создаём строку с дефолтом, ENABLED=false.
+        // Существующие НЕ трогаем — admin мог отредактировать тексты или
+        // включить toggle через UI, перезатереть их повторным seed'ом нельзя.
+        // Если нужен явный reset — admin удаляет row через tinker и запускает seeder.
         foreach ($this->templates() as $type => $data) {
-            ClientNotificationTemplate::updateOrCreate(
+            ClientNotificationTemplate::firstOrCreate(
                 ['type' => $type],
                 array_merge($data, ['is_enabled' => false])
             );
