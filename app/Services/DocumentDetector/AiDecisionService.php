@@ -167,6 +167,53 @@ class AiDecisionService
         $isAuto = isset($extra['auto']) && $extra['auto'];
         $isSystemActor = $isAuto || $author === null;
 
+        // Auto-reanimate при outbound document на closed_lost (M-2026-2102).
+        //
+        // Кейс: AI ошибочно закрыл заявку как inbound_decline (например клиент
+        // указал на технический mismatch — «у нас 928, а ваша 1128»), потом
+        // менеджер прислал новое КП / счёт / уточнение. Раньше state machine
+        // отвергала transitionTo (terminal status) → AiDecision Dismissed →
+        // заявка оставалась закрытой. Теперь — auto-reanimate.
+        //
+        // Только для outbound (менеджер сам делает осознанное действие).
+        // OutboundDeclined НЕ реанимирует — менеджер дополнительно закрывает.
+        // Inbound на closed_lost не реанимирует (Phase 1 inheritance — авто-
+        // реанимация по reply клиента выключена).
+        $shouldReanimateOutbound = $request->status === RequestStatus::ClosedLost
+            && in_array($type, [
+                DetectorType::OutboundQuotationFull,
+                DetectorType::OutboundQuotationPartial,
+                DetectorType::OutboundInvoice,
+                DetectorType::OutboundClarification,
+            ], true);
+        if ($shouldReanimateOutbound) {
+            try {
+                $this->stateService->reanimate(
+                    request: $request,
+                    author: $author,
+                    sourceMessage: $decision->emailMessage,
+                    // Менеджер сам прислал КП/счёт — он работает над заявкой,
+                    // не пересчитываем assigned. Иначе reanimate мог бы откатить
+                    // владельца на основании email_message.mailbox.owner.
+                    reassessAssignee: false,
+                    event: 'auto_reanimate_for_outbound',
+                    comment: 'Авто-реанимация: менеджер прислал ' . $type->label() . ' на закрытую заявку',
+                );
+                $request = $request->fresh();
+                $context['payload']['auto_reanimated_for_outbound'] = $type->value;
+                Log::info('AiDecisionService: auto-reanimated closed_lost before outbound document', [
+                    'decision_id' => $decision->id,
+                    'request_id' => $request->id,
+                    'detector_type' => $type->value,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('AiDecisionService: auto-reanimate before outbound failed (continue with transitionTo)', [
+                    'decision_id' => $decision->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         DB::transaction(function () use ($decision, $request, $target, $author, $context, $isAuto, $isSystemActor) {
             try {
                 $this->stateService->transitionTo(
