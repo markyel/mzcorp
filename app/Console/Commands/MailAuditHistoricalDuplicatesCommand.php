@@ -88,14 +88,23 @@ class MailAuditHistoricalDuplicatesCommand extends Command
                     $this->warn("    folder {$folder} not found, skip");
                     continue;
                 }
+                // ОБЯЗАТЕЛЬНО: явный SELECT — без него webklex может
+                // не отправить SEARCH в правильный folder context и
+                // получить «Empty response» от Yandex.
+                $f->select();
 
-                // BEFORE = строго до даты, поэтому добавляем сутки к --to.
+                // Yandex IMAP SEARCH принимает дату в формате `DD-Mon-YYYY`
+                // (RFC 3501). Carbon::format('d-M-Y') даёт «15-May-2026».
+                // BEFORE — строго ДО, поэтому добавляем 1 день к --to.
+                $sinceStr = $fromDate->format('d-M-Y');
+                $beforeStr = $toDate->copy()->addDay()->format('d-M-Y');
+
                 $msgs = $f->query()
                     ->setFetchOptions(IMAP::FT_PEEK)
                     ->setFetchBody(false)
                     ->setFetchFlags(false)
-                    ->whereSince($fromDate->copy()->subDay())
-                    ->whereBefore($toDate->copy()->addDay())
+                    ->whereSince($sinceStr)
+                    ->whereBefore($beforeStr)
                     ->get();
 
                 $count = 0;
@@ -112,18 +121,11 @@ class MailAuditHistoricalDuplicatesCommand extends Command
                             continue;
                         }
 
+                        // Yandex может не отдавать INTERNALDATE через webklex
+                        // в headers-only fetch. Доверяем SEARCH SINCE/BEFORE
+                        // на стороне сервера. Для аналитики берём Date: header.
                         $internalDate = $msg->getInternalDate();
-                        // Дополнительная фильтрация по дате (BEFORE/SINCE на стороне Yandex
-                        // могут быть нечёткими по часовому поясу).
-                        if ($internalDate) {
-                            try {
-                                $dt = Carbon::parse((string) $internalDate);
-                                if ($dt->lt($fromDate) || $dt->gt($toDate)) {
-                                    continue;
-                                }
-                            } catch (\Throwable) {
-                            }
-                        }
+                        $dateHeader = (string) ($hdr->get('date') ?? '');
 
                         $from = (string) ($hdr->get('from') ?? '');
                         $subject = (string) ($hdr->get('subject') ?? '');
@@ -135,7 +137,7 @@ class MailAuditHistoricalDuplicatesCommand extends Command
                             'from' => mb_substr($from, 0, 120),
                             'subject' => mb_substr($subject, 0, 80),
                             'x_fwd' => $xFwd,
-                            'date' => $internalDate,
+                            'date' => $dateHeader ?: $internalDate,
                         ];
                         $count++;
                     } catch (\Throwable $e) {
