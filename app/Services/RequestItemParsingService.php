@@ -837,22 +837,72 @@ PROMPT;
                 && !in_array($mime, ['image/heic', 'image/heif'], true);
         });
 
-        // 1a) Unified path для лёгких писем (≤3 фото, без structured-вложений).
+        // 1a) Unified path для лёгких писем (≤3 фото, без heavy structured-вложений).
         // ОДИН Vision-вызов видит subject + body + linked URLs + все фото
         // сразу — снимает проблему дублей между photo-parser и text-parser
         // (артикул с шильдика сам приклеивается к позиции из текста). См.
         // ParseItemsUnifiedPrompt + M-2026-1495.
-        // Heavy-письма (PDF-таблицы, screenshot'ы счетов, 4+ фото) идут по
-        // split pipeline ниже — там document-extraction отдельным слоем
-        // надёжнее и vision-контекст не разрывает потолок.
+        //
+        // Разделяем structured-вложения на:
+        //   - lightweight (.doc/.docx) — текстовый контент, может быть
+        //     extract'нут и подмешан в body перед unified-call. Это покрывает
+        //     M-2026-1953/msg#5469 «Цикин Василий, плата VQC»: фото+doc дали
+        //     дубль (vision видит OA8522.5A с шильдика, text — M22198 в .doc),
+        //     unified-call с обогащённым body даст одну позицию с M-SKU.
+        //   - heavy (.pdf/.xls/.xlsx) — обычно табличные данные / большие
+        //     счета, идут через document-extraction (split path), Vision их
+        //     не парсит надёжно. Heavy не позволяет включить unified.
         $structuredAttachments = $attachments->filter(function ($a) {
             return preg_match('/\.(pdf|docx|xlsx|xls|doc)$/i', (string) $a->filename) === 1;
         });
+        $lightweightStructured = $structuredAttachments->filter(function ($a) {
+            return preg_match('/\.(doc|docx)$/i', (string) $a->filename) === 1;
+        });
+        $heavyStructured = $structuredAttachments->filter(function ($a) {
+            return preg_match('/\.(pdf|xls|xlsx)$/i', (string) $a->filename) === 1;
+        });
         $canUseUnified = $imageAttachments->count() > 0
             && $imageAttachments->count() <= 3
-            && $structuredAttachments->isEmpty();
+            && $heavyStructured->isEmpty();
 
         if ($canUseUnified) {
+            // Extract'им текст из лёгких .doc/.docx и подмешиваем в body.
+            // Этот текст пойдёт ВНУТРЬ unified-вызова вместе с фото, поэтому
+            // отдельный parseItemsFromFile для них НЕ вызываем (см. logика
+            // ниже — после unified мы возвращаемся, split-блок не работает).
+            $extendedBody = $referenceText ?? '';
+            $lightweightExtractedNote = [];
+            foreach ($lightweightStructured as $lightAtt) {
+                try {
+                    $absolutePath = \Illuminate\Support\Facades\Storage::disk($lightAtt->disk)
+                        ->path($lightAtt->file_path);
+                    if (! file_exists($absolutePath)) {
+                        continue;
+                    }
+                    $upload = new UploadedFile(
+                        $absolutePath,
+                        $lightAtt->filename ?? basename($absolutePath),
+                        $lightAtt->mime_type,
+                        null,
+                        true,
+                    );
+                    $extracted = trim($this->extractTextFromFile($upload));
+                    if ($extracted !== '') {
+                        $extendedBody = ($extendedBody !== '' ? $extendedBody . "\n\n" : '')
+                            . "--- Содержимое вложения «" . ($lightAtt->filename ?? '') . "» ---\n"
+                            . $extracted;
+                        $lightweightExtractedNote[] = $lightAtt->filename;
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('parseItemsFromInboundContent: lightweight structured extract failed', [
+                        'source' => $sourceTag,
+                        'attachment_id' => $lightAtt->id,
+                        'filename' => $lightAtt->filename,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
             try {
                 [$images, $attachmentIds] = $this->loadImageDataUris($imageAttachments, $sourceTag);
                 if (!empty($images)) {
@@ -860,7 +910,7 @@ PROMPT;
                         images: $images,
                         attachmentIds: $attachmentIds,
                         subject: $subject,
-                        body: $referenceText ?? '',
+                        body: $extendedBody,
                         fromEmail: $fromEmail,
                         fromName: $fromName,
                         linkedUrlsText: $linkedUrlsText,
@@ -876,6 +926,9 @@ PROMPT;
                         'subject_preview' => mb_substr($subject, 0, 60),
                         'images_count' => $imageAttachments->count(),
                         'structured_count' => 0,
+                        'lightweight_doc_count' => count($lightweightExtractedNote),
+                        'lightweight_doc_filenames' => $lightweightExtractedNote,
+                        'extended_body_chars' => mb_strlen($extendedBody),
                         'items_before_dedup' => count($unifiedItems),
                         'items_breakdown' => array_map(
                             fn ($it) => [
@@ -1594,7 +1647,140 @@ PROMPT;
             $seenIndex[$key] = count($result);
             $result[] = $item;
         }
+
+        // Второй проход: cross-article dedupe для split-path кейса
+        // «vision видит внутренний код шильдика, text видит наш M-SKU».
+        // Если 2 позиции совпали по (name_normalized + qty + invoice_index),
+        // но разные артикулы, И одна из них имеет паттерн M-SKU (M\d{4,}),
+        // другая нет — объединяем с приоритетом M-SKU варианта.
+        //
+        // Кейс M-2026-1953/msg#5469: vision выдал
+        // {art:"OA8522.5A/3874W7/81", name:"Плата VQC...", qty:1}, text выдал
+        // {art:"M22198", name:"Плата VQC...", qty:1}. Это ОДНА позиция, наш
+        // M-SKU должен победить (он matchable в catalog).
+        return $this->crossArticleDedupe($result);
+    }
+
+    /**
+     * Второй проход дедупликации: если name+qty+invoice совпадают, но
+     * артикулы разные, и один из них M-SKU (наш каталожный номер),
+     * мерджим в M-SKU вариант. Иначе оставляем оба (могут быть реально
+     * разные позиции с одинаковым названием).
+     *
+     * @param array<int,array> $items
+     * @return array<int,array>
+     */
+    private function crossArticleDedupe(array $items): array
+    {
+        if (count($items) < 2) {
+            return $items;
+        }
+
+        // Группируем по (name_normalized + qty + invoice_index).
+        $groups = []; // groupKey => [int $resultIdx, ...]
+        foreach ($items as $idx => $item) {
+            $name = mb_strtolower(trim((string) ($item['name'] ?? '')));
+            // Нормализуем подряд идущие пробелы и убираем пунктуацию-разделители.
+            $name = preg_replace('/\s+/u', ' ', $name) ?: $name;
+            if ($name === '') {
+                continue;
+            }
+            $qty = (float) ($item['qty'] ?? 0);
+            $invoiceIndex = (int) ($item['invoice_index'] ?? 1);
+            $groupKey = $name . '|qty=' . $qty . '|inv=' . $invoiceIndex;
+            $groups[$groupKey][] = $idx;
+        }
+
+        $dropIndexes = [];
+        foreach ($groups as $groupKey => $idxList) {
+            if (count($idxList) < 2) {
+                continue;
+            }
+
+            // Ищем позицию с M-SKU паттерном.
+            $mSkuIdx = null;
+            $nonMSkuIdxs = [];
+            foreach ($idxList as $idx) {
+                $art = (string) ($items[$idx]['article'] ?? '');
+                if ($this->looksLikeInternalCatalogSku($art)) {
+                    if ($mSkuIdx === null) {
+                        $mSkuIdx = $idx;
+                    } else {
+                        // Уже есть M-SKU выше — дополнительные тоже идут в группу M-SKU,
+                        // но если разные M-SKU — это РАЗНЫЕ позиции, не мерджим.
+                        if (mb_strtoupper($this->normalizeArticle($items[$mSkuIdx]['article'] ?? null))
+                            !== mb_strtoupper($this->normalizeArticle($items[$idx]['article'] ?? null))
+                        ) {
+                            // Разные M-SKU → группа не однородна, прерываем для безопасности.
+                            $mSkuIdx = null;
+                            $nonMSkuIdxs = [];
+                            break;
+                        }
+                    }
+                } else {
+                    $nonMSkuIdxs[] = $idx;
+                }
+            }
+
+            // Только если ровно один M-SKU и есть non-M-SKU — мерджим.
+            if ($mSkuIdx === null || empty($nonMSkuIdxs)) {
+                continue;
+            }
+
+            // Merge non-M-SKU позиции в M-SKU победителя.
+            $winner = &$items[$mSkuIdx];
+            $merged = $winner['__merged_from'] ?? [];
+            foreach ($nonMSkuIdxs as $loserIdx) {
+                $loser = $items[$loserIdx];
+                $merged[] = [
+                    'source' => $loser['__source'] ?? null,
+                    'name' => (string) ($loser['name'] ?? ''),
+                    'article' => $loser['article'] ?? null,
+                    'qty' => (string) ($loser['qty'] ?? ''),
+                    'reason' => 'cross_article_merge_to_m_sku',
+                    'group_key' => $groupKey,
+                ];
+                $dropIndexes[$loserIdx] = true;
+            }
+            $winner['__merged_from'] = $merged;
+            unset($winner);
+        }
+
+        if (empty($dropIndexes)) {
+            return $items;
+        }
+
+        $result = [];
+        foreach ($items as $idx => $item) {
+            if (! isset($dropIndexes[$idx])) {
+                $result[] = $item;
+            }
+        }
+
+        Log::info('crossArticleDedupe: merged non-M-SKU positions into M-SKU', [
+            'dropped' => count($dropIndexes),
+            'remaining' => count($result),
+        ]);
+
         return $result;
+    }
+
+    /**
+     * Внутренний M-SKU паттерн: `M\d{4,}` (case-insensitive, кириллическая М тоже).
+     * См. CatalogImportService::cyrillicLookalikeFold — используется в нашей
+     * собственной нумерации каталога.
+     */
+    private function looksLikeInternalCatalogSku(string $article): bool
+    {
+        if ($article === '') {
+            return false;
+        }
+        // Cyrillic М (U+041C) → ASCII M.
+        $normalized = str_replace(["\u{041C}", "\u{043C}"], ['M', 'm'], $article);
+        $normalized = mb_strtoupper(trim($normalized));
+
+        // M-SKU: M + минимум 4 цифры (M02871, M22198, M03779, M04990, ...)
+        return (bool) preg_match('/\bM\d{4,}\b/', $normalized);
     }
 
     /**
