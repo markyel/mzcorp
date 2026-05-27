@@ -222,6 +222,31 @@ class MailRouter
         // сопроводительные reply'и где Vision на attachments мог бы
         // ложно сгенерировать дубликаты позиций (см. M-2026-0759 кейс).
         if ($linkedRequest !== null) {
+            // Жёсткое правило sticky direct_mailbox для reply'ев
+            // (Foundation §1.5): если письмо пришло в личный ящик X,
+            // а связанная Request у другого assigned-менеджера Y —
+            // переподчинить Request на X. Уважаем выбор клиента.
+            //
+            // Гарды:
+            //  - origin mailbox.type === Personal (для shared ничего не меняем);
+            //  - owner существует, не archived, не unavailable до 2099 (нюанс orphan-fix);
+            //  - текущий assigned_user_id !== owner_user_id (иначе нечего менять).
+            //
+            // После reassign Фикс А автоматически не сработает (origin owner =
+            // current assigned), MailDeliverToManagerService пометит
+            // «already in manager mailbox, skip» — никаких лишних копий.
+            try {
+                $this->applyStickyDirectMailboxOnReply($message, $linkedRequest);
+                // Refresh — assigned_user_id мог поменяться внутри reassign.
+                $linkedRequest = $linkedRequest->fresh() ?? $linkedRequest;
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: sticky direct_mailbox reassign failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $linkedRequest->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
             $shouldParse = true;
             try {
                 $shouldParse = app(\App\Services\Mail\ReplyParseGate::class)
@@ -519,5 +544,67 @@ class MailRouter
                 ]);
             }
         }
+    }
+
+    /**
+     * Жёсткое правило «личный ящик X → Request у X» применённое для reply'ев
+     * (Foundation §1.5, parallel со sticky Level 0 в AssignmentService для
+     * новых заявок).
+     *
+     * Кейс M-2026-1651 / msg#5298 (27.05): клиент написал reply лично
+     * Курзаеву (РОП), но linker по In-Reply-To привязал к Request у Головнева.
+     * Раньше assigned не пересчитывался — Головнев оставался owner, мы
+     * APPEND'или копию ему (commit 19e2957). Двойной learn: Фикс А блокирует
+     * дубль APPEND'а, Fix Б (этот метод) — переподчиняет Request на того,
+     * кому клиент адресовал письмо. Уважаем выбор клиента.
+     *
+     * Гарды:
+     *  - origin mailbox.type === Personal;
+     *  - owner существует, не archived, не в долгом unavailable;
+     *  - текущий assigned_user_id !== owner_user_id.
+     */
+    private function applyStickyDirectMailboxOnReply(
+        EmailMessage $message,
+        \App\Models\Request $request,
+    ): void {
+        $mailbox = $message->mailbox;
+        if (! $mailbox || $mailbox->type !== \App\Enums\MailboxType::Personal) {
+            return;
+        }
+        $ownerId = $mailbox->owner_user_id;
+        if (! $ownerId) {
+            return;
+        }
+        if ((int) $request->assigned_user_id === (int) $ownerId) {
+            return;
+        }
+
+        $owner = $mailbox->owner;
+        if (! $owner) {
+            return;
+        }
+        if ($owner->archived_at !== null) {
+            return;
+        }
+        if ($owner->unavailable_until !== null && $owner->unavailable_until->isFuture()) {
+            // В долгом отпуске — не вешаем заявку на него, оставляем текущего.
+            return;
+        }
+
+        Log::info('MailRouter: sticky direct_mailbox reassign on reply', [
+            'email_message_id' => $message->id,
+            'request_id' => $request->id,
+            'internal_code' => $request->internal_code,
+            'from_user_id' => $request->assigned_user_id,
+            'to_user_id' => $owner->id,
+            'origin_mailbox' => $mailbox->email,
+        ]);
+
+        app(\App\Services\Request\ReassignService::class)->reassign(
+            request: $request,
+            newAssignee: $owner,
+            reason: 'sticky_direct_mailbox_on_reply email_message_id=' . $message->id,
+            by: null, // system-actor — переподчинение по правилу, не вручную
+        );
     }
 }

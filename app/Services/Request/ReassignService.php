@@ -12,18 +12,27 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Ручное переподчинение заявки другому менеджеру.
+ * Переподчинение заявки другому менеджеру.
  *
- * Триггер — РОП/директор из карточки заявки. Пишет audit-запись в
- * `request_assignments` и (если есть привязанное письмо) ставит в
- * очередь IMAP-move оригинала в подпапку нового менеджера.
+ * Триггеры:
+ *  - ручной — РОП/директор из карточки заявки ($by = current user);
+ *  - системный — MailRouter применяет sticky direct_mailbox для reply'я,
+ *    пришедшего в личный ящик не-assigned менеджера ($by = null).
+ *    Жёсткое правило «личный ящик X → Request у X» (см. CLAUDE.md /
+ *    Foundation §1.5). Reason тогда содержит явный префикс типа
+ *    `sticky_direct_mailbox_on_reply` чтобы аудит отличал источник.
+ *
+ * Пишет audit в `request_assignments` и (если есть привязанное письмо)
+ * ставит в очередь IMAP-операции — Route в подпапку MZ|<Фамилия> общего
+ * ящика + Deliver в INBOX нового менеджера + Archive из INBOX старого.
+ * Все три job'а идемпотентны.
  *
  * IMAP-move async через `RouteMailToManagerJob` — Yandex 360 IMAP COPY
  * держит соединение 5–10 секунд, синхронный вызов блокировал Livewire
  * UI и кнопка «зависала».
  *
  * AssignmentService.autoAssign не используем — он содержит sticky/round-robin
- * логику для НОВЫХ заявок и пропустит ручной выбор оператора.
+ * логику для НОВЫХ заявок и пропустит уже-сделанный выбор переподчинения.
  */
 class ReassignService
 {
@@ -31,7 +40,7 @@ class ReassignService
         RequestModel $request,
         User $newAssignee,
         ?string $reason,
-        User $by,
+        ?User $by,
     ): RequestAssignment {
         // Snapshot ДО транзакции: внутри замыкания мы перепишем
         // assigned_user_id, и после dispatch'а доступа к старому ID уже нет.
@@ -48,11 +57,20 @@ class ReassignService
             $request->assigned_at = now();
             $request->save();
 
+            // Reason prefix:
+            //  - $by !== null → manual_reassign (триггер UI РОПа/директора);
+            //  - $by === null → system_reassign (триггер pipelines, например
+            //    sticky direct_mailbox при reply в личный ящик).
+            $prefix = $by !== null ? 'manual_reassign' : 'system_reassign';
+            $finalReason = $reason
+                ? $prefix . ': ' . mb_substr($reason, 0, 200)
+                : $prefix;
+
             return RequestAssignment::create([
                 'request_id' => $request->id,
                 'user_id' => $newAssignee->id,
-                'by_user_id' => $by->id,
-                'reason' => $reason ? 'manual_reassign: ' . mb_substr($reason, 0, 200) : 'manual_reassign',
+                'by_user_id' => $by?->id,
+                'reason' => $finalReason,
                 'assigned_at' => now(),
             ]);
         });
