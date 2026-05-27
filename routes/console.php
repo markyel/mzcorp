@@ -138,3 +138,14 @@ Schedule::command('mail:backfill-manager-deliveries --apply')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Phase 6: автоматические уведомления клиенту (clarification reminder /
+// quote followup / invoice expiring soon / invoice expired). Каждый тип
+// проверяет is_enabled — по умолчанию все выключены, admin включает через
+// UI Admin/Notifications. Cron работает раз в час — обновляет статус
+// заявок, ничего не шлёт без явного включения.
+Schedule::command('notifications:dispatch-client')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();

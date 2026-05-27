@@ -134,6 +134,16 @@ Route::middleware('auth')->group(function () {
             return view('admin.settings.index');
         })->name('settings.index');
 
+        // Phase 6: автоматические уведомления клиенту — toggle по типам +
+        // редактируемые тексты + превью с реальной заявкой.
+        Route::get('/dashboard/notifications', function () {
+            return view('admin.notifications.index');
+        })->name('notifications.index');
+
+        Route::get('/dashboard/notifications/{template}/edit', function (\App\Models\ClientNotificationTemplate $template) {
+            return view('admin.notifications.edit', ['template' => $template]);
+        })->name('notifications.edit');
+
         // Foundation Фаза 2: auto-rejection — РОП пересматривает письма,
         // которые AI классифицировал как irrelevant/reclamation/accounting/...,
         // и реоткрывает ошибочно отклонённые как Request.

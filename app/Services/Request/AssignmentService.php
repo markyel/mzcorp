@@ -155,6 +155,33 @@ class AssignmentService
             \App\Jobs\Mail\DeliverToManagerInboxJob::dispatch($email->id, $manager->id);
         }
 
+        // Phase 6: автоматическое уведомление клиенту «Заявка принята в работу».
+        //
+        // Шлём только если:
+        //  - заявка не наследник (inheritance_parent_id IS NULL — это значит
+        //    клиент не отвечал в существующем нашем треде);
+        //  - origin EmailMessage не reply на чужое письмо (in_reply_to IS NULL —
+        //    значит это первое письмо клиента, а не continuation треда).
+        //
+        // ClientNotificationService::sendOrderReceived сам проверит:
+        //  - is_enabled шаблона (по умолчанию выключен — admin включает явно);
+        //  - идемпотентность (повторный autoAssign не задвоит);
+        //  - client_email != null.
+        if ($email
+            && $request->inheritance_parent_id === null
+            && empty($email->in_reply_to)
+        ) {
+            try {
+                app(\App\Services\Mail\ClientNotificationService::class)
+                    ->sendOrderReceived($request->refresh());
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning(
+                    'AssignmentService: order_received notification failed (non-fatal)',
+                    ['request_id' => $request->id, 'error' => $e->getMessage()]
+                );
+            }
+        }
+
         return $manager;
     }
 

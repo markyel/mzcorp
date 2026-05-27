@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep -l \"studly\")",
+      "Bash(xargs grep -l \"ComponentRegistry\\\\|getClass\\\\|resolveClass\\\\|aliases\\\\b\")",
+      "Bash(grep -rn \"explode.*\\\\\\\\\\\\\\\\.\" vendor/livewire/livewire/src/Factory/)",
+      "Bash(git checkout *)",
+      "Bash(php -v)",
+      "Bash(composer -V)",
+      "Bash(npm -v)"
+    ]
+  }
+}

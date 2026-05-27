@@ -64,6 +64,7 @@
         $navLinks[] = ['route' => 'mail-review.index', 'label' => 'Авто-отклонённые', 'pattern' => 'mail-review.*'];
         $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];
         $navLinks[] = ['route' => 'settings.index', 'label' => 'Настройки', 'pattern' => 'settings.*'];
+        $navLinks[] = ['route' => 'notifications.index', 'label' => 'Уведомления', 'pattern' => 'notifications.*'];
     }
     if ($user?->hasRole('admin')) {
         // Подключение основной почты и активация/деактивация маршрутизации —
