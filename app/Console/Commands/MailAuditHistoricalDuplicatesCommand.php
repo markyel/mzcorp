@@ -43,7 +43,9 @@ class MailAuditHistoricalDuplicatesCommand extends Command
         {--from= : Начало периода YYYY-MM-DD (включительно)}
         {--to= : Конец периода YYYY-MM-DD (включительно)}
         {--mailboxes= : CSV id ящиков (default — все active personal)}
-        {--folder=INBOX : IMAP-папка (default INBOX)}';
+        {--folder=INBOX : IMAP-папка (default INBOX)}
+        {--exclude-from= : CSV email-адресов, чьи письма исключать (например директоров, чтобы убрать легитимный BCC)}
+        {--sample-limit=20 : Сколько примеров дублей показать с детализацией}';
 
     protected $description = 'Исторический аудит cross-mailbox дублей через IMAP — поиск дублей, которых ещё не видела БД.';
 
@@ -59,6 +61,11 @@ class MailAuditHistoricalDuplicatesCommand extends Command
         $fromDate = Carbon::parse($from)->startOfDay();
         $toDate = Carbon::parse($to)->endOfDay();
         $folder = (string) $this->option('folder');
+        $excludeFrom = collect(explode(',', (string) $this->option('exclude-from')))
+            ->map(fn ($e) => mb_strtolower(trim($e)))
+            ->filter()
+            ->all();
+        $sampleLimit = (int) $this->option('sample-limit');
 
         $mailboxes = Mailbox::query()
             ->where('type', MailboxType::Personal->value)
@@ -128,13 +135,24 @@ class MailAuditHistoricalDuplicatesCommand extends Command
                         $dateHeader = (string) ($hdr->get('date') ?? '');
 
                         $from = (string) ($hdr->get('from') ?? '');
+                        $to = (string) ($hdr->get('to') ?? '');
                         $subject = (string) ($hdr->get('subject') ?? '');
                         $xFwd = (string) ($hdr->get('x_yandex_forward') ?? '');
+
+                        // Эвристическая нормализация: извлекаем чистый email из 'Name <email>'.
+                        $fromEmail = $this->extractEmail($from);
+
+                        // Фильтр --exclude-from: исключаем письма с указанных адресов.
+                        if (! empty($excludeFrom) && $fromEmail && in_array($fromEmail, $excludeFrom, true)) {
+                            continue;
+                        }
 
                         $index[$messageId][] = [
                             'mb_email' => $mb->email,
                             'mb_id' => $mb->id,
                             'from' => mb_substr($from, 0, 120),
+                            'from_email' => $fromEmail,
+                            'to' => mb_substr($to, 0, 200),
                             'subject' => mb_substr($subject, 0, 80),
                             'x_fwd' => $xFwd,
                             'date' => $dateHeader ?: $internalDate,
@@ -210,25 +228,51 @@ class MailAuditHistoricalDuplicatesCommand extends Command
             $withFwd, count($dups), count($dups) > 0 ? ($withFwd / count($dups) * 100) : 0
         ));
 
-        // Sample 10 примеров
+        // Детальные примеры — с датой, from, to, локациями
         $this->newLine();
-        $this->info('=== Sample examples ===');
+        $this->info(sprintf('=== Sample examples (top %d) ===', $sampleLimit));
         $sampled = 0;
         foreach ($dups as $mid => $occ) {
-            if ($sampled >= 10) {
+            if ($sampled >= $sampleLimit) {
                 break;
             }
-            $this->line('  message-id: ' . mb_substr($mid, 0, 70));
-            foreach ($occ as $o) {
-                $this->line(sprintf(
-                    '    %s | from=%s subj=%s x_fwd=%s',
-                    $o['mb_email'], mb_substr($o['from'], 0, 40), mb_substr($o['subject'], 0, 50),
-                    $o['x_fwd'] !== '' ? mb_substr($o['x_fwd'], 0, 50) : '—'
-                ));
-            }
+            $first = $occ[0];
+            $boxes = array_unique(array_column($occ, 'mb_email'));
+            sort($boxes);
+
+            $this->line('');
+            $this->line(sprintf(
+                '#%d  date=%s  from=%s',
+                $sampled + 1,
+                $first['date'] ?: '—',
+                $first['from'] ?: '—'
+            ));
+            $this->line(sprintf('    subject: %s', $first['subject'] ?: '(без темы)'));
+            $this->line(sprintf('    to header: %s', $first['to'] ?: '—'));
+            $this->line(sprintf('    лежит в (%d ящиков): %s', count($boxes), implode(', ', $boxes)));
+            $this->line(sprintf('    x_yandex_forward: %s', $first['x_fwd'] ?: '—'));
+            $this->line(sprintf('    message-id: %s', mb_substr($mid, 0, 100)));
             $sampled++;
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Извлекаем email из строки вида "Name <email@example.com>" или просто "email@example.com".
+     */
+    private function extractEmail(string $raw): ?string
+    {
+        if ($raw === '') {
+            return null;
+        }
+        if (preg_match('/<([^>]+@[^>]+)>/', $raw, $m)) {
+            return mb_strtolower(trim($m[1]));
+        }
+        if (preg_match('/([\w.+\-]+@[\w.\-]+\.\w+)/', $raw, $m)) {
+            return mb_strtolower(trim($m[1]));
+        }
+
+        return null;
     }
 }
