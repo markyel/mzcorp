@@ -177,6 +177,29 @@ class RequestStateService
             'event' => $context['event'] ?? 'manual',
         ]);
 
+        // Phase 6: уведомление клиенту при закрытии. Sync, post-transaction.
+        // ClientNotificationService::sendOrderClosedLost сам проверит:
+        //  - is_enabled шаблона;
+        //  - guard: detector_type=outbound_declined → skip (менеджер уже написал);
+        //  - идемпотентность через client_notifications_sent.
+        if ($to === RequestStatus::ClosedLost) {
+            try {
+                $lastChange = RequestStateChange::where('request_id', $request->id)
+                    ->where('to_status', RequestStatus::ClosedLost->value)
+                    ->orderByDesc('id')
+                    ->first();
+                if ($lastChange) {
+                    app(\App\Services\Mail\ClientNotificationService::class)
+                        ->sendOrderClosedLost($request->refresh(), $lastChange);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('RequestStateService: order_closed_lost notification failed (non-fatal)', [
+                    'request_id' => $request->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         return $request;
     }
 

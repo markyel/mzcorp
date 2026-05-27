@@ -53,6 +53,17 @@ enum ClientNotificationType: string
      */
     case InvoiceExpired = 'invoice_expired';
 
+    /**
+     * «Заявка закрыта». Sync hook после успешного RequestStateService::transitionTo
+     * в ClosedLost. Guard: НЕ слать если закрытие пришло из outbound-сигнала
+     * менеджера (detector_type=outbound_declined) — он уже написал клиенту своё
+     * сообщение и повторное уведомление избыточно. Слать для:
+     *  - manual UI close (CloseLostDialog) — менеджер не писал клиенту;
+     *  - inbound_decline (клиент сам отказался) — подтверждение что мы услышали;
+     *  - системного закрытия (auto-recover) — клиент в курсе быть должен.
+     */
+    case OrderClosedLost = 'order_closed_lost';
+
     public function label(): string
     {
         return match ($this) {
@@ -61,17 +72,19 @@ enum ClientNotificationType: string
             self::QuoteFollowupReminder => 'Напоминание после КП',
             self::InvoiceExpiringSoon => 'Скоро истечёт срок счёта',
             self::InvoiceExpired => 'Срок счёта истёк',
+            self::OrderClosedLost => 'Заявка закрыта',
         };
     }
 
     public function description(): string
     {
         return match ($this) {
-            self::OrderReceived => 'Отправляется автоматически сразу после создания и назначения заявки. НЕ отправляется, если заявка пришла как продолжение существующей переписки.',
+            self::OrderReceived => 'Отправляется автоматически сразу после создания и назначения заявки. НЕ отправляется, если заявка пришла как продолжение существующей переписки. Если письмо пришло на общий ящик (info@), указывается ответственный менеджер; если на личный — этот блок скрывается автоматически.',
             self::ClarificationReminder => 'Если клиент не ответил на уточняющий вопрос в течение заданного срока — отправляется напоминание.',
             self::QuoteFollowupReminder => 'Если после отправки коммерческого предложения клиент не отреагировал в течение заданного срока.',
             self::InvoiceExpiringSoon => 'За несколько дней до истечения срока действия выставленного счёта.',
             self::InvoiceExpired => 'Сразу после того как срок действия счёта истёк.',
+            self::OrderClosedLost => 'Отправляется при закрытии заявки вручную через UI или после явного отказа клиента. НЕ отправляется, если заявку закрыл сам менеджер своим письмом-отказом («не наш профиль»), потому что клиент уже прочитал ответ.',
         };
     }
 
@@ -96,6 +109,7 @@ enum ClientNotificationType: string
             self::OrderReceived => [
                 'items_count' => 'Количество позиций в заявке',
                 'items_summary' => 'Краткий список позиций',
+                'manager_intro' => 'Условный блок: «Ответственный менеджер: Имя (email).» Подставляется только если письмо пришло на общий ящик (info@/mail@). Для писем на личный ящик менеджера — пустая строка (клиент уже знает, к кому пишет).',
             ],
             self::ClarificationReminder => [
                 'days_since_sent' => 'Сколько дней назад отправили вопрос',
@@ -116,6 +130,10 @@ enum ClientNotificationType: string
                 'invoice_amount' => 'Сумма счёта',
                 'invoice_expired_at' => 'Дата истечения срока действия счёта (DD.MM.YYYY)',
                 'days_since_expiry' => 'Сколько дней прошло с истечения',
+            ],
+            self::OrderClosedLost => [
+                'close_reason_label' => 'Человеческое описание причины закрытия (из ClosedLostReason enum)',
+                'close_comment' => 'Комментарий менеджера к закрытию (если заполнен)',
             ],
         };
 

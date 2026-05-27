@@ -3,11 +3,14 @@
 namespace App\Services\Mail;
 
 use App\Enums\ClientNotificationType;
+use App\Enums\ClosedLostReason;
+use App\Enums\MailboxType;
 use App\Enums\MailDirection;
 use App\Models\ClientNotificationSent;
 use App\Models\ClientNotificationTemplate;
 use App\Models\EmailMessage;
 use App\Models\Request;
+use App\Models\RequestStateChange;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -65,6 +68,58 @@ class ClientNotificationService
             extra: [
                 'items_count' => $request->items()->where('is_active', true)->count(),
                 'items_summary' => $this->buildItemsSummary($request),
+            ],
+        );
+    }
+
+    /**
+     * «Заявка закрыта». Триггерится синхронным hook'ом в RequestStateService::transitionTo
+     * после успешного перехода в ClosedLost.
+     *
+     * Guard: НЕ слать если закрытие пришло из outbound-сигнала менеджера
+     * (state_change.payload.detector_type === 'outbound_declined'). В этом
+     * случае менеджер уже сам написал клиенту ответ-отказ — повторное
+     * уведомление избыточно. Шлём для:
+     *  - manual UI (CloseLostDialog) — payload.detector_type отсутствует;
+     *  - inbound_decline — клиент сам отказался, подтверждаем что услышали;
+     *  - системного закрытия (auto-recover unassigned) — клиент в курсе быть должен.
+     */
+    public function sendOrderClosedLost(Request $request, RequestStateChange $stateChange): bool
+    {
+        $payload = is_array($stateChange->payload) ? $stateChange->payload : [];
+        $detectorType = (string) ($payload['detector_type'] ?? '');
+
+        // Outbound — менеджер уже написал клиенту, не слать ещё одно.
+        if ($detectorType === 'outbound_declined') {
+            return false;
+        }
+
+        // Найдём anchor для треда — последнее inbound от клиента в этой Request,
+        // либо origin email_message заявки.
+        $replyTo = EmailMessage::query()
+            ->where('related_request_id', $request->id)
+            ->where('direction', 'inbound')
+            ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
+            ->orderByDesc('id')
+            ->first()
+            ?? $request->emailMessage;
+
+        if (! $replyTo) {
+            return false;
+        }
+
+        $reasonEnum = ClosedLostReason::tryFrom((string) $request->closed_lost_reason);
+        $reasonLabel = $reasonEnum?->label() ?? ($request->closed_lost_reason ?: 'не указана');
+        $comment = trim((string) ($request->closed_lost_comment ?? ''));
+
+        return $this->dispatch(
+            request: $request,
+            type: ClientNotificationType::OrderClosedLost,
+            scopeKey: '', // одна заявка — одно закрытие; idempotent на повторных вызовах
+            replyTo: $replyTo,
+            extra: [
+                'close_reason_label' => $reasonLabel,
+                'close_comment' => $comment !== '' ? 'Комментарий: ' . $comment : '',
             ],
         );
     }
@@ -222,6 +277,12 @@ class ClientNotificationService
             'manager_phone' => (string) ($manager?->phone ?? ''),
             'client_name' => (string) ($request->client_name ?: $this->guessClientNameFromEmail($request->client_email)),
             'company_name' => 'MyZip',
+            // Conditional: для OrderReceived (и любого другого где это
+            // полезно) — заполняем «Ответственный менеджер: ...» ТОЛЬКО
+            // если письмо пришло на общий ящик. Если на личный — клиент
+            // и так знает, к кому пишет; повторять имя в авто-уведомлении
+            // выглядит формально.
+            'manager_intro' => $this->buildManagerIntro($request, $manager),
         ];
 
         $extraStr = [];
@@ -230,6 +291,28 @@ class ClientNotificationService
         }
 
         return array_merge($common, $extraStr);
+    }
+
+    /**
+     * Conditional блок про ответственного менеджера. Если оригинальное
+     * письмо пришло на shared mailbox (info@/mail@) — клиент не знает,
+     * кто его обрабатывает, явно представляем менеджера. Если письмо
+     * пришло на personal — пустая строка (Markdown схлопнет пустой абзац).
+     */
+    private function buildManagerIntro(Request $request, ?User $manager): string
+    {
+        if (! $manager) {
+            return '';
+        }
+        $origin = $request->emailMessage;
+        $mailboxType = $origin?->mailbox?->type;
+        if ($mailboxType !== MailboxType::Shared) {
+            return '';
+        }
+
+        $email = $manager->email ? ' (' . $manager->email . ')' : '';
+
+        return 'Ответственный менеджер: **' . $manager->name . '**' . $email . '.';
     }
 
     /**

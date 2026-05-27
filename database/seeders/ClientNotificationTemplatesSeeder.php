@@ -42,7 +42,7 @@ class ClientNotificationTemplatesSeeder extends Seeder
 
 Спасибо за обращение. Ваш запрос **{{ request_code }}** принят в работу.
 
-Ответственный менеджер: **{{ manager_name }}** ({{ manager_email }}).
+{{ manager_intro }}
 
 Мы изучим запрос, и в ближайшее время вернёмся к вам с предложением. Если у вас есть уточнения — отправьте их в ответ на это письмо, оно автоматически попадёт в вашу заявку.
 
@@ -117,6 +117,25 @@ MD,
 К сожалению, срок действия счёта **№ {{ invoice_number }}** на сумму {{ invoice_amount }} по заявке **{{ request_code }}** истёк {{ invoice_expired_at }} ({{ days_since_expiry }} дн. назад).
 
 Если оплата всё ещё актуальна — сообщите, мы выставим новый счёт с актуальными ценами.
+
+С уважением,
+{{ manager_name }}
+{{ company_name }}
+MD,
+                'threshold_hours' => null,
+                'warning_days' => null,
+            ],
+
+            ClientNotificationType::OrderClosedLost->value => [
+                'subject_template' => 'Заявка {{ request_code }} закрыта',
+                'body_template' => <<<'MD'
+Здравствуйте, {{ client_name }}!
+
+Заявка **{{ request_code }}** закрыта. Причина: {{ close_reason_label }}.
+
+{{ close_comment }}
+
+Если ситуация изменится — напишите в ответ на это письмо, мы готовы вернуться к работе.
 
 С уважением,
 {{ manager_name }}
