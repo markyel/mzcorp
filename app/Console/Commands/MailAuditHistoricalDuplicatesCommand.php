@@ -45,7 +45,8 @@ class MailAuditHistoricalDuplicatesCommand extends Command
         {--mailboxes= : CSV id ящиков (default — все active personal)}
         {--folder=INBOX : IMAP-папка (default INBOX)}
         {--exclude-from= : CSV email-адресов, чьи письма исключать (например директоров, чтобы убрать легитимный BCC)}
-        {--sample-limit=20 : Сколько примеров дублей показать с детализацией}';
+        {--sample-limit=20 : Сколько примеров дублей показать с детализацией}
+        {--csv= : Путь файла для выгрузки полного отчёта в CSV (RFC 4180, UTF-8 with BOM)}';
 
     protected $description = 'Исторический аудит cross-mailbox дублей через IMAP — поиск дублей, которых ещё не видела БД.';
 
@@ -66,6 +67,7 @@ class MailAuditHistoricalDuplicatesCommand extends Command
             ->filter()
             ->all();
         $sampleLimit = (int) $this->option('sample-limit');
+        $csvPath = $this->option('csv') ? (string) $this->option('csv') : null;
 
         $mailboxes = Mailbox::query()
             ->where('type', MailboxType::Personal->value)
@@ -245,17 +247,67 @@ class MailAuditHistoricalDuplicatesCommand extends Command
                 '#%d  date=%s  from=%s',
                 $sampled + 1,
                 $first['date'] ?: '—',
-                $first['from'] ?: '—'
+                $this->decodeMime($first['from'] ?: '—')
             ));
-            $this->line(sprintf('    subject: %s', $first['subject'] ?: '(без темы)'));
-            $this->line(sprintf('    to header: %s', $first['to'] ?: '—'));
+            $this->line(sprintf('    subject: %s', $this->decodeMime($first['subject'] ?: '(без темы)')));
+            $this->line(sprintf('    to header: %s', $this->decodeMime($first['to'] ?: '—')));
             $this->line(sprintf('    лежит в (%d ящиков): %s', count($boxes), implode(', ', $boxes)));
             $this->line(sprintf('    x_yandex_forward: %s', $first['x_fwd'] ?: '—'));
             $this->line(sprintf('    message-id: %s', mb_substr($mid, 0, 100)));
             $sampled++;
         }
 
+        // CSV-выгрузка
+        if ($csvPath) {
+            $this->newLine();
+            $this->info('=== Writing CSV ===');
+            $fh = fopen($csvPath, 'w');
+            if (! $fh) {
+                $this->error('  cannot open ' . $csvPath);
+
+                return self::FAILURE;
+            }
+            // UTF-8 BOM для Excel
+            fwrite($fh, "\xEF\xBB\xBF");
+            fputcsv($fh, [
+                'date', 'from', 'from_email', 'to_visible', 'subject',
+                'mailboxes_with_copy', 'copies_count', 'x_yandex_forward', 'message_id',
+            ]);
+            foreach ($dups as $mid => $occ) {
+                $first = $occ[0];
+                $boxes = array_values(array_unique(array_column($occ, 'mb_email')));
+                sort($boxes);
+                fputcsv($fh, [
+                    (string) ($first['date'] ?? ''),
+                    $this->decodeMime((string) ($first['from'] ?? '')),
+                    (string) ($first['from_email'] ?? ''),
+                    $this->decodeMime((string) ($first['to'] ?? '')),
+                    $this->decodeMime((string) ($first['subject'] ?? '')),
+                    implode('; ', $boxes),
+                    count($boxes),
+                    (string) ($first['x_fwd'] ?? ''),
+                    $mid,
+                ]);
+            }
+            fclose($fh);
+            $this->line('  written: ' . $csvPath . ' (' . count($dups) . ' rows)');
+        }
+
         return self::SUCCESS;
+    }
+
+    /**
+     * Декодирование MIME-encoded строк (=?UTF-8?B?...?= / =?koi8-r?Q?...?=).
+     * iconv_mime_decode безопаснее чем mb_decode_mimeheader на смешанных charset'ах.
+     */
+    private function decodeMime(string $raw): string
+    {
+        if ($raw === '' || ! str_contains($raw, '=?')) {
+            return $raw;
+        }
+        $decoded = @iconv_mime_decode($raw, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
+
+        return $decoded !== false ? $decoded : $raw;
     }
 
     /**
