@@ -108,7 +108,7 @@ Schedule::command('quotes:reboost-stuck-decisions --apply --limit=50')
 // без category и не превращается в Request — кейс 25.05.2026 #3681.
 // Limit=50 покрывает обычный пик после простоя OpenAI;
 // идемпотентно по categorized_at IS NULL.
-Schedule::command('mail:categorize --all --limit=50')
+Schedule::command('mail:categorize --all --limit=50 --include-orphans')
     ->everyFiveMinutes()
     ->withoutOverlapping()
     ->onOneServer()
