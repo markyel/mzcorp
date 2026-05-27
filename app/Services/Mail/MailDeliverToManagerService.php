@@ -2,6 +2,7 @@
 
 namespace App\Services\Mail;
 
+use App\Enums\MailboxType;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use App\Models\User;
@@ -72,6 +73,41 @@ class MailDeliverToManagerService
                 'email_message_id' => $message->id,
                 'manager_id' => $manager->id,
                 'mailbox_id' => $managerMailbox->id,
+            ]);
+
+            return false;
+        }
+
+        // Письмо лежит в личном ящике ДРУГОГО менеджера — не дублируем.
+        //
+        // Foundation §1.5: личный ящик принадлежит конкретному менеджеру. Если
+        // клиент написал лично менеджеру A, а linker привязал письмо к чужой
+        // Request (assigned=B), мы НЕ APPEND'им копию в личный inbox B.
+        //
+        // Контекст:
+        //  - Менеджер A видит письмо в своём Yandex (как и положено — клиент
+        //    обратился к нему лично).
+        //  - Менеджер B видит письмо в треде заявки в MyLift UI — Detail::mount
+        //    собирает все email_messages по related_request_id независимо от
+        //    исходного ящика.
+        //  - В обратную сторону (shared → personal B) — APPEND продолжает
+        //    работать, это исходный кейс M-2026-1928 / коммит 19e2957.
+        //
+        // Без этого guard'а коммит 19e2957 множил дубли: reply клиента, попавший
+        // в личный ящик A (например, через Outlook autocomplete или
+        // переподчинение sales-команды), копировался в личный inbox B как
+        // «доставка assigned-менеджеру», и оба менеджера видели одно и то же
+        // письмо в своих ящиках. См. MEMORY «Большая волна 2026-05-27».
+        $originMailbox = $message->mailbox;
+        if ($originMailbox
+            && $originMailbox->type === MailboxType::Personal
+            && $originMailbox->owner_user_id
+            && (int) $originMailbox->owner_user_id !== (int) $manager->id) {
+            Log::info('MailDeliverToManagerService: skip — origin in another personal mailbox', [
+                'email_message_id' => $message->id,
+                'origin_mailbox_id' => $originMailbox->id,
+                'origin_owner_user_id' => $originMailbox->owner_user_id,
+                'target_manager_id' => $manager->id,
             ]);
 
             return false;
