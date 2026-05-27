@@ -79,8 +79,9 @@
             <h4 class="font-medium text-gray-900 mb-2">Доступные плейсхолдеры</h4>
             <div class="space-y-1.5 text-xs">
                 @foreach($placeholders as $key => $description)
+                    @php $sample = '{{ '.$key.' }}'; @endphp
                     <div class="font-mono">
-                        <code class="text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100">{{ '{{ '.$key.' }}' }}</code>
+                        <code class="text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100">{{ $sample }}</code>
                         <div class="text-gray-600 ml-2 mt-0.5">{{ $description }}</div>
                     </div>
                 @endforeach
