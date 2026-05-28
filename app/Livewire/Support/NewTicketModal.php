@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Support;
 
+use App\Models\SupportTicket;
 use App\Services\Support\SupportTicketService;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
@@ -14,12 +15,30 @@ use Livewire\WithFileUploads;
  * рядом с bell. Открывается через Livewire-событие
  * `open-support-modal` с payload контекста (url, route, viewport, user_agent),
  * который собирается JS-обвязкой на момент клика.
+ *
+ * Имеет два режима:
+ *   - mode='new'  — форма создания нового тикета (default при открытии).
+ *   - mode='view' — inline-тред конкретного тикета: история сообщений
+ *                   + форма ответа (текст + файлы). Без перехода на
+ *                   /support/{ticket} — пользователь не теряет контекст.
+ *
+ * Переключение: клик на тикет в блоке «Мои обращения» / по кнопке
+ * «Открыть тикет» в success-state → `viewTicket($id)`. Возврат —
+ * `backToList()` (стрелка «← к новому обращению»).
  */
 class NewTicketModal extends Component
 {
     use WithFileUploads;
 
     public bool $open = false;
+
+    /** 'new' | 'view' */
+    public string $mode = 'new';
+
+    /** Id просматриваемого тикета при mode=view. */
+    public ?int $viewTicketId = null;
+
+    // ── Поля формы НОВОГО тикета ─────────────────────────────────────────
 
     #[Validate('nullable|string|max:200')]
     public string $subject = '';
@@ -41,10 +60,27 @@ class NewTicketModal extends Component
     public bool $sentSuccess = false;
     public ?int $sentTicketId = null;
 
+    // ── Поля формы ОТВЕТА в существующий тикет (mode=view) ──────────────
+
+    #[Validate('required|string|min:1|max:5000')]
+    public string $reply = '';
+
+    /**
+     * @var array<int, \Livewire\Features\SupportFileUploads\TemporaryUploadedFile>
+     */
+    #[Validate([
+        'replyAttachments.*' => 'file|max:10240',
+    ])]
+    public array $replyAttachments = [];
+
+    public ?string $replyFlash = null;
+
     #[On('open-support-modal')]
     public function show(array $context = []): void
     {
-        $this->reset(['subject', 'body', 'attachments', 'sentSuccess', 'sentTicketId']);
+        $this->reset(['subject', 'body', 'attachments', 'sentSuccess', 'sentTicketId',
+                      'reply', 'replyAttachments', 'replyFlash', 'viewTicketId']);
+        $this->mode = 'new';
         $this->resetErrorBag();
         $this->context = $this->sanitizeContext($context);
         $this->open = true;
@@ -57,7 +93,11 @@ class NewTicketModal extends Component
 
     public function save(SupportTicketService $service): void
     {
-        $this->validate();
+        $this->validate([
+            'subject' => 'nullable|string|max:200',
+            'body' => 'required|string|min:5|max:5000',
+            'attachments.*' => 'file|max:10240',
+        ]);
 
         $ticket = $service->createTicket(
             auth()->user(),
@@ -72,6 +112,114 @@ class NewTicketModal extends Component
         $this->sentTicketId = $ticket->id;
         $this->sentSuccess = true;
         $this->reset(['subject', 'body', 'attachments']);
+    }
+
+    /**
+     * Переключиться в режим просмотра конкретного тикета (inline-тред).
+     * Авторизация: автор тикета или admin.
+     */
+    public function viewTicket(int $ticketId): void
+    {
+        $ticket = SupportTicket::find($ticketId);
+        if (! $ticket) {
+            $this->replyFlash = 'Тикет не найден.';
+            return;
+        }
+        $user = auth()->user();
+        $owns = $user && $user->id === $ticket->user_id;
+        $admin = $user && $user->hasRole('admin');
+        if (! ($owns || $admin)) {
+            $this->replyFlash = 'Нет доступа к этому тикету.';
+            return;
+        }
+
+        $this->viewTicketId = $ticket->id;
+        $this->mode = 'view';
+        $this->reset(['reply', 'replyAttachments']);
+        $this->replyFlash = null;
+        $this->resetErrorBag();
+
+        // Снять unread support_reply-нотификации этого тикета.
+        if ($owns) {
+            $user->notifications()
+                ->where('type', \App\Notifications\SupportTicketReplyNotification::class)
+                ->whereNull('read_at')
+                ->whereRaw("(data::jsonb->>'ticket_id')::int = ?", [$ticket->id])
+                ->update(['read_at' => now()]);
+        }
+    }
+
+    public function backToList(): void
+    {
+        $this->mode = 'new';
+        $this->viewTicketId = null;
+        $this->sentSuccess = false;
+        $this->sentTicketId = null;
+        $this->reset(['reply', 'replyAttachments']);
+        $this->replyFlash = null;
+        $this->resetErrorBag();
+        // Сбрасываем флаг success — при возврате видим чистую форму нового тикета.
+    }
+
+    /**
+     * Отправить ответ в текущий просматриваемый тикет (mode=view).
+     */
+    public function sendReply(SupportTicketService $service): void
+    {
+        if ($this->mode !== 'view' || $this->viewTicketId === null) {
+            return;
+        }
+
+        $ticket = SupportTicket::find($this->viewTicketId);
+        if (! $ticket) {
+            $this->replyFlash = 'Тикет недоступен.';
+            return;
+        }
+        $user = auth()->user();
+        $owns = $user && $user->id === $ticket->user_id;
+        $admin = $user && $user->hasRole('admin');
+        if (! ($owns || $admin)) {
+            $this->replyFlash = 'Нет доступа.';
+            return;
+        }
+
+        $this->validate([
+            'reply' => 'required|string|min:1|max:5000',
+            'replyAttachments.*' => 'file|max:10240',
+        ]);
+
+        // isInternal=false — автор в принципе не может оставлять internal,
+        // и сама модалка под админа сейчас не заточена (для админа есть
+        // отдельная страница /support/{ticket} с isInternal-чекбоксом).
+        $service->addReply(
+            $ticket,
+            $user,
+            $this->reply,
+            false,
+            $this->replyAttachments,
+        );
+
+        $this->reset(['reply', 'replyAttachments']);
+        $this->resetErrorBag();
+        $this->replyFlash = 'Комментарий добавлен.';
+        unset($this->viewedTicket);
+    }
+
+    /**
+     * Загруженный тикет с тредом и вложениями для blade-рендера.
+     */
+    #[Computed]
+    public function viewedTicket(): ?SupportTicket
+    {
+        if ($this->viewTicketId === null) {
+            return null;
+        }
+        return SupportTicket::with([
+            'user',
+            'messages.author',
+            'messages.attachments',
+            'attachments' => fn ($q) => $q->whereNull('message_id'),
+        ])->find($this->viewTicketId);
     }
 
     /**
@@ -103,7 +251,7 @@ class NewTicketModal extends Component
         if (! $user) {
             return collect();
         }
-        $tickets = \App\Models\SupportTicket::query()
+        $tickets = SupportTicket::query()
             ->where('user_id', $user->id)
             ->orderByDesc('id')
             ->limit(5)
