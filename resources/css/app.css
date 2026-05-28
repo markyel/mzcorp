@@ -27,19 +27,24 @@
         display: none !important;
     }
 
-    /* <select> base: форсим color и background, даже если @tailwindcss/forms
-       или нативный рендер браузера (Windows-Chrome особенно) переопределяет
-       utility-классы по специфичности. Без этого правила селекты с
-       text-fg-1 + bg-surface показывали «бледный» текст почти неразличимо
-       на белом — отчёт пользователя 2026-05-28 для /dashboard/mail.
-       option тоже задаём явно — Windows иногда наследует system menu colors. */
+    /* <select> base: форсим color/background через !important — без этого
+       Windows-Chrome рендерит закрытый select системными «приглушёнными»
+       цветами поверх utility-классов (text-fg-1 + bg-surface), и текст
+       выглядит светло-серым на белом. Отчёт пользователя 2026-05-28 для
+       /dashboard/mail; первая попытка без !important не сработала.
+       option стилизуем отдельно — на Windows option наследует от Shell. */
     select {
-        color: var(--fg-1);
-        background-color: var(--bg-surface);
+        color: var(--fg-1) !important;
+        background-color: var(--bg-surface) !important;
     }
     select option {
-        color: var(--fg-1);
-        background-color: var(--bg-surface);
+        color: var(--fg-1) !important;
+        background-color: var(--bg-surface) !important;
+    }
+    /* @tailwindcss/forms кладёт серую стрелку (stroke #6b7280). На белом
+       фоне с тёмным текстом она тоже бледная — поднимаем до --fg-2. */
+    select {
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'><path stroke='%23475569' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/></svg>") !important;
     }
 }
 
