@@ -27,18 +27,26 @@
         display: none !important;
     }
 
-    /* <select> base: форсим color/background через !important — без этого
-       Windows-Chrome рендерит закрытый select системными «приглушёнными»
-       цветами поверх utility-классов (text-fg-1 + bg-surface), и текст
-       выглядит светло-серым на белом. Отчёт пользователя 2026-05-28 для
-       /dashboard/mail; первая попытка без !important не сработала.
-       option стилизуем отдельно — на Windows option наследует от Shell. */
+    /* <select> closed-state на Windows-Chrome: даже с color !important
+       нативный шелл-рендер native control использует свой text-fill для
+       ВЫБРАННОЙ опции (option видны при открытии, а закрытый select —
+       серый «приглушённый» текст). Решение требует три рычага одновременно:
+         - -webkit-text-fill-color — побеждает наследование на native form-
+           controls (specific для Chromium-shell, color его не покрывает).
+         - color-scheme: light — выключает Chrome auto-dark на этом контроле
+           (Auto Dark Mode for Web Contents может переинвертировать color).
+         - forced-color-adjust: none — Windows High Contrast не переопределит.
+       option стилизуем отдельно — открытое меню наследует от system menu. */
     select {
         color: var(--fg-1) !important;
+        -webkit-text-fill-color: var(--fg-1) !important;
         background-color: var(--bg-surface) !important;
+        color-scheme: light;
+        forced-color-adjust: none;
     }
     select option {
         color: var(--fg-1) !important;
+        -webkit-text-fill-color: var(--fg-1) !important;
         background-color: var(--bg-surface) !important;
     }
     /* @tailwindcss/forms кладёт серую стрелку (stroke #6b7280). На белом
