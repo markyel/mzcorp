@@ -6,7 +6,7 @@
 <div>
     @if($open)
         <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 24px;"
-             wire:click.self="close">
+             wire:mousedown.self="close">
             <div class="ds-card p-5 w-full max-w-[680px] max-h-[85vh] overflow-y-auto" wire:click.stop>
                 <h3 class="text-[15px] font-semibold text-fg-1 mb-1">
                     Привязать строку КП к позиции заявки

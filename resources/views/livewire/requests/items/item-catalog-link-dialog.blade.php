@@ -1,7 +1,7 @@
 <div>
     @if($open)
         <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: flex-start; justify-content: center; padding: 60px 24px 24px;"
-             wire:click.self="close">
+             wire:mousedown.self="close">
             <div class="ds-card p-5 w-full {{ $comparing ? 'max-w-[1200px]' : 'max-w-[1040px]' }} max-h-[90vh] flex flex-col" wire:click.stop>
                 <h3 class="text-[15px] font-semibold text-fg-1 mb-1">
                     Привязать позицию к каталогу

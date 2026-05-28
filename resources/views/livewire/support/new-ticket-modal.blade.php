@@ -2,7 +2,7 @@
     @if($open)
         @php $developerName = config('support.developer_name'); @endphp
         <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(15,18,23,0.55); display: flex; align-items: flex-start; justify-content: center; padding: 48px 24px; overflow-y: auto;"
-             wire:click.self="close">
+             wire:mousedown.self="close">
             <div style="width: min(640px, 100%); background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: 0 24px 56px -12px rgba(0,0,0,0.25); overflow: hidden;"
                  wire:click.stop>
 

@@ -1,7 +1,7 @@
 <div>
     @if($open)
         <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 24px;"
-             wire:click.self="close">
+             wire:mousedown.self="close">
             <div class="ds-card p-5 w-full max-w-[520px]" wire:click.stop>
                 <h3 class="text-[15px] font-semibold text-fg-1 mb-3">
                     📋 Выставить счёт
