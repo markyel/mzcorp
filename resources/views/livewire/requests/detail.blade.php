@@ -1694,8 +1694,9 @@
                             @else
                                 Парсер не нашёл ни одной позиции в письме.
                                 <div class="text-[12px] mt-2 text-fg-4">
-                                    Бывает, когда письмо содержит только фото без структурированного списка,
-                                    или внешний AI-сервис был временно недоступен.
+                                    Бывает, когда письмо содержит только фото без читаемой маркировки,
+                                    PDF/DOCX-документа со списком позиций нет, или AI-сервис был недоступен.
+                                    «↻ Перезапустить парсер» прогонит те же файлы заново — поможет только при сбое AI.
                                 </div>
                                 <div class="flex items-center justify-center gap-2 mt-4">
                                     <button type="button" wire:click="reparseItems"
@@ -1703,8 +1704,18 @@
                                             class="btn btn-sm">
                                         ↻ Перезапустить парсер
                                     </button>
-                                    <span class="text-[11.5px] text-fg-4">или добавьте позицию вручную ниже</span>
                                 </div>
+                                @if($canEditItems && ! auth()->user()?->hasRole('secretary'))
+                                    {{-- Форма «+ добавить позицию» доступна и когда позиций ещё нет —
+                                         иначе менеджер заперт после неудачного парсинга, как было
+                                         с M-2026-2102 (3 jpg без маркировки → items=0, и обещанной
+                                         «ниже» формы добавления не было видно). --}}
+                                    <div class="mt-4 pt-4 border-t border-border-subtle inline-flex items-center gap-2 text-left text-[12.5px]">
+                                        <livewire:requests.items.add-item-form
+                                            :request-id="$req->id"
+                                            :key="'add-item-form-empty-' . $req->id" />
+                                    </div>
+                                @endif
                             @endif
                         </div>
                     @else
