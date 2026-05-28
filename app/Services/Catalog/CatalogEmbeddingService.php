@@ -686,10 +686,12 @@ class CatalogEmbeddingService
                        OR brand_article_normalized ILIKE ANY (?::text[])
                        OR (articles_search IS NOT NULL AND articles_search ILIKE ANY (?::text[]))
                        OR (brands_search IS NOT NULL AND brands_search ILIKE ANY (?::text[]))
+                       OR (description IS NOT NULL AND lower(description) ILIKE ANY (?::text[]))
+                       OR (comment IS NOT NULL AND lower(comment) ILIKE ANY (?::text[]))
                   )
                 LIMIT ?
                 ",
-                [$lowerArr, $lowerArr, $upperArr, $upperArr, $upperArr, $limit],
+                [$lowerArr, $lowerArr, $upperArr, $upperArr, $upperArr, $lowerArr, $lowerArr, $limit],
             );
             foreach ($rows as $r) {
                 $catId = (int) $r->catalog_id;
@@ -798,31 +800,59 @@ class CatalogEmbeddingService
             // EXISTS UNNEST давал nested loop вместо index lookup → 1.6с
             // вместо ~200мс).
             $nameExpr = "regexp_replace(lower(name), '[\\-_./,]', '', 'g')";
+            // description/comment — GIN trgm индексы добавлены миграцией
+            // 2026_05_28_180000. Для поиска по тексту замены («ЗАМЕНА ДЛЯ
+            // B157AAEX01») и техническим описаниям. Снижаем вес — позиция
+            // где артикул в комментарии не должна перебивать прямой
+            // hit по name/articles_search.
+            $descExpr = 'lower(description)';
+            $commExpr = 'lower(comment)';
             $selectTerms = [];
             $whereOrs = [];
             $bindings = [];
             foreach ($tokens as $tok) {
+                $tokLower = mb_strtolower($tok);
                 if ($useArticles) {
                     $selectTerms[] = "GREATEST("
                         . "word_similarity(?, $nameExpr), "
                         . "CASE WHEN articles_search IS NOT NULL AND articles_search <> '' "
-                        . "THEN word_similarity(?, articles_search) ELSE 0 END)";
+                        . "THEN word_similarity(?, articles_search) ELSE 0 END, "
+                        . "CASE WHEN description IS NOT NULL AND description <> '' "
+                        . "THEN word_similarity(?, $descExpr) * 0.7 ELSE 0 END, "
+                        . "CASE WHEN comment IS NOT NULL AND comment <> '' "
+                        . "THEN word_similarity(?, $commExpr) * 0.7 ELSE 0 END)";
                     $bindings[] = $tok;
                     $bindings[] = $tok;
+                    $bindings[] = $tokLower;
+                    $bindings[] = $tokLower;
                 } else {
-                    $selectTerms[] = "word_similarity(?, $nameExpr)";
+                    $selectTerms[] = "GREATEST("
+                        . "word_similarity(?, $nameExpr), "
+                        . "CASE WHEN description IS NOT NULL AND description <> '' "
+                        . "THEN word_similarity(?, $descExpr) * 0.7 ELSE 0 END, "
+                        . "CASE WHEN comment IS NOT NULL AND comment <> '' "
+                        . "THEN word_similarity(?, $commExpr) * 0.7 ELSE 0 END)";
                     $bindings[] = $tok;
+                    $bindings[] = $tokLower;
+                    $bindings[] = $tokLower;
                 }
             }
             $avgExpr = '(' . implode(' + ', $selectTerms) . ') / ' . count($tokens) . '.0';
 
             foreach ($tokens as $tok) {
+                $tokLower = mb_strtolower($tok);
                 $whereOrs[] = "? <% $nameExpr";
                 $bindings[] = $tok;
                 if ($useArticles) {
                     $whereOrs[] = "(articles_search IS NOT NULL AND ? <% articles_search)";
                     $bindings[] = $tok;
                 }
+                // description/comment — частичный индекс по GIN trgm, WHERE
+                // обращается к lower(description)/lower(comment) с %% триграммой.
+                $whereOrs[] = "(description IS NOT NULL AND ? <% $descExpr)";
+                $bindings[] = $tokLower;
+                $whereOrs[] = "(comment IS NOT NULL AND ? <% $commExpr)";
+                $bindings[] = $tokLower;
             }
 
             $sql = "

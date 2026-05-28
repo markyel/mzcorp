@@ -84,6 +84,12 @@ class CatalogSearchService
                 $q->orWhere('brands_search', 'ILIKE', $upperLike);
                 // sku — короткая, B-tree index достаточно
                 $q->orWhereRaw('sku ILIKE ?', [$like]);
+                // description/comment — GIN trgm индексы добавлены миграцией
+                // 2026_05_28_180000. Покрывает поиск по replace-кодам в
+                // комментариях («ЗАМЕНА ДЛЯ B157AAEX01») и по техническим
+                // описаниям. Запрос: пользователь 2026-05-28.
+                $q->orWhereRaw('lower(description) LIKE ?', [$like]);
+                $q->orWhereRaw('lower(comment) LIKE ?', [$like]);
             })
             ->orderByDesc('is_active')
             ->orderBy('sku')
