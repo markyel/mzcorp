@@ -46,7 +46,9 @@ class ResolvePendingChunkJob implements ShouldQueue, ShouldBeUnique
     use Queueable;
     use SerializesModels;
 
-    public string $queue = 'catalog-resolve';
+    // Тип не пишем (string) — Queueable trait объявляет `public $queue;`
+    // без типа, в PHP 8 несовпадающий тип в trait composition = Fatal.
+    public $queue = 'catalog-resolve';
     public int $tries = 1;
     public int $timeout = 600;
     public bool $failOnTimeout = true;

@@ -48,7 +48,10 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
      * Инцидент 2026-05-28: catalog ResolvePendingChunkJob зацикливался
      * в default и забивал все 4 воркера, info@ застрял на час.
      */
-    public string $queue = 'mail-sync';
+    // Тип не пишем (string) — trait Illuminate\Bus\Queueable объявляет
+    // `public $queue;` без типа, PHP 8 trait composition не допускает
+    // несовпадающие типы у одинаковых свойств → Fatal. Кейс 2026-05-28.
+    public $queue = 'mail-sync';
 
     /** Чанк fetch'а — больше = меньше IMAP round-trips, но больше памяти. */
     private const FETCH_CHUNK = 50;

@@ -47,7 +47,9 @@ class ResolvePendingFromCatalogJob implements ShouldQueue, ShouldBeUnique
      * чтобы тяжёлая catalog/LLM-работа не блокировала IMAP-синки.
      * См. post-mortem 2026-05-28 в MEMORY § «Sync info@ stuck».
      */
-    public string $queue = 'catalog-resolve';
+    // Тип не пишем (string) — Queueable trait объявляет `public $queue;`
+    // без типа, в PHP 8 несовпадающий тип в trait composition = Fatal.
+    public $queue = 'catalog-resolve';
 
     public int $tries = 1;
     public int $timeout = 120; // dispatch'ер сам по себе быстрый — оставляем запас.
