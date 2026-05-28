@@ -40,6 +40,16 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
     use Queueable;
     use SerializesModels;
 
+    /**
+     * Очередь `mail-sync` — выделена, чтобы IMAP-синхронизация
+     * (time-critical) не блокировалась тяжёлыми catalog/LLM-jobs
+     * в общей `default`. Supervisor слушает очереди с приоритетом
+     * mail-sync,default,catalog-resolve — sync всегда выигрывает.
+     * Инцидент 2026-05-28: catalog ResolvePendingChunkJob зацикливался
+     * в default и забивал все 4 воркера, info@ застрял на час.
+     */
+    public string $queue = 'mail-sync';
+
     /** Чанк fetch'а — больше = меньше IMAP round-trips, но больше памяти. */
     private const FETCH_CHUNK = 50;
 

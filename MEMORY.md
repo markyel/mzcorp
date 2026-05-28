@@ -342,6 +342,42 @@ sudo supervisorctl restart mzcorp-worker:*
 - Plus-addressing срезается при нормализации — `foo+anything@spam.com` матчится записью `foo@spam.com`. Спамеры используют `+` для обхода простых блокировок, мы этот трюк нейтрализуем.
 - `domain` запись `paulschaab.de` действует на ВСЕ поддомены. Если нужно блокировать только корневой — никак, придётся завести email-записи по каждому. Это намеренно — упрощение MVP.
 
+## Queue topology (2026-05-28 post-mortem)
+
+**Инцидент:** входящая почта info@ не обрабатывалась >1 часа. 4 воркера на одной общей очереди `default` зациклились на `ResolvePendingChunkJob` (catalog A→B→C резолв), забили очередь, sync IMAP-job'ы ждали.
+
+**Цепочка событий:**
+1. `ResolvePendingChunkJob` обрабатывает 50 items × ~3с (pgvector HNSW + LLM rerank) = 150с в норме. В плохую минуту (OpenAI лагает) ≥ 300с timeout.
+2. PCNTL alarm стреляет таймаут, Laravel пытается mark job as failed и записать в `failed_jobs`. В логах виден race: `ResolvePendingChunkJob done` + `MaxAttemptsExceeded` в одну секунду.
+3. Мои частые `supervisorctl restart mzcorp-worker:*` (после каждого деплоя) — оставляли некоторые jobs в reserved-limbo. После рестарта другой воркер подбирал reserved-by-timeout, handle() запускался ВТОРОЙ раз с тем же `jobs.uuid`.
+4. Второй fail → INSERT в `failed_jobs` с UUID, который уже там есть → `failed_jobs_uuid_unique` violation → exception throws везде, видна как «OpenAI chat failed» (наш logger обернул PDO-error в OpenAI-контексте).
+5. На каждый цикл воркер тратил ~5 мин (timeout + failure handling), 4 воркера × 5 мин = backlog. 64 SyncMailboxFolderJob накопились без обработки.
+
+**Архитектурный фикс — три очереди:**
+
+| Queue | Назначение | Кто туда пишет |
+|---|---|---|
+| `mail-sync` | IMAP SyncMailboxFolderJob (time-critical) | `SyncMailboxFolderJob::$queue` |
+| `default` | всё остальное (Parse, Deliver, Route, KB, OutgoingQuote, нотификации, AI) | implicit fallback |
+| `catalog-resolve` | тяжёлая catalog/LLM/pgvector работа | `ResolvePendingChunkJob`, `ResolvePendingFromCatalogJob` |
+
+Supervisor (все 4 воркера): `--queue=mail-sync,default,catalog-resolve`. Порядок ВАЖЕН — Laravel queue:work обрабатывает очереди слева направо, не уходит на следующую пока в текущей есть jobs. Mail-sync гарантированно не голодает даже если catalog-resolve забит на часы.
+
+Конфиг в репо: `deploy/supervisor/mzcorp-worker.conf`. После git pull на проде: `cp deploy/supervisor/mzcorp-worker.conf /etc/supervisor/conf.d/ && sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl restart mzcorp-worker:*`.
+
+**Дополнительные защиты в ResolvePendingChunkJob:**
+- `timeout: 300 → 600` — запас на медленный LLM/pgvector.
+- `ShouldBeUnique` по md5 sorted itemIds, окно 5 мин — race при reserved-reaquire отказывается.
+- `failOnTimeout = true` — Laravel явно помечает failed, не оставляет reserved.
+
+**Что нельзя делать:**
+- Перезапускать воркеров `supervisorctl restart` подряд, не дав текущим job'ам graceful exit. Используйте `php artisan queue:restart` — он отправляет soft-signal «закончи текущий job и выйди», новый воркер supervisor поднимет сам. Особенно важно для in-flight catalog-resolve (5-10 мин).
+- Объединять очереди обратно в одну `default`. Класс этого инцидента вернётся.
+
+**Что хорошо бы добавить позже:**
+- Cron-команда `queue:prune-failed --hours=72` (раз в день) — чтобы failed_jobs не рос.
+- Health-check команда `queue:size-check` с алертом если jobs > 200 или reserved > 30 минут.
+
 ## Открытые вопросы (из Foundation)
 
 ### Критические — ждут ответа клиента

@@ -5,6 +5,7 @@ namespace App\Jobs\Catalog;
 use App\Models\RequestItem;
 use App\Services\Catalog\CatalogResolutionService;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -12,7 +13,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Резолв одного chunk'а (≤100) pending RequestItem'ов через
+ * Резолв одного chunk'а (≤50) pending RequestItem'ов через
  * CatalogResolutionService::matchOrResolve (A→B→C цепочка).
  *
  * Dispatch'ится из `ResolvePendingFromCatalogJob`, который chunkById
@@ -20,29 +21,58 @@ use Illuminate\Support\Facades\Log;
  * job. Каждый chunk идёт в очередь отдельным job'ом — параллелятся
  * между worker'ами, retry'ются независимо, не накапливают память.
  *
- * Тюнинг (после 2026-05-24 boevoj test'a):
- *   - chunk size 50 (в caller'е) + $timeout=300 — реальный C-stage
- *     стоит ~2-3с/item (pgvector HNSW + LLM gpt-4o-mini validation),
- *     то есть 50 × 3 = 150с с запасом до 300.
- *   - $tries=1 — retry бесполезен: если timeout сработал, повторный
- *     запуск тоже не уложится. Лучше job-fail и видеть это в
- *     queue:failed, чем тратить worker-минуту повторно.
+ * Очередь `catalog-resolve` — отдельная от `default` и `mail-sync`.
+ * Инцидент 2026-05-28: этот job зацикливался по таймауту (300с не
+ * хватало на 50 items в плохую минуту), Laravel пытался mark-failed
+ * + INSERT в failed_jobs, supervisor restart возвращал reserved job
+ * в очередь с прежним UUID → коллизия `failed_jobs_uuid_unique` →
+ * 4 воркера часами крутили этот цикл, забив default очередь.
+ *
+ * Тюнинг (после 2026-05-28 post-mortem):
+ *   - timeout 300 → 600: запас даже при медленном LLM/pgvector.
+ *   - ShouldBeUnique по hash itemIds + window 5 мин: повторный
+ *     dispatch того же chunk (если кто-то re-released из reserved)
+ *     отказывается — нет двух attempt'ов на один и тот же набор.
+ *   - $tries=1 сохраняем: retry бесполезен, если действительно
+ *     timeout. Лучше job-fail в queue:failed, чем worker-минута
+ *     повторно.
+ *   - failOnTimeout=true: явно помечаем как failed в catch worker'а,
+ *     не позволяя оставаться reserved.
  */
-class ResolvePendingChunkJob implements ShouldQueue
+class ResolvePendingChunkJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
     use SerializesModels;
 
+    public string $queue = 'catalog-resolve';
     public int $tries = 1;
-    public int $timeout = 300;
+    public int $timeout = 600;
+    public bool $failOnTimeout = true;
 
     /**
      * @param  array<int, int>  $itemIds  request_items.id для обработки
      */
     public function __construct(public readonly array $itemIds)
     {
+    }
+
+    /**
+     * Уникальный ключ — md5 от sorted itemIds. Два одинаковых
+     * chunk'а в окне 5 минут не запустятся параллельно. Защита
+     * от race при worker restart + reserved-reaquire.
+     */
+    public function uniqueId(): string
+    {
+        $sorted = $this->itemIds;
+        sort($sorted);
+        return 'resolve-chunk-'.md5(implode(',', $sorted));
+    }
+
+    public function uniqueFor(): int
+    {
+        return 300; // 5 мин
     }
 
     public function handle(CatalogResolutionService $service): void

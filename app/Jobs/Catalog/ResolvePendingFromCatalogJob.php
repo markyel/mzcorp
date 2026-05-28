@@ -42,6 +42,13 @@ class ResolvePendingFromCatalogJob implements ShouldQueue, ShouldBeUnique
     use Queueable;
     use SerializesModels;
 
+    /**
+     * Очередь `catalog-resolve` — изолируем от mail-sync и default,
+     * чтобы тяжёлая catalog/LLM-работа не блокировала IMAP-синки.
+     * См. post-mortem 2026-05-28 в MEMORY § «Sync info@ stuck».
+     */
+    public string $queue = 'catalog-resolve';
+
     public int $tries = 1;
     public int $timeout = 120; // dispatch'ер сам по себе быстрый — оставляем запас.
 
