@@ -48,7 +48,25 @@
 
     {{-- ────────── SUBNAV ────────── --}}
     <div class="flex items-center gap-3 mb-3 text-[12.5px]">
+        {{-- «← К списку» восстанавливает фильтры/пагинацию через document.referrer.
+             Если пришли с /dashboard/requests (с любыми ?q=&bucket=&page=N) — href
+             перезаписываем на этот URL, и возврат попадает ровно в то место пула,
+             где был пользователь. Если referrer пуст / не пул (прямой переход
+             из bell-уведомления / email / bookmark) — fallback на голый
+             /dashboard/requests (текущий поведение). Жалоба пользователя
+             2026-05-28: «потеря пути, фильтры сбрасываются». --}}
         <a href="{{ route('requests.index') }}"
+           x-data
+           x-init="(() => {
+                const r = document.referrer;
+                if (!r) return;
+                try {
+                    const u = new URL(r);
+                    if (u.origin === window.location.origin && u.pathname === '/dashboard/requests') {
+                        $el.href = r;
+                    }
+                } catch (_) { /* malformed referrer — keep fallback */ }
+           })()"
            class="inline-flex items-center gap-1.5 px-2.5 py-1 border border-border rounded-md bg-surface text-sky-700 hover:bg-hover transition-colors">
             ← К списку
         </a>
