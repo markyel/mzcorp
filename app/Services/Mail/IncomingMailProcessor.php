@@ -34,11 +34,25 @@ class IncomingMailProcessor
         private readonly MailFolderRouter $folders,
         private readonly RequestActivityService $activity,
         private readonly EmailTextCleanerService $cleaner,
+        private readonly SenderBlocklistService $blocklist,
     ) {
     }
 
     public function processIfRequest(EmailMessage $message): ?Request
     {
+        // Defense-in-depth для стоп-листа: MailRouter уже отбивает blocked
+        // ДО категоризации, но cron-команды `mail:create-requests` /
+        // `mail:categorize` могут вызвать processIfRequest напрямую,
+        // обходя router. Повторная проверка дешёвая (локальный SELECT).
+        if ($this->blocklist->isBlocked($message->from_email)) {
+            Log::info('IncomingMailProcessor: skip — sender in blocklist', [
+                'email_message_id' => $message->id,
+                'from_email' => $message->from_email,
+            ]);
+
+            return null;
+        }
+
         // Принимаем client_request (новая заявка) и thread_reply (ответ
         // в треде). Для thread_reply создаём Request ТОЛЬКО когда linker
         // не нашёл existing — это «висящий» reply на тред которого у нас

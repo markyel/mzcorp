@@ -115,6 +115,13 @@ Route::middleware('auth')->group(function () {
             return view('admin.mail-rules.edit', ['rule' => $rule]);
         })->name('mail-rules.edit');
 
+        // Стоп-лист отправителей — Phase 1.X (ручной CRUD + кнопка «Закрыть как спам»
+        // на карточке заявки). Письма из стоп-листа не попадают в pipeline создания
+        // заявок. Менеджер сам сюда не ходит — это административный экран.
+        Route::get('/dashboard/sender-blocklist', function () {
+            return view('admin.sender-blocklist.index');
+        })->name('sender-blocklist.index');
+
         // Управление менеджерами (Phase 1.13) — список + create/edit + OAuth-привязка ящиков.
         Route::get('/dashboard/managers', function () {
             return view('admin.managers.index');

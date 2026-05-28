@@ -28,6 +28,11 @@ enum ClosedLostReason: string
     // Письмо остаётся в IMAP /MZ/, заявка уходит из активных пулов с явной
     // причиной — для аналитики «доля unparseable-входящих».
     case ParserNoContent = 'parser_no_content';
+    // Заявка создалась ошибочно от спам-отправителя (рассылка, бот,
+    // не-наша тематика на регулярной основе). При закрытии с этой причиной
+    // отправитель добавляется в `sender_blocklist` — будущие письма не
+    // создают заявок (см. CloseLostDialog → blocklistScope: email|domain).
+    case Spam = 'spam';
 
     public function label(): string
     {
@@ -45,6 +50,7 @@ enum ClosedLostReason: string
             self::ManualOther => 'Закрыто РОПом вручную',
             self::Duplicate => 'Объединена с другой заявкой',
             self::ParserNoContent => 'Парсер не нашёл позиций (авто)',
+            self::Spam => 'Спам — отправитель в стоп-лист',
         };
     }
 

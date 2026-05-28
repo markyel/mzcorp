@@ -29,7 +29,45 @@
                     @php
                         $selected = collect($reasons)->firstWhere('value', $reason);
                         $needsComment = $selected['needsComment'] ?? false;
+                        $isSpam = $reason === 'spam';
                     @endphp
+
+                    {{-- Spam scope: только при reason=Spam --}}
+                    @if($isSpam)
+                        <div class="rounded border border-amber-200 bg-amber-50 p-3">
+                            <div class="text-[12px] uppercase tracking-wider text-amber-800 font-semibold mb-2">
+                                Что добавить в стоп-лист
+                            </div>
+                            @if($senderInfo['email'])
+                                <div class="space-y-2 text-[13px]">
+                                    <label class="flex items-start gap-2 cursor-pointer">
+                                        <input type="radio" wire:model="blocklistScope" value="email" class="mt-1">
+                                        <span>
+                                            Только адрес: <span class="font-mono text-[12px]">{{ $senderInfo['email'] }}</span>
+                                        </span>
+                                    </label>
+                                    @if($senderInfo['domain'])
+                                        <label class="flex items-start gap-2 cursor-pointer">
+                                            <input type="radio" wire:model="blocklistScope" value="domain" class="mt-1">
+                                            <span>
+                                                Весь домен: <span class="font-mono text-[12px]">{{ $senderInfo['domain'] }}</span>
+                                                <span class="text-fg-3 block text-[11px]">включая поддомены</span>
+                                            </span>
+                                        </label>
+                                    @endif
+                                </div>
+                                <div class="text-[11px] text-amber-700 mt-2">
+                                    Будущие письма от выбранного источника не будут создавать заявок.
+                                    Уже открытые заявки остаются — закройте их вручную при необходимости.
+                                </div>
+                            @else
+                                <div class="text-[12px] text-amber-800">
+                                    У заявки нет исходного письма — нельзя автоматически определить отправителя.
+                                    Выберите другую причину или добавьте адрес в стоп-лист вручную.
+                                </div>
+                            @endif
+                        </div>
+                    @endif
 
                     <div>
                         <label class="block text-[12px] uppercase tracking-wider text-fg-3 font-semibold mb-1">

@@ -61,6 +61,7 @@
     }
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'mail-rules.index', 'label' => 'Правила почты', 'pattern' => 'mail-rules.*'];
+        $navLinks[] = ['route' => 'sender-blocklist.index', 'label' => 'Стоп-лист', 'pattern' => 'sender-blocklist.*'];
         $navLinks[] = ['route' => 'mail-review.index', 'label' => 'Авто-отклонённые', 'pattern' => 'mail-review.*'];
         $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];
         // Уведомления клиенту вынесены в подпункт страницы «Настройки»,

@@ -43,6 +43,7 @@ class MailRouter
         private readonly InboundIntentClassifier $inboundClassifier,
         private readonly AiDecisionService $aiDecisions,
         private readonly \App\Services\Request\AttentionService $attention,
+        private readonly SenderBlocklistService $blocklist,
     ) {
     }
 
@@ -136,6 +137,29 @@ class MailRouter
         // [MyLift forward] в subject. Не маршрутизируем их повторно.
         if ($this->isLoopMessage($message)) {
             $this->recordLoopSkipped($message);
+
+            return;
+        }
+
+        // Стоп-лист отправителей: ДО AI-категоризации (экономим токены) и
+        // ДО reply-linker (спам не должен привязываться к существующим
+        // заявкам). Если отправитель в стоп-листе — помечаем письмо
+        // Irrelevant с reasoning'ом, выходим без routing/parser/job'ов.
+        // sender_blocklist hit_count инкрементится внутри isBlocked().
+        if ($this->blocklist->isBlocked($message->from_email)) {
+            $message->forceFill([
+                'category' => EmailCategory::Irrelevant->value,
+                'category_reasoning' => 'Blocked by sender_blocklist (from='.$message->from_email.')',
+                'categorized_at' => now(),
+            ])->save();
+
+            $this->recordBlocklistSkipped($message);
+
+            Log::info('MailRouter: skip — sender in blocklist', [
+                'email_message_id' => $message->id,
+                'from_email' => $message->from_email,
+                'subject' => mb_substr((string) $message->subject, 0, 80),
+            ]);
 
             return;
         }
@@ -480,6 +504,18 @@ class MailRouter
             'email_message_id' => $message->id,
             'subject' => mb_substr((string) $message->subject, 0, 80),
             'from' => $message->from_email,
+        ]);
+    }
+
+    private function recordBlocklistSkipped(EmailMessage $message): void
+    {
+        RoutedMail::create([
+            'email_message_id' => $message->id,
+            'rule_id' => null,
+            'ai_classified_as' => $message->category,
+            'action_taken' => 'blocklist_skipped',
+            'success' => true,
+            'processed_at' => now(),
         ]);
     }
 

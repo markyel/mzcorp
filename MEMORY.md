@@ -20,6 +20,7 @@
 **Кнопки в action-panel убраны**: «▶ Начать работу», «📨 КП отправлено», «❓ Жду уточнение клиента», «📑 Клиент на согласовании», «⏰ Клиент отложил», «💵 Запросил счёт». Остались semi-manual: «↩ Вернуться к работе», «✓ Клиент ответил» (override), «💴 Счёт отправлен» / «💰 Оплачено» / «✓ Закрыть как успех» (outbound события менеджера/бухгалтерии — не intent), «❌ Закрыть как потеря» (с reason-taxonomy), pause/resume. Все inbound intent-переходы (UnderReview / PostponedUntil / AwaitingInvoice / ClosedLost suggestion) идут через `InboundIntentClassifier` → AiDecision-плашку. PostponeDialog оставлен как dead-UI компонент (никто не диспатчит `open-postpone-dialog`) — на случай будущего «Manual override для semi-auto статусов».
 
 **Mail-pipeline для нового inbound**:
+0. `MailRouter::route` — **SenderBlocklistService::isBlocked** (ДО LLM, ДО reply-linker): если from_email или его домен в `sender_blocklist` → category=irrelevant + `category_reasoning="Blocked by sender_blocklist..."` + `routed_mails.action_taken=blocklist_skipped`, выходим. Inc `hit_count`/`last_hit_at` на матчнувшей записи. Defense-in-depth повторно в `IncomingMailProcessor::processIfRequest` (для cron-команд минующих router). См. секцию «Sender Blocklist» ниже.
 1. `MailRouter::route` — cross-mailbox дедуп ДО LLM: если message_id уже у нас в БД с related_request_id → наследуем категорию + Request, выходим (защита L2)
 2. `InternalSenderDetector` (наш домен / Mailbox / User → category=irrelevant, без LLM)
 3. `TrustedPartnerOverride` (Liftway-saas → category=client_request, без LLM)
@@ -299,6 +300,47 @@ sudo supervisorctl restart mzcorp-worker:*
 На VPS установлены: PHP 8.3.6 + расширения, Composer 2.x, Node.js 20 LTS (NodeSource), npm. HOME для `www-data` под кеши: `/var/www/.config/psysh`, `/var/www/.cache/composer`, `/var/www/.npm`.
 
 Ещё не оформлено в `deploy/deploy.sh` — это TODO.
+
+## Sender Blocklist (стоп-лист отправителей, 2026-05-28)
+
+Фича добавлена по запросу: заявки от мусорных отправителей (рассылки, боты) не должны создаваться. Старая концепция Foundation §1.5 (`from_domain ∈ blacklist` как label_only) доведена до полноценной сущности.
+
+**Файлы:**
+- `app/Enums/BlocklistEntryType.php` (email | domain), `BlocklistEntrySource.php` (manual | from_request)
+- `app/Enums/ClosedLostReason.php` — добавлен case `Spam`
+- `database/migrations/2026_05_28_150000_create_sender_blocklist_table.php` (unique по (type, normalized_value), FK на users + requests с nullOnDelete)
+- `app/Models/SenderBlocklistEntry.php` (table: `sender_blocklist`)
+- `app/Services/Mail/SenderBlocklistService.php` — `isBlocked`, `block`, `unblock`, `bulkBlock`, `normalize*` (публичные для UI/тестов)
+- `app/Services/Mail/MailRouter.php` — врезка ДО LLM-категоризатора (после loop-guard, перед cross-mailbox dedup)
+- `app/Services/Mail/IncomingMailProcessor.php` — defense-in-depth (для cron `mail:create-requests` / `mail:categorize`, минующих MailRouter)
+- `app/Livewire/SenderBlocklist/BlocklistIndex.php` + view → `/dashboard/sender-blocklist` (role:head_of_sales|director|admin)
+- `app/Livewire/Requests/CloseLostDialog.php` — при reason=Spam radio «email/domain» с автозаполнением из `request->emailMessage->from_email`
+- `resources/views/layouts/navigation.blade.php` — пункт «Стоп-лист» в топбаре
+- Гайды: `resources/docs/rop/sender-blocklist.md`, `resources/docs/manager/spam-close.md`
+
+**Семантика матчинга:**
+- email — точное совпадение нормализованных адресов. Lowercase + trim + срез plus-addressing (`foo+x@a.ru` → `foo@a.ru`). Спамеры обходят простой блок через `+` — нормализация съедает.
+- domain — суффикс-матч с разделителем `.`. `paulschaab.de` ловит `mail.paulschaab.de`, но НЕ `paulschaab.de.evil.com`. Покрыто тестом `test_blocks_by_domain_with_subdomain_suffix_match`.
+
+**Решения по UX (зафиксировано):**
+- **Только будущие письма.** Добавление в стоп-лист НЕ закрывает ретроактивно существующие открытые заявки от того же отправителя. Безопаснее — не позволяет одной ошибкой обнулить пачку реальных работ.
+- **Manager → from_request, РОП/admin → manual.** Менеджер может закрыть СВОЮ заявку как «Спам» и автоматически попасть в стоп-лист (source=from_request, audit by_user). CRUD-таблица доступна только head_of_sales/director/admin.
+- **Domain matching = exact + subdomains.** Не настраивается per-entry. Если нужен только конкретный поддомен — заводить его как отдельную domain-запись.
+
+**Аудит:**
+- `routed_mails.action_taken = 'blocklist_skipped'` для каждого отбитого письма (новое значение, не enum'нутое — string).
+- `email_messages.category = irrelevant`, `category_reasoning = "Blocked by sender_blocklist (from=...)"` — видно в `/dashboard/mail-review`.
+- `sender_blocklist.hit_count` + `last_hit_at` — счётчик + время последнего срабатывания, отображается в таблице.
+- При закрытии заявки как Spam через CloseLostDialog: `request_state_changes.payload` содержит `closed_lost_reason=spam`; `sender_blocklist` row создаётся с `added_from_request_id=<request_id>` и `source=from_request`.
+
+**Тесты:**
+- `tests/Unit/Services/Mail/SenderBlocklistNormalizationTest.php` — 8 кейсов нормализации БЕЗ БД (PHPUnit\TestCase, не Laravel\TestCase). Прогоняется локально без коннекта к Postgres.
+- `tests/Feature/Services/Mail/SenderBlocklistServiceTest.php` — 7 интеграционных (RefreshDatabase): exact email, subdomain suffix match, idempotency, hit_counter, unblock, bulkBlock, normalize persistence.
+
+**Грабли при имплементации:**
+- В `CloseLostDialog::save()` — добавление в blocklist делается ПОСЛЕ `transitionTo()`, чтобы не закрыть заявку, если blocklist отказался принять. Но `block()` обёрнут try-catch — если blocklist упадёт уже после успешного транзита, статус останется ClosedLost+Spam, в session flash появится предупреждение «не удалось — добавьте вручную». Не валим UX-flow из-за write-conflict на счётчике.
+- Plus-addressing срезается при нормализации — `foo+anything@spam.com` матчится записью `foo@spam.com`. Спамеры используют `+` для обхода простых блокировок, мы этот трюк нейтрализуем.
+- `domain` запись `paulschaab.de` действует на ВСЕ поддомены. Если нужно блокировать только корневой — никак, придётся завести email-записи по каждому. Это намеренно — упрощение MVP.
 
 ## Открытые вопросы (из Foundation)
 
