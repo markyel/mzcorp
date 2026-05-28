@@ -1701,8 +1701,16 @@
                                 <div class="flex items-center justify-center gap-2 mt-4">
                                     <button type="button" wire:click="reparseItems"
                                             wire:confirm="Перезапустить парсер для этого письма?"
+                                            wire:loading.attr="disabled"
+                                            wire:target="reparseItems"
                                             class="btn btn-sm">
-                                        ↻ Перезапустить парсер
+                                        <span wire:loading.remove wire:target="reparseItems">↻ Перезапустить парсер</span>
+                                        <span wire:loading wire:target="reparseItems" class="inline-flex items-center gap-1.5">
+                                            <svg class="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                                            </svg>
+                                            запускаем…
+                                        </span>
                                     </button>
                                 </div>
                                 @if($canEditItems && ! auth()->user()?->hasRole('secretary'))

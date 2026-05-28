@@ -124,12 +124,33 @@ class Request extends Model
      */
     public function isParsingInFlight(): bool
     {
+        $meta = is_array($this->parsing_meta ?? null) ? $this->parsing_meta : [];
+        $finished = $meta['parser_finished_at'] ?? null;
+        $reparseAt = $meta['reparse_dispatched_at'] ?? null;
+
+        // Ручной reparse через UI: считаем заявку «in flight» пока парсер
+        // не завершится ПОСЛЕ диспатча (или 5 минут не пройдут как timeout).
+        // Это покрывает заявки в любых статусах — quoted, in_progress, paid…
+        // — а не только Pending. Без этого после reparse не появлялся chip
+        // «парсится…», не включался wire:poll, пользователю казалось что
+        // кнопка не сработала. Кейс M-2026-2102 2026-05-28.
+        if ($reparseAt !== null) {
+            try {
+                $reparseTs = \Carbon\Carbon::parse($reparseAt);
+                $finishedTs = $finished !== null ? \Carbon\Carbon::parse($finished) : null;
+                $stillRunning = $finishedTs === null || $finishedTs->lt($reparseTs);
+                if ($stillRunning && $reparseTs->greaterThan(now()->subMinutes(5))) {
+                    return true;
+                }
+            } catch (\Throwable) {
+                // Битый timestamp в meta — игнорируем, идём к default-логике.
+            }
+        }
+
+        // Default-логика (первоначальный парсинг при создании заявки).
         if ($this->status !== RequestStatus::Pending) {
             return false;
         }
-        $finished = is_array($this->parsing_meta ?? null)
-            ? ($this->parsing_meta['parser_finished_at'] ?? null)
-            : null;
         if ($finished !== null) {
             return false;
         }

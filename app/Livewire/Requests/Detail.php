@@ -1347,10 +1347,15 @@ class Detail extends Component
         }
 
         try {
-            // Снять отметку «парсер закончил», чтобы isParsingInFlight() снова
-            // дал true и chip «парсится…» появился, wire:poll начал крутиться.
+            // Снять отметку «парсер закончил» и поставить «reparse запущен» —
+            // isParsingInFlight() работает по этим двум меткам совместно
+            // (см. Request::isParsingInFlight). Без reparse_dispatched_at
+            // флаг in-flight оставался false на non-Pending статусах
+            // (quoted/in_progress…), wire:poll не запускался, и UI
+            // выглядел как «кнопка не сработала».
             $meta = is_array($this->request->parsing_meta) ? $this->request->parsing_meta : [];
             unset($meta['parser_finished_at']);
+            $meta['reparse_dispatched_at'] = now()->toIso8601String();
             $this->request->forceFill(['parsing_meta' => $meta])->save();
 
             \App\Jobs\Mail\ParseRequestItemsJob::dispatch($emailId, force: true, reset: true);
