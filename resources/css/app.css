@@ -26,6 +26,21 @@
     [x-cloak] {
         display: none !important;
     }
+
+    /* <select> base: форсим color и background, даже если @tailwindcss/forms
+       или нативный рендер браузера (Windows-Chrome особенно) переопределяет
+       utility-классы по специфичности. Без этого правила селекты с
+       text-fg-1 + bg-surface показывали «бледный» текст почти неразличимо
+       на белом — отчёт пользователя 2026-05-28 для /dashboard/mail.
+       option тоже задаём явно — Windows иногда наследует system menu colors. */
+    select {
+        color: var(--fg-1);
+        background-color: var(--bg-surface);
+    }
+    select option {
+        color: var(--fg-1);
+        background-color: var(--bg-surface);
+    }
 }
 
 @layer components {

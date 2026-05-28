@@ -143,15 +143,27 @@ class SupportTicketService
         $disk = 'local';
         $dir = 'support/' . $ticket->id;
         $name = Str::random(24) . '.' . ($file->getClientOriginalExtension() ?: 'bin');
+
+        // ВАЖНО: размер/mime/имя читаем ДО storeAs().
+        //
+        // Livewire TemporaryUploadedFile после storeAs() теряет связь с
+        // исходным temp-файлом в `livewire-tmp/`, и любой вызов getSize() /
+        // getMimeType() лезет в FilesystemAdapter->size() уже несуществующего
+        // файла → 500 на `file not found`. Видно в логах prod 2026-05-28
+        // (stack #5 SupportTicketService.php:154 → ->getSize()).
+        $originalName = mb_substr($file->getClientOriginalName(), 0, 255);
+        $mimeType = $file->getClientMimeType() ?: $file->getMimeType();
+        $sizeBytes = (int) ($file->getSize() ?: 0);
+
         $path = $file->storeAs($dir, $name, $disk);
 
         return SupportTicketAttachment::create([
             'ticket_id' => $ticket->id,
             'message_id' => $message?->id,
             'uploaded_by_user_id' => $uploader->id,
-            'original_name' => mb_substr($file->getClientOriginalName(), 0, 255),
-            'mime_type' => $file->getClientMimeType() ?: $file->getMimeType(),
-            'size_bytes' => $file->getSize() ?: 0,
+            'original_name' => $originalName,
+            'mime_type' => $mimeType,
+            'size_bytes' => $sizeBytes,
             'file_path' => $path,
             'disk' => $disk,
         ]);
