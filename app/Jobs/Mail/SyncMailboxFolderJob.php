@@ -40,19 +40,6 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
     use Queueable;
     use SerializesModels;
 
-    /**
-     * Очередь `mail-sync` — выделена, чтобы IMAP-синхронизация
-     * (time-critical) не блокировалась тяжёлыми catalog/LLM-jobs
-     * в общей `default`. Supervisor слушает очереди с приоритетом
-     * mail-sync,default,catalog-resolve — sync всегда выигрывает.
-     * Инцидент 2026-05-28: catalog ResolvePendingChunkJob зацикливался
-     * в default и забивал все 4 воркера, info@ застрял на час.
-     */
-    // Тип не пишем (string) — trait Illuminate\Bus\Queueable объявляет
-    // `public $queue;` без типа, PHP 8 trait composition не допускает
-    // несовпадающие типы у одинаковых свойств → Fatal. Кейс 2026-05-28.
-    public $queue = 'mail-sync';
-
     /** Чанк fetch'а — больше = меньше IMAP round-trips, но больше памяти. */
     private const FETCH_CHUNK = 50;
 
@@ -85,6 +72,18 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
         public readonly int $mailboxId,
         public readonly string $folderType, // 'inbox' | 'sent'
     ) {
+        // Очередь `mail-sync` — выделена, чтобы IMAP-синхронизация
+        // (time-critical) не блокировалась тяжёлыми catalog/LLM-jobs
+        // в общей `default`. Supervisor слушает очереди с приоритетом
+        // mail-sync,default,catalog-resolve. Инцидент 2026-05-28.
+        //
+        // ВАЖНО: устанавливаем queue через `onQueue()` в __construct, а
+        // НЕ через `public $queue = '...'` на уровне класса — PHP 8 trait
+        // composition считает любое class-level default несовместимым с
+        // `public $queue;` (null) из Queueable trait → Fatal Error при
+        // загрузке класса. onQueue() устанавливает $this->queue runtime,
+        // без property-level конфликта.
+        $this->onQueue('mail-sync');
     }
 
     public function uniqueId(): string

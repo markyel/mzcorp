@@ -46,9 +46,6 @@ class ResolvePendingChunkJob implements ShouldQueue, ShouldBeUnique
     use Queueable;
     use SerializesModels;
 
-    // Тип не пишем (string) — Queueable trait объявляет `public $queue;`
-    // без типа, в PHP 8 несовпадающий тип в trait composition = Fatal.
-    public $queue = 'catalog-resolve';
     public int $tries = 1;
     public int $timeout = 600;
     public bool $failOnTimeout = true;
@@ -58,6 +55,10 @@ class ResolvePendingChunkJob implements ShouldQueue, ShouldBeUnique
      */
     public function __construct(public readonly array $itemIds)
     {
+        // queue устанавливаем через onQueue(), не class-level default —
+        // см. SyncMailboxFolderJob::__construct, та же причина (Queueable
+        // trait composition Fatal на default-mismatch в PHP 8).
+        $this->onQueue('catalog-resolve');
     }
 
     /**

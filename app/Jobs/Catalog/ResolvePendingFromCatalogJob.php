@@ -42,15 +42,6 @@ class ResolvePendingFromCatalogJob implements ShouldQueue, ShouldBeUnique
     use Queueable;
     use SerializesModels;
 
-    /**
-     * Очередь `catalog-resolve` — изолируем от mail-sync и default,
-     * чтобы тяжёлая catalog/LLM-работа не блокировала IMAP-синки.
-     * См. post-mortem 2026-05-28 в MEMORY § «Sync info@ stuck».
-     */
-    // Тип не пишем (string) — Queueable trait объявляет `public $queue;`
-    // без типа, в PHP 8 несовпадающий тип в trait composition = Fatal.
-    public $queue = 'catalog-resolve';
-
     public int $tries = 1;
     public int $timeout = 120; // dispatch'ер сам по себе быстрый — оставляем запас.
 
@@ -58,6 +49,14 @@ class ResolvePendingFromCatalogJob implements ShouldQueue, ShouldBeUnique
     // (vector+LLM) стоит ~2-3с/item, 50 items × 3 = 150с укладывается
     // в timeout=300 ChunkJob'а с запасом. 100 валилось по timeout.
     private const CHUNK_SIZE = 50;
+
+    public function __construct()
+    {
+        // queue=catalog-resolve через onQueue(), а не public $queue —
+        // PHP 8 trait composition Fatal на default-mismatch с Queueable.
+        // См. SyncMailboxFolderJob::__construct.
+        $this->onQueue('catalog-resolve');
+    }
 
     public function uniqueId(): string
     {
