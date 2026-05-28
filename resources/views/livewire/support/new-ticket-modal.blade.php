@@ -44,27 +44,23 @@
                 </div>
 
                 {{-- Mini-список последних обращений с маркером непрочитанных
-                     ответов. Если их вообще нет — блок скрыт.
-                     Клик по тикету переключает модалку в режим view
-                     (inline-тред + форма ответа) без ухода на /support/{ticket}. --}}
+                     ответов. Если их вообще нет — блок скрыт. --}}
                 @php $recent = $this->recentTickets; @endphp
-                @if($recent->isNotEmpty() && $mode === 'new')
+                @if($recent->isNotEmpty())
                     <div class="px-5 pt-3 pb-2 border-b border-border-subtle"
                          style="background: var(--bg-app);">
                         <div class="flex items-center gap-2 mb-1.5">
                             <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">Мои обращения</span>
-                            <span class="text-[11px] text-fg-3">— клик, чтобы дополнить</span>
                             <span class="flex-1"></span>
                             <a href="{{ route('support.my') }}" class="text-[12px] text-sky-700 hover:underline">все →</a>
                         </div>
                         <ul class="space-y-0.5">
                             @foreach($recent as $t)
                                 <li class="flex items-center gap-2 text-[12.5px] py-0.5">
-                                    <button type="button"
-                                            wire:click="viewTicket({{ $t->id }})"
-                                            class="flex-1 min-w-0 truncate text-left hover:underline cursor-pointer {{ $t->unread > 0 ? 'text-fg-1 font-semibold' : 'text-fg-2' }}">
+                                    <a href="{{ route('support.show', $t->id) }}"
+                                       class="flex-1 min-w-0 truncate hover:underline {{ $t->unread > 0 ? 'text-fg-1 font-semibold' : 'text-fg-2' }}">
                                         #{{ $t->id }} · {{ $t->subject }}
-                                    </button>
+                                    </a>
                                     @if($t->unread > 0)
                                         <span class="chip chip-attn" style="font-size: 10.5px; padding: 1px 6px;" title="Новых ответов: {{ $t->unread }}">
                                             {{ $t->unread }} {{ \Illuminate\Support\Str::plural('ответ', $t->unread) }}
@@ -79,148 +75,7 @@
                     </div>
                 @endif
 
-                @if($mode === 'view' && $this->viewedTicket)
-                    {{-- ───── View / Reply mode ───── --}}
-                    @php $vt = $this->viewedTicket; @endphp
-                    <div class="px-5 pt-3 pb-3 border-b border-border-subtle"
-                         style="background: var(--bg-app);">
-                        <div class="flex items-center gap-2">
-                            <button type="button" wire:click="backToList"
-                                    class="text-[12px] text-sky-700 hover:underline inline-flex items-center gap-1">
-                                ← к новому обращению
-                            </button>
-                            <span class="flex-1"></span>
-                            <span class="chip {{ $vt->status->chipClass() }}" style="font-size: 10.5px; padding: 1px 6px;">
-                                {{ $vt->status->label() }}
-                            </span>
-                        </div>
-                        <div class="text-[14px] font-semibold text-fg-1 mt-1.5 leading-tight">
-                            #{{ $vt->id }} · {{ $vt->subject }}
-                        </div>
-                    </div>
-
-                    {{-- Тред: исходное тело + ответы --}}
-                    <div class="px-5 py-3 space-y-3 max-h-[400px] overflow-y-auto">
-                        {{-- Initial body --}}
-                        <div class="rounded-md border border-border-subtle p-3">
-                            <div class="flex items-center gap-2 mb-1.5 text-[11.5px] text-fg-3">
-                                <span class="font-semibold text-fg-1">{{ $vt->user?->name }}</span>
-                                <span>·</span>
-                                <span class="font-mono">{{ $vt->created_at?->format('d.m.Y H:i') }}</span>
-                                <span class="text-fg-4">· создал тикет</span>
-                            </div>
-                            <div class="text-[13px] text-fg-1 whitespace-pre-wrap">{{ $vt->body }}</div>
-                            @if($vt->attachments->isNotEmpty())
-                                <ul class="mt-2 pt-2 border-t border-border-subtle space-y-0.5 text-[12px]">
-                                    @foreach($vt->attachments as $att)
-                                        <li>
-                                            <a href="{{ route('support.attachment.download', $att) }}" class="text-sky-700 hover:underline">{{ $att->original_name }}</a>
-                                            <span class="text-fg-3">({{ $att->humanSize() }})</span>
-                                        </li>
-                                    @endforeach
-                                </ul>
-                            @endif
-                        </div>
-
-                        {{-- Replies (только не-internal для не-админа фильтрует addReply notify;
-                             в треде показываем всё, что пользователь имеет право видеть.
-                             Internal-заметки скрываем от автора). --}}
-                        @php $isAdmin = auth()->user()?->hasRole('admin') ?? false; @endphp
-                        @foreach($vt->messages as $m)
-                            @if(! $m->is_internal || $isAdmin)
-                                @php $own = $m->user_id === auth()->id(); @endphp
-                                <div wire:key="mmsg-{{ $m->id }}"
-                                     class="rounded-md border border-border-subtle p-3 {{ $m->is_internal ? 'border-[var(--amber-600)]' : '' }}">
-                                    <div class="flex items-center gap-2 mb-1.5 text-[11.5px] text-fg-3">
-                                        <span class="font-semibold text-fg-1">{{ $m->author?->name }}</span>
-                                        <span>·</span>
-                                        <span class="font-mono">{{ $m->created_at?->format('d.m.Y H:i') }}</span>
-                                        @if($own)
-                                            <span class="text-fg-4">· вы</span>
-                                        @endif
-                                        @if($m->is_internal)
-                                            <span class="chip chip-attn" style="font-size: 10px; padding: 0 5px;">внутренняя</span>
-                                        @endif
-                                    </div>
-                                    <div class="text-[13px] text-fg-1 whitespace-pre-wrap">{{ $m->body }}</div>
-                                    @if($m->attachments->isNotEmpty())
-                                        <ul class="mt-2 pt-2 border-t border-border-subtle space-y-0.5 text-[12px]">
-                                            @foreach($m->attachments as $att)
-                                                <li>
-                                                    <a href="{{ route('support.attachment.download', $att) }}" class="text-sky-700 hover:underline">{{ $att->original_name }}</a>
-                                                    <span class="text-fg-3">({{ $att->humanSize() }})</span>
-                                                </li>
-                                            @endforeach
-                                        </ul>
-                                    @endif
-                                </div>
-                            @endif
-                        @endforeach
-                    </div>
-
-                    @if($replyFlash)
-                        <div class="mx-5 mb-2 px-3 py-2 rounded-md border border-[var(--emerald-600)] bg-[var(--emerald-50,#ecfdf5)] text-[12.5px] text-fg-1">
-                            {{ $replyFlash }}
-                        </div>
-                    @endif
-
-                    {{-- Форма ответа в тикет (если статус не терминальный) --}}
-                    @if(! $vt->status->isTerminal())
-                        <form wire:submit="sendReply" class="border-t border-border-subtle">
-                            <div class="px-5 py-3 space-y-2.5">
-                                <div>
-                                    <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1">
-                                        Ваш ответ <span class="text-[var(--accent)]">*</span>
-                                    </div>
-                                    <textarea wire:model="reply" rows="3" maxlength="5000"
-                                              placeholder="Дополнить, уточнить, ответить…"
-                                              class="w-full px-3 py-2 border border-[var(--border-strong)] rounded-md bg-surface text-fg-1 text-[13px] outline-none focus:border-[var(--sky-500)] resize-y"
-                                              style="line-height: 1.5;"></textarea>
-                                    @error('reply') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
-                                </div>
-
-                                <div>
-                                    <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1">
-                                        Файлы <span class="normal-case text-fg-4 font-normal">(до 10 МБ × файл)</span>
-                                    </div>
-                                    <label class="inline-flex items-center gap-1.5 h-8 px-3 border border-[var(--border-strong)] rounded-md bg-surface text-fg-1 text-[12.5px] font-medium cursor-pointer hover:bg-[var(--bg-hover)]">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.8l-8.58 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-                                        </svg>
-                                        Выбрать файлы
-                                        <input type="file" wire:model="replyAttachments" multiple class="hidden">
-                                    </label>
-                                    <span class="ml-2 text-[12px] text-fg-3">
-                                        @if(empty($replyAttachments))
-                                            Файл не выбран
-                                        @else
-                                            Выбрано: {{ count($replyAttachments) }}
-                                        @endif
-                                    </span>
-                                    <div wire:loading wire:target="replyAttachments" class="text-[12px] text-fg-3 mt-1">Загружаем файлы…</div>
-                                    @error('replyAttachments.*') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
-                                </div>
-                            </div>
-
-                            <div class="flex items-center gap-2 px-5 py-3 border-t border-border" style="background: var(--bg-surface-2, var(--bg-app));">
-                                <button type="submit" class="btn btn-primary"
-                                        wire:loading.attr="disabled" wire:target="sendReply,replyAttachments">
-                                    <span wire:loading.remove wire:target="sendReply">Отправить</span>
-                                    <span wire:loading wire:target="sendReply">Отправляем…</span>
-                                </button>
-                                <button type="button" wire:click="backToList" class="btn">Назад</button>
-                                <span class="flex-1"></span>
-                                <button type="button" wire:click="close" class="btn">Закрыть</button>
-                            </div>
-                        </form>
-                    @else
-                        <div class="px-5 py-3 border-t border-border text-[12.5px] text-fg-3 text-center"
-                             style="background: var(--bg-surface-2, var(--bg-app));">
-                            Тикет {{ $vt->status->label() }}. Чтобы продолжить — создайте новое обращение.
-                        </div>
-                    @endif
-
-                @elseif($sentSuccess)
+                @if($sentSuccess)
                     {{-- Success state --}}
                     <div class="px-5 py-5">
                         <div class="rounded-md border border-[var(--emerald-600)] bg-[var(--emerald-50,#ecfdf5)] p-4 text-[13px] text-fg-1">
@@ -230,7 +85,7 @@
                     </div>
                     <div class="flex items-center gap-2 px-5 py-3 border-t border-border" style="background: var(--bg-surface-2, var(--bg-app));">
                         @if($sentTicketId)
-                            <button type="button" wire:click="viewTicket({{ $sentTicketId }})" class="btn btn-primary">Открыть тикет</button>
+                            <a href="{{ route('support.show', $sentTicketId) }}" class="btn btn-primary">Открыть тикет</a>
                         @endif
                         <a href="{{ route('support.my') }}" class="btn">Мои обращения</a>
                         <button type="button" wire:click="close" class="btn">Закрыть</button>
