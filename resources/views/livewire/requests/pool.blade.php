@@ -673,7 +673,10 @@
                                     'very_hard' => 'var(--red-600)',
                                 };
                             }
-                            $createdShort = $req->created_at?->format('d.m.y');
+                            // Дата + время получения заявки. Время добавлено по запросу
+                            // 2026-05-28 (РОПу/директору важно понимать, в какой момент дня
+                            // пришло письмо — утренний поток vs вечерний).
+                            $createdShort = $req->created_at?->format('d.m.y H:i');
                         @endphp
 
                         <a href="{{ $href }}" wire:key="req-{{ $req->id }}"
