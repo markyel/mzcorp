@@ -212,6 +212,140 @@
         <div class="lg:col-span-2 space-y-4">
 
             @if($this->isPrivileged)
+                {{-- ───────── Timeseries inflow по дням ─────────
+                     Линейный SVG-чарт: ось X — дни, ось Y — кол-во заявок.
+                     Три серии: personal (личные ящики менеджеров),
+                     shared (общая почта — info@), total (включая ручные
+                     заявки + manual). Источник — Dashboard::
+                     requestInflowTimeseries(). Без JS-библиотек, чистый SVG. --}}
+                @php
+                    $ts = $this->requestInflowTimeseries;
+                    $tsPoints = $ts['points'];
+                    $tsTotals = $ts['totals'];
+                    $tsMax = max(1, $ts['max']); // защита от деления на 0
+                    $tsCount = count($tsPoints);
+                    // Геометрия SVG. ViewBox делаем гибким по числу точек.
+                    $svgW = 880;
+                    $svgH = 220;
+                    $padL = 36;   // под Y-axis подписи
+                    $padR = 12;
+                    $padT = 12;
+                    $padB = 26;   // под X-axis подписи
+                    $plotW = $svgW - $padL - $padR;
+                    $plotH = $svgH - $padT - $padB;
+                    // X-координата i-той точки. При count=1 — центр; иначе span.
+                    $xAt = function (int $i) use ($padL, $plotW, $tsCount) {
+                        if ($tsCount <= 1) {
+                            return $padL + $plotW / 2;
+                        }
+                        return $padL + ($i / ($tsCount - 1)) * $plotW;
+                    };
+                    $yAt = function (int $v) use ($padT, $plotH, $tsMax) {
+                        return $padT + $plotH - ($v / $tsMax) * $plotH;
+                    };
+                    // Построить SVG-path "M x0,y0 L x1,y1 L x2,y2 ..." по ряду значений.
+                    $buildPath = function (string $key) use ($tsPoints, $xAt, $yAt) {
+                        $segs = [];
+                        foreach ($tsPoints as $i => $p) {
+                            $cmd = $i === 0 ? 'M' : 'L';
+                            $segs[] = $cmd . round($xAt($i), 1) . ',' . round($yAt((int) $p[$key]), 1);
+                        }
+                        return implode(' ', $segs);
+                    };
+                    // Сколько label'ов на оси X помещается без overlap. Цель ~8.
+                    $xLabelStep = max(1, (int) ceil($tsCount / 8));
+                    // Y-axis ticks — 4 уровня.
+                    $yTicks = [0, (int) round($tsMax * 0.25), (int) round($tsMax * 0.5), (int) round($tsMax * 0.75), $tsMax];
+                @endphp
+                <div class="ds-card">
+                    <div class="ds-card-header">
+                        <h3>Поток заявок · по дням · {{ $this->periodLabel }}</h3>
+                        <span class="flex-1"></span>
+                        {{-- Legend --}}
+                        <span class="inline-flex items-center gap-1 text-[11.5px] text-fg-3">
+                            <span class="inline-block w-3 h-[2px]" style="background:#0284c7;"></span>
+                            Личные <span class="mono tnum text-fg-1 font-semibold">{{ $tsTotals['personal'] }}</span>
+                        </span>
+                        <span class="inline-flex items-center gap-1 text-[11.5px] text-fg-3 ml-3">
+                            <span class="inline-block w-3 h-[2px]" style="background:#059669;"></span>
+                            Общая <span class="mono tnum text-fg-1 font-semibold">{{ $tsTotals['shared'] }}</span>
+                        </span>
+                        <span class="inline-flex items-center gap-1 text-[11.5px] text-fg-3 ml-3">
+                            <span class="inline-block w-3 h-[2px]" style="background:#111827;"></span>
+                            Всего <span class="mono tnum text-fg-1 font-semibold">{{ $tsTotals['total'] }}</span>
+                        </span>
+                    </div>
+                    <div class="ds-card-body">
+                        @if($tsCount === 0 || $tsTotals['total'] === 0)
+                            <div class="text-center text-fg-3 py-8 text-[13px]">
+                                За выбранный период заявок не было.
+                            </div>
+                        @else
+                            <svg viewBox="0 0 {{ $svgW }} {{ $svgH }}"
+                                 xmlns="http://www.w3.org/2000/svg"
+                                 preserveAspectRatio="xMidYMid meet"
+                                 style="width:100%;height:auto;max-height:260px;font-family:var(--font-sans);font-size:10px;">
+                                {{-- Y-axis grid lines + labels --}}
+                                @foreach($yTicks as $tick)
+                                    @php $ty = $yAt((int) $tick); @endphp
+                                    <line x1="{{ $padL }}" x2="{{ $svgW - $padR }}"
+                                          y1="{{ round($ty, 1) }}" y2="{{ round($ty, 1) }}"
+                                          stroke="#e5e7eb" stroke-width="1" />
+                                    <text x="{{ $padL - 6 }}" y="{{ round($ty + 3, 1) }}"
+                                          text-anchor="end" fill="#9ca3af" font-size="10">{{ $tick }}</text>
+                                @endforeach
+
+                                {{-- X-axis labels (выборочно) --}}
+                                @foreach($tsPoints as $i => $p)
+                                    @if($i % $xLabelStep === 0 || $i === $tsCount - 1)
+                                        <text x="{{ round($xAt($i), 1) }}" y="{{ $svgH - $padB + 14 }}"
+                                              text-anchor="middle" fill="#6b7280" font-size="10">{{ $p['label'] }}</text>
+                                    @endif
+                                @endforeach
+
+                                {{-- Series: shared (общая почта · emerald) --}}
+                                <path d="{{ $buildPath('shared') }}"
+                                      fill="none" stroke="#059669" stroke-width="2"
+                                      stroke-linecap="round" stroke-linejoin="round" />
+
+                                {{-- Series: personal (личные · sky) --}}
+                                <path d="{{ $buildPath('personal') }}"
+                                      fill="none" stroke="#0284c7" stroke-width="2"
+                                      stroke-linecap="round" stroke-linejoin="round" />
+
+                                {{-- Series: total (всего · neutral-900 + dashed) --}}
+                                <path d="{{ $buildPath('total') }}"
+                                      fill="none" stroke="#111827" stroke-width="1.5"
+                                      stroke-dasharray="3 3"
+                                      stroke-linecap="round" stroke-linejoin="round" />
+
+                                {{-- Точки + hover-tooltip через native <title> --}}
+                                @foreach($tsPoints as $i => $p)
+                                    @php $cx = round($xAt($i), 1); @endphp
+                                    @if($p['shared'] > 0)
+                                        <circle cx="{{ $cx }}" cy="{{ round($yAt((int) $p['shared']), 1) }}"
+                                                r="2.5" fill="#059669">
+                                            <title>{{ $p['label'] }} · общая: {{ $p['shared'] }}</title>
+                                        </circle>
+                                    @endif
+                                    @if($p['personal'] > 0)
+                                        <circle cx="{{ $cx }}" cy="{{ round($yAt((int) $p['personal']), 1) }}"
+                                                r="2.5" fill="#0284c7">
+                                            <title>{{ $p['label'] }} · личные: {{ $p['personal'] }}</title>
+                                        </circle>
+                                    @endif
+                                    @if($p['total'] > 0)
+                                        <circle cx="{{ $cx }}" cy="{{ round($yAt((int) $p['total']), 1) }}"
+                                                r="2" fill="#111827" fill-opacity="0.55">
+                                            <title>{{ $p['label'] }} · всего: {{ $p['total'] }}{{ ($p['total'] !== $p['personal'] + $p['shared']) ? ' (вручную: ' . ($p['total'] - $p['personal'] - $p['shared']) . ')' : '' }}</title>
+                                        </circle>
+                                    @endif
+                                @endforeach
+                            </svg>
+                        @endif
+                    </div>
+                </div>
+
                 {{-- ───────── Heatmap inflow-by-hour (weekday × hour) ─────────
                      7 строк (Пн..Вс) × 24 колонки (часы Europe/Moscow).
                      Интенсивность фона = count/max в палитре sky.
@@ -238,7 +372,7 @@
                 @endphp
                 <div class="ds-card">
                     <div class="ds-card-header">
-                        <h3>Поток заявок · {{ $this->periodLabel }}</h3>
+                        <h3>Поток заявок · по часам · {{ $this->periodLabel }}</h3>
                         <span class="flex-1"></span>
                         <span class="text-[11.5px] text-fg-3">всего <span class="mono tnum text-fg-1 font-semibold">{{ $hmTotal }}</span> · максимум <span class="mono tnum text-fg-1 font-semibold">{{ $hmMax }}</span>/час</span>
                     </div>

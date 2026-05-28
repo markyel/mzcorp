@@ -727,6 +727,97 @@ class Index extends Component
     }
 
     /**
+     * Timeseries потока заявок по дням за выбранный период с разбивкой
+     * по типу источника: personal (личные ящики менеджеров) vs shared
+     * (info@, общая почта) vs total.
+     *
+     * Логика:
+     *   - Source = `requests` JOIN email_messages → mailboxes.type
+     *   - Группировка по DATE(created_at AT TIME ZONE 'Europe/Moscow')
+     *   - Пропуски в днях заполняются нулями (нужно для непрерывной
+     *     линии графика, иначе SVG path выскакивал бы)
+     *   - Заявки без email_message (созданы вручную в UI) попадают
+     *     в `total`, но НЕ в personal+shared. Разница = manual или
+     *     archived mailbox — на хелперах не отображается, чтобы не
+     *     путать оператора.
+     *
+     * UI: SVG-чарт в dashboard рядом с heatmap. Для period=1/7 — все дни,
+     * для 30/90 — все дни (label каждые ~7-й день в осях).
+     *
+     * @return array{
+     *     points: array<int, array{date: string, label: string, personal: int, shared: int, total: int}>,
+     *     totals: array{personal: int, shared: int, total: int},
+     *     max: int
+     * }
+     */
+    #[Computed]
+    public function requestInflowTimeseries(): array
+    {
+        if (! $this->isPrivileged) {
+            return ['points' => [], 'totals' => ['personal' => 0, 'shared' => 0, 'total' => 0], 'max' => 0];
+        }
+        [$from, $to] = $this->periodRange();
+
+        // Группировка по дню + типу mailbox'а. LEFT JOIN потому что у
+        // ручных заявок email_message_id = null.
+        $rows = DB::table('requests as r')
+            ->leftJoin('email_messages as em', 'em.id', '=', 'r.email_message_id')
+            ->leftJoin('mailboxes as mb', 'mb.id', '=', 'em.mailbox_id')
+            ->whereBetween('r.created_at', [$from, $to])
+            ->selectRaw("
+                DATE(r.created_at AT TIME ZONE 'Europe/Moscow') AS day,
+                mb.type AS mailbox_type,
+                COUNT(*) AS c
+            ")
+            ->groupBy('day', 'mailbox_type')
+            ->get();
+
+        // Собираем по дням: $byDay['2026-05-28'] = ['personal' => 3, 'shared' => 5, 'total' => 9]
+        $byDay = [];
+        foreach ($rows as $r) {
+            $day = (string) $r->day;
+            $type = (string) ($r->mailbox_type ?? '');
+            $c = (int) $r->c;
+            $byDay[$day] ??= ['personal' => 0, 'shared' => 0, 'total' => 0];
+            if ($type === 'personal') {
+                $byDay[$day]['personal'] += $c;
+            } elseif ($type === 'shared') {
+                $byDay[$day]['shared'] += $c;
+            }
+            $byDay[$day]['total'] += $c; // вкл. manual/unknown
+        }
+
+        // Заполняем пропуски: пробегаем все дни диапазона.
+        $fromMsk = $from->setTimezone('Europe/Moscow')->startOfDay();
+        $toMsk = $to->setTimezone('Europe/Moscow');
+        $days = (int) max(1, ceil($fromMsk->diffInHours($toMsk) / 24));
+        $days = min($days, 366); // защита
+
+        $points = [];
+        $totals = ['personal' => 0, 'shared' => 0, 'total' => 0];
+        $max = 0;
+        for ($i = 0; $i < $days; $i++) {
+            $d = $fromMsk->addDays($i);
+            $key = $d->format('Y-m-d');
+            $row = $byDay[$key] ?? ['personal' => 0, 'shared' => 0, 'total' => 0];
+            $points[] = [
+                'date' => $key,
+                // Подпись зависит от плотности. Для коротких — d.m, для длинных — d.
+                'label' => $days <= 14 ? $d->format('d.m') : $d->format('d.m'),
+                'personal' => $row['personal'],
+                'shared' => $row['shared'],
+                'total' => $row['total'],
+            ];
+            $totals['personal'] += $row['personal'];
+            $totals['shared'] += $row['shared'];
+            $totals['total'] += $row['total'];
+            $max = max($max, $row['total']);
+        }
+
+        return ['points' => $points, 'totals' => $totals, 'max' => $max];
+    }
+
+    /**
      * Inflow heatmap: 7 (Mon-Sun) × 24 (hours, Europe/Moscow) ячеек со
      * счётчиком заявок (requests.created_at) за выбранный период.
      *
