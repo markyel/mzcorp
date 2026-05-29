@@ -121,11 +121,9 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
    только top-офсеты — dompdf криво считает bottom). */
 .sigwrap { position: relative; height: 15mm; }
 .sigwrap .sig { position: absolute; top: 0; right: 4mm; width: 32mm; height: auto; }
-.sigwrap .stamp { position: absolute; top: 0; right: 26mm; width: 21mm; height: auto; }
 .sigwrap .line { position: absolute; top: 11mm; left: 0; right: 0; border-bottom: 0.5pt solid #0f1419; padding-bottom: 0.5mm; }
 .sigwrap .line .label { float: left; color: #5c6470; font-size: 8pt; }
 .sigwrap .line .who { float: right; color: #0f1419; font-weight: bold; font-size: 9.5pt; }
-.sigwrap .caption { position: absolute; top: 13mm; left: 0; right: 0; text-align: right; font: 7.5pt/1.2 'PT Sans', sans-serif; color: #9aa0a8; }
 
 .runfoot { margin-top: 1.5mm; padding-top: 1mm; border-top: 0.4pt solid #d8dce3; font: 7.5pt/1.3 'PT Sans', sans-serif; color: #5c6470; }
 .runfoot table { width: 100%; }
@@ -331,9 +329,6 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
     <td class="right sigtop">
       <div class="role">{{ $company['director_title'] }} {{ $company['legal_name'] }}</div>
       <div class="sigwrap">
-        @if($stampPath && file_exists($stampPath))
-          <img class="stamp" src="{{ $stampPath }}" alt="М.П.">
-        @endif
         @if($signaturePath && file_exists($signaturePath))
           <img class="sig" src="{{ $signaturePath }}" alt="подпись">
         @endif
@@ -341,7 +336,6 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
           <span class="label">подпись</span>
           <span class="who">{{ $company['director_name'] }}</span>
         </div>
-        <div class="caption">М.П.</div>
       </div>
     </td>
     </tr>
