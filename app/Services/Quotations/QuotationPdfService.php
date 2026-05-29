@@ -11,9 +11,17 @@ use Illuminate\Support\Facades\View;
 /**
  * Рендер КП в PDF через dompdf. Шаблон в `resources/views/quotations/pdf-template.blade.php`.
  *
- * Логотип ($company->short_name) подтягивается из `public/assets/logos/myzip-corporate.png`
- * (dompdf плохо рендерит inline SVG, поэтому используем PNG). Если файла нет —
- * шаблон скрывает logo-блок.
+ * Шрифт — PT Sans / PT Mono (ParaType, OFL), TTF лежат в `resources/fonts/` и
+ * регистрируются в dompdf программно через FontMetrics::registerFont() (надёжнее
+ * @font-face url(), не зависит от base-path и слэшей на Windows). PT Sans заметно
+ * компактнее и аккуратнее дефолтного DejaVu Sans.
+ *
+ * Логотип ($company->short_name) — цветной SVG `public/assets/logos/myzip-corporate.svg`
+ * (dompdf 3.x умеет рендерить path-only SVG через php-svg-lib). Fallback на PNG.
+ * Если файла нет — шаблон скрывает logo-блок.
+ *
+ * Подпись и печать — PNG с прозрачным фоном из `public/assets/stamp/`
+ * (signature.png, stamp.png). Печать накладывается на подпись (position:absolute).
  *
  * Сумма прописью — RuMoneySpeller (без внешних deps).
  *
@@ -47,6 +55,8 @@ class QuotationPdfService
             'q' => $quotation,
             'company' => $company,
             'logoPath' => $this->resolveLogoPath(),
+            'signaturePath' => $this->resolveStampAsset('signature.png'),
+            'stampPath' => $this->resolveStampAsset('stamp.png'),
             'issueDateRu' => $this->formatRuDate($issueAt) . ' г.',
             'validUntilShort' => $validUntil->format('d.m.y'),
             'stockStamp' => $issueAt->setTimezone('Europe/Moscow')->format('d.m.Y \в H:i'),
@@ -61,7 +71,7 @@ class QuotationPdfService
         $html = View::make('quotations.pdf-template', $payload)->render();
 
         $options = new Options();
-        $options->set('defaultFont', 'DejaVu Sans');
+        $options->set('defaultFont', 'PT Sans');
         $options->set('isRemoteEnabled', false);
         $options->set('isHtml5ParserEnabled', true);
         $options->set('isFontSubsettingEnabled', true);
@@ -82,11 +92,41 @@ class QuotationPdfService
         $options->set('fontCache', $fontDir);
 
         $dompdf = new Dompdf($options);
+        $this->registerFonts($dompdf);
         $dompdf->loadHtml($html, 'UTF-8');
         $dompdf->setPaper('A4', 'portrait');
         $dompdf->render();
 
         return (string) $dompdf->output();
+    }
+
+    /**
+     * Регистрируем PT Sans / PT Mono из resources/fonts/ в dompdf.
+     * Программная регистрация надёжнее @font-face: не зависит от base-path
+     * документа и не ломается на Windows-слэшах в url(). Файлов нет — тихо
+     * пропускаем (dompdf откатится на defaultFont).
+     */
+    private function registerFonts(Dompdf $dompdf): void
+    {
+        $dir = resource_path('fonts');
+        $fonts = [
+            ['PT Sans', 'normal', 'normal', 'PTSans-Regular.ttf'],
+            ['PT Sans', 'bold', 'normal', 'PTSans-Bold.ttf'],
+            ['PT Sans', 'normal', 'italic', 'PTSans-Italic.ttf'],
+            ['PT Sans', 'bold', 'italic', 'PTSans-BoldItalic.ttf'],
+            ['PT Mono', 'normal', 'normal', 'PTMono-Regular.ttf'],
+        ];
+
+        $metrics = $dompdf->getFontMetrics();
+        foreach ($fonts as [$family, $weight, $style, $file]) {
+            $path = $dir . DIRECTORY_SEPARATOR . $file;
+            if (is_file($path)) {
+                $metrics->registerFont(
+                    ['family' => $family, 'weight' => $weight, 'style' => $style],
+                    $path
+                );
+            }
+        }
     }
 
     /**
@@ -101,11 +141,12 @@ class QuotationPdfService
     }
 
     /**
-     * PNG-логотип для dompdf. Если файла нет — null, template скроет блок.
+     * Логотип для dompdf. Предпочитаем цветной SVG (php-svg-lib рендерит
+     * path-only SVG), fallback на PNG. Если файла нет — null, template скроет блок.
      */
     private function resolveLogoPath(): ?string
     {
-        foreach (['myzip-corporate.png', 'myzip-corporate.jpg'] as $name) {
+        foreach (['myzip-corporate.svg', 'myzip-corporate.png', 'myzip-corporate.jpg'] as $name) {
             $path = public_path("assets/logos/{$name}");
             if (is_file($path)) {
                 return $path;
@@ -113,6 +154,16 @@ class QuotationPdfService
         }
 
         return null;
+    }
+
+    /**
+     * Подпись/печать из public/assets/stamp/. null → template скроет блок.
+     */
+    private function resolveStampAsset(string $file): ?string
+    {
+        $path = public_path("assets/stamp/{$file}");
+
+        return is_file($path) ? $path : null;
     }
 
     /**
