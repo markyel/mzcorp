@@ -744,9 +744,15 @@ class Index extends Component
      * UI: SVG-чарт в dashboard рядом с heatmap. Для period=1/7 — все дни,
      * для 30/90 — все дни (label каждые ~7-й день в осях).
      *
+     * Дополнительно: серия `won` — успешно закрытые заявки. Считается НЕ по
+     * created_at, а по дню перехода в ClosedWon (request_state_changes),
+     * distinct request_id — как `won` в воронке. Это исход на дату закрытия,
+     * а не приход, поэтому за день может превышать total (закрыли больше, чем
+     * пришло) — учитываем в max, чтобы линия не обрезалась.
+     *
      * @return array{
-     *     points: array<int, array{date: string, label: string, personal: int, shared: int, total: int}>,
-     *     totals: array{personal: int, shared: int, total: int},
+     *     points: array<int, array{date: string, label: string, personal: int, shared: int, total: int, won: int}>,
+     *     totals: array{personal: int, shared: int, total: int, won: int},
      *     max: int
      * }
      */
@@ -754,7 +760,7 @@ class Index extends Component
     public function requestInflowTimeseries(): array
     {
         if (! $this->isPrivileged) {
-            return ['points' => [], 'totals' => ['personal' => 0, 'shared' => 0, 'total' => 0], 'max' => 0];
+            return ['points' => [], 'totals' => ['personal' => 0, 'shared' => 0, 'total' => 0, 'won' => 0], 'max' => 0];
         }
         [$from, $to] = $this->periodRange();
 
@@ -787,6 +793,21 @@ class Index extends Component
             $byDay[$day]['total'] += $c; // вкл. manual/unknown
         }
 
+        // Успешно закрытые по дню перехода в ClosedWon (distinct request_id).
+        $wonRows = DB::table('request_state_changes')
+            ->where('to_status', RequestStatus::ClosedWon->value)
+            ->whereBetween('created_at', [$from, $to])
+            ->selectRaw("
+                DATE(created_at AT TIME ZONE 'Europe/Moscow') AS day,
+                COUNT(DISTINCT request_id) AS c
+            ")
+            ->groupBy('day')
+            ->get();
+        $wonByDay = [];
+        foreach ($wonRows as $r) {
+            $wonByDay[(string) $r->day] = (int) $r->c;
+        }
+
         // Заполняем пропуски: пробегаем все дни диапазона.
         $fromMsk = $from->setTimezone('Europe/Moscow')->startOfDay();
         $toMsk = $to->setTimezone('Europe/Moscow');
@@ -794,12 +815,13 @@ class Index extends Component
         $days = min($days, 366); // защита
 
         $points = [];
-        $totals = ['personal' => 0, 'shared' => 0, 'total' => 0];
+        $totals = ['personal' => 0, 'shared' => 0, 'total' => 0, 'won' => 0];
         $max = 0;
         for ($i = 0; $i < $days; $i++) {
             $d = $fromMsk->addDays($i);
             $key = $d->format('Y-m-d');
             $row = $byDay[$key] ?? ['personal' => 0, 'shared' => 0, 'total' => 0];
+            $won = $wonByDay[$key] ?? 0;
             $points[] = [
                 'date' => $key,
                 // Подпись зависит от плотности. Для коротких — d.m, для длинных — d.
@@ -807,11 +829,13 @@ class Index extends Component
                 'personal' => $row['personal'],
                 'shared' => $row['shared'],
                 'total' => $row['total'],
+                'won' => $won,
             ];
             $totals['personal'] += $row['personal'];
             $totals['shared'] += $row['shared'];
             $totals['total'] += $row['total'];
-            $max = max($max, $row['total']);
+            $totals['won'] += $won;
+            $max = max($max, $row['total'], $won);
         }
 
         return ['points' => $points, 'totals' => $totals, 'max' => $max];

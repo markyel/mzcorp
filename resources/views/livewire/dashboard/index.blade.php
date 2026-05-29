@@ -274,6 +274,10 @@
                             <span class="inline-block w-3 h-[2px]" style="background:#111827;"></span>
                             Всего <span class="mono tnum text-fg-1 font-semibold">{{ $tsTotals['total'] }}</span>
                         </span>
+                        <span class="inline-flex items-center gap-1 text-[11.5px] text-fg-3 ml-3">
+                            <span class="inline-block w-3 h-[2px]" style="background:#d97706;"></span>
+                            Успешно закрыто <span class="mono tnum text-fg-1 font-semibold">{{ $tsTotals['won'] }}</span>
+                        </span>
                     </div>
                     <div class="ds-card-body">
                         @if($tsCount === 0 || $tsTotals['total'] === 0)
@@ -319,6 +323,11 @@
                                       stroke-dasharray="3 3"
                                       stroke-linecap="round" stroke-linejoin="round" />
 
+                                {{-- Series: won (успешно закрыто · amber) --}}
+                                <path d="{{ $buildPath('won') }}"
+                                      fill="none" stroke="#d97706" stroke-width="2"
+                                      stroke-linecap="round" stroke-linejoin="round" />
+
                                 {{-- Точки + hover-tooltip через native <title> --}}
                                 @foreach($tsPoints as $i => $p)
                                     @php $cx = round($xAt($i), 1); @endphp
@@ -338,6 +347,12 @@
                                         <circle cx="{{ $cx }}" cy="{{ round($yAt((int) $p['total']), 1) }}"
                                                 r="2" fill="#111827" fill-opacity="0.55">
                                             <title>{{ $p['label'] }} · всего: {{ $p['total'] }}{{ ($p['total'] !== $p['personal'] + $p['shared']) ? ' (вручную: ' . ($p['total'] - $p['personal'] - $p['shared']) . ')' : '' }}</title>
+                                        </circle>
+                                    @endif
+                                    @if($p['won'] > 0)
+                                        <circle cx="{{ $cx }}" cy="{{ round($yAt((int) $p['won']), 1) }}"
+                                                r="2.5" fill="#d97706">
+                                            <title>{{ $p['label'] }} · успешно закрыто: {{ $p['won'] }}</title>
                                         </circle>
                                     @endif
                                 @endforeach
