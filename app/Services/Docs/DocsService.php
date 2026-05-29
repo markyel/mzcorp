@@ -14,7 +14,6 @@ use League\CommonMark\Extension\HeadingPermalink\HeadingPermalinkExtension;
 use League\CommonMark\Extension\Table\TableExtension;
 use League\CommonMark\MarkdownConverter;
 use League\CommonMark\Environment\Environment;
-use Symfony\Component\Yaml\Yaml;
 
 /**
  * Загружает гайды из resources/docs/{section}/{slug}.md, парсит YAML-frontmatter
@@ -199,15 +198,55 @@ class DocsService
         }
         $yamlBlock = implode("\n", array_slice($lines, 1, $endIdx - 1));
         $body = implode("\n", array_slice($lines, $endIdx + 1));
-        try {
-            $data = Yaml::parse($yamlBlock) ?? [];
-            if (! is_array($data)) {
-                $data = [];
+
+        return [$this->parseFrontmatter($yamlBlock), ltrim($body, "\n")];
+    }
+
+    /**
+     * Минимальный парсер frontmatter'а гайдов. Намеренно НЕ зависит от
+     * symfony/yaml: тот пакет dev-only и на проде (composer install --no-dev)
+     * отсутствует — раньше Yaml::parse() молча падал в catch, и title слетал
+     * на slug. Формат у нас плоский и контролируемый:
+     *   key: скалярная строка
+     *   key: [a, b, c]   — инлайн-массив (roles)
+     *
+     * @return array<string, mixed>
+     */
+    private function parseFrontmatter(string $block): array
+    {
+        $data = [];
+        foreach (preg_split('/\r\n|\n/', $block) ?: [] as $line) {
+            if (trim($line) === '' || ! preg_match('/^([A-Za-z_][\w-]*):\s?(.*)$/', $line, $m)) {
+                continue;
             }
-        } catch (\Throwable) {
-            $data = [];
+            $key = $m[1];
+            $value = trim($m[2]);
+
+            if (str_starts_with($value, '[') && str_ends_with($value, ']')) {
+                $inner = trim(substr($value, 1, -1));
+                $data[$key] = $inner === ''
+                    ? []
+                    : array_values(array_filter(array_map(
+                        fn (string $v) => $this->stripQuotes(trim($v)),
+                        explode(',', $inner),
+                    ), fn (string $v) => $v !== ''));
+                continue;
+            }
+
+            $data[$key] = $this->stripQuotes($value);
         }
-        return [$data, ltrim($body, "\n")];
+
+        return $data;
+    }
+
+    private function stripQuotes(string $v): string
+    {
+        if (strlen($v) >= 2
+            && (($v[0] === '"' && substr($v, -1) === '"') || ($v[0] === "'" && substr($v, -1) === "'"))) {
+            return substr($v, 1, -1);
+        }
+
+        return $v;
     }
 
     private function converter(): MarkdownConverter
