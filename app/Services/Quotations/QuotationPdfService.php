@@ -115,6 +115,11 @@ class QuotationPdfService
             ['PT Sans', 'normal', 'italic', 'PTSans-Italic.ttf'],
             ['PT Sans', 'bold', 'italic', 'PTSans-BoldItalic.ttf'],
             ['PT Mono', 'normal', 'normal', 'PTMono-Regular.ttf'],
+            // PT Mono не имеет bold-начертания. Заголовок КП («№ КП-2026-…»)
+            // наследует bold от .num, и без этой регистрации dompdf откатывался
+            // на дефолтный шрифт без кириллицы → номер рендерился как «??».
+            // Маппим bold на тот же Regular-файл, чтобы кириллица отображалась.
+            ['PT Mono', 'bold', 'normal', 'PTMono-Regular.ttf'],
         ];
 
         $metrics = $dompdf->getFontMetrics();
