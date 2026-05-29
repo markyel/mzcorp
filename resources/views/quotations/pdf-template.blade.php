@@ -58,7 +58,6 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
 .items .name .art { font-family: 'PT Mono', monospace; color: #5c6470; font-size: 8pt; margin-top: 0.6mm; }
 .items .term { font-size: 8.5pt; line-height: 1.3; color: #0f1419; }
 .items .term .s { display: block; color: #5c6470; font-weight: normal; font-size: 7.5pt; margin-top: 0.4mm; }
-.items .actu { font-size: 8.5pt; line-height: 1.3; color: #0f6e3a; font-weight: normal; font-family: 'PT Mono', monospace; }
 .items .qty { text-align: right; color: #0f1419; font-weight: bold; }
 .items .qty small { color: #5c6470; font-weight: normal; font-size: 7.5pt; margin-left: 1mm; }
 .items .pricebox { text-align: right; line-height: 1.2; }
@@ -216,9 +215,8 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
     <thead>
       <tr>
         <th class="r" style="width:8mm">№</th>
-        <th>Наименование, характеристика, артикул</th>
+        <th>Наименование и артикул</th>
         <th style="width:22mm">Срок</th>
-        <th style="width:17mm">Актуально до</th>
         <th class="r" style="width:14mm">Кол-во</th>
         <th class="r" style="width:30mm">Цена со скидкой</th>
         <th class="r" style="width:27mm">Сумма (НДС в т. ч.)</th>
@@ -234,12 +232,8 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
           <td class="num">{{ $item->position }}</td>
           <td class="name">
             <div class="t">{{ $item->snapshot_name }}</div>
-            @if($item->snapshot_sku || $item->snapshot_brand || $item->snapshot_brand_article)
-              <div class="art">
-                @if($item->snapshot_sku){{ $item->snapshot_sku }}@endif
-                @if($item->snapshot_brand) · {{ $item->snapshot_brand }}@endif
-                @if($item->snapshot_brand_article) · {{ $item->snapshot_brand_article }}@endif
-              </div>
+            @if($item->snapshot_sku)
+              <div class="art">{{ $item->snapshot_sku }}</div>
             @endif
           </td>
           <td class="term">
@@ -252,7 +246,6 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
             @endif
             @if($item->catalog_lead_time_days)<span class="s">≈ {{ (int) ceil($item->catalog_lead_time_days / 7) }} нед</span>@endif
           </td>
-          <td class="actu">{{ $validUntilShort }}</td>
           <td class="qty">{{ rtrim(rtrim((string) $item->qty, '0'), '.') }} <small>{{ $item->unit }}</small></td>
           <td class="pricebox">
             <span class="now">{{ number_format((float) $item->final_unit_price, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></span>
@@ -273,7 +266,7 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
   </table>
 
   <div class="tnote">
-    Информация о наличии указана по состоянию склада на <b>{{ $stockStamp }}</b>. Гарантируем неизменность стоимости на <b>{{ $q->valid_days }} дней</b> с даты предложения.
+    Информация о наличии указана по состоянию склада на <b>{{ $stockStamp }}</b>. Цены и условия предложения <b>актуальны до {{ $validUntilShort }}</b> (неизменность стоимости гарантируется <b>{{ $q->valid_days }} дней</b> с даты предложения).
   </div>
 
   <div class="totals">
