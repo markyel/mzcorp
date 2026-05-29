@@ -312,11 +312,14 @@ class EmailSignatureService
                 $candidates[] = public_path($path);
             }
         }
-        // Default fallback — public/assets/logo-myzip-email.{svg,png}.
-        // SVG приоритетнее: цветной герб на прозрачном; PNG-вариант
-        // оказался белым (для тёмных фонов) — не виден на белом письме.
-        $candidates[] = public_path('assets/logo-myzip-email.svg');
+        // Default fallback — public/assets/logo-myzip-email.{png,svg}.
+        // PNG приоритетнее: Gmail (и Outlook, и большинство клиентов) НЕ
+        // рендерят SVG в письмах — ни внешний, ни data:image/svg+xml — и
+        // показывают битый placeholder. Текущий PNG — цветной герб на
+        // прозрачном фоне, виден на белом письме. SVG оставлен последним
+        // запасным вариантом, но из-за guard'а ниже фактически не отдаётся.
         $candidates[] = public_path('assets/logo-myzip-email.png');
+        $candidates[] = public_path('assets/logo-myzip-email.svg');
 
         foreach ($candidates as $absPath) {
             if (! is_file($absPath) || ! is_readable($absPath)) {
@@ -328,6 +331,12 @@ class EmailSignatureService
             }
             $mime = $this->detectImageMime($absPath, $content);
             if ($mime === null) {
+                continue;
+            }
+            // SVG в email не поддерживается (Gmail/Outlook режут) — даже если
+            // config или первый кандидат указывает на .svg, пропускаем и
+            // падаем на PNG-fallback.
+            if ($mime === 'image/svg+xml') {
                 continue;
             }
             $b64 = base64_encode($content);

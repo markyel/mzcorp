@@ -491,10 +491,10 @@ return [
             // Path/URL логотипа. EmailSignatureService::resolveLogoSrc()
             // читает локальный файл и встраивает как data:image/...;base64,
             // чтобы лого работал без внешней сети (Gmail/Yandex блокируют
-            // внешние картинки). SVG предпочтительнее PNG — цветной герб
-            // на прозрачном фоне; PNG-вариант у нас белый (под тёмный фон)
-            // и невидим в подписи на белом фоне письма.
-            'logo_url' => env('SIGNATURE_LOGO_URL', 'https://mzcorp.ru/assets/logo-myzip-email.svg'),
+            // внешние картинки). ТОЛЬКО PNG — Gmail/Outlook не рендерят SVG
+            // в письмах (показывают битый placeholder). Текущий PNG — цветной
+            // герб на прозрачном фоне, виден на белом фоне письма.
+            'logo_url' => env('SIGNATURE_LOGO_URL', 'https://mzcorp.ru/assets/logo-myzip-email.png'),
             'brand_color' => '#D32027',
         ],
     ],
