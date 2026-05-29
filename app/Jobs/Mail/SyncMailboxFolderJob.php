@@ -392,7 +392,15 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
                 $fetched++;
                 $maxUid = max($maxUid, $uid);
 
-                $email = $persister->persist($msg, $mailbox, $folder->path, $direction);
+                // Каноникализируем имя Sent-папки к 'Sent' (как пишет
+                // EmailDraftService/OutgoingMailSender), иначе сырой MUTF-7
+                // путь Yandex (&BB4...-, «Отправленные») не совпадёт с дедуп-
+                // ключом (mailbox_id, folder, message_id) и Sent-sync создаст
+                // дубль нашего же исходящего письма вместо обновления imap_uid
+                // в существующей записи (MessagePersister Phase 1.9).
+                $persistFolder = $this->folderType === 'sent' ? 'Sent' : $folder->path;
+
+                $email = $persister->persist($msg, $mailbox, $persistFolder, $direction);
                 if ($email === null) {
                     $skippedDup++;
                     continue;
