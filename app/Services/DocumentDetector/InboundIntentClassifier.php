@@ -13,8 +13,10 @@ use Illuminate\Support\Facades\Log;
 /**
  * Inbound-классификатор клиентских ответов (Foundation §7.2).
  *
- * Триггер: входящее письмо, привязанное к Request в одном из 4 статусов
- *   (quoted / under_review / postponed_until / awaiting_client_clarification).
+ * Триггер: входящее письмо, привязанное к Request в одном из статусов
+ *   quoted / under_review / postponed_until / awaiting_client_clarification /
+ *   awaiting_invoice / invoiced (см. ELIGIBLE_STATUSES). Последние два — чтобы
+ *   ловить отказ клиента после выставления счёта (auto-close lost).
  * LLM (gpt-4o-mini) определяет intent клиента, возвращает структурированный
  * ответ; сервис мапит intent → DetectorType и возвращает payload для
  * AiDecisionService::recordSuggestion.
@@ -36,6 +38,8 @@ class InboundIntentClassifier
         RequestStatus::UnderReview,
         RequestStatus::PostponedUntil,
         RequestStatus::AwaitingClientClarification,
+        RequestStatus::AwaitingInvoice,
+        RequestStatus::Invoiced,
     ];
 
     private const CONFIDENCE_FLOOR = 0.6;
