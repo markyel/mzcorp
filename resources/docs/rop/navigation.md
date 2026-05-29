@@ -1,5 +1,5 @@
 ---
-title: Где что — навигация РОПа
+title: Где что находится
 order: 10
 excerpt: Расширенный набор пунктов в шапке и левом рейле для роли head_of_sales.
 roles: [head_of_sales]

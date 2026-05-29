@@ -1,5 +1,5 @@
 ---
-title: Авто-отклонённые
+title: Отклонённые автоматически
 order: 40
 excerpt: Разбор писем, которые AI пометил irrelevant — реоткрытие как заявка или подтверждение.
 roles: [head_of_sales, secretary]

@@ -1,5 +1,5 @@
 ---
-title: Где что — навигация
+title: Где что находится
 order: 10
 excerpt: Шапка, левый рейл, основные разделы системы.
 roles: [manager, head_of_sales, secretary, director]

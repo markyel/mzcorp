@@ -1,5 +1,5 @@
 ---
-title: Мой пул заявок
+title: Мои заявки
 order: 20
 excerpt: Левая навигация, bucket-фильтры, таблица с группировкой по статусам, поиск.
 roles: [manager, head_of_sales]
