@@ -432,9 +432,9 @@
                 @php
                     // Phase 2 use-case C: hero «Сумма» и «Сматчено» считаем по items.catalogItem.
                     // Сумма — сумма (qty × catalog.price) по всем item'ам с привязкой
-                    // (item не сматчен → не в сумме). НДС НЕ добавляем — это «netto»
-                    // подытог по каталожным ценам, ту же сумму видно внизу таба
-                    // «Позиции». Итог с НДС там же.
+                    // (item не сматчен → не в сумме). Каталожные цены УЖЕ с НДС, так что
+                    // это итог с НДС; ту же сумму и разбивку (без НДС / в т.ч. НДС) видно
+                    // внизу таба «Позиции».
                     $heroSubtotal = 0.0;
                     $heroMatched = 0;
                     foreach ($items as $itm) {
@@ -452,7 +452,7 @@
                 <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle">
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Сумма</span>
                     <span class="{{ $heroHasMoney ? 'text-fg-1' : 'text-fg-3' }} mono"
-                          title="Подытог по каталожным ценам сматченных позиций (без НДС). С НДС см. внизу таба «Позиции».">
+                          title="Сумма по каталожным ценам сматченных позиций (с НДС). Разбивку без НДС / в т.ч. НДС см. внизу таба «Позиции».">
                         {{ $heroHasMoney ? number_format($heroSubtotal, 2, '.', ' ') . ' ₽' : '—' }}
                     </span>
                 </div>
@@ -2255,8 +2255,14 @@
                                     }
                                 }
                                 $vatPercent = (float) app_setting('tax.vat_percent', config('services.tax.vat_percent', 22));
-                                $vat = $subtotal * $vatPercent / 100;
-                                $totalAll = $subtotal + $vat;
+                                // Каталожные цены (mdb-импорт) УЖЕ включают НДС — налог
+                                // выделяем из суммы, а не накидываем сверху. Итог = сумма
+                                // каталожных цен (как «К оплате» в КП).
+                                $totalAll = $subtotal;
+                                $vat = $vatPercent > 0
+                                    ? round($subtotal * $vatPercent / (100 + $vatPercent), 2)
+                                    : 0.0;
+                                $netto = round($subtotal - $vat, 2);
                                 $hasAnyPrice = $countedItems > 0;
                                 $totalsTitle = $hasAnyPrice
                                     ? "посчитано позиций: {$countedItems} из {$items->count()}"
@@ -2272,8 +2278,8 @@
                                     <span class="text-fg-3">+ добавить позицию</span>
                                 @endif
                                 <span class="flex-1"></span>
-                                <span class="text-fg-3">подытог:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($subtotal, 2, '.', ' ') . ' ₽' : '—' }}</span>
-                                <span class="text-fg-3">+ НДС {{ rtrim(rtrim(number_format($vatPercent, 1, '.', ''), '0'), '.') }}%:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($vat, 2, '.', ' ') . ' ₽' : '—' }}</span>
+                                <span class="text-fg-3">без НДС:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($netto, 2, '.', ' ') . ' ₽' : '—' }}</span>
+                                <span class="text-fg-3">в т.ч. НДС {{ rtrim(rtrim(number_format($vatPercent, 1, '.', ''), '0'), '.') }}%:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono">{{ $hasAnyPrice ? number_format($vat, 2, '.', ' ') . ' ₽' : '—' }}</span>
                                 <span class="text-fg-3">итого:</span><span class="{{ $hasAnyPrice ? 'text-fg-1' : 'text-fg-3' }} mono text-[14px]">{{ $hasAnyPrice ? number_format($totalAll, 2, '.', ' ') . ' ₽' : '—' }}</span>
                             </div>
                         </div>
