@@ -28,10 +28,11 @@ class EmailSignatureService
     public function __construct() {}
 
     /**
-     * Кэш data-URI логотипа на время request'а — чтобы не читать файл
-     * по нескольку раз при отправке батча писем.
+     * Кэш resolved-пути к локальному файлу логотипа на время request'а.
      */
-    private ?string $logoDataUriCache = null;
+    private ?string $logoLocalPathCache = null;
+
+    private bool $logoLocalPathResolved = false;
 
     /**
      * Рендер подписи в plain + html для конкретного менеджера.
@@ -173,7 +174,7 @@ class EmailSignatureService
         $taglineEn = (string) ($sig['tagline_en'] ?? '');
         $legalName = (string) ($company['legal_name'] ?? '');
         $edoId = (string) ($company['edo_id'] ?? '');
-        $logoUrl = $this->resolveLogoSrc((string) ($sig['logo_url'] ?? ''));
+        $logoUrl = $this->logoPublicUrl();
         $websites = is_array($sig['websites'] ?? null) ? $sig['websites'] : [];
 
         $rows = [];
@@ -285,82 +286,58 @@ class EmailSignatureService
     }
 
     /**
-     * Превращает logo_url из config в src для <img>. Если URL указывает
-     * на локальный файл в public/ — встраиваем как data:image/...;base64
-     * (надёжнее: email-клиенты не блокируют data-URI как внешние картинки).
-     * Если внешний URL (http/https другого хоста) — оставляем как есть
-     * с учётом риска блокировки.
+     * Публичный http(s) URL логотипа для атрибута src в <img>. Этот src
+     * попадает в HTML, который сохраняется в CRM-тред (там превью смотрят
+     * в браузере — он грузит картинку по сети).
      *
-     * Возвращает пустую строку если ни локального файла, ни валидного
-     * URL — тогда renderHtml() не рендерит логотип-колонку.
+     * В реальном исходящем письме OutgoingMailMimeBuilder::build() заменяет
+     * этот src на cid:-ссылку и встраивает файл inline-вложением, потому что:
+     *  - Gmail вырезает data:image/...;base64 картинки в письмах вовсе;
+     *  - внешние http-картинки часть клиентов прячет до «показать изображения».
+     * CID (multipart/related) показывается inline без оговорок везде.
+     *
+     * Пустая строка → renderHtml() не рендерит логотип-колонку.
      */
-    private function resolveLogoSrc(string $configured): string
+    public function logoPublicUrl(): string
     {
-        if ($this->logoDataUriCache !== null) {
-            return $this->logoDataUriCache;
-        }
+        return trim((string) (config('services.company.signature.logo_url') ?? ''));
+    }
 
-        // 1) Если в config есть путь, выглядящий как локальный
-        //    (https://OUR-DOMAIN/assets/... или /assets/... или просто
-        //    «logo-myzip-email.png»), читаем из public/.
+    /**
+     * Абсолютный путь к локальному PNG-файлу логотипа — для CID-embed в MIME.
+     * SVG игнорируем: почтовые клиенты его не рендерят. null если файла нет
+     * (тогда build() оставит http-src, Gmail подгрузит через свой прокси).
+     */
+    public function logoLocalPath(): ?string
+    {
+        if ($this->logoLocalPathResolved) {
+            return $this->logoLocalPathCache;
+        }
+        $this->logoLocalPathResolved = true;
+
         $candidates = [];
+        $configured = $this->logoPublicUrl();
         if ($configured !== '') {
-            // Извлекаем path из URL.
             $path = parse_url($configured, PHP_URL_PATH) ?: $configured;
             $path = ltrim($path, '/');
             if ($path !== '') {
                 $candidates[] = public_path($path);
             }
         }
-        // Default fallback — public/assets/logo-myzip-email.{png,svg}.
-        // PNG приоритетнее: Gmail (и Outlook, и большинство клиентов) НЕ
-        // рендерят SVG в письмах — ни внешний, ни data:image/svg+xml — и
-        // показывают битый placeholder. Текущий PNG — цветной герб на
-        // прозрачном фоне, виден на белом письме. SVG оставлен последним
-        // запасным вариантом, но из-за guard'а ниже фактически не отдаётся.
         $candidates[] = public_path('assets/logo-myzip-email.png');
-        $candidates[] = public_path('assets/logo-myzip-email.svg');
 
         foreach ($candidates as $absPath) {
             if (! is_file($absPath) || ! is_readable($absPath)) {
                 continue;
             }
-            $content = @file_get_contents($absPath);
-            if ($content === false || $content === '') {
+            // SVG не поддерживается почтовыми клиентами — пропускаем.
+            if (strtolower((string) pathinfo($absPath, PATHINFO_EXTENSION)) === 'svg') {
                 continue;
             }
-            $mime = $this->detectImageMime($absPath, $content);
-            if ($mime === null) {
-                continue;
-            }
-            // SVG в email не поддерживается (Gmail/Outlook режут) — даже если
-            // config или первый кандидат указывает на .svg, пропускаем и
-            // падаем на PNG-fallback.
-            if ($mime === 'image/svg+xml') {
-                continue;
-            }
-            $b64 = base64_encode($content);
-            return $this->logoDataUriCache = 'data:'.$mime.';base64,'.$b64;
+            return $this->logoLocalPathCache = $absPath;
         }
 
-        // Нет локального файла — оставляем внешний URL (если был задан).
-        // Это работает если файл реально доступен по https и почтовый
-        // клиент не блокирует внешние картинки. Хуже data-URI, но
-        // лучше чем ничего.
-        return $this->logoDataUriCache = $configured;
-    }
-
-    private function detectImageMime(string $path, string $content): ?string
-    {
-        $ext = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
-        return match ($ext) {
-            'png' => 'image/png',
-            'jpg', 'jpeg' => 'image/jpeg',
-            'gif' => 'image/gif',
-            'svg' => 'image/svg+xml',
-            'webp' => 'image/webp',
-            default => null,
-        };
+        return $this->logoLocalPathCache = null;
     }
 
     /**

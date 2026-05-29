@@ -488,12 +488,13 @@ return [
             'free_phone' => '8 (800) 333-64-72',
             'general_email' => 'info@myzip.ru',
             'websites' => ['myzip.ru', 'mylift.ru'],
-            // Path/URL логотипа. EmailSignatureService::resolveLogoSrc()
-            // читает локальный файл и встраивает как data:image/...;base64,
-            // чтобы лого работал без внешней сети (Gmail/Yandex блокируют
-            // внешние картинки). ТОЛЬКО PNG — Gmail/Outlook не рендерят SVG
-            // в письмах (показывают битый placeholder). Текущий PNG — цветной
-            // герб на прозрачном фоне, виден на белом фоне письма.
+            // http(s) URL логотипа. Используется двояко:
+            //  - как <img src> в HTML-подписи для CRM-превью в браузере;
+            //  - его path резолвится в локальный public/-файл, который
+            //    OutgoingMailMimeBuilder встраивает inline-вложением (CID).
+            // В реальном письме src заменяется на cid:-ссылку — Gmail вырезает
+            // data:image base64, а внешние картинки часть клиентов прячет.
+            // ТОЛЬКО PNG: SVG почтовые клиенты не рендерят.
             'logo_url' => env('SIGNATURE_LOGO_URL', 'https://mzcorp.ru/assets/logo-myzip-email.png'),
             'brand_color' => '#D32027',
         ],

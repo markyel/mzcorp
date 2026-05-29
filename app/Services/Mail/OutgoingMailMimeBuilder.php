@@ -137,7 +137,7 @@ class OutgoingMailMimeBuilder
             $email->text($finalBody['plain']);
         }
         if ($finalBody['html'] !== '') {
-            $email->html($finalBody['html']);
+            $email->html($this->embedSignatureLogo($email, $finalBody['html']));
         }
 
         // Threading headers (RFC 5322 §3.6.4).
@@ -179,6 +179,39 @@ class OutgoingMailMimeBuilder
         }
 
         return $email;
+    }
+
+    /**
+     * Inline-логотип подписи как CID-вложение (multipart/related).
+     *
+     * EmailSignatureService рендерит <img src="<http-url>"> — это нужно для
+     * CRM-превью в браузере. В реальном письме заменяем src на cid:-ссылку и
+     * встраиваем PNG inline-вложением: Gmail вырезает data:image base64, а
+     * внешние http-картинки часть клиентов прячет до «показать изображения».
+     * CID показывается inline везде без оговорок.
+     *
+     * Если файла лого нет — оставляем http-src как fallback (Gmail подгрузит
+     * через свой image-proxy).
+     */
+    private function embedSignatureLogo(SymfonyEmail $email, string $html): string
+    {
+        $logoUrl = $this->signatureService->logoPublicUrl();
+        $logoPath = $this->signatureService->logoLocalPath();
+
+        if ($logoUrl === '' || $logoPath === null) {
+            return $html;
+        }
+        // В html src проходит через htmlspecialchars; для нашего URL спецсимволов
+        // нет, поэтому строковое совпадение надёжно. Если src не найден —
+        // подпись legacy/без лого, встраивать нечего.
+        if (! str_contains($html, $logoUrl)) {
+            return $html;
+        }
+
+        $cid = 'mylift-logo';
+        $email->embedFromPath($logoPath, $cid);
+
+        return str_replace($logoUrl, 'cid:'.$cid, $html);
     }
 
     /**
