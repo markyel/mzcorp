@@ -266,6 +266,33 @@ class InboundReplyLinker
         // обновить КП) — обслуживаются именно так (наследование), плюс
         // ручная кнопка «↻ Реанимировать» (Phase 3).
         if ($request->status->isTerminal()) {
+            // Постпродажная переписка по УСПЕШНО закрытой (closed_won) сделке:
+            // вопросы доставки, сертификатов, закрывающих документов. Заявку
+            // НЕ реанимируем (сделка состоялась) — прицепляем письмо к закрытой
+            // заявке, чтобы переписка жила в ней. Менеджеру MailRouter поднимет
+            // алерт PostSale (отдельная секция Pool). Эскалация в новое КП
+            // классифицируется как client_request → отдельная новая заявка.
+            if ($request->status === RequestStatus::ClosedWon
+                && $message->category === EmailCategory::PostSale->value
+            ) {
+                $message->forceFill(['related_request_id' => $request->id])->save();
+
+                $this->activity->touch(
+                    $request,
+                    \App\Enums\RequestActivityType::PostSaleMessage,
+                    $message->sent_at ?: now(),
+                );
+
+                Log::info('InboundReplyLinker: post-sale message linked to closed_won request', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $request->id,
+                    'internal_code' => $request->internal_code,
+                    'matched_by' => $matchedBy,
+                ]);
+
+                return $request;
+            }
+
             $this->rememberInheritanceCandidate($message, $request, (string) $matchedBy);
 
             return null;

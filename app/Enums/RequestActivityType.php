@@ -23,6 +23,7 @@ enum RequestActivityType: string
     case Assigned = 'assigned';
     case ClientReplied = 'client_replied';
     case SupplierReplied = 'supplier_replied';
+    case PostSaleMessage = 'post_sale_message';
     case Resumed = 'resumed';
     case Reanimated = 'reanimated';
     case ManualFlagSet = 'manual_flag_set';
@@ -49,6 +50,7 @@ enum RequestActivityType: string
             self::Assigned => 'Назначена',
             self::ClientReplied => 'Ответ клиента',
             self::SupplierReplied => 'Ответ поставщика',
+            self::PostSaleMessage => 'Постпродажное сообщение',
             self::Resumed => 'Снята с паузы',
             self::Reanimated => 'Реанимирована',
             self::ManualFlagSet => 'Ручной флаг',
@@ -75,6 +77,7 @@ enum RequestActivityType: string
             self::Assigned => '🆕',
             self::ClientReplied => '📨',
             self::SupplierReplied => '📦',
+            self::PostSaleMessage => '🛒',
             self::Resumed => '▶',
             self::Reanimated => '↻',
             self::ManualFlagSet => '🚩',
@@ -106,6 +109,7 @@ enum RequestActivityType: string
             self::Assigned,
             self::ClientReplied,
             self::SupplierReplied,
+            self::PostSaleMessage,
             self::Resumed,
             self::Reanimated,
             self::ManualFlagSet => true,

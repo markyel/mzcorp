@@ -94,6 +94,26 @@
                 </a>
             @endforeach
 
+            {{-- Постпродажа: closed_won заявки с непрочитанным постпродажным
+                 письмом (вопрос сроков / сертификатов / закрывающих документов).
+                 Заявка остаётся закрытой; алерт снимается при открытии карточки.
+                 Bucket=postsale → setBucket. Показываем всегда (секция пула),
+                 amber-pill когда есть непрочитанные. --}}
+            @php
+                $postSaleActive = $bucket === 'postsale';
+                $postSaleCount = (int) ($totals['postsale_mine'] ?? 0);
+            @endphp
+            <a href="#" wire:click.prevent="setBucket('postsale')"
+               class="{{ $renderQuery(['scope' => 'mine', 'status' => ''], $postSaleActive) }}">
+                <span class="w-3.5 text-center">🛒</span>
+                <span class="flex-1">Постпродажа</span>
+                @if($postSaleCount > 0)
+                    <span class="font-mono text-[11.5px] px-1.5 rounded-full bg-amber-100 text-amber-800">{{ $postSaleCount }}</span>
+                @else
+                    <span class="font-mono text-[11.5px] {{ $postSaleActive ? 'text-[var(--fg-1)]' : 'text-[var(--fg-3)]' }}">0</span>
+                @endif
+            </a>
+
             {{-- Phase 2 placeholder queries (статус-производные) --}}
             @foreach([
                 ['icon' => '⌛', 'label' => 'Жду клиента'],
@@ -363,34 +383,44 @@
                  attention_required_at; кнопка красная если счётчик > 0. --}}
             @php
                 $bucketChips = [
-                    'active'  => ['label' => 'Активные',   'count' => $bucketCounts['active']],
-                    'overdue' => ['label' => 'Просрочено', 'count' => $bucketCounts['overdue'] ?? 0],
-                    'paused'  => ['label' => 'На паузе',   'count' => $bucketCounts['paused']],
-                    'closed'  => ['label' => 'Закрытые',   'count' => $bucketCounts['closed']],
-                    'all'     => ['label' => 'Все',        'count' => $bucketCounts['all']],
+                    'active'   => ['label' => 'Активные',    'count' => $bucketCounts['active']],
+                    'overdue'  => ['label' => 'Просрочено',  'count' => $bucketCounts['overdue'] ?? 0],
+                    'paused'   => ['label' => 'На паузе',    'count' => $bucketCounts['paused']],
+                    'closed'   => ['label' => 'Закрытые',    'count' => $bucketCounts['closed']],
+                    'postsale' => ['label' => '🛒 Постпродажа', 'count' => $bucketCounts['postsale'] ?? 0],
+                    'all'      => ['label' => 'Все',         'count' => $bucketCounts['all']],
                 ];
             @endphp
             @foreach($bucketChips as $key => $meta)
                 @php
                     $on = $bucket === $key;
+                    // overdue → red highlight, postsale → amber highlight when >0.
                     $isOverdueChip = $key === 'overdue';
+                    $isPostSaleChip = $key === 'postsale';
                     $overdueAttn = $isOverdueChip && $meta['count'] > 0;
+                    $postSaleAttn = $isPostSaleChip && $meta['count'] > 0;
                 @endphp
                 <button wire:click="setBucket('{{ $key }}')"
                         class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium
                                {{ $on
-                                  ? ($overdueAttn ? 'bg-[var(--red-600)] text-white' : 'bg-[var(--accent)] text-fg-on-accent')
+                                  ? ($overdueAttn ? 'bg-[var(--red-600)] text-white' : ($postSaleAttn ? 'bg-[var(--amber-600)] text-white' : 'bg-[var(--accent)] text-fg-on-accent'))
                                   : ($overdueAttn
                                         ? 'bg-[var(--red-50)] border border-[var(--red-300)] text-[var(--red-700)] hover:bg-[var(--red-100)]'
-                                        : 'bg-[var(--bg-surface)] border border-[var(--border-strong)] text-[var(--fg-2)] hover:text-[var(--fg-1)]') }}">
+                                        : ($postSaleAttn
+                                            ? 'bg-[var(--amber-50)] border border-[var(--amber-300)] text-[var(--amber-700)] hover:bg-[var(--amber-100)]'
+                                            : 'bg-[var(--bg-surface)] border border-[var(--border-strong)] text-[var(--fg-2)] hover:text-[var(--fg-1)]')) }}">
                     <span>{{ $meta['label'] }}</span>
                     <span class="font-mono text-[11px] {{ $on ? 'opacity-90' : 'opacity-75' }}">{{ $meta['count'] }}</span>
                 </button>
             @endforeach
 
+            {{-- Уточняющие status-chips внутри текущего bucket'а. Для
+                 bucket=postsale не показываем — статус всегда closed_won,
+                 а statusCounts считал бы ВСЕ закрытые-success (не только
+                 с постпродажным письмом), что вводит в заблуждение. --}}
+            @if($bucket !== 'postsale')
             <span class="text-[var(--fg-4)] mx-1">·</span>
 
-            {{-- Уточняющие status-chips внутри текущего bucket'а. --}}
             <button wire:click="$set('status', '')"
                     class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap
                            {{ $status === ''
@@ -416,6 +446,7 @@
                     @if($on)<span class="text-[var(--fg-3)] text-[14px] leading-none">×</span>@endif
                 </button>
             @endforeach
+            @endif
 
             {{-- Phase 2 disabled chips --}}
             @foreach(['Бренд', 'Возраст ≤ 30 дн', 'Сумма ≥ 10 000 ₽'] as $label)
@@ -448,7 +479,9 @@
         <div class="flex-1 overflow-auto">
             @if($page->total() === 0)
                 <div class="p-12 text-center text-[var(--fg-3)]">
-                    @if($effectiveScope === 'mine' && $search === '' && $status === '')
+                    @if($bucket === 'postsale')
+                        Нет постпродажных писем по закрытым заявкам.
+                    @elseif($effectiveScope === 'mine' && $search === '' && $status === '')
                         Все заявки разобраны. Хорошая работа.
                     @else
                         Под фильтр ничего не попало.

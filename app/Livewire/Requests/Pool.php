@@ -163,7 +163,7 @@ class Pool extends Component
 
     public function setBucket(string $bucket): void
     {
-        $allowed = ['active', 'overdue', 'paused', 'closed', 'all'];
+        $allowed = ['active', 'overdue', 'paused', 'closed', 'postsale', 'all'];
         $this->bucket = in_array($bucket, $allowed, true) ? $bucket : 'active';
         $this->status = '';
         $this->resetPage();
@@ -179,6 +179,10 @@ class Pool extends Component
         return match ($this->bucket) {
             'paused' => [RequestStatus::Paused->value],
             'closed' => [RequestStatus::ClosedWon->value, RequestStatus::ClosedLost->value],
+            // Постпродажа: только успешно закрытые (closed_won), на которые
+            // пришло постпродажное письмо. Доп. фильтр attention_reason=post_sale
+            // + attention_required_at IS NOT NULL — в render().
+            'postsale' => [RequestStatus::ClosedWon->value],
             'all' => array_map(
                 fn (RequestStatus $s) => $s->value,
                 array_filter(
@@ -365,6 +369,15 @@ class Pool extends Component
                 ->where('attention_reason', '!=', \App\Enums\AttentionReason::ClientReplied->value);
         }
 
+        // Постпродажа: closed_won заявки с непрочитанным постпродажным письмом.
+        // Фильтр по attention_reason (НЕ по attention_level — sweepOverdue
+        // сбрасывает level в 0 для silent-статусов, к которым относится
+        // closed_won). Снимается при открытии карточки (onManagerOpened).
+        if ($this->bucket === 'postsale') {
+            $query->where('attention_reason', \App\Enums\AttentionReason::PostSale->value)
+                ->whereNotNull('attention_required_at');
+        }
+
         // Уточняющий status-фильтр внутри bucket'а — только если значение
         // принадлежит текущему bucket'у (защита от рассинхронизации URL).
         $validStatus = $this->status !== '' && in_array($this->status, $bucketStatuses, true);
@@ -524,6 +537,12 @@ class Pool extends Component
                     RequestStatus::ClosedLost->value,
                 ])
                 ->count(),
+            // Постпродажа: closed_won с непрочитанным постпродажным письмом.
+            'postsale' => (clone $countsBase)
+                ->where('status', RequestStatus::ClosedWon->value)
+                ->where('attention_reason', \App\Enums\AttentionReason::PostSale->value)
+                ->whereNotNull('attention_required_at')
+                ->count(),
             'all' => (clone $countsBase)
                 ->when(! $this->canSeeAll, fn ($q) => $q->where('status', '!=', RequestStatus::Pending->value))
                 ->count(),
@@ -554,6 +573,25 @@ class Pool extends Component
                 array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
             ))
             ->count();
+        // Постпродажа (мои): closed_won заявки текущего менеджера (вкл.
+        // активные делегации), на которые пришло постпродажное письмо и
+        // менеджер ещё не открыл карточку. Подсветка в левой навигации.
+        $myPostSale = Request::query()
+            ->where(function ($q) use ($authId) {
+                $q->where('assigned_user_id', $authId)
+                    ->orWhereExists(function ($sub) use ($authId) {
+                        $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                            ->from('request_delegations')
+                            ->whereColumn('request_delegations.request_id', 'requests.id')
+                            ->where('request_delegations.acting_user_id', $authId)
+                            ->whereNull('request_delegations.ended_at');
+                    });
+            })
+            ->where('status', RequestStatus::ClosedWon->value)
+            ->where('attention_reason', \App\Enums\AttentionReason::PostSale->value)
+            ->whereNotNull('attention_required_at')
+            ->count();
+
         // Counter «Нераспределённые» — только реально открытые (не closed_*).
         // Автозакрытые системой заявки имеют отдельный пул и не должны
         // подсвечивать этот счётчик.
@@ -620,6 +658,7 @@ class Pool extends Component
                 'unassigned' => $unassigned,
                 'all_open' => $allOpen,
                 'auto_closed' => $autoClosed,
+                'postsale_mine' => $myPostSale,
             ],
             'statusCounts' => $statusCounts,
             'bucketCounts' => $bucketCounts,

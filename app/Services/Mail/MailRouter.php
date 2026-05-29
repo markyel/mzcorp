@@ -235,6 +235,22 @@ class MailRouter
             ]);
         }
 
+        // Постпродажная переписка по успешно закрытой (closed_won) сделке.
+        // Линкер уже прицепил письмо к закрытой заявке (related_request_id
+        // проставлен), реанимация НЕ выполняется. Здесь — только алерт
+        // менеджеру (отдельная секция Pool) + доставка письма в его ящик.
+        // Парсер позиций и обычный reply-pipeline НЕ запускаем: новых позиций
+        // нет, заявка остаётся закрытой. Эскалация в новое КП ловится
+        // категоризатором как client_request → отдельная новая заявка.
+        if ($linkedRequest !== null
+            && $message->category === EmailCategory::PostSale->value
+            && $linkedRequest->status === \App\Enums\RequestStatus::ClosedWon
+        ) {
+            $this->handlePostSaleMessage($message, $linkedRequest);
+
+            return;
+        }
+
         // Phase 1.9: если reply прицеплен к существующей Request — запустим
         // парсер с force=true для извлечения ДОПОЛНИТЕЛЬНЫХ позиций
         // («забыл указать ещё M-1234 - 3 шт»). RequestItemPersister
@@ -397,6 +413,25 @@ class MailRouter
         // если linker не нашёл existing (related_request_id null). Это спасает
         // «висящие» thread_reply'и: клиент сделал forward старой переписки,
         // у нас в БД нет того треда — без fallback'а заявка не создавалась.
+        // post_sale, не привязанное к закрытой (closed_won) заявке: у клиента
+        // нет успешно закрытой сделки, к которой относилась бы переписка —
+        // трактуем письмо как обычный клиентский запрос и создаём новую
+        // заявку (решение продукта). category переписываем, чтобы и create-
+        // гейт ниже, и аудит RoutedMail видели client_request.
+        if ($message->category === EmailCategory::PostSale->value && $linkedRequest === null) {
+            $reasoning = trim((string) $message->category_reasoning
+                . ' [post_sale без closed_won → client_request]');
+            $message->forceFill([
+                'category' => EmailCategory::ClientRequest->value,
+                'category_reasoning' => $reasoning,
+            ])->save();
+
+            Log::info('MailRouter: post_sale without closed_won match → client_request', [
+                'email_message_id' => $message->id,
+                'from_email' => $message->from_email,
+            ]);
+        }
+
         $createCategories = [
             EmailCategory::ClientRequest->value,
             EmailCategory::ThreadReply->value,
@@ -542,6 +577,58 @@ class MailRouter
         }
 
         return false;
+    }
+
+    /**
+     * Постпродажное письмо по успешно закрытой (closed_won) заявке.
+     *
+     * Заявку НЕ реанимируем (сделка состоялась). Делаем две вещи:
+     *   1. attention=PostSale — закрытая заявка всплывёт в отдельной секции
+     *      Pool менеджера «Постпродажная переписка» (новый комментарий клиента).
+     *   2. Доставляем письмо в личный ящик менеджера + раскладываем в подпапку
+     *      MZ|{Lastname} — теми же job'ами, что и для обычного reply'я, чтобы
+     *      менеджер видел переписку в почте.
+     *
+     * Парсер позиций НЕ запускаем — новых позиций в постпродаже нет.
+     */
+    private function handlePostSaleMessage(EmailMessage $message, \App\Models\Request $request): void
+    {
+        try {
+            $this->attention->onPostSaleMessage($request);
+        } catch (\Throwable $e) {
+            Log::warning('MailRouter: attention onPostSaleMessage failed (non-fatal)', [
+                'email_message_id' => $message->id,
+                'request_id' => $request->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        if ($request->assigned_user_id) {
+            try {
+                \App\Jobs\Mail\DeliverToManagerInboxJob::dispatch(
+                    $message->id,
+                    $request->assigned_user_id,
+                );
+                \App\Jobs\Mail\RouteMailToManagerJob::dispatch(
+                    $message->id,
+                    $request->assigned_user_id,
+                );
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: dispatch post-sale routing/delivery failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $request->id,
+                    'manager_id' => $request->assigned_user_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        Log::info('MailRouter: post-sale message handled on closed_won request', [
+            'email_message_id' => $message->id,
+            'request_id' => $request->id,
+            'internal_code' => $request->internal_code,
+            'manager_id' => $request->assigned_user_id,
+        ]);
     }
 
     /**

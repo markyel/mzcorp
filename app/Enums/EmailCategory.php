@@ -13,6 +13,13 @@ namespace App\Enums;
  *                     запускает IncomingMailProcessor + RequestItemParsingService.
  *   thread_reply   — клиент отвечает в существующем треде (Re:/Fwd: + цитата
  *                     от нас). Не создаём новый Request, прикрепляем к существующему.
+ *   post_sale      — постпродажная переписка по УЖЕ успешно закрытой (closed_won)
+ *                     сделке: сроки/статус доставки, наличие сертификатов,
+ *                     закрывающие документы (УПД, счёт-фактура, акт). Легитимна,
+ *                     но НЕ создаёт новую заявку — прикрепляется к закрытой заявке,
+ *                     менеджеру поднимается алерт. Если у клиента нет подходящей
+ *                     closed_won заявки — MailRouter трактует письмо как
+ *                     client_request (новая заявка).
  *   irrelevant     — всё прочее (наши же исходящие, поставщики, авто-ответы,
  *                     newsletter, спам, бухгалтерия, услуги без ТМЦ, internal).
  */
@@ -20,6 +27,7 @@ enum EmailCategory: string
 {
     case ClientRequest = 'client_request';
     case ThreadReply = 'thread_reply';
+    case PostSale = 'post_sale';
     case Irrelevant = 'irrelevant';
 
     public function label(): string
@@ -27,6 +35,7 @@ enum EmailCategory: string
         return match ($this) {
             self::ClientRequest => 'Заявка клиента',
             self::ThreadReply => 'Ответ в треде',
+            self::PostSale => 'Постпродажная переписка',
             self::Irrelevant => 'Не клиентская',
         };
     }

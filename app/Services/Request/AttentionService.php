@@ -93,6 +93,33 @@ class AttentionService
     }
 
     /**
+     * Hook: постпродажное письмо клиента по УСПЕШНО закрытой (closed_won)
+     * заявке — вопросы доставки, сертификатов, закрывающих документов.
+     *
+     * Единственный hook, который СОЗНАТЕЛЬНО ставит attention на closed_won
+     * (минуя silentStatuses-гейт): заявку не реанимируем, но менеджер должен
+     * увидеть «новый комментарий покупателя» в отдельной секции Pool.
+     * reason=PostSale, level=1 (info). Снимается onManagerOpened.
+     *
+     * Не затирает Manual — он сильнее.
+     */
+    public function onPostSaleMessage(Request $request): void
+    {
+        if ($request->status !== RequestStatus::ClosedWon) {
+            return;
+        }
+        if ($this->isManualSet($request)) {
+            return;
+        }
+
+        $request->forceFill([
+            'attention_required_at' => now(),
+            'attention_reason' => AttentionReason::PostSale->value,
+            'attention_level' => 1,
+        ])->save();
+    }
+
+    /**
      * Hook: заявка только что назначена менеджеру (auto-assign / sticky /
      * round-robin / РОП-reassign). Ставит reason=FreshAssignment, level=1
      * info. Снимается onManagerOpened.
@@ -128,6 +155,7 @@ class AttentionService
         $clearable = [
             AttentionReason::ClientReplied->value,
             AttentionReason::FreshAssignment->value,
+            AttentionReason::PostSale->value,
         ];
         if (! in_array($this->reasonValue($request), $clearable, true)) {
             return;
@@ -236,6 +264,7 @@ class AttentionService
             AttentionReason::ClientReplied->value,
             AttentionReason::FreshAssignment->value,
             AttentionReason::SupplierReplied->value,
+            AttentionReason::PostSale->value,
         ], true);
     }
 

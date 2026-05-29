@@ -24,6 +24,11 @@ namespace App\Enums;
  *                          Снимается в Detail::mount по onManagerOpened.
  *   - FreshAssignment 🆕  «Новая заявка» — auto-assigned менеджеру, ещё не
  *                          открывал. info-уровень. Снимается onManagerOpened.
+ *   - PostSale        🛒  «Постпродажа» — клиент написал по уже успешно
+ *                          закрытой (closed_won) сделке (доставка, сертификаты,
+ *                          закрывающие документы). Единственная причина, которая
+ *                          ставится на closed_won. Заявку не реанимирует.
+ *                          Снимается onManagerOpened.
  *   - Manual          🚩  «Ручной флаг» — менеджер/РОП явно поставил «вернуть
  *                          в фокус». Самый сильный: НЕ затирается recompute()
  *                          / onClientReplied / onManagerOpened. Снимается
@@ -43,6 +48,7 @@ enum AttentionReason: string
     case FreshAssignment = 'fresh_assignment';
     case Manual = 'manual';
     case SupplierReplied = 'supplier_replied';
+    case PostSale = 'post_sale';
 
     // ──────────── deprecated, не возвращаются compute() ────────────
     case AwaitingClient = 'awaiting_client';
@@ -60,6 +66,7 @@ enum AttentionReason: string
             self::FreshAssignment => 'Новая заявка',
             self::Manual => 'Ручной флаг',
             self::SupplierReplied => 'Ответ поставщика',
+            self::PostSale => 'Постпродажа',
             // legacy
             self::AwaitingClient => 'Жду клиента',
             self::AwaitingSupplier => 'Жду поставщика',
@@ -81,6 +88,7 @@ enum AttentionReason: string
             self::FreshAssignment => '🆕',
             self::Manual => '🚩',
             self::SupplierReplied => '📦',
+            self::PostSale => '🛒',
             // legacy
             self::AwaitingClient => '👤',
             self::AwaitingSupplier => '📦',
@@ -101,7 +109,8 @@ enum AttentionReason: string
             self::FreshAssignment,
             self::Manual,
             self::PostponedResume,
-            self::SupplierReplied => true,
+            self::SupplierReplied,
+            self::PostSale => true,
             default => false,
         };
     }
