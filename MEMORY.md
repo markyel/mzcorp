@@ -204,6 +204,31 @@ Cross-mailbox дедуп — 3 защитных слоя против Request-д
 - ✅ **500 на /dashboard/requests/auto-closed** (`6344717`). Route `/dashboard/requests/{request}` определён ВЫШЕ статичного `auto-closed` → Laravel матчил wildcard, Postgres падал на `WHERE id = 'auto-closed'` (invalid integer syntax). Фикс: статичный роут объявлен ПЕРЕД `{request}`-биндингом, плюс abort_unless внутри для проверки роли head_of_sales/director/admin/secretary.
 - ✅ **Размещение пункта «Автозакрытые» в UI** (эволюция, `df75f65` → `6344717` → `a0bfb1a` → `b3f9929`). Прошёл через 3 итерации: (1) топбар с amber-badge — отвергнут «не нужно в верхнем меню»; (2) левый rail с иконкой ↺ и badge — отвергнут «не в рейл»; (3) **финальное место** — внутри серого sidebar страницы «Заявки», в самом низу под секцией «Сохранённые виды», после `border-t` разделителя. Counter `totals['auto_closed']` за 30 дней передаётся из Pool.php. Видно только привилегированным ролям. **Грабли:** `mt-auto` НЕ работает в `<aside class="overflow-y-auto">` — прижимает к низу прокручиваемого контента, а не видимой области; используем простой `mt-3 border-t`.
 
+### Закрыто 2026-05-28
+
+- ✅ **Sender Blocklist** (полная фича) — модель + сервис + врезка ДО LLM + CRUD `/dashboard/sender-blocklist` + ClosedLostReason::Spam в карточке заявки + гайды. См. секцию MEMORY § «Sender Blocklist (стоп-лист отправителей, 2026-05-28)».
+- ✅ **nginx 403 на `/docs/`** — убрал `$uri/` из `try_files` (физическая папка `public/docs/screenshots/` блокировала Laravel-роут).
+- ✅ **Support ticket 500 на вложении** — `getSize()/getMimeType()` ПОСЛЕ `storeAs()` падал (Livewire `TemporaryUploadedFile` теряет связь). Read metadata BEFORE storeAs().
+- ✅ **`<select>` на `/dashboard/mail` обрезка букв** — `@tailwindcss/forms` `padding` + `line-height` на `h-[26px]`. Base CSS `padding-y: 0 !important; line-height: 1 !important`. (3 ложных шага по color/contrast — урок: «обрезано» ≠ «бледно»).
+- ✅ **«← К списку» терял фильтры/пагинацию** — Alpine `x-init` с `document.referrer` перезаписывает href, URL-state уже синхронизирован Livewire `#[Url]`.
+- ✅ **M-2026-2102 не парсилась** — 4-слойный фикс: add-item-form в empty-state, `parsing_meta.reparse_dispatched_at` для feedback на non-Pending, whitelist «Паллета траволатора» в `ParseItemsUnifiedPrompt`, симметричный whitelist в `RequestItemParsingService::isServiceItem()`. **Двойной слой фильтрации — править оба.**
+- ✅ **Catalog search не находил в description/comment** — расширил code-token + trigram на `lower(description)/lower(comment)` через GIN trgm индексы. Запрос «B157AAUX01» теперь находит замены в comment'ах. Vector embedding не трогал (35K эмбеддингов перегенерять не стал).
+- ✅ **`wire:click.self` закрывал модалки при drag-select текста** — заменил на `wire:mousedown.self` в 12 модалках. Click срабатывает на общем предке; mousedown — только на точке нажатия.
+- ✅ **Pool: дата + время** в колонке кода заявки (`d.m.y H:i`).
+- ✅ **Production incident: info@ stuck >1ч** — `ResolvePendingChunkJob` зацикливался по PCNTL timeout race + UUID-collision в `failed_jobs`. **Архитектурный фикс:** три очереди (`mail-sync`, `default`, `catalog-resolve`), supervisor `--queue=mail-sync,default,catalog-resolve`. Job-классы: queue через `$this->onQueue()` в `__construct` (НЕ class-level — PHP 8 trait composition Fatal). `ResolvePendingChunkJob` timeout 300→600, ShouldBeUnique, failOnTimeout. См. MEMORY § «Queue topology (2026-05-28 post-mortem)».
+- ✅ **Manager workflow.md обновлён** — преамбула + расширены шаги (⋮ меню / Похожие из каталога / per-item уточнения / полноценный КП-flow / счёт с напоминаниями) + 11 свежих скринов.
+- ✅ **Dashboard: timeseries chart** — поток заявок по дням с тремя сериями (personal/shared/total), inline SVG, без npm-deps.
+- ✅ **10 свежих граблей в MEMORY § «Известные грабли»** — PHP 8 trait composition, worker class cache, не лупить supervisorctl restart, двойной слой фильтрации, PCNTL timeout race, shell quoting, click.self vs mousedown.self, forms+h-[26px] обрезка, TemporaryUploadedFile после storeAs, document.referrer возврат.
+
+**Открыто:**
+
+- ⏳ **Корневая причина `ResolvePendingChunkJob` timeout** — после архитектурного фикса инцидент изолирован, но цикл может вернуться. Spawn-task создан. Нужно понять: медленный LLM? n+1 в matchOrResolve? memory leak на cursor? Либо явный `delete()` row при битых входах.
+- ⏳ **Cron `queue:prune-failed --hours=72`** — раз в сутки.
+- ⏳ **Health-check `queue:size-check`** + telegram-alert на jobs > 200 / reserved > 30 мин.
+- ⏳ **«← К списку»: scroll position** через sessionStorage (referrer даёт URL, но не якорь).
+- ⏳ **Старые скрины** в `public/docs/screenshots/` (`requests-pool.png`, `request-detail.png`, `request-positions.png`, `dashboard.png`) — если нигде не используются, удалить.
+- ⏳ **`mzcorp-worker.conf` синхронизация репо vs прод** — сейчас вручную, при следующем worker-deploy перепроверить.
+
 ### Закрыто 2026-05-27
 
 - ✅ **Cross-mailbox дубли — установлен корень, не наш код** (`0993e83`, `80d156a`, `5015685`, `478e964`, `9b961d2`, `aec05dd`, `feb5c99`). Жалоба «M-2026-2049 ушла Якубовичу хотя адресована Ежову» вскрыла три независимых механизма:
@@ -447,6 +472,77 @@ Supervisor (все 4 воркера): `--queue=mail-sync,default,catalog-resolve
 - **request_state_changes.event = varchar(32) (2026-05-22 находка):** Колонка коротко-индексируемая, длинные event-имена (`system.cleanup.internal_client_email_phantom` = 44 символа) падают на `SQLSTATE[22001] String data, right truncated`. Держим event'ы ≤ 32 символов. Использованные: `clarification_sent`, `reanimate`, `cleanup.internal_phantom` (24 chars).
 
 ## Журнал сессий
+
+### Сессия 2026-05-28 — sender-blocklist + queue topology + dashboard chart + ops-грабли
+
+**Контекст:** большая «комбо-сессия» — одна крупная фича (sender blocklist), несколько UX-фиксов, один production incident с разделением очередей, обновление manager-гайда, новый chart на дашборде. По ходу два раза заваливал прод (50 мин и ~1 час) — оба раза собственными «защитными» фиксами. Все известные грабли записал отдельно (см. секцию «Известные грабли» — добавлено 10 свежих позиций сверху списка) — следующий раз начинать с их прочтения.
+
+#### Что задеплоено
+
+| Модуль | Что | Ключевые коммиты |
+|---|---|---|
+| **Sender blocklist** | Целиком: enum BlocklistEntryType/Source, миграция `sender_blocklist` (unique по normalized_value), модель + сервис с suffix-match по доменам и plus-addressing нормализацией, врезка в `MailRouter::route` ДО LLM + defense-in-depth в `IncomingMailProcessor`, Livewire CRUD `/dashboard/sender-blocklist` (single + bulk), case `ClosedLostReason::Spam` + UX в `CloseLostDialog` с выбором email/domain scope, пункт «Стоп-лист» в топбаре. Гайды `rop/sender-blocklist.md` + `manager/spam-close.md`. 8 unit-тестов нормализации + 7 integration-тестов сервиса. Полная секция в MEMORY § «Sender Blocklist (стоп-лист отправителей, 2026-05-28)». | `b5aacd7` |
+| **nginx fix /docs/ 403** | Убрал `$uri/` из `try_files` в `deploy/nginx/mzcorp.conf` + продовый `/etc/nginx/sites-available/mzcorp.conf`. Физическая папка `public/docs/screenshots/` блокировала Laravel-роут. | `24a09ae` |
+| **Support 500 на attachment** | `SupportTicketService::storeAttachment` читал `getSize()/getMimeType()` ПОСЛЕ `storeAs()` — Livewire `TemporaryUploadedFile` к тому моменту терял связь с temp-файлом, `FilesystemAdapter->size()` падал на «file not found». Read metadata BEFORE storeAs(). | `18719db` |
+| **CSS select обрезка** | `@tailwindcss/forms` накатывал `padding: .5rem .75rem + line-height: 1.5rem` на все `<select>`, с `h-[26px]` это давало 10px на контент при 18px глифах → вертикальная обрезка букв. Сначала зря погнал в сторону color/contrast (3 итерации с !important / -webkit-text-fill-color / color-scheme — всё мимо). В итоге `padding-top/bottom: 0 !important; line-height: 1 !important` в base CSS. Урок: если на скрине буквы «срезаны по горизонтали» — это геометрия, не контраст. | `672245f` + предыдущие |
+| **Возврат «← К списку»** | Alpine `x-init` в `detail.blade.php` читает `document.referrer`, если pathname === `/dashboard/requests` — перезаписывает `$el.href`. URL-state у Livewire уже синхронизирован через `#[Url]`, проблема была только в return-path. Работает и для SPA-режима (referrer пишется в History API replaceState). | `a399d1f` |
+| **M-2026-2102 не парсилась** | (1) Empty-state на табе «Позиции» обещал «добавьте позицию вручную ниже» — формы там не было, она пряталась за `@else $items->isEmpty()`. Подложил `livewire:requests.items.add-item-form` прямо в empty-state. (2) `Request::isParsingInFlight()` был gated на `status===Pending`, на quoted-заявке reparse не давал visual feedback → пользователь думал что кнопка не сработала. Добавил `parsing_meta.reparse_dispatched_at`, isParsingInFlight теперь возвращает true в течение 5 мин после ручного reparse независимо от статуса. Wire:loading на кнопку. (3) **Контентная проблема LLM:** «нужна паллета траволатора Doppler» — модель отбрасывала позицию по слову «паллет» в blacklist промпта. Whitelist «Паллета траволатора/эскалатора, Ступень, Гребёнка, Поручень, Канат тяговый» в `ParseItemsUnifiedPrompt`. (4) **Двойной слой фильтрации**: после фикса промпта LLM возвращал позицию (`items_count: 1` в логах), но `RequestItemParsingService::isServiceItem()` PHP-фильтр её отрезал по тому же regex `^паллет`. Симметричный whitelist `traveолатор|эскалатор|лифт|лебёдк|кабин|шахт|...` в negative-exclusions. **Грабля в граблях**: oba layer должны быть синхронны, правя один — править другой. | `bd20e58`, `ee03bdc`, `b872741`, `3c23bda` |
+| **Catalog search description/comment** | Расширил поиск на `description`+`comment` каталога (GIN trgm индексы + word_similarity в codeTokenTopN/trigramTopN, weight ×0.7 чтобы body-hit не перебивал name-match). Vector embedding не трогал — потребовало бы перегенерации 35K эмбеддингов. Запрос пользователя: `B157AAUX01` — точного нет, но похожий `B157AAEX01` теперь находится в comment'ах M19188/M06971 «ЗАМЕНЕНО НА M24479». Миграция `2026_05_28_180000_add_description_comment_trgm_indexes_to_catalog_items.php` (CREATE INDEX IF NOT EXISTS — идемпотентно). | `da3a... → 0e59179` |
+| **Модалки drag-select fix** | `wire:click.self="close"` → `wire:mousedown.self="close"` на 12 модалках. Drag-select текста из панели за её пределы перестал случайно закрывать окно. `click` срабатывает на общем предке mousedown+mouseup; `mousedown` — только в точке нажатия. | до `becd3f9` (часть mass-edit) |
+| **Pool date + time** | В колонке кода заявки `created_at->format('d.m.y H:i')` вместо `d.m.y`. По запросу РОПа — важно понимать утренний/вечерний поток. | до `becd3f9` |
+| **Queue topology post-mortem** | **Инцидент:** info@ inbox stuck 1h. `ResolvePendingChunkJob` зацикливался по PCNTL timeout race (handle() писал `done` И одновременно Laravel mark-failed по MaxAttemptsExceeded), мои частые `supervisorctl restart` оставляли reserved-limbo, INSERT в `failed_jobs` падал по UUID collision (`failed_jobs_uuid_unique`), 178 одинаковых записей. Архитектурный фикс — 3 очереди: `mail-sync` (SyncMailboxFolderJob), `default` (всё остальное), `catalog-resolve` (ResolvePendingChunkJob + dispatcher). Supervisor `--queue=mail-sync,default,catalog-resolve` (приоритет mail-sync). Закоммичен `deploy/supervisor/mzcorp-worker.conf`. Защиты: `ResolvePendingChunkJob` timeout 300→600, `ShouldBeUnique` по md5 sorted itemIds (5 мин), `failOnTimeout = true`. **САМОПОДРЫВ:** деплоя class-level `public string $queue = '...'` уронил прод в Fatal Error PHP 8 trait composition (Queueable trait объявляет `public $queue;` без default). Фикс — установка через `$this->onQueue('...')` в `__construct`. Полная секция в MEMORY § «Queue topology (2026-05-28 post-mortem)». | `3af4f45`, `cab33ce` |
+| **Manager workflow.md обновлён** | Преамбула «Что такое mzCorp и зачем» (системный pitch без коммерческого пафоса). Расширены Шаг 2 (полное ⋮ меню позиции, Похожие из каталога с фильтрами и compare-checkboxes, Привязать вручную, Сменить фото), Шаг 3 (per-item панель со слотами KB + chip-кнопки + preview готового письма), Шаг 5 КП **полностью переписан** (КП теперь в самом mzCorp, не «вне MyLift»: пустой → создать → редактировать с per-line скидками и price_min defence → версии v1/v2 → Превью PDF → отправить), Шаги 6-7 (auto-reminders клиенту, ручная отметка оплаты). 11 свежих скринов в `public/docs/screenshots/` (требуют ssh + chown www-data на проде, но git pull это делает автоматически — проверено). | `becd3f9` |
+| **Dashboard timeseries chart** | Новая ds-card «Поток заявок · по дням · {periodLabel}» перед heatmap. 3 series — personal (sky #0284c7), shared (emerald #059669, info@), total (neutral #111827 dashed). Чистый inline SVG без npm-зависимостей (Chart.js не подтягивал — Tailwind config уже сложный). Computed `requestInflowTimeseries()` через LEFT JOIN requests → email_messages → mailboxes.type. Заявки без email_message (ручные) попадают в total, не в split — tooltip показывает дельту «вручную: N». Доступно head_of_sales/director/secretary/admin (`isPrivileged`). Существующий heatmap переименован «по часам». | финальный коммит сессии |
+| **Скриншоты + asset cleanup** | 11 свежих скринов из `C:\Work\mzCorp\sshots\MyLift-*.png` в `public/docs/screenshots/` с осмысленными именами: `requests-pool-detailed.png`, `request-overview.png`, `request-positions-full.png`, `item-actions-menu.png`, `catalog-link-similar.png`, `catalog-link-manual.png`, `item-clarification-panel.png`, `clarifications-draft.png`, `clarification-email-compose.png`, `quote-empty-create.png`, `quote-draft.png`. Старые 4 файла (`requests-pool.png`, `request-detail.png`, `request-positions.png`, `dashboard.png`) оставлены — могут использоваться где-то ещё. | в `becd3f9` |
+
+#### Известные грабли — за сессию добавлено 10 (см. начало секции «Известные грабли»)
+
+Топ-3 для следующей сессии (читать обязательно):
+
+1. **PHP 8 trait composition: `public $queue` на job-классе = Fatal.** Ставь через `$this->onQueue('...')` в `__construct`. Стоило 50 мин даунтайма ДВАЖДЫ за сессию.
+2. **`queue:work` процессы кешируют классы в памяти.** После `git pull` любого `app/Services/*`, `app/Jobs/*`, `app/Prompts/*`, `app/Models/*` ОБЯЗАТЕЛЕН `php artisan queue:restart` (soft) или `supervisorctl restart` (hard). Без этого воркер крутит старый код. Дважды попался: `ParseItemsUnifiedPrompt` + `isServiceItem`.
+3. **Не лупить `supervisorctl restart mzcorp-worker:*` после каждого деплоя.** Hard kill обрывает in-flight job-ы, reserved-limbo создаёт UUID-collision на следующем re-pickup. Используй `php artisan queue:restart` — soft signal «закончи и выйди», supervisor поднимет свежего. Hard restart — только при рассинхроне/висящем процессе.
+
+Остальные 7 граблей: shell quoting на ssh+tinker (heredoc через storage/script.php), Двойной слой фильтрации в parser-pipeline, PCNTL timeout race в long jobs, `wire:click.self` vs `wire:mousedown.self` на backdrop, `@tailwindcss/forms` + `h-[26px]` = обрезка глифов, Livewire `TemporaryUploadedFile` после `storeAs()` мёртв, `document.referrer` для возврата.
+
+#### Открытые вопросы / TODO
+
+- **Корневая причина зацикливания `ResolvePendingChunkJob`** до post-mortem. Запущен spawn-task: прочитать `app/Jobs/Catalog/ResolvePendingChunkJob.php`, понять почему 50 items × 3с не укладывались в 300с (медленный LLM? n+1 в matchOrResolve? memory leak на cursor?). После архитектурного фикса (timeout 600 + isolated queue) проблема перестала влиять на mail-sync, но сам цикл может вернуться. Нужно либо починить причину, либо явно `delete()` row с битыми входами.
+- **Cron `queue:prune-failed --hours=72`** — раз в сутки, чтобы `failed_jobs` не рос. Сейчас 9 остатков (старые RouteMailToManagerJob), не критично.
+- **Health-check команда** `queue:size-check` + telegram-alert если jobs > 200 или reserved > 30 мин.
+- **`document.referrer`** в кнопке «← К списку» не сохраняет точное место скролла. Если нужна полная восстановляемость — sessionStorage с scroll position.
+- **Старые скрины** в `public/docs/screenshots/` (`requests-pool.png`, `request-detail.png`, `request-positions.png`, `dashboard.png`) — оставлены на случай использования. Если ни одна страница не ссылается — удалить.
+- **`mzcorp-worker.conf` в репо vs прод** — рассинхрон возможен. Сейчас прод-копия обновлена руками (cp + reread + update + restart). На следующем deploy любого worker-кода — пересинхронить.
+- **Spawn-task `Fix poisoned ResolvePendingChunkJob cycle`** — висит в chip'е сессии (создан до моего deploy queue topology, root cause там объяснён более узко). Если будет открыт — нужно не дублировать.
+
+#### Файлы / структура
+
+Новые файлы:
+- `app/Enums/BlocklistEntryType.php`, `BlocklistEntrySource.php`
+- `app/Models/SenderBlocklistEntry.php`
+- `app/Services/Mail/SenderBlocklistService.php`
+- `app/Livewire/SenderBlocklist/BlocklistIndex.php`
+- `database/migrations/2026_05_28_150000_create_sender_blocklist_table.php`
+- `database/migrations/2026_05_28_180000_add_description_comment_trgm_indexes_to_catalog_items.php`
+- `resources/views/livewire/sender-blocklist/blocklist-index.blade.php`
+- `resources/views/admin/sender-blocklist/index.blade.php`
+- `resources/docs/rop/sender-blocklist.md`
+- `resources/docs/manager/spam-close.md`
+- `tests/Unit/Services/Mail/SenderBlocklistNormalizationTest.php`
+- `tests/Feature/Services/Mail/SenderBlocklistServiceTest.php`
+- `deploy/supervisor/mzcorp-worker.conf`
+- `public/docs/screenshots/{request-overview,request-positions-full,item-actions-menu,catalog-link-{similar,manual},item-clarification-panel,clarifications-draft,clarification-email-compose,quote-empty-create,quote-draft,requests-pool-detailed}.png` (11 шт.)
+
+Изменённые job-ы (важно — `$queue` через `onQueue()` в `__construct`, НЕ public property):
+- `app/Jobs/Mail/SyncMailboxFolderJob.php` (queue=mail-sync)
+- `app/Jobs/Catalog/ResolvePendingChunkJob.php` (queue=catalog-resolve, timeout=600, ShouldBeUnique, failOnTimeout)
+- `app/Jobs/Catalog/ResolvePendingFromCatalogJob.php` (queue=catalog-resolve)
+
+Изменённый prod-конфиг (синхронизирован руками после правки в репо):
+- `/etc/supervisor/conf.d/mzcorp-worker.conf` ← `deploy/supervisor/mzcorp-worker.conf`
+- `/etc/nginx/sites-available/mzcorp.conf` (только `try_files` строка) ← `deploy/nginx/mzcorp.conf`
+
+---
 
 ### Сессия 2026-05-25 — support tickets + docs + load_weight + mail self-healing + circuit-breaker
 
