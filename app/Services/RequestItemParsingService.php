@@ -20,6 +20,16 @@ use Smalot\PdfParser\Parser as PdfParser;
 
 class RequestItemParsingService
 {
+    /**
+     * Максимум фото для unified-вызова (ОДИН Vision видит текст+все фото сразу).
+     * Совпадает с лимитом photo-парсера (parseItemsFromPhotoMarkings → 8), чтобы
+     * многокадровые письма (клиент снимает один шильдик с 4-8 ракурсов — типичный
+     * кейс) шли через unified, а не падали в split-путь с дублями text/photo
+     * (M-2026-2147: 6 фото энкодера → split → «Энкодер»+артикул vs «Энкодер (Лифт
+     * OTIS…)»+null, дедуп не склеил из-за разных name).
+     */
+    private const MAX_UNIFIED_IMAGES = 8;
+
     public function __construct(
         private OpenAIChatService $openai,
         private EmailTextCleanerService $cleaner = new EmailTextCleanerService(),
@@ -848,7 +858,7 @@ PROMPT;
                 && !in_array($mime, ['image/heic', 'image/heif'], true);
         });
 
-        // 1a) Unified path для лёгких писем (≤3 фото, без heavy structured-вложений).
+        // 1a) Unified path для лёгких писем (≤8 фото, без heavy structured-вложений).
         // ОДИН Vision-вызов видит subject + body + linked URLs + все фото
         // сразу — снимает проблему дублей между photo-parser и text-parser
         // (артикул с шильдика сам приклеивается к позиции из текста). См.
@@ -873,7 +883,7 @@ PROMPT;
             return preg_match('/\.(pdf|xls|xlsx)$/i', (string) $a->filename) === 1;
         });
         $canUseUnified = $imageAttachments->count() > 0
-            && $imageAttachments->count() <= 3
+            && $imageAttachments->count() <= self::MAX_UNIFIED_IMAGES
             && $heavyStructured->isEmpty();
 
         if ($canUseUnified) {
@@ -1120,15 +1130,15 @@ PROMPT;
 
     /**
      * Unified Vision-парсинг: ОДИН вызов LLM видит ВСЮ заявку (subject + body +
-     * linked URLs + до 3 фото) и возвращает консолидированный items[].
+     * linked URLs + до 8 фото) и возвращает консолидированный items[].
      *
      * Снимает проблему дублей split-pipeline (photo-parser и text-parser
      * возвращали отдельные item'ы для одной позиции, потому что в дедупе
      * ключ был article+qty+invoice_index — но photo читал article с шильдика,
      * а text оставлял null → разные ключи). См. M-2026-1495.
      *
-     * Применяется только к «лёгким» письмам (≤3 фото без structured
-     * вложений) — для тяжёлых остаётся split pipeline (он лучше масштабируется
+     * Применяется к письмам без heavy structured-вложений (≤8 фото) — для
+     * тяжёлых (PDF/XLS/XLSX) остаётся split pipeline (он лучше масштабируется
      * на PDF-таблицы и multi-invoice screenshot'ы).
      *
      * @param array<string> $images data:image/...;base64,... в том же порядке, что $attachmentIds
@@ -1145,8 +1155,8 @@ PROMPT;
         ?string $linkedUrlsText,
     ): array {
         // Симметричный cap (как в parseItemsFromPhotoMarkings).
-        $images = array_slice($images, 0, 3);
-        $attachmentIds = array_slice($attachmentIds, 0, 3);
+        $images = array_slice($images, 0, self::MAX_UNIFIED_IMAGES);
+        $attachmentIds = array_slice($attachmentIds, 0, self::MAX_UNIFIED_IMAGES);
 
         $userPromptText = $this->buildInboundUserPrompt(
             text: $body,
@@ -1172,8 +1182,8 @@ PROMPT;
             config('services.openai.vision_model'),
             [
                 'temperature' => 0,
-                // photo_descriptions[] CoT + items[]: запас на 3 фото + ~10 items.
-                'max_tokens' => 6144,
+                // photo_descriptions[] CoT + items[]: запас на ≤8 фото + ~10 items.
+                'max_tokens' => 8192,
                 'response_format' => ['type' => 'json_object'],
             ],
         );
