@@ -235,20 +235,19 @@ class MailRouter
             ]);
         }
 
-        // Постпродажная переписка по уже оформленному заказу (счёт выставлен /
-        // оплачен / успешно закрыт). Новую заявку НЕ создаём и менеджера НЕ
-        // назначаем — цепляем письмо к существующему заказу клиента и шлём
-        // алерт его менеджеру (+ доставка письма в ящик). Парсер позиций и
-        // reply-pipeline не трогаем: новых позиций нет.
+        // Постпродажная переписка по уже оформленному заказу (отгрузка /
+        // комплектация / документы). Новую заявку НЕ создаём и менеджера НЕ
+        // назначаем.
         //
-        // Заказ ищем так: если линкер уже нашёл его по заголовкам/коду и статус
-        // «оплачен/закрыт» — берём его; иначе берём последний заказ клиента в
-        // этих статусах по from_email. Если подходящего заказа нет вовсе —
-        // письмо остаётся в общем ящике без заявки (тикет M-2026-2706: клиент
-        // просит отгрузить оплаченный заказ — это не повод заводить новую
-        // заявку и назначать менеджера).
+        // Привязка к заказу — ТОЛЬКО при надёжном совпадении линкера по
+        // заголовкам/коду и только если заказ «оплачен/закрыт» (тогда шлём
+        // алерт менеджеру + доставку письма в ящик). Угадывать заказ по
+        // from_email НЕЛЬЗЯ (тикет M-2026-2762: в архиве платёжки по разным
+        // счетам — конкретный заказ из письма не вычислить). Если надёжной
+        // привязки нет — письмо остаётся в общем ящике (info@) нетронутым,
+        // без заявки и без привязки.
         if ($message->category === EmailCategory::PostSale->value) {
-            $postSaleRequest = $this->resolvePostSaleRequest($message, $linkedRequest);
+            $postSaleRequest = $this->resolvePostSaleRequest($linkedRequest);
             if ($postSaleRequest !== null) {
                 if ($message->related_request_id !== $postSaleRequest->id) {
                     $message->forceFill(['related_request_id' => $postSaleRequest->id])->save();
@@ -258,12 +257,12 @@ class MailRouter
                 return;
             }
 
-            Log::info('MailRouter: post_sale without paid/won order — no request created', [
+            Log::info('MailRouter: post_sale — no reliable order link, left untouched in inbox', [
                 'email_message_id' => $message->id,
                 'from_email' => $message->from_email,
             ]);
             // category остаётся post_sale → create-гейт ниже заявку не создаёт,
-            // письмо остаётся в общем ящике для ручной обработки.
+            // письмо остаётся в общем ящике без привязки.
         }
 
         // Phase 1.9: если reply прицеплен к существующей Request — запустим
@@ -605,8 +604,17 @@ class MailRouter
      * null = подходящего заказа нет — заявку создавать не нужно, письмо
      * остаётся в общем ящике.
      */
-    private function resolvePostSaleRequest(EmailMessage $message, ?\App\Models\Request $linkedRequest): ?\App\Models\Request
+    private function resolvePostSaleRequest(?\App\Models\Request $linkedRequest): ?\App\Models\Request
     {
+        // Привязываем post_sale письмо к заказу ТОЛЬКО при надёжном совпадении
+        // линкера по заголовкам/коду (In-Reply-To / References / subject-code)
+        // и только если этот заказ «оплачен/закрыт». Нечёткий поиск «последнего
+        // оплаченного заказа по from_email» УБРАН: он угадывал не тот заказ
+        // (тикет M-2026-2762). Нет надёжной привязки — письмо остаётся в ящике.
+        if ($linkedRequest === null) {
+            return null;
+        }
+
         $postSaleStatuses = [
             \App\Enums\RequestStatus::AwaitingInvoice->value,
             \App\Enums\RequestStatus::Invoiced->value,
@@ -614,26 +622,9 @@ class MailRouter
             \App\Enums\RequestStatus::ClosedWon->value,
         ];
 
-        // Линкер уже нашёл заявку по заголовкам/коду — это авторитетное
-        // совпадение. Если статус «оплачен/закрыт» — это и есть наш заказ.
-        // Иначе (например header-match на открытую/closed_lost тему) НЕ
-        // подменяем его нечётким поиском по from_email — пусть письмо уйдёт
-        // в обычный reply-pipeline на найденную заявку.
-        if ($linkedRequest !== null) {
-            return in_array($linkedRequest->status?->value, $postSaleStatuses, true)
-                ? $linkedRequest
-                : null;
-        }
-
-        if (! $message->from_email) {
-            return null;
-        }
-
-        return \App\Models\Request::query()
-            ->where('client_email', $message->from_email)
-            ->whereIn('status', $postSaleStatuses)
-            ->orderByDesc('created_at')
-            ->first();
+        return in_array($linkedRequest->status?->value, $postSaleStatuses, true)
+            ? $linkedRequest
+            : null;
     }
 
     private function handlePostSaleMessage(EmailMessage $message, \App\Models\Request $request): void

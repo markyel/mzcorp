@@ -2,39 +2,39 @@
 
 namespace App\Services\Mail;
 
-use App\Enums\RequestStatus;
 use App\Models\EmailMessage;
-use App\Models\Request;
 
 /**
  * Pre-classifier: письмо-просьба отгрузить / поставить на комплектацию уже
- * ОПЛАЧЕННЫЙ заказ — это post_sale, а не новая заявка.
+ * оформленный заказ — это post_sale, а не новая заявка.
  *
  * gpt-4o на терсовых письмах («Прошу поставить на комплектацию», тема
  * «Отгрузка», вложение-zip с платёжкой) систематически ставит client_request
  * («комплектация → запрос ТМЦ», «вложение может быть спецификацией») →
  * плодятся ошибочные заявки с назначением менеджера (тикеты M-2026-2706,
  * M-2026-2762). Промпт это не лечит — модель упорно держит client_request.
- * Здесь ловим паттерн детерминированно.
  *
- * Триггерим post_sale ТОЛЬКО при совпадении всех условий:
- *   1) в теме/теле есть «отгруз…» / «…комплектаци…» (отгрузка купленного);
+ * ВАЖНО (фидбэк по тикету): информации из самого письма достаточно, чтобы
+ * понять что это НЕ новая заявка — анализировать вложения и искать оплаченный
+ * заказ не нужно. Сигнал — тема «Отгрузка» и/или тело «прошу поставить на
+ * комплектацию / отгрузите». Поэтому детектор работает ТОЛЬКО по контенту:
+ *
+ *   1) тема содержит «отгрузк…» ЛИБО тело содержит лексику отгрузки/
+ *      комплектации купленного («на комплектаци…», «отгруз…»);
  *   2) НЕТ признаков НОВОГО запроса — цены/КП или перечня с количествами
- *      (защита от «отгрузите образцы и заодно посчитайте КП на 50 роликов»);
- *   3) у клиента (from_email) есть хотя бы один заказ в статусах
- *      awaiting_invoice / invoiced / paid / closed_won — сделка реально была.
+ *      (защита от «отгрузите образцы и заодно посчитайте КП на 50 роликов»).
  *
- * Условия (1)+(3) уже сильные (существующий оплативший клиент + лексика
- * отгрузки); (2) — предохранитель от ложных срабатываний на новых КП/заказах.
- * Даже при ложном срабатывании потери письма нет: MailRouter прицепит его к
- * последнему оплаченному заказу клиента и уведомит его менеджера — тот при
- * необходимости заведёт заявку руками (это лучше, чем авто-заявка на каждое
- * постпродажное письмо).
+ * Заказ детектор НЕ ищет и письмо ни к чему не привязывает: в архиве могут
+ * быть платёжки по разным счетам — угадывать конкретный заказ нельзя. Такое
+ * письмо правильно оставить в общем ящике (info@) нетронутым, без заявки.
  */
 class PostSaleFulfillmentDetector
 {
-    /** Лексика отгрузки/комплектации уже купленного. */
-    private const FULFILLMENT_STEMS = ['отгруз', 'комплектац'];
+    /** Лексика отгрузки/комплектации в теме письма. */
+    private const SUBJECT_STEMS = ['отгрузк'];
+
+    /** Лексика отгрузки/комплектации купленного в теле письма. */
+    private const BODY_STEMS = ['на комплектаци', 'отгруз'];
 
     /**
      * Признаки НОВОГО запроса (цена/КП/перечень с количествами). Если хоть
@@ -60,35 +60,31 @@ class PostSaleFulfillmentDetector
         'штук',
     ];
 
-    private const PAID_STATUSES = [
-        RequestStatus::AwaitingInvoice->value,
-        RequestStatus::Invoiced->value,
-        RequestStatus::Paid->value,
-        RequestStatus::ClosedWon->value,
-    ];
-
     /**
      * @return string|null  Причина (для лога/reasoning) либо null — паттерн не сработал.
      */
     public function detect(EmailMessage $message): ?string
     {
-        $from = (string) $message->from_email;
-        if ($from === '') {
-            return null;
-        }
+        $subject = mb_strtolower((string) $message->subject);
+        $body = mb_strtolower((string) $message->body_plain);
+        $haystack = $subject . "\n" . $body;
 
-        $haystack = mb_strtolower(
-            ((string) $message->subject) . "\n" . ((string) $message->body_plain)
-        );
-
-        $hasFulfillment = false;
-        foreach (self::FULFILLMENT_STEMS as $stem) {
-            if (str_contains($haystack, $stem)) {
-                $hasFulfillment = true;
+        $matchedSignal = null;
+        foreach (self::SUBJECT_STEMS as $stem) {
+            if (str_contains($subject, $stem)) {
+                $matchedSignal = 'тема об отгрузке';
                 break;
             }
         }
-        if (! $hasFulfillment) {
+        if ($matchedSignal === null) {
+            foreach (self::BODY_STEMS as $stem) {
+                if (str_contains($body, $stem)) {
+                    $matchedSignal = 'текст об отгрузке/комплектации';
+                    break;
+                }
+            }
+        }
+        if ($matchedSignal === null) {
             return null;
         }
 
@@ -98,20 +94,6 @@ class PostSaleFulfillmentDetector
             }
         }
 
-        $paidOrder = Request::query()
-            ->where('client_email', $from)
-            ->whereIn('status', self::PAID_STATUSES)
-            ->orderByDesc('created_at')
-            ->first(['id', 'internal_code', 'status']);
-
-        if ($paidOrder === null) {
-            return null;
-        }
-
-        return sprintf(
-            'отгрузка/комплектация по оплаченному заказу %s (%s)',
-            $paidOrder->internal_code,
-            $paidOrder->status?->value ?? '—',
-        );
+        return $matchedSignal . ' уже оформленного заказа, без запроса цены/КП — постпродажное письмо, не новая заявка';
     }
 }
