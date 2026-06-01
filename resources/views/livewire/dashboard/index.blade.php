@@ -741,62 +741,121 @@
                             </div>
                         @else
                             @php
-                                $cx = 90; $cy = 90; $r = 78; $innerR = 47;
+                                // Геометрия donut + выноски (leader lines) к подписям
+                                // по бокам. Подписи разводим по вертикали, чтобы не
+                                // налезали друг на друга (анти-коллизия в каждой
+                                // половине отдельно).
+                                $W = 540; $H = 260;
+                                $cx = 270; $cy = 130; $r = 84; $innerR = 52;
                                 $total = $dist['total'];
                                 $single = count($dist['slices']) === 1;
-                                $angle = -90.0; // старт сверху
-                                $polar = function (float $deg) use ($cx, $cy, $r): array {
-                                    $rad = deg2rad($deg);
-                                    return [round($cx + $r * cos($rad), 2), round($cy + $r * sin($rad), 2)];
+
+                                $polar = function (float $deg, float $rad) use ($cx, $cy): array {
+                                    $a = deg2rad($deg);
+                                    return [round($cx + $rad * cos($a), 2), round($cy + $rad * sin($a), 2)];
                                 };
-                                $segments = [];
+
+                                $arcs = [];
+                                $labels = [];
+                                $angle = -90.0; // старт сверху
                                 foreach ($dist['slices'] as $sl) {
                                     $sweep = $sl['count'] / $total * 360;
                                     $start = $angle;
                                     $end = $angle + $sweep;
+                                    $mid = ($start + $end) / 2;
                                     $angle = $end;
+
                                     if ($single) {
-                                        $segments[] = ['slice' => $sl, 'full' => true];
-                                        continue;
+                                        $arcs[] = ['full' => true, 'color' => $sl['color']];
+                                    } else {
+                                        [$x1, $y1] = $polar($start, $r);
+                                        [$x2, $y2] = $polar($end, $r);
+                                        $largeArc = $sweep > 180 ? 1 : 0;
+                                        $arcs[] = [
+                                            'full' => false,
+                                            'color' => $sl['color'],
+                                            'd' => "M {$cx} {$cy} L {$x1} {$y1} A {$r} {$r} 0 {$largeArc} 1 {$x2} {$y2} Z",
+                                        ];
                                     }
-                                    [$x1, $y1] = $polar($start);
-                                    [$x2, $y2] = $polar($end);
-                                    $largeArc = $sweep > 180 ? 1 : 0;
-                                    $segments[] = [
+
+                                    [$ax, $ay] = $polar($mid, $r);        // точка на кромке сектора
+                                    $side = cos(deg2rad($mid)) >= 0 ? 'r' : 'l';
+                                    $labels[] = [
                                         'slice' => $sl,
-                                        'full' => false,
-                                        'd' => "M {$cx} {$cy} L {$x1} {$y1} A {$r} {$r} 0 {$largeArc} 1 {$x2} {$y2} Z",
+                                        'side' => $side,
+                                        'ax' => $ax, 'ay' => $ay,
+                                        'idealY' => $ay,
+                                        'pct' => round($sl['count'] / $total * 100),
                                     ];
                                 }
+
+                                // Анти-коллизия подписей по вертикали в каждой половине.
+                                $gap = 26; $topY = 18; $botY = $H - 18;
+                                foreach (['l', 'r'] as $sideKey) {
+                                    $idx = array_keys(array_filter($labels, fn ($l) => $l['side'] === $sideKey));
+                                    usort($idx, fn ($a, $b) => $labels[$a]['idealY'] <=> $labels[$b]['idealY']);
+                                    $prev = null;
+                                    foreach ($idx as $i) {
+                                        $y = $labels[$i]['idealY'];
+                                        if ($prev !== null && $y < $prev + $gap) {
+                                            $y = $prev + $gap;
+                                        }
+                                        $labels[$i]['labelY'] = $y;
+                                        $prev = $y;
+                                    }
+                                    if (! empty($idx)) {
+                                        $lastI = end($idx);
+                                        $overflow = $labels[$lastI]['labelY'] - $botY;
+                                        if ($overflow > 0) {
+                                            foreach ($idx as $i) { $labels[$i]['labelY'] -= $overflow; }
+                                        }
+                                        $firstI = $idx[0];
+                                        if ($labels[$firstI]['labelY'] < $topY) {
+                                            $shift = $topY - $labels[$firstI]['labelY'];
+                                            foreach ($idx as $i) { $labels[$i]['labelY'] += $shift; }
+                                        }
+                                    }
+                                }
+
+                                // X-координаты колонок выносок/подписей по сторонам.
+                                $colX = ['l' => $cx - $r - 22, 'r' => $cx + $r + 22];
+                                $tickX = ['l' => $cx - $r - 34, 'r' => $cx + $r + 34];
+                                $textX = ['l' => $cx - $r - 40, 'r' => $cx + $r + 40];
                             @endphp
-                            <div class="flex flex-col sm:flex-row items-center gap-5">
-                                <svg viewBox="0 0 180 180" width="180" height="180" class="shrink-0">
-                                    @foreach($segments as $seg)
-                                        @if($seg['full'])
-                                            <circle cx="{{ $cx }}" cy="{{ $cy }}" r="{{ $r }}" fill="{{ $seg['slice']['color'] }}"/>
-                                        @else
-                                            <path d="{{ $seg['d'] }}" fill="{{ $seg['slice']['color'] }}"
-                                                  stroke="var(--bg-surface)" stroke-width="1.5"/>
-                                        @endif
-                                    @endforeach
-                                    <circle cx="{{ $cx }}" cy="{{ $cy }}" r="{{ $innerR }}" fill="var(--bg-surface)"/>
-                                    <text x="{{ $cx }}" y="{{ $cy - 1 }}" text-anchor="middle"
-                                          style="fill: var(--fg-1); font-size: 23px; font-weight: 700;">{{ $total }}</text>
-                                    <text x="{{ $cx }}" y="{{ $cy + 14 }}" text-anchor="middle"
-                                          style="fill: var(--fg-3); font-size: 9px; letter-spacing: 0.06em;">заявок</text>
-                                </svg>
-                                <ul class="flex-1 w-full space-y-1.5 text-[12.5px]">
-                                    @foreach($dist['slices'] as $sl)
-                                        @php $pct = round($sl['count'] / $total * 100); @endphp
-                                        <li class="flex items-center gap-2" wire:key="sd-{{ $sl['key'] }}">
-                                            <span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background: {{ $sl['color'] }}"></span>
-                                            <span class="flex-1 text-fg-1 truncate">{{ $sl['label'] }}</span>
-                                            <span class="mono tnum text-fg-2">{{ $sl['count'] }}</span>
-                                            <span class="mono tnum text-fg-3 w-10 text-right">{{ $pct }}%</span>
-                                        </li>
-                                    @endforeach
-                                </ul>
-                            </div>
+                            <svg viewBox="0 0 {{ $W }} {{ $H }}" class="w-full max-w-[540px] h-auto mx-auto block"
+                                 xmlns="http://www.w3.org/2000/svg">
+                                {{-- Секторы --}}
+                                @foreach($arcs as $arc)
+                                    @if($arc['full'])
+                                        <circle cx="{{ $cx }}" cy="{{ $cy }}" r="{{ $r }}" fill="{{ $arc['color'] }}"/>
+                                    @else
+                                        <path d="{{ $arc['d'] }}" fill="{{ $arc['color'] }}"
+                                              stroke="var(--bg-surface)" stroke-width="1.5"/>
+                                    @endif
+                                @endforeach
+                                <circle cx="{{ $cx }}" cy="{{ $cy }}" r="{{ $innerR }}" fill="var(--bg-surface)"/>
+                                <text x="{{ $cx }}" y="{{ $cy - 2 }}" text-anchor="middle"
+                                      style="fill: var(--fg-1); font-size: 26px; font-weight: 700;">{{ $total }}</text>
+                                <text x="{{ $cx }}" y="{{ $cy + 15 }}" text-anchor="middle"
+                                      style="fill: var(--fg-3); font-size: 9.5px; letter-spacing: 0.06em;">заявок</text>
+
+                                {{-- Выноски + подписи --}}
+                                @foreach($labels as $lb)
+                                    @php
+                                        $side = $lb['side'];
+                                        $ly = $lb['labelY'];
+                                        $points = "{$lb['ax']},{$lb['ay']} {$colX[$side]},{$ly} {$tickX[$side]},{$ly}";
+                                        $anchor = $side === 'r' ? 'start' : 'end';
+                                    @endphp
+                                    <polyline points="{{ $points }}" fill="none"
+                                              stroke="{{ $lb['slice']['color'] }}" stroke-width="1.3"/>
+                                    <circle cx="{{ $lb['ax'] }}" cy="{{ $lb['ay'] }}" r="2.4" fill="{{ $lb['slice']['color'] }}"/>
+                                    <text x="{{ $textX[$side] }}" y="{{ $ly - 3 }}" text-anchor="{{ $anchor }}"
+                                          style="fill: var(--fg-1); font-size: 11px;">{{ $lb['slice']['label'] }}</text>
+                                    <text x="{{ $textX[$side] }}" y="{{ $ly + 9 }}" text-anchor="{{ $anchor }}"
+                                          style="fill: var(--fg-3); font-size: 10px;">{{ $lb['slice']['count'] }} · {{ $lb['pct'] }}%</text>
+                                @endforeach
+                            </svg>
                         @endif
                     </div>
                 </div>
