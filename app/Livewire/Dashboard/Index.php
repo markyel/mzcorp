@@ -59,6 +59,14 @@ class Index extends Component
      */
     public bool $customPickerOpen = false;
 
+    /**
+     * Фильтр круговой диаграммы «распределение текущих заявок по статусам»:
+     * id менеджера (assigned_user_id) или 0 = все менеджеры. Персистится
+     * в URL, чтобы РОП мог расшарить ссылку на срез конкретного менеджера.
+     */
+    #[Url(as: 'sdmgr', except: 0)]
+    public int $statusChartManagerId = 0;
+
     public function setPeriod(int $days): void
     {
         if (in_array($days, [1, 7, 30, 90], true)) {
@@ -323,6 +331,92 @@ class Index extends Component
     public function isManager(): bool
     {
         return (bool) auth()->user()?->hasRole(RoleEnum::Manager->value);
+    }
+
+    /**
+     * Менеджеры для фильтра круговой диаграммы (роли, обрабатывающие
+     * заявки). Активные пользователи, отсортированы по имени.
+     *
+     * @return \Illuminate\Support\Collection<int, User>
+     */
+    #[Computed]
+    public function statusChartManagers()
+    {
+        return User::active()
+            ->role(RoleEnum::requestHandlerRoles())
+            ->orderBy('name')
+            ->get(['id', 'name']);
+    }
+
+    /**
+     * Палитра секторов круговой диаграммы по статусам. SVG fill требует
+     * конкретный цвет, а не design-token класс (chipClass), поэтому здесь
+     * отдельная hex-карта, согласованная по смыслу с chipClass.
+     *
+     * @return array<string, string>
+     */
+    private function statusChartColors(): array
+    {
+        return [
+            RequestStatus::Pending->value => '#9aa3af',
+            RequestStatus::New->value => '#ef4444',
+            RequestStatus::Assigned->value => '#38bdf8',
+            RequestStatus::InProgress->value => '#3b82f6',
+            RequestStatus::AwaitingClientClarification->value => '#f59e0b',
+            RequestStatus::Quoted->value => '#10b981',
+            RequestStatus::UnderReview->value => '#fbbf24',
+            RequestStatus::PostponedUntil->value => '#fb923c',
+            RequestStatus::AwaitingInvoice->value => '#a78bfa',
+            RequestStatus::Invoiced->value => '#6366f1',
+            RequestStatus::Paid->value => '#22c55e',
+            RequestStatus::Paused->value => '#94a3b8',
+        ];
+    }
+
+    /**
+     * Распределение текущих (активных — всё, кроме closed_won/closed_lost)
+     * заявок по статусам для круговой диаграммы. Опционально по конкретному
+     * менеджеру ($statusChartManagerId). Группируем по operational-статусу
+     * (колонка status), сектора с нулём отбрасываем, порядок — по lifecycle
+     * (cases enum'а).
+     *
+     * @return array{total:int, slices: array<int, array{key:string, label:string, count:int, color:string}>}
+     */
+    #[Computed]
+    public function statusDistribution(): array
+    {
+        $activeStatuses = array_values(array_filter(
+            RequestStatus::cases(),
+            fn (RequestStatus $s) => ! $s->isTerminal(),
+        ));
+        $activeValues = array_map(fn (RequestStatus $s) => $s->value, $activeStatuses);
+
+        $base = Request::query()->whereIn('status', $activeValues);
+        if ($this->statusChartManagerId > 0) {
+            $base->where('assigned_user_id', $this->statusChartManagerId);
+        }
+        $counts = $base->groupBy('status')
+            ->selectRaw('status, COUNT(*) AS c')
+            ->pluck('c', 'status');
+
+        $colors = $this->statusChartColors();
+        $slices = [];
+        $total = 0;
+        foreach ($activeStatuses as $s) {
+            $c = (int) ($counts[$s->value] ?? 0);
+            if ($c === 0) {
+                continue;
+            }
+            $total += $c;
+            $slices[] = [
+                'key' => $s->value,
+                'label' => $s->label(),
+                'count' => $c,
+                'color' => $colors[$s->value] ?? '#94a3b8',
+            ];
+        }
+
+        return ['total' => $total, 'slices' => $slices];
     }
 
     #[Computed]

@@ -717,6 +717,89 @@
                         @endif
                     </div>
                 </div>
+
+                {{-- ───────── Распределение текущих заявок по статусам ─────────
+                     Круговая (donut) диаграмма активных заявок по статусам.
+                     Фильтр по конкретному менеджеру или все. --}}
+                @php $dist = $this->statusDistribution; @endphp
+                <div class="ds-card">
+                    <div class="ds-card-header">
+                        <h3>Заявки по статусам</h3>
+                        <span class="flex-1"></span>
+                        <select wire:model.live="statusChartManagerId"
+                                class="px-2 py-1 border border-border rounded bg-surface text-fg-1 text-[12px] max-w-[220px]">
+                            <option value="0">Все менеджеры</option>
+                            @foreach($this->statusChartManagers as $mgr)
+                                <option value="{{ $mgr->id }}">{{ $mgr->name }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="ds-card-body">
+                        @if($dist['total'] === 0)
+                            <div class="py-8 text-center text-fg-3 text-[12.5px]">
+                                Нет активных заявок для выбранного фильтра.
+                            </div>
+                        @else
+                            @php
+                                $cx = 90; $cy = 90; $r = 78; $innerR = 47;
+                                $total = $dist['total'];
+                                $single = count($dist['slices']) === 1;
+                                $angle = -90.0; // старт сверху
+                                $polar = function (float $deg) use ($cx, $cy, $r): array {
+                                    $rad = deg2rad($deg);
+                                    return [round($cx + $r * cos($rad), 2), round($cy + $r * sin($rad), 2)];
+                                };
+                                $segments = [];
+                                foreach ($dist['slices'] as $sl) {
+                                    $sweep = $sl['count'] / $total * 360;
+                                    $start = $angle;
+                                    $end = $angle + $sweep;
+                                    $angle = $end;
+                                    if ($single) {
+                                        $segments[] = ['slice' => $sl, 'full' => true];
+                                        continue;
+                                    }
+                                    [$x1, $y1] = $polar($start);
+                                    [$x2, $y2] = $polar($end);
+                                    $largeArc = $sweep > 180 ? 1 : 0;
+                                    $segments[] = [
+                                        'slice' => $sl,
+                                        'full' => false,
+                                        'd' => "M {$cx} {$cy} L {$x1} {$y1} A {$r} {$r} 0 {$largeArc} 1 {$x2} {$y2} Z",
+                                    ];
+                                }
+                            @endphp
+                            <div class="flex flex-col sm:flex-row items-center gap-5">
+                                <svg viewBox="0 0 180 180" width="180" height="180" class="shrink-0">
+                                    @foreach($segments as $seg)
+                                        @if($seg['full'])
+                                            <circle cx="{{ $cx }}" cy="{{ $cy }}" r="{{ $r }}" fill="{{ $seg['slice']['color'] }}"/>
+                                        @else
+                                            <path d="{{ $seg['d'] }}" fill="{{ $seg['slice']['color'] }}"
+                                                  stroke="var(--bg-surface)" stroke-width="1.5"/>
+                                        @endif
+                                    @endforeach
+                                    <circle cx="{{ $cx }}" cy="{{ $cy }}" r="{{ $innerR }}" fill="var(--bg-surface)"/>
+                                    <text x="{{ $cx }}" y="{{ $cy - 1 }}" text-anchor="middle"
+                                          style="fill: var(--fg-1); font-size: 23px; font-weight: 700;">{{ $total }}</text>
+                                    <text x="{{ $cx }}" y="{{ $cy + 14 }}" text-anchor="middle"
+                                          style="fill: var(--fg-3); font-size: 9px; letter-spacing: 0.06em;">заявок</text>
+                                </svg>
+                                <ul class="flex-1 w-full space-y-1.5 text-[12.5px]">
+                                    @foreach($dist['slices'] as $sl)
+                                        @php $pct = round($sl['count'] / $total * 100); @endphp
+                                        <li class="flex items-center gap-2" wire:key="sd-{{ $sl['key'] }}">
+                                            <span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background: {{ $sl['color'] }}"></span>
+                                            <span class="flex-1 text-fg-1 truncate">{{ $sl['label'] }}</span>
+                                            <span class="mono tnum text-fg-2">{{ $sl['count'] }}</span>
+                                            <span class="mono tnum text-fg-3 w-10 text-right">{{ $pct }}%</span>
+                                        </li>
+                                    @endforeach
+                                </ul>
+                            </div>
+                        @endif
+                    </div>
+                </div>
             @endif
 
             {{-- Последние заявки --}}
