@@ -170,6 +170,23 @@ class Pool extends Component
     }
 
     /**
+     * Статусы «оформленного заказа» для постпродажного bucket'а и флага
+     * PostSale — счёт выставлен / оплачен / успешно закрыт. Именно к ним
+     * MailRouter привязывает post_sale письмо (платёжка / отгрузка / документы).
+     *
+     * @return array<int, string>
+     */
+    private function postSaleStatuses(): array
+    {
+        return [
+            RequestStatus::AwaitingInvoice->value,
+            RequestStatus::Invoiced->value,
+            RequestStatus::Paid->value,
+            RequestStatus::ClosedWon->value,
+        ];
+    }
+
+    /**
      * Список enum-значений для текущего bucket.
      *
      * @return array<int, string>
@@ -179,10 +196,11 @@ class Pool extends Component
         return match ($this->bucket) {
             'paused' => [RequestStatus::Paused->value],
             'closed' => [RequestStatus::ClosedWon->value, RequestStatus::ClosedLost->value],
-            // Постпродажа: только успешно закрытые (closed_won), на которые
-            // пришло постпродажное письмо. Доп. фильтр attention_reason=post_sale
-            // + attention_required_at IS NOT NULL — в render().
-            'postsale' => [RequestStatus::ClosedWon->value],
+            // Постпродажа: заказы в статусах «счёт/оплата/успех», на которые
+            // пришло постпродажное письмо (платёжка / отгрузка / документы).
+            // Доп. фильтр attention_reason=post_sale + attention_required_at
+            // IS NOT NULL — в render().
+            'postsale' => $this->postSaleStatuses(),
             'all' => array_map(
                 fn (RequestStatus $s) => $s->value,
                 array_filter(
@@ -537,9 +555,10 @@ class Pool extends Component
                     RequestStatus::ClosedLost->value,
                 ])
                 ->count(),
-            // Постпродажа: closed_won с непрочитанным постпродажным письмом.
+            // Постпродажа: заказы со счётом/оплатой/успехом и непрочитанным
+            // постпродажным письмом.
             'postsale' => (clone $countsBase)
-                ->where('status', RequestStatus::ClosedWon->value)
+                ->whereIn('status', $this->postSaleStatuses())
                 ->where('attention_reason', \App\Enums\AttentionReason::PostSale->value)
                 ->whereNotNull('attention_required_at')
                 ->count(),
@@ -573,9 +592,10 @@ class Pool extends Component
                 array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
             ))
             ->count();
-        // Постпродажа (мои): closed_won заявки текущего менеджера (вкл.
-        // активные делегации), на которые пришло постпродажное письмо и
-        // менеджер ещё не открыл карточку. Подсветка в левой навигации.
+        // Постпродажа (мои): заказы текущего менеджера (вкл. активные
+        // делегации) в статусах «счёт/оплата/успех», на которые пришло
+        // постпродажное письмо и менеджер ещё не открыл карточку. Подсветка
+        // в левой навигации.
         $myPostSale = Request::query()
             ->where(function ($q) use ($authId) {
                 $q->where('assigned_user_id', $authId)
@@ -587,7 +607,7 @@ class Pool extends Component
                             ->whereNull('request_delegations.ended_at');
                     });
             })
-            ->where('status', RequestStatus::ClosedWon->value)
+            ->whereIn('status', $this->postSaleStatuses())
             ->where('attention_reason', \App\Enums\AttentionReason::PostSale->value)
             ->whereNotNull('attention_required_at')
             ->count();

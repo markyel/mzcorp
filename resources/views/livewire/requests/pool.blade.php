@@ -480,7 +480,7 @@
             @if($page->total() === 0)
                 <div class="p-12 text-center text-[var(--fg-3)]">
                     @if($bucket === 'postsale')
-                        Нет постпродажных писем по закрытым заявкам.
+                        Нет постпродажных писем по оформленным заказам.
                     @elseif($effectiveScope === 'mine' && $search === '' && $status === '')
                         Все заявки разобраны. Хорошая работа.
                     @else

@@ -93,19 +93,28 @@ class AttentionService
     }
 
     /**
-     * Hook: постпродажное письмо клиента по УСПЕШНО закрытой (closed_won)
-     * заявке — вопросы доставки, сертификатов, закрывающих документов.
+     * Hook: постпродажное письмо клиента по уже оформленному заказу — платёжка,
+     * вопросы доставки/отгрузки, сертификатов, закрывающих документов.
      *
-     * Единственный hook, который СОЗНАТЕЛЬНО ставит attention на closed_won
-     * (минуя silentStatuses-гейт): заявку не реанимируем, но менеджер должен
-     * увидеть «новый комментарий покупателя» в отдельной секции Pool.
-     * reason=PostSale, level=1 (info). Снимается onManagerOpened.
+     * Срабатывает для «оплаченных/закрытых» статусов (awaiting_invoice /
+     * invoiced / paid / closed_won) — именно к ним MailRouter привязывает
+     * post_sale письмо. Поднимает info-флаг PostSale (level=1), чтобы заявка
+     * всплыла в пуле: менеджер должен увидеть «пришла оплата / новости по
+     * заказу». Для paid/closed_won это СОЗНАТЕЛЬНЫЙ обход silentStatuses-гейта
+     * (как раньше для closed_won); invoiced/awaiting_invoice — активные статусы.
+     * reason=PostSale, sticky, снимается onManagerOpened.
      *
      * Не затирает Manual — он сильнее.
      */
     public function onPostSaleMessage(Request $request): void
     {
-        if ($request->status !== RequestStatus::ClosedWon) {
+        $postSaleStatuses = [
+            RequestStatus::AwaitingInvoice,
+            RequestStatus::Invoiced,
+            RequestStatus::Paid,
+            RequestStatus::ClosedWon,
+        ];
+        if (! in_array($request->status, $postSaleStatuses, true)) {
             return;
         }
         if ($this->isManualSet($request)) {
