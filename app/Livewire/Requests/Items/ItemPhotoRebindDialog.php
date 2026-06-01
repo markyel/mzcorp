@@ -84,27 +84,32 @@ class ItemPhotoRebindDialog extends Component
     }
 
     /**
-     * Все image-вложения письма заявки в порядке id ASC.
-     * Эта же последовательность — та, которую видел Vision.
+     * Все image-вложения входящих писем треда заявки (триггерное +
+     * reply'и клиента). Сортировка по (email_message_id, id) держит
+     * фото триггерного письма первыми в Vision-порядке, затем — фото
+     * из более поздних писем. См. Request::photoSourceMessageIds().
      *
      * @return \Illuminate\Database\Eloquent\Collection<int, EmailAttachment>
      */
     #[Computed]
     public function photoAttachments()
     {
-        $item = $this->subjectItem;
-        $emailMessageId = $item?->request?->email_message_id
-            ?? \App\Models\Request::query()
-                ->whereKey($this->requestId)
-                ->value('email_message_id');
+        $request = \App\Models\Request::query()
+            ->whereKey($this->requestId)
+            ->first(['id', 'email_message_id']);
+        if (! $request) {
+            return collect();
+        }
 
-        if (! $emailMessageId) {
+        $messageIds = $request->photoSourceMessageIds();
+        if (empty($messageIds)) {
             return collect();
         }
 
         return EmailAttachment::query()
-            ->where('email_message_id', $emailMessageId)
+            ->whereIn('email_message_id', $messageIds)
             ->where('mime_type', 'like', 'image/%')
+            ->orderBy('email_message_id')
             ->orderBy('id')
             ->get(['id', 'filename', 'mime_type', 'size_bytes']);
     }

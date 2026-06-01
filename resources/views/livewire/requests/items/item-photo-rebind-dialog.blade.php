@@ -50,7 +50,7 @@
                 <div class="overflow-auto flex-1 -mx-1 px-1">
                     @if($photos->isEmpty())
                         <div class="py-8 text-center text-fg-3 text-[12.5px]">
-                            У письма нет image-вложений.
+                            В письмах заявки нет image-вложений.
                         </div>
                     @else
                         <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2.5">

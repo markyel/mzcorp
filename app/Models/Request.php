@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\AttentionReason;
+use App\Enums\MailDirection;
 use App\Enums\RequestStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -297,6 +298,39 @@ class Request extends Model
     public function emailMessage(): BelongsTo
     {
         return $this->belongsTo(EmailMessage::class);
+    }
+
+    /**
+     * ID всех входящих писем треда заявки, из вложений которых оператор
+     * может выбрать фото для позиции (диалог «Сменить фото»).
+     *
+     * Включает триггерное письмо (email_message_id) и все последующие
+     * inbound reply'и клиента (related_request_id = этой заявке). Фото
+     * товара присылает клиент, поэтому outbound (наши Sent — подписи,
+     * рендеры КП) и черновики исключены, чтобы не засорять picker
+     * логотипами и служебными картинками.
+     *
+     * Раньше picker и валидация rebindPhoto смотрели только в триггерное
+     * письмо — фото, присланные в более позднем письме, были недоступны
+     * (кейс M-2026-2257: Vision взял логотип из первого письма, нужное
+     * фото пришло позже).
+     *
+     * @return list<int>
+     */
+    public function photoSourceMessageIds(): array
+    {
+        return EmailMessage::query()
+            ->where('direction', MailDirection::Inbound->value)
+            ->where('is_draft', false)
+            ->where(function ($q) {
+                $q->where('related_request_id', $this->id);
+                if ($this->email_message_id !== null) {
+                    $q->orWhere('id', $this->email_message_id);
+                }
+            })
+            ->orderBy('id')
+            ->pluck('id')
+            ->all();
     }
 
     public function assignedUser(): BelongsTo

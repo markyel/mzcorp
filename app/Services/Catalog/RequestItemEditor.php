@@ -639,20 +639,21 @@ class RequestItemEditor
             return $item; // идемпотентность
         }
 
-        // Validate: attachment должен принадлежать тому же письму, что и заявка.
-        // Это закрывает риск кросс-заявочной привязки — оператор не сможет
-        // прикрепить случайную картинку из чужого треда.
+        // Validate: attachment должен принадлежать одному из входящих писем
+        // треда заявки (триггерное + reply'и клиента). Это закрывает риск
+        // кросс-заявочной привязки — оператор не сможет прикрепить случайную
+        // картинку из чужого треда. См. Request::photoSourceMessageIds().
         if ($attachmentId !== null) {
-            $emailMessageId = $item->request?->email_message_id;
-            if ($emailMessageId === null) {
+            $messageIds = $item->request?->photoSourceMessageIds() ?? [];
+            if (empty($messageIds)) {
                 throw new \DomainException('У заявки нет привязанного письма — фото менять некуда.');
             }
             $attachment = EmailAttachment::query()
-                ->where('email_message_id', $emailMessageId)
+                ->whereIn('email_message_id', $messageIds)
                 ->whereKey($attachmentId)
                 ->first(['id', 'mime_type']);
             if ($attachment === null) {
-                throw new \DomainException('Это вложение не относится к письму заявки.');
+                throw new \DomainException('Это вложение не относится к письмам заявки.');
             }
             if (! str_starts_with((string) $attachment->mime_type, 'image/')) {
                 throw new \DomainException('Можно привязать только вложение типа image/*.');
