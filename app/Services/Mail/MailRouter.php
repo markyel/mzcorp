@@ -235,20 +235,35 @@ class MailRouter
             ]);
         }
 
-        // Постпродажная переписка по успешно закрытой (closed_won) сделке.
-        // Линкер уже прицепил письмо к закрытой заявке (related_request_id
-        // проставлен), реанимация НЕ выполняется. Здесь — только алерт
-        // менеджеру (отдельная секция Pool) + доставка письма в его ящик.
-        // Парсер позиций и обычный reply-pipeline НЕ запускаем: новых позиций
-        // нет, заявка остаётся закрытой. Эскалация в новое КП ловится
-        // категоризатором как client_request → отдельная новая заявка.
-        if ($linkedRequest !== null
-            && $message->category === EmailCategory::PostSale->value
-            && $linkedRequest->status === \App\Enums\RequestStatus::ClosedWon
-        ) {
-            $this->handlePostSaleMessage($message, $linkedRequest);
+        // Постпродажная переписка по уже оформленному заказу (счёт выставлен /
+        // оплачен / успешно закрыт). Новую заявку НЕ создаём и менеджера НЕ
+        // назначаем — цепляем письмо к существующему заказу клиента и шлём
+        // алерт его менеджеру (+ доставка письма в ящик). Парсер позиций и
+        // reply-pipeline не трогаем: новых позиций нет.
+        //
+        // Заказ ищем так: если линкер уже нашёл его по заголовкам/коду и статус
+        // «оплачен/закрыт» — берём его; иначе берём последний заказ клиента в
+        // этих статусах по from_email. Если подходящего заказа нет вовсе —
+        // письмо остаётся в общем ящике без заявки (тикет M-2026-2706: клиент
+        // просит отгрузить оплаченный заказ — это не повод заводить новую
+        // заявку и назначать менеджера).
+        if ($message->category === EmailCategory::PostSale->value) {
+            $postSaleRequest = $this->resolvePostSaleRequest($message, $linkedRequest);
+            if ($postSaleRequest !== null) {
+                if ($message->related_request_id !== $postSaleRequest->id) {
+                    $message->forceFill(['related_request_id' => $postSaleRequest->id])->save();
+                }
+                $this->handlePostSaleMessage($message, $postSaleRequest);
 
-            return;
+                return;
+            }
+
+            Log::info('MailRouter: post_sale without paid/won order — no request created', [
+                'email_message_id' => $message->id,
+                'from_email' => $message->from_email,
+            ]);
+            // category остаётся post_sale → create-гейт ниже заявку не создаёт,
+            // письмо остаётся в общем ящике для ручной обработки.
         }
 
         // Phase 1.9: если reply прицеплен к существующей Request — запустим
@@ -413,25 +428,11 @@ class MailRouter
         // если linker не нашёл existing (related_request_id null). Это спасает
         // «висящие» thread_reply'и: клиент сделал forward старой переписки,
         // у нас в БД нет того треда — без fallback'а заявка не создавалась.
-        // post_sale, не привязанное к закрытой (closed_won) заявке: у клиента
-        // нет успешно закрытой сделки, к которой относилась бы переписка —
-        // трактуем письмо как обычный клиентский запрос и создаём новую
-        // заявку (решение продукта). category переписываем, чтобы и create-
-        // гейт ниже, и аудит RoutedMail видели client_request.
-        if ($message->category === EmailCategory::PostSale->value && $linkedRequest === null) {
-            $reasoning = trim((string) $message->category_reasoning
-                . ' [post_sale без closed_won → client_request]');
-            $message->forceFill([
-                'category' => EmailCategory::ClientRequest->value,
-                'category_reasoning' => $reasoning,
-            ])->save();
-
-            Log::info('MailRouter: post_sale without closed_won match → client_request', [
-                'email_message_id' => $message->id,
-                'from_email' => $message->from_email,
-            ]);
-        }
-
+        // post_sale обрабатывается выше: либо привязка к оплаченному/закрытому
+        // заказу (early return), либо «нет подходящего заказа → оставить письмо
+        // в общем ящике без заявки». До сюда post_sale доходит только во втором
+        // случае, и create-гейт ниже его не подхватывает (нет в createCategories) —
+        // новую заявку не создаём (тикет M-2026-2706).
         $createCategories = [
             EmailCategory::ClientRequest->value,
             EmailCategory::ThreadReply->value,
@@ -591,6 +592,50 @@ class MailRouter
      *
      * Парсер позиций НЕ запускаем — новых позиций в постпродаже нет.
      */
+    /**
+     * Найти заказ клиента, к которому относится постпродажное письмо
+     * (тикет M-2026-2706). «Оплаченный/закрытый» заказ = статус
+     * awaiting_invoice / invoiced / paid / closed_won.
+     *
+     * Приоритет:
+     *  1) заказ, который линкер уже нашёл по заголовкам/коду — если его статус
+     *     попадает в «оплачен/закрыт»;
+     *  2) последний (по created_at) заказ клиента в этих статусах по from_email.
+     *
+     * null = подходящего заказа нет — заявку создавать не нужно, письмо
+     * остаётся в общем ящике.
+     */
+    private function resolvePostSaleRequest(EmailMessage $message, ?\App\Models\Request $linkedRequest): ?\App\Models\Request
+    {
+        $postSaleStatuses = [
+            \App\Enums\RequestStatus::AwaitingInvoice->value,
+            \App\Enums\RequestStatus::Invoiced->value,
+            \App\Enums\RequestStatus::Paid->value,
+            \App\Enums\RequestStatus::ClosedWon->value,
+        ];
+
+        // Линкер уже нашёл заявку по заголовкам/коду — это авторитетное
+        // совпадение. Если статус «оплачен/закрыт» — это и есть наш заказ.
+        // Иначе (например header-match на открытую/closed_lost тему) НЕ
+        // подменяем его нечётким поиском по from_email — пусть письмо уйдёт
+        // в обычный reply-pipeline на найденную заявку.
+        if ($linkedRequest !== null) {
+            return in_array($linkedRequest->status?->value, $postSaleStatuses, true)
+                ? $linkedRequest
+                : null;
+        }
+
+        if (! $message->from_email) {
+            return null;
+        }
+
+        return \App\Models\Request::query()
+            ->where('client_email', $message->from_email)
+            ->whereIn('status', $postSaleStatuses)
+            ->orderByDesc('created_at')
+            ->first();
+    }
+
     private function handlePostSaleMessage(EmailMessage $message, \App\Models\Request $request): void
     {
         try {
