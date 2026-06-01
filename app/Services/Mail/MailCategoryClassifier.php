@@ -35,6 +35,7 @@ class MailCategoryClassifier
         private readonly TrustedPartnerOverride $partnerOverride,
         private readonly InternalSenderDetector $internalSender,
         private readonly UnintendedRecipientDetector $unintendedRecipient,
+        private readonly PostSaleFulfillmentDetector $postSaleFulfillment,
         private readonly \App\Services\AI\OpenAiCircuitBreaker $circuitBreaker,
     ) {
     }
@@ -138,6 +139,38 @@ class MailCategoryClassifier
                 'to' => $message->to_recipients,
                 'cc' => $message->cc_recipients,
                 'reason' => $unintendedReason,
+            ]);
+
+            return [
+                'category' => $category,
+                'confidence' => 1.0,
+                'intent' => null,
+                'reasoning' => $reasoning,
+            ];
+        }
+
+        // Post-sale fulfillment short-circuit: «отгрузите / поставьте на
+        // комплектацию» уже оплаченный заказ — это post_sale, а не новая
+        // заявка. gpt-4o на таких терсовых письмах систематически ошибается
+        // в client_request (тикеты M-2026-2706 / M-2026-2762). Детектор
+        // срабатывает только при наличии оплаченного заказа клиента и
+        // отсутствии запроса цены/количеств — иначе решает LLM.
+        $fulfillmentReason = $this->postSaleFulfillment->detect($message);
+        if ($fulfillmentReason !== null) {
+            $category = EmailCategory::PostSale;
+            $reasoning = 'Post-sale fulfillment: ' . $fulfillmentReason;
+            $message->forceFill([
+                'category' => $category->value,
+                'category_confidence' => 1.0,
+                'category_intent' => null,
+                'category_reasoning' => $reasoning,
+                'categorized_at' => now(),
+            ])->save();
+
+            Log::info('MailCategoryClassifier: post-sale fulfillment override', [
+                'email_message_id' => $message->id,
+                'from_email' => $message->from_email,
+                'reason' => $fulfillmentReason,
             ]);
 
             return [
