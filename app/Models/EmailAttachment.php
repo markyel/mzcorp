@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
@@ -41,6 +42,22 @@ class EmailAttachment extends Model
     public function emailMessage(): BelongsTo
     {
         return $this->belongsTo(EmailMessage::class);
+    }
+
+    /**
+     * Вложения, пригодные для ручной привязки фото к позиции
+     * (диалог «Сменить фото»): картинки, НЕ встроенные в тело письма.
+     *
+     * Inline-картинки (is_inline — подключены через cid: в HTML) — это
+     * подписи / логотипы / баннеры отправителя, а не фото товара. Они
+     * дублируются в каждом письме треда и засоряют picker (кейс
+     * M-2026-2257: логотип «LiftCo» из подписи прилипал к позиции).
+     */
+    public function scopeBindablePhotos(Builder $query): Builder
+    {
+        return $query
+            ->where('mime_type', 'like', 'image/%')
+            ->where('is_inline', false);
     }
 
     /**

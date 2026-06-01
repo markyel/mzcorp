@@ -84,12 +84,16 @@ class ItemPhotoRebindDialog extends Component
     }
 
     /**
-     * Все image-вложения входящих писем треда заявки (триггерное +
-     * reply'и клиента). Сортировка по (email_message_id, id) держит
-     * фото триггерного письма первыми в Vision-порядке, затем — фото
-     * из более поздних писем. См. Request::photoSourceMessageIds().
+     * Фото-вложения входящих писем треда заявки (триггерное + reply'и
+     * клиента), пригодные для привязки: только реальные вложения, без
+     * inline-картинок подписи (см. EmailAttachment::scopeBindablePhotos).
      *
-     * @return \Illuminate\Database\Eloquent\Collection<int, EmailAttachment>
+     * Сортировка по (email_message_id, id) держит фото триггерного письма
+     * первыми в Vision-порядке, затем — из более поздних писем. Дедуп по
+     * (filename, size_bytes) схлопывает одинаковые вложения, присланные
+     * в нескольких письмах треда.
+     *
+     * @return \Illuminate\Support\Collection<int, EmailAttachment>
      */
     #[Computed]
     public function photoAttachments()
@@ -108,10 +112,12 @@ class ItemPhotoRebindDialog extends Component
 
         return EmailAttachment::query()
             ->whereIn('email_message_id', $messageIds)
-            ->where('mime_type', 'like', 'image/%')
+            ->bindablePhotos()
             ->orderBy('email_message_id')
             ->orderBy('id')
-            ->get(['id', 'filename', 'mime_type', 'size_bytes']);
+            ->get(['id', 'filename', 'mime_type', 'size_bytes'])
+            ->unique(fn (EmailAttachment $a) => $a->filename.'|'.$a->size_bytes)
+            ->values();
     }
 
     public function save(RequestItemEditor $editor): void

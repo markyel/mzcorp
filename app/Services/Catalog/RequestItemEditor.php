@@ -650,13 +650,11 @@ class RequestItemEditor
             }
             $attachment = EmailAttachment::query()
                 ->whereIn('email_message_id', $messageIds)
+                ->bindablePhotos()
                 ->whereKey($attachmentId)
                 ->first(['id', 'mime_type']);
             if ($attachment === null) {
-                throw new \DomainException('Это вложение не относится к письмам заявки.');
-            }
-            if (! str_starts_with((string) $attachment->mime_type, 'image/')) {
-                throw new \DomainException('Можно привязать только вложение типа image/*.');
+                throw new \DomainException('Это вложение нельзя привязать: оно не относится к письмам заявки или является inline-картинкой подписи.');
             }
         }
 
