@@ -748,7 +748,8 @@
         {{-- Right column --}}
         <div class="space-y-4">
 
-            {{-- Mailbox health --}}
+            {{-- Mailbox health (скрыто у менеджеров — не их зона) --}}
+            @unless($this->isManager)
             <div class="ds-card">
                 <div class="ds-card-header"><h3>Почтовые ящики</h3></div>
                 <div class="ds-card-body">
@@ -785,6 +786,7 @@
                     @endif
                 </div>
             </div>
+            @endunless
 
             @if($this->isPrivileged)
                 {{-- Foundation §7.3: AI quality score (DocumentDetector). --}}

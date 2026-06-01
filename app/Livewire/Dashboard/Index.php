@@ -314,6 +314,17 @@ class Index extends Component
         ]);
     }
 
+    /**
+     * Менеджер — операционная роль без доступа к настройкам инфраструктуры.
+     * Плашка «Почтовые ящики» на дашборде им не нужна (мониторинг ящиков —
+     * зона РОПа/директора/секретаря).
+     */
+    #[Computed]
+    public function isManager(): bool
+    {
+        return (bool) auth()->user()?->hasRole(RoleEnum::Manager->value);
+    }
+
     #[Computed]
     public function requestCounts(): array
     {
