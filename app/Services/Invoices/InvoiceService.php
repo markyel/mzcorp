@@ -4,6 +4,7 @@ namespace App\Services\Invoices;
 
 use App\Enums\InvoiceStatus;
 use App\Enums\RequestStatus;
+use App\Models\EmailMessage;
 use App\Models\Invoice;
 use App\Models\Quotation;
 use App\Models\Request;
@@ -166,7 +167,14 @@ class InvoiceService
             })
             ->first();
         if ($existing) {
-            return $existing;
+            // Несколько счетов с одним номером в переписке: ориентируемся на
+            // ПОСЛЕДНИЙ отправленный (тикет M-2026-1824 — счёт МЗ-5668
+            // переотправляли с разными суммами). Если входящий документ свежее
+            // источника существующего счёта — обновляем сумму/дату/срок/
+            // источник, оставаясь одной записью. Тот же/старый источник — no-op.
+            $this->refreshFromNewerQuote($existing, $quote, $number);
+
+            return $existing->fresh();
         }
 
         $issuedAt = $quote->document_date
@@ -250,6 +258,82 @@ class InvoiceService
 
             return $invoice->fresh();
         });
+    }
+
+    /**
+     * Обновить существующий счёт значениями из более свежего исходящего
+     * документа с тем же номером («последний отправленный счёт», M-2026-1824).
+     *
+     * Трогаем только pending-счёт (оплаченный / аннулированный / истёкший —
+     * историчны). «Свежее» определяем по времени исходящего письма-источника.
+     */
+    private function refreshFromNewerQuote(Invoice $existing, \App\Models\OutboundQuote $quote, string $number): void
+    {
+        if ($existing->status !== InvoiceStatus::Pending) {
+            return;
+        }
+
+        $incoming = $quote->email_message_id ? EmailMessage::find($quote->email_message_id) : null;
+        $current = $existing->email_message_id ? EmailMessage::find($existing->email_message_id) : null;
+        if (! $this->isNewerSource($incoming, $current)) {
+            return;
+        }
+
+        $issuedAt = $quote->document_date ? Carbon::parse((string) $quote->document_date) : now();
+        $validityDays = (int) config('services.invoices.default_validity_business_days', 5);
+        $expiresAt = $this->calendar->addBusinessDays($issuedAt, $validityDays)
+            ->endOfDay()
+            ->setTimezone(config('app.timezone'));
+        $amount = $quote->total_amount !== null ? (float) $quote->total_amount : $existing->amount_snapshot;
+
+        $existing->update([
+            'invoice_number' => mb_substr($number, 0, 128),
+            'issued_at' => $issuedAt,
+            'expires_at' => $expiresAt,
+            'validity_days' => $validityDays,
+            'amount_snapshot' => $amount,
+            'email_message_id' => $quote->email_message_id,
+            'comment' => sprintf(
+                'Обновлён по последнему отправленному счёту (документ #%d, %s от %s, %s ₽).',
+                $quote->id,
+                $number,
+                $issuedAt->format('d.m.Y'),
+                $amount !== null ? number_format((float) $amount, 2, '.', ' ') : '—'
+            ),
+        ]);
+
+        Log::info('InvoiceService: refreshed invoice from newer outbound quote', [
+            'invoice_id' => $existing->id,
+            'invoice_number' => $number,
+            'outbound_quote_id' => $quote->id,
+            'request_id' => $existing->request_id,
+            'amount' => $amount,
+        ]);
+    }
+
+    /**
+     * Источник $incoming свежее, чем $current? «Свежесть» — по sent_at письма,
+     * при равных/неизвестных датах — по id письма (позже пришедшее = больший id).
+     * Тот же источник (равный id) — НЕ свежее (защита от churn при reparse).
+     */
+    private function isNewerSource(?EmailMessage $incoming, ?EmailMessage $current): bool
+    {
+        if ($incoming === null) {
+            return false;
+        }
+        if ($current === null) {
+            return true;
+        }
+        if ($incoming->id === $current->id) {
+            return false;
+        }
+        $a = $incoming->sent_at;
+        $b = $current->sent_at;
+        if ($a !== null && $b !== null && ! $a->equalTo($b)) {
+            return $a->greaterThan($b);
+        }
+
+        return $incoming->id > $current->id;
     }
 
     /**
