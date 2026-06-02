@@ -49,7 +49,14 @@
                 <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
                     <tr>
                         <th class="px-4 py-2 text-left">От / Тема</th>
-                        <th class="px-4 py-2 text-left">Дата</th>
+                        <th class="px-4 py-2 text-left">
+                            <button type="button" wire:click="toggleSort"
+                                    class="inline-flex items-center gap-1 uppercase tracking-wider text-[10.5px] font-semibold text-fg-3 hover:text-fg-1"
+                                    title="{{ $sort === 'newest' ? 'Сначала новые — нажмите для старых' : 'Сначала старые — нажмите для новых' }}">
+                                Дата
+                                <span aria-hidden="true">{{ $sort === 'newest' ? '↓' : '↑' }}</span>
+                            </button>
+                        </th>
                         <th class="px-4 py-2 text-left">Причина AI</th>
                         <th class="px-4 py-2 text-left">Влож.</th>
                         <th class="px-4 py-2 text-right">Действия</th>

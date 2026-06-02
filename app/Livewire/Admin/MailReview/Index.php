@@ -37,6 +37,13 @@ class Index extends Component
     #[Url(as: 'window')]
     public string $window = '30d';
 
+    /**
+     * Хронологическая сортировка по дате письма (sent_at):
+     * newest — от поздних к ранним (по умолчанию), oldest — наоборот.
+     */
+    #[Url(as: 'sort')]
+    public string $sort = 'newest';
+
     public function updatingSearch(): void
     {
         $this->resetPage();
@@ -51,6 +58,20 @@ class Index extends Component
     {
         $this->window = in_array($window, ['today', '7d', '30d', '90d', 'all'], true) ? $window : '30d';
         $this->resetPage();
+    }
+
+    /**
+     * Установить/переключить хронологическую сортировку по дате письма.
+     */
+    public function setSort(string $sort): void
+    {
+        $this->sort = $sort === 'oldest' ? 'oldest' : 'newest';
+        $this->resetPage();
+    }
+
+    public function toggleSort(): void
+    {
+        $this->setSort($this->sort === 'newest' ? 'oldest' : 'newest');
     }
 
     /**
@@ -142,10 +163,16 @@ class Index extends Component
     #[Computed]
     public function emails()
     {
+        // Хронология по дате письма. sent_at nullable → NULLS LAST, чтобы
+        // письма без даты не всплывали наверх при desc. id — тай-брейк в ту же
+        // сторону (стабильный порядок при равных/пустых датах).
+        $dir = $this->sort === 'oldest' ? 'asc' : 'desc';
+
         return $this->buildQuery()
             ->with(['mailbox:id,email,owner_user_id'])
             ->withCount('attachments')
-            ->orderByDesc('id')
+            ->orderByRaw('sent_at ' . ($dir === 'asc' ? 'asc' : 'desc') . ' nulls last')
+            ->orderBy('id', $dir)
             ->paginate(25);
     }
 
