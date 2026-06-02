@@ -125,6 +125,24 @@ class InvoiceService
         if ($documentType !== \App\Enums\DetectorType::OutboundInvoice->value) {
             return null;
         }
+
+        // Guard: вложение по имени — договор / спецификация (приложение к
+        // договору), а не счёт на оплату. Детектор уровня письма штампует ВСЕ
+        // парсимые вложения invoice-письма как outbound_invoice, поэтому
+        // приложенные к счёту договор/спецификация тоже доходят сюда и плодят
+        // фантомный счёт, который никогда не оплатят (тикет M-2026-2582:
+        // «Договор … (счет 5687).pdf» рядом со «Счет МЗ-5687.pdf»). Имя файла —
+        // самый надёжный сигнал; счёт-файл («Счёт …») сюда не попадает.
+        if ($this->looksLikeContractDocument($quote)) {
+            Log::info('InvoiceService::autoIssueFromOutboundQuote: skip — attachment is contract/spec, not an invoice', [
+                'outbound_quote_id' => $quote->id,
+                'request_id' => $quote->request_id,
+                'email_attachment_id' => $quote->email_attachment_id,
+            ]);
+
+            return null;
+        }
+
         $number = trim((string) ($quote->document_number ?? ''));
         if ($number === '') {
             Log::warning('InvoiceService::autoIssueFromOutboundQuote: skip — no document_number', [
@@ -232,6 +250,32 @@ class InvoiceService
 
             return $invoice->fresh();
         });
+    }
+
+    /**
+     * Имя вложения указывает на договор / спецификацию (приложение к договору),
+     * а не на счёт на оплату. Файл-счёт («Счёт …» / «Инвойс …») сюда НЕ
+     * попадает, даже если в его имени в скобках мелькает «(счет 5687)».
+     * См. тикет M-2026-2582.
+     */
+    private function looksLikeContractDocument(\App\Models\OutboundQuote $quote): bool
+    {
+        if (! $quote->email_attachment_id) {
+            return false;
+        }
+        $attachment = \App\Models\EmailAttachment::find($quote->email_attachment_id);
+        $name = mb_strtolower(trim((string) ($attachment->filename ?? '')));
+        if ($name === '') {
+            return false;
+        }
+
+        // Сам файл — счёт на оплату (имя начинается со «счёт/счет/инвойс/invoice»):
+        // не трогаем, это и есть инвойс.
+        if (preg_match('/^(сч[ёе]т|инвойс|invoice)/u', $name)) {
+            return false;
+        }
+
+        return str_contains($name, 'договор') || str_contains($name, 'спецификац');
     }
 
     /**
