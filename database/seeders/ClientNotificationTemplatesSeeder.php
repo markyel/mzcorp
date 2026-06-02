@@ -50,9 +50,6 @@ class ClientNotificationTemplatesSeeder extends Seeder
 
 Мы изучим запрос, и в ближайшее время вернёмся к вам с предложением. Если у вас есть уточнения — отправьте их в ответ на это письмо, оно автоматически попадёт в вашу заявку.
 
-С уважением,
-{{ manager_name }}
-{{ company_name }}
 MD,
                 'threshold_hours' => null,
                 'warning_days' => null,
@@ -69,9 +66,6 @@ MD,
 
 Без ваших ответов мы не можем продолжить подбор позиций. Подскажите, пожалуйста, или отправьте уточнения в ответ на это письмо.
 
-С уважением,
-{{ manager_name }}
-{{ company_name }}
 MD,
                 'threshold_hours' => null,
                 'warning_days' => null,
@@ -86,9 +80,6 @@ MD,
 
 Подскажите, пожалуйста, есть ли по нему вопросы или готовы ли вы перейти к выставлению счёта.
 
-С уважением,
-{{ manager_name }}
-{{ company_name }}
 MD,
                 'threshold_hours' => null,
                 'warning_days' => null,
@@ -105,9 +96,6 @@ MD,
 
 Если у вас остались вопросы по оплате — напишите, постараемся помочь.
 
-С уважением,
-{{ manager_name }}
-{{ company_name }}
 MD,
                 'threshold_hours' => null,
                 'warning_days' => 3,
@@ -122,9 +110,6 @@ MD,
 
 Если оплата всё ещё актуальна — сообщите, мы выставим новый счёт с актуальными ценами.
 
-С уважением,
-{{ manager_name }}
-{{ company_name }}
 MD,
                 'threshold_hours' => null,
                 'warning_days' => null,
@@ -141,9 +126,6 @@ MD,
 
 Если ситуация изменится — напишите в ответ на это письмо, мы готовы вернуться к работе.
 
-С уважением,
-{{ manager_name }}
-{{ company_name }}
 MD,
                 'threshold_hours' => null,
                 'warning_days' => null,
