@@ -203,6 +203,15 @@ class RequestStateService
             }
         }
 
+        // Закрытие как потеря с активными счетами: клиент отказался — счёт
+        // больше не действителен, аннулируем все pending-инвойсы заявки.
+        // Post-transaction: статус уже ClosedLost (terminal), поэтому
+        // InvoiceService::cancel() через maybeTransitionToAwaitingInvoice НЕ
+        // вернёт заявку в AwaitingInvoice (там guard на terminal).
+        if ($to === RequestStatus::ClosedLost && $author !== null) {
+            $this->cancelPendingInvoicesOnClose($request, $author, $closedLostReason);
+        }
+
         // Phase 6: уведомление клиенту при закрытии. Sync, post-transaction.
         // ClientNotificationService::sendOrderClosedLost сам проверит:
         //  - is_enabled шаблона;
@@ -537,6 +546,49 @@ class RequestStateService
 
         // Phase 1.11: первый дедлайн для свеженазначенной заявки.
         $this->attention->recompute($request);
+    }
+
+    /**
+     * Аннулировать все pending-счета заявки при закрытии как потеря.
+     *
+     * Счёт выставлен, но клиент отказался — он больше не актуален. Статус
+     * заявки на момент вызова уже ClosedLost (terminal), поэтому
+     * InvoiceService::cancel() → maybeTransitionToAwaitingInvoice не вернёт
+     * заявку в AwaitingInvoice. Каждый счёт аннулируем независимо: ошибка по
+     * одному не валит остальные и не откатывает уже совершённый переход.
+     */
+    private function cancelPendingInvoicesOnClose(Request $request, User $author, ?ClosedLostReason $reason): void
+    {
+        $pending = $request->invoices()
+            ->where('status', \App\Enums\InvoiceStatus::Pending->value)
+            ->get();
+
+        if ($pending->isEmpty()) {
+            return;
+        }
+
+        $reasonText = sprintf(
+            'Заявка закрыта как потеря%s — счёт аннулирован автоматически.',
+            $reason !== null ? ' ('.$reason->label().')' : '',
+        );
+
+        $invoiceService = app(\App\Services\Invoices\InvoiceService::class);
+        foreach ($pending as $invoice) {
+            try {
+                $invoiceService->cancel($invoice, $reasonText, $author);
+            } catch (\Throwable $e) {
+                Log::warning('RequestStateService: auto-cancel invoice on close_lost failed (non-fatal)', [
+                    'request_id' => $request->id,
+                    'invoice_id' => $invoice->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        Log::info('RequestStateService: cancelled pending invoices on close_lost', [
+            'request_id' => $request->id,
+            'count' => $pending->count(),
+        ]);
     }
 
     private function ensureCanTransition(Request $request, ?User $author): void
