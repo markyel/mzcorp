@@ -51,21 +51,6 @@ class OutgoingMailMimeBuilder
      */
     public function composeFinalBody(EmailMessage $draft): array
     {
-        // Pre-rendered HTML (авто-уведомления ClientNotificationService): тело
-        // уже собрано из Markdown в готовую самодостаточную HTML-обёртку
-        // (шапка MyZip + текст + футер). Отдаём как есть — НЕ прогоняем через
-        // plainToHtml (иначе клиент видит сырой Markdown `**…**`) и не клеим
-        // повторно подпись/цитату. Ручной reply менеджера сюда не попадает:
-        // ComposeForm всегда сохраняет body_html='' (тело вводится в textarea,
-        // HTML собирается ниже из body_plain).
-        $prerenderedHtml = trim((string) ($draft->body_html ?? ''));
-        if ($prerenderedHtml !== '') {
-            return [
-                'html' => (string) $draft->body_html,
-                'plain' => (string) ($draft->body_plain ?? ''),
-            ];
-        }
-
         $userText = (string) ($draft->body_plain ?? '');
 
         $author = $draft->draft_author_user_id
@@ -90,7 +75,17 @@ class OutgoingMailMimeBuilder
         // и InboundReplyLinker сматчит обратно к нужной Request.
         $footer = $this->buildRequestCodeFooter($draft);
 
-        $userHtml = $this->plainToHtml($userText);
+        // HTML-часть письма. Авто-уведомления (ClientNotificationService)
+        // кладут в body_html уже отрендеренный из Markdown HTML — берём его
+        // как есть (иначе plainToHtml покажет клиенту сырой `**…**`). Ручной
+        // reply менеджера хранит body_html='' → собираем из plain. В обоих
+        // случаях ниже доклеиваются ОБЩИЕ подпись + футер + цитата, поэтому
+        // авто-уведомление выглядит как обычное письмо в треде, с подписью
+        // и цитатой оригинала (без отдельной «карточки»-обёртки).
+        $prerenderedHtml = trim((string) ($draft->body_html ?? ''));
+        $userHtml = $prerenderedHtml !== ''
+            ? (string) $draft->body_html
+            : $this->plainToHtml($userText);
 
         $plain = $userText
             . ($signature['plain'] !== '' ? "\n" . $signature['plain'] : '')

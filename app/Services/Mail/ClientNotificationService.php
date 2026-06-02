@@ -14,7 +14,6 @@ use App\Models\RequestStateChange;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\View;
 use Illuminate\Support\Str;
 use League\CommonMark\GithubFlavoredMarkdownConverter;
 
@@ -33,9 +32,13 @@ use League\CommonMark\GithubFlavoredMarkdownConverter;
  *
  * Текст рендерится:
  *   1. Markdown body_template + placeholders → MD string.
- *   2. League CommonMark → HTML.
- *   3. Wrap в общий MyZip-шаблон (resources/views/emails/notification_wrap).
- *   4. Plain-text fallback — голый rendered MD без HTML-обёртки.
+ *   2. League CommonMark → HTML (без внешней обёртки).
+ *   3. Plain-text вариант — голый rendered MD.
+ *
+ * Подпись (шаблонная, EmailSignatureService), футер с № заявки и цитата
+ * исходного письма доклеиваются единообразно в OutgoingMailMimeBuilder::
+ * composeFinalBody() при отправке — ровно как для ручных писем менеджера,
+ * поэтому уведомление выглядит как обычный ответ в треде.
  */
 class ClientNotificationService
 {
@@ -166,14 +169,13 @@ class ClientNotificationService
         $subject = $this->renderPlaceholders($template->subject_template, $placeholders);
         $bodyMd = $this->renderPlaceholders($template->body_template, $placeholders);
 
-        // Markdown → HTML → wrap.
-        $bodyHtmlInner = (new GithubFlavoredMarkdownConverter())->convert($bodyMd)->getContent();
-        $bodyHtml = View::make('emails.notification_wrap', [
-            'subject' => $subject,
-            'bodyHtml' => $bodyHtmlInner,
-        ])->render();
+        // Markdown → HTML. БЕЗ внешней «карточки»-обёртки: уведомление уходит
+        // как обычный ответ в треде. Общую шаблонную подпись, футер с № заявки
+        // и цитату исходного письма доклеит OutgoingMailMimeBuilder::
+        // composeFinalBody() при отправке — ту же, что у ручных писем менеджера.
+        $bodyHtml = (new GithubFlavoredMarkdownConverter())->convert($bodyMd)->getContent();
 
-        // Plain-text fallback — Markdown как есть (без HTML-обёртки).
+        // Plain-text вариант — Markdown как есть.
         $bodyPlain = $bodyMd;
 
         // Создаём draft как reply в тред заявки — берём существующую логику
@@ -255,11 +257,7 @@ class ClientNotificationService
 
         $subject = $this->renderPlaceholders($template->subject_template, $placeholders);
         $bodyMd = $this->renderPlaceholders($template->body_template, $placeholders);
-        $bodyHtmlInner = (new GithubFlavoredMarkdownConverter())->convert($bodyMd)->getContent();
-        $bodyHtml = View::make('emails.notification_wrap', [
-            'subject' => $subject,
-            'bodyHtml' => $bodyHtmlInner,
-        ])->render();
+        $bodyHtml = (new GithubFlavoredMarkdownConverter())->convert($bodyMd)->getContent();
 
         return [
             'subject' => $subject,
