@@ -69,11 +69,6 @@ class Index extends Component
         $this->resetPage();
     }
 
-    public function toggleSort(): void
-    {
-        $this->setSort($this->sort === 'newest' ? 'oldest' : 'newest');
-    }
-
     /**
      * Реоткрыть письмо как Request. Создаём Request со статусом Pending,
      * dispatch'им парсер позиций — дальше pipeline идёт обычным путём
