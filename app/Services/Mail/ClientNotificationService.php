@@ -186,10 +186,21 @@ class ClientNotificationService
             replyAll: false,
         );
 
-        // Перезаписываем subject (createReply ставит Re:..., нам нужен наш).
+        // Threading: Gmail/Yandex склеивают переписку в один тред не только по
+        // In-Reply-To/References, но и по совпадению нормализованной темы. Если
+        // подставить сюда subject_template («Ваш запрос … принят в работу»), он
+        // не совпадёт с темой клиентского треда и письмо уйдёт ОТДЕЛЬНЫМ тредом.
+        // createReply() уже выставил draft.subject = «Re: <тема клиента>» — его
+        // и оставляем для треда. subject_template используем как fallback
+        // (пустая тема у anchor'а — edge-case) и как заголовок HTML-обёртки.
+        $threadSubject = trim((string) $draft->subject);
+        if ($threadSubject === '' || rtrim(mb_strtolower($threadSubject), ': ') === 're') {
+            $threadSubject = $subject;
+        }
+
         // Body — наш HTML + Plain, в textarea не показываем (это автомат).
         $draft->forceFill([
-            'subject' => $subject,
+            'subject' => $threadSubject,
             'body_html' => $bodyHtml,
             'body_plain' => $bodyPlain,
         ])->save();
@@ -214,7 +225,7 @@ class ClientNotificationService
             'outgoing_email_message_id' => $sentDraft->id,
             'reply_to_email_message_id' => $replyTo->id,
             'recipient_email' => $request->client_email,
-            'subject' => $subject,
+            'subject' => $threadSubject,
             'body_rendered_html' => $bodyHtml,
             'body_rendered_plain' => $bodyPlain,
             'sent_at' => now(),
