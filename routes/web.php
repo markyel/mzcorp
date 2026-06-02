@@ -90,6 +90,14 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/mail', function () {
             return view('mail.index');
         })->name('mail.index');
+
+        // Foundation Фаза 2: auto-rejection — пересмотр писем, которые AI
+        // классифицировал как irrelevant/reclamation/accounting/..., и
+        // реоткрытие ошибочно отклонённых как Request. Секретарь отвечает за
+        // контроль маршрутизации, поэтому имеет доступ наравне с РОП/директором.
+        Route::get('/dashboard/mail-review', function () {
+            return view('admin.mail-review.index');
+        })->name('mail-review.index');
     });
 
     // Phase 4: раздел «Счета». Менеджер видит свои Invoice, привилегированные
@@ -150,13 +158,6 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/notifications/{template}/edit', function (\App\Models\ClientNotificationTemplate $template) {
             return view('admin.notifications.edit', ['template' => $template]);
         })->name('notifications.edit');
-
-        // Foundation Фаза 2: auto-rejection — РОП пересматривает письма,
-        // которые AI классифицировал как irrelevant/reclamation/accounting/...,
-        // и реоткрывает ошибочно отклонённые как Request.
-        Route::get('/dashboard/mail-review', function () {
-            return view('admin.mail-review.index');
-        })->name('mail-review.index');
     });
 
 
