@@ -23,14 +23,21 @@ final class DocPage
     }
 
     /**
+     * Роли с полным доступом ко всей документации (видят любые разделы,
+     * независимо от frontmatter `roles`): админ + директорат + РОП.
+     */
+    private const FULL_ACCESS_ROLES = ['admin', 'director', 'head_of_sales'];
+
+    /**
      * Доступна ли страница пользователю с указанными ролями.
-     * Админ всегда видит всё. Пустой $this->roles = публично для authed.
+     * Админ / директорат / РОП всегда видят всё. Пустой $this->roles =
+     * публично для authed.
      *
      * @param array<int, string> $userRoles
      */
     public function isVisibleTo(array $userRoles): bool
     {
-        if (in_array('admin', $userRoles, true)) {
+        if (array_intersect(self::FULL_ACCESS_ROLES, $userRoles) !== []) {
             return true;
         }
         if ($this->roles === []) {
