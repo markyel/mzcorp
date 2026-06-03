@@ -453,6 +453,59 @@ class Detail extends Component
     }
 
     /**
+     * Двунаправленные sticky-связи для hero-блока (навигация в обе стороны):
+     *  - forward: ЭТА заявка прилеплена к другой (её id в нашем auto_sticky.linked);
+     *  - reverse: ДРУГАЯ заявка прилеплена к этой (наш id в её auto_sticky.linked).
+     *
+     * Лёгкая выборка (без позиций) — только для перехода между связанными
+     * заявками. Полные позиции связанных грузит relatedStickyRequests() (таб «Позиции»).
+     *
+     * @return \Illuminate\Support\Collection<int, array{request: \App\Models\Request, forward: bool, reverse: bool}>
+     */
+    #[Computed]
+    public function stickyConnections()
+    {
+        $thisId = (int) $this->request->id;
+        $forwardIds = array_map('intval', $this->sticky['links']->pluck('id')->all());
+
+        // Reverse: заявки, в auto_sticky.linked которых упомянут наш id.
+        // JSON-as-string в reason — подстрочное ILIKE (как в relatedStickyRequests).
+        $reverseIds = \App\Models\RequestAssignment::query()
+            ->where('reason', 'like', 'auto_sticky:%')
+            ->where(function ($q) use ($thisId) {
+                $q->where('reason', 'like', '%"linked":[' . $thisId . ']%')
+                    ->orWhere('reason', 'like', '%"linked":[' . $thisId . ',%')
+                    ->orWhere('reason', 'like', '%,' . $thisId . ',%')
+                    ->orWhere('reason', 'like', '%,' . $thisId . ']%');
+            })
+            ->pluck('request_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->reject(fn ($id) => $id === $thisId)
+            ->values()
+            ->all();
+
+        $ids = array_values(array_unique(array_merge($forwardIds, $reverseIds)));
+        if (empty($ids)) {
+            return collect();
+        }
+
+        $forwardSet = array_flip($forwardIds);
+        $reverseSet = array_flip($reverseIds);
+
+        return \App\Models\Request::query()
+            ->whereIn('id', $ids)
+            ->where('id', '!=', $thisId)
+            ->orderByDesc('created_at')
+            ->get(['id', 'internal_code', 'subject', 'status', 'client_name'])
+            ->map(fn ($r) => [
+                'request' => $r,
+                'forward' => isset($forwardSet[(int) $r->id]),
+                'reverse' => isset($reverseSet[(int) $r->id]),
+            ]);
+    }
+
+    /**
      * Phase 2.1 inheritance: Map<request_item_id, RequestItemLink>
      * для текущей заявки.
      *

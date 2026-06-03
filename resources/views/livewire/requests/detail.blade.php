@@ -366,19 +366,36 @@
                             default => 'Заявки, по которым AssignmentService прицепил эту через sticky',
                         };
                     @endphp
-                    @if($sticky['links']->isNotEmpty())
+                    @php $stickyConns = $this->stickyConnections; @endphp
+                    @if($stickyConns->isNotEmpty())
+                        {{-- Двунаправленные sticky-связи: → эта прилеплена к той,
+                             ← та прилеплена к этой, ↔ взаимно. Навигация в обе стороны
+                             (раньше показывали только forward — с заявки-«якоря» вернуться
+                             было нельзя). --}}
                         <span class="flex items-center gap-1.5 flex-wrap"
                               title="{{ $stickyHoverTitle }}">
                             @if($stickyKindLabel)
                                 <span class="inline-flex items-center text-[10.5px] font-semibold px-1.5 py-0.5 rounded-[3px] bg-violet-50 text-violet-700">{{ $stickyKindLabel }}</span>
                             @endif
-                            @foreach($sticky['links'] as $linked)
+                            @foreach($stickyConns as $conn)
+                                @php
+                                    $linked = $conn['request'];
+                                    $dirArrow = $conn['forward'] && $conn['reverse'] ? '↔' : ($conn['forward'] ? '→' : '←');
+                                    $dirTitle = $conn['forward'] && $conn['reverse']
+                                        ? 'Взаимная sticky-связь'
+                                        : ($conn['forward']
+                                            ? 'Эта заявка прилеплена к ' . $linked->internal_code
+                                            : $linked->internal_code . ' прилеплена к этой заявке');
+                                    $linkedTerminal = $linked->status->isTerminal();
+                                @endphp
                                 {{-- Без wire:navigate — после SPA-перехода между
                                      двумя Detail-страницами Livewire не пересоздаёт
                                      state и вкладки/диалоги перестают реагировать.
                                      Full reload надёжнее (минусом — 200-300мс лаг). --}}
                                 <a href="{{ route('requests.show', $linked) }}"
-                                   class="mono text-[12px] text-sky-700 hover:underline">{{ $linked->internal_code }}</a>{{ ! $loop->last ? ',' : '' }}
+                                   class="inline-flex items-center gap-0.5 mono text-[12px] hover:underline {{ $linkedTerminal ? 'text-fg-4 line-through' : 'text-sky-700' }}"
+                                   title="{{ $dirTitle }} · {{ $linked->status->label() }}{{ $linked->subject ? ' · ' . \Illuminate\Support\Str::limit($linked->subject, 60) : '' }}">
+                                    <span class="text-fg-4 not-italic">{{ $dirArrow }}</span>{{ $linked->internal_code }}</a>{{ ! $loop->last ? ',' : '' }}
                             @endforeach
                         </span>
                     @elseif($sticky['legacy'])
