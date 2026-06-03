@@ -70,6 +70,11 @@ class RequestItem extends Model
         // первичном создании; не меняется при дальнейших правках. Каждый
         // элемент: {source, name, article, qty, reason, dedup_key}.
         'parsing_merged_from',
+        // Письмо-источник, из которого позиция была спаршена. Заполняется
+        // RequestItemPersister (всегда = message->id), бэкфиллится по времени
+        // для исторических данных. Драйвит провенанс при ручном разъединении
+        // заявки (RequestSplitService / SplitDialog).
+        'source_email_message_id',
     ];
 
     protected function casts(): array
@@ -81,6 +86,7 @@ class RequestItem extends Model
             'quality_assessment_payload' => 'array',
             'suggestion_confidence' => 'float',
             'suggestion_source_email_id' => 'integer',
+            'source_email_message_id' => 'integer',
             'match_path' => \App\Enums\MatchPath::class,
             'parsing_merged_from' => 'array',
         ];
@@ -160,6 +166,16 @@ class RequestItem extends Model
     public function request(): BelongsTo
     {
         return $this->belongsTo(Request::class);
+    }
+
+    /**
+     * Письмо, из которого позиция была спаршена (провенанс). Может быть null
+     * для позиций до ввода колонки/бэкфилла. Используется RequestSplitService
+     * и бейджем «источник N поз.» в карточке заявки.
+     */
+    public function sourceEmail(): BelongsTo
+    {
+        return $this->belongsTo(EmailMessage::class, 'source_email_message_id');
     }
 
     /**

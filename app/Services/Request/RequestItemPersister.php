@@ -196,6 +196,11 @@ class RequestItemPersister
                 'suggestion_status' => $suggestionStatus,
                 'suggestion_confidence' => $finalConfidence,
                 'suggestion_source_email_id' => $suggestionStatus !== null ? $message->id : null,
+                // Провенанс позиция → письмо-источник: всегда реальное письмо,
+                // из которого парсер извлёк позицию (в отличие от
+                // suggestion_source_email_id, который только для pending). Драйвит
+                // ручное разъединение заявки (RequestSplitService).
+                'source_email_message_id' => $message->id,
                 'parsing_merged_from' => $mergedFrom,
             ]);
 

@@ -556,6 +556,9 @@
             $canReply = $isOwner || $isDelegate
                 || $authUser?->hasAnyRole(['head_of_sales', 'director', 'admin']);
             $canReassign = $authUser?->hasAnyRole(['head_of_sales', 'director', 'secretary', 'admin']);
+            // Разъединение заявки (split / un-merge) — только admin/director/РОП
+            // (секретарь не разъединяет, у него read-only по операциям).
+            $canSplit = $authUser?->hasAnyRole(['head_of_sales', 'director', 'admin']);
             $lastInbound = $thread->reverse()
                 ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound);
             $allowed = $req->status->allowedTransitions();
@@ -928,6 +931,13 @@
                 <livewire:requests.merge-dialog :request="$req" wire:key="merge-{{ $req->id }}" lazy />
             @endif
 
+            {{-- Разъединение заявки (split / un-merge). admin/РОП/директор.
+                 Показываем только если заявка active и в треде ≥2 письма
+                 (есть что выносить — иначе нечего разъединять). --}}
+            @if($canSplit && ! $req->status->isTerminal() && $req->status !== $RS::Pending && $thread->count() >= 2)
+                <livewire:requests.split-dialog :request="$req" wire:key="split-{{ $req->id }}" lazy />
+            @endif
+
             {{-- Phase 2.1 — отвязать наследование (только для child-заявок).
                  Доступно owner / acting / privileged. История item-links
                  сохраняется (is_active=false), статус child обнуляется. --}}
@@ -1274,6 +1284,12 @@
                                             </div>
                                         </div>
                                         <span class="flex-1"></span>
+                                        {{-- Провенанс: сколько активных позиций заявки спаршено
+                                             из этого письма. Подсказка для разъединения заявки. --}}
+                                        @php $srcCount = $items->where('source_email_message_id', $msg->id)->count(); @endphp
+                                        @if($srcCount > 0)
+                                            <span class="chip chip-attn" title="Из этого письма спаршено позиций: {{ $srcCount }}"><span class="dot"></span>источник {{ $srcCount }} поз.</span>
+                                        @endif
                                         @if($isOutbound)
                                             <span class="chip chip-info"><span class="dot"></span>исходящее</span>
                                         @elseif($catLabel)
