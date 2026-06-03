@@ -166,7 +166,7 @@
                      если фильтр активен на этом менеджере. --}}
                 @php $_managers = $this->availableManagers; @endphp
                 @if($_managers->isNotEmpty())
-                    <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--fg-4)] px-2 pt-3 pb-1">
+                    <div class="text-[10.5px] font-semibold uppercase tracking-wider text-[var(--fg-3)] px-2 pt-2 pb-1.5">
                         Менеджеры
                     </div>
                     @foreach($_managers as $_mgr)
@@ -175,10 +175,10 @@
                             $_mgrCount = $managerOpenCounts[(int) $_mgr['id']] ?? 0;
                         @endphp
                         <a href="#" wire:click.prevent="setManagerFilter({{ (int) $_mgr['id'] }})"
-                           class="flex items-center gap-2 px-2 py-1.5 rounded-md text-[12.5px] {{ $_mgrActiveNav ? 'bg-[var(--accent)]/10 text-[var(--accent)] font-medium' : 'text-[var(--fg-2)] hover:bg-[var(--bg-surface-2)] hover:text-[var(--fg-1)]' }}">
-                            <span class="w-3.5 text-center text-[var(--fg-3)]">{{ $_mgrActiveNav ? '●' : '○' }}</span>
+                           class="flex items-center gap-2 px-2 py-1.5 rounded-md text-[12.5px] {{ $_mgrActiveNav ? 'bg-[var(--bg-surface)] text-[var(--fg-1)] font-medium shadow-[inset_2px_0_0_var(--accent)]' : 'text-[var(--fg-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--fg-1)]' }}">
+                            <span class="w-3.5 text-center {{ $_mgrActiveNav ? 'text-[var(--accent)]' : 'text-[var(--fg-3)]' }}">{{ $_mgrActiveNav ? '●' : '○' }}</span>
                             <span class="flex-1 truncate">{{ $_mgr['name'] }}</span>
-                            <span class="font-mono text-[11.5px] {{ $_mgrActiveNav ? 'text-[var(--accent)]' : 'text-[var(--fg-3)]' }}">{{ $_mgrCount }}</span>
+                            <span class="font-mono text-[11.5px] {{ $_mgrActiveNav ? 'text-[var(--fg-1)]' : 'text-[var(--fg-3)]' }}">{{ $_mgrCount }}</span>
                         </a>
                     @endforeach
                 @endif
