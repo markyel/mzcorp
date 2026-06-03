@@ -16,22 +16,28 @@
     @if($open)
         <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 24px;"
              wire:mousedown.self="close">
-            <div class="ds-card p-5 w-full max-w-[640px] max-h-[88vh] overflow-y-auto" wire:click.stop>
-                <h3 class="text-[15px] font-semibold text-fg-1 mb-1">
-                    Разъединение заявки <span class="mono text-fg-2">{{ $request->internal_code }}</span>
-                </h3>
-                <div class="text-[12px] text-fg-3 mb-4">
-                    Выберите письма чужого потока и их позиции — они уйдут в новую заявку.
-                    В исходной должно остаться хотя бы одно письмо; seed-письмо вынести нельзя.
+            {{-- Карта: фиксированная высота, шапка/подвал не скроллятся, тело
+                 (списки писем/позиций) прокручивается внутри. --}}
+            <div class="ds-card p-0 w-full max-w-[640px] max-h-[85vh] flex flex-col overflow-hidden" wire:click.stop>
+                {{-- Шапка --}}
+                <div class="px-5 pt-5 pb-3 border-b border-border-subtle shrink-0">
+                    <h3 class="text-[15px] font-semibold text-fg-1 mb-1">
+                        Разъединение заявки <span class="mono text-fg-2">{{ $request->internal_code }}</span>
+                    </h3>
+                    <div class="text-[12px] text-fg-3">
+                        Выберите письма чужого потока и их позиции — они уйдут в новую заявку.
+                        В исходной должно остаться хотя бы одно письмо; seed-письмо вынести нельзя.
+                    </div>
+                    @error('split') <div class="text-red-700 text-[12.5px] mt-2">{{ $message }}</div> @enderror
                 </div>
 
-                @error('split') <div class="text-red-700 text-[12.5px] mb-3">{{ $message }}</div> @enderror
-
-                <form wire:submit="save" class="space-y-4">
+                <form wire:submit="save" class="flex flex-col min-h-0 flex-1">
+                    {{-- Прокручиваемое тело --}}
+                    <div class="px-5 py-3 space-y-4 overflow-y-auto flex-1 min-h-0">
                     {{-- Письма --}}
                     <div>
                         <div class="text-[11.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">Письма</div>
-                        <div class="border border-border rounded-md divide-y divide-border-subtle">
+                        <div class="border border-border rounded-md divide-y divide-border-subtle max-h-[240px] overflow-y-auto">
                             @foreach($thread as $msg)
                                 @php
                                     $isOut = $msg->direction === MailDirection::Outbound->value || $msg->direction === MailDirection::Outbound;
@@ -73,7 +79,7 @@
                         @if($items->isEmpty())
                             <div class="text-[12px] text-fg-3">В заявке нет активных позиций.</div>
                         @else
-                            <div class="border border-border rounded-md divide-y divide-border-subtle">
+                            <div class="border border-border rounded-md divide-y divide-border-subtle max-h-[220px] overflow-y-auto">
                                 @foreach($items as $it)
                                     <label class="flex items-start gap-2 px-3 py-2 text-[12.5px] cursor-pointer hover:bg-[var(--bg-hover)]">
                                         <input type="checkbox"
@@ -121,8 +127,10 @@
                             @endif
                         </div>
                     </div>
+                    </div>{{-- /прокручиваемое тело --}}
 
-                    <div class="flex items-center gap-2 pt-3 border-t border-border-subtle">
+                    {{-- Подвал — зафиксирован, не скроллится --}}
+                    <div class="px-5 py-3 flex items-center gap-2 border-t border-border-subtle shrink-0">
                         <button type="submit" class="btn btn-primary"
                                 @disabled(empty($selectedEmailIds))>Выделить в новую заявку</button>
                         <button type="button" wire:click="close" class="btn">Отмена</button>
