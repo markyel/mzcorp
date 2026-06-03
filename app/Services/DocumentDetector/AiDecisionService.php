@@ -3,6 +3,7 @@
 namespace App\Services\DocumentDetector;
 
 use App\Enums\AiDecisionStatus;
+use App\Enums\ClosedLostReason;
 use App\Enums\DetectorType;
 use App\Enums\RequestStatus;
 use App\Models\AiDecision;
@@ -137,10 +138,16 @@ class AiDecisionService
         if ($target === RequestStatus::ClosedLost) {
             $payload = is_array($decision->payload) ? $decision->payload : [];
             // Reason — может быть пробросан из extra (CloseLostDialog override),
-            // или из AI-suggested reason'а.
+            // или из AI-suggested reason'а. Дефолт: для отказа МЕНЕДЖЕРА
+            // (outbound_declined) — «Мы не можем предложить» (we_cant_offer),
+            // иначе manual_other. we_cant_offer не требует комментария — auto-apply
+            // не отвалится по «нужен комментарий».
+            $defaultReason = $type === DetectorType::OutboundDeclined
+                ? ClosedLostReason::WeCantOffer->value
+                : ClosedLostReason::ManualOther->value;
             $reason = $extra['closed_lost_reason']
                 ?? $payload['suggested_closed_lost_reason']
-                ?? 'manual_other';
+                ?? $defaultReason;
             $context['closed_lost_reason'] = $reason;
             $context['closed_lost_comment'] = $extra['closed_lost_comment']
                 ?? $payload['cited_phrase']
