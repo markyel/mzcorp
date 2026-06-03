@@ -562,8 +562,12 @@ class Pool extends Component
                 ->where('attention_reason', \App\Enums\AttentionReason::PostSale->value)
                 ->whereNotNull('attention_required_at')
                 ->count(),
+            // «Все» = Активные + Закрытые + На паузе. Pending («в разборе» —
+            // парсер ещё не извлёк позиции) исключаем всегда: он не входит ни в
+            // одну из верхних корзин, иначе сумма не сходится (Все − активные −
+            // закрытые − пауза = pending).
             'all' => (clone $countsBase)
-                ->when(! $this->canSeeAll, fn ($q) => $q->where('status', '!=', RequestStatus::Pending->value))
+                ->where('status', '!=', RequestStatus::Pending->value)
                 ->count(),
         ];
 
