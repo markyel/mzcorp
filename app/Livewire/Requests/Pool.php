@@ -201,11 +201,14 @@ class Pool extends Component
             // Доп. фильтр attention_reason=post_sale + attention_required_at
             // IS NOT NULL — в render().
             'postsale' => $this->postSaleStatuses(),
+            // «Все» = Активные + Закрытые + На паузе. Pending («в разборе»)
+            // исключаем и из списка, чтобы он совпадал со счётчиком корзины.
             'all' => array_map(
                 fn (RequestStatus $s) => $s->value,
                 array_filter(
                     RequestStatus::cases(),
-                    fn (RequestStatus $s) => $this->canSeeAll || $s->isVisibleToManager(),
+                    fn (RequestStatus $s) => $s !== RequestStatus::Pending
+                        && ($this->canSeeAll || $s->isVisibleToManager()),
                 ),
             ),
             // overdue делит пространство статусов с active (только open),
