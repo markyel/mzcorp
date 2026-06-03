@@ -149,3 +149,15 @@ Schedule::command('notifications:dispatch-client')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Авто-закрытие заявок по молчанию клиента (уточнение / КП / счёт). Пороги
+// (календарные дни) — в настройках auto_close.*_days, 0 = выкл. Раз в сутки,
+// после ежечасных напоминаний (ремайндеры идут раньше закрытия). Закрывает
+// через systemCloseLost с причиной no_client_response_to_* / invoice_unpaid;
+// восстановление — ручное «↻ Реанимировать». См. RequestsAutoCloseInactiveCommand.
+Schedule::command('requests:auto-close-inactive')
+    ->dailyAt('08:00')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
