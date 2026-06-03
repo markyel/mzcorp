@@ -65,9 +65,13 @@ class BackfillItemSourceEmailCommand extends Command
         ) {
             foreach ($requests as $request) {
                 // Входящие письма заявки, отсортированы по sent_at ASC.
+                // Исключаем cross-mailbox копии (тот же Message-ID, доставленный
+                // в личный ящик менеджера) — как в треде карточки, чтобы
+                // провенанс указывал на ВИДИМОЕ письмо, а не на скрытую копию.
                 $inbound = EmailMessage::query()
                     ->where('related_request_id', $request->id)
                     ->where('direction', MailDirection::Inbound->value)
+                    ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
                     ->orderBy('sent_at')
                     ->get(['id', 'sent_at']);
 
