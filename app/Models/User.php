@@ -46,6 +46,9 @@ class User extends Authenticatable
         // Плановая нагрузка в %; 100 — норма, 50 — в 2 раза меньше, 200 — в 2 раза больше.
         // См. App\Services\Request\AssignmentService::pickWeightedLeastLoadedManager.
         'load_weight',
+        // Персональный порядок писем в табе «Переписка»: 'asc' (старые сверху)
+        // или 'desc' (новые сверху). Применяется ко всем заявкам пользователя.
+        'thread_sort_order',
     ];
 
     /**

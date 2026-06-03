@@ -1266,16 +1266,24 @@
                         <h3>Переписка</h3>
                         <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $tabs['thread']['count'] }}</span>
                         <span class="flex-1"></span>
+                        @if(! $thread->isEmpty())
+                            {{-- Порядок писем (персональная настройка, сохраняется per-user). --}}
+                            <button type="button" wire:click="toggleThreadSort" class="btn btn-sm mr-2"
+                                    title="Порядок писем в переписке — переключить (сохраняется в ваших настройках, применяется ко всем заявкам)">
+                                {{ $threadSort === 'desc' ? 'Сначала новые ↓' : 'Сначала старые ↑' }}
+                            </button>
+                        @endif
                         @if($email?->mailbox)
                             <span class="text-[11.5px] text-fg-3">канал: {{ $email->mailbox->email }} ↔ {{ $req->client_email }}</span>
                         @endif
                     </div>
 
-                    @if($thread->isEmpty())
+                    @php $orderedThread = $threadSort === 'desc' ? $thread->reverse() : $thread; @endphp
+                    @if($orderedThread->isEmpty())
                         <div class="ds-card-body text-sm text-fg-3">Заявка создана не из e-mail.</div>
                     @else
                         <div>
-                            @foreach($thread as $msg)
+                            @foreach($orderedThread as $msg)
                                 @php
                                     $isOutbound = $msg->direction === MailDirection::Outbound;
                                     $authorName = $msg->from_name ?: $msg->from_email;

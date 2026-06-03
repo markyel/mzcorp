@@ -47,6 +47,13 @@ class Detail extends Component
     public string $tab = 'overview';
 
     /**
+     * Персональный порядок писем в табе «Переписка»: 'asc' (старые сверху,
+     * дефолт) / 'desc' (новые сверху, как в почтовых клиентах). Инициализируется
+     * из users.thread_sort_order, переключается кнопкой и сохраняется per-user.
+     */
+    public string $threadSort = 'asc';
+
+    /**
      * Priority 1: toggle «Показать удалённые позиции» в табе «Позиции».
      * Soft-deleted items (is_active=false) по умолчанию скрыты, в hero
      * не учитываются. При toggle=true рендерим серой строкой с кнопкой
@@ -89,6 +96,11 @@ class Detail extends Component
         if (! $isPrivileged && $request->assigned_user_id !== $user?->id) {
             abort(403, 'Эта заявка назначена другому менеджеру.');
         }
+
+        // Персональный порядок писем в «Переписке».
+        $this->threadSort = in_array($user?->thread_sort_order, ['asc', 'desc'], true)
+            ? $user->thread_sort_order
+            : 'asc';
 
         $this->request = $request->load([
             'assignedUser:id,name,email',
@@ -946,6 +958,16 @@ class Detail extends Component
     public function toggleStickyItems(): void
     {
         $this->includeStickyItems = ! $this->includeStickyItems;
+    }
+
+    /**
+     * Переключить порядок писем в «Переписке» (старые/новые сверху) и сохранить
+     * выбор в настройках пользователя — он применится во всех заявках.
+     */
+    public function toggleThreadSort(): void
+    {
+        $this->threadSort = $this->threadSort === 'asc' ? 'desc' : 'asc';
+        auth()->user()?->forceFill(['thread_sort_order' => $this->threadSort])->save();
     }
 
     /**
