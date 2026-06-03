@@ -446,13 +446,13 @@ class Index extends Component
             RequestStatus::Pending->value,
             RequestStatus::Paid->value,
         ];
-        // «Просрочено» считаем так же, как чип в пуле (Pool::bucketCounts['overdue']),
-        // чтобы цифра на дашборде совпадала со списком при клике: исключаем
-        // attention_reason=client_replied — это отдельный сигнал «клиент ответил»,
-        // не SLA-просрочка.
+        // «Просрочено» = СТРОГО SLA-просрочка (истёкший дедлайн), как чип в пуле
+        // (Pool::bucketCounts['overdue']) — совпадает со списком при клике.
+        // Событийные attention (fresh_assignment, client_replied, postponed_resume)
+        // тоже level=1, но это не просрочка → берём только reason=sla_breach.
         $overdue = (clone $base)
             ->where('attention_level', 1)
-            ->where('attention_reason', '!=', \App\Enums\AttentionReason::ClientReplied->value)
+            ->where('attention_reason', \App\Enums\AttentionReason::SlaBreach->value)
             ->whereNotIn('status', $silent)
             ->count();
         $dueToday = (clone $base)

@@ -381,13 +381,14 @@ class Pool extends Component
         $bucketStatuses = $this->statusesForBucket();
         $query->whereIn('status', $bucketStatuses);
 
-        // Phase 1.11: bucket=overdue — только просроченные (attention_level=1).
-        // ClientReplied имеет attention_level=1 (немедленный показ), но это
-        // не алярм — исключаем из overdue bucket. Менеджер увидит ClientReplied
-        // в обычном bucket=active (amber-подсветка строки).
+        // Phase 1.11 + 2026-06-03: bucket=overdue — СТРОГО SLA-просрочка.
+        // «Просрочено» = истёкший дедлайн (attention_reason=sla_breach + level=1).
+        // Событийные сигналы (fresh_assignment «новая назначенная», client_replied
+        // «клиент ответил», postponed_resume) тоже имеют level=1, но это НЕ
+        // просрочка — их менеджер видит в active-пуле, в overdue не показываем.
         if ($this->bucket === 'overdue') {
             $query->where('attention_level', 1)
-                ->where('attention_reason', '!=', \App\Enums\AttentionReason::ClientReplied->value);
+                ->where('attention_reason', \App\Enums\AttentionReason::SlaBreach->value);
         }
 
         // Постпродажа: closed_won заявки с непрочитанным постпродажным письмом.
@@ -543,7 +544,7 @@ class Pool extends Component
                 ->count(),
             'overdue' => (clone $countsBase)
                 ->where('attention_level', 1)
-                ->where('attention_reason', '!=', \App\Enums\AttentionReason::ClientReplied->value)
+                ->where('attention_reason', \App\Enums\AttentionReason::SlaBreach->value)
                 ->whereIn('status', array_filter(
                     $openValues,
                     fn ($v) => $this->canSeeAll || $v !== RequestStatus::Pending->value,
