@@ -805,6 +805,13 @@
                                         <span class="dot"></span>{{ $badge['icon'] ? $badge['icon'].' ' : '' }}{{ $badge['label'] }}
                                     </span>
                                 </div>
+                                {{-- Для закрытых заявок (успех/потеря) — дата и время
+                                     закрытия (как в карточке). --}}
+                                @if($req->status->isTerminal() && $req->closed_at)
+                                    <div class="text-[11px] mt-0.5 text-[var(--fg-3)] tnum" title="Дата закрытия">
+                                        {{ $req->closed_at->format('d.m.Y H:i') }}
+                                    </div>
+                                @endif
                                 {{-- Не рендерим activity-строку если она дублирует
                                      статус-чип (например status=Invoiced +
                                      activity=InvoiceSent → оба «Счёт отправлен»).
