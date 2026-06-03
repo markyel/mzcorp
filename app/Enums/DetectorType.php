@@ -24,6 +24,10 @@ enum DetectorType: string
     case InboundInvoiceRequest = 'inbound_invoice_request';
     case InboundDecline = 'inbound_decline';
     case InboundClarificationResponse = 'inbound_clarification_response';
+    // Клиент в ответе по заявке с КП/счётом просит ДОБАВИТЬ позиции к той же
+    // сделке (расширение). Заявку возвращаем «в работу» (InProgress), чтобы
+    // менеджер пересобрал КП/счёт на расширенный состав.
+    case InboundExtension = 'inbound_extension';
     case InboundUnclear = 'inbound_unclear';
 
     public function label(): string
@@ -39,6 +43,7 @@ enum DetectorType: string
             self::InboundInvoiceRequest => 'Клиент: запросил счёт',
             self::InboundDecline => 'Клиент: отказ',
             self::InboundClarificationResponse => 'Клиент: ответ на уточнение',
+            self::InboundExtension => 'Клиент: добавил позиции',
             self::InboundUnclear => 'Клиент: непонятно',
         };
     }
@@ -71,6 +76,7 @@ enum DetectorType: string
             self::InboundInvoiceRequest => RequestStatus::AwaitingInvoice,
             self::InboundDecline => RequestStatus::ClosedLost,
             self::InboundClarificationResponse => RequestStatus::InProgress,
+            self::InboundExtension => RequestStatus::InProgress,
             self::InboundUnclear => null,
         };
     }

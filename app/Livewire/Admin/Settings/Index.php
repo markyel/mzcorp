@@ -323,6 +323,13 @@ class Index extends Component
                 'type' => AppSetting::TYPE_BOOL,
                 'default' => false,
             ],
+            'detector.auto_mode.inbound_extension' => [
+                'group' => 'DocumentDetector · auto-mode',
+                'label' => 'Auto: Клиент добавил позиции → in_progress',
+                'help' => 'Автоматически возвращать заявку с КП/счётом в «В работе», если клиент в ответе запросил новые позиции (расширение сделки). По умолчанию — только подсказка менеджеру.',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
         ];
     }
 

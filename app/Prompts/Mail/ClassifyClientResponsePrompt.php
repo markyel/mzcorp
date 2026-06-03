@@ -11,12 +11,14 @@ use App\Models\Request;
  * (Foundation §7.2). Дёргается только если письмо привязано к Request
  * в статусе quoted / under_review / postponed_until / awaiting_clarification.
  *
- * 6 типов intent (Foundation §7.2 + inbound_unclear fallback):
+ * 8 типов intent (Foundation §7.2 + inbound_unclear fallback):
  *   • under_review_acknowledgment
  *   • postponement_request (+ извлекаем дату клиента, если есть)
  *   • invoice_request
  *   • decline_with_reason (+ извлекаем reason taxonomy + цитата)
  *   • clarification_response (только если статус был awaiting_clarification)
+ *   • additional_items — клиент добавляет позиции к этой же сделке (расширение)
+ *   • new_request — отдельная новая заявка в том же треде
  *   • unclear — алерт менеджеру, без auto-перехода
  *
  * Используем gpt-4o-mini — простая классификация, short body.
@@ -38,10 +40,34 @@ class ClassifyClientResponsePrompt
         $fromEmail = (string) ($message->from_email ?? '');
         $fromName = (string) ($message->from_name ?? '');
 
+        // Текущие позиции заявки — нужны, чтобы отличить «расширение той же
+        // сделки» (additional_items) от «отдельной новой заявки в том же
+        // треде» (new_request): новые позиции тематически связаны со старыми
+        // и/или клиент явно просит добавить к этому же заказу/КП/счёту.
+        $items = $request->relationLoaded('items')
+            ? $request->items
+            : $request->items()->where('is_active', true)->orderBy('position')->get();
+        $positionsBlock = '';
+        foreach ($items as $it) {
+            if (isset($it->is_active) && ! $it->is_active) {
+                continue;
+            }
+            $positionsBlock .= '- ' . trim(implode(' · ', array_filter([
+                $it->parsed_name,
+                $it->parsed_brand,
+                $it->parsed_article,
+            ]))) . "\n";
+        }
+        if ($positionsBlock === '') {
+            $positionsBlock = "(позиций нет)\n";
+        }
+
         $userPrompt = "## КОНТЕКСТ ЗАЯВКИ\n"
             . "Internal code: {$request->internal_code}\n"
             . "Текущий статус: {$request->status->value} ({$request->status->label()})\n"
             . "Клиент: " . ($request->client_name ?: $request->client_email) . "\n"
+            . "Тема заявки: " . ((string) ($request->subject ?? '')) . "\n"
+            . "Позиции в этой заявке:\n{$positionsBlock}"
             . "\n"
             . "## ВХОДЯЩЕЕ ПИСЬМО\n"
             . "From: {$fromName} <{$fromEmail}>\n"
@@ -133,6 +159,28 @@ class ClassifyClientResponsePrompt
    (out-of-office, благодарность, риторический вопрос, общая переписка).
    Менеджеру покажем алерт, статус не двигаем.
 
+7. additional_items — клиент просит ДОБАВИТЬ новые позиции к ЭТОЙ ЖЕ сделке
+   (расширение текущей заявки). Признаки: новые позиции тематически связаны
+   с уже имеющимися (то же оборудование/объект/бренд), и/или клиент явно
+   хочет ОБЩЕЕ предложение/счёт на всё вместе.
+   • «Добавьте ещё, пожалуйста, вот эту деталь к заказу»
+   • «И ещё нужен <позиция> — посчитайте вместе с предыдущим»
+   • «К той же заявке добавьте 5 шт <артикул>, счёт хочу на всё одним»
+   Заявку вернём «в работу» (in_progress), менеджер пересоберёт КП/счёт.
+
+8. new_request — в письме СОВЕРШЕННО НОВАЯ заявка, не связанная с текущей,
+   просто отправленная в том же треде (клиент ответил на старое письмо, но
+   спрашивает про другое оборудование/объект). Признаки: новые позиции НЕ
+   связаны с текущими, нет указания «к этому же заказу», по сути это новый
+   запрос. Создадим ОТДЕЛЬНУЮ заявку, текущую не трогаем.
+   • «Здравствуйте! А ещё подскажите по другому объекту: нужны <совсем другие позиции>»
+   • «Отдельный вопрос, не по этому КП: пришлите цены на <другое>»
+
+   Отличие 7 vs 8: 7 — РАСШИРЕНИЕ той же сделки (общий КП/счёт, связанные
+   позиции); 8 — НЕЗАВИСИМЫЙ новый запрос. Если сомневаешься и позиции явно
+   из другой темы — склоняйся к new_request только при высокой уверенности,
+   иначе additional_items (расширение безопаснее — обратимо разъединением).
+
 ═══ ПРАВИЛА ═══
 
 • Confidence < 0.6 → принудительно меняй intent на unclear.
@@ -148,7 +196,7 @@ class ClassifyClientResponsePrompt
 Строго JSON без markdown:
 
 {
-  "intent": "under_review_acknowledgment | postponement_request | invoice_request | decline_with_reason | clarification_response | unclear",
+  "intent": "under_review_acknowledgment | postponement_request | invoice_request | decline_with_reason | clarification_response | additional_items | new_request | unclear",
   "confidence": 0.0-1.0,
   "reasoning": "1-2 предложения на русском",
   "suggested_resume_date": "ISO8601 или null (только для postponement_request)",

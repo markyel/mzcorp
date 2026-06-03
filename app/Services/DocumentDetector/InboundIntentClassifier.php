@@ -56,7 +56,9 @@ class InboundIntentClassifier
     }
 
     /**
-     * @return ?array{type: DetectorType, confidence: float, payload: array<string, mixed>}
+     * @return ?array{type: ?DetectorType, confidence: float, payload: array<string, mixed>}
+     *   type === null с payload.intent === 'new_request' — сигнал «это отдельная
+     *   новая заявка в треде» (обрабатывает MailRouter, не AiDecisionService).
      */
     public function classify(EmailMessage $message, Request $request): ?array
     {
@@ -106,7 +108,11 @@ class InboundIntentClassifier
         }
 
         $type = $this->intentToDetectorType($intent, $request->status);
-        if ($type === null) {
+
+        // new_request не мапится в DetectorType (это не переход статуса, а
+        // создание ОТДЕЛЬНОЙ заявки). Пробрасываем сигнал через payload.intent —
+        // MailRouter сам разветвит (spin-off). Прочие intent'ы без типа → null.
+        if ($type === null && $intent !== 'new_request') {
             return null;
         }
 
@@ -142,7 +148,7 @@ class InboundIntentClassifier
             'email_message_id' => $message->id,
             'request_id' => $request->id,
             'intent' => $intent,
-            'type' => $type->value,
+            'type' => $type?->value,
             'confidence' => $confidence,
         ]);
 
@@ -161,7 +167,9 @@ class InboundIntentClassifier
             'invoice_request' => DetectorType::InboundInvoiceRequest,
             'decline_with_reason' => DetectorType::InboundDecline,
             'clarification_response' => DetectorType::InboundClarificationResponse,
+            'additional_items' => DetectorType::InboundExtension,
             'unclear' => DetectorType::InboundUnclear,
+            // 'new_request' намеренно не мапится — обрабатывается отдельно.
             default => null,
         };
     }

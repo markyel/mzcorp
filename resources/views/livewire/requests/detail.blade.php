@@ -669,6 +669,7 @@
                             'inbound_invoice_request' => '💵',
                             'inbound_decline' => '⊘',
                             'inbound_clarification_response' => '↩',
+                            'inbound_extension' => '➕',
                             default => '🤖',
                         };
                     @endphp

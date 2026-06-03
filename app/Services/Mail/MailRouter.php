@@ -30,6 +30,13 @@ use Illuminate\Support\Facades\Log;
  */
 class MailRouter
 {
+    /**
+     * Порог уверенности LLM, при котором ответ в треде разворачивается в
+     * ОТДЕЛЬНУЮ новую заявку (intent=new_request). Ниже — линкуем к текущей
+     * заявке как обычный reply (безопаснее: расширение обратимо разъединением).
+     */
+    private const NEW_REQUEST_CONFIDENCE = 0.8;
+
     public function __construct(
         private readonly MailRoutingRuleEngine $engine,
         private readonly MailLabelService $labels,
@@ -311,6 +318,49 @@ class MailRouter
                     'error' => $e->getMessage(),
                 ]);
             }
+
+            // Foundation §7.2 + расширение vs новая заявка: классифицируем
+            // intent ОДИН раз ЗДЕСЬ (до парсинга), чтобы при new_request успеть
+            // развернуть письмо в ОТДЕЛЬНУЮ заявку ДО того, как парсер добавит
+            // позиции в текущую. Результат переиспользуем ниже для
+            // recordSuggestion (повторного LLM-вызова нет).
+            $intentResult = null;
+            if ($this->inboundClassifier->isApplicable($linkedRequest)) {
+                try {
+                    $intentResult = $this->inboundClassifier->classify($message->fresh(), $linkedRequest);
+                } catch (\Throwable $e) {
+                    Log::warning('MailRouter: inbound intent classifier failed (non-fatal)', [
+                        'email_message_id' => $message->id,
+                        'request_id' => $linkedRequest->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            // new_request: клиент прислал СОВЕРШЕННО НОВУЮ заявку в старом треде.
+            // Разворачиваем письмо в отдельную Request (с авто-назначением),
+            // текущую не трогаем и выходим. Гейт: сигналы позиций (shouldParse) +
+            // порог уверенности. Ошибка LLM обратима (merge назад).
+            if ($shouldParse
+                && ($intentResult['payload']['intent'] ?? null) === 'new_request'
+                && (float) ($intentResult['confidence'] ?? 0) >= self::NEW_REQUEST_CONFIDENCE
+            ) {
+                try {
+                    $new = app(\App\Services\Request\RequestExtensionService::class)
+                        ->spinOffNewRequest($message, $linkedRequest);
+                    if ($new !== null) {
+                        return;
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('MailRouter: new_request spin-off failed (fallback to reply)', [
+                        'email_message_id' => $message->id,
+                        'request_id' => $linkedRequest->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+                // спин-офф не удался — продолжаем как обычный reply ниже.
+            }
+
             if ($shouldParse) {
                 \App\Jobs\Mail\ParseRequestItemsJob::dispatch($message->id, true);
             }
@@ -372,23 +422,21 @@ class MailRouter
                 ]);
             }
 
-            // Phase 4 (Foundation §7.2): inbound intent classifier.
-            // Запускаем только для статусов где имеет смысл (quoted /
-            // under_review / postponed / awaiting_clarification).
-            if ($this->inboundClassifier->isApplicable($linkedRequest)) {
+            // Phase 4 (Foundation §7.2): записываем suggestion по intent'у,
+            // классифицированному ВЫШЕ (до парсинга). type === null — это
+            // new_request, не развёрнутый в новую заявку (низкая уверенность
+            // или сбой spin-off): перехода статуса нет, suggestion не пишем.
+            if ($intentResult !== null && ($intentResult['type'] ?? null) !== null) {
                 try {
-                    $intent = $this->inboundClassifier->classify($message->fresh(), $linkedRequest);
-                    if ($intent !== null) {
-                        $this->aiDecisions->recordSuggestion(
-                            $intent['type'],
-                            $linkedRequest,
-                            $message,
-                            (float) $intent['confidence'],
-                            $intent['payload'],
-                        );
-                    }
+                    $this->aiDecisions->recordSuggestion(
+                        $intentResult['type'],
+                        $linkedRequest,
+                        $message,
+                        (float) $intentResult['confidence'],
+                        $intentResult['payload'],
+                    );
                 } catch (\Throwable $e) {
-                    Log::warning('MailRouter: inbound intent classifier failed (non-fatal)', [
+                    Log::warning('MailRouter: recordSuggestion failed (non-fatal)', [
                         'email_message_id' => $message->id,
                         'request_id' => $linkedRequest->id,
                         'error' => $e->getMessage(),
