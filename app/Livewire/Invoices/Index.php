@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\Invoices\InvoiceService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -49,6 +50,17 @@ class Index extends Component
     /** Confirm-state для cancel: id invoice, reason. */
     public ?int $cancellingInvoiceId = null;
     public string $cancellationReason = '';
+
+    /* --- Массовая оплата по списку номеров --- */
+    public bool $bulkOpen = false;
+    public string $bulkNumbers = '';
+    public bool $bulkPreviewed = false;
+    /** @var array<int, array<string, mixed>> найденные счета для превью */
+    public array $bulkFound = [];
+    /** @var array<int, string> номера из списка без совпадений */
+    public array $bulkNotFound = [];
+    /** @var array<int, int> id выбранных к оплате счетов */
+    public array $bulkSelectedIds = [];
 
     public function mount(): void
     {
@@ -174,6 +186,154 @@ class Index extends Component
         $this->dispatch('toast', message: "Счёт №{$invoice->invoice_number} аннулирован.", type: 'success');
         $this->cancellingInvoiceId = null;
         $this->cancellationReason = '';
+    }
+
+    /* --------------------------- Массовая оплата ---------------------------- */
+
+    public function openBulk(): void
+    {
+        $this->resetBulk();
+        $this->bulkOpen = true;
+    }
+
+    public function closeBulk(): void
+    {
+        $this->bulkOpen = false;
+        $this->resetBulk();
+    }
+
+    public function backToBulkInput(): void
+    {
+        $this->bulkPreviewed = false;
+        $this->bulkFound = [];
+        $this->bulkNotFound = [];
+        $this->bulkSelectedIds = [];
+    }
+
+    private function resetBulk(): void
+    {
+        $this->bulkNumbers = '';
+        $this->bulkPreviewed = false;
+        $this->bulkFound = [];
+        $this->bulkNotFound = [];
+        $this->bulkSelectedIds = [];
+    }
+
+    /**
+     * Шаг 1→2: распарсить номера, найти счета, категоризировать и предвыбрать
+     * подходящие к оплате (Pending/Expired + есть права).
+     */
+    public function previewBulk(): void
+    {
+        // Парсинг: переносы строк / запятые / точки с запятой; trim; dedupe по lower-case.
+        $raw = preg_split('/[\r\n,;]+/u', $this->bulkNumbers) ?: [];
+        $numbers = [];
+        foreach ($raw as $n) {
+            $n = trim($n);
+            if ($n !== '') {
+                $numbers[mb_strtolower($n)] = $n; // ключ — lower, значение — оригинал
+            }
+        }
+        if ($numbers === []) {
+            $this->dispatch('toast', message: 'Вставьте хотя бы один номер счёта.', type: 'error');
+            return;
+        }
+
+        $query = Invoice::query()
+            ->with(['request:id,internal_code,assigned_user_id', 'request.assignedUser:id,name'])
+            ->whereIn(DB::raw('lower(invoice_number)'), array_keys($numbers));
+
+        // Менеджер находит только счета своих заявок (как scope «mine») — чужие
+        // не показываем (попадут в «не найдено», без утечки существования).
+        if (! $this->canSeeAll()) {
+            $uid = auth()->id();
+            $query->whereHas('request', fn ($r) => $r->where('assigned_user_id', $uid));
+        }
+
+        $invoices = $query->orderBy('invoice_number')->orderByDesc('id')->get();
+
+        $found = [];
+        $selected = [];
+        $matchedLower = [];
+        foreach ($invoices as $inv) {
+            $matchedLower[mb_strtolower((string) $inv->invoice_number)] = true;
+            $status = $inv->status;
+            $canAct = $this->canAct($inv);
+            $payable = in_array($status, InvoiceService::PAYABLE_STATUSES, true);
+            $eligible = $canAct && $payable;
+            $reason = '';
+            if (! $canAct) {
+                $reason = 'нет прав';
+            } elseif (! $payable) {
+                $reason = match ($status) {
+                    InvoiceStatus::Paid => 'уже оплачен',
+                    InvoiceStatus::Cancelled => 'аннулирован',
+                    default => 'недоступен',
+                };
+            }
+
+            $found[] = [
+                'id' => $inv->id,
+                'invoice_number' => $inv->invoice_number,
+                'request_code' => $inv->request?->internal_code,
+                'status' => $status->value,
+                'status_label' => $status->label(),
+                'manager' => $inv->request?->assignedUser?->name,
+                'amount' => $inv->amount_snapshot !== null ? (string) $inv->amount_snapshot : null,
+                'eligible' => $eligible,
+                'reason' => $reason,
+            ];
+            if ($eligible) {
+                $selected[] = $inv->id;
+            }
+        }
+
+        $notFound = [];
+        foreach ($numbers as $lower => $original) {
+            if (! isset($matchedLower[$lower])) {
+                $notFound[] = $original;
+            }
+        }
+
+        $this->bulkFound = $found;
+        $this->bulkNotFound = $notFound;
+        $this->bulkSelectedIds = $selected;
+        $this->bulkPreviewed = true;
+    }
+
+    /**
+     * Шаг 2: пометить выбранные счета оплаченными. Повторно проверяем права и
+     * статус (защита от гонки и подмены id), затем bulkMarkPaid.
+     */
+    public function confirmBulk(InvoiceService $service): void
+    {
+        if ($this->bulkSelectedIds === []) {
+            $this->dispatch('toast', message: 'Не выбрано ни одного счёта.', type: 'error');
+            return;
+        }
+
+        $invoices = Invoice::with('request')
+            ->whereKey($this->bulkSelectedIds)
+            ->get()
+            ->filter(fn (Invoice $inv) => $this->canAct($inv)
+                && in_array($inv->status, InvoiceService::PAYABLE_STATUSES, true));
+
+        if ($invoices->isEmpty()) {
+            $this->dispatch('toast', message: 'Нет счетов, доступных к оплате.', type: 'error');
+            return;
+        }
+
+        $result = $service->bulkMarkPaid($invoices, auth()->user());
+
+        $failedCount = count($result['failed']);
+        $msg = "Оплачено счетов: {$result['paid']}";
+        if ($failedCount > 0) {
+            $msg .= " · с ошибкой: {$failedCount}";
+        }
+        $this->dispatch('toast', message: $msg, type: $result['paid'] > 0 ? 'success' : 'error');
+
+        $this->bulkOpen = false;
+        $this->resetBulk();
     }
 
     /* ------------------------------ Computed -------------------------------- */

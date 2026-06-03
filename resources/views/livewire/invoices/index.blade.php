@@ -5,6 +5,8 @@
             <h3>Счета</h3>
             <span class="text-[12px] text-fg-3 ml-2">Учёт выставленных счетов и оплат</span>
             <span class="flex-1"></span>
+            <button type="button" wire:click="openBulk" class="btn btn-sm mr-3"
+                    title="Отметить оплаченными несколько счетов по списку номеров">✓ Массовая оплата</button>
             <span class="text-[11.5px] text-fg-3 mono">{{ $this->invoices->total() }} счетов</span>
         </div>
 
@@ -232,4 +234,97 @@
             @endif
         @endif
     </div>
+
+    {{-- ============== Массовая оплата по списку номеров ============== --}}
+    @if($bulkOpen)
+        <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 24px;"
+             wire:mousedown.self="closeBulk">
+            {{-- Карта: фикс. высота, шапка/подвал не скроллятся, тело прокручивается. --}}
+            <div class="ds-card p-0 w-full max-w-[720px] max-h-[85vh] flex flex-col overflow-hidden" wire:click.stop>
+                {{-- Шапка --}}
+                <div class="px-5 pt-5 pb-3 border-b border-border-subtle shrink-0">
+                    <h3 class="text-[15px] font-semibold text-fg-1 mb-1">Массовая оплата счетов</h3>
+                    <div class="text-[12px] text-fg-3">
+                        Вставьте номера счетов — система найдёт совпадения и отметит выбранные оплаченными
+                        (заявки перейдут в статус «Оплачено»). Оплатить можно счета в статусе «Ожидает» и «Истёк».
+                    </div>
+                </div>
+
+                @if(! $bulkPreviewed)
+                    {{-- Шаг 1: ввод номеров --}}
+                    <form wire:submit="previewBulk" class="flex flex-col min-h-0 flex-1">
+                        <div class="px-5 py-3 overflow-y-auto flex-1 min-h-0">
+                            <label class="block text-[11.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">
+                                Номера счетов
+                                <span class="text-fg-4 normal-case font-normal">— по одному в строке (или через запятую)</span>
+                            </label>
+                            <textarea wire:model="bulkNumbers" rows="8"
+                                      placeholder="МЗ-5687&#10;МЗ-5688&#10;МЗ-5690"
+                                      class="w-full px-3 py-2 border border-border rounded-md bg-surface text-[13px] mono outline-none focus:border-[var(--sky-500)] resize-y"></textarea>
+                        </div>
+                        <div class="px-5 py-3 flex items-center gap-2 border-t border-border-subtle shrink-0">
+                            <button type="submit" class="btn btn-primary">Найти счета</button>
+                            <button type="button" wire:click="closeBulk" class="btn">Отмена</button>
+                        </div>
+                    </form>
+                @else
+                    {{-- Шаг 2: превью + подтверждение --}}
+                    @php
+                        $eligibleCount = collect($bulkFound)->where('eligible', true)->count();
+                        $skipCount = count($bulkFound) - $eligibleCount;
+                    @endphp
+                    <div class="px-5 py-3 overflow-y-auto flex-1 min-h-0 space-y-4">
+                        {{-- Сводка --}}
+                        <div class="text-[12.5px] text-fg-2">
+                            Найдено: <span class="font-semibold">{{ count($bulkFound) }}</span> ·
+                            к оплате: <span class="font-semibold text-[var(--emerald-700)]">{{ $eligibleCount }}</span> ·
+                            пропуск: <span class="font-semibold text-fg-3">{{ $skipCount }}</span> ·
+                            не найдено: <span class="font-semibold text-fg-3">{{ count($bulkNotFound) }}</span>
+                        </div>
+
+                        {{-- Найденные счета --}}
+                        @if(count($bulkFound) > 0)
+                            <div class="border border-border rounded-md divide-y divide-border-subtle max-h-[44vh] overflow-y-auto">
+                                @foreach($bulkFound as $row)
+                                    <label class="flex items-center gap-2.5 px-3 py-2 text-[12.5px] {{ $row['eligible'] ? 'cursor-pointer hover:bg-[var(--bg-hover)]' : 'opacity-60' }}">
+                                        <input type="checkbox" value="{{ $row['id'] }}"
+                                               wire:model="bulkSelectedIds"
+                                               @disabled(! $row['eligible'])>
+                                        <span class="mono text-fg-1 font-medium min-w-[120px]">{{ $row['invoice_number'] }}</span>
+                                        <span class="chip {{ $this->statusChipClass($row['status']) }}"><span class="dot"></span>{{ $row['status_label'] }}</span>
+                                        <span class="text-fg-3 truncate flex-1">
+                                            @if($row['request_code']) {{ $row['request_code'] }} @endif
+                                            @if($row['manager']) · {{ $row['manager'] }} @endif
+                                            @if($row['amount']) · {{ number_format((float) $row['amount'], 2, ',', ' ') }} ₽ @endif
+                                        </span>
+                                        @if(! $row['eligible'])
+                                            <span class="text-[11px] text-amber-700 whitespace-nowrap">{{ $row['reason'] }}</span>
+                                        @endif
+                                    </label>
+                                @endforeach
+                            </div>
+                        @endif
+
+                        {{-- Не найдено --}}
+                        @if(count($bulkNotFound) > 0)
+                            <div>
+                                <div class="text-[11.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Не найдено</div>
+                                <div class="text-[12px] text-fg-3 mono break-words">{{ implode(', ', $bulkNotFound) }}</div>
+                            </div>
+                        @endif
+                    </div>
+
+                    <div class="px-5 py-3 flex items-center gap-2 border-t border-border-subtle shrink-0">
+                        <button type="button"
+                                wire:click="confirmBulk"
+                                wire:confirm="Отметить выбранные счета ({{ count($bulkSelectedIds) }}) как оплаченные? Заявки перейдут в статус «Оплачено»."
+                                class="btn btn-primary"
+                                @disabled(empty($bulkSelectedIds))>Отметить оплаченными ({{ count($bulkSelectedIds) }})</button>
+                        <button type="button" wire:click="backToBulkInput" class="btn">← Назад</button>
+                        <button type="button" wire:click="closeBulk" class="btn">Отмена</button>
+                    </div>
+                @endif
+            </div>
+        </div>
+    @endif
 </div>

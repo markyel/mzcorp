@@ -363,13 +363,21 @@ class InvoiceService
     }
 
     /**
+     * Статусы, из которых счёт можно пометить оплаченным.
+     * Pending — обычная оплата; Expired — оплата с опозданием (клиент заплатил
+     * после истечения срока, заявку всё равно закрываем оплатой).
+     * Paid/Cancelled — терминальные, повторно не оплачиваем.
+     */
+    public const PAYABLE_STATUSES = [InvoiceStatus::Pending, InvoiceStatus::Expired];
+
+    /**
      * Пометить счёт оплаченным + перевести Request → Paid.
      */
     public function markPaid(Invoice $invoice, User $author): Invoice
     {
-        if ($invoice->status !== InvoiceStatus::Pending) {
+        if (! in_array($invoice->status, self::PAYABLE_STATUSES, true)) {
             throw new \DomainException(sprintf(
-                'Нельзя оплатить счёт в статусе %s. Допустимо только pending.',
+                'Нельзя оплатить счёт в статусе %s. Допустимо только pending или expired.',
                 $invoice->status->value
             ));
         }
@@ -405,6 +413,35 @@ class InvoiceService
 
             return $invoice->fresh();
         });
+    }
+
+    /**
+     * Массовая оплата: помечает оплаченными переданные счета (каждый — через
+     * markPaid, со своей транзакцией и переводом заявки в Paid). Авторизацию
+     * НЕ проверяет — вызывающий обязан передать только доступные счета. Ошибки
+     * по отдельному счёту (например, статус уже не payable) не валят весь батч.
+     *
+     * @param  iterable<\App\Models\Invoice>  $invoices
+     * @return array{paid: int, failed: array<int, array{number: string, error: string}>}
+     */
+    public function bulkMarkPaid(iterable $invoices, User $author): array
+    {
+        $paid = 0;
+        $failed = [];
+
+        foreach ($invoices as $invoice) {
+            try {
+                $this->markPaid($invoice, $author);
+                $paid++;
+            } catch (\Throwable $e) {
+                $failed[] = [
+                    'number' => (string) $invoice->invoice_number,
+                    'error' => $e->getMessage(),
+                ];
+            }
+        }
+
+        return ['paid' => $paid, 'failed' => $failed];
     }
 
     /**
