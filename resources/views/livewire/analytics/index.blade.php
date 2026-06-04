@@ -208,7 +208,7 @@
         }
         $segs = array_merge($wonSegs, $lostSegs);
         $pTotal = $pTotWon + $pTotLost;
-        $cx = 110; $cy = 110; $rO = 100; $rI = 58;
+        $vbW = 660; $vbH = 240; $cx = 330; $cy = 120; $rO = 90; $rI = 52;
         $polar = function ($r, $deg) use ($cx, $cy) {
             $a = deg2rad($deg - 90);
             return [round($cx + $r * cos($a), 2), round($cy + $r * sin($a), 2)];
@@ -226,6 +226,39 @@
             $acc += $ang;
         }
         $wonPct = $pTotal > 0 ? round($pTotWon * 100 / $pTotal) : 0;
+
+        // Выноски: для каждого сегмента — точка на внешнем радиусе по середине
+        // угла, локоть наружу, затем к подписи слева/справа. Подписи разносим
+        // по вертикали (de-collision), чтобы не накладывались.
+        $labLeftX = 14; $labRightX = $vbW - 14;
+        $minY = 16; $maxY = $vbH - 16; $gap = 17;
+        $callL = []; $callR = [];
+        foreach ($arcs as $a) {
+            $mid = ($a['start'] + $a['end']) / 2;
+            [$ox, $oy] = $polar($rO, $mid);
+            [$ex, $ey] = $polar($rO + 10, $mid);
+            $c = [
+                'name' => $a['seg']['name'], 'value' => $a['seg']['value'], 'color' => $a['seg']['color'],
+                'ox' => $ox, 'oy' => $oy, 'ex' => $ex, 'ey' => $ey, 'desiredY' => $ey,
+            ];
+            if (cos(deg2rad($mid - 90)) >= 0) { $callR[] = $c; } else { $callL[] = $c; }
+        }
+        $place = function (array $items) use ($minY, $maxY, $gap) {
+            if ($items === []) return $items;
+            usort($items, fn ($a, $b) => $a['desiredY'] <=> $b['desiredY']);
+            $y = $minY - $gap;
+            foreach ($items as $i => $it) { $ny = max($it['desiredY'], $y + $gap); $items[$i]['y'] = $ny; $y = $ny; }
+            $last = $items[count($items) - 1]['y'];
+            if ($last > $maxY) {
+                $shift = $last - $maxY;
+                foreach ($items as $i => $it) { $items[$i]['y'] = max($minY, $it['y'] - $shift); }
+                $y = $minY - $gap;
+                foreach ($items as $i => $it) { $ny = max($it['y'], $y + $gap); $items[$i]['y'] = $ny; $y = $ny; }
+            }
+            return $items;
+        };
+        $callL = $place($callL);
+        $callR = $place($callR);
     @endphp
     <div class="ds-card">
         <div class="ds-card-header">
@@ -236,59 +269,39 @@
             @if($pTotal === 0)
                 <div class="text-center text-fg-3 py-6 text-[13px]">Нет закрытых заявок за период.</div>
             @else
-                <div class="flex flex-wrap items-center gap-6">
-                    <div class="shrink-0 mx-auto sm:mx-0">
-                        <svg viewBox="0 0 220 220" width="220" height="220" style="font-family:var(--font-sans)">
-                            @if(count($segs) === 1)
-                                <circle cx="110" cy="110" r="100" fill="{{ $segs[0]['color'] }}" />
-                                <circle cx="110" cy="110" r="58" fill="var(--bg-surface)" />
-                                <title>{{ $segs[0]['group'] }} · {{ $segs[0]['name'] }}: {{ $segs[0]['value'] }}</title>
-                            @else
-                                @foreach($arcs as $a)
-                                    <path d="{{ $arc($a['start'], $a['end']) }}" fill="{{ $a['seg']['color'] }}" stroke="white" stroke-width="1">
-                                        <title>{{ $a['seg']['group'] }} · {{ $a['seg']['name'] }}: {{ $a['seg']['value'] }}</title>
-                                    </path>
-                                @endforeach
-                            @endif
-                            <text x="110" y="102" text-anchor="middle" font-size="12" fill="#6b7280">Закрыто</text>
-                            <text x="110" y="123" text-anchor="middle" font-size="22" font-weight="700" fill="#111827">{{ $pTotal }}</text>
-                            <text x="110" y="139" text-anchor="middle" font-size="11" fill="#059669">{{ $wonPct }}% успех</text>
-                        </svg>
-                    </div>
-                    <div class="flex-1 min-w-[260px]">
-                        <div class="flex items-center gap-4 mb-2 text-[12.5px]">
-                            <span class="inline-flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm" style="background:#059669"></span><span class="text-fg-1 font-medium">Успех: {{ $pTotWon }}</span></span>
-                            <span class="inline-flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm" style="background:#dc2626"></span><span class="text-fg-1 font-medium">Потеря: {{ $pTotLost }}</span></span>
-                        </div>
-                        <table class="w-full text-[12px]">
-                            <thead class="text-fg-3 text-[10px] uppercase tracking-wider border-b border-border">
-                                <tr>
-                                    <th class="px-2 py-1 text-left">Менеджер</th>
-                                    <th class="px-2 py-1 text-right">Успех</th>
-                                    <th class="px-2 py-1 text-right">Потеря</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach($legend as $lg)
-                                    <tr class="border-b border-border-subtle last:border-b-0">
-                                        <td class="px-2 py-1 text-fg-1">{{ $lg['name'] }}</td>
-                                        <td class="px-2 py-1 text-right">
-                                            <span class="inline-flex items-center gap-1.5 justify-end">
-                                                <span class="w-2.5 h-2.5 rounded-sm" style="background:{{ $lg['g'] }}"></span>
-                                                <span class="mono text-emerald-700">{{ $lg['won'] }}</span>
-                                            </span>
-                                        </td>
-                                        <td class="px-2 py-1 text-right">
-                                            <span class="inline-flex items-center gap-1.5 justify-end">
-                                                <span class="w-2.5 h-2.5 rounded-sm" style="background:{{ $lg['r'] }}"></span>
-                                                <span class="mono text-red-700">{{ $lg['lost'] }}</span>
-                                            </span>
-                                        </td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    </div>
+                <svg viewBox="0 0 {{ $vbW }} {{ $vbH }}" preserveAspectRatio="xMidYMid meet"
+                     style="width:100%;max-width:680px;height:auto;display:block;margin:0 auto;font-family:var(--font-sans)">
+                    @if(count($segs) === 1)
+                        <circle cx="{{ $cx }}" cy="{{ $cy }}" r="{{ $rO }}" fill="{{ $segs[0]['color'] }}" />
+                        <circle cx="{{ $cx }}" cy="{{ $cy }}" r="{{ $rI }}" fill="var(--bg-surface)" />
+                    @else
+                        @foreach($arcs as $a)
+                            <path d="{{ $arc($a['start'], $a['end']) }}" fill="{{ $a['seg']['color'] }}" stroke="white" stroke-width="1">
+                                <title>{{ $a['seg']['group'] }} · {{ $a['seg']['name'] }}: {{ $a['seg']['value'] }}</title>
+                            </path>
+                        @endforeach
+                        {{-- Выноски слева --}}
+                        @foreach($callL as $c)
+                            <polyline points="{{ $c['ox'] }},{{ $c['oy'] }} {{ $c['ex'] }},{{ $c['ey'] }} {{ $labLeftX + 11 }},{{ $c['y'] }}"
+                                      fill="none" stroke="#cbd5e1" stroke-width="1" />
+                            <rect x="{{ $labLeftX }}" y="{{ $c['y'] - 5 }}" width="9" height="9" rx="1.5" fill="{{ $c['color'] }}" />
+                            <text x="{{ $labLeftX + 14 }}" y="{{ $c['y'] + 3.5 }}" text-anchor="start" font-size="11" fill="#374151">{{ $c['name'] }} <tspan font-weight="700" fill="#111827">{{ $c['value'] }}</tspan></text>
+                        @endforeach
+                        {{-- Выноски справа --}}
+                        @foreach($callR as $c)
+                            <polyline points="{{ $c['ox'] }},{{ $c['oy'] }} {{ $c['ex'] }},{{ $c['ey'] }} {{ $labRightX - 11 }},{{ $c['y'] }}"
+                                      fill="none" stroke="#cbd5e1" stroke-width="1" />
+                            <rect x="{{ $labRightX - 9 }}" y="{{ $c['y'] - 5 }}" width="9" height="9" rx="1.5" fill="{{ $c['color'] }}" />
+                            <text x="{{ $labRightX - 14 }}" y="{{ $c['y'] + 3.5 }}" text-anchor="end" font-size="11" fill="#374151"><tspan font-weight="700" fill="#111827">{{ $c['value'] }}</tspan> {{ $c['name'] }}</text>
+                        @endforeach
+                    @endif
+                    <text x="{{ $cx }}" y="{{ $cy - 8 }}" text-anchor="middle" font-size="12" fill="#6b7280">Закрыто</text>
+                    <text x="{{ $cx }}" y="{{ $cy + 13 }}" text-anchor="middle" font-size="22" font-weight="700" fill="#111827">{{ $pTotal }}</text>
+                    <text x="{{ $cx }}" y="{{ $cy + 29 }}" text-anchor="middle" font-size="11" fill="#059669">{{ $wonPct }}% успех</text>
+                </svg>
+                <div class="flex items-center justify-center gap-4 mt-1 text-[12.5px]">
+                    <span class="inline-flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm" style="background:#059669"></span><span class="text-fg-1 font-medium">Успех: {{ $pTotWon }}</span></span>
+                    <span class="inline-flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm" style="background:#dc2626"></span><span class="text-fg-1 font-medium">Потеря: {{ $pTotLost }}</span></span>
                 </div>
             @endif
         </div>
