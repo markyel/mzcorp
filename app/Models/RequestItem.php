@@ -6,6 +6,7 @@ use App\Models\Kb\EquipmentCategory;
 use App\Models\Kb\ManufacturerBrand;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
  * Позиция заявки.
@@ -210,6 +211,29 @@ class RequestItem extends Model
     public function imageAttachment(): BelongsTo
     {
         return $this->belongsTo(EmailAttachment::class, 'image_attachment_id');
+    }
+
+    /**
+     * Все фото, привязанные к позиции (many-to-many). Pivot `is_main`
+     * помечает главное (оно же дублируется в image_attachment_id для
+     * thumbnail-превью), `sort_order` — порядок в галерее. Одно вложение
+     * может быть привязано к нескольким позициям (общий план).
+     *
+     * Сортировка: главное первым, затем по sort_order/id.
+     */
+    public function photos(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            EmailAttachment::class,
+            'request_item_photos',
+            'request_item_id',
+            'email_attachment_id',
+        )
+            ->withPivot(['is_main', 'sort_order'])
+            ->withTimestamps()
+            ->orderByDesc('request_item_photos.is_main')
+            ->orderBy('request_item_photos.sort_order')
+            ->orderBy('request_item_photos.id');
     }
 
     /**

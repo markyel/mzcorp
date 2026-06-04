@@ -679,6 +679,90 @@ class RequestItemEditor
     }
 
     /**
+     * Множественная привязка фото к позиции (мультивыбор + назначение
+     * главного). Заменяет одиночный rebindPhoto в новом UI «Сменить фото».
+     *
+     * Главное фото дублируется в image_attachment_id (денормализация для
+     * существующих thumbnail-превью и метрик) и помечается pivot.is_main.
+     *
+     * @param  array<int, int>  $attachmentIds   выбранные вложения в порядке отображения
+     * @param  ?int             $mainAttachmentId какое из них главное; если не из набора
+     *                          или null — главным станет первое (пустой набор → null)
+     * @throws \DomainException если вложение не относится к письмам заявки
+     */
+    public function syncPhotos(RequestItem $item, array $attachmentIds, ?int $mainAttachmentId, User $author): RequestItem
+    {
+        $this->ensureCanEdit($item, $author);
+
+        // Нормализуем: уникальные положительные int, сохраняя порядок выбора.
+        $ids = [];
+        foreach ($attachmentIds as $aid) {
+            $aid = (int) $aid;
+            if ($aid > 0 && ! in_array($aid, $ids, true)) {
+                $ids[] = $aid;
+            }
+        }
+
+        // Валидация: каждое вложение должно принадлежать входящему письму
+        // треда заявки (триггерное + reply'и) и быть bindable-фото. Закрывает
+        // кросс-заявочную привязку. См. Request::photoSourceMessageIds().
+        if (! empty($ids)) {
+            $messageIds = $item->request?->photoSourceMessageIds() ?? [];
+            if (empty($messageIds)) {
+                throw new \DomainException('У заявки нет привязанного письма — фото менять некуда.');
+            }
+            $validIds = EmailAttachment::query()
+                ->whereIn('email_message_id', $messageIds)
+                ->bindablePhotos()
+                ->whereIn('id', $ids)
+                ->pluck('id')
+                ->all();
+            $validSet = array_flip($validIds);
+            foreach ($ids as $aid) {
+                if (! isset($validSet[$aid])) {
+                    throw new \DomainException('Одно из вложений нельзя привязать: оно не относится к письмам заявки или является inline-картинкой подписи.');
+                }
+            }
+        }
+
+        // Главное: только из набора; иначе первое; пустой набор → null.
+        $mainId = ($mainAttachmentId !== null && in_array((int) $mainAttachmentId, $ids, true))
+            ? (int) $mainAttachmentId
+            : ($ids[0] ?? null);
+
+        $oldIds = $item->photos()->pluck('email_attachments.id')->map(fn ($v) => (int) $v)->all();
+        $oldMain = $item->image_attachment_id;
+
+        DB::transaction(function () use ($item, $ids, $mainId, $author, $oldIds, $oldMain) {
+            $syncData = [];
+            foreach ($ids as $i => $aid) {
+                $syncData[$aid] = [
+                    'is_main' => $aid === $mainId,
+                    'sort_order' => $i,
+                ];
+            }
+            $item->photos()->sync($syncData);
+
+            $item->image_attachment_id = $mainId;
+            $this->appendAudit($item, [
+                'action' => 'sync_photos',
+                'old' => ['photo_ids' => $oldIds, 'main' => $oldMain],
+                'new' => ['photo_ids' => $ids, 'main' => $mainId],
+            ], $author);
+            $item->save();
+        });
+
+        Log::info('RequestItemEditor: photos synced', [
+            'request_item_id' => $item->id,
+            'count' => count($ids),
+            'main' => $mainId,
+            'by' => $author->id,
+        ]);
+
+        return $item->load('photos');
+    }
+
+    /**
      * Foundation §6.2 Phase C — применить enrichment suggestion из
      * LLM-извлечения ответа клиента к позиции (поле parsed_article /
      * parsed_brand / parsed_qty).

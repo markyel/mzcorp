@@ -28,7 +28,17 @@ class ItemPhotoRebindDialog extends Component
 {
     public int $requestId;
     public ?int $requestItemId = null;
-    public ?int $selectedAttachmentId = null;
+
+    /**
+     * Выбранные вложения (в порядке отображения). Несколько фото на позицию.
+     *
+     * @var array<int, int>
+     */
+    public array $selectedIds = [];
+
+    /** Главное фото (id вложения); обязано входить в selectedIds. */
+    public ?int $mainId = null;
+
     public bool $open = false;
 
     public function mount(int $requestId): void
@@ -43,12 +53,30 @@ class ItemPhotoRebindDialog extends Component
             ->where('request_id', $this->requestId)
             ->where('is_active', true)
             ->whereKey($itemId)
+            ->with('photos:id')
             ->first(['id', 'image_attachment_id']);
         if (! $item) {
             return;
         }
         $this->requestItemId = $item->id;
-        $this->selectedAttachmentId = $item->image_attachment_id;
+
+        $selected = $item->photos->pluck('id')->map(fn ($v) => (int) $v)->all();
+        $main = $item->photos->first(fn ($p) => (bool) ($p->pivot->is_main ?? false))?->id;
+
+        // Tolerant: позиция из парсера держит главное фото только в
+        // image_attachment_id, без pivot-строк. Подставляем его как набор.
+        if (empty($selected) && $item->image_attachment_id) {
+            $selected = [(int) $item->image_attachment_id];
+        }
+
+        $this->selectedIds = $selected;
+        $this->mainId = $main
+            ? (int) $main
+            : ($item->image_attachment_id ? (int) $item->image_attachment_id : ($selected[0] ?? null));
+        if ($this->mainId !== null && ! in_array($this->mainId, $this->selectedIds, true)) {
+            $this->mainId = $this->selectedIds[0] ?? null;
+        }
+
         $this->resetErrorBag();
         $this->open = true;
     }
@@ -57,12 +85,46 @@ class ItemPhotoRebindDialog extends Component
     {
         $this->open = false;
         $this->requestItemId = null;
-        $this->selectedAttachmentId = null;
+        $this->selectedIds = [];
+        $this->mainId = null;
     }
 
-    public function selectAttachment(?int $attachmentId): void
+    /**
+     * Тогл выбора фото. Снятие главного переносит «главную» на первое
+     * оставшееся; добавление первого фото делает его главным.
+     */
+    public function toggleAttachment(int $attachmentId): void
     {
-        $this->selectedAttachmentId = $attachmentId;
+        if (in_array($attachmentId, $this->selectedIds, true)) {
+            $this->selectedIds = array_values(array_filter(
+                $this->selectedIds,
+                fn ($v) => (int) $v !== $attachmentId,
+            ));
+            if ($this->mainId === $attachmentId) {
+                $this->mainId = $this->selectedIds[0] ?? null;
+            }
+        } else {
+            $this->selectedIds[] = $attachmentId;
+            if ($this->mainId === null) {
+                $this->mainId = $attachmentId;
+            }
+        }
+    }
+
+    /** Назначить фото главным (заодно включает его в набор). */
+    public function setMain(int $attachmentId): void
+    {
+        if (! in_array($attachmentId, $this->selectedIds, true)) {
+            $this->selectedIds[] = $attachmentId;
+        }
+        $this->mainId = $attachmentId;
+    }
+
+    /** Снять все привязки. */
+    public function clearAll(): void
+    {
+        $this->selectedIds = [];
+        $this->mainId = null;
     }
 
     /**
@@ -139,9 +201,9 @@ class ItemPhotoRebindDialog extends Component
         }
 
         try {
-            $editor->rebindPhoto($item, $this->selectedAttachmentId, auth()->user());
+            $editor->syncPhotos($item, $this->selectedIds, $this->mainId, auth()->user());
         } catch (\DomainException $e) {
-            $this->addError('selectedAttachmentId', $e->getMessage());
+            $this->addError('selectedIds', $e->getMessage());
 
             return;
         }

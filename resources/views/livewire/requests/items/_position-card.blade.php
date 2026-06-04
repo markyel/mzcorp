@@ -146,20 +146,27 @@
         {{-- Image. Если передан galleryItems+galleryIndex (Positions-таб) —
              dispatch'им items+index, чтобы лайтбокс показал стрелки и
              поддержку клавиш ← / →. Иначе — legacy single-image. --}}
+        @php $photoCount = (int) ($item->photos_count ?? 0); @endphp
         @if($itemImgIsImage)
-            <button type="button"
-                    @if(($galleryIndex ?? null) !== null && ! empty($galleryItems ?? null))
-                        x-on:click="$dispatch('open-image', { items: @js($galleryItems), index: {{ $galleryIndex }} })"
-                    @else
-                        x-on:click="$dispatch('open-image', { src: @js($itemPreviewUrl), name: @js($itemImg->filename), dl: @js($itemDownloadUrl) })"
-                    @endif
-                    class="w-10 h-10 border border-border rounded-[6px] overflow-hidden bg-app block shrink-0"
-                    title="{{ $itemImg->filename }} — открыть">
-                <img src="{{ $itemPreviewUrl }}"
-                     alt="{{ $itemImg->filename }}"
-                     loading="lazy"
-                     class="w-10 h-10 object-cover block">
-            </button>
+            <div class="relative w-10 h-10 shrink-0">
+                <button type="button"
+                        @if(($galleryIndex ?? null) !== null && ! empty($galleryItems ?? null))
+                            x-on:click="$dispatch('open-image', { items: @js($galleryItems), index: {{ $galleryIndex }} })"
+                        @else
+                            x-on:click="$dispatch('open-image', { src: @js($itemPreviewUrl), name: @js($itemImg->filename), dl: @js($itemDownloadUrl) })"
+                        @endif
+                        class="w-10 h-10 border border-border rounded-[6px] overflow-hidden bg-app block"
+                        title="{{ $itemImg->filename }}{{ $photoCount > 1 ? ' · фото: ' . $photoCount : '' }} — открыть">
+                    <img src="{{ $itemPreviewUrl }}"
+                         alt="{{ $itemImg->filename }}"
+                         loading="lazy"
+                         class="w-10 h-10 object-cover block">
+                </button>
+                @if($photoCount > 1)
+                    <span class="absolute -bottom-1 -right-1 min-w-[16px] h-[16px] px-[3px] rounded-full bg-[var(--accent)] text-white text-[10px] font-bold leading-[16px] text-center shadow ring-1 ring-[var(--surface)]"
+                          title="Фото у позиции: {{ $photoCount }}">{{ $photoCount }}</span>
+                @endif
+            </div>
         @else
             <div class="w-10 h-10 border border-border rounded-[6px] bg-app flex items-center justify-center text-[9px] text-fg-3 mono shrink-0"
                  title="Без привязки к фото">img</div>

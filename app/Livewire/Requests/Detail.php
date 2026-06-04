@@ -104,7 +104,7 @@ class Detail extends Component
 
         $this->request = $request->load([
             'assignedUser:id,name,email',
-            'items' => fn ($q) => $this->applyItemsFilter($q)->orderBy('position'),
+            'items' => fn ($q) => $this->applyItemsFilter($q)->withCount('photos')->orderBy('position'),
             'items.brand:id,name',
             'items.kbCategory:id,slug,name',
             'items.imageAttachment:id,email_message_id,filename,mime_type,disk,file_path,size_bytes',
@@ -357,7 +357,7 @@ class Detail extends Component
             ->whereKey($this->request->id)
             ->with([
                 'assignedUser:id,name,email',
-                'items' => fn ($q) => $this->applyItemsFilter($q)->orderBy('position'),
+                'items' => fn ($q) => $this->applyItemsFilter($q)->withCount('photos')->orderBy('position'),
                 'items.brand:id,name',
                 'items.kbCategory:id,slug,name',
                 'items.imageAttachment:id,email_message_id,filename,mime_type,disk,file_path,size_bytes',
@@ -1214,6 +1214,7 @@ class Detail extends Component
     #[On('item-edited')]
     #[On('items-changed')]
     #[On('quote-item-rematched')]
+    #[On('item-photo-rebound')]
     public function handleItemChangedEvent(): void
     {
         $this->reloadRequest();

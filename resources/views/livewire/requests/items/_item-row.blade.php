@@ -55,20 +55,27 @@
      style="grid-template-columns: 24px 36px 1fr 110px 90px 100px 110px 56px">
     <span class="mono text-[12px] text-fg-3 text-right">{{ $item->position }}</span>
 
+    @php $photoCount = (int) ($item->photos_count ?? 0); @endphp
     @if($itemImgIsImage)
         @php
             $itemPreviewUrl = route('attachments.preview', $itemImg);
             $itemDownloadUrl = route('attachments.download', $itemImg);
         @endphp
-        <button type="button"
-                x-on:click="$dispatch('open-image', { src: @js($itemPreviewUrl), name: @js($itemImg->filename), dl: @js($itemDownloadUrl) })"
-                class="w-8 h-8 border border-border rounded-sm overflow-hidden bg-app block shrink-0"
-                title="{{ $itemImg->filename }} — открыть">
-            <img src="{{ $itemPreviewUrl }}"
-                 alt="{{ $itemImg->filename }}"
-                 loading="lazy"
-                 class="w-8 h-8 object-cover block">
-        </button>
+        <div class="relative w-8 h-8 shrink-0">
+            <button type="button"
+                    x-on:click="$dispatch('open-image', { src: @js($itemPreviewUrl), name: @js($itemImg->filename), dl: @js($itemDownloadUrl) })"
+                    class="w-8 h-8 border border-border rounded-sm overflow-hidden bg-app block"
+                    title="{{ $itemImg->filename }}{{ $photoCount > 1 ? ' · фото: ' . $photoCount : '' }} — открыть">
+                <img src="{{ $itemPreviewUrl }}"
+                     alt="{{ $itemImg->filename }}"
+                     loading="lazy"
+                     class="w-8 h-8 object-cover block">
+            </button>
+            @if($photoCount > 1)
+                <span class="absolute -bottom-1 -right-1 min-w-[15px] h-[15px] px-[3px] rounded-full bg-[var(--accent)] text-white text-[9.5px] font-bold leading-[15px] text-center shadow ring-1 ring-[var(--surface)]"
+                      title="Фото у позиции: {{ $photoCount }}">{{ $photoCount }}</span>
+            @endif
+        </div>
     @else
         <span class="w-8 h-8 border border-border rounded-sm bg-app flex items-center justify-center text-[9px] text-fg-3"
               title="Без привязки к фото">img</span>
