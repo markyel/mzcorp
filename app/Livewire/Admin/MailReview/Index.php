@@ -4,14 +4,9 @@ namespace App\Livewire\Admin\MailReview;
 
 use App\Enums\EmailCategory;
 use App\Enums\MailDirection;
-use App\Enums\RequestStatus;
-use App\Jobs\Mail\ParseRequestItemsJob;
 use App\Models\EmailMessage;
-use App\Models\Request;
-use App\Services\Request\InternalCodeGenerator;
+use App\Services\Mail\EmailToRequestPromoter;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -74,10 +69,10 @@ class Index extends Component
      * dispatch'им парсер позиций — дальше pipeline идёт обычным путём
      * (RequestItemPersister → autoAssign → MailFolderRouter).
      *
-     * Запись о ручном реоткрытии — в email_messages.detected_artifacts
-     * (как и для DocumentDetector — единое поле под audit AI-overrides).
+     * Общая логика вынесена в EmailToRequestPromoter (используется также на
+     * странице «Почта» — кнопка «Создать заявку из письма»).
      */
-    public function reopenAsRequest(int $emailId, InternalCodeGenerator $codeGen): void
+    public function reopenAsRequest(int $emailId, EmailToRequestPromoter $promoter): void
     {
         $email = EmailMessage::query()
             ->where('direction', MailDirection::Inbound->value)
@@ -86,47 +81,14 @@ class Index extends Component
         if (! $email) {
             return;
         }
-        if ($email->related_request_id) {
-            session()->flash('status', 'Это письмо уже связано с заявкой #' . $email->related_request_id);
+
+        try {
+            $request = $promoter->promote($email, auth()->id(), 'manual_reopen_as_request');
+        } catch (\DomainException $e) {
+            session()->flash('status', $e->getMessage());
 
             return;
         }
-
-        $request = DB::transaction(function () use ($email, $codeGen) {
-            $req = Request::create([
-                'internal_code' => $codeGen->next(),
-                'email_message_id' => $email->id,
-                'status' => RequestStatus::Pending,
-                'client_email' => $email->from_email ?: '',
-                'client_name' => $email->from_name,
-                'subject' => $email->subject,
-            ]);
-            $email->forceFill(['related_request_id' => $req->id])->save();
-
-            // Audit: ручное переоткрытие AI-решения.
-            $existing = is_array($email->detected_artifacts ?? null)
-                ? $email->detected_artifacts
-                : [];
-            $existing[] = [
-                'type' => 'manual_reopen_as_request',
-                'overrode_category' => $email->category,
-                'reopened_at' => now()->toIso8601String(),
-                'reopened_by_user_id' => auth()->id(),
-                'request_id' => $req->id,
-            ];
-            $email->forceFill(['detected_artifacts' => $existing])->save();
-
-            return $req;
-        });
-
-        ParseRequestItemsJob::dispatch($email->id);
-
-        Log::info('MailReview: email reopened as Request', [
-            'email_message_id' => $email->id,
-            'request_id' => $request->id,
-            'overrode_category' => $email->category,
-            'by_user_id' => auth()->id(),
-        ]);
 
         session()->flash('status', sprintf(
             'Создана заявка %s. Парсер позиций запущен.',

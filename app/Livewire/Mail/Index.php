@@ -7,6 +7,7 @@ use App\Enums\MailDirection;
 use App\Enums\Role;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
+use App\Services\Mail\EmailToRequestPromoter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
@@ -125,6 +126,54 @@ class Index extends Component
     public function toggleExpand(int $id): void
     {
         $this->expandedId = ($this->expandedId === $id) ? null : $id;
+    }
+
+    /**
+     * Принудительно создать заявку из входящего письма (ручной override
+     * AI-классификации). Доступно тем же ролям, что и сам раздел «Почта»
+     * (РОП / секретарь / директорат / админ — проверка в mount + здесь).
+     *
+     * Кейс: PostSaleFulfillmentDetector / классификатор ошибочно увёл письмо
+     * в post_sale / irrelevant (например, сработал на слово «комплектация»),
+     * хотя это новая заявка. Кнопка поднимает письмо в Request, дальше —
+     * обычный pipeline (парсер позиций → autoAssign → routing).
+     */
+    public function createRequestFromEmail(int $emailId, EmailToRequestPromoter $promoter): void
+    {
+        $user = auth()->user();
+        abort_unless($user?->hasAnyRole([
+            Role::HeadOfSales->value,
+            Role::Secretary->value,
+            Role::Director->value,
+            Role::Admin->value,
+        ]), 403);
+
+        $email = EmailMessage::query()
+            ->where('direction', MailDirection::Inbound->value)
+            ->whereKey($emailId)
+            ->first();
+        if (! $email) {
+            session()->flash('status', 'Письмо не найдено.');
+
+            return;
+        }
+
+        try {
+            $request = $promoter->promote($email, $user->id, 'manual_create_request_from_mail');
+        } catch (\DomainException $e) {
+            session()->flash('status', $e->getMessage());
+
+            return;
+        }
+
+        // Сбрасываем кэш раскрытого письма — теперь оно связано с заявкой,
+        // блок «Привязано к заявке» отрисуется вместо кнопки.
+        unset($this->expandedEmail);
+
+        session()->flash('status', sprintf(
+            'Создана заявка %s из письма. Парсер позиций запущен.',
+            $request->internal_code,
+        ));
     }
 
     /* ------------------------------ Computed -------------------------------- */
@@ -284,6 +333,7 @@ class Index extends Component
         return match ($category) {
             EmailCategory::ClientRequest->value => 'chip-ok',
             EmailCategory::ThreadReply->value   => 'chip-info',
+            EmailCategory::PostSale->value      => 'chip-warn',
             EmailCategory::Irrelevant->value    => 'chip-paused',
             default                             => 'chip-neutral',
         };

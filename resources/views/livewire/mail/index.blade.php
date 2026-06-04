@@ -1,4 +1,10 @@
 <div class="space-y-4">
+    @if(session('status'))
+        <div class="ds-card px-4 py-2.5 text-[12.5px] text-emerald-800 bg-emerald-50 border border-emerald-300">
+            {{ session('status') }}
+        </div>
+    @endif
+
     {{-- Header + filters --}}
     <div class="ds-card">
         <div class="ds-card-header">
@@ -74,6 +80,7 @@
                 <option value="">🏷 Все категории</option>
                 <option value="client_request">Заявка клиента</option>
                 <option value="thread_reply">Ответ в треде</option>
+                <option value="post_sale">Постпродажная переписка</option>
                 <option value="irrelevant">Не клиентская</option>
                 <option value="unclassified">? Не классиф.</option>
             </select>
@@ -373,7 +380,7 @@
                                                 </div>
                                             @endif
 
-                                            {{-- Link to Request --}}
+                                            {{-- Link to Request / принудительное создание заявки --}}
                                             @if($full->relatedRequest)
                                                 <div class="border-t border-border pt-3 flex items-center gap-2">
                                                     <span class="text-fg-3 text-[12px]">Привязано к заявке:</span>
@@ -384,6 +391,21 @@
                                                         <span class="dot"></span>{{ $full->relatedRequest->internal_code }}
                                                     </a>
                                                     <span class="text-fg-4 text-[11px]">↗ открыть карточку</span>
+                                                </div>
+                                            @elseif($full->direction?->value === 'inbound')
+                                                {{-- Письмо не оформлено как заявка (AI увёл в post_sale /
+                                                     irrelevant / thread_reply). Привилегированный
+                                                     пользователь поднимает его в заявку вручную. --}}
+                                                <div class="border-t border-border pt-3 flex items-center gap-2.5 flex-wrap">
+                                                    <span class="text-fg-3 text-[12px]">Письмо не оформлено как заявка.</span>
+                                                    <button type="button"
+                                                            wire:click="createRequestFromEmail({{ $full->id }})"
+                                                            wire:confirm="Создать заявку из этого письма? Будет создан Request, запущен парсер позиций и автоназначение менеджера."
+                                                            onclick="event.stopPropagation()"
+                                                            class="btn btn-sm btn-primary">+ Создать заявку из письма</button>
+                                                    <span class="text-fg-4 text-[11px]">
+                                                        переопределяет AI-классификацию ({{ $this->categoryLabel($full->category) }})
+                                                    </span>
                                                 </div>
                                             @endif
                                         </div>
