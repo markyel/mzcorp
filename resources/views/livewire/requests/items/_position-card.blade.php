@@ -163,7 +163,7 @@
                          class="w-10 h-10 object-cover block">
                 </button>
                 @if($photoCount > 1)
-                    <span class="absolute -bottom-1 -right-1 min-w-[16px] h-[16px] px-[3px] rounded-full bg-[var(--accent)] text-white text-[10px] font-bold leading-[16px] text-center shadow ring-1 ring-[var(--surface)]"
+                    <span class="absolute bottom-0 right-0 translate-x-1/3 translate-y-1/3 min-w-[16px] h-[16px] px-[3px] rounded-full bg-[var(--accent)] text-white text-[10px] font-bold leading-[16px] text-center shadow ring-1 ring-[var(--surface)]"
                           title="Фото у позиции: {{ $photoCount }}">{{ $photoCount }}</span>
                 @endif
             </div>
