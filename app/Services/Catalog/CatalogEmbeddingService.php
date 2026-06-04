@@ -683,6 +683,7 @@ class CatalogEmbeddingService
                   AND (
                        lower(sku) ILIKE ANY (?::text[])
                        OR regexp_replace(lower(name), '[\\-_./,]', '', 'g') ILIKE ANY (?::text[])
+                       OR (name_en IS NOT NULL AND regexp_replace(lower(name_en), '[\\-_./,]', '', 'g') ILIKE ANY (?::text[]))
                        OR brand_article_normalized ILIKE ANY (?::text[])
                        OR (articles_search IS NOT NULL AND articles_search ILIKE ANY (?::text[]))
                        OR (brands_search IS NOT NULL AND brands_search ILIKE ANY (?::text[]))
@@ -691,7 +692,7 @@ class CatalogEmbeddingService
                   )
                 LIMIT ?
                 ",
-                [$lowerArr, $lowerArr, $upperArr, $upperArr, $upperArr, $lowerArr, $lowerArr, $limit],
+                [$lowerArr, $lowerArr, $lowerArr, $upperArr, $upperArr, $upperArr, $lowerArr, $lowerArr, $limit],
             );
             foreach ($rows as $r) {
                 $catId = (int) $r->catalog_id;
@@ -800,6 +801,10 @@ class CatalogEmbeddingService
             // EXISTS UNNEST давал nested loop вместо index lookup → 1.6с
             // вместо ~200мс).
             $nameExpr = "regexp_replace(lower(name), '[\\-_./,]', '', 'g')";
+            // Английское название каталога. Артикул часто прячется именно тут
+            // (напр. «LOP push button (A4N59074) …» при sku=M26748), а русское
+            // name его не содержит. Полный вес, тот же nosep-паттерн что у name.
+            $nameEnExpr = "regexp_replace(lower(name_en), '[\\-_./,]', '', 'g')";
             // description/comment — GIN trgm индексы добавлены миграцией
             // 2026_05_28_180000. Для поиска по тексту замены («ЗАМЕНА ДЛЯ
             // B157AAEX01») и техническим описаниям. Снижаем вес — позиция
@@ -815,6 +820,8 @@ class CatalogEmbeddingService
                 if ($useArticles) {
                     $selectTerms[] = "GREATEST("
                         . "word_similarity(?, $nameExpr), "
+                        . "CASE WHEN name_en IS NOT NULL AND name_en <> '' "
+                        . "THEN word_similarity(?, $nameEnExpr) ELSE 0 END, "
                         . "CASE WHEN articles_search IS NOT NULL AND articles_search <> '' "
                         . "THEN word_similarity(?, articles_search) ELSE 0 END, "
                         . "CASE WHEN description IS NOT NULL AND description <> '' "
@@ -823,15 +830,19 @@ class CatalogEmbeddingService
                         . "THEN word_similarity(?, $commExpr) * 0.7 ELSE 0 END)";
                     $bindings[] = $tok;
                     $bindings[] = $tok;
+                    $bindings[] = $tok;
                     $bindings[] = $tokLower;
                     $bindings[] = $tokLower;
                 } else {
                     $selectTerms[] = "GREATEST("
                         . "word_similarity(?, $nameExpr), "
+                        . "CASE WHEN name_en IS NOT NULL AND name_en <> '' "
+                        . "THEN word_similarity(?, $nameEnExpr) ELSE 0 END, "
                         . "CASE WHEN description IS NOT NULL AND description <> '' "
                         . "THEN word_similarity(?, $descExpr) * 0.7 ELSE 0 END, "
                         . "CASE WHEN comment IS NOT NULL AND comment <> '' "
                         . "THEN word_similarity(?, $commExpr) * 0.7 ELSE 0 END)";
+                    $bindings[] = $tok;
                     $bindings[] = $tok;
                     $bindings[] = $tokLower;
                     $bindings[] = $tokLower;
@@ -842,6 +853,8 @@ class CatalogEmbeddingService
             foreach ($tokens as $tok) {
                 $tokLower = mb_strtolower($tok);
                 $whereOrs[] = "? <% $nameExpr";
+                $bindings[] = $tok;
+                $whereOrs[] = "(name_en IS NOT NULL AND ? <% $nameEnExpr)";
                 $bindings[] = $tok;
                 if ($useArticles) {
                     $whereOrs[] = "(articles_search IS NOT NULL AND ? <% articles_search)";

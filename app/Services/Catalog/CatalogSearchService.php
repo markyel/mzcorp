@@ -69,6 +69,10 @@ class CatalogSearchService
             ->where(function ($q) use ($like, $upperLike, $normalizedLike) {
                 // lower(name) ILIKE → GIN trgm index
                 $q->whereRaw('lower(name) LIKE ?', [$like]);
+                // lower(name_en) ILIKE → GIN trgm index (catalog_items_name_en_trgm_idx).
+                // Артикул/термин часто сидит в английском названии («LOP push
+                // button (A4N59074) …») при русском name без этого кода.
+                $q->orWhereRaw('lower(name_en) LIKE ?', [$like]);
                 // brand_article_normalized — uppercase no-sep — GIN trgm index
                 if ($normalizedLike !== null) {
                     $q->orWhere('brand_article_normalized', 'ILIKE', $normalizedLike);
