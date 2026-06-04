@@ -1765,6 +1765,14 @@ class Detail extends Component
 
     public function render()
     {
+        // Livewire при ре-гидратации $this->request между запросами теряет
+        // withCount-агрегаты (photos_count — это атрибут модели, не relation),
+        // из-за чего бейдж «сколько фото» в списке позиций мог не появляться.
+        // Пересчитываем дёшево одним запросом прямо перед рендером.
+        if ($this->request->relationLoaded('items') && $this->request->items->isNotEmpty()) {
+            $this->request->items->loadCount('photos');
+        }
+
         return view('livewire.requests.detail');
     }
 }
