@@ -93,6 +93,19 @@ class ItemCatalogLinkDialog extends Component
 
     public const COMPARE_MAX = 8;
 
+    /**
+     * Сколько результатов показывать в списке. Растёт по «Показать ещё».
+     * Базовый набор тянем сразу на RESULT_MAX (один поиск/embed), а в UI
+     * режем до $resultLimit — «показать ещё» мгновенно раскрывает уже
+     * загруженные строки без повторного запроса/embed.
+     */
+    public int $resultLimit = 20;
+
+    private const RESULT_BASE = 20;
+    private const RESULT_STEP = 20;
+    /** Потолок: topNByQueryText всё равно капит similar-поиск на 50. */
+    private const RESULT_MAX = 50;
+
     /** Допуск ±N мм при сравнении размеров subject vs catalog.size_a..f. */
     private const DIM_TOLERANCE_MM = 5;
 
@@ -133,6 +146,7 @@ class ItemCatalogLinkDialog extends Component
         // путь (parsed_*) до первого ручного «Искать».
         $this->similarQueryActive = '';
         $this->selectedCatalogId = $item->catalog_item_id;
+        $this->resultLimit = self::RESULT_BASE;
         // Skeleton: сначала откроем окно, потом wire:init="markReady"
         // запустит тяжёлый поиск отдельным round-trip'ом.
         $this->resultsReady = false;
@@ -150,11 +164,27 @@ class ItemCatalogLinkDialog extends Component
         $this->resultsReady = true;
     }
 
+    /**
+     * «Показать ещё» — раскрыть следующую порцию уже загруженных результатов
+     * (базовый набор тянется на RESULT_MAX сразу, повторного поиска нет).
+     */
+    public function loadMore(): void
+    {
+        $this->resultLimit = min($this->resultLimit + self::RESULT_STEP, self::RESULT_MAX);
+    }
+
+    /** Смена текстового запроса (вкладка text) → начинаем показ с первой порции. */
+    public function updatedQuery(): void
+    {
+        $this->resultLimit = self::RESULT_BASE;
+    }
+
     public function setMode(string $mode): void
     {
         if (in_array($mode, ['text', 'similar'], true)) {
             $this->mode = $mode;
             $this->selectedCatalogId = null;
+            $this->resultLimit = self::RESULT_BASE;
             // Переключение на similar — снова тяжёлый поиск, прячем
             // результаты до wire:init markReady (мгновенный отклик
             // на клик «Похожие»). Для text-режима поиск дешёвый,
@@ -180,6 +210,7 @@ class ItemCatalogLinkDialog extends Component
         $this->selectedDims = [];
         $this->filterUnit = null;
         $this->compareView = 'compare';
+        $this->resultLimit = self::RESULT_BASE;
     }
 
     public function toggleBrandFilter(): void
@@ -321,6 +352,7 @@ class ItemCatalogLinkDialog extends Component
         $this->similarQuery = $trimmed;
         $this->similarQueryActive = $trimmed;
         $this->selectedCatalogId = null;
+        $this->resultLimit = self::RESULT_BASE;
         unset($this->similarResults);
     }
 
@@ -333,6 +365,7 @@ class ItemCatalogLinkDialog extends Component
         $this->similarQuery = '';
         $this->similarQueryActive = '';
         $this->selectedCatalogId = null;
+        $this->resultLimit = self::RESULT_BASE;
         unset($this->similarResults);
     }
 
@@ -437,20 +470,22 @@ class ItemCatalogLinkDialog extends Component
         if ($this->mode !== 'text' || mb_strlen(trim($this->query)) < 2) {
             return [];
         }
-        return app(CatalogSearchService::class)->search($this->query)
+        // Тянем сразу до RESULT_MAX — «показать ещё» режет уже загруженное.
+        return app(CatalogSearchService::class)->search($this->query, self::RESULT_MAX)
             ->map(fn (CatalogItem $c) => ['catalog' => $c, 'similarity' => null])
             ->all();
     }
 
     /**
-     * Filtered text-search results — passed to UI table.
+     * Filtered text-search results — passed to UI table. Режется до
+     * $resultLimit («показать ещё» увеличивает лимит).
      *
      * @return array<int, array{catalog: CatalogItem, similarity: null}>
      */
     #[Computed]
     public function textResults(): array
     {
-        return $this->applyChipFilters($this->textResultsBase);
+        return array_slice($this->applyChipFilters($this->textResultsBase), 0, $this->resultLimit);
     }
 
     /**
@@ -485,21 +520,40 @@ class ItemCatalogLinkDialog extends Component
 
         // Если менеджер применил ручной запрос («Плата ПКЛ-32») — ищем по
         // нему. Иначе — дефолтный путь через parsed_name/parsed_article.
+        // Тянем сразу до RESULT_MAX — «показать ещё» режет уже загруженное
+        // (один embed/SQL, повторного поиска при раскрытии нет).
         return $this->similarQueryActive !== ''
-            ? $editor->findSimilarByQuery($item, $this->similarQueryActive, auth()->user(), 10)
-            : $editor->findSimilar($item, auth()->user(), 10);
+            ? $editor->findSimilarByQuery($item, $this->similarQueryActive, auth()->user(), self::RESULT_MAX)
+            : $editor->findSimilar($item, auth()->user(), self::RESULT_MAX);
     }
 
     /**
-     * Top-10 vector-similarity (вкладка `similar`). Поднимает таймаут —
-     * embed-запрос к OpenAI может занимать 2-5 сек.
+     * Vector-similarity результаты (вкладка `similar`), порезанные до
+     * $resultLimit. «Показать ещё» увеличивает лимит.
      *
      * @return array<int, array{catalog: CatalogItem, similarity: float}>
      */
     #[Computed]
     public function similarResults(): array
     {
-        return $this->applyChipFilters($this->similarResultsBase);
+        return array_slice($this->applyChipFilters($this->similarResultsBase), 0, $this->resultLimit);
+    }
+
+    /**
+     * Есть ли ещё нераскрытые (отфильтрованные) результаты сверх $resultLimit —
+     * показывать ли кнопку «Показать ещё».
+     */
+    #[Computed]
+    public function canLoadMore(): bool
+    {
+        if (! $this->resultsReady || $this->comparing) {
+            return false;
+        }
+        $filtered = $this->mode === 'text'
+            ? $this->applyChipFilters($this->textResultsBase)
+            : $this->applyChipFilters($this->similarResultsBase);
+
+        return count($filtered) > $this->resultLimit;
     }
 
     /**

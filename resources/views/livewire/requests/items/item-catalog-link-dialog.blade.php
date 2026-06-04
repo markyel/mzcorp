@@ -308,6 +308,15 @@
                                     'selectedId' => $selectedCatalogId,
                                     'compareIds' => $compareIds,
                                 ])
+                                @if($this->canLoadMore)
+                                    <div class="px-3 py-2 text-center border-t border-border-subtle bg-surface sticky bottom-0">
+                                        <button type="button" wire:click="loadMore"
+                                                class="btn btn-sm"
+                                                wire:loading.attr="disabled" wire:target="loadMore">
+                                            Показать ещё
+                                        </button>
+                                    </div>
+                                @endif
                             @endif
                         @endif
                     </div>
@@ -334,9 +343,9 @@
                     </div>
                     <div class="text-[11.5px] text-fg-3 mb-2 flex items-center gap-2">
                         @if($similarQueryActive !== '')
-                            <span>Поиск по запросу: <span class="mono text-fg-2">«{{ $similarQueryActive }}»</span> · top-10.</span>
+                            <span>Поиск по запросу: <span class="mono text-fg-2">«{{ $similarQueryActive }}»</span> · по убыванию похожести.</span>
                         @else
-                            <span>Vector-поиск по KB-эмбеддингам исходных данных позиции, top-10 по убыванию похожести.
+                            <span>Vector-поиск по KB-эмбеддингам исходных данных позиции, по убыванию похожести.
                                 Можно ввести свой запрос выше и нажать «Искать».</span>
                         @endif
                         <span wire:loading wire:target="similarResults,setMode,applySimilarQuery,resetSimilarQuery" class="text-amber-700">⏳ ищем…</span>
@@ -373,6 +382,15 @@
                                     'selectedId' => $selectedCatalogId,
                                     'compareIds' => $compareIds,
                                 ])
+                                @if($this->canLoadMore)
+                                    <div class="px-3 py-2 text-center border-t border-border-subtle bg-surface sticky bottom-0">
+                                        <button type="button" wire:click="loadMore"
+                                                class="btn btn-sm"
+                                                wire:loading.attr="disabled" wire:target="loadMore">
+                                            Показать ещё
+                                        </button>
+                                    </div>
+                                @endif
                             @endif
                         @endif
                     </div>
