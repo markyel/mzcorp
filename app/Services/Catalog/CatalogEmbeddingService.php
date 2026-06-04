@@ -380,8 +380,26 @@ class CatalogEmbeddingService
             return ($r['vector'] ?? 0.0) >= $minVecOnly;
         }));
 
+        // Token-coverage: сколько РАЗЛИЧНЫХ слов запроса встречается в позиции.
+        // Тикет «A4N59074 стрелка»: при равном (capped на 1.0) score позиция,
+        // где есть И артикул, И «стрелка», должна стоять выше тех, где только
+        // артикул. Используется как первый tiebreaker после score — порядок
+        // позиций с РАЗНЫМ score не меняет. Считаем только при ≥2 словах.
+        $coverageTokens = $this->coverageTokens($queryText);
+        $coverageById = (count($coverageTokens) >= 2 && $scored !== [])
+            ? $this->coverageForCandidates(array_map(fn ($r) => $r['catalog_id'], $scored), $coverageTokens)
+            : [];
+        foreach ($scored as $idx => $r) {
+            $scored[$idx]['coverage'] = $coverageById[$r['catalog_id']] ?? 0;
+        }
+
         usort($scored, function ($a, $b) {
             $cmp = $b['score'] <=> $a['score'];
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+            // Больше покрытых слов запроса = выше (при равном score).
+            $cmp = ($b['coverage'] ?? 0) <=> ($a['coverage'] ?? 0);
             if ($cmp !== 0) {
                 return $cmp;
             }
@@ -451,6 +469,81 @@ class CatalogEmbeddingService
      *
      * @return list<string>
      */
+    /**
+     * Различные «слова» запроса для подсчёта покрытия (token coverage).
+     * Пробельные токены ≥3 симв., lowercase, без separators и stop-words,
+     * уникальные. Без stem-форм — нужны именно различные слова, не варианты.
+     *
+     * @return list<string>
+     */
+    private function coverageTokens(string $queryText): array
+    {
+        static $stop = [
+            'бренд', 'тип', 'запчасти', 'запчасть', 'артикул', 'производителя',
+            'производитель', 'название', 'наименование', 'описание', 'категория',
+            'позиция', 'код', 'модель', 'марка', 'для', 'под', 'без',
+            'name', 'type', 'brand', 'article', 'model', 'category', 'for', 'with', 'and',
+        ];
+        $parts = preg_split('/[\s,;]+/u', mb_strtolower($queryText)) ?: [];
+        $out = [];
+        foreach ($parts as $p) {
+            $norm = (string) preg_replace('/[\s\-_.\/,]/u', '', $p);
+            if (mb_strlen($norm) < 3 || in_array($norm, $stop, true)) {
+                continue;
+            }
+            if (! in_array($norm, $out, true)) {
+                $out[] = $norm;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Для кандидатов считает, сколько различных query-слов встречается в их
+     * searchable-тексте (name + name_en + articles_search +
+     * brand_article_normalized + description + comment). Один запрос по списку
+     * id (десятки строк) — substring LIKE по lower()-конкатенации.
+     *
+     * @param  list<int>     $ids
+     * @param  list<string>  $tokens
+     * @return array<int, int>  catalog_id => coverage
+     */
+    private function coverageForCandidates(array $ids, array $tokens): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        if ($ids === [] || $tokens === []) {
+            return [];
+        }
+        $terms = [];
+        $bindings = [];
+        foreach ($tokens as $t) {
+            $terms[] = '(CASE WHEN hay LIKE ? THEN 1 ELSE 0 END)';
+            $bindings[] = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $t) . '%';
+        }
+        $bindings[] = '{' . implode(',', $ids) . '}';
+        $sql = '
+            SELECT id, (' . implode(' + ', $terms) . ") AS coverage
+            FROM (
+                SELECT id, lower(
+                    coalesce(name, '') || ' ' || coalesce(name_en, '') || ' ' ||
+                    coalesce(articles_search, '') || ' ' || coalesce(brand_article_normalized, '') || ' ' ||
+                    coalesce(description, '') || ' ' || coalesce(comment, '')
+                ) AS hay
+                FROM catalog_items
+                WHERE id = ANY(?::bigint[])
+            ) t
+        ";
+        $map = [];
+        try {
+            foreach (DB::select($sql, $bindings) as $row) {
+                $map[(int) $row->id] = (int) $row->coverage;
+            }
+        } catch (\Throwable $e) {
+            Log::info('CatalogEmbeddingService: coverage compute failed', ['error' => $e->getMessage()]);
+        }
+        return $map;
+    }
+
     private function extractTrigramTokens(string $queryText): array
     {
         // Стоп-слова: служебные метки шапки RequestItemEditor::buildQueryText
