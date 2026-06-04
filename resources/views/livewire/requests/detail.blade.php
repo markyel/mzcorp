@@ -2474,6 +2474,8 @@
                                     @php
                                         $invStatus = $inv->status?->value ?? 'pending';
                                         $isPending = $invStatus === 'pending';
+                                        $isCancelled = $invStatus === 'cancelled';
+                                        $canMarkPaid = in_array($invStatus, ['pending', 'expired', 'cancelled'], true);
                                         $isOverdue = $isPending && $inv->expires_at?->isPast();
                                         $chipMap = ['pending'=>'chip-warn','paid'=>'chip-ok','expired'=>'chip-danger','cancelled'=>'chip-paused'];
                                         $labelMap = ['pending'=>'Ожидает','paid'=>'Оплачен','expired'=>'Просрочен','cancelled'=>'Аннулирован'];
@@ -2525,11 +2527,16 @@
                                             @endif
                                         </td>
                                         <td class="px-3 py-2 text-right align-top whitespace-nowrap">
-                                            @if($isPending && $canManage)
+                                            @if($canMarkPaid && $canManage)
                                                 <button type="button"
                                                         wire:click="markInvoicePaid({{ $inv->id }})"
-                                                        wire:confirm="Пометить счёт №{{ $inv->invoice_number }} как оплаченный?"
-                                                        class="btn btn-sm btn-primary">✓ Оплачен</button>
+                                                        wire:confirm="{{ $isCancelled
+                                                            ? 'Счёт №' . $inv->invoice_number . ' был аннулирован. Отметить его оплаченным?'
+                                                            : 'Пометить счёт №' . $inv->invoice_number . ' как оплаченный?' }}"
+                                                        class="btn btn-sm btn-primary"
+                                                        title="{{ $isCancelled ? 'Отметить оплаченным (реанимация аннулированного счёта)' : 'Отметить оплаченным' }}">✓ Оплачен</button>
+                                            @endif
+                                            @if($isPending && $canManage)
                                                 <button type="button"
                                                         onclick="const r = prompt('Причина аннулирования счёта №{{ $inv->invoice_number }}?'); if (r) @this.call('cancelInvoice', {{ $inv->id }}, r);"
                                                         class="btn btn-sm text-red-700"

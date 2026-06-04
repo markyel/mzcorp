@@ -366,9 +366,11 @@ class InvoiceService
      * Статусы, из которых счёт можно пометить оплаченным.
      * Pending — обычная оплата; Expired — оплата с опозданием (клиент заплатил
      * после истечения срока, заявку всё равно закрываем оплатой).
-     * Paid/Cancelled — терминальные, повторно не оплачиваем.
+     * Cancelled — реанимация: счёт аннулировали по просрочке/закрытию заявки,
+     * но клиент всё-таки оплатил, а заявку вернули в работу (тикет M-2026-2195).
+     * Paid — терминальный, повторно не оплачиваем.
      */
-    public const PAYABLE_STATUSES = [InvoiceStatus::Pending, InvoiceStatus::Expired];
+    public const PAYABLE_STATUSES = [InvoiceStatus::Pending, InvoiceStatus::Expired, InvoiceStatus::Cancelled];
 
     /**
      * Пометить счёт оплаченным + перевести Request → Paid.
@@ -377,16 +379,23 @@ class InvoiceService
     {
         if (! in_array($invoice->status, self::PAYABLE_STATUSES, true)) {
             throw new \DomainException(sprintf(
-                'Нельзя оплатить счёт в статусе %s. Допустимо только pending или expired.',
+                'Нельзя оплатить счёт в статусе %s. Допустимо pending, expired или cancelled.',
                 $invoice->status->value
             ));
         }
 
-        return DB::transaction(function () use ($invoice, $author) {
+        // Реанимация ранее аннулированного счёта: снимаем отметку аннулирования,
+        // чтобы статус/комментарий в UI не противоречили (был «отменён» → стал
+        // «оплачен»). Сам факт оплаты фиксируется в request_state_changes.
+        $wasCancelled = $invoice->status === InvoiceStatus::Cancelled;
+
+        return DB::transaction(function () use ($invoice, $author, $wasCancelled) {
             $invoice->update([
                 'status' => InvoiceStatus::Paid->value,
                 'paid_at' => now(),
                 'paid_by_user_id' => $author->id,
+                'cancelled_at' => $wasCancelled ? null : $invoice->cancelled_at,
+                'cancellation_reason' => $wasCancelled ? null : $invoice->cancellation_reason,
             ]);
 
             try {
@@ -396,10 +405,13 @@ class InvoiceService
                     $author,
                     [
                         'event' => 'invoice_paid',
-                        'comment' => sprintf('Счёт №%s оплачен.', $invoice->invoice_number),
+                        'comment' => $wasCancelled
+                            ? sprintf('Ранее аннулированный счёт №%s оплачен (реанимация).', $invoice->invoice_number)
+                            : sprintf('Счёт №%s оплачен.', $invoice->invoice_number),
                         'payload' => [
                             'invoice_id' => $invoice->id,
                             'invoice_number' => $invoice->invoice_number,
+                            'reanimated' => $wasCancelled,
                         ],
                     ],
                 );

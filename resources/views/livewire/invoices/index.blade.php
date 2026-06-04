@@ -152,6 +152,8 @@
                         @php
                             $req = $inv->request;
                             $isPending = $inv->status?->value === 'pending';
+                            $isCancelled = $inv->status?->value === 'cancelled';
+                            $canMarkPaid = in_array($inv->status?->value, ['pending', 'expired', 'cancelled'], true);
                             $isOverdue = $isPending && $inv->expires_at?->isPast();
                             $daysRemain = $inv->expires_at ? now()->diffInDays($inv->expires_at, false) : null;
                         @endphp
@@ -212,11 +214,16 @@
                                 @endif
                             </td>
                             <td class="px-3 py-2 text-right align-top whitespace-nowrap">
-                                @if($isPending)
+                                @if($canMarkPaid)
                                     <button type="button"
                                             wire:click="markPaid({{ $inv->id }})"
-                                            wire:confirm="Пометить счёт №{{ $inv->invoice_number }} как оплаченный? Заявка перейдёт в статус «Оплачено»."
-                                            class="btn btn-sm btn-primary">✓ Оплачен</button>
+                                            wire:confirm="{{ $isCancelled
+                                                ? 'Счёт №' . $inv->invoice_number . ' был аннулирован. Отметить его оплаченным? Заявка перейдёт в статус «Оплачено».'
+                                                : 'Пометить счёт №' . $inv->invoice_number . ' как оплаченный? Заявка перейдёт в статус «Оплачено».' }}"
+                                            class="btn btn-sm btn-primary"
+                                            title="{{ $isCancelled ? 'Отметить оплаченным (реанимация аннулированного счёта)' : 'Отметить оплаченным' }}">✓ Оплачен</button>
+                                @endif
+                                @if($isPending)
                                     <button type="button"
                                             wire:click="startCancel({{ $inv->id }})"
                                             class="btn btn-sm text-red-700"
@@ -246,7 +253,7 @@
                     <h3 class="text-[15px] font-semibold text-fg-1 mb-1">Массовая оплата счетов</h3>
                     <div class="text-[12px] text-fg-3">
                         Вставьте номера счетов — система найдёт совпадения и отметит выбранные оплаченными
-                        (заявки перейдут в статус «Оплачено»). Оплатить можно счета в статусе «Ожидает» и «Истёк».
+                        (заявки перейдут в статус «Оплачено»). Оплатить можно счета в статусе «Ожидает», «Истёк» и «Аннулирован».
                     </div>
                 </div>
 
