@@ -192,6 +192,108 @@
         </div>
     </div>
 
+    {{-- ───────── 2b. Общая круговая: Успех/Потеря, доли по менеджерам ───────── --}}
+    @php
+        $pieRows = array_values(array_filter($wl, fn ($r) => ($r['won'] + $r['lost']) > 0));
+        $greens = ['#065f46', '#047857', '#059669', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#bbf7d0'];
+        $reds   = ['#7f1d1d', '#991b1b', '#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fca5a5', '#fecaca'];
+        $wonSegs = []; $lostSegs = []; $pTotWon = 0; $pTotLost = 0; $legend = [];
+        foreach ($pieRows as $pi => $row) {
+            $g = $greens[$pi % count($greens)];
+            $rd = $reds[$pi % count($reds)];
+            if ($row['won'] > 0)  $wonSegs[]  = ['name' => $row['name'], 'value' => $row['won'],  'color' => $g,  'group' => 'Успех'];
+            if ($row['lost'] > 0) $lostSegs[] = ['name' => $row['name'], 'value' => $row['lost'], 'color' => $rd, 'group' => 'Потеря'];
+            $pTotWon += $row['won']; $pTotLost += $row['lost'];
+            $legend[] = ['name' => $row['name'], 'won' => $row['won'], 'lost' => $row['lost'], 'g' => $g, 'r' => $rd];
+        }
+        $segs = array_merge($wonSegs, $lostSegs);
+        $pTotal = $pTotWon + $pTotLost;
+        $cx = 110; $cy = 110; $rO = 100; $rI = 58;
+        $polar = function ($r, $deg) use ($cx, $cy) {
+            $a = deg2rad($deg - 90);
+            return [round($cx + $r * cos($a), 2), round($cy + $r * sin($a), 2)];
+        };
+        $arc = function ($s, $e) use ($polar, $rO, $rI) {
+            $large = ($e - $s) > 180 ? 1 : 0;
+            [$x1, $y1] = $polar($rO, $s); [$x2, $y2] = $polar($rO, $e);
+            [$x3, $y3] = $polar($rI, $e); [$x4, $y4] = $polar($rI, $s);
+            return "M $x1 $y1 A $rO $rO 0 $large 1 $x2 $y2 L $x3 $y3 A $rI $rI 0 $large 0 $x4 $y4 Z";
+        };
+        $acc = 0; $arcs = [];
+        foreach ($segs as $sg) {
+            $ang = $pTotal > 0 ? $sg['value'] / $pTotal * 360 : 0;
+            $arcs[] = ['seg' => $sg, 'start' => $acc, 'end' => $acc + $ang];
+            $acc += $ang;
+        }
+        $wonPct = $pTotal > 0 ? round($pTotWon * 100 / $pTotal) : 0;
+    @endphp
+    <div class="ds-card">
+        <div class="ds-card-header">
+            <h3>Общая: Успех / Потеря по менеджерам</h3>
+            <span class="text-[12px] text-fg-3 ml-2">закрытые за период · когорта по дате создания</span>
+        </div>
+        <div class="ds-card-body">
+            @if($pTotal === 0)
+                <div class="text-center text-fg-3 py-6 text-[13px]">Нет закрытых заявок за период.</div>
+            @else
+                <div class="flex flex-wrap items-center gap-6">
+                    <div class="shrink-0 mx-auto sm:mx-0">
+                        <svg viewBox="0 0 220 220" width="220" height="220" style="font-family:var(--font-sans)">
+                            @if(count($segs) === 1)
+                                <circle cx="110" cy="110" r="100" fill="{{ $segs[0]['color'] }}" />
+                                <circle cx="110" cy="110" r="58" fill="var(--bg-surface)" />
+                                <title>{{ $segs[0]['group'] }} · {{ $segs[0]['name'] }}: {{ $segs[0]['value'] }}</title>
+                            @else
+                                @foreach($arcs as $a)
+                                    <path d="{{ $arc($a['start'], $a['end']) }}" fill="{{ $a['seg']['color'] }}" stroke="white" stroke-width="1">
+                                        <title>{{ $a['seg']['group'] }} · {{ $a['seg']['name'] }}: {{ $a['seg']['value'] }}</title>
+                                    </path>
+                                @endforeach
+                            @endif
+                            <text x="110" y="102" text-anchor="middle" font-size="12" fill="#6b7280">Закрыто</text>
+                            <text x="110" y="123" text-anchor="middle" font-size="22" font-weight="700" fill="#111827">{{ $pTotal }}</text>
+                            <text x="110" y="139" text-anchor="middle" font-size="11" fill="#059669">{{ $wonPct }}% успех</text>
+                        </svg>
+                    </div>
+                    <div class="flex-1 min-w-[260px]">
+                        <div class="flex items-center gap-4 mb-2 text-[12.5px]">
+                            <span class="inline-flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm" style="background:#059669"></span><span class="text-fg-1 font-medium">Успех: {{ $pTotWon }}</span></span>
+                            <span class="inline-flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm" style="background:#dc2626"></span><span class="text-fg-1 font-medium">Потеря: {{ $pTotLost }}</span></span>
+                        </div>
+                        <table class="w-full text-[12px]">
+                            <thead class="text-fg-3 text-[10px] uppercase tracking-wider border-b border-border">
+                                <tr>
+                                    <th class="px-2 py-1 text-left">Менеджер</th>
+                                    <th class="px-2 py-1 text-right">Успех</th>
+                                    <th class="px-2 py-1 text-right">Потеря</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach($legend as $lg)
+                                    <tr class="border-b border-border-subtle last:border-b-0">
+                                        <td class="px-2 py-1 text-fg-1">{{ $lg['name'] }}</td>
+                                        <td class="px-2 py-1 text-right">
+                                            <span class="inline-flex items-center gap-1.5 justify-end">
+                                                <span class="w-2.5 h-2.5 rounded-sm" style="background:{{ $lg['g'] }}"></span>
+                                                <span class="mono text-emerald-700">{{ $lg['won'] }}</span>
+                                            </span>
+                                        </td>
+                                        <td class="px-2 py-1 text-right">
+                                            <span class="inline-flex items-center gap-1.5 justify-end">
+                                                <span class="w-2.5 h-2.5 rounded-sm" style="background:{{ $lg['r'] }}"></span>
+                                                <span class="mono text-red-700">{{ $lg['lost'] }}</span>
+                                            </span>
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            @endif
+        </div>
+    </div>
+
     {{-- ───────── 3. Время закрытия по менеджерам (Успех/Потеря) ───────── --}}
     @php $ttc = $this->timeToClose; @endphp
     <div class="ds-card">
