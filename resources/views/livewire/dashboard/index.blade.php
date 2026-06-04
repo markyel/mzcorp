@@ -361,6 +361,106 @@
                     </div>
                 </div>
 
+                {{-- ───────── Менеджеры: динамика закрытых + Успех/Потеря ─────────
+                     Компактные виджеты; полная версия — раздел «Аналитика». --}}
+                @if($this->isPrivileged)
+                    @php
+                        $mdyn = $this->managerClosedDynamics;
+                        $mseries = $mdyn['series'];
+                        $mlabels = $mdyn['labels'];
+                        $mn = count($mlabels);
+                        $mmax = max(1, (int) $mdyn['max']);
+                        $mW = 900; $mH = 220; $mpadL = 26; $mpadR = 10; $mpadT = 10; $mpadB = 22;
+                        $mxAt = function ($i) use ($mW, $mpadL, $mpadR, $mn) {
+                            if ($mn <= 1) return $mpadL;
+                            return $mpadL + ($i * ($mW - $mpadL - $mpadR) / ($mn - 1));
+                        };
+                        $myAt = function ($v) use ($mH, $mpadT, $mpadB, $mmax) {
+                            return $mH - $mpadB - ($v * ($mH - $mpadT - $mpadB) / $mmax);
+                        };
+                        $mPath = function ($points) use ($mxAt, $myAt) {
+                            $d = '';
+                            foreach ($points as $i => $v) { $d .= ($i === 0 ? 'M' : 'L') . round($mxAt($i), 1) . ' ' . round($myAt($v), 1) . ' '; }
+                            return trim($d);
+                        };
+                        $mGrand = array_sum(array_map(fn ($s) => $s['total'], $mseries));
+                        $mStep = max(1, (int) ceil($mn / 12));
+                        $wl = $this->managerWonLost;
+                    @endphp
+                    <div class="ds-card">
+                        <div class="ds-card-header">
+                            <h3>Менеджеры · динамика закрытых</h3>
+                            <span class="text-[12px] text-fg-3 ml-2">won+lost по дате закрытия · {{ $this->periodLabel }}</span>
+                            <span class="flex-1"></span>
+                            <a href="{{ route('analytics.index') }}" wire:navigate class="text-[12px] text-sky-700 hover:underline">Аналитика →</a>
+                        </div>
+                        <div class="ds-card-body">
+                            @if($mGrand === 0)
+                                <div class="text-center text-fg-3 py-6 text-[13px]">За период закрытых заявок нет.</div>
+                            @else
+                                <svg viewBox="0 0 {{ $mW }} {{ $mH }}" xmlns="http://www.w3.org/2000/svg"
+                                     preserveAspectRatio="xMidYMid meet"
+                                     style="width:100%;height:auto;max-height:240px;font-family:var(--font-sans);font-size:10px;">
+                                    @foreach([0, (int) round($mmax / 2), $mmax] as $tick)
+                                        @php $ty = $myAt((int) $tick); @endphp
+                                        <line x1="{{ $mpadL }}" x2="{{ $mW - $mpadR }}" y1="{{ round($ty, 1) }}" y2="{{ round($ty, 1) }}" stroke="#e5e7eb" stroke-width="1" />
+                                        <text x="{{ $mpadL - 5 }}" y="{{ round($ty + 3, 1) }}" text-anchor="end" fill="#9ca3af" font-size="10">{{ $tick }}</text>
+                                    @endforeach
+                                    @foreach($mlabels as $i => $lab)
+                                        @if($i % $mStep === 0 || $i === $mn - 1)
+                                            <text x="{{ round($mxAt($i), 1) }}" y="{{ $mH - $mpadB + 13 }}" text-anchor="middle" fill="#6b7280" font-size="10">{{ $lab }}</text>
+                                        @endif
+                                    @endforeach
+                                    @foreach($mseries as $s)
+                                        @if($s['total'] > 0)
+                                            <path d="{{ $mPath($s['points']) }}" fill="none" stroke="{{ $s['color'] }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                                        @endif
+                                    @endforeach
+                                </svg>
+                                <div class="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[11px]">
+                                    @foreach($mseries as $s)
+                                        @if($s['total'] > 0)
+                                            <span class="inline-flex items-center gap-1.5">
+                                                <span class="inline-block w-3 h-[3px] rounded-full" style="background: {{ $s['color'] }}"></span>
+                                                <span class="text-fg-1">{{ $s['name'] }}</span>
+                                                <span class="text-fg-3">{{ $s['total'] }} (<span class="text-emerald-700">{{ $s['won'] }}</span>/<span class="text-red-700">{{ $s['lost'] }}</span>)</span>
+                                            </span>
+                                        @endif
+                                    @endforeach
+                                </div>
+                            @endif
+
+                            @if(! empty($wl))
+                                <div class="mt-4 overflow-x-auto">
+                                    <div class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">Успех / Потеря по менеджерам · когорта по дате создания</div>
+                                    <table class="w-full text-[12px]">
+                                        <thead class="text-fg-3 text-[10px] uppercase tracking-wider border-b border-border">
+                                            <tr>
+                                                <th class="px-2 py-1.5 text-left">Менеджер</th>
+                                                <th class="px-2 py-1.5 text-right">Всего</th>
+                                                <th class="px-2 py-1.5 text-right text-emerald-700">Успех</th>
+                                                <th class="px-2 py-1.5 text-right text-red-700">Потеря</th>
+                                                <th class="px-2 py-1.5 text-right">Win-rate</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach($wl as $row)
+                                                <tr class="border-b border-border-subtle last:border-b-0">
+                                                    <td class="px-2 py-1 text-fg-1">{{ $row['name'] }}</td>
+                                                    <td class="px-2 py-1 text-right mono text-fg-1">{{ $row['total'] }}</td>
+                                                    <td class="px-2 py-1 text-right mono text-emerald-700">{{ $row['won'] }}</td>
+                                                    <td class="px-2 py-1 text-right mono text-red-700">{{ $row['lost'] }}</td>
+                                                    <td class="px-2 py-1 text-right mono {{ $row['win_rate'] === null ? 'text-fg-4' : ($row['win_rate'] >= 50 ? 'text-emerald-700' : 'text-amber-700') }}">{{ $row['win_rate'] === null ? '—' : $row['win_rate'] . '%' }}</td>
+                                                </tr>
+                                            @endforeach
+                                        </tbody>
+                                    </table>
+                                </div>
+                            @endif
+                        </div>
+                    </div>
+                @endif
+
                 {{-- ───────── Heatmap inflow-by-hour (weekday × hour) ─────────
                      7 строк (Пн..Вс) × 24 колонки (часы Europe/Moscow).
                      Интенсивность фона = count/max в палитре sky.

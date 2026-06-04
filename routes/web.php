@@ -91,6 +91,12 @@ Route::middleware('auth')->group(function () {
             return view('mail.index');
         })->name('mail.index');
 
+        // Раздел «Аналитика» — метрики по менеджерам (динамика закрытых,
+        // Успех/Потеря, время закрытия, детализация обработки заявок).
+        Route::get('/dashboard/analytics', function () {
+            return view('analytics.index');
+        })->name('analytics.index');
+
         // Foundation Фаза 2: auto-rejection — пересмотр писем, которые AI
         // классифицировал как irrelevant/reclamation/accounting/..., и
         // реоткрытие ошибочно отклонённых как Request. Секретарь отвечает за

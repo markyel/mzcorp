@@ -67,6 +67,10 @@
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin', 'secretary'])) {
         $navLinks[] = ['route' => 'mail-review.index', 'label' => 'Авто-отклонённые', 'pattern' => 'mail-review.*'];
     }
+    // «Аналитика» — метрики по менеджерам (РОП / директорат / секретарь / админ).
+    if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin', 'secretary'])) {
+        $navLinks[] = ['route' => 'analytics.index', 'label' => 'Аналитика', 'pattern' => 'analytics.*'];
+    }
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];
         // Уведомления клиенту вынесены в подпункт страницы «Настройки»,

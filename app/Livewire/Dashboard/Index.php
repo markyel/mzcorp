@@ -1197,6 +1197,36 @@ class Index extends Component
         return $result;
     }
 
+    /**
+     * Виджет дашборда: динамика закрытых заявок по менеджерам (мультилиния).
+     * Полная версия — в разделе «Аналитика». См. ManagerAnalyticsService.
+     */
+    #[Computed]
+    public function managerClosedDynamics(): array
+    {
+        if (! $this->isPrivileged) {
+            return ['dates' => [], 'labels' => [], 'series' => [], 'max' => 0];
+        }
+        [$from, $to] = $this->periodRange();
+
+        return app(\App\Services\Analytics\ManagerAnalyticsService::class)->closedDynamics($from, $to);
+    }
+
+    /**
+     * Виджет дашборда: сводка Успех/Потеря по менеджерам (когорта по дате
+     * создания за период).
+     */
+    #[Computed]
+    public function managerWonLost(): array
+    {
+        if (! $this->isPrivileged) {
+            return [];
+        }
+        [$from, $to] = $this->periodRange();
+
+        return app(\App\Services\Analytics\ManagerAnalyticsService::class)->wonLostByManager($from, $to);
+    }
+
     public function render()
     {
         return view('livewire.dashboard.index');
