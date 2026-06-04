@@ -67,14 +67,37 @@ class Index extends Component
     #[Url(as: 'sdmgr', except: 0)]
     public int $statusChartManagerId = 0;
 
+    /** Допустимые preset-периоды (дни). */
+    private const PERIOD_PRESETS = [1, 7, 30, 90];
+
+    /**
+     * При входе без явного периода в URL берём последний сохранённый
+     * пользователем preset (users.dashboard_period_days). Если в URL есть
+     * `period` или активен custom-диапазон (`from`/`to`) — не трогаем,
+     * приоритет у ссылки (например, расшаренной).
+     */
+    public function mount(): void
+    {
+        if (request()->has('period') || request()->has('from') || request()->has('to')) {
+            return;
+        }
+
+        $saved = (int) (auth()->user()?->dashboard_period_days ?? 30);
+        if (in_array($saved, self::PERIOD_PRESETS, true)) {
+            $this->periodDays = $saved;
+        }
+    }
+
     public function setPeriod(int $days): void
     {
-        if (in_array($days, [1, 7, 30, 90], true)) {
+        if (in_array($days, self::PERIOD_PRESETS, true)) {
             $this->periodDays = $days;
             // Переключение на preset очищает custom.
             $this->customFrom = '';
             $this->customTo = '';
             $this->customPickerOpen = false;
+            // Запоминаем выбор как персональный дефолт дашборда.
+            auth()->user()?->forceFill(['dashboard_period_days' => $days])->save();
         }
     }
 

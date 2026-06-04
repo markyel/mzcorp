@@ -49,6 +49,9 @@ class User extends Authenticatable
         // Персональный порядок писем в табе «Переписка»: 'asc' (старые сверху)
         // или 'desc' (новые сверху). Применяется ко всем заявкам пользователя.
         'thread_sort_order',
+        // Персональный дефолтный период дашборда (preset 1/7/30/90 дней).
+        // См. App\Livewire\Dashboard\Index::setPeriod / mount.
+        'dashboard_period_days',
     ];
 
     /**
@@ -75,6 +78,7 @@ class User extends Authenticatable
             'unavailable_until' => 'datetime',
             'unavailable_auto_delegate' => 'boolean',
             'load_weight' => 'integer',
+            'dashboard_period_days' => 'integer',
             'password' => 'hashed',
         ];
     }
