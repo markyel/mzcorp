@@ -356,11 +356,11 @@
     <div class="ds-card">
         <div class="ds-card-header">
             <h3>Детализация обработки заявок</h3>
-            <span class="text-[12px] text-fg-3 ml-2">создано за период · {{ $details->total() }} заявок</span>
+            <span class="text-[12px] text-fg-3 ml-2">закрытые, созданные за период · {{ $details->total() }} заявок</span>
         </div>
         <div class="ds-card-body overflow-x-auto">
             @if($details->isEmpty())
-                <div class="text-center text-fg-3 py-6 text-[13px]">Нет заявок за период.</div>
+                <div class="text-center text-fg-3 py-6 text-[13px]">Нет закрытых заявок за период.</div>
             @else
                 <table class="w-full text-[12px] whitespace-nowrap">
                     <thead class="text-fg-3 text-[10px] uppercase tracking-wider border-b border-border">
@@ -399,7 +399,8 @@
                                 </td>
                                 <td class="px-2 py-1.5 text-right mono {{ $toQuoteDur ? 'text-fg-1' : 'text-fg-4' }}">{{ $toQuoteDur ?? '—' }}</td>
                                 <td class="px-2 py-1.5">
-                                    <span class="text-[11px] text-fg-2">{{ $st?->label() ?? $st }}</span>
+                                    @php $stv = $st instanceof \App\Enums\RequestStatus ? $st->value : (string) $st; @endphp
+                                    <span class="text-[11px] font-medium {{ $stv === 'closed_won' ? 'text-emerald-700' : ($stv === 'closed_lost' ? 'text-red-700' : 'text-fg-2') }}">{{ $st?->label() ?? $st }}</span>
                                 </td>
                             </tr>
                         @endforeach

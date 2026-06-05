@@ -297,6 +297,8 @@ class ManagerAnalyticsService
         $q = Request::query()
             ->whereBetween('created_at', [$from->utc(), $to->utc()])
             ->whereNotNull('assigned_user_id')
+            // Только закрытые (won/lost) — раздел про обработку закрытых заявок.
+            ->whereIn('status', [$this->won(), $this->lost()])
             ->with('assignedUser:id,name')
             ->select('requests.*')
             ->selectRaw("$firstReaction AS first_reaction_at")
