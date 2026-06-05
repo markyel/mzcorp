@@ -70,37 +70,31 @@ class IqotPoolService
             $cnt = (int) $row->cnt;
             $isNew = ! $pos->exists;
             $last = $latest->get((int) $row->catalog_item_id);
-            $lastQty = $last && $last->qty !== null ? (float) $last->qty : null;
-            $lastUnit = $last ? (trim((string) $last->unit) ?: null) : null;
-            $lastOurPrice = $last && $last->final_unit_price !== null ? (float) $last->final_unit_price : null;
-            $lastQuoteCode = $last ? (trim((string) $last->internal_code) ?: null) : null;
 
-            // Исключена вручную («не запрашивать никогда») — не возвращаем в пул.
+            // Метаданные (частота, кол-во/единица и НАША цена+код из последнего
+            // проигранного КП) обновляем ВСЕГДА — в т.ч. у исключённых/свежих,
+            // чтобы сравнение «наше КП vs офферы» всегда имело актуальную цену.
+            $pos->lost_quote_count = $cnt;
+            $pos->qty = $last && $last->qty !== null ? (float) $last->qty : null;
+            $pos->unit = $last ? (trim((string) $last->unit) ?: null) : null;
+            $pos->our_unit_price = $last && $last->final_unit_price !== null ? (float) $last->final_unit_price : null;
+            $pos->our_quotation_code = $last ? (trim((string) $last->internal_code) ?: null) : null;
+
+            // Исключена вручную («не запрашивать никогда») — статус не трогаем.
             if (! $isNew && $pos->isExcluded()) {
-                if ((int) $pos->lost_quote_count !== $cnt) {
-                    $pos->lost_quote_count = $cnt;
-                    $pos->save();
-                }
+                $pos->save();
 
                 continue;
             }
 
-            // Свежий отчёт — только обновляем частоту, статус не трогаем.
+            // Свежий отчёт — не пере-анализируем, статус не трогаем.
             if (! $isNew && $pos->hasFreshReport($freshDays)) {
-                if ((int) $pos->lost_quote_count !== $cnt) {
-                    $pos->lost_quote_count = $cnt;
-                    $pos->save();
-                }
+                $pos->save();
                 $skippedFresh++;
 
                 continue;
             }
 
-            $pos->lost_quote_count = $cnt;
-            $pos->qty = $lastQty;
-            $pos->unit = $lastUnit;
-            $pos->our_unit_price = $lastOurPrice;
-            $pos->our_quotation_code = $lastQuoteCode;
             if ($isNew) {
                 $pos->source = IqotPosition::SOURCE_AUTO;
                 $pos->status = IqotPositionStatus::Pending->value;
