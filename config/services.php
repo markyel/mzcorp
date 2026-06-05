@@ -500,6 +500,26 @@ return [
         ],
     ],
 
+    /*
+    | IQOT — анализ цен конкурентов (Public API v1, порт интеграции из LazyLift).
+    | base_url/timeout — инфраструктура (env). Остальные ключи (enabled, api_key,
+    | daily_limit, report_fresh_days, root_category) редактируются в UI «Настройки»
+    | (app_settings, ключи iqot.*); значения ниже — fallback-дефолты.
+    | См. app/Services/Iqot/IqotApiService.php.
+    */
+    'iqot' => [
+        'base_url' => env('IQOT_BASE_URL', 'https://iqot.ru/api/v1'),
+        'timeout' => (int) env('IQOT_TIMEOUT', 30),
+        'enabled' => (bool) env('IQOT_ENABLED', false),
+        'api_key' => env('IQOT_API_KEY', ''),
+        // Дневной лимит позиций на анализ (защита баланса). 0 = не отправлять.
+        'daily_limit' => (int) env('IQOT_DAILY_LIMIT', 50),
+        // Окно актуальности отчёта: позиция со свежим отчётом не пере-анализируется.
+        'report_fresh_days' => (int) env('IQOT_REPORT_FRESH_DAYS', 90),
+        // Корневая категория (client_category.path[0]) для каждой позиции.
+        'root_category' => env('IQOT_ROOT_CATEGORY', 'Лифтовое оборудование'),
+    ],
+
     'catalog_sync' => [
         // Public URL до .mdb (mylift.ru/getxfile.php?id=...). Команда
         // catalog:sync-from-url HEAD-проверяет Last-Modified и SHA-256,

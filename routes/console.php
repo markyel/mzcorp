@@ -161,3 +161,21 @@ Schedule::command('requests:auto-close-inactive')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// IQOT (анализ цен конкурентов): раз в 2 часа обновляем пул из проигранных КП
+// и отправляем приоритетные позиции в рамках дневного лимита. No-op, если
+// iqot.enabled выключено или ключ не задан (проверка внутри сервиса).
+Schedule::command('iqot:dispatch')
+    ->cron('15 */2 * * *')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
+// IQOT: smart-поллинг submissions (только те, у кого X-Next-Check-After прошёл)
+// + раскладка готовых отчётов по позициям каталога. Ежечасно.
+Schedule::command('iqot:poll')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();

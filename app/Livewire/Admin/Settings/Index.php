@@ -330,6 +330,47 @@ class Index extends Component
                 'type' => AppSetting::TYPE_BOOL,
                 'default' => false,
             ],
+
+            // ─── IQOT · анализ цен конкурентов ───────────────────────────
+            'iqot.enabled' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Включить интеграцию IQOT',
+                'help' => 'Главный выключатель. Пока выключено — система не отправляет позиции в IQOT и не тратит баланс. Нужен заполненный API-ключ.',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
+            'iqot.api_key' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'API-ключ IQOT',
+                'help' => 'Ключ Public API (iqot.ru). Хранится в app_settings. Без него интеграция не работает.',
+                'type' => AppSetting::TYPE_STRING,
+                'default' => '',
+            ],
+            'iqot.daily_limit' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Дневной лимит позиций',
+                'help' => 'Сколько позиций в сутки максимум отправляем на анализ в IQOT (защита баланса). 0 = не отправлять.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 50,
+                'step' => 1,
+                'min' => 0,
+            ],
+            'iqot.report_fresh_days' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Актуальность отчёта (дней)',
+                'help' => 'Позиция со свежим (моложе N дней) отчётом IQOT повторно не анализируется. По умолчанию 90.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 90,
+                'step' => 1,
+                'min' => 1,
+            ],
+            'iqot.root_category' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Корневая категория IQOT',
+                'help' => 'Передаётся в client_category каждой позиции (бизнес-домен). Напр. «Лифтовое оборудование».',
+                'type' => AppSetting::TYPE_STRING,
+                'default' => 'Лифтовое оборудование',
+            ],
         ];
     }
 
@@ -379,6 +420,11 @@ class Index extends Component
             'tax.vat_percent' => 'services.tax.vat_percent',
             'assignment.newbie_boost' => 'services.assignment.newbie_boost',
             'dealer.auto_threshold' => 'services.dealer.auto_threshold',
+            'iqot.enabled' => 'services.iqot.enabled',
+            'iqot.api_key' => 'services.iqot.api_key',
+            'iqot.daily_limit' => 'services.iqot.daily_limit',
+            'iqot.report_fresh_days' => 'services.iqot.report_fresh_days',
+            'iqot.root_category' => 'services.iqot.root_category',
         ];
 
         return $configMap[$key] ?? '';
