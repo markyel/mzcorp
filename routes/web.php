@@ -97,6 +97,11 @@ Route::middleware('auth')->group(function () {
             return view('analytics.index');
         })->name('analytics.index');
 
+        // Отчёт «Топ позиций» — самые продаваемые / отказные позиции каталога.
+        Route::get('/dashboard/analytics/positions', function () {
+            return view('analytics.positions');
+        })->name('analytics.positions');
+
         // Foundation Фаза 2: auto-rejection — пересмотр писем, которые AI
         // классифицировал как irrelevant/reclamation/accounting/..., и
         // реоткрытие ошибочно отклонённых как Request. Секретарь отвечает за

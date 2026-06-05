@@ -429,4 +429,61 @@ class ManagerAnalyticsService
 
         return $q;
     }
+
+    /**
+     * Топ позиций каталога по продажам/потерям (для отчёта «самые продаваемые /
+     * самые отказные»). На основе закрытых заявок (по дате закрытия):
+     *  - won_units / won_deals = сколько единиц продано (closed_won);
+     *  - lost_units / lost_deals = сколько единиц проиграно (closed_lost).
+     * Единица — `parsed_qty` позиции (в её ед.). Учитываются только catalog-matched
+     * активные позиции. Потери очищены через excludeNonWorkClose (победы не
+     * затрагиваются — нерабочие закрытия бывают только у потерь). Возвращает
+     * Query\Builder для пагинации в компоненте; сортировка по won_units/lost_units.
+     *
+     * @return \Illuminate\Database\Query\Builder
+     */
+    public function topPositionsQuery(CarbonImmutable $from, CarbonImmutable $to, string $sort = 'won', string $search = '')
+    {
+        $won = $this->won();
+        $lost = $this->lost();
+
+        $q = DB::table('request_items')
+            ->join('requests', 'requests.id', '=', 'request_items.request_id')
+            ->join('catalog_items', 'catalog_items.id', '=', 'request_items.catalog_item_id')
+            ->whereIn('requests.status', [$won, $lost])
+            ->whereNotNull('request_items.catalog_item_id')
+            ->where('request_items.is_active', true)
+            ->whereNotNull('requests.closed_at')
+            ->whereBetween('requests.closed_at', [$from->utc(), $to->utc()]);
+
+        // Победы не трогает; у потерь отсекает нерабочие закрытия (заливка/авто-триаж).
+        $this->excludeNonWorkClose($q);
+
+        if ($search !== '') {
+            $term = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
+            $q->where(function ($w) use ($term) {
+                $w->where('catalog_items.name', 'ilike', $term)
+                    ->orWhere('catalog_items.sku', 'ilike', $term)
+                    ->orWhere('catalog_items.brand_article', 'ilike', $term);
+            });
+        }
+
+        $q->groupBy('request_items.catalog_item_id', 'catalog_items.sku', 'catalog_items.name')
+            ->selectRaw(
+                'request_items.catalog_item_id, catalog_items.sku, catalog_items.name,
+                 COALESCE(SUM(request_items.parsed_qty) FILTER (WHERE requests.status = ?), 0) AS won_units,
+                 COUNT(DISTINCT requests.id) FILTER (WHERE requests.status = ?) AS won_deals,
+                 COALESCE(SUM(request_items.parsed_qty) FILTER (WHERE requests.status = ?), 0) AS lost_units,
+                 COUNT(DISTINCT requests.id) FILTER (WHERE requests.status = ?) AS lost_deals',
+                [$won, $won, $lost, $lost]
+            );
+
+        if ($sort === 'lost') {
+            $q->orderByDesc('lost_units')->orderByDesc('lost_deals');
+        } else {
+            $q->orderByDesc('won_units')->orderByDesc('won_deals');
+        }
+
+        return $q;
+    }
 }

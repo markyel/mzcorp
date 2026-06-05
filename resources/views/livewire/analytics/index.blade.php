@@ -24,6 +24,8 @@
         <div class="ds-card-header">
             <h3>Аналитика по менеджерам</h3>
             <span class="text-[12px] text-fg-3 ml-2">Период: {{ $this->periodLabel }}</span>
+            <span class="flex-1"></span>
+            <a href="{{ route('analytics.positions') }}" wire:navigate class="text-[12px] text-sky-700 hover:underline font-medium">Топ позиций · продажи/потери →</a>
         </div>
         <div class="px-4 pb-3 flex items-center gap-2 gap-y-2 flex-wrap text-[12px]">
             {{-- Период --}}
