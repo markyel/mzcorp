@@ -186,11 +186,15 @@ class PollIqotSubmissionsJob implements ShouldQueue
             return;
         }
 
-        foreach ($items as $it) {
-            if (! is_array($it) || ! preg_match('/^pos-(\d+)$/', (string) ($it['client_ref'] ?? ''), $m)) {
+        foreach (array_values($items) as $i => $it) {
+            if (! is_array($it)) {
                 continue;
             }
-            $pos = IqotPosition::find((int) $m[1]);
+            $pid = $this->resolvePositionId($it, $i, $sub);
+            if ($pid === null) {
+                continue;
+            }
+            $pos = IqotPosition::find($pid);
             if (! $pos || (int) $pos->iqot_submission_id !== (int) $sub->id) {
                 continue;
             }
@@ -226,15 +230,15 @@ class PollIqotSubmissionsJob implements ShouldQueue
             return;
         }
 
-        foreach ($entries as $entry) {
+        foreach (array_values($entries) as $i => $entry) {
             if (! is_array($entry)) {
                 continue;
             }
-            $ref = (string) ($entry['client_ref'] ?? '');
-            if (! preg_match('/^pos-(\d+)$/', $ref, $m)) {
+            $pid = $this->resolvePositionId($entry, $i, $sub);
+            if ($pid === null) {
                 continue;
             }
-            $pos = IqotPosition::find((int) $m[1]);
+            $pos = IqotPosition::find($pid);
             if (! $pos || (int) $pos->iqot_submission_id !== (int) $sub->id) {
                 continue;
             }
@@ -253,6 +257,26 @@ class PollIqotSubmissionsJob implements ShouldQueue
                 'error_message' => null,
             ])->save();
         }
+    }
+
+    /**
+     * id позиции по записи ответа IQOT: сначала по client_ref (`pos-{id}`), а
+     * если IQOT его не вернул (наблюдалось после dispatch) — по индексу: items[]
+     * ответа идут в том же порядке, что и наш payload.items[], где client_ref есть.
+     */
+    private function resolvePositionId(array $entry, int $index, IqotSubmission $sub): ?int
+    {
+        if (preg_match('/^pos-(\d+)$/', (string) ($entry['client_ref'] ?? ''), $m)) {
+            return (int) $m[1];
+        }
+        $payloadItems = is_array($sub->payload ?? null) ? ($sub->payload['items'] ?? []) : [];
+        $payloadItems = array_values(is_array($payloadItems) ? $payloadItems : []);
+        if (isset($payloadItems[$index]['client_ref'])
+            && preg_match('/^pos-(\d+)$/', (string) $payloadItems[$index]['client_ref'], $m)) {
+            return (int) $m[1];
+        }
+
+        return null;
     }
 
     private function extractMinPrice(array $entry): ?float
