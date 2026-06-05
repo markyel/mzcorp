@@ -141,7 +141,10 @@ class OutboundDocumentDetector
      * Filename-паттерны счёта.
      */
     private const INVOICE_FILENAME_RE = [
-        '/(^|[\s_\-])счё?т[\s_\-]/iu',
+        // сч[её]?т — ловит «счт» / «счёт» / «счет». Раньше было `счё?т` и
+        // распространённое написание «Счет …» (через е) НЕ матчилось, из-за чего
+        // счёт в письме с КП оставался неопознанным (M-2026-3456).
+        '/(^|[\s_\-])сч[её]?т[\s_\-]/iu',
         '/invoice/i',
         '/(^|[_\-])bill[\s_\-]/i',
         '/(^|[_\-])inv[\s_\-]/i',
@@ -296,28 +299,47 @@ class OutboundDocumentDetector
         $invoice = [];
         foreach ($message->attachments as $att) {
             $fname = (string) $att->filename;
-            if ($fname === '') {
-                continue;
-            }
-            $ext = strtolower((string) pathinfo($fname, PATHINFO_EXTENSION));
-            if (! in_array($ext, self::RELEVANT_EXTENSIONS, true)) {
-                continue;
-            }
-            foreach (self::INVOICE_FILENAME_RE as $re) {
-                if (preg_match($re, $fname) === 1) {
-                    $invoice[] = $fname;
-                    continue 2;
-                }
-            }
-            foreach (self::QUOTATION_FILENAME_RE as $re) {
-                if (preg_match($re, $fname) === 1) {
-                    $quotation[] = $fname;
-                    continue 2;
-                }
+            $type = $this->classifyAttachmentByFilename($fname);
+            if ($type === DetectorType::OutboundInvoice) {
+                $invoice[] = $fname;
+            } elseif ($type === DetectorType::OutboundQuotationFull) {
+                $quotation[] = $fname;
             }
         }
 
         return ['quotation' => $quotation, 'invoice' => $invoice];
+    }
+
+    /**
+     * Классифицировать ОДНО вложение по имени файла (priority invoice > quotation).
+     * Возвращает DetectorType::OutboundInvoice / OutboundQuotationFull, либо null
+     * если имя не самоопределяется (или расширение нерелевантно).
+     *
+     * Используется MailRouter'ом для per-attachment маршрутизации парсинга:
+     * одно письмо может нести И КП, И счёт одновременно (M-2026-3456), поэтому
+     * каждое вложение парсится по СВОЕМУ типу, а не по типу всего письма.
+     */
+    public function classifyAttachmentByFilename(string $filename): ?DetectorType
+    {
+        if ($filename === '') {
+            return null;
+        }
+        $ext = strtolower((string) pathinfo($filename, PATHINFO_EXTENSION));
+        if (! in_array($ext, self::RELEVANT_EXTENSIONS, true)) {
+            return null;
+        }
+        foreach (self::INVOICE_FILENAME_RE as $re) {
+            if (preg_match($re, $filename) === 1) {
+                return DetectorType::OutboundInvoice;
+            }
+        }
+        foreach (self::QUOTATION_FILENAME_RE as $re) {
+            if (preg_match($re, $filename) === 1) {
+                return DetectorType::OutboundQuotationFull;
+            }
+        }
+
+        return null;
     }
 
     private function buildSearchableText(EmailMessage $message): string

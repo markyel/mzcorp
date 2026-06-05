@@ -726,11 +726,11 @@ class MailRouter
      * attachment_id — повторный запуск через MailRouter (sync пересортировка)
      * не плодит дубли.
      */
-    private function dispatchOutboundQuoteParsing(EmailMessage $message, DetectorType $type): void
+    private function dispatchOutboundQuoteParsing(EmailMessage $message, DetectorType $letterType): void
     {
         // Парсим только КП и счёт. Clarification и outbound_quotation_partial
         // (partial — пока зарезервирован, не используется детектором) — пропускаем.
-        if (! in_array($type, [DetectorType::OutboundQuotationFull, DetectorType::OutboundInvoice], true)) {
+        if (! in_array($letterType, [DetectorType::OutboundQuotationFull, DetectorType::OutboundInvoice], true)) {
             return;
         }
 
@@ -741,8 +741,15 @@ class MailRouter
             if (! in_array($ext, $parseable, true)) {
                 continue;
             }
+            // Письмо может нести И КП, И счёт одновременно (M-2026-3456). Тип письма
+            // (priority invoice > quotation) задаёт статус заявки, но КАЖДОЕ вложение
+            // парсится по СВОЕМУ типу: «Счет …» → outbound_invoice (→ Invoice),
+            // «Предложение …» → outbound_quotation_full. Файлы, что по имени не
+            // самоопределяются (спецификация, doc.pdf), наследуют тип письма.
+            $attType = $this->outboundDetector->classifyAttachmentByFilename((string) $att->filename)
+                ?? $letterType;
             try {
-                ParseOutboundQuoteJob::dispatch($att->id, $type->value, false);
+                ParseOutboundQuoteJob::dispatch($att->id, $attType->value, false);
             } catch (\Throwable $e) {
                 Log::warning('MailRouter: dispatch outbound quote parser failed (non-fatal)', [
                     'email_message_id' => $message->id,
