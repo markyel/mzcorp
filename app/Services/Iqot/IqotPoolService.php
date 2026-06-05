@@ -54,6 +54,16 @@ class IqotPoolService
             $cnt = (int) $row->cnt;
             $isNew = ! $pos->exists;
 
+            // Исключена вручную («не запрашивать никогда») — не возвращаем в пул.
+            if (! $isNew && $pos->isExcluded()) {
+                if ((int) $pos->lost_quote_count !== $cnt) {
+                    $pos->lost_quote_count = $cnt;
+                    $pos->save();
+                }
+
+                continue;
+            }
+
             // Свежий отчёт — только обновляем частоту, статус не трогаем.
             if (! $isNew && $pos->hasFreshReport($freshDays)) {
                 if ((int) $pos->lost_quote_count !== $cnt) {
@@ -93,6 +103,9 @@ class IqotPoolService
         $pos->source = IqotPosition::SOURCE_MANUAL;
         $pos->requested_by_user_id = $userId;
         $pos->manual_requested_at = now();
+        // Явный ручной запрос снимает «исключено навсегда».
+        $pos->excluded_at = null;
+        $pos->excluded_by_user_id = null;
         // Не сбрасываем, если уже отправлена и ждём отчёт.
         if ($pos->status !== IqotPositionStatus::Analyzing->value) {
             $pos->status = IqotPositionStatus::Pending->value;

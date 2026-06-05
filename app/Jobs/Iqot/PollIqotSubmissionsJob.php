@@ -194,6 +194,10 @@ class PollIqotSubmissionsJob implements ShouldQueue
             if (! $pos || (int) $pos->iqot_submission_id !== (int) $sub->id) {
                 continue;
             }
+            // Исключена вручную, пока ждали отчёт — не возвращаем в completed.
+            if ($pos->excluded_at !== null) {
+                continue;
+            }
 
             $pos->forceFill([
                 'report' => $entry,

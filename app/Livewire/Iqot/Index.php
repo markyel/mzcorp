@@ -90,6 +90,8 @@ class Index extends Component
         return IqotPosition::query()
             ->with(['catalogItem:id,sku,name,brand,brand_article,brands,articles', 'submission:id,submission_id,local_status', 'requestedBy:id,name'])
             ->when($this->statusFilter !== '', fn ($q) => $q->where('status', $this->statusFilter))
+            // По умолчанию исключённые не показываем — для них есть фильтр.
+            ->when($this->statusFilter === '', fn ($q) => $q->where('status', '!=', IqotPositionStatus::Excluded->value))
             ->when($this->sourceFilter !== '', fn ($q) => $q->where('source', $this->sourceFilter))
             ->when($this->search !== '', function ($q) {
                 $term = '%' . $this->search . '%';
@@ -148,6 +150,44 @@ class Index extends Component
         if ($pos) {
             $pool->enqueueCatalogItem((int) $pos->catalog_item_id, auth()->id());
             session()->flash('iqot-flash', 'Позиция поставлена в очередь на повторный анализ.');
+            unset($this->stats, $this->positions);
+        }
+    }
+
+    /**
+     * Исключить позицию из пула навсегда («не запрашивать никогда»).
+     */
+    public function exclude(int $positionId): void
+    {
+        $this->assertManager();
+        $pos = IqotPosition::find($positionId);
+        if ($pos) {
+            $pos->forceFill([
+                'status' => IqotPositionStatus::Excluded->value,
+                'excluded_at' => now(),
+                'excluded_by_user_id' => auth()->id(),
+            ])->save();
+            session()->flash('iqot-flash', 'Позиция исключена из пула — больше не запрашивается.');
+            unset($this->stats, $this->positions);
+        }
+    }
+
+    /**
+     * Вернуть исключённую позицию обратно в пул.
+     */
+    public function unexclude(int $positionId): void
+    {
+        $this->assertManager();
+        $pos = IqotPosition::find($positionId);
+        if ($pos && $pos->isExcluded()) {
+            $pos->forceFill([
+                'status' => IqotPositionStatus::Pending->value,
+                'excluded_at' => null,
+                'excluded_by_user_id' => null,
+                'error_code' => null,
+                'error_message' => null,
+            ])->save();
+            session()->flash('iqot-flash', 'Позиция возвращена в пул.');
             unset($this->stats, $this->positions);
         }
     }

@@ -2,11 +2,12 @@
     @php
         $stats = $this->stats;
         $statusChips = [
-            '' => 'Все',
+            '' => 'Активные',
             'pending' => 'В очереди',
             'analyzing' => 'Анализируется',
             'completed' => 'Готов отчёт',
             'failed' => 'Ошибка',
+            'excluded' => 'Исключённые',
         ];
         $statusClass = [
             'pending' => 'text-fg-3',
@@ -14,6 +15,7 @@
             'analyzing' => 'text-amber-700',
             'completed' => 'text-emerald-700',
             'failed' => 'text-red-700',
+            'excluded' => 'text-fg-4',
         ];
     @endphp
 
@@ -146,9 +148,16 @@
                                         <span class="text-fg-4">—</span>
                                     @endif
                                 </td>
-                                <td class="px-2 py-1.5 text-right">
-                                    @if(in_array($p->status, ['completed', 'failed'], true))
-                                        <button type="button" wire:click="reanalyze({{ $p->id }})" class="btn btn-sm" wire:loading.attr="disabled">Повторить</button>
+                                <td class="px-2 py-1.5 text-right whitespace-nowrap">
+                                    @if($p->status === 'excluded')
+                                        <button type="button" wire:click="unexclude({{ $p->id }})" class="btn btn-sm" wire:loading.attr="disabled">Вернуть в пул</button>
+                                    @else
+                                        @if(in_array($p->status, ['completed', 'failed'], true))
+                                            <button type="button" wire:click="reanalyze({{ $p->id }})" class="btn btn-sm" wire:loading.attr="disabled">Повторить</button>
+                                        @endif
+                                        <button type="button" wire:click="exclude({{ $p->id }})"
+                                                wire:confirm="Исключить позицию из пула? Она больше не будет отправляться в IQOT."
+                                                class="btn btn-sm btn-danger" wire:loading.attr="disabled">Исключить</button>
                                     @endif
                                 </td>
                             </tr>

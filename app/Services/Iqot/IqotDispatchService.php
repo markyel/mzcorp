@@ -56,6 +56,7 @@ class IqotDispatchService
         $take = min($remaining, 300);
         $positions = IqotPosition::with('catalogItem')
             ->where('status', IqotPositionStatus::Pending->value)
+            ->whereNull('excluded_at')
             ->orderByRaw('CASE WHEN source = ? THEN 0 ELSE 1 END', [IqotPosition::SOURCE_MANUAL])
             ->orderByDesc('lost_quote_count')
             ->orderBy('created_at')

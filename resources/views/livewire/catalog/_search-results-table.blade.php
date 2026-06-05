@@ -362,7 +362,7 @@
                                     </div>
                                 @else
                                     <div class="px-3.5 py-2.5 flex items-center justify-between gap-2">
-                                        <span class="text-[11.5px] text-fg-3">@if($iqp && $iqp->status === 'failed')Ошибка прошлого анализа@else Цены конкурентов не анализировались@endif</span>
+                                        <span class="text-[11.5px] text-fg-3">@if($iqp && $iqp->status === 'failed')Ошибка прошлого анализа@elseif($iqp && $iqp->status === 'excluded')Исключена из пула@else Цены конкурентов не анализировались@endif</span>
                                         <button type="button" wire:click="analyzeWithIqot({{ $cat->id }})" wire:loading.attr="disabled"
                                                 class="inline-flex items-center gap-1 h-7 px-2.5 rounded-md bg-[var(--accent)] text-fg-on-accent text-[11.5px] font-medium whitespace-nowrap">
                                             IQOT — анализ

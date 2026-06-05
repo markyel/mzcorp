@@ -33,6 +33,8 @@ class IqotPosition extends Model
         'report_offers_count',
         'analyzed_at',
         'last_enqueued_at',
+        'excluded_at',
+        'excluded_by_user_id',
         'error_code',
         'error_message',
     ];
@@ -45,6 +47,7 @@ class IqotPosition extends Model
         'manual_requested_at' => 'datetime',
         'analyzed_at' => 'datetime',
         'last_enqueued_at' => 'datetime',
+        'excluded_at' => 'datetime',
     ];
 
     public function catalogItem(): BelongsTo
@@ -60,6 +63,16 @@ class IqotPosition extends Model
     public function requestedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'requested_by_user_id');
+    }
+
+    public function excludedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'excluded_by_user_id');
+    }
+
+    public function isExcluded(): bool
+    {
+        return $this->excluded_at !== null;
     }
 
     public function statusEnum(): ?IqotPositionStatus

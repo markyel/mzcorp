@@ -8,7 +8,8 @@ namespace App\Enums;
  *  - queued    — отобрана к отправке (промежуточное);
  *  - analyzing — отправлена в IQOT, ждём отчёт;
  *  - completed — отчёт получен;
- *  - failed    — ошибка отправки/анализа.
+ *  - failed    — ошибка отправки/анализа;
+ *  - excluded  — исключена из пула вручную («не запрашивать никогда»).
  */
 enum IqotPositionStatus: string
 {
@@ -17,6 +18,7 @@ enum IqotPositionStatus: string
     case Analyzing = 'analyzing';
     case Completed = 'completed';
     case Failed = 'failed';
+    case Excluded = 'excluded';
 
     public function label(): string
     {
@@ -26,6 +28,7 @@ enum IqotPositionStatus: string
             self::Analyzing => 'Анализируется',
             self::Completed => 'Готов отчёт',
             self::Failed => 'Ошибка',
+            self::Excluded => 'Исключена',
         };
     }
 
