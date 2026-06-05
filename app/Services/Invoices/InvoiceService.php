@@ -348,7 +348,24 @@ class InvoiceService
             return false;
         }
         $attachment = \App\Models\EmailAttachment::find($quote->email_attachment_id);
-        $name = mb_strtolower(trim((string) ($attachment->filename ?? '')));
+
+        return self::isContractOrSpecFilename((string) ($attachment->filename ?? ''));
+    }
+
+    /**
+     * Имя файла — договор / спецификация (приложение к счёту), а не сам счёт.
+     * Pure-функция (без БД) — вынесена для тестируемости.
+     *
+     * Ловит и полное «спецификац…», и сокращение «Спец» как отдельный токен
+     * («Спец 31.pdf», «Спец_31», «Спец.pdf») — тикет M-2026-1797: счёт
+     * получил номер спецификации (31) вместо номера счёта (5742), т.к.
+     * «Спец 31.pdf» не подпадал под `спецификац` и доходил до создания Invoice.
+     * Токен-граница ([^а-яё]) исключает ложные срабатывания на «специальн…»,
+     * «спецодежда» и т.п.
+     */
+    public static function isContractOrSpecFilename(string $filename): bool
+    {
+        $name = mb_strtolower(trim($filename));
         if ($name === '') {
             return false;
         }
@@ -359,7 +376,9 @@ class InvoiceService
             return false;
         }
 
-        return str_contains($name, 'договор') || str_contains($name, 'спецификац');
+        return str_contains($name, 'договор')
+            || str_contains($name, 'спецификац')
+            || preg_match('/(^|[^а-яё])спец([^а-яё]|$)/u', $name) === 1;
     }
 
     /**
