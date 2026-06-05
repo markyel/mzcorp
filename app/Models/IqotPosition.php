@@ -26,6 +26,8 @@ class IqotPosition extends Model
         'manual_requested_at',
         'qty',
         'unit',
+        'our_unit_price',
+        'our_quotation_code',
         'client_ref',
         'payload_name',
         'payload_oem',
@@ -45,6 +47,7 @@ class IqotPosition extends Model
     protected $casts = [
         'lost_quote_count' => 'integer',
         'qty' => 'decimal:3',
+        'our_unit_price' => 'decimal:2',
         'report_offers_count' => 'integer',
         'report_min_price' => 'decimal:2',
         'report' => 'array',
@@ -89,6 +92,100 @@ class IqotPosition extends Model
         $offers = is_array($this->report ?? null) ? ($this->report['all_offers'] ?? []) : [];
 
         return is_array($offers) ? array_values(array_filter($offers, 'is_array')) : [];
+    }
+
+    /**
+     * Наглядное сравнение «наше КП vs офферы IQOT» (как в LazyLift).
+     * Сортировка по цене БЕЗ НДС (офферы с НДС приводим делением на 1+ставка);
+     * в выводе сохраняем исходную цену оффера и пометку с/без НДС. Наша цена
+     * (our_unit_price) уже NET. Возвращает строки + ранг нашего КП + дельту
+     * против лучшего IQOT.
+     *
+     * @return array{
+     *   rows: list<array<string,mixed>>, total:int, our_rank:?int,
+     *   best_iqot_net:?float, delta:?float, delta_pct:?float, our_quotation_code:?string
+     * }
+     */
+    public function priceComparison(): array
+    {
+        $rate = (float) app_setting('tax.vat_percent', config('services.tax.vat_percent', 22)) / 100;
+
+        $rows = [];
+        foreach ($this->offers() as $o) {
+            $raw = $o['price_per_unit'] ?? $o['total_price'] ?? $o['price'] ?? null;
+            if (! is_numeric($raw)) {
+                continue;
+            }
+            $raw = (float) $raw;
+            $inclVat = array_key_exists('price_includes_vat', $o)
+                ? (bool) $o['price_includes_vat']
+                : (isset($o['vat_label']) && mb_stripos((string) $o['vat_label'], 'без') === false);
+            $net = $inclVat && $rate > 0 ? $raw / (1 + $rate) : $raw;
+
+            $rows[] = [
+                'is_ours' => false,
+                'supplier' => $o['supplier']['name'] ?? ('#' . ($o['supplier_id'] ?? '?')),
+                'email' => $o['supplier']['email'] ?? null,
+                'phone' => $o['supplier']['phone'] ?? null,
+                'raw' => $raw,
+                'net' => $net,
+                'includes_vat' => $inclVat,
+                'vat_label' => $o['vat_label'] ?? ($inclVat ? 'с НДС' : 'без НДС'),
+                'delivery_days' => $o['delivery_days'] ?? null,
+                'total' => isset($o['total_price']) && is_numeric($o['total_price']) ? (float) $o['total_price'] : null,
+                'received_at' => $o['received_at'] ?? null,
+                'notes' => $o['notes'] ?? null,
+            ];
+        }
+
+        if ($this->our_unit_price !== null) {
+            $rows[] = [
+                'is_ours' => true,
+                'supplier' => 'Наше КП' . ($this->our_quotation_code ? ' ' . $this->our_quotation_code : ''),
+                'email' => null,
+                'phone' => null,
+                'raw' => (float) $this->our_unit_price,
+                'net' => (float) $this->our_unit_price,
+                'includes_vat' => false,
+                'vat_label' => 'без НДС',
+                'delivery_days' => null,
+                'total' => null,
+                'received_at' => null,
+                'notes' => 'собственное КП',
+            ];
+        }
+
+        usort($rows, fn ($a, $b) => $a['net'] <=> $b['net']);
+
+        $ourRank = null;
+        foreach ($rows as $i => $r) {
+            if ($r['is_ours']) {
+                $ourRank = $i + 1;
+                break;
+            }
+        }
+        $bestIqotNet = null;
+        foreach ($rows as $r) {
+            if (! $r['is_ours']) {
+                $bestIqotNet = $bestIqotNet === null ? $r['net'] : min($bestIqotNet, $r['net']);
+            }
+        }
+        $delta = null;
+        $deltaPct = null;
+        if ($this->our_unit_price !== null && $bestIqotNet !== null && $bestIqotNet > 0) {
+            $delta = (float) $this->our_unit_price - $bestIqotNet;
+            $deltaPct = $delta / $bestIqotNet * 100;
+        }
+
+        return [
+            'rows' => $rows,
+            'total' => count($rows),
+            'our_rank' => $ourRank,
+            'best_iqot_net' => $bestIqotNet,
+            'delta' => $delta,
+            'delta_pct' => $deltaPct,
+            'our_quotation_code' => $this->our_quotation_code,
+        ];
     }
 
     /**

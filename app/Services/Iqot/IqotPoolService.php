@@ -57,7 +57,7 @@ class IqotPoolService
             ->orderBy('qi.catalog_item_id')
             ->orderByRaw('q.sent_at DESC NULLS LAST')
             ->orderByDesc('q.id')
-            ->selectRaw('DISTINCT ON (qi.catalog_item_id) qi.catalog_item_id, qi.qty, qi.unit')
+            ->selectRaw('DISTINCT ON (qi.catalog_item_id) qi.catalog_item_id, qi.qty, qi.unit, qi.final_unit_price, q.internal_code')
             ->get()
             ->keyBy('catalog_item_id');
 
@@ -72,6 +72,8 @@ class IqotPoolService
             $last = $latest->get((int) $row->catalog_item_id);
             $lastQty = $last && $last->qty !== null ? (float) $last->qty : null;
             $lastUnit = $last ? (trim((string) $last->unit) ?: null) : null;
+            $lastOurPrice = $last && $last->final_unit_price !== null ? (float) $last->final_unit_price : null;
+            $lastQuoteCode = $last ? (trim((string) $last->internal_code) ?: null) : null;
 
             // Исключена вручную («не запрашивать никогда») — не возвращаем в пул.
             if (! $isNew && $pos->isExcluded()) {
@@ -97,6 +99,8 @@ class IqotPoolService
             $pos->lost_quote_count = $cnt;
             $pos->qty = $lastQty;
             $pos->unit = $lastUnit;
+            $pos->our_unit_price = $lastOurPrice;
+            $pos->our_quotation_code = $lastQuoteCode;
             if ($isNew) {
                 $pos->source = IqotPosition::SOURCE_AUTO;
                 $pos->status = IqotPositionStatus::Pending->value;
