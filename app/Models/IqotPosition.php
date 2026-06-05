@@ -110,20 +110,21 @@ class IqotPosition extends Model
     {
         $rate = (float) app_setting('tax.vat_percent', config('services.tax.vat_percent', 22)) / 100;
 
-        // Наша база сравнения: цена из ПОСЛЕДНЕГО проигранного КП (our_unit_price,
-        // NET без НДС), а если КП по позиции не было (ручной мониторинг) —
-        // фолбэк на цену КАТАЛОГА (тоже NET). Обе уже без НДС.
+        // Наша база сравнения: цена из ПОСЛЕДНЕГО проигранного КП (our_unit_price),
+        // а если КП по позиции не было (ручной мониторинг) — фолбэк на цену
+        // КАТАЛОГА. ВАЖНО: и КП-цена, и catalog.price указаны С НДС (gross) —
+        // для сравнения приводим к без-НДС (делим на 1+ставка), как и офферы.
         $cat = $this->catalogItem;
-        $ourNet = null;
+        $ourGross = null;
         $ourLabel = null;
         $ourNotes = null;
         $ourLead = null;
         if ($this->our_unit_price !== null) {
-            $ourNet = (float) $this->our_unit_price;
+            $ourGross = (float) $this->our_unit_price;
             $ourLabel = 'Наше КП' . ($this->our_quotation_code ? ' ' . $this->our_quotation_code : '');
             $ourNotes = 'собственное КП';
         } elseif ($cat && $cat->price !== null) {
-            $ourNet = (float) $cat->price;
+            $ourGross = (float) $cat->price;
             $ourLabel = 'Наша цена (каталог)';
             $ourLead = $cat->lead_time_days;
             $notes = [];
@@ -135,6 +136,7 @@ class IqotPosition extends Model
             }
             $ourNotes = $notes === [] ? null : implode(' · ', $notes);
         }
+        $ourNet = $ourGross === null ? null : ($rate > 0 ? $ourGross / (1 + $rate) : $ourGross);
 
         $rows = [];
         foreach ($this->offers() as $o) {
@@ -170,10 +172,10 @@ class IqotPosition extends Model
                 'supplier' => $ourLabel,
                 'email' => null,
                 'phone' => null,
-                'raw' => $ourNet,
+                'raw' => $ourGross,
                 'net' => $ourNet,
-                'includes_vat' => false,
-                'vat_label' => 'без НДС',
+                'includes_vat' => true,
+                'vat_label' => 'с НДС',
                 'delivery_days' => $ourLead,
                 'total' => null,
                 'received_at' => null,
