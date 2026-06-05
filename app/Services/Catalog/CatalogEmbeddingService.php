@@ -1439,6 +1439,9 @@ class CatalogEmbeddingService
                 'sku' => (string) $cat->sku,
                 'similarity' => (float) $c['similarity'],
                 'method' => (string) ($c['method'] ?? 'vector'),
+                // Категория кандидата — part_type (человекочитаемо, без зависимости
+                // от таксономии). Для LLM-сверки класса детали.
+                'category' => $cat->part_type,
             ];
         }
 
@@ -1471,6 +1474,7 @@ class CatalogEmbeddingService
                         $item->parsed_name,
                         $clientArticle,
                         $payload,
+                        $this->requestCategoryText($item),
                     )],
                 ],
                 $rerankModel,
@@ -1538,6 +1542,8 @@ class CatalogEmbeddingService
                         $catalog->brand_article,
                         (string) $catalog->sku,
                         $similarity,
+                        $this->requestCategoryText($item),
+                        $catalog->part_type,
                     )],
                 ],
                 config('services.openai.clarification_model', 'gpt-4o-mini'),
@@ -1567,6 +1573,22 @@ class CatalogEmbeddingService
             'same' => (bool) $parsed['same'],
             'reason' => is_string($parsed['reason'] ?? null) ? mb_substr($parsed['reason'], 0, 500) : '',
         ];
+    }
+
+    /**
+     * Человекочитаемая «нужная» категория позиции заявки для LLM-сверки класса
+     * детали: KB-категория (identification_category_id → name), иначе
+     * detailed_category из quality_assessment_payload. null = не определена.
+     */
+    private function requestCategoryText(RequestItem $item): ?string
+    {
+        $name = $item->kbCategory?->name;
+        if (is_string($name) && trim($name) !== '') {
+            return $name;
+        }
+        $dc = $item->quality_assessment_payload['detailed_category']['name'] ?? null;
+
+        return is_string($dc) && trim($dc) !== '' ? $dc : null;
     }
 
     /**

@@ -34,6 +34,13 @@ class RerankCatalogMatchPrompt
 
 ═══ ПРИЗНАКИ РАЗНЫХ ТОВАРОВ (отклоняй) ═══
 
+  • **Категория детали.** В запросе указана нужная категория, у кандидатов —
+    их категория. Кандидата с явно ДРУГИМ классом отклоняй, даже если совпал
+    артикул/токен или высокий similarity. Напр.: клиент просит «Двигатель», а
+    кандидат — «Кнопка» / «Реле» / «Плата управления» → это НЕ тот товар.
+    Категория — сильный сигнал. Исключение: если категория запроса выглядит
+    явно ошибочной (противоречит и названию, и артикулу) — опирайся на название.
+
   • Разный функциональный класс детали:
        «звено цепи» ≠ «звезда главного приводного вала»
        «резиновый поручень» (лента) ≠ «ролик/колесо поручня» (механика)
@@ -147,16 +154,18 @@ PROMPT;
     }
 
     /**
-     * @param  list<array{brand: ?string, name: ?string, brand_article: ?string, sku: string, similarity: float, method: string}>  $candidates
+     * @param  list<array{brand: ?string, name: ?string, brand_article: ?string, sku: string, similarity: float, method: string, category?: ?string}>  $candidates
      */
     public static function userMessage(
         ?string $requestBrand,
         ?string $requestName,
         ?string $requestArticle,
         array $candidates,
+        ?string $requestCategory = null,
     ): string {
         $lines = [
             'ЗАЯВКА КЛИЕНТА:',
+            '  Категория (нужна): ' . ($requestCategory ?: '—'),
             '  Бренд:    ' . ($requestBrand ?: '—'),
             '  Название: ' . ($requestName ?: '—'),
             '  Артикул:  ' . ($requestArticle ?: '—'),
@@ -165,6 +174,7 @@ PROMPT;
         ];
         foreach ($candidates as $i => $c) {
             $lines[] = sprintf('[%d]', $i);
+            $lines[] = '  Категория:       ' . (($c['category'] ?? null) ?: '—');
             $lines[] = '  Бренд:           ' . ($c['brand'] ?: '—');
             $lines[] = '  Название:        ' . ($c['name'] ?: '—');
             $lines[] = '  Артикул произв.: ' . ($c['brand_article'] ?: '—');
