@@ -79,6 +79,44 @@ class IqotPosition extends Model
         return $this->excluded_at !== null;
     }
 
+    /**
+     * Список предложений поставщиков из отчёта IQOT (report.all_offers).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function offers(): array
+    {
+        $offers = is_array($this->report ?? null) ? ($this->report['all_offers'] ?? []) : [];
+
+        return is_array($offers) ? array_values(array_filter($offers, 'is_array')) : [];
+    }
+
+    /**
+     * Мин. цена за единицу из отчёта (для бэкфилла report_min_price).
+     */
+    public function minPriceFromReport(): ?float
+    {
+        $price = static function ($o): ?float {
+            if (! is_array($o)) {
+                return null;
+            }
+            foreach (['price_per_unit', 'total_price', 'price'] as $k) {
+                if (isset($o[$k]) && is_numeric($o[$k])) {
+                    return (float) $o[$k];
+                }
+            }
+
+            return null;
+        };
+        $best = $price($this->report['best_offer_by_price'] ?? null);
+        if ($best !== null) {
+            return $best;
+        }
+        $prices = array_filter(array_map($price, $this->offers()), fn ($p) => $p !== null);
+
+        return $prices === [] ? null : min($prices);
+    }
+
     public function statusEnum(): ?IqotPositionStatus
     {
         return IqotPositionStatus::tryFrom((string) $this->status);

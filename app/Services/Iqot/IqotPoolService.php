@@ -118,6 +118,12 @@ class IqotPoolService
     public function enqueueCatalogItem(int $catalogItemId, ?int $userId = null): IqotPosition
     {
         $pos = IqotPosition::firstOrNew(['catalog_item_id' => $catalogItemId]);
+        // Есть свежий отчёт — повторно на расценку НЕ кидаем (бережём баланс IQOT).
+        // Отчёт обновляется сам, пока submission собирает офферы; принудительный
+        // повторный анализ возможен только после устаревания отчёта.
+        if ($pos->exists && $pos->hasFreshReport()) {
+            return $pos;
+        }
         if (! $pos->exists) {
             $pos->lost_quote_count = 0;
         }

@@ -351,7 +351,7 @@
                                     </div>
                                     <div class="flex justify-between items-center px-3.5 py-2 text-[11.5px]">
                                         <div class="text-fg-3">Офферов: <span class="text-fg-1 mono">{{ $iqp->report_offers_count ?? '—' }}</span> · {{ $iqp->analyzed_at?->format('d.m.Y') }}</div>
-                                        <button type="button" wire:click="analyzeWithIqot({{ $cat->id }})" wire:loading.attr="disabled" class="text-sky-700 font-medium hover:underline">Обновить</button>
+                                        <a href="{{ route('iqot.index', ['q' => $cat->sku]) }}" wire:navigate class="text-sky-700 font-medium hover:underline">Все предложения →</a>
                                     </div>
                                 @elseif($iqp && in_array($iqp->status, ['pending', 'queued', 'analyzing'], true))
                                     <div class="px-3.5 py-2.5 flex items-center justify-between text-[12px]">

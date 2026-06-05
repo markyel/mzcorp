@@ -279,23 +279,48 @@ class PollIqotSubmissionsJob implements ShouldQueue
         return null;
     }
 
+    /**
+     * Мин. цена за единицу по реальной схеме IQOT report-item:
+     * best_offer_by_price.price_per_unit, иначе min по all_offers[].price_per_unit
+     * (fallback total_price). Старые ключи оставлены как fallback.
+     */
     private function extractMinPrice(array $entry): ?float
     {
-        foreach (['min_price', 'minimum_price', 'price_min', 'best_price', 'lowest_price'] as $k) {
-            if (isset($entry[$k]) && is_numeric($entry[$k])) {
-                return (float) $entry[$k];
+        $offerPrice = static function ($o): ?float {
+            if (! is_array($o)) {
+                return null;
             }
+            foreach (['price_per_unit', 'total_price', 'price'] as $k) {
+                if (isset($o[$k]) && is_numeric($o[$k])) {
+                    return (float) $o[$k];
+                }
+            }
+
+            return null;
+        };
+
+        $best = $offerPrice($entry['best_offer_by_price'] ?? null);
+        if ($best !== null) {
+            return $best;
         }
-        $offers = $entry['offers'] ?? null;
+
+        $offers = $entry['all_offers'] ?? $entry['offers'] ?? null;
         if (is_array($offers) && $offers !== []) {
             $prices = [];
             foreach ($offers as $o) {
-                if (is_array($o) && isset($o['price']) && is_numeric($o['price'])) {
-                    $prices[] = (float) $o['price'];
+                $p = $offerPrice($o);
+                if ($p !== null) {
+                    $prices[] = $p;
                 }
             }
             if ($prices !== []) {
                 return min($prices);
+            }
+        }
+
+        foreach (['min_price', 'minimum_price', 'price_min', 'best_price', 'lowest_price'] as $k) {
+            if (isset($entry[$k]) && is_numeric($entry[$k])) {
+                return (float) $entry[$k];
             }
         }
 
@@ -309,8 +334,10 @@ class PollIqotSubmissionsJob implements ShouldQueue
                 return (int) $entry[$k];
             }
         }
-        if (isset($entry['offers']) && is_array($entry['offers'])) {
-            return count($entry['offers']);
+        foreach (['all_offers', 'offers'] as $k) {
+            if (isset($entry[$k]) && is_array($entry[$k])) {
+                return count($entry[$k]);
+            }
         }
 
         return null;

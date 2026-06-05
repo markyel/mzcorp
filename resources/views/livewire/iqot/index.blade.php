@@ -118,13 +118,14 @@
                             <th class="px-2 py-2 text-right"></th>
                         </tr>
                     </thead>
-                    <tbody>
-                        @foreach($this->positions as $p)
-                            @php
-                                $ci = $p->catalogItem;
-                                $fresh = $p->hasFreshReport();
-                            @endphp
-                            <tr wire:key="iqp-{{ $p->id }}" class="border-b border-border-subtle last:border-b-0 hover:bg-hover align-top">
+                    @foreach($this->positions as $p)
+                        @php
+                            $ci = $p->catalogItem;
+                            $fresh = $p->hasFreshReport();
+                            $offers = $p->offers();
+                        @endphp
+                        <tbody wire:key="iqp-{{ $p->id }}" x-data="{ open: false }">
+                            <tr class="border-b border-border-subtle hover:bg-hover align-top">
                                 <td class="px-2 py-1.5">
                                     <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($ci->name ?? '—', 60) }}</div>
                                     <div class="mono text-[11px] text-fg-3">{{ $ci->sku ?? '—' }}</div>
@@ -155,7 +156,13 @@
                                 <td class="px-2 py-1.5 text-right mono {{ $p->report_min_price !== null ? 'text-fg-1 font-semibold' : 'text-fg-4' }}">
                                     {{ $p->report_min_price !== null ? number_format((float) $p->report_min_price, 2, ',', ' ') . ' ₽' : '—' }}
                                 </td>
-                                <td class="px-2 py-1.5 text-right mono text-fg-2">{{ $p->report_offers_count ?? '—' }}</td>
+                                <td class="px-2 py-1.5 text-right mono text-fg-2">
+                                    @if($offers !== [])
+                                        <button type="button" @click="open = !open" class="text-sky-700 hover:underline">{{ $p->report_offers_count ?? count($offers) }} <span x-text="open ? '▾' : '▸'"></span></button>
+                                    @else
+                                        {{ $p->report_offers_count ?? '—' }}
+                                    @endif
+                                </td>
                                 <td class="px-2 py-1.5 text-[11.5px]">
                                     @if($p->analyzed_at)
                                         <span class="{{ $fresh ? 'text-emerald-700' : 'text-fg-3' }}">{{ $p->analyzed_at->format('d.m.Y') }}</span>
@@ -168,7 +175,8 @@
                                     @if($p->status === 'excluded')
                                         <button type="button" wire:click="unexclude({{ $p->id }})" class="btn btn-sm" wire:loading.attr="disabled">Вернуть в пул</button>
                                     @else
-                                        @if(in_array($p->status, ['completed', 'failed'], true))
+                                        {{-- «Повторить» только если нет свежего отчёта (иначе не пере-отправляем — бережём баланс) --}}
+                                        @if($p->status === 'failed' || ($p->status === 'completed' && ! $fresh))
                                             <button type="button" wire:click="reanalyze({{ $p->id }})" class="btn btn-sm" wire:loading.attr="disabled">Повторить</button>
                                         @endif
                                         <button type="button" wire:click="exclude({{ $p->id }})"
@@ -177,8 +185,40 @@
                                     @endif
                                 </td>
                             </tr>
-                        @endforeach
-                    </tbody>
+                            @if($offers !== [])
+                                <tr x-show="open" x-cloak class="border-b border-border-subtle bg-surface-2">
+                                    <td colspan="10" class="px-4 py-2.5">
+                                        <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">Предложения поставщиков ({{ count($offers) }})</div>
+                                        <table class="w-full text-[12px]">
+                                            <thead class="text-fg-3 text-[10px] uppercase tracking-wider">
+                                                <tr>
+                                                    <th class="px-2 py-1 text-left">Поставщик</th>
+                                                    <th class="px-2 py-1 text-right">Цена/ед.</th>
+                                                    <th class="px-2 py-1 text-right">Срок</th>
+                                                    <th class="px-2 py-1 text-left">НДС</th>
+                                                    <th class="px-2 py-1 text-left">Контакты</th>
+                                                    <th class="px-2 py-1 text-left">Примечание</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach($offers as $of)
+                                                    @php $price = $of['price_per_unit'] ?? $of['total_price'] ?? $of['price'] ?? null; @endphp
+                                                    <tr class="border-t border-border-subtle">
+                                                        <td class="px-2 py-1 text-fg-1">{{ $of['supplier']['name'] ?? '—' }}</td>
+                                                        <td class="px-2 py-1 text-right mono text-fg-1 font-semibold">{{ is_numeric($price) ? number_format((float) $price, 2, ',', ' ') . ' ₽' : '—' }}</td>
+                                                        <td class="px-2 py-1 text-right mono text-fg-2">{{ isset($of['delivery_days']) ? $of['delivery_days'] . ' дн' : '—' }}</td>
+                                                        <td class="px-2 py-1 text-fg-3 text-[11px]">{{ $of['vat_label'] ?? '—' }}</td>
+                                                        <td class="px-2 py-1 text-fg-2 text-[11px] mono">{{ $of['supplier']['phone'] ?? '' }}{{ !empty($of['supplier']['email']) ? ' · ' . $of['supplier']['email'] : '' }}</td>
+                                                        <td class="px-2 py-1 text-fg-3 text-[11px]">{{ \Illuminate\Support\Str::limit((string)($of['notes'] ?? ''), 90) }}</td>
+                                                    </tr>
+                                                @endforeach
+                                            </tbody>
+                                        </table>
+                                    </td>
+                                </tr>
+                            @endif
+                        </tbody>
+                    @endforeach
                 </table>
                 <div class="mt-3">{{ $this->positions->links() }}</div>
             @endif
