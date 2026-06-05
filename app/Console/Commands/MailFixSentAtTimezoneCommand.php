@@ -48,6 +48,11 @@ class MailFixSentAtTimezoneCommand extends Command
                     if (! is_string($raw) || trim($raw) === '') {
                         continue;
                     }
+                    // Только при явном offset (Z / ±HH:MM / ±HHMM) — без него
+                    // момент неоднозначен, не гадаем, оставляем как есть.
+                    if (preg_match('/(Z|[+\-]\d{2}:?\d{2})$/', trim($raw)) !== 1) {
+                        continue;
+                    }
 
                     try {
                         $correct = Carbon::parse($raw)->setTimezone($tz);
