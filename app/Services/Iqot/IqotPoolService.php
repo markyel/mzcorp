@@ -7,6 +7,7 @@ use App\Enums\QuotationStatus;
 use App\Enums\RequestStatus;
 use App\Models\CatalogItem;
 use App\Models\IqotPosition;
+use App\Models\RequestItem;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -27,7 +28,14 @@ class IqotPoolService
     }
 
     /**
-     * Собрать/обновить auto-позиции пула из проигранных КП.
+     * Собрать/обновить auto-позиции пула.
+     *
+     * Источник — catalog-matched позиции заявок, которые были в статусе «КП
+     * отправлено» (ЛЮБЫМ путём: структурный Quotation ИЛИ детектор вложения) и
+     * закрыты в потерю. Дедуп по catalog_item_id; lost_quote_count = число таких
+     * заявок. qty/unit — из позиции заявки (effectiveQty/effectiveUnit, последняя
+     * по дате закрытия). Наша цена — из структурного КП, если он был; иначе пусто
+     * (сравнение возьмёт цену каталога).
      *
      * @return array{created:int, updated:int, skipped_fresh:int}
      */
@@ -35,50 +43,80 @@ class IqotPoolService
     {
         $freshDays = $this->freshDays();
 
-        $rows = DB::table('quotation_items as qi')
-            ->join('quotations as q', 'q.id', '=', 'qi.quotation_id')
-            ->join('requests as r', 'r.id', '=', 'q.request_id')
-            ->where('q.status', QuotationStatus::Sent->value)
+        // Базовый фильтр: closed_lost заявки, что были «КП отправлено» (любым
+        // путём — фиксируется переходом статуса в quoted), их активные позиции,
+        // сматченные с каталогом.
+        $base = DB::table('request_items as ri')
+            ->join('requests as r', 'r.id', '=', 'ri.request_id')
             ->where('r.status', RequestStatus::ClosedLost->value)
-            ->whereNotNull('qi.catalog_item_id')
-            ->groupBy('qi.catalog_item_id')
-            ->selectRaw('qi.catalog_item_id, COUNT(DISTINCT q.id) AS cnt')
+            ->where('ri.is_active', true)
+            ->whereNotNull('ri.catalog_item_id')
+            ->whereExists(function ($s) {
+                $s->from('request_state_changes as sc')
+                    ->whereColumn('sc.request_id', 'r.id')
+                    ->where('sc.to_status', RequestStatus::Quoted->value);
+            });
+
+        $rows = (clone $base)
+            ->groupBy('ri.catalog_item_id')
+            ->selectRaw('ri.catalog_item_id, COUNT(DISTINCT r.id) AS cnt')
             ->get();
 
-        // qty/unit из ПОСЛЕДНЕГО проигранного КП по каждой позиции (DISTINCT ON
-        // по sent_at desc). Канат и т.п.: «1 шт» бессмысленно — берём как
-        // запрашивали в последнем КП (напр. 576 м).
-        $latest = DB::table('quotation_items as qi')
-            ->join('quotations as q', 'q.id', '=', 'qi.quotation_id')
-            ->join('requests as r', 'r.id', '=', 'q.request_id')
-            ->where('q.status', QuotationStatus::Sent->value)
-            ->where('r.status', RequestStatus::ClosedLost->value)
-            ->whereNotNull('qi.catalog_item_id')
-            ->orderBy('qi.catalog_item_id')
-            ->orderByRaw('q.sent_at DESC NULLS LAST')
-            ->orderByDesc('q.id')
-            ->selectRaw('DISTINCT ON (qi.catalog_item_id) qi.catalog_item_id, qi.qty, qi.unit, qi.final_unit_price, q.internal_code')
+        // Последняя (по дате закрытия) исходная позиция на каждый catalog_item —
+        // для qty/unit и нашей цены.
+        $latest = (clone $base)
+            ->orderBy('ri.catalog_item_id')
+            ->orderByRaw('r.closed_at DESC NULLS LAST')
+            ->orderByDesc('r.id')
+            ->selectRaw('DISTINCT ON (ri.catalog_item_id) ri.catalog_item_id, ri.id AS request_item_id, r.id AS request_id')
             ->get()
             ->keyBy('catalog_item_id');
+
+        $items = $latest->isEmpty()
+            ? collect()
+            : RequestItem::whereIn('id', $latest->pluck('request_item_id'))->get()->keyBy('id');
+
+        // Наша цена из структурного КП (Quotation sent) по (request_id, catalog_item_id),
+        // если он был; для детектор-пути такого КП нет — our_unit_price останется пуст.
+        $kp = collect();
+        if ($latest->isNotEmpty()) {
+            $kp = DB::table('quotation_items as qi')
+                ->join('quotations as q', 'q.id', '=', 'qi.quotation_id')
+                ->where('q.status', QuotationStatus::Sent->value)
+                ->whereIn('q.request_id', $latest->pluck('request_id')->unique()->values()->all())
+                ->whereNotNull('qi.catalog_item_id')
+                ->orderBy('q.request_id')
+                ->orderBy('qi.catalog_item_id')
+                ->orderByRaw('q.sent_at DESC NULLS LAST')
+                ->orderByDesc('q.id')
+                ->selectRaw('DISTINCT ON (q.request_id, qi.catalog_item_id) q.request_id, qi.catalog_item_id, qi.final_unit_price, q.internal_code')
+                ->get()
+                ->keyBy(fn ($r) => $r->request_id . ':' . $r->catalog_item_id);
+        }
 
         $created = 0;
         $updated = 0;
         $skippedFresh = 0;
 
         foreach ($rows as $row) {
-            $pos = IqotPosition::firstOrNew(['catalog_item_id' => (int) $row->catalog_item_id]);
+            $catId = (int) $row->catalog_item_id;
             $cnt = (int) $row->cnt;
+            $pos = IqotPosition::firstOrNew(['catalog_item_id' => $catId]);
             $isNew = ! $pos->exists;
-            $last = $latest->get((int) $row->catalog_item_id);
 
-            // Метаданные (частота, кол-во/единица и НАША цена+код из последнего
-            // проигранного КП) обновляем ВСЕГДА — в т.ч. у исключённых/свежих,
-            // чтобы сравнение «наше КП vs офферы» всегда имело актуальную цену.
+            $lt = $latest->get($catId);
+            $ri = $lt ? $items->get($lt->request_item_id) : null;
+            $kpRow = $lt ? $kp->get($lt->request_id . ':' . $catId) : null;
+
+            // Метаданные обновляем ВСЕГДА — в т.ч. у исключённых/свежих.
             $pos->lost_quote_count = $cnt;
-            $pos->qty = $last && $last->qty !== null ? (float) $last->qty : null;
-            $pos->unit = $last ? (trim((string) $last->unit) ?: null) : null;
-            $pos->our_unit_price = $last && $last->final_unit_price !== null ? (float) $last->final_unit_price : null;
-            $pos->our_quotation_code = $last ? (trim((string) $last->internal_code) ?: null) : null;
+            if ($ri) {
+                $eq = $ri->effectiveQty();
+                $pos->qty = $eq > 0 ? $eq : ((float) ($ri->parsed_qty ?: 1));
+                $pos->unit = $ri->effectiveUnit() ?: (trim((string) ($ri->parsed_unit ?? '')) ?: null);
+            }
+            $pos->our_unit_price = $kpRow && $kpRow->final_unit_price !== null ? (float) $kpRow->final_unit_price : null;
+            $pos->our_quotation_code = $kpRow ? (trim((string) $kpRow->internal_code) ?: null) : null;
 
             // Исключена вручную («не запрашивать никогда») — статус не трогаем.
             if (! $isNew && $pos->isExcluded()) {
