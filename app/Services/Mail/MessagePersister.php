@@ -798,7 +798,13 @@ class MessagePersister
         }
         $first = $this->attributeToArray($attr)[0] ?? null;
 
-        return $first instanceof CarbonInterface ? $first : null;
+        // Заголовок Date приходит в таймзоне отправителя (часто UTC «+0000»).
+        // Eloquent сохраняет wall-clock без конверсии, а читает как app.timezone
+        // → без нормализации UTC-письмо отображалось бы на −3ч (рассинхрон MSK).
+        // Приводим к таймзоне приложения, чтобы хранить корректный момент.
+        return $first instanceof CarbonInterface
+            ? $first->setTimezone(config('app.timezone'))
+            : null;
     }
 
     /**
