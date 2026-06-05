@@ -117,6 +117,12 @@ Route::middleware('auth')->group(function () {
 
     // Mail routing rules — управление правилами для РОП и директора.
     Route::middleware('role:head_of_sales,director,admin')->group(function () {
+        // Раздел «IQOT» — анализ цен конкурентов: пул позиций (из проигранных КП
+        // + ручные из каталога), статусы submission и отчёты по позициям.
+        Route::get('/dashboard/iqot', function () {
+            return view('iqot.index');
+        })->name('iqot.index');
+
         Route::get('/dashboard/mail-rules', function () {
             return view('admin.mail-rules.index');
         })->name('mail-rules.index');

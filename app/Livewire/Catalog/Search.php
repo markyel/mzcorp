@@ -3,8 +3,10 @@
 namespace App\Livewire\Catalog;
 
 use App\Models\CatalogItem;
+use App\Models\IqotPosition;
 use App\Models\Kb\EquipmentCategory;
 use App\Services\Catalog\CatalogEmbeddingService;
+use App\Services\Iqot\IqotPoolService;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -371,6 +373,46 @@ class Search extends Component
         }
 
         return array_values($rows);
+    }
+
+    /**
+     * Доступ к ручному запуску IQOT-анализа — РОП / директор / админ.
+     */
+    #[Computed]
+    public function canIqot(): bool
+    {
+        return auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'admin']) ?? false;
+    }
+
+    /**
+     * Карта catalog_item_id → IqotPosition для текущей выдачи (подсветка
+     * наличия отчёта / статуса анализа в карточке каталога).
+     *
+     * @return \Illuminate\Support\Collection<int, IqotPosition>
+     */
+    #[Computed]
+    public function iqotByCatalogId()
+    {
+        if (! $this->canIqot) {
+            return collect();
+        }
+        $ids = array_map(fn ($r) => $r['catalog']->id, $this->results);
+        if ($ids === []) {
+            return collect();
+        }
+
+        return IqotPosition::whereIn('catalog_item_id', $ids)->get()->keyBy('catalog_item_id');
+    }
+
+    /**
+     * Ручное добавление позиции каталога в пул IQOT (приоритетно).
+     */
+    public function analyzeWithIqot(int $catalogItemId, IqotPoolService $pool): void
+    {
+        abort_unless($this->canIqot, 403);
+        $pool->enqueueCatalogItem($catalogItemId, auth()->id());
+        unset($this->iqotByCatalogId);
+        session()->flash('iqot-flash', 'Позиция добавлена в очередь IQOT-анализа.');
     }
 
     public function render()

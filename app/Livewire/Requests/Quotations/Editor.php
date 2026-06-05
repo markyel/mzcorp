@@ -3,6 +3,7 @@
 namespace App\Livewire\Requests\Quotations;
 
 use App\Enums\Role;
+use App\Models\IqotPosition;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
 use App\Models\RequestItem;
@@ -102,6 +103,28 @@ class Editor extends Component
         return $this->request->items
             ->where('is_active', true)
             ->whereNull('catalog_item_id');
+    }
+
+    /**
+     * Карта catalog_item_id → IqotPosition со СВЕЖИМ отчётом для позиций этой
+     * заявки. Наличие записи = по позиции есть актуальный анализ цен конкурентов
+     * (подсветка в строках КП со ссылкой на раздел IQOT).
+     *
+     * @return \Illuminate\Support\Collection<int, IqotPosition>
+     */
+    #[Computed]
+    public function iqotByCatalogId()
+    {
+        $ids = $this->request->items->pluck('catalog_item_id')->filter()->unique()->all();
+        if ($ids === []) {
+            return collect();
+        }
+        $fresh = (int) app_setting('iqot.report_fresh_days', config('services.iqot.report_fresh_days', 90));
+
+        return IqotPosition::whereIn('catalog_item_id', $ids)
+            ->withFreshReport($fresh)
+            ->get()
+            ->keyBy('catalog_item_id');
     }
 
     #[Computed]
@@ -468,7 +491,7 @@ class Editor extends Component
     #[On('request-state-changed')]
     public function onStateChanged(): void
     {
-        unset($this->request, $this->versions, $this->activeQuotation, $this->matchedItems, $this->unmatchedItems);
+        unset($this->request, $this->versions, $this->activeQuotation, $this->matchedItems, $this->unmatchedItems, $this->iqotByCatalogId);
     }
 
     public function render()

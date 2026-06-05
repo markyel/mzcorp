@@ -335,6 +335,42 @@
                                 <div class="mono text-[13px] text-fg-1">{{ $cat->lead_time_days !== null ? $cat->lead_time_days . ' дн' : '—' }}</div>
                             </div>
                         </div>
+
+                        {{-- IQOT · анализ цен конкурентов (РОП / директор / админ) --}}
+                        @if($this->canIqot)
+                            @php $iqp = $this->iqotByCatalogId->get($cat->id); @endphp
+                            <div class="bg-surface border border-border rounded-md overflow-hidden mt-2">
+                                <div class="px-3.5 py-2 bg-surface-2 border-b border-border-subtle text-[10px] uppercase tracking-wider text-fg-3 font-semibold flex items-center justify-between">
+                                    <span>IQOT · цены конкурентов</span>
+                                    <a href="{{ route('iqot.index') }}" wire:navigate class="text-sky-700 normal-case font-medium">Раздел →</a>
+                                </div>
+                                @if($iqp && $iqp->hasFreshReport())
+                                    <div class="flex justify-between items-baseline px-3.5 py-2 border-b border-border-subtle text-[12.5px]">
+                                        <div class="text-fg-3 text-[12px] font-medium">Мин. цена (IQOT)</div>
+                                        <div class="mono text-[14px] font-semibold text-emerald-700">{{ $iqp->report_min_price !== null ? number_format((float) $iqp->report_min_price, 2, ',', ' ') . ' ₽' : '—' }}</div>
+                                    </div>
+                                    <div class="flex justify-between items-center px-3.5 py-2 text-[11.5px]">
+                                        <div class="text-fg-3">Офферов: <span class="text-fg-1 mono">{{ $iqp->report_offers_count ?? '—' }}</span> · {{ $iqp->analyzed_at?->format('d.m.Y') }}</div>
+                                        <button type="button" wire:click="analyzeWithIqot({{ $cat->id }})" wire:loading.attr="disabled" class="text-sky-700 font-medium hover:underline">Обновить</button>
+                                    </div>
+                                @elseif($iqp && in_array($iqp->status, ['pending', 'queued', 'analyzing'], true))
+                                    <div class="px-3.5 py-2.5 flex items-center justify-between text-[12px]">
+                                        <span class="text-amber-700">{{ $iqp->statusEnum()?->label() ?? 'в очереди' }}…</span>
+                                        @if($iqp->report_min_price !== null)
+                                            <span class="text-fg-3 text-[11.5px]">прошлый: {{ number_format((float) $iqp->report_min_price, 2, ',', ' ') }} ₽</span>
+                                        @endif
+                                    </div>
+                                @else
+                                    <div class="px-3.5 py-2.5 flex items-center justify-between gap-2">
+                                        <span class="text-[11.5px] text-fg-3">@if($iqp && $iqp->status === 'failed')Ошибка прошлого анализа@else Цены конкурентов не анализировались@endif</span>
+                                        <button type="button" wire:click="analyzeWithIqot({{ $cat->id }})" wire:loading.attr="disabled"
+                                                class="inline-flex items-center gap-1 h-7 px-2.5 rounded-md bg-[var(--accent)] text-fg-on-accent text-[11.5px] font-medium whitespace-nowrap">
+                                            IQOT — анализ
+                                        </button>
+                                    </div>
+                                @endif
+                            </div>
+                        @endif
                     </div>
 
                     {{-- ─── Правая колонка: name h2 + name_en + kvgrid + descriptions/comments ─── --}}

@@ -171,6 +171,14 @@
                                         @if($item->snapshot_brand) <span class="text-fg-2">{{ $item->snapshot_brand }}</span> @endif
                                         @if($item->snapshot_brand_article) <span>{{ $item->snapshot_brand_article }}</span> @endif
                                         @if(!$item->catalog_in_stock) <span class="text-amber-700">нет на складе</span> @endif
+                                        @php $iqp = $item->catalog_item_id ? $this->iqotByCatalogId->get($item->catalog_item_id) : null; @endphp
+                                        @if($iqp)
+                                            <a href="{{ route('iqot.index') }}" wire:navigate
+                                               title="Анализ цен конкурентов IQOT — открыть раздел"
+                                               class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-semibold normal-case hover:bg-emerald-100">
+                                                IQOT{{ $iqp->report_min_price !== null ? ': ' . number_format((float) $iqp->report_min_price, 0, ',', ' ') . ' ₽' : '' }}@if($iqp->report_offers_count) · {{ $iqp->report_offers_count }} офф.@endif
+                                            </a>
+                                        @endif
                                     </div>
                                 </td>
                                 <td class="px-2 py-1.5 align-top text-right">

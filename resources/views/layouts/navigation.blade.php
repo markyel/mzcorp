@@ -71,6 +71,10 @@
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin', 'secretary'])) {
         $navLinks[] = ['route' => 'analytics.index', 'label' => 'Аналитика', 'pattern' => 'analytics.*'];
     }
+    // «IQOT» — анализ цен конкурентов (РОП / директорат / админ).
+    if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
+        $navLinks[] = ['route' => 'iqot.index', 'label' => 'IQOT', 'pattern' => 'iqot.*'];
+    }
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];
         // Уведомления клиенту вынесены в подпункт страницы «Настройки»,
