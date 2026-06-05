@@ -36,15 +36,14 @@ class ManagerAnalyticsService
     ];
 
     /**
-     * Триаж-причины Потери: заявка не вошла в воронку (не наша тематика, спам,
-     * дубль, парсер не нашёл позиций). Исключаем из аналитики ТОЛЬКО когда
-     * закрыто АВТО (LLM/cron) — ручной триаж менеджера остаётся как его работа.
-     */
-    private const TRIAGE_LOST_REASONS = ['off_topic', 'spam', 'parser_no_content', 'duplicate'];
-
-    /**
-     * Закрывающие события, которые исключаем ВСЕГДА (не работа менеджера, какой
-     * бы ни была причина): разовая pre-launch заливка и служебная чистка фантомов.
+     * Принцип аналитики: учитываем всё, что ДОШЛО ДО МЕНЕДЖЕРА (попало в его пул,
+     * `assigned_user_id IS NOT NULL`), независимо от того, кто/как потом закрыл
+     * (менеджер вручную, LLM, cron). Не дошедшее (неназначенные авто-закрытия
+     * cron'а, напр. parser_no_content) отсекается самим фильтром по assigned.
+     *
+     * Единственное доп.исключение — разовая pre-launch заливка / чистка фантомов:
+     * старые заявки, закрытые пачкой перед запуском, назначены, но это не
+     * активность периода. Отсекаем по событию закрывающего перехода.
      */
     private const NON_WORK_CLOSE_EVENTS = ['bulk_close_historic', 'cleanup.internal_phantom'];
 
@@ -59,12 +58,10 @@ class ManagerAnalyticsService
     }
 
     /**
-     * Отбрасывает заявки, закрытие которых НЕ считаем работой менеджера. По
-     * ПОСЛЕДНЕМУ закрывающему (closed_won/closed_lost) переходу исключаем, если:
-     *  - event ∈ NON_WORK_CLOSE_EVENTS (разовая заливка/чистка), ИЛИ
-     *  - закрыто АВТО (by_user_id IS NULL) И причина — триаж (TRIAGE_LOST_REASONS).
-     * Остаются: открытые заявки, все ручные закрытия менеджера (любой причины) и
-     * АВТО-закрытия реальных потерь (молчит после КП, неоплаченный счёт и т.п.).
+     * Отбрасывает заявки, чьё ПОСЛЕДНЕЕ закрывающее (closed_won/closed_lost)
+     * событие — разовая pre-launch заливка / чистка фантомов
+     * (NON_WORK_CLOSE_EVENTS). Это единственное исключение поверх фильтра по
+     * assigned_user_id («дошло до менеджера»); см. NON_WORK_CLOSE_EVENTS.
      *
      * Последний переход определяем через DISTINCT ON (Postgres): на заявку может
      * быть несколько закрытий (реанимация → повторное).
@@ -74,23 +71,16 @@ class ManagerAnalyticsService
     private function excludeNonWorkClose($q): void
     {
         $q->whereNotIn('requests.id', function ($sub) {
-            $sub->select('lc.request_id')
+            $sub->select('request_id')
                 ->fromSub(function ($inner) {
                     $inner->from('request_state_changes')
                         ->whereIn('to_status', [$this->won(), $this->lost()])
-                        ->selectRaw('DISTINCT ON (request_id) request_id, event, by_user_id')
+                        ->selectRaw('DISTINCT ON (request_id) request_id, event')
                         ->orderBy('request_id')
                         ->orderByDesc('created_at')
                         ->orderByDesc('id');
                 }, 'lc')
-                ->join('requests as r', 'r.id', '=', 'lc.request_id')
-                ->where(function ($w) {
-                    $w->whereIn('lc.event', self::NON_WORK_CLOSE_EVENTS)
-                        ->orWhere(function ($w2) {
-                            $w2->whereNull('lc.by_user_id')
-                                ->whereIn('r.closed_lost_reason', self::TRIAGE_LOST_REASONS);
-                        });
-                });
+                ->whereIn('event', self::NON_WORK_CLOSE_EVENTS);
         });
     }
 
@@ -364,9 +354,12 @@ class ManagerAnalyticsService
             $base->whereIn('assigned_user_id', $managerIds);
         }
 
+        // Все потери периода (включая не дошедшие до менеджера) — для расчёта
+        // числа «не учтено» (excluded).
         $totalLost = (int) (clone $base)->count();
 
-        $kept = clone $base;
+        // Учитываем только дошедшее до менеджера (assigned) и не разовую заливку.
+        $kept = (clone $base)->whereNotNull('assigned_user_id');
         $this->excludeNonWorkClose($kept);
 
         $rows = $kept
