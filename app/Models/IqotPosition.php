@@ -110,10 +110,31 @@ class IqotPosition extends Model
     {
         $rate = (float) app_setting('tax.vat_percent', config('services.tax.vat_percent', 22)) / 100;
 
-        // Наша база сравнения — цена КАТАЛОГА (NET, без НДС), а не из КП: КП-цена
-        // варьируется по сделкам, а часть позиций мониторится вручную (без КП).
+        // Наша база сравнения: цена из ПОСЛЕДНЕГО проигранного КП (our_unit_price,
+        // NET без НДС), а если КП по позиции не было (ручной мониторинг) —
+        // фолбэк на цену КАТАЛОГА (тоже NET). Обе уже без НДС.
         $cat = $this->catalogItem;
-        $ourNet = $cat && $cat->price !== null ? (float) $cat->price : null;
+        $ourNet = null;
+        $ourLabel = null;
+        $ourNotes = null;
+        $ourLead = null;
+        if ($this->our_unit_price !== null) {
+            $ourNet = (float) $this->our_unit_price;
+            $ourLabel = 'Наше КП' . ($this->our_quotation_code ? ' ' . $this->our_quotation_code : '');
+            $ourNotes = 'собственное КП';
+        } elseif ($cat && $cat->price !== null) {
+            $ourNet = (float) $cat->price;
+            $ourLabel = 'Наша цена (каталог)';
+            $ourLead = $cat->lead_time_days;
+            $notes = [];
+            if ($cat->price_min !== null) {
+                $notes[] = 'мин. ' . number_format((float) $cat->price_min, 2, ',', ' ') . ' ₽';
+            }
+            if (! $cat->is_price_actual) {
+                $notes[] = 'цена не актуальна';
+            }
+            $ourNotes = $notes === [] ? null : implode(' · ', $notes);
+        }
 
         $rows = [];
         foreach ($this->offers() as $o) {
@@ -144,26 +165,19 @@ class IqotPosition extends Model
         }
 
         if ($ourNet !== null) {
-            $ourNotes = [];
-            if ($cat && $cat->price_min !== null) {
-                $ourNotes[] = 'мин. ' . number_format((float) $cat->price_min, 2, ',', ' ') . ' ₽';
-            }
-            if ($cat && ! $cat->is_price_actual) {
-                $ourNotes[] = 'цена не актуальна';
-            }
             $rows[] = [
                 'is_ours' => true,
-                'supplier' => 'Наша цена (каталог)',
+                'supplier' => $ourLabel,
                 'email' => null,
                 'phone' => null,
                 'raw' => $ourNet,
                 'net' => $ourNet,
                 'includes_vat' => false,
                 'vat_label' => 'без НДС',
-                'delivery_days' => $cat?->lead_time_days,
+                'delivery_days' => $ourLead,
                 'total' => null,
                 'received_at' => null,
-                'notes' => $ourNotes === [] ? null : implode(' · ', $ourNotes),
+                'notes' => $ourNotes,
             ];
         }
 
@@ -196,6 +210,7 @@ class IqotPosition extends Model
             'best_iqot_net' => $bestIqotNet,
             'delta' => $delta,
             'delta_pct' => $deltaPct,
+            'our_label' => $ourLabel,
         ];
     }
 

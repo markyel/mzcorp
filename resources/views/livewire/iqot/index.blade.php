@@ -191,7 +191,7 @@
                                     <td colspan="10" class="px-4 py-2.5">
                                         @if($cmp['our_rank'])
                                             <div class="text-[12px] text-fg-2 mb-2">
-                                                <b class="text-red-700">Наша цена (каталог)</b>
+                                                <b class="text-red-700">{{ $cmp['our_label'] ?? 'Наша цена' }}</b>
                                                 занимает <b>{{ $cmp['our_rank'] }}-е место</b> из {{ $cmp['total'] }} по цене (без НДС)
                                                 @if($cmp['delta'] !== null)
                                                     · vs лучший IQOT:
