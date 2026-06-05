@@ -53,7 +53,13 @@ class IqotDispatchService
             return ['skipped' => 'daily_limit_reached', 'used_today' => $usedToday];
         }
 
-        $take = min($remaining, 300);
+        // За ОДИН заход отдаём только порцию = дневной лимит / число заходов в день
+        // (окно 8–18). Так лимит не тратится сразу, а приоритетные позиции уходят
+        // уже с первого утреннего захода. Общий дневной лимит при этом соблюдается
+        // (ограничение $remaining). Cap 300 — потолок IQOT на одну submission.
+        $runsPerDay = max(1, (int) app_setting('iqot.runs_per_day', config('services.iqot.runs_per_day', 6)));
+        $perRun = max(1, (int) ceil($dailyLimit / $runsPerDay));
+        $take = min($perRun, $remaining, 300);
         $positions = IqotPosition::with('catalogItem')
             ->where('status', IqotPositionStatus::Pending->value)
             ->whereNull('excluded_at')

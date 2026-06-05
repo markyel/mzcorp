@@ -514,6 +514,10 @@ return [
         'api_key' => env('IQOT_API_KEY', ''),
         // Дневной лимит позиций на анализ (защита баланса). 0 = не отправлять.
         'daily_limit' => (int) env('IQOT_DAILY_LIMIT', 50),
+        // Число заходов крона в день (окно 8–18). daily_limit делится на это
+        // число = порция за один заход (чтобы не израсходовать лимит сразу).
+        // Должно соответствовать расписанию iqot:dispatch в routes/console.php.
+        'runs_per_day' => (int) env('IQOT_RUNS_PER_DAY', 6),
         // Окно актуальности отчёта: позиция со свежим отчётом не пере-анализируется.
         'report_fresh_days' => (int) env('IQOT_REPORT_FRESH_DAYS', 90),
         // Корневая категория (client_category.path[0]) для каждой позиции.

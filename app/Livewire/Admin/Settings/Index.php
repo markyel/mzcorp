@@ -355,6 +355,16 @@ class Index extends Component
                 'step' => 1,
                 'min' => 0,
             ],
+            'iqot.runs_per_day' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Заходов в день (окно 8–18)',
+                'help' => 'Дневной лимит делится на это число = порция за один заход (чтобы не израсходовать лимит сразу, а первоочередные позиции уходили с первого утреннего захода). По умолчанию 6 — каждые 2 часа с 8 до 18. Менять вместе с расписанием крона.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 6,
+                'step' => 1,
+                'min' => 1,
+                'max' => 24,
+            ],
             'iqot.report_fresh_days' => [
                 'group' => 'IQOT · анализ цен',
                 'label' => 'Актуальность отчёта (дней)',
@@ -423,6 +433,7 @@ class Index extends Component
             'iqot.enabled' => 'services.iqot.enabled',
             'iqot.api_key' => 'services.iqot.api_key',
             'iqot.daily_limit' => 'services.iqot.daily_limit',
+            'iqot.runs_per_day' => 'services.iqot.runs_per_day',
             'iqot.report_fresh_days' => 'services.iqot.report_fresh_days',
             'iqot.root_category' => 'services.iqot.root_category',
         ];

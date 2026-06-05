@@ -162,11 +162,13 @@ Schedule::command('requests:auto-close-inactive')
     ->onOneServer()
     ->runInBackground();
 
-// IQOT (анализ цен конкурентов): раз в 2 часа обновляем пул из проигранных КП
-// и отправляем приоритетные позиции в рамках дневного лимита. No-op, если
-// iqot.enabled выключено или ключ не задан (проверка внутри сервиса).
+// IQOT (анализ цен конкурентов): новые позиции отправляем ТОЛЬКО в рабочее окно
+// 8–18 MSK, каждые 2 часа → 6 заходов/день (8,10,12,14,16,18). За один заход
+// уходит порция = daily_limit / runs_per_day (см. IqotDispatchService) — лимит
+// не тратится сразу. No-op, если iqot.enabled выключено или ключ не задан.
+// ВАЖНО: число заходов должно совпадать с настройкой iqot.runs_per_day (=6).
 Schedule::command('iqot:dispatch')
-    ->cron('15 */2 * * *')
+    ->cron('0 8-18/2 * * *')
     ->timezone('Europe/Moscow')
     ->withoutOverlapping()
     ->onOneServer()
