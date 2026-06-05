@@ -147,14 +147,11 @@ class IqotPoolService
         if (! $ci) {
             return '';
         }
-        $primary = trim((string) ($ci->brand_article ?? ''));
-        if ($primary !== '') {
-            return $primary;
-        }
-        foreach ((array) ($ci->articles ?? []) as $a) {
-            $a = trim((string) $a);
-            if ($a !== '') {
-                return $a;
+        $sku = (string) ($ci->sku ?? '');
+        foreach (array_merge([$ci->brand_article], (array) ($ci->articles ?? [])) as $candidate) {
+            $candidate = trim((string) $candidate);
+            if ($candidate !== '' && ! $this->isInternalCode($candidate, $sku)) {
+                return $candidate;
             }
         }
 
@@ -166,17 +163,40 @@ class IqotPoolService
         if (! $ci) {
             return '';
         }
-        $primary = trim((string) ($ci->brand ?? ''));
-        if ($primary !== '') {
-            return $primary;
-        }
-        foreach ((array) ($ci->brands ?? []) as $b) {
-            $b = trim((string) $b);
-            if ($b !== '') {
-                return $b;
+        $sku = (string) ($ci->sku ?? '');
+        foreach (array_merge([$ci->brand], (array) ($ci->brands ?? [])) as $candidate) {
+            $candidate = trim((string) $candidate);
+            if ($candidate !== '' && ! $this->isInternalCode($candidate, $sku)) {
+                return $candidate;
             }
         }
 
         return '';
+    }
+
+    /**
+     * Является ли значение нашим внутренним M-артикулом (его НЕЛЬЗЯ слать в IQOT).
+     * True если: равно sku каталога (после нормализации), либо похоже на M-код
+     * (латинское «M####» / кириллическое «МЗ-…»). brand_article иногда просто
+     * дублирует sku — такие значения отсекаем.
+     */
+    private function isInternalCode(string $value, ?string $sku): bool
+    {
+        $norm = static fn ($s) => mb_strtoupper(preg_replace('/[\s\-._]+/u', '', trim((string) $s)));
+        $v = $norm($value);
+        if ($v === '') {
+            return true;
+        }
+        if ($sku !== null && $sku !== '' && $v === $norm($sku)) {
+            return true;
+        }
+        if (preg_match('/^M\d{3,}$/iu', $value) === 1) {
+            return true;
+        }
+        if (preg_match('/^МЗ\b/u', mb_strtoupper(trim($value))) === 1) {
+            return true;
+        }
+
+        return false;
     }
 }
