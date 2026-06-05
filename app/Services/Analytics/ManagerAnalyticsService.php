@@ -207,7 +207,8 @@ class ManagerAnalyticsService
             ];
         }
 
-        usort($out, fn ($a, $b) => $b['total'] <=> $a['total']);
+        // Сортировка по числу ЗАКРЫТЫХ (won+lost) — раздел про закрытые заявки.
+        usort($out, fn ($a, $b) => ($b['won'] + $b['lost']) <=> ($a['won'] + $a['lost']));
 
         return $out;
     }

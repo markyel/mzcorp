@@ -430,24 +430,25 @@
                                 </div>
                             @endif
 
-                            @if(! empty($wl))
+                            @php $wlClosed = array_values(array_filter($wl, fn ($r) => ($r['won'] + $r['lost']) > 0)); @endphp
+                            @if(! empty($wlClosed))
                                 <div class="mt-4 overflow-x-auto">
-                                    <div class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">Успех / Потеря по менеджерам · когорта по дате создания</div>
+                                    <div class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">Успех / Потеря по менеджерам · заявки, созданные за период (закрытые)</div>
                                     <table class="w-full text-[12px]">
                                         <thead class="text-fg-3 text-[10px] uppercase tracking-wider border-b border-border">
                                             <tr>
                                                 <th class="px-2 py-1.5 text-left">Менеджер</th>
-                                                <th class="px-2 py-1.5 text-right">Всего</th>
+                                                <th class="px-2 py-1.5 text-right">Закрыто</th>
                                                 <th class="px-2 py-1.5 text-right text-emerald-700">Успех</th>
                                                 <th class="px-2 py-1.5 text-right text-red-700">Потеря</th>
                                                 <th class="px-2 py-1.5 text-right">Win-rate</th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            @foreach($wl as $row)
+                                            @foreach($wlClosed as $row)
                                                 <tr class="border-b border-border-subtle last:border-b-0">
                                                     <td class="px-2 py-1 text-fg-1">{{ $row['name'] }}</td>
-                                                    <td class="px-2 py-1 text-right mono text-fg-1">{{ $row['total'] }}</td>
+                                                    <td class="px-2 py-1 text-right mono text-fg-1">{{ $row['won'] + $row['lost'] }}</td>
                                                     <td class="px-2 py-1 text-right mono text-emerald-700">{{ $row['won'] }}</td>
                                                     <td class="px-2 py-1 text-right mono text-red-700">{{ $row['lost'] }}</td>
                                                     <td class="px-2 py-1 text-right mono {{ $row['win_rate'] === null ? 'text-fg-4' : ($row['win_rate'] >= 50 ? 'text-emerald-700' : 'text-amber-700') }}">{{ $row['win_rate'] === null ? '—' : $row['win_rate'] . '%' }}</td>

@@ -147,33 +147,32 @@
     <div class="ds-card">
         <div class="ds-card-header">
             <h3>Закрытые заявки: Успех / Потеря по менеджерам</h3>
-            <span class="text-[12px] text-fg-3 ml-2">когорта по дате создания за период</span>
+            <span class="text-[12px] text-fg-3 ml-2">заявки, созданные за период · только закрытые (won + lost)</span>
         </div>
         <div class="ds-card-body overflow-x-auto">
-            @if(empty($wl))
-                <div class="text-center text-fg-3 py-6 text-[13px]">Нет данных за период.</div>
+            @php $wlClosed = array_values(array_filter($wl, fn ($r) => ($r['won'] + $r['lost']) > 0)); @endphp
+            @if(empty($wlClosed))
+                <div class="text-center text-fg-3 py-6 text-[13px]">Нет закрытых заявок за период.</div>
             @else
                 <table class="w-full text-[12.5px]">
                     <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
                         <tr>
                             <th class="px-2 py-2 text-left">Менеджер</th>
-                            <th class="px-2 py-2 text-right">Всего</th>
+                            <th class="px-2 py-2 text-right">Закрыто</th>
                             <th class="px-2 py-2 text-right text-emerald-700">Успех</th>
                             <th class="px-2 py-2 text-right text-red-700">Потеря</th>
-                            <th class="px-2 py-2 text-right text-fg-3">В работе</th>
                             <th class="px-2 py-2 text-right">Win-rate</th>
                             <th class="px-2 py-2 text-left w-[180px]">Распределение</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach($wl as $row)
-                            @php $tot = max(1, $row['total']); @endphp
+                        @foreach($wlClosed as $row)
+                            @php $closed = $row['won'] + $row['lost']; $tot = max(1, $closed); @endphp
                             <tr class="border-b border-border-subtle last:border-b-0">
                                 <td class="px-2 py-1.5 text-fg-1">{{ $row['name'] }}</td>
-                                <td class="px-2 py-1.5 text-right mono text-fg-1">{{ $row['total'] }}</td>
+                                <td class="px-2 py-1.5 text-right mono text-fg-1">{{ $closed }}</td>
                                 <td class="px-2 py-1.5 text-right mono text-emerald-700">{{ $row['won'] }}</td>
                                 <td class="px-2 py-1.5 text-right mono text-red-700">{{ $row['lost'] }}</td>
-                                <td class="px-2 py-1.5 text-right mono text-fg-3">{{ $row['open'] }}</td>
                                 <td class="px-2 py-1.5 text-right mono {{ $row['win_rate'] === null ? 'text-fg-4' : ($row['win_rate'] >= 50 ? 'text-emerald-700' : 'text-amber-700') }}">
                                     {{ $row['win_rate'] === null ? '—' : $row['win_rate'] . '%' }}
                                 </td>
@@ -181,7 +180,6 @@
                                     <div class="flex h-2.5 rounded-sm overflow-hidden bg-surface-2">
                                         <div style="width: {{ $row['won'] / $tot * 100 }}%" class="bg-emerald-500" title="Успех: {{ $row['won'] }}"></div>
                                         <div style="width: {{ $row['lost'] / $tot * 100 }}%" class="bg-red-500" title="Потеря: {{ $row['lost'] }}"></div>
-                                        <div style="width: {{ $row['open'] / $tot * 100 }}%" class="bg-neutral-300" title="В работе: {{ $row['open'] }}"></div>
                                     </div>
                                 </td>
                             </tr>
