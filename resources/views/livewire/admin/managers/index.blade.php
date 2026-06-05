@@ -120,7 +120,7 @@
                                             wire:confirm="Восстановить «{{ $u->name }}»?"
                                             class="btn btn-sm">Восстановить</button>
                                 @else
-                                    @if($u->hasRole('manager'))
+                                    @if($u->hasAnyRole(\App\Enums\Role::requestHandlerRoles()))
                                         @if($u->isUnavailable() || $u->isUnavailabilityPlanned())
                                             <button type="button" wire:click="markAvailable({{ $u->id }})"
                                                     wire:confirm="Снять «недоступен» / отменить план с «{{ $u->name }}» прямо сейчас? Менеджер снова попадёт в round-robin, активные delegation'ы закроются."
