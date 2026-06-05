@@ -110,6 +110,11 @@ class IqotPosition extends Model
     {
         $rate = (float) app_setting('tax.vat_percent', config('services.tax.vat_percent', 22)) / 100;
 
+        // Наша база сравнения — цена КАТАЛОГА (NET, без НДС), а не из КП: КП-цена
+        // варьируется по сделкам, а часть позиций мониторится вручную (без КП).
+        $cat = $this->catalogItem;
+        $ourNet = $cat && $cat->price !== null ? (float) $cat->price : null;
+
         $rows = [];
         foreach ($this->offers() as $o) {
             $raw = $o['price_per_unit'] ?? $o['total_price'] ?? $o['price'] ?? null;
@@ -138,20 +143,27 @@ class IqotPosition extends Model
             ];
         }
 
-        if ($this->our_unit_price !== null) {
+        if ($ourNet !== null) {
+            $ourNotes = [];
+            if ($cat && $cat->price_min !== null) {
+                $ourNotes[] = 'мин. ' . number_format((float) $cat->price_min, 2, ',', ' ') . ' ₽';
+            }
+            if ($cat && ! $cat->is_price_actual) {
+                $ourNotes[] = 'цена не актуальна';
+            }
             $rows[] = [
                 'is_ours' => true,
-                'supplier' => 'Наше КП' . ($this->our_quotation_code ? ' ' . $this->our_quotation_code : ''),
+                'supplier' => 'Наша цена (каталог)',
                 'email' => null,
                 'phone' => null,
-                'raw' => (float) $this->our_unit_price,
-                'net' => (float) $this->our_unit_price,
+                'raw' => $ourNet,
+                'net' => $ourNet,
                 'includes_vat' => false,
                 'vat_label' => 'без НДС',
-                'delivery_days' => null,
+                'delivery_days' => $cat?->lead_time_days,
                 'total' => null,
                 'received_at' => null,
-                'notes' => 'собственное КП',
+                'notes' => $ourNotes === [] ? null : implode(' · ', $ourNotes),
             ];
         }
 
@@ -172,8 +184,8 @@ class IqotPosition extends Model
         }
         $delta = null;
         $deltaPct = null;
-        if ($this->our_unit_price !== null && $bestIqotNet !== null && $bestIqotNet > 0) {
-            $delta = (float) $this->our_unit_price - $bestIqotNet;
+        if ($ourNet !== null && $bestIqotNet !== null && $bestIqotNet > 0) {
+            $delta = $ourNet - $bestIqotNet;
             $deltaPct = $delta / $bestIqotNet * 100;
         }
 
@@ -184,7 +196,6 @@ class IqotPosition extends Model
             'best_iqot_net' => $bestIqotNet,
             'delta' => $delta,
             'delta_pct' => $deltaPct,
-            'our_quotation_code' => $this->our_quotation_code,
         ];
     }
 

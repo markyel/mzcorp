@@ -88,7 +88,7 @@ class Index extends Component
     public function positions()
     {
         return IqotPosition::query()
-            ->with(['catalogItem:id,sku,name,brand,brand_article,brands,articles', 'submission:id,submission_id,local_status', 'requestedBy:id,name'])
+            ->with(['catalogItem:id,sku,name,brand,brand_article,brands,articles,price,price_min,is_price_actual,lead_time_days', 'submission:id,submission_id,local_status', 'requestedBy:id,name'])
             ->when($this->statusFilter !== '', fn ($q) => $q->where('status', $this->statusFilter))
             // По умолчанию исключённые не показываем — для них есть фильтр.
             ->when($this->statusFilter === '', fn ($q) => $q->where('status', '!=', IqotPositionStatus::Excluded->value))
