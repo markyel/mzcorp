@@ -2,6 +2,7 @@
 
 namespace App\Services\Analytics;
 
+use App\Enums\ClosedLostReason;
 use App\Enums\RequestStatus;
 use App\Enums\Role as RoleEnum;
 use App\Models\Request;
@@ -275,6 +276,60 @@ class ManagerAnalyticsService
         usort($out, fn ($a, $b) => ($b['won_count'] + $b['lost_count']) <=> ($a['won_count'] + $a['lost_count']));
 
         return $out;
+    }
+
+    /**
+     * Разбивка причин Потери (closed_lost_reason) для заявок, ЗАКРЫТЫХ в
+     * периоде (по дате закрытия — причина проставляется в момент закрытия).
+     * Атрибуция к менеджеру — assigned_user_id; пустой фильтр = все.
+     *
+     * Базис «по дате закрытия» (а не когорта по дате создания, как в блоках
+     * Успех/Потеря): отвечает на вопрос «по каким причинам мы закрывали в
+     * Потерю за период».
+     *
+     * @param  array<int, int>  $managerIds
+     * @return array{
+     *     total:int,
+     *     rows:list<array{reason:?string, label:string, count:int, share:float}>
+     * }
+     */
+    public function lostReasonsBreakdown(CarbonImmutable $from, CarbonImmutable $to, array $managerIds = []): array
+    {
+        $q = DB::table('requests')
+            ->where('status', $this->lost())
+            ->whereNotNull('closed_at')
+            ->whereBetween('closed_at', [$from->utc(), $to->utc()]);
+
+        if ($managerIds !== []) {
+            $q->whereIn('assigned_user_id', $managerIds);
+        }
+
+        $rows = $q->selectRaw('closed_lost_reason, COUNT(*) AS c')
+            ->groupBy('closed_lost_reason')
+            ->orderByDesc('c')
+            ->get();
+
+        $total = 0;
+        foreach ($rows as $r) {
+            $total += (int) $r->c;
+        }
+
+        $out = [];
+        foreach ($rows as $r) {
+            $reason = $r->closed_lost_reason !== null ? (string) $r->closed_lost_reason : null;
+            $label = $reason !== null
+                ? (ClosedLostReason::tryFrom($reason)?->label() ?? $reason)
+                : 'Причина не указана';
+            $count = (int) $r->c;
+            $out[] = [
+                'reason' => $reason,
+                'label' => $label,
+                'count' => $count,
+                'share' => $total > 0 ? round($count * 100 / $total, 1) : 0.0,
+            ];
+        }
+
+        return ['total' => $total, 'rows' => $out];
     }
 
     /**

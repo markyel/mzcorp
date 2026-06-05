@@ -165,6 +165,14 @@ class Index extends Component
     }
 
     #[Computed]
+    public function lostReasons(): array
+    {
+        [$from, $to] = $this->periodRange();
+
+        return app(ManagerAnalyticsService::class)->lostReasonsBreakdown($from, $to, $this->managerIds);
+    }
+
+    #[Computed]
     public function timeToClose(): array
     {
         [$from, $to] = $this->periodRange();

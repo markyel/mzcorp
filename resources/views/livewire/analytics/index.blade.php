@@ -306,6 +306,75 @@
         </div>
     </div>
 
+    {{-- ───────── 2c. Причины Потери (closed_lost_reason) ───────── --}}
+    @php
+        $lr = $this->lostReasons;
+        $lrRows = $lr['rows'];
+        $lrTotal = (int) $lr['total'];
+        $lrMax = 0;
+        foreach ($lrRows as $row) { $lrMax = max($lrMax, $row['count']); }
+        $lrMax = max(1, $lrMax);
+        // «Технический шум» (не бизнес-потери) — для справочной сводки.
+        $noiseReasons = ['off_topic', 'spam', 'duplicate', 'parser_no_content'];
+        $lrNoise = 0;
+        foreach ($lrRows as $row) { if (in_array($row['reason'], $noiseReasons, true)) $lrNoise += $row['count']; }
+        $lrReal = $lrTotal - $lrNoise;
+    @endphp
+    <div class="ds-card">
+        <div class="ds-card-header">
+            <h3>Причины Потери</h3>
+            <span class="text-[12px] text-fg-3 ml-2">закрыто в Потерю за период · по дате закрытия · всего {{ $lrTotal }}</span>
+        </div>
+        <div class="ds-card-body overflow-x-auto">
+            @if($lrTotal === 0)
+                <div class="text-center text-fg-3 py-6 text-[13px]">Нет потерянных заявок за период.</div>
+            @else
+                <div class="flex items-center gap-4 mb-3 text-[12px]">
+                    <span class="inline-flex items-center gap-1.5">
+                        <span class="w-2.5 h-2.5 rounded-sm bg-red-500"></span>
+                        <span class="text-fg-2">Бизнес-потери:</span>
+                        <span class="text-fg-1 font-semibold mono">{{ $lrReal }}</span>
+                    </span>
+                    <span class="inline-flex items-center gap-1.5">
+                        <span class="w-2.5 h-2.5 rounded-sm bg-neutral-400"></span>
+                        <span class="text-fg-2">Технический шум:</span>
+                        <span class="text-fg-1 font-semibold mono">{{ $lrNoise }}</span>
+                        <span class="text-fg-3">({{ $lrTotal > 0 ? round($lrNoise * 100 / $lrTotal) : 0 }}%)</span>
+                    </span>
+                </div>
+                <table class="w-full text-[12.5px]">
+                    <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
+                        <tr>
+                            <th class="px-2 py-2 text-left">Причина</th>
+                            <th class="px-2 py-2 text-right">Кол-во</th>
+                            <th class="px-2 py-2 text-right">Доля</th>
+                            <th class="px-2 py-2 text-left w-[240px]"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($lrRows as $row)
+                            @php $isNoise = in_array($row['reason'], $noiseReasons, true); @endphp
+                            <tr class="border-b border-border-subtle last:border-b-0">
+                                <td class="px-2 py-1.5 text-fg-1">
+                                    {{ $row['label'] }}
+                                    @if($isNoise)<span class="ml-1 text-[10px] text-fg-4">(шум)</span>@endif
+                                </td>
+                                <td class="px-2 py-1.5 text-right mono text-fg-1">{{ $row['count'] }}</td>
+                                <td class="px-2 py-1.5 text-right mono text-fg-2">{{ rtrim(rtrim(number_format($row['share'], 1, '.', ''), '0'), '.') }}%</td>
+                                <td class="px-2 py-1.5">
+                                    <div class="h-2.5 rounded-sm bg-surface-2 overflow-hidden">
+                                        <div style="width: {{ $row['count'] / $lrMax * 100 }}%"
+                                             class="h-full {{ $isNoise ? 'bg-neutral-400' : 'bg-red-500' }}"></div>
+                                    </div>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            @endif
+        </div>
+    </div>
+
     {{-- ───────── 3. Время закрытия по менеджерам (Успех/Потеря) ───────── --}}
     @php $ttc = $this->timeToClose; @endphp
     <div class="ds-card">
