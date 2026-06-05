@@ -28,6 +28,16 @@ use Illuminate\Support\Facades\Log;
 class CatalogResolutionService
 {
     /**
+     * Минимальная длина нормализованного токена для ТОЧНОГО article-матча
+     * (sku / brand_article / articles[]). Короткие обрывки вроде «2», «04»
+     * (напр. хвост «АИР80S6/2» после split по «/») неинформативны и ловят мусор
+     * в articles[]. Кейс M-2026-3418: токен «2» сматчился с кнопкой M18255, у
+     * которой в articles[] лежит "2" (из названия «Кнопка приказа "2"»). Такие
+     * токены пропускаем — их подберёт C-step (поиск по name).
+     */
+    private const MIN_ARTICLE_TOKEN_LEN = 4;
+
+    /**
      * Use-case A: резолв одной позиции, помеченной internal_catalog_pending.
      * Если в каталоге найден M-SKU — заполняем catalog_item_id, выставляем
      * status=sufficient и фиксируем catalog в payload.
@@ -132,6 +142,11 @@ class CatalogResolutionService
             }
             $norm = CatalogImportService::normalizeArticle($tok);
             if ($norm === null || $norm === '') {
+                continue;
+            }
+            // Слишком короткий токен — неинформативен для точного article-матча
+            // и ловит мусор в articles[] (см. MIN_ARTICLE_TOKEN_LEN). Отдаём C-step.
+            if (mb_strlen($norm) < self::MIN_ARTICLE_TOKEN_LEN) {
                 continue;
             }
 
