@@ -35,6 +35,19 @@ class ManagerAnalyticsService
         '#db2777', '#65a30d', '#ea580c', '#4f46e5', '#0d9488', '#b45309',
     ];
 
+    /**
+     * Причины Потери, которые НЕ считаем потерями: такие заявки фактически не
+     * попадали в работу (спам в стоп-лист, не наша тематика, дубль, парсер не
+     * нашёл позиций → авто-закрытие cron'ом). Исключаются из ВСЕХ блоков
+     * аналитики, иначе раздувают потери и занижают win-rate.
+     */
+    private const EXCLUDED_LOST_REASONS = [
+        ClosedLostReason::OffTopic,
+        ClosedLostReason::Spam,
+        ClosedLostReason::Duplicate,
+        ClosedLostReason::ParserNoContent,
+    ];
+
     private function won(): string
     {
         return RequestStatus::ClosedWon->value;
@@ -43,6 +56,34 @@ class ManagerAnalyticsService
     private function lost(): string
     {
         return RequestStatus::ClosedLost->value;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function excludedLostReasonValues(): array
+    {
+        return array_map(fn (ClosedLostReason $r) => $r->value, self::EXCLUDED_LOST_REASONS);
+    }
+
+    /**
+     * Отбрасывает из выборки заявки, закрытые как Потеря по «нерабочим»
+     * причинам (см. EXCLUDED_LOST_REASONS). Оставляет: не-потерянные (успех/
+     * открытые), потери без причины и потери с прочими причинами.
+     *
+     * Логика: keep, если NOT (status = lost AND closed_lost_reason IN excluded).
+     *
+     * @param  \Illuminate\Database\Query\Builder|Builder  $q
+     */
+    private function excludeNonWorkLost($q): void
+    {
+        $excluded = $this->excludedLostReasonValues();
+        $lost = $this->lost();
+        $q->where(function ($w) use ($excluded, $lost) {
+            $w->where('status', '!=', $lost)
+                ->orWhereNull('closed_lost_reason')
+                ->orWhereNotIn('closed_lost_reason', $excluded);
+        });
     }
 
     /**
@@ -89,13 +130,15 @@ class ManagerAnalyticsService
             return ['dates' => [], 'labels' => [], 'series' => [], 'max' => 0];
         }
 
-        $rows = DB::table('requests')
+        $q = DB::table('requests')
             ->whereIn('status', [$this->won(), $this->lost()])
             ->whereNotNull('closed_at')
             ->whereNotNull('assigned_user_id')
             ->whereIn('assigned_user_id', $managers->pluck('id'))
-            ->whereBetween('closed_at', [$from->utc(), $to->utc()])
-            ->selectRaw("
+            ->whereBetween('closed_at', [$from->utc(), $to->utc()]);
+        $this->excludeNonWorkLost($q);
+
+        $rows = $q->selectRaw("
                 DATE(closed_at AT TIME ZONE '" . self::TZ . "') AS day,
                 assigned_user_id,
                 status,
@@ -176,11 +219,13 @@ class ManagerAnalyticsService
             return [];
         }
 
-        $rows = DB::table('requests')
+        $q = DB::table('requests')
             ->whereNotNull('assigned_user_id')
             ->whereIn('assigned_user_id', $managers->pluck('id'))
-            ->whereBetween('created_at', [$from->utc(), $to->utc()])
-            ->selectRaw("
+            ->whereBetween('created_at', [$from->utc(), $to->utc()]);
+        $this->excludeNonWorkLost($q);
+
+        $rows = $q->selectRaw("
                 assigned_user_id,
                 COUNT(*) FILTER (WHERE status = ?) AS won,
                 COUNT(*) FILTER (WHERE status = ?) AS lost,
@@ -233,13 +278,15 @@ class ManagerAnalyticsService
             return [];
         }
 
-        $rows = DB::table('requests')
+        $q = DB::table('requests')
             ->whereNotNull('assigned_user_id')
             ->whereIn('assigned_user_id', $managers->pluck('id'))
             ->whereIn('status', [$this->won(), $this->lost()])
             ->whereNotNull('closed_at')
-            ->whereBetween('created_at', [$from->utc(), $to->utc()])
-            ->selectRaw("
+            ->whereBetween('created_at', [$from->utc(), $to->utc()]);
+        $this->excludeNonWorkLost($q);
+
+        $rows = $q->selectRaw("
                 assigned_user_id,
                 status,
                 COUNT(*) AS c,
@@ -287,24 +334,36 @@ class ManagerAnalyticsService
      * Успех/Потеря): отвечает на вопрос «по каким причинам мы закрывали в
      * Потерю за период».
      *
+     * «Нерабочие» причины (EXCLUDED_LOST_REASONS) в total/rows НЕ попадают —
+     * их суммарное число отдаётся отдельным полем `excluded` для справки.
+     *
      * @param  array<int, int>  $managerIds
      * @return array{
      *     total:int,
+     *     excluded:int,
      *     rows:list<array{reason:?string, label:string, count:int, share:float}>
      * }
      */
     public function lostReasonsBreakdown(CarbonImmutable $from, CarbonImmutable $to, array $managerIds = []): array
     {
-        $q = DB::table('requests')
+        $base = DB::table('requests')
             ->where('status', $this->lost())
             ->whereNotNull('closed_at')
             ->whereBetween('closed_at', [$from->utc(), $to->utc()]);
 
         if ($managerIds !== []) {
-            $q->whereIn('assigned_user_id', $managerIds);
+            $base->whereIn('assigned_user_id', $managerIds);
         }
 
-        $rows = $q->selectRaw('closed_lost_reason, COUNT(*) AS c')
+        $excludedValues = $this->excludedLostReasonValues();
+
+        $excluded = (int) (clone $base)
+            ->whereIn('closed_lost_reason', $excludedValues)
+            ->count();
+
+        $rows = (clone $base)
+            ->where(fn ($w) => $w->whereNull('closed_lost_reason')->orWhereNotIn('closed_lost_reason', $excludedValues))
+            ->selectRaw('closed_lost_reason, COUNT(*) AS c')
             ->groupBy('closed_lost_reason')
             ->orderByDesc('c')
             ->get();
@@ -329,7 +388,7 @@ class ManagerAnalyticsService
             ];
         }
 
-        return ['total' => $total, 'rows' => $out];
+        return ['total' => $total, 'excluded' => $excluded, 'rows' => $out];
     }
 
     /**
@@ -360,6 +419,8 @@ class ManagerAnalyticsService
             ->selectRaw("$quoteSent AS quote_sent_at")
             ->selectRaw("$clarCount AS clarifications_count")
             ->orderByDesc('created_at');
+
+        $this->excludeNonWorkLost($q);
 
         if ($managerIds !== []) {
             $q->whereIn('assigned_user_id', $managerIds);
