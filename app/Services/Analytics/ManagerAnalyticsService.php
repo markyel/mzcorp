@@ -36,17 +36,17 @@ class ManagerAnalyticsService
     ];
 
     /**
-     * Причины Потери, которые НЕ считаем потерями: такие заявки фактически не
-     * попадали в работу (спам в стоп-лист, не наша тематика, дубль, парсер не
-     * нашёл позиций → авто-закрытие cron'ом). Исключаются из ВСЕХ блоков
-     * аналитики, иначе раздувают потери и занижают win-rate.
+     * Триаж-причины Потери: заявка не вошла в воронку (не наша тематика, спам,
+     * дубль, парсер не нашёл позиций). Исключаем из аналитики ТОЛЬКО когда
+     * закрыто АВТО (LLM/cron) — ручной триаж менеджера остаётся как его работа.
      */
-    private const EXCLUDED_LOST_REASONS = [
-        ClosedLostReason::OffTopic,
-        ClosedLostReason::Spam,
-        ClosedLostReason::Duplicate,
-        ClosedLostReason::ParserNoContent,
-    ];
+    private const TRIAGE_LOST_REASONS = ['off_topic', 'spam', 'parser_no_content', 'duplicate'];
+
+    /**
+     * Закрывающие события, которые исключаем ВСЕГДА (не работа менеджера, какой
+     * бы ни была причина): разовая pre-launch заливка и служебная чистка фантомов.
+     */
+    private const NON_WORK_CLOSE_EVENTS = ['bulk_close_historic', 'cleanup.internal_phantom'];
 
     private function won(): string
     {
@@ -59,30 +59,38 @@ class ManagerAnalyticsService
     }
 
     /**
-     * @return list<string>
-     */
-    private function excludedLostReasonValues(): array
-    {
-        return array_map(fn (ClosedLostReason $r) => $r->value, self::EXCLUDED_LOST_REASONS);
-    }
-
-    /**
-     * Отбрасывает из выборки заявки, закрытые как Потеря по «нерабочим»
-     * причинам (см. EXCLUDED_LOST_REASONS). Оставляет: не-потерянные (успех/
-     * открытые), потери без причины и потери с прочими причинами.
+     * Отбрасывает заявки, закрытие которых НЕ считаем работой менеджера. По
+     * ПОСЛЕДНЕМУ закрывающему (closed_won/closed_lost) переходу исключаем, если:
+     *  - event ∈ NON_WORK_CLOSE_EVENTS (разовая заливка/чистка), ИЛИ
+     *  - закрыто АВТО (by_user_id IS NULL) И причина — триаж (TRIAGE_LOST_REASONS).
+     * Остаются: открытые заявки, все ручные закрытия менеджера (любой причины) и
+     * АВТО-закрытия реальных потерь (молчит после КП, неоплаченный счёт и т.п.).
      *
-     * Логика: keep, если NOT (status = lost AND closed_lost_reason IN excluded).
+     * Последний переход определяем через DISTINCT ON (Postgres): на заявку может
+     * быть несколько закрытий (реанимация → повторное).
      *
      * @param  \Illuminate\Database\Query\Builder|Builder  $q
      */
-    private function excludeNonWorkLost($q): void
+    private function excludeNonWorkClose($q): void
     {
-        $excluded = $this->excludedLostReasonValues();
-        $lost = $this->lost();
-        $q->where(function ($w) use ($excluded, $lost) {
-            $w->where('status', '!=', $lost)
-                ->orWhereNull('closed_lost_reason')
-                ->orWhereNotIn('closed_lost_reason', $excluded);
+        $q->whereNotIn('requests.id', function ($sub) {
+            $sub->select('lc.request_id')
+                ->fromSub(function ($inner) {
+                    $inner->from('request_state_changes')
+                        ->whereIn('to_status', [$this->won(), $this->lost()])
+                        ->selectRaw('DISTINCT ON (request_id) request_id, event, by_user_id')
+                        ->orderBy('request_id')
+                        ->orderByDesc('created_at')
+                        ->orderByDesc('id');
+                }, 'lc')
+                ->join('requests as r', 'r.id', '=', 'lc.request_id')
+                ->where(function ($w) {
+                    $w->whereIn('lc.event', self::NON_WORK_CLOSE_EVENTS)
+                        ->orWhere(function ($w2) {
+                            $w2->whereNull('lc.by_user_id')
+                                ->whereIn('r.closed_lost_reason', self::TRIAGE_LOST_REASONS);
+                        });
+                });
         });
     }
 
@@ -136,7 +144,7 @@ class ManagerAnalyticsService
             ->whereNotNull('assigned_user_id')
             ->whereIn('assigned_user_id', $managers->pluck('id'))
             ->whereBetween('closed_at', [$from->utc(), $to->utc()]);
-        $this->excludeNonWorkLost($q);
+        $this->excludeNonWorkClose($q);
 
         $rows = $q->selectRaw("
                 DATE(closed_at AT TIME ZONE '" . self::TZ . "') AS day,
@@ -223,7 +231,7 @@ class ManagerAnalyticsService
             ->whereNotNull('assigned_user_id')
             ->whereIn('assigned_user_id', $managers->pluck('id'))
             ->whereBetween('created_at', [$from->utc(), $to->utc()]);
-        $this->excludeNonWorkLost($q);
+        $this->excludeNonWorkClose($q);
 
         $rows = $q->selectRaw("
                 assigned_user_id,
@@ -284,7 +292,7 @@ class ManagerAnalyticsService
             ->whereIn('status', [$this->won(), $this->lost()])
             ->whereNotNull('closed_at')
             ->whereBetween('created_at', [$from->utc(), $to->utc()]);
-        $this->excludeNonWorkLost($q);
+        $this->excludeNonWorkClose($q);
 
         $rows = $q->selectRaw("
                 assigned_user_id,
@@ -334,8 +342,9 @@ class ManagerAnalyticsService
      * Успех/Потеря): отвечает на вопрос «по каким причинам мы закрывали в
      * Потерю за период».
      *
-     * «Нерабочие» причины (EXCLUDED_LOST_REASONS) в total/rows НЕ попадают —
-     * их суммарное число отдаётся отдельным полем `excluded` для справки.
+     * «Нерабочие» закрытия (авто + историческая заливка, см. excludeNonWorkClose)
+     * в total/rows НЕ попадают — их суммарное число отдаётся отдельным полем
+     * `excluded` для справки.
      *
      * @param  array<int, int>  $managerIds
      * @return array{
@@ -355,14 +364,12 @@ class ManagerAnalyticsService
             $base->whereIn('assigned_user_id', $managerIds);
         }
 
-        $excludedValues = $this->excludedLostReasonValues();
+        $totalLost = (int) (clone $base)->count();
 
-        $excluded = (int) (clone $base)
-            ->whereIn('closed_lost_reason', $excludedValues)
-            ->count();
+        $kept = clone $base;
+        $this->excludeNonWorkClose($kept);
 
-        $rows = (clone $base)
-            ->where(fn ($w) => $w->whereNull('closed_lost_reason')->orWhereNotIn('closed_lost_reason', $excludedValues))
+        $rows = $kept
             ->selectRaw('closed_lost_reason, COUNT(*) AS c')
             ->groupBy('closed_lost_reason')
             ->orderByDesc('c')
@@ -372,6 +379,7 @@ class ManagerAnalyticsService
         foreach ($rows as $r) {
             $total += (int) $r->c;
         }
+        $excluded = $totalLost - $total;
 
         $out = [];
         foreach ($rows as $r) {
@@ -420,7 +428,7 @@ class ManagerAnalyticsService
             ->selectRaw("$clarCount AS clarifications_count")
             ->orderByDesc('created_at');
 
-        $this->excludeNonWorkLost($q);
+        $this->excludeNonWorkClose($q);
 
         if ($managerIds !== []) {
             $q->whereIn('assigned_user_id', $managerIds);
