@@ -17,6 +17,15 @@
             'failed' => 'text-red-700',
             'excluded' => 'text-fg-4',
         ];
+        // Прогресс сбора со стороны IQOT (items[].status), пока идёт «Анализируется».
+        $iqotItemLabel = [
+            'dispatched' => 'разослано поставщикам',
+            'awaiting_suppliers' => 'ждём поставщиков',
+            'with_offers' => 'есть офферы',
+            'with_offers_minimum' => 'офферы собраны',
+            'collecting' => 'сбор офферов',
+            'completed' => 'готово',
+        ];
     @endphp
 
     {{-- Header --}}
@@ -136,6 +145,9 @@
                                     <span class="text-[11.5px] font-medium {{ $statusClass[$p->status] ?? 'text-fg-2' }}">
                                         {{ $p->statusEnum()?->label() ?? $p->status }}
                                     </span>
+                                    @if($p->status === 'analyzing' && $p->iqot_item_status)
+                                        <div class="text-[10px] text-fg-3">{{ $iqotItemLabel[$p->iqot_item_status] ?? $p->iqot_item_status }}</div>
+                                    @endif
                                     @if($p->status === 'failed' && $p->error_message)
                                         <div class="text-[10px] text-red-600" title="{{ $p->error_message }}">{{ \Illuminate\Support\Str::limit($p->error_message, 40) }}</div>
                                     @endif

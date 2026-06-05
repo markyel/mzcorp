@@ -33,6 +33,7 @@ class IqotPosition extends Model
         'report',
         'report_min_price',
         'report_offers_count',
+        'iqot_item_status',
         'analyzed_at',
         'last_enqueued_at',
         'excluded_at',

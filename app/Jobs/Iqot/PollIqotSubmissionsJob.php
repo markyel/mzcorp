@@ -166,8 +166,52 @@ class PollIqotSubmissionsJob implements ShouldQueue
 
         $sub->save();
 
+        // Прогресс сбора по позициям (offers_count + iqot item status) — из ответа
+        // статуса, ещё до готового отчёта, чтобы было видно движение.
+        $this->applyStatusToPositions($sub, is_array($body) ? $body : []);
+
         if ($sub->hasReport()) {
             $this->applyReportToPositions($sub);
+        }
+    }
+
+    /**
+     * Обновить по позициям live-прогресс из items[] ответа GET /submissions:
+     * offers_count и iqot_item_status. Не трогает completed/excluded.
+     */
+    protected function applyStatusToPositions(IqotSubmission $sub, array $body): void
+    {
+        $items = $body['items'] ?? [];
+        if (! is_array($items)) {
+            return;
+        }
+
+        foreach ($items as $it) {
+            if (! is_array($it) || ! preg_match('/^pos-(\d+)$/', (string) ($it['client_ref'] ?? ''), $m)) {
+                continue;
+            }
+            $pos = IqotPosition::find((int) $m[1]);
+            if (! $pos || (int) $pos->iqot_submission_id !== (int) $sub->id) {
+                continue;
+            }
+            if ($pos->excluded_at !== null || $pos->status === IqotPositionStatus::Completed->value) {
+                continue;
+            }
+
+            $dirty = false;
+            if (isset($it['offers_count']) && is_numeric($it['offers_count'])
+                && (int) $pos->report_offers_count !== (int) $it['offers_count']) {
+                $pos->report_offers_count = (int) $it['offers_count'];
+                $dirty = true;
+            }
+            $istatus = isset($it['status']) ? mb_substr((string) $it['status'], 0, 32) : null;
+            if ($istatus !== null && $pos->iqot_item_status !== $istatus) {
+                $pos->iqot_item_status = $istatus;
+                $dirty = true;
+            }
+            if ($dirty) {
+                $pos->save();
+            }
         }
     }
 
