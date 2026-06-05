@@ -45,6 +45,22 @@ class IqotPoolService
             ->selectRaw('qi.catalog_item_id, COUNT(DISTINCT q.id) AS cnt')
             ->get();
 
+        // qty/unit из ПОСЛЕДНЕГО проигранного КП по каждой позиции (DISTINCT ON
+        // по sent_at desc). Канат и т.п.: «1 шт» бессмысленно — берём как
+        // запрашивали в последнем КП (напр. 576 м).
+        $latest = DB::table('quotation_items as qi')
+            ->join('quotations as q', 'q.id', '=', 'qi.quotation_id')
+            ->join('requests as r', 'r.id', '=', 'q.request_id')
+            ->where('q.status', QuotationStatus::Sent->value)
+            ->where('r.status', RequestStatus::ClosedLost->value)
+            ->whereNotNull('qi.catalog_item_id')
+            ->orderBy('qi.catalog_item_id')
+            ->orderByRaw('q.sent_at DESC NULLS LAST')
+            ->orderByDesc('q.id')
+            ->selectRaw('DISTINCT ON (qi.catalog_item_id) qi.catalog_item_id, qi.qty, qi.unit')
+            ->get()
+            ->keyBy('catalog_item_id');
+
         $created = 0;
         $updated = 0;
         $skippedFresh = 0;
@@ -53,6 +69,9 @@ class IqotPoolService
             $pos = IqotPosition::firstOrNew(['catalog_item_id' => (int) $row->catalog_item_id]);
             $cnt = (int) $row->cnt;
             $isNew = ! $pos->exists;
+            $last = $latest->get((int) $row->catalog_item_id);
+            $lastQty = $last && $last->qty !== null ? (float) $last->qty : null;
+            $lastUnit = $last ? (trim((string) $last->unit) ?: null) : null;
 
             // Исключена вручную («не запрашивать никогда») — не возвращаем в пул.
             if (! $isNew && $pos->isExcluded()) {
@@ -76,6 +95,8 @@ class IqotPoolService
             }
 
             $pos->lost_quote_count = $cnt;
+            $pos->qty = $lastQty;
+            $pos->unit = $lastUnit;
             if ($isNew) {
                 $pos->source = IqotPosition::SOURCE_AUTO;
                 $pos->status = IqotPositionStatus::Pending->value;
@@ -130,12 +151,19 @@ class IqotPoolService
         $name = trim((string) ($ci->name ?? ''));
         $oem = $ci?->oemForExternal() ?? '';
         $brand = $ci?->brandForExternal() ?? '';
-        $unit = trim((string) ($ci->unit_name ?? '')) ?: 'шт.';
+
+        // Кол-во/единица — из последнего проигранного КП (см. refreshPool).
+        // Каталожный unit_name НЕ используем: это поле «Узел», не единица измерения.
+        $qty = (float) ($pos->qty ?? 0);
+        if ($qty <= 0) {
+            $qty = 1.0;
+        }
+        $unit = trim((string) ($pos->unit ?? '')) ?: 'шт.';
 
         $line = [
             'client_ref' => 'pos-' . $pos->id,
             'name' => $name,
-            'quantity' => 1.0,
+            'quantity' => $qty,
             'unit' => $unit,
         ];
         if ($oem !== '') {

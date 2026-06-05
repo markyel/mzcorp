@@ -24,6 +24,8 @@ class IqotPosition extends Model
         'source',
         'lost_quote_count',
         'manual_requested_at',
+        'qty',
+        'unit',
         'client_ref',
         'payload_name',
         'payload_oem',
@@ -41,6 +43,7 @@ class IqotPosition extends Model
 
     protected $casts = [
         'lost_quote_count' => 'integer',
+        'qty' => 'decimal:3',
         'report_offers_count' => 'integer',
         'report_min_price' => 'decimal:2',
         'report' => 'array',

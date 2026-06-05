@@ -99,6 +99,7 @@
                         <tr>
                             <th class="px-2 py-2 text-left">Позиция</th>
                             <th class="px-2 py-2 text-left">OEM</th>
+                            <th class="px-2 py-2 text-right">Кол-во</th>
                             <th class="px-2 py-2 text-right">В КП</th>
                             <th class="px-2 py-2 text-left">Источник</th>
                             <th class="px-2 py-2 text-left">Статус</th>
@@ -120,6 +121,9 @@
                                     <div class="mono text-[11px] text-fg-3">{{ $ci->sku ?? '—' }}</div>
                                 </td>
                                 <td class="px-2 py-1.5 mono text-[11.5px] text-fg-2">{{ $p->payload_oem ?: ($ci?->oemForExternal() ?: '—') }}</td>
+                                <td class="px-2 py-1.5 text-right mono text-fg-1 whitespace-nowrap">
+                                    @if($p->qty !== null){{ rtrim(rtrim(number_format((float) $p->qty, 3, '.', ''), '0'), '.') }} <span class="text-fg-3 text-[11px]">{{ $p->unit ?: 'шт.' }}</span>@else <span class="text-fg-4">—</span>@endif
+                                </td>
                                 <td class="px-2 py-1.5 text-right mono {{ $p->lost_quote_count > 1 ? 'text-amber-700 font-semibold' : 'text-fg-2' }}">{{ $p->lost_quote_count ?: '—' }}</td>
                                 <td class="px-2 py-1.5">
                                     @if($p->source === 'manual')
