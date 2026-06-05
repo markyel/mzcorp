@@ -117,7 +117,7 @@
                                     <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($ci->name ?? '—', 60) }}</div>
                                     <div class="mono text-[11px] text-fg-3">{{ $ci->sku ?? '—' }}</div>
                                 </td>
-                                <td class="px-2 py-1.5 mono text-[11.5px] text-fg-2">{{ $p->payload_oem ?: ($ci->brand_article ?: '—') }}</td>
+                                <td class="px-2 py-1.5 mono text-[11.5px] text-fg-2">{{ $p->payload_oem ?: ($ci?->oemForExternal() ?: '—') }}</td>
                                 <td class="px-2 py-1.5 text-right mono {{ $p->lost_quote_count > 1 ? 'text-amber-700 font-semibold' : 'text-fg-2' }}">{{ $p->lost_quote_count ?: '—' }}</td>
                                 <td class="px-2 py-1.5">
                                     @if($p->source === 'manual')

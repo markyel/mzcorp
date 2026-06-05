@@ -115,8 +115,8 @@ class IqotPoolService
         /** @var CatalogItem|null $ci */
         $ci = $pos->catalogItem;
         $name = trim((string) ($ci->name ?? ''));
-        $oem = $this->pickOem($ci);
-        $brand = $this->pickBrand($ci);
+        $oem = $ci?->oemForExternal() ?? '';
+        $brand = $ci?->brandForExternal() ?? '';
         $unit = trim((string) ($ci->unit_name ?? '')) ?: 'шт.';
 
         $line = [
@@ -142,61 +142,4 @@ class IqotPoolService
         return $line;
     }
 
-    private function pickOem(?CatalogItem $ci): string
-    {
-        if (! $ci) {
-            return '';
-        }
-        $sku = (string) ($ci->sku ?? '');
-        foreach (array_merge([$ci->brand_article], (array) ($ci->articles ?? [])) as $candidate) {
-            $candidate = trim((string) $candidate);
-            if ($candidate !== '' && ! $this->isInternalCode($candidate, $sku)) {
-                return $candidate;
-            }
-        }
-
-        return '';
-    }
-
-    private function pickBrand(?CatalogItem $ci): string
-    {
-        if (! $ci) {
-            return '';
-        }
-        $sku = (string) ($ci->sku ?? '');
-        foreach (array_merge([$ci->brand], (array) ($ci->brands ?? [])) as $candidate) {
-            $candidate = trim((string) $candidate);
-            if ($candidate !== '' && ! $this->isInternalCode($candidate, $sku)) {
-                return $candidate;
-            }
-        }
-
-        return '';
-    }
-
-    /**
-     * Является ли значение нашим внутренним M-артикулом (его НЕЛЬЗЯ слать в IQOT).
-     * True если: равно sku каталога (после нормализации), либо похоже на M-код
-     * (латинское «M####» / кириллическое «МЗ-…»). brand_article иногда просто
-     * дублирует sku — такие значения отсекаем.
-     */
-    private function isInternalCode(string $value, ?string $sku): bool
-    {
-        $norm = static fn ($s) => mb_strtoupper(preg_replace('/[\s\-._]+/u', '', trim((string) $s)));
-        $v = $norm($value);
-        if ($v === '') {
-            return true;
-        }
-        if ($sku !== null && $sku !== '' && $v === $norm($sku)) {
-            return true;
-        }
-        if (preg_match('/^M\d{3,}$/iu', $value) === 1) {
-            return true;
-        }
-        if (preg_match('/^МЗ\b/u', mb_strtoupper(trim($value))) === 1) {
-            return true;
-        }
-
-        return false;
-    }
 }

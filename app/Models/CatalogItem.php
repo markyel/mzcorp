@@ -97,4 +97,61 @@ class CatalogItem extends Model
     {
         return $this->belongsTo(EquipmentCategory::class, 'equipment_category_id');
     }
+
+    /**
+     * OEM-код для ВНЕШНИХ сервисов (IQOT и т.п.) — без нашего M-артикула.
+     * brand_article иногда дублирует sku (M-код); такие значения отсекаем,
+     * берём первый «настоящий» OEM из brand_article/articles[]. null = нет OEM.
+     */
+    public function oemForExternal(): ?string
+    {
+        foreach (array_merge([$this->brand_article], (array) ($this->articles ?? [])) as $candidate) {
+            $candidate = trim((string) $candidate);
+            if ($candidate !== '' && ! self::isInternalCode($candidate, $this->sku)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * OEM-бренд для внешних сервисов (без значений-дублей M-артикула).
+     */
+    public function brandForExternal(): ?string
+    {
+        foreach (array_merge([$this->brand], (array) ($this->brands ?? [])) as $candidate) {
+            $candidate = trim((string) $candidate);
+            if ($candidate !== '' && ! self::isInternalCode($candidate, $this->sku)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Является ли значение нашим внутренним M-артикулом (нельзя слать наружу/
+     * показывать как OEM): равно sku (нормализованно) или похоже на M-код
+     * (латинское «M####» / кириллическое «МЗ-…»).
+     */
+    public static function isInternalCode(string $value, ?string $sku): bool
+    {
+        $norm = static fn ($s) => mb_strtoupper(preg_replace('/[\s\-._]+/u', '', trim((string) $s)));
+        $v = $norm($value);
+        if ($v === '') {
+            return true;
+        }
+        if ($sku !== null && $sku !== '' && $v === $norm($sku)) {
+            return true;
+        }
+        if (preg_match('/^M\d{3,}$/iu', $value) === 1) {
+            return true;
+        }
+        if (preg_match('/^МЗ\b/u', mb_strtoupper(trim($value))) === 1) {
+            return true;
+        }
+
+        return false;
+    }
 }
