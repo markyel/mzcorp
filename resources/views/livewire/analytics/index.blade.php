@@ -206,7 +206,7 @@
         }
         $segs = array_merge($wonSegs, $lostSegs);
         $pTotal = $pTotWon + $pTotLost;
-        $vbW = 660; $vbH = 240; $cx = 330; $cy = 120; $rO = 90; $rI = 52;
+        $vbW = 720; $vbH = 240; $cx = 360; $cy = 120; $rO = 90; $rI = 52;
         $polar = function ($r, $deg) use ($cx, $cy) {
             $a = deg2rad($deg - 90);
             return [round($cx + $r * cos($a), 2), round($cy + $r * sin($a), 2)];
@@ -228,7 +228,8 @@
         // Выноски: для каждого сегмента — точка на внешнем радиусе по середине
         // угла, локоть наружу, затем к подписи слева/справа. Подписи разносим
         // по вертикали (de-collision), чтобы не накладывались.
-        $labLeftX = 14; $labRightX = $vbW - 14;
+        // Колонки квадратиков-свотчей вплотную к донату (со стороны диаграммы).
+        $lInnerX = $cx - $rO - 55; $rInnerX = $cx + $rO + 55;
         $minY = 16; $maxY = $vbH - 16; $gap = 17;
         $callL = []; $callR = [];
         foreach ($arcs as $a) {
@@ -268,7 +269,7 @@
                 <div class="text-center text-fg-3 py-6 text-[13px]">Нет закрытых заявок за период.</div>
             @else
                 <svg viewBox="0 0 {{ $vbW }} {{ $vbH }}" preserveAspectRatio="xMidYMid meet"
-                     style="width:100%;max-width:680px;height:auto;display:block;margin:0 auto;font-family:var(--font-sans)">
+                     style="width:100%;max-width:760px;height:auto;display:block;margin:0 auto;font-family:var(--font-sans)">
                     @if(count($segs) === 1)
                         <circle cx="{{ $cx }}" cy="{{ $cy }}" r="{{ $rO }}" fill="{{ $segs[0]['color'] }}" />
                         <circle cx="{{ $cx }}" cy="{{ $cy }}" r="{{ $rI }}" fill="var(--bg-surface)" />
@@ -278,19 +279,19 @@
                                 <title>{{ $a['seg']['group'] }} · {{ $a['seg']['name'] }}: {{ $a['seg']['value'] }}</title>
                             </path>
                         @endforeach
-                        {{-- Выноски слева --}}
+                        {{-- Выноски слева: квадратик у правого края (ближе к диаграмме), имя слева от него --}}
                         @foreach($callL as $c)
-                            <polyline points="{{ $c['ox'] }},{{ $c['oy'] }} {{ $c['ex'] }},{{ $c['ey'] }} {{ $labLeftX + 11 }},{{ $c['y'] }}"
+                            <polyline points="{{ $c['ox'] }},{{ $c['oy'] }} {{ $c['ex'] }},{{ $c['ey'] }} {{ $lInnerX }},{{ $c['y'] }}"
                                       fill="none" stroke="#cbd5e1" stroke-width="1" />
-                            <rect x="{{ $labLeftX }}" y="{{ $c['y'] - 5 }}" width="9" height="9" rx="1.5" fill="{{ $c['color'] }}" />
-                            <text x="{{ $labLeftX + 14 }}" y="{{ $c['y'] + 3.5 }}" text-anchor="start" font-size="11" fill="#374151">{{ $c['name'] }} <tspan font-weight="700" fill="#111827">{{ $c['value'] }}</tspan></text>
+                            <rect x="{{ $lInnerX - 9 }}" y="{{ $c['y'] - 5 }}" width="9" height="9" rx="1.5" fill="{{ $c['color'] }}" />
+                            <text x="{{ $lInnerX - 14 }}" y="{{ $c['y'] + 3.5 }}" text-anchor="end" font-size="11" fill="#374151">{{ $c['name'] }} <tspan font-weight="700" fill="#111827">{{ $c['value'] }}</tspan></text>
                         @endforeach
-                        {{-- Выноски справа --}}
+                        {{-- Выноски справа: квадратик у левого края (ближе к диаграмме), имя справа от него --}}
                         @foreach($callR as $c)
-                            <polyline points="{{ $c['ox'] }},{{ $c['oy'] }} {{ $c['ex'] }},{{ $c['ey'] }} {{ $labRightX - 11 }},{{ $c['y'] }}"
+                            <polyline points="{{ $c['ox'] }},{{ $c['oy'] }} {{ $c['ex'] }},{{ $c['ey'] }} {{ $rInnerX }},{{ $c['y'] }}"
                                       fill="none" stroke="#cbd5e1" stroke-width="1" />
-                            <rect x="{{ $labRightX - 9 }}" y="{{ $c['y'] - 5 }}" width="9" height="9" rx="1.5" fill="{{ $c['color'] }}" />
-                            <text x="{{ $labRightX - 14 }}" y="{{ $c['y'] + 3.5 }}" text-anchor="end" font-size="11" fill="#374151"><tspan font-weight="700" fill="#111827">{{ $c['value'] }}</tspan> {{ $c['name'] }}</text>
+                            <rect x="{{ $rInnerX }}" y="{{ $c['y'] - 5 }}" width="9" height="9" rx="1.5" fill="{{ $c['color'] }}" />
+                            <text x="{{ $rInnerX + 14 }}" y="{{ $c['y'] + 3.5 }}" text-anchor="start" font-size="11" fill="#374151"><tspan font-weight="700" fill="#111827">{{ $c['value'] }}</tspan> {{ $c['name'] }}</text>
                         @endforeach
                     @endif
                     <text x="{{ $cx }}" y="{{ $cy - 8 }}" text-anchor="middle" font-size="12" fill="#6b7280">Закрыто</text>
