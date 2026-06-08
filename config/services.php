@@ -535,6 +535,14 @@ return [
         // Источник дневных курсов для команды iqot:update-fx-rates (ЦБ РФ,
         // без ключа). См. app/Services/Iqot/CbrFxRateProvider.php.
         'fx_source_url' => env('IQOT_FX_SOURCE_URL', 'https://www.cbr.ru/scripts/XML_daily.asp'),
+        // Подсветка позиций, требующих пересмотра цены, в списке с готовым
+        // отчётом. Флаг ставится, когда наша цена на min_rank-м месте ИЛИ ниже
+        // И отклонение от лучшей цены IQOT (без НДС) больше min_deviation_pct %.
+        // См. IqotPosition::pricingAttention().
+        'attention' => [
+            'min_rank' => (int) env('IQOT_ATTENTION_MIN_RANK', 3),
+            'min_deviation_pct' => (float) env('IQOT_ATTENTION_MIN_DEVIATION_PCT', 10),
+        ],
     ],
 
     'catalog_sync' => [

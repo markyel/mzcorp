@@ -131,6 +131,15 @@
                                 <td class="px-2 py-1.5">
                                     <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($ci->name ?? '—', 60) }}</div>
                                     <div class="mono text-[11px] text-fg-3">{{ $ci->sku ?? '—' }}</div>
+                                    @if($p->status === 'completed')
+                                        @php $attn = $p->pricingAttention(); @endphp
+                                        @if($attn)
+                                            <span class="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-700 border border-red-200"
+                                                  title="Наша цена {{ $attn['rank'] }}-е место из {{ $attn['total'] }}; на {{ number_format($attn['deviation_pct'], 1, ',', ' ') }}% дороже лучшей цены IQOT (без НДС). Требует пересмотра цены.">
+                                                ⚠ пересмотреть цену · {{ $attn['rank'] }}-е · +{{ number_format($attn['deviation_pct'], 0, ',', ' ') }}%
+                                            </span>
+                                        @endif
+                                    @endif
                                 </td>
                                 <td class="px-2 py-1.5 mono text-[11.5px] text-fg-2">{{ $p->payload_oem ?: ($ci?->oemForExternal() ?: '—') }}</td>
                                 <td class="px-2 py-1.5 text-right mono text-fg-1 whitespace-nowrap">

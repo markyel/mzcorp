@@ -415,6 +415,24 @@ class Index extends Component
                 'step' => 0.1,
                 'min' => 0,
             ],
+            'iqot.attention_min_rank' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Внимание: место нашей цены ≥',
+                'help' => 'Позиция в списке «Готов отчёт» помечается «⚠ пересмотреть цену», если наша цена занимает это место ИЛИ ниже (по цене без НДС). По умолчанию 3.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => (int) config('services.iqot.attention.min_rank', 3),
+                'step' => 1,
+                'min' => 2,
+            ],
+            'iqot.attention_min_deviation_pct' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Внимание: отклонение от мин. цены, % >',
+                'help' => 'Второе условие пометки: наша цена дороже лучшей цены IQOT (без НДС) больше чем на этот процент. Помечаются только позиции, где выполнены ОБА условия. По умолчанию 10.',
+                'type' => AppSetting::TYPE_FLOAT,
+                'default' => (float) config('services.iqot.attention.min_deviation_pct', 10),
+                'step' => 1,
+                'min' => 0,
+            ],
         ];
     }
 
@@ -473,6 +491,8 @@ class Index extends Component
             'iqot.fx_usd' => 'services.iqot.fx_rates.USD',
             'iqot.fx_eur' => 'services.iqot.fx_rates.EUR',
             'iqot.fx_cny' => 'services.iqot.fx_rates.CNY',
+            'iqot.attention_min_rank' => 'services.iqot.attention.min_rank',
+            'iqot.attention_min_deviation_pct' => 'services.iqot.attention.min_deviation_pct',
         ];
 
         return $configMap[$key] ?? '';

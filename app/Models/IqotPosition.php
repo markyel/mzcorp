@@ -256,6 +256,36 @@ class IqotPosition extends Model
     }
 
     /**
+     * Требует ли позиция внимания к ценообразованию: наша цена на min_rank-м
+     * месте ИЛИ ниже И отклонение от лучшей цены IQOT (без НДС) больше
+     * min_deviation_pct %. Пороги — config/Настройки (iqot.attention.*).
+     * Возвращает null, если внимание не нужно (или сравнивать не с чем), иначе
+     * детали для бейджа/тултипа.
+     *
+     * @return array{rank:int, total:int, deviation_pct:float, delta:?float}|null
+     */
+    public function pricingAttention(): ?array
+    {
+        $minRank = (int) app_setting('iqot.attention_min_rank', config('services.iqot.attention.min_rank', 3));
+        $minDev = (float) app_setting('iqot.attention_min_deviation_pct', config('services.iqot.attention.min_deviation_pct', 10));
+
+        $cmp = $this->priceComparison();
+        if ($cmp['our_rank'] === null || $cmp['delta_pct'] === null) {
+            return null;
+        }
+        if ($cmp['our_rank'] >= $minRank && $cmp['delta_pct'] > $minDev) {
+            return [
+                'rank' => $cmp['our_rank'],
+                'total' => $cmp['total'],
+                'deviation_pct' => $cmp['delta_pct'],
+                'delta' => $cmp['delta'],
+            ];
+        }
+
+        return null;
+    }
+
+    /**
      * Мин. цена за единицу из отчёта В РУБЛЁВОМ ЭКВИВАЛЕНТЕ (для бэкфилла
      * report_min_price). НЕ доверяем `best_offer_by_price` — IQOT выбирает его
      * по «голому» числу без учёта валюты (80 USD «дешевле» 6000 RUB). Считаем
