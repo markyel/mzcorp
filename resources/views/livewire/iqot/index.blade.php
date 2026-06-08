@@ -6,6 +6,7 @@
             'pending' => 'В очереди',
             'analyzing' => 'Анализируется',
             'completed' => 'Готов отчёт',
+            'no_offers' => 'Без предложений',
             'failed' => 'Ошибка',
             'excluded' => 'Исключённые',
         ];
@@ -14,6 +15,7 @@
             'queued' => 'text-fg-3',
             'analyzing' => 'text-amber-700',
             'completed' => 'text-emerald-700',
+            'no_offers' => 'text-amber-700',
             'failed' => 'text-red-700',
             'excluded' => 'text-fg-4',
         ];
@@ -176,7 +178,7 @@
                                         <button type="button" wire:click="unexclude({{ $p->id }})" class="btn btn-sm" wire:loading.attr="disabled">Вернуть в пул</button>
                                     @else
                                         {{-- «Повторить» только если нет свежего отчёта (иначе не пере-отправляем — бережём баланс) --}}
-                                        @if($p->status === 'failed' || ($p->status === 'completed' && ! $fresh))
+                                        @if($p->status === 'failed' || (in_array($p->status, ['completed', 'no_offers'], true) && ! $fresh))
                                             <button type="button" wire:click="reanalyze({{ $p->id }})" class="btn btn-sm" wire:loading.attr="disabled">Повторить</button>
                                         @endif
                                         <button type="button" wire:click="exclude({{ $p->id }})"

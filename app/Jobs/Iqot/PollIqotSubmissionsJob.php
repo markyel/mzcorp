@@ -248,12 +248,21 @@ class PollIqotSubmissionsJob implements ShouldQueue
                 continue;
             }
 
+            // 0 офферов → отдельный статус no_offers (несмотря на completed от
+            // IQOT — сравнивать не с чем). Самокорректируется: отчёт
+            // переприменяется на каждом опросе, при появлении оффера статус
+            // вернётся в completed.
+            $offersCount = $this->extractOffersCount($entry);
+            $status = ($offersCount ?? 0) > 0
+                ? IqotPositionStatus::Completed->value
+                : IqotPositionStatus::NoOffers->value;
+
             $pos->forceFill([
                 'report' => $entry,
                 'report_min_price' => $this->extractMinPrice($entry),
-                'report_offers_count' => $this->extractOffersCount($entry),
+                'report_offers_count' => $offersCount,
                 'analyzed_at' => now(),
-                'status' => IqotPositionStatus::Completed->value,
+                'status' => $status,
                 'error_code' => null,
                 'error_message' => null,
             ])->save();

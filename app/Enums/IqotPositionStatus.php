@@ -7,7 +7,9 @@ namespace App\Enums;
  *  - pending   — в пуле, ждёт отправки;
  *  - queued    — отобрана к отправке (промежуточное);
  *  - analyzing — отправлена в IQOT, ждём отчёт;
- *  - completed — отчёт получен;
+ *  - completed — отчёт получен И есть хотя бы один оффер;
+ *  - no_offers — отчёт получен, но поставщики не прислали ни одного предложения
+ *                (IQOT отдаёт completed, но сравнивать не с чем);
  *  - failed    — ошибка отправки/анализа;
  *  - excluded  — исключена из пула вручную («не запрашивать никогда»).
  */
@@ -17,6 +19,7 @@ enum IqotPositionStatus: string
     case Queued = 'queued';
     case Analyzing = 'analyzing';
     case Completed = 'completed';
+    case NoOffers = 'no_offers';
     case Failed = 'failed';
     case Excluded = 'excluded';
 
@@ -27,6 +30,7 @@ enum IqotPositionStatus: string
             self::Queued => 'Отобрана',
             self::Analyzing => 'Анализируется',
             self::Completed => 'Готов отчёт',
+            self::NoOffers => 'Без предложений',
             self::Failed => 'Ошибка',
             self::Excluded => 'Исключена',
         };
