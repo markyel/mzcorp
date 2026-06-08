@@ -36,6 +36,9 @@ class IqotPosition extends Model
         'report',
         'report_min_price',
         'report_offers_count',
+        'cmp_our_rank',
+        'cmp_deviation_pct',
+        'cmp_total',
         'iqot_item_status',
         'analyzed_at',
         'last_enqueued_at',
@@ -51,6 +54,9 @@ class IqotPosition extends Model
         'our_unit_price' => 'decimal:2',
         'report_offers_count' => 'integer',
         'report_min_price' => 'decimal:2',
+        'cmp_our_rank' => 'integer',
+        'cmp_deviation_pct' => 'decimal:2',
+        'cmp_total' => 'integer',
         'report' => 'array',
         'manual_requested_at' => 'datetime',
         'analyzed_at' => 'datetime',
@@ -255,34 +261,76 @@ class IqotPosition extends Model
         ];
     }
 
+    /** Порог места для флага внимания (наша цена на этом месте ИЛИ ниже). */
+    public static function attentionMinRank(): int
+    {
+        return (int) app_setting('iqot.attention_min_rank', config('services.iqot.attention.min_rank', 3));
+    }
+
+    /** Порог отклонения от лучшей цены IQOT (без НДС, %) для флага внимания. */
+    public static function attentionMinDeviationPct(): float
+    {
+        return (float) app_setting('iqot.attention_min_deviation_pct', config('services.iqot.attention.min_deviation_pct', 10));
+    }
+
     /**
      * Требует ли позиция внимания к ценообразованию: наша цена на min_rank-м
      * месте ИЛИ ниже И отклонение от лучшей цены IQOT (без НДС) больше
-     * min_deviation_pct %. Пороги — config/Настройки (iqot.attention.*).
-     * Возвращает null, если внимание не нужно (или сравнивать не с чем), иначе
-     * детали для бейджа/тултипа.
+     * min_deviation_pct %. Использует КЕШ сравнения (cmp_*), который SQL-фильтр
+     * читает теми же порогами — бейдж и фильтр согласованы. Возвращает null,
+     * если внимание не нужно (или сравнивать не с чем).
      *
-     * @return array{rank:int, total:int, deviation_pct:float, delta:?float}|null
+     * @return array{rank:int, total:?int, deviation_pct:float}|null
      */
     public function pricingAttention(): ?array
     {
-        $minRank = (int) app_setting('iqot.attention_min_rank', config('services.iqot.attention.min_rank', 3));
-        $minDev = (float) app_setting('iqot.attention_min_deviation_pct', config('services.iqot.attention.min_deviation_pct', 10));
-
-        $cmp = $this->priceComparison();
-        if ($cmp['our_rank'] === null || $cmp['delta_pct'] === null) {
+        if ($this->cmp_our_rank === null || $this->cmp_deviation_pct === null) {
             return null;
         }
-        if ($cmp['our_rank'] >= $minRank && $cmp['delta_pct'] > $minDev) {
+        if ($this->cmp_our_rank >= self::attentionMinRank()
+            && (float) $this->cmp_deviation_pct > self::attentionMinDeviationPct()) {
             return [
-                'rank' => $cmp['our_rank'],
-                'total' => $cmp['total'],
-                'deviation_pct' => $cmp['delta_pct'],
-                'delta' => $cmp['delta'],
+                'rank' => (int) $this->cmp_our_rank,
+                'total' => $this->cmp_total !== null ? (int) $this->cmp_total : null,
+                'deviation_pct' => (float) $this->cmp_deviation_pct,
             ];
         }
 
         return null;
+    }
+
+    /**
+     * Пересчитать кеш сравнения (cmp_our_rank/cmp_deviation_pct/cmp_total) по
+     * текущему отчёту и курсам. Вызывается при раскладке отчёта и при смене
+     * курсов. НЕ сохраняет сам по себе при $persist=false (для batch-forceFill).
+     *
+     * @return array{cmp_our_rank:?int, cmp_deviation_pct:?float, cmp_total:?int}
+     */
+    public function recomputeComparisonCache(bool $persist = true): array
+    {
+        $cmp = $this->priceComparison();
+        $values = [
+            'cmp_our_rank' => $cmp['our_rank'],
+            'cmp_deviation_pct' => $cmp['delta_pct'],
+            'cmp_total' => $cmp['total'] ?: null,
+        ];
+        if ($persist) {
+            $this->forceFill($values)->save();
+        }
+
+        return $values;
+    }
+
+    /**
+     * SQL-скоуп: только позиции, требующие внимания к цене (по кешу cmp_* и
+     * текущим порогам). Пагинируется на уровне БД.
+     */
+    public function scopeNeedingPricingAttention(Builder $q): Builder
+    {
+        return $q->whereNotNull('cmp_our_rank')
+            ->whereNotNull('cmp_deviation_pct')
+            ->where('cmp_our_rank', '>=', self::attentionMinRank())
+            ->where('cmp_deviation_pct', '>', self::attentionMinDeviationPct());
     }
 
     /**

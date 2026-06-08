@@ -257,10 +257,18 @@ class PollIqotSubmissionsJob implements ShouldQueue
                 ? IqotPositionStatus::Completed->value
                 : IqotPositionStatus::NoOffers->value;
 
+            // Кеш сравнения для фильтра «требуют внимания» — считаем по только
+            // что выставленному отчёту (priceComparison читает $pos->report).
+            $pos->report = $entry;
+            $cmp = $pos->priceComparison();
+
             $pos->forceFill([
                 'report' => $entry,
                 'report_min_price' => $this->extractMinPrice($entry),
                 'report_offers_count' => $offersCount,
+                'cmp_our_rank' => $cmp['our_rank'],
+                'cmp_deviation_pct' => $cmp['delta_pct'],
+                'cmp_total' => $cmp['total'] ?: null,
                 'analyzed_at' => now(),
                 'status' => $status,
                 'error_code' => null,

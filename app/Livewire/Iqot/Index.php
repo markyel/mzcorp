@@ -26,6 +26,9 @@ class Index extends Component
     #[Url(as: 'src', except: '')]
     public string $sourceFilter = '';
 
+    #[Url(as: 'attn', except: false)]
+    public bool $attentionOnly = false;
+
     #[Url(as: 'q', except: '')]
     public string $search = '';
 
@@ -44,6 +47,11 @@ class Index extends Component
     }
 
     public function updatedSourceFilter(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatedAttentionOnly(): void
     {
         $this->resetPage();
     }
@@ -73,12 +81,15 @@ class Index extends Component
 
         $fresh = IqotPosition::withFreshReport($this->freshDays())->count();
 
+        $attention = IqotPosition::query()->needingPricingAttention()->count();
+
         return [
             'enabled' => (bool) app_setting('iqot.enabled', config('services.iqot.enabled', false)),
             'configured' => trim((string) app_setting('iqot.api_key', config('services.iqot.api_key', ''))) !== '',
             'daily_limit' => (int) app_setting('iqot.daily_limit', config('services.iqot.daily_limit', 50)),
             'used_today' => $usedToday,
             'fresh' => $fresh,
+            'attention' => $attention,
             'by_status' => $byStatus,
             'total' => array_sum($byStatus),
         ];
@@ -93,6 +104,7 @@ class Index extends Component
             // По умолчанию исключённые не показываем — для них есть фильтр.
             ->when($this->statusFilter === '', fn ($q) => $q->where('status', '!=', IqotPositionStatus::Excluded->value))
             ->when($this->sourceFilter !== '', fn ($q) => $q->where('source', $this->sourceFilter))
+            ->when($this->attentionOnly, fn ($q) => $q->needingPricingAttention())
             ->when($this->search !== '', function ($q) {
                 $term = '%' . $this->search . '%';
                 $q->whereHas('catalogItem', function ($c) use ($term) {

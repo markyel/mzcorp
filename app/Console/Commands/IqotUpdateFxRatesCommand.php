@@ -82,12 +82,12 @@ class IqotUpdateFxRatesCommand extends Command
 
         if (! $dryRun && $changed > 0) {
             $settings->set('iqot.fx_updated_at', now()->toDateTimeString().($cbrDate ? ' (ЦБ '.$cbrDate.')' : ''), AppSetting::TYPE_STRING);
-            // Кешированная «Мин. цена» (report_min_price) считается в рублях по
-            // текущему курсу — пересчитываем по новым курсам, иначе колонка в
-            // пуле/каталоге/КП отстаёт на день. Live-сравнение (priceComparison)
-            // считается в рантайме и в рефреше не нуждается.
-            $refreshed = $this->refreshCachedMinPrices($settings);
-            $this->line("Пересчитана «Мин. цена» у {$refreshed} позиций.");
+            // Кешированные «Мин. цена» (report_min_price) и сигналы сравнения
+            // (cmp_*, для фильтра «требуют внимания») считаются в рублях по
+            // текущему курсу — пересчитываем по новым курсам, иначе колонки в
+            // пуле/каталоге/КП отстают на день.
+            $refreshed = $this->refreshCachedComparison($settings);
+            $this->line("Пересчитаны кеши сравнения у {$refreshed} позиций.");
         }
 
         $this->table(['Валюта', 'Было', 'Стало (за 1 ед.)'], $rows);
@@ -97,20 +97,32 @@ class IqotUpdateFxRatesCommand extends Command
     }
 
     /**
-     * Пересчитать кешированный report_min_price (рублёвый эквивалент) по
-     * актуальным курсам. SettingsService-кэш уже сброшен set()'ом, так что
-     * minPriceFromReport видит свежие курсы.
+     * Пересчитать кеши, зависящие от курса: report_min_price (рублёвый
+     * эквивалент) + сигналы сравнения cmp_* (ранг/отклонение для фильтра
+     * «требуют внимания»). SettingsService-кэш уже сброшен set()'ом, так что
+     * minPriceFromReport/priceComparison видят свежие курсы.
      */
-    private function refreshCachedMinPrices(SettingsService $settings): int
+    private function refreshCachedComparison(SettingsService $settings): int
     {
         $settings->forget();
         $updated = 0;
         IqotPosition::whereNotNull('report')->chunkById(200, function ($rows) use (&$updated) {
             foreach ($rows as $pos) {
-                $new = $pos->minPriceFromReport();
-                $old = $pos->report_min_price === null ? null : (float) $pos->report_min_price;
-                if (($new === null ? null : round($new, 2)) !== ($old === null ? null : round($old, 2))) {
-                    $pos->forceFill(['report_min_price' => $new])->save();
+                $newMin = $pos->minPriceFromReport();
+                $cmp = $pos->priceComparison();
+
+                $changed =
+                    (($newMin === null ? null : round($newMin, 2)) !== ($pos->report_min_price === null ? null : round((float) $pos->report_min_price, 2)))
+                    || ((int) $cmp['our_rank'] !== (int) $pos->cmp_our_rank)
+                    || (($cmp['delta_pct'] === null ? null : round($cmp['delta_pct'], 2)) !== ($pos->cmp_deviation_pct === null ? null : round((float) $pos->cmp_deviation_pct, 2)));
+
+                if ($changed) {
+                    $pos->forceFill([
+                        'report_min_price' => $newMin,
+                        'cmp_our_rank' => $cmp['our_rank'],
+                        'cmp_deviation_pct' => $cmp['delta_pct'],
+                        'cmp_total' => $cmp['total'] ?: null,
+                    ])->save();
                     $updated++;
                 }
             }

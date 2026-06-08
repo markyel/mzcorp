@@ -89,6 +89,16 @@
                 @endforeach
             </div>
 
+            <button type="button" wire:click="$toggle('attentionOnly')"
+                    class="h-[26px] px-2.5 inline-flex items-center gap-1.5 whitespace-nowrap font-medium rounded-md border
+                           {{ $attentionOnly ? 'bg-red-600 text-white border-red-600' : 'bg-surface text-fg-2 border-border hover:text-fg-1' }}"
+                    title="Только позиции, где наша цена на {{ \App\Models\IqotPosition::attentionMinRank() }}-м месте или ниже и дороже лучшей цены IQOT больше чем на {{ rtrim(rtrim(number_format(\App\Models\IqotPosition::attentionMinDeviationPct(), 1, '.', ''), '0'), '.') }}%">
+                ⚠ Требуют внимания
+                @if($stats['attention'] > 0)
+                    <span class="px-1 rounded text-[10px] font-bold {{ $attentionOnly ? 'bg-white/25 text-white' : 'bg-red-100 text-red-700' }}">{{ $stats['attention'] }}</span>
+                @endif
+            </button>
+
             <span class="flex-1"></span>
             <input type="search" wire:model.live.debounce.300ms="search"
                    placeholder="Поиск: название / M-SKU / OEM"
