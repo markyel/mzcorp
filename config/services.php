@@ -543,6 +543,14 @@ return [
             'min_rank' => (int) env('IQOT_ATTENTION_MIN_RANK', 3),
             'min_deviation_pct' => (float) env('IQOT_ATTENTION_MIN_DEVIATION_PCT', 10),
         ],
+        // «Кричащий» (критический) алерт — приоритет работы по ценообразованию:
+        // наша цена в топ-N% самых дорогих на рынке ПРИ выборке ≥ min_suppliers
+        // поставщиков. Такая строка подсвечивается фоном и поднимается наверх.
+        // См. IqotPosition::isCriticalPricing().
+        'critical' => [
+            'top_pct' => (float) env('IQOT_CRITICAL_TOP_PCT', 20),
+            'min_suppliers' => (int) env('IQOT_CRITICAL_MIN_SUPPLIERS', 4),
+        ],
     ],
 
     'catalog_sync' => [

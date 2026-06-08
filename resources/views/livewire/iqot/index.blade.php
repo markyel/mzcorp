@@ -48,6 +48,9 @@
             <span class="text-fg-3">Дневной лимит: <span class="text-fg-1 mono font-semibold">{{ $stats['daily_limit'] }}</span></span>
             <span class="text-fg-3">Отправлено сегодня: <span class="text-fg-1 mono font-semibold">{{ $stats['used_today'] }}</span></span>
             <span class="text-fg-3">Свежих отчётов: <span class="text-emerald-700 mono font-semibold">{{ $stats['fresh'] }}</span></span>
+            @if($stats['critical'] > 0)
+                <span class="text-fg-3">🔴 Выше рынка: <span class="text-red-700 mono font-bold">{{ $stats['critical'] }}</span></span>
+            @endif
             <span class="text-fg-3">В пуле: <span class="text-fg-1 mono font-semibold">{{ $stats['total'] }}</span></span>
             <span class="flex-1"></span>
             <button type="button" wire:click="refreshPool" class="btn btn-sm" wire:loading.attr="disabled">Обновить пул</button>
@@ -135,18 +138,27 @@
                             $ci = $p->catalogItem;
                             $fresh = $p->hasFreshReport();
                             $offers = $p->offers();
+                            $alert = $p->pricingAlert();
+                            $isCritical = ($alert['level'] ?? null) === 'critical';
                         @endphp
                         <tbody wire:key="iqp-{{ $p->id }}" x-data="{ open: false }">
-                            <tr class="border-b border-border-subtle hover:bg-hover align-top">
+                            <tr class="border-b border-border-subtle align-top {{ $isCritical ? 'bg-red-50 hover:bg-red-100 border-l-2 border-l-red-500' : 'hover:bg-hover' }}">
                                 <td class="px-2 py-1.5">
                                     <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($ci->name ?? '—', 60) }}</div>
                                     <div class="mono text-[11px] text-fg-3">{{ $ci->sku ?? '—' }}</div>
-                                    @if($p->status === 'completed')
-                                        @php $attn = $p->pricingAttention(); @endphp
-                                        @if($attn)
+                                    @if($alert)
+                                        @php
+                                            $devStr = $alert['deviation_pct'] !== null ? ' · +' . number_format($alert['deviation_pct'], 0, ',', ' ') . '%' : '';
+                                        @endphp
+                                        @if($alert['level'] === 'critical')
+                                            <span class="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white"
+                                                  title="Цена выше рынка: {{ $alert['rank'] }}-е место из {{ $alert['total'] }} при {{ $alert['suppliers'] }} поставщиках. Приоритет работы по ценообразованию.">
+                                                🔴 выше рынка · {{ $alert['rank'] }}-е из {{ $alert['total'] }}{{ $devStr }}
+                                            </span>
+                                        @else
                                             <span class="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-700 border border-red-200"
-                                                  title="Наша цена {{ $attn['rank'] }}-е место из {{ $attn['total'] }}; на {{ number_format($attn['deviation_pct'], 1, ',', ' ') }}% дороже лучшей цены IQOT (без НДС). Требует пересмотра цены.">
-                                                ⚠ пересмотреть цену · {{ $attn['rank'] }}-е · +{{ number_format($attn['deviation_pct'], 0, ',', ' ') }}%
+                                                  title="Наша цена {{ $alert['rank'] }}-е место из {{ $alert['total'] }}; на {{ number_format($alert['deviation_pct'], 1, ',', ' ') }}% дороже лучшей цены IQOT (без НДС). Требует пересмотра цены.">
+                                                ⚠ пересмотреть цену · {{ $alert['rank'] }}-е{{ $devStr }}
                                             </span>
                                         @endif
                                     @endif

@@ -433,6 +433,25 @@ class Index extends Component
                 'step' => 1,
                 'min' => 0,
             ],
+            'iqot.critical_top_pct' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Критично: топ-N% самых дорогих',
+                'help' => 'Строка подсвечивается красным фоном (приоритет ценообразования), если наша цена попадает в этот % самых дорогих на рынке. По умолчанию 20 (топ-20% дороговизны, напр. 5-е место из 5).',
+                'type' => AppSetting::TYPE_FLOAT,
+                'default' => (float) config('services.iqot.critical.top_pct', 20),
+                'step' => 5,
+                'min' => 1,
+                'max' => 100,
+            ],
+            'iqot.critical_min_suppliers' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Критично: минимум поставщиков',
+                'help' => 'Красный фон ставится только при выборке от этого числа поставщиков (офферов IQOT) — чтобы алерт был статистически значим. По умолчанию 4.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => (int) config('services.iqot.critical.min_suppliers', 4),
+                'step' => 1,
+                'min' => 1,
+            ],
         ];
     }
 
@@ -493,6 +512,8 @@ class Index extends Component
             'iqot.fx_cny' => 'services.iqot.fx_rates.CNY',
             'iqot.attention_min_rank' => 'services.iqot.attention.min_rank',
             'iqot.attention_min_deviation_pct' => 'services.iqot.attention.min_deviation_pct',
+            'iqot.critical_top_pct' => 'services.iqot.critical.top_pct',
+            'iqot.critical_min_suppliers' => 'services.iqot.critical.min_suppliers',
         ];
 
         return $configMap[$key] ?? '';

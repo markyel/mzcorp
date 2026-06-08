@@ -82,6 +82,7 @@ class Index extends Component
         $fresh = IqotPosition::withFreshReport($this->freshDays())->count();
 
         $attention = IqotPosition::query()->needingPricingAttention()->count();
+        $critical = IqotPosition::query()->criticalPricing()->count();
 
         return [
             'enabled' => (bool) app_setting('iqot.enabled', config('services.iqot.enabled', false)),
@@ -90,6 +91,7 @@ class Index extends Component
             'used_today' => $usedToday,
             'fresh' => $fresh,
             'attention' => $attention,
+            'critical' => $critical,
             'by_status' => $byStatus,
             'total' => array_sum($byStatus),
         ];
@@ -113,6 +115,12 @@ class Index extends Component
                         ->orWhere('brand_article', 'ilike', $term);
                 });
             })
+            // Критические («выше рынка») — наверх как приоритет ценообразования.
+            ->orderByRaw(
+                'CASE WHEN cmp_our_rank IS NOT NULL AND cmp_total IS NOT NULL AND cmp_total > 0 '
+                .'AND (cmp_total - 1) >= ? AND (cmp_our_rank - 1)::float / cmp_total >= ? THEN 0 ELSE 1 END',
+                [IqotPosition::criticalMinSuppliers(), 1 - IqotPosition::criticalTopPct() / 100],
+            )
             ->orderByRaw('CASE WHEN source = ? THEN 0 ELSE 1 END', [IqotPosition::SOURCE_MANUAL])
             ->orderByDesc('lost_quote_count')
             ->orderByDesc('analyzed_at')

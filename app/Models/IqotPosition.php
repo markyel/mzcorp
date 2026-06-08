@@ -273,30 +273,83 @@ class IqotPosition extends Model
         return (float) app_setting('iqot.attention_min_deviation_pct', config('services.iqot.attention.min_deviation_pct', 10));
     }
 
-    /**
-     * Требует ли позиция внимания к ценообразованию: наша цена на min_rank-м
-     * месте ИЛИ ниже И отклонение от лучшей цены IQOT (без НДС) больше
-     * min_deviation_pct %. Использует КЕШ сравнения (cmp_*), который SQL-фильтр
-     * читает теми же порогами — бейдж и фильтр согласованы. Возвращает null,
-     * если внимание не нужно (или сравнивать не с чем).
-     *
-     * @return array{rank:int, total:?int, deviation_pct:float}|null
-     */
-    public function pricingAttention(): ?array
+    /** Топ-N% самых дорогих на рынке для критического алерта. */
+    public static function criticalTopPct(): float
     {
-        if ($this->cmp_our_rank === null || $this->cmp_deviation_pct === null) {
+        return (float) app_setting('iqot.critical_top_pct', config('services.iqot.critical.top_pct', 20));
+    }
+
+    /** Минимум поставщиков (офферов IQOT) для критического алерта. */
+    public static function criticalMinSuppliers(): int
+    {
+        return (int) app_setting('iqot.critical_min_suppliers', config('services.iqot.critical.min_suppliers', 4));
+    }
+
+    /**
+     * «Кричащий» алерт: наша цена в топ-N% самых дорогих ПРИ выборке ≥
+     * min_suppliers поставщиков. Считается по кешу cmp_*. Доля более дешёвых
+     * участников = (rank-1)/total; «топ 20%» = эта доля ≥ 0.8.
+     */
+    public function isCriticalPricing(): bool
+    {
+        $rank = $this->cmp_our_rank;
+        $total = $this->cmp_total;
+        if ($rank === null || $total === null || $total < 1) {
+            return false;
+        }
+        $suppliers = (int) $total - 1; // строки сравнения минус наша
+        if ($suppliers < self::criticalMinSuppliers()) {
+            return false;
+        }
+        $topFraction = 1 - self::criticalTopPct() / 100;
+
+        return ((int) $rank - 1) / (int) $total >= $topFraction;
+    }
+
+    /** Выполнено ли «мягкое» условие внимания (место ≥ min_rank И dev > порога). */
+    private function matchesAttention(): bool
+    {
+        return $this->cmp_our_rank !== null
+            && $this->cmp_deviation_pct !== null
+            && $this->cmp_our_rank >= self::attentionMinRank()
+            && (float) $this->cmp_deviation_pct > self::attentionMinDeviationPct();
+    }
+
+    /**
+     * Уровень алерта по ценообразованию + данные для бейджа/строки. Использует
+     * КЕШ сравнения (cmp_*), теми же порогами что и SQL-скоупы — бейдж, фон
+     * строки и фильтр согласованы.
+     *  - 'critical'  — наша цена в топ-N% самых дорогих при ≥ min_suppliers (фон);
+     *  - 'attention' — место ≥ min_rank И отклонение > порога (бейдж);
+     *  - null        — внимание не требуется / сравнивать не с чем.
+     *
+     * @return array{level:'critical'|'attention', rank:int, total:?int, deviation_pct:?float, suppliers:?int}|null
+     */
+    public function pricingAlert(): ?array
+    {
+        if ($this->cmp_our_rank === null) {
             return null;
         }
-        if ($this->cmp_our_rank >= self::attentionMinRank()
-            && (float) $this->cmp_deviation_pct > self::attentionMinDeviationPct()) {
-            return [
-                'rank' => (int) $this->cmp_our_rank,
-                'total' => $this->cmp_total !== null ? (int) $this->cmp_total : null,
-                'deviation_pct' => (float) $this->cmp_deviation_pct,
-            ];
+
+        $level = null;
+        if ($this->isCriticalPricing()) {
+            $level = 'critical';
+        } elseif ($this->matchesAttention()) {
+            $level = 'attention';
+        }
+        if ($level === null) {
+            return null;
         }
 
-        return null;
+        $total = $this->cmp_total !== null ? (int) $this->cmp_total : null;
+
+        return [
+            'level' => $level,
+            'rank' => (int) $this->cmp_our_rank,
+            'total' => $total,
+            'deviation_pct' => $this->cmp_deviation_pct !== null ? (float) $this->cmp_deviation_pct : null,
+            'suppliers' => $total !== null ? $total - 1 : null,
+        ];
     }
 
     /**
@@ -322,15 +375,44 @@ class IqotPosition extends Model
     }
 
     /**
-     * SQL-скоуп: только позиции, требующие внимания к цене (по кешу cmp_* и
-     * текущим порогам). Пагинируется на уровне БД.
+     * SQL-скоуп: критический («кричащий») алерт — топ-N% самых дорогих при
+     * ≥ min_suppliers поставщиков. (cmp_total-1) = число офферов; доля более
+     * дешёвых = (cmp_our_rank-1)/cmp_total ≥ (1 - top_pct/100).
+     */
+    public function scopeCriticalPricing(Builder $q): Builder
+    {
+        $topFraction = 1 - self::criticalTopPct() / 100;
+
+        return $q->whereNotNull('cmp_our_rank')
+            ->whereNotNull('cmp_total')
+            ->where('cmp_total', '>', 0)
+            ->whereRaw('(cmp_total - 1) >= ?', [self::criticalMinSuppliers()])
+            ->whereRaw('(cmp_our_rank - 1)::float / cmp_total >= ?', [$topFraction]);
+    }
+
+    /**
+     * SQL-скоуп: позиции, требующие внимания к цене — «мягкий» (место/отклонение)
+     * ИЛИ критический тир. Пагинируется на уровне БД, пороги текущие.
      */
     public function scopeNeedingPricingAttention(Builder $q): Builder
     {
-        return $q->whereNotNull('cmp_our_rank')
-            ->whereNotNull('cmp_deviation_pct')
-            ->where('cmp_our_rank', '>=', self::attentionMinRank())
-            ->where('cmp_deviation_pct', '>', self::attentionMinDeviationPct());
+        $topFraction = 1 - self::criticalTopPct() / 100;
+
+        return $q->whereNotNull('cmp_our_rank')->where(function (Builder $w) use ($topFraction) {
+            // мягкий: место ≥ порога И отклонение > порога
+            $w->where(function (Builder $a) {
+                $a->whereNotNull('cmp_deviation_pct')
+                    ->where('cmp_our_rank', '>=', self::attentionMinRank())
+                    ->where('cmp_deviation_pct', '>', self::attentionMinDeviationPct());
+            })
+            // критический: топ-N% при ≥ min_suppliers
+            ->orWhere(function (Builder $c) use ($topFraction) {
+                $c->whereNotNull('cmp_total')
+                    ->where('cmp_total', '>', 0)
+                    ->whereRaw('(cmp_total - 1) >= ?', [self::criticalMinSuppliers()])
+                    ->whereRaw('(cmp_our_rank - 1)::float / cmp_total >= ?', [$topFraction]);
+            });
+        });
     }
 
     /**
