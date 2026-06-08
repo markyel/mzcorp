@@ -8,6 +8,7 @@ use App\Exceptions\IqotApiException;
 use App\Models\IqotPosition;
 use App\Models\IqotSubmission;
 use App\Services\Iqot\IqotApiService;
+use App\Services\Iqot\IqotCurrencyConverter;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -280,41 +281,28 @@ class PollIqotSubmissionsJob implements ShouldQueue
     }
 
     /**
-     * Мин. цена за единицу по реальной схеме IQOT report-item:
-     * best_offer_by_price.price_per_unit, иначе min по all_offers[].price_per_unit
-     * (fallback total_price). Старые ключи оставлены как fallback.
+     * Мин. цена за единицу В РУБЛЁВОМ ЭКВИВАЛЕНТЕ по реальной схеме IQOT
+     * report-item. ВАЖНО: не доверяем `best_offer_by_price` — IQOT выбирает его
+     * по «голому» числу без учёта валюты (80 USD «дешевле» 6000 RUB). Считаем
+     * min по all_offers[] с конвертацией по валюте каждого оффера
+     * (IqotCurrencyConverter). Старые скалярные ключи — последний fallback.
      */
     private function extractMinPrice(array $entry): ?float
     {
-        $offerPrice = static function ($o): ?float {
-            if (! is_array($o)) {
-                return null;
-            }
-            foreach (['price_per_unit', 'total_price', 'price'] as $k) {
-                if (isset($o[$k]) && is_numeric($o[$k])) {
-                    return (float) $o[$k];
-                }
-            }
-
-            return null;
-        };
-
-        $best = $offerPrice($entry['best_offer_by_price'] ?? null);
-        if ($best !== null) {
-            return $best;
-        }
-
         $offers = $entry['all_offers'] ?? $entry['offers'] ?? null;
         if (is_array($offers) && $offers !== []) {
-            $prices = [];
-            foreach ($offers as $o) {
-                $p = $offerPrice($o);
-                if ($p !== null) {
-                    $prices[] = $p;
-                }
+            $min = IqotCurrencyConverter::minRawRub($offers);
+            if ($min !== null) {
+                return $min;
             }
-            if ($prices !== []) {
-                return min($prices);
+        }
+
+        // Нет all_offers — пробуем одиночный best_offer_by_price (с конвертацией).
+        $best = $entry['best_offer_by_price'] ?? null;
+        if (is_array($best)) {
+            $min = IqotCurrencyConverter::minRawRub([$best]);
+            if ($min !== null) {
+                return $min;
             }
         }
 

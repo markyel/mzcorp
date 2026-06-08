@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\IqotPositionStatus;
+use App\Services\Iqot\IqotCurrencyConverter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -150,6 +151,13 @@ class IqotPosition extends Model
                 : (isset($o['vat_label']) && mb_stripos((string) $o['vat_label'], 'без') === false);
             $net = $inclVat && $rate > 0 ? $raw / (1 + $rate) : $raw;
 
+            // Валюта оффера → рублёвый эквивалент (для ранга/дельты). Офферы
+            // IQOT бывают в USD/EUR/CNY; без конвертации «80 USD» сравнивалось
+            // бы как «80 ₽». netRub null, если курс валюты не задан в Настройках.
+            $currency = IqotCurrencyConverter::normalize($o['currency'] ?? null);
+            $rawConv = IqotCurrencyConverter::toRub($raw, $currency);
+            $netConv = IqotCurrencyConverter::toRub($net, $currency);
+
             $rows[] = [
                 'is_ours' => false,
                 'supplier' => $o['supplier']['name'] ?? ('#' . ($o['supplier_id'] ?? '?')),
@@ -157,6 +165,13 @@ class IqotPosition extends Model
                 'phone' => $o['supplier']['phone'] ?? null,
                 'raw' => $raw,
                 'net' => $net,
+                'currency' => $currency,
+                'currency_symbol' => IqotCurrencyConverter::symbol($currency),
+                'converted' => $rawConv['converted'],
+                'rate' => $rawConv['rate'],
+                'rate_known' => $rawConv['known'],
+                'raw_rub' => $rawConv['rub'],
+                'net_rub' => $netConv['rub'],
                 'includes_vat' => $inclVat,
                 'vat_label' => $o['vat_label'] ?? ($inclVat ? 'с НДС' : 'без НДС'),
                 'delivery_days' => $o['delivery_days'] ?? null,
@@ -174,6 +189,13 @@ class IqotPosition extends Model
                 'phone' => null,
                 'raw' => $ourGross,
                 'net' => $ourNet,
+                'currency' => 'RUB',
+                'currency_symbol' => '₽',
+                'converted' => false,
+                'rate' => 1.0,
+                'rate_known' => true,
+                'raw_rub' => $ourGross,
+                'net_rub' => $ourNet,
                 'includes_vat' => true,
                 'vat_label' => 'с НДС',
                 'delivery_days' => $ourLead,
@@ -183,7 +205,24 @@ class IqotPosition extends Model
             ];
         }
 
-        usort($rows, fn ($a, $b) => $a['net'] <=> $b['net']);
+        // Ключ сортировки — рублёвый эквивалент net (net_rub). Строки с
+        // неизвестным курсом (net_rub === null) уходят в конец и не участвуют
+        // в расчёте «лучший IQOT» / ранга.
+        usort($rows, function ($a, $b) {
+            $an = $a['net_rub'];
+            $bn = $b['net_rub'];
+            if ($an === null && $bn === null) {
+                return $a['net'] <=> $b['net'];
+            }
+            if ($an === null) {
+                return 1;
+            }
+            if ($bn === null) {
+                return -1;
+            }
+
+            return $an <=> $bn;
+        });
 
         $ourRank = null;
         foreach ($rows as $i => $r) {
@@ -194,8 +233,8 @@ class IqotPosition extends Model
         }
         $bestIqotNet = null;
         foreach ($rows as $r) {
-            if (! $r['is_ours']) {
-                $bestIqotNet = $bestIqotNet === null ? $r['net'] : min($bestIqotNet, $r['net']);
+            if (! $r['is_ours'] && $r['net_rub'] !== null) {
+                $bestIqotNet = $bestIqotNet === null ? $r['net_rub'] : min($bestIqotNet, $r['net_rub']);
             }
         }
         $delta = null;
@@ -217,29 +256,14 @@ class IqotPosition extends Model
     }
 
     /**
-     * Мин. цена за единицу из отчёта (для бэкфилла report_min_price).
+     * Мин. цена за единицу из отчёта В РУБЛЁВОМ ЭКВИВАЛЕНТЕ (для бэкфилла
+     * report_min_price). НЕ доверяем `best_offer_by_price` — IQOT выбирает его
+     * по «голому» числу без учёта валюты (80 USD «дешевле» 6000 RUB). Считаем
+     * min по all_offers с конвертацией каждого оффера по его валюте.
      */
     public function minPriceFromReport(): ?float
     {
-        $price = static function ($o): ?float {
-            if (! is_array($o)) {
-                return null;
-            }
-            foreach (['price_per_unit', 'total_price', 'price'] as $k) {
-                if (isset($o[$k]) && is_numeric($o[$k])) {
-                    return (float) $o[$k];
-                }
-            }
-
-            return null;
-        };
-        $best = $price($this->report['best_offer_by_price'] ?? null);
-        if ($best !== null) {
-            return $best;
-        }
-        $prices = array_filter(array_map($price, $this->offers()), fn ($p) => $p !== null);
-
-        return $prices === [] ? null : min($prices);
+        return IqotCurrencyConverter::minRawRub($this->offers());
     }
 
     public function statusEnum(): ?IqotPositionStatus

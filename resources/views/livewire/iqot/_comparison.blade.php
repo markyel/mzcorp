@@ -20,7 +20,7 @@
             <th class="px-2 py-1 text-left">Поставщик</th>
             <th class="px-2 py-1 text-left">Контакты</th>
             <th class="px-2 py-1 text-right">Цена/шт</th>
-            <th class="px-2 py-1 text-right">Без НДС</th>
+            <th class="px-2 py-1 text-right">Без НДС, ₽</th>
             <th class="px-2 py-1 text-right">Срок</th>
             <th class="px-2 py-1 text-left">Получено</th>
         </tr>
@@ -36,13 +36,37 @@
                     @if($row['is_ours'])<span class="text-fg-3">собственное КП</span>@else{{ $row['phone'] }}{{ !empty($row['email']) ? ' · ' . $row['email'] : '' }}@endif
                 </td>
                 <td class="px-2 py-1 text-right mono font-semibold {{ $row['is_ours'] ? 'text-red-700' : 'text-fg-1' }}">
-                    {{ number_format($row['raw'], 2, ',', ' ') }} ₽
+                    {{ number_format($row['raw'], 2, ',', ' ') }} {{ $row['currency_symbol'] }}
                     <div class="text-[9px] text-fg-3">{{ $row['vat_label'] }}</div>
+                    @if($row['converted'])
+                        @if($row['rate_known'])
+                            <div class="text-[9px] text-amber-700"
+                                 title="Пересчитано по курсу {{ number_format($row['rate'], 2, ',', ' ') }} ₽/{{ $row['currency'] }} (Настройки) — приблизительно">
+                                ≈ {{ number_format($row['raw_rub'], 0, ',', ' ') }} ₽ · курс ~
+                            </div>
+                        @else
+                            <div class="text-[9px] text-red-600"
+                                 title="Курс валюты {{ $row['currency'] }} не задан в Настройках → не участвует в сравнении">
+                                курс {{ $row['currency'] }} не задан
+                            </div>
+                        @endif
+                    @endif
                 </td>
-                <td class="px-2 py-1 text-right mono text-fg-2">{{ number_format($row['net'], 2, ',', ' ') }}</td>
+                <td class="px-2 py-1 text-right mono {{ $row['net_rub'] === null ? 'text-fg-4' : 'text-fg-2' }}">
+                    @if($row['net_rub'] !== null)
+                        {{ number_format($row['net_rub'], 2, ',', ' ') }}@if($row['converted'])<span class="text-amber-700">*</span>@endif
+                    @else
+                        —
+                    @endif
+                </td>
                 <td class="px-2 py-1 text-right mono text-fg-2">{{ $row['delivery_days'] !== null ? $row['delivery_days'] . ' дн' : '—' }}</td>
                 <td class="px-2 py-1 text-fg-3 text-[11px]">{{ $row['received_at'] ? \Illuminate\Support\Carbon::parse($row['received_at'])->format('d.m H:i') : '—' }}</td>
             </tr>
         @endforeach
     </tbody>
 </table>
+@if(collect($cmp['rows'])->contains('converted', true))
+    <div class="mt-1.5 text-[10px] text-amber-700">
+        <span class="font-semibold">*</span> цены в иностранной валюте пересчитаны в ₽ по приблизительному курсу из Настроек (для ранжирования). Уточняйте актуальный курс.
+    </div>
+@endif

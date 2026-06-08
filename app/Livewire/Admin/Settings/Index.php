@@ -381,6 +381,33 @@ class Index extends Component
                 'type' => AppSetting::TYPE_STRING,
                 'default' => 'Лифтовое оборудование',
             ],
+            'iqot.fx_usd' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Курс USD → ₽',
+                'help' => 'Приблизительный курс доллара для сравнения офферов в долларах (поле currency=USD). Без него «80 USD» сравнивается как «80 ₽». Курс ручной — обновляйте при сильном движении.',
+                'type' => AppSetting::TYPE_FLOAT,
+                'default' => (float) config('services.iqot.fx_rates.USD', 90),
+                'step' => 0.5,
+                'min' => 0,
+            ],
+            'iqot.fx_eur' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Курс EUR → ₽',
+                'help' => 'Приблизительный курс евро для сравнения офферов в евро (currency=EUR).',
+                'type' => AppSetting::TYPE_FLOAT,
+                'default' => (float) config('services.iqot.fx_rates.EUR', 100),
+                'step' => 0.5,
+                'min' => 0,
+            ],
+            'iqot.fx_cny' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Курс CNY (юань) → ₽',
+                'help' => 'Приблизительный курс юаня для сравнения офферов в юанях (currency=CNY/RMB). Актуально для китайских поставщиков.',
+                'type' => AppSetting::TYPE_FLOAT,
+                'default' => (float) config('services.iqot.fx_rates.CNY', 12.5),
+                'step' => 0.1,
+                'min' => 0,
+            ],
         ];
     }
 
@@ -436,6 +463,9 @@ class Index extends Component
             'iqot.runs_per_day' => 'services.iqot.runs_per_day',
             'iqot.report_fresh_days' => 'services.iqot.report_fresh_days',
             'iqot.root_category' => 'services.iqot.root_category',
+            'iqot.fx_usd' => 'services.iqot.fx_rates.USD',
+            'iqot.fx_eur' => 'services.iqot.fx_rates.EUR',
+            'iqot.fx_cny' => 'services.iqot.fx_rates.CNY',
         ];
 
         return $configMap[$key] ?? '';

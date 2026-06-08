@@ -522,6 +522,16 @@ return [
         'report_fresh_days' => (int) env('IQOT_REPORT_FRESH_DAYS', 90),
         // Корневая категория (client_category.path[0]) для каждой позиции.
         'root_category' => env('IQOT_ROOT_CATEGORY', 'Лифтовое оборудование'),
+        // Приблизительные курсы валют → рубль для сравнения офферов IQOT.
+        // Офферы приходят в разных валютах (currency: USD/EUR/CNY/RUB); без
+        // конвертации «80 USD» ошибочно сравнивается как «80 ₽». Курс ручной
+        // (не онлайн-котировка), редактируется в Настройках (iqot.fx_*).
+        // См. app/Services/Iqot/IqotCurrencyConverter.php.
+        'fx_rates' => [
+            'USD' => (float) env('IQOT_FX_USD', 90),
+            'EUR' => (float) env('IQOT_FX_EUR', 100),
+            'CNY' => (float) env('IQOT_FX_CNY', 12.5),
+        ],
     ],
 
     'catalog_sync' => [
