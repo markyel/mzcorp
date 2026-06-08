@@ -3,6 +3,7 @@
 namespace App\Livewire\Analytics;
 
 use App\Enums\Role as RoleEnum;
+use App\Models\IqotPosition;
 use App\Services\Analytics\ManagerAnalyticsService;
 use Carbon\CarbonImmutable;
 use Livewire\Attributes\Computed;
@@ -98,6 +99,29 @@ class Positions extends Component
         return app(ManagerAnalyticsService::class)
             ->topPositionsQuery($from, $to, $this->sort, $this->search)
             ->paginate(50);
+    }
+
+    /**
+     * Карта catalog_item_id → IqotPosition с отчётом (для показа сравнения цен
+     * конкурентов прямо в списке, как в разделе IQOT). Только для позиций
+     * текущей страницы.
+     *
+     * @return \Illuminate\Support\Collection<int, IqotPosition>
+     */
+    #[Computed]
+    public function iqotByCatalogId()
+    {
+        $ids = collect($this->rows->items())->pluck('catalog_item_id')->filter()->all();
+        if ($ids === []) {
+            return collect();
+        }
+
+        return IqotPosition::with('catalogItem:id,sku,name,brand,brand_article,brands,articles,price,price_min,is_price_actual,lead_time_days')
+            ->whereIn('catalog_item_id', $ids)
+            ->whereNotNull('analyzed_at')
+            ->whereNotNull('report')
+            ->get()
+            ->keyBy('catalog_item_id');
     }
 
     public function render()

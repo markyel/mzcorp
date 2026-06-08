@@ -186,54 +186,9 @@
                                 </td>
                             </tr>
                             @if($offers !== [])
-                                @php $cmp = $p->priceComparison(); @endphp
                                 <tr x-show="open" x-cloak class="border-b border-border-subtle bg-surface-2">
                                     <td colspan="10" class="px-4 py-2.5">
-                                        @if($cmp['our_rank'])
-                                            <div class="text-[12px] text-fg-2 mb-2">
-                                                <b class="text-red-700">{{ $cmp['our_label'] ?? 'Наша цена' }}</b>
-                                                занимает <b>{{ $cmp['our_rank'] }}-е место</b> из {{ $cmp['total'] }} по цене (без НДС)
-                                                @if($cmp['delta'] !== null)
-                                                    · vs лучший IQOT:
-                                                    <b class="{{ $cmp['delta'] > 0 ? 'text-red-700' : 'text-emerald-700' }}">{{ $cmp['delta'] > 0 ? '+' : '' }}{{ number_format($cmp['delta'], 0, ',', ' ') }} ₽ ({{ $cmp['delta'] > 0 ? '+' : '' }}{{ number_format($cmp['delta_pct'], 1, ',', ' ') }}%)</b>
-                                                @endif
-                                            </div>
-                                        @else
-                                            <div class="text-[10px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">Предложения поставщиков ({{ $cmp['total'] }}) · сравнение по цене без НДС</div>
-                                        @endif
-                                        <table class="w-full text-[12px]">
-                                            <thead class="text-fg-3 text-[10px] uppercase tracking-wider">
-                                                <tr>
-                                                    <th class="px-2 py-1 text-center w-8">#</th>
-                                                    <th class="px-2 py-1 text-left">Поставщик</th>
-                                                    <th class="px-2 py-1 text-left">Контакты</th>
-                                                    <th class="px-2 py-1 text-right">Цена/шт</th>
-                                                    <th class="px-2 py-1 text-right">Без НДС</th>
-                                                    <th class="px-2 py-1 text-right">Срок</th>
-                                                    <th class="px-2 py-1 text-left">Получено</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                @foreach($cmp['rows'] as $i => $r)
-                                                    <tr class="border-t border-border-subtle {{ $r['is_ours'] ? 'bg-red-50' : '' }}" @if(!empty($r['notes'])) title="{{ $r['notes'] }}" @endif>
-                                                        <td class="px-2 py-1 text-center font-bold {{ $r['is_ours'] ? 'text-red-700' : 'text-fg-3' }}">{{ $i + 1 }}</td>
-                                                        <td class="px-2 py-1 {{ $r['is_ours'] ? 'text-red-700' : 'text-fg-1' }}">
-                                                            @if($r['is_ours'])<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-600 text-white mr-1">КП</span>@endif{{ $r['supplier'] }}
-                                                        </td>
-                                                        <td class="px-2 py-1 text-fg-2 text-[11px] mono">
-                                                            @if($r['is_ours'])<span class="text-fg-3">собственное КП</span>@else{{ $r['phone'] }}{{ !empty($r['email']) ? ' · ' . $r['email'] : '' }}@endif
-                                                        </td>
-                                                        <td class="px-2 py-1 text-right mono font-semibold {{ $r['is_ours'] ? 'text-red-700' : 'text-fg-1' }}">
-                                                            {{ number_format($r['raw'], 2, ',', ' ') }} ₽
-                                                            <div class="text-[9px] text-fg-3">{{ $r['vat_label'] }}</div>
-                                                        </td>
-                                                        <td class="px-2 py-1 text-right mono text-fg-2">{{ number_format($r['net'], 2, ',', ' ') }}</td>
-                                                        <td class="px-2 py-1 text-right mono text-fg-2">{{ $r['delivery_days'] !== null ? $r['delivery_days'] . ' дн' : '—' }}</td>
-                                                        <td class="px-2 py-1 text-fg-3 text-[11px]">{{ $r['received_at'] ? \Illuminate\Support\Carbon::parse($r['received_at'])->format('d.m H:i') : '—' }}</td>
-                                                    </tr>
-                                                @endforeach
-                                            </tbody>
-                                        </table>
+                                        @include('livewire.iqot._comparison', ['pos' => $p])
                                     </td>
                                 </tr>
                             @endif

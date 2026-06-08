@@ -63,23 +63,40 @@
                             <th class="px-2 py-2 text-right">Сделок (потеря)</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        @php $rank = ($rows->currentPage() - 1) * $rows->perPage(); @endphp
-                        @foreach($rows as $r)
-                            @php $rank++; @endphp
-                            <tr wire:key="pos-{{ $r->catalog_item_id }}" class="border-b border-border-subtle last:border-b-0 hover:bg-hover">
-                                <td class="px-2 py-1.5 text-center mono text-fg-3">{{ $rank }}</td>
+                    @php $rank = ($rows->currentPage() - 1) * $rows->perPage(); @endphp
+                    @foreach($rows as $r)
+                        @php
+                            $rank++;
+                            $iqp = $this->iqotByCatalogId->get($r->catalog_item_id);
+                            $hasIqot = $iqp && $iqp->offers() !== [];
+                        @endphp
+                        <tbody wire:key="pos-{{ $r->catalog_item_id }}" x-data="{ open: false }">
+                            <tr class="border-b border-border-subtle hover:bg-hover">
+                                <td class="px-2 py-1.5 text-center mono text-fg-3 align-top">{{ $rank }}</td>
                                 <td class="px-2 py-1.5">
                                     <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($r->name ?? '—', 70) }}</div>
                                     <div class="mono text-[11px] text-fg-3">{{ $r->sku ?? '—' }}</div>
+                                    @if($hasIqot)
+                                        <button type="button" @click="open = !open"
+                                                class="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10.5px] font-medium hover:bg-emerald-100">
+                                            IQOT@if($iqp->report_min_price !== null): мин. {{ number_format((float) $iqp->report_min_price, 0, ',', ' ') }} ₽@endif · {{ $iqp->report_offers_count ?? count($iqp->offers()) }} офф. <span x-text="open ? '▾' : '▸'"></span>
+                                        </button>
+                                    @endif
                                 </td>
-                                <td class="px-2 py-1.5 text-right mono {{ (float) $r->won_units > 0 ? 'text-emerald-700 font-semibold' : 'text-fg-4' }}">{{ (float) $r->won_units > 0 ? $fmtQty($r->won_units) : '—' }}</td>
-                                <td class="px-2 py-1.5 text-right mono text-fg-2">{{ (int) $r->won_deals ?: '—' }}</td>
-                                <td class="px-2 py-1.5 text-right mono {{ (float) $r->lost_units > 0 ? 'text-red-700 font-semibold' : 'text-fg-4' }}">{{ (float) $r->lost_units > 0 ? $fmtQty($r->lost_units) : '—' }}</td>
-                                <td class="px-2 py-1.5 text-right mono text-fg-2">{{ (int) $r->lost_deals ?: '—' }}</td>
+                                <td class="px-2 py-1.5 text-right mono align-top {{ (float) $r->won_units > 0 ? 'text-emerald-700 font-semibold' : 'text-fg-4' }}">{{ (float) $r->won_units > 0 ? $fmtQty($r->won_units) : '—' }}</td>
+                                <td class="px-2 py-1.5 text-right mono text-fg-2 align-top">{{ (int) $r->won_deals ?: '—' }}</td>
+                                <td class="px-2 py-1.5 text-right mono align-top {{ (float) $r->lost_units > 0 ? 'text-red-700 font-semibold' : 'text-fg-4' }}">{{ (float) $r->lost_units > 0 ? $fmtQty($r->lost_units) : '—' }}</td>
+                                <td class="px-2 py-1.5 text-right mono text-fg-2 align-top">{{ (int) $r->lost_deals ?: '—' }}</td>
                             </tr>
-                        @endforeach
-                    </tbody>
+                            @if($hasIqot)
+                                <tr x-show="open" x-cloak class="border-b border-border-subtle bg-surface-2">
+                                    <td colspan="6" class="px-4 py-2.5">
+                                        @include('livewire.iqot._comparison', ['pos' => $iqp])
+                                    </td>
+                                </tr>
+                            @endif
+                        </tbody>
+                    @endforeach
                 </table>
                 <div class="mt-3">{{ $rows->links() }}</div>
             @endif
