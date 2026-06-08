@@ -532,6 +532,9 @@ return [
             'EUR' => (float) env('IQOT_FX_EUR', 100),
             'CNY' => (float) env('IQOT_FX_CNY', 12.5),
         ],
+        // Источник дневных курсов для команды iqot:update-fx-rates (ЦБ РФ,
+        // без ключа). См. app/Services/Iqot/CbrFxRateProvider.php.
+        'fx_source_url' => env('IQOT_FX_SOURCE_URL', 'https://www.cbr.ru/scripts/XML_daily.asp'),
     ],
 
     'catalog_sync' => [

@@ -181,3 +181,15 @@ Schedule::command('iqot:poll')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// IQOT: ежедневное обновление курсов валют (USD/EUR/CNY) из ЦБ РФ для
+// конвертации инвалютных офферов в рубли. ЦБ публикует курс на текущую дату
+// накануне вечером — берём утром (07:30 MSK). Уважает тумблер
+// iqot.fx_auto_update (выключив, оператор пинит ручные курсы). No-op без сети
+// — старые значения сохраняются. См. IqotUpdateFxRatesCommand.
+Schedule::command('iqot:update-fx-rates')
+    ->dailyAt('07:30')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();

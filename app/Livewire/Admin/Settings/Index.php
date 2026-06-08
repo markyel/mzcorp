@@ -381,10 +381,17 @@ class Index extends Component
                 'type' => AppSetting::TYPE_STRING,
                 'default' => 'Лифтовое оборудование',
             ],
+            'iqot.fx_auto_update' => [
+                'group' => 'IQOT · анализ цен',
+                'label' => 'Авто-обновление курсов из ЦБ РФ',
+                'help' => 'Раз в день (07:30 MSK) тянуть курсы USD/EUR/CNY из ЦБ РФ в поля ниже. Выключите, чтобы «запинить» ручные курсы — тогда автозагрузка их не перезапишет.',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => true,
+            ],
             'iqot.fx_usd' => [
                 'group' => 'IQOT · анализ цен',
                 'label' => 'Курс USD → ₽',
-                'help' => 'Приблизительный курс доллара для сравнения офферов в долларах (поле currency=USD). Без него «80 USD» сравнивается как «80 ₽». Курс ручной — обновляйте при сильном движении.',
+                'help' => 'Курс доллара для сравнения офферов в долларах (currency=USD). Без него «80 USD» сравнивается как «80 ₽». Обновляется автоматически из ЦБ РФ (если включён тумблер выше) — правьте вручную только при выключенном авто-обновлении.',
                 'type' => AppSetting::TYPE_FLOAT,
                 'default' => (float) config('services.iqot.fx_rates.USD', 90),
                 'step' => 0.5,
@@ -393,7 +400,7 @@ class Index extends Component
             'iqot.fx_eur' => [
                 'group' => 'IQOT · анализ цен',
                 'label' => 'Курс EUR → ₽',
-                'help' => 'Приблизительный курс евро для сравнения офферов в евро (currency=EUR).',
+                'help' => 'Курс евро для сравнения офферов в евро (currency=EUR). Обновляется автоматически из ЦБ РФ.',
                 'type' => AppSetting::TYPE_FLOAT,
                 'default' => (float) config('services.iqot.fx_rates.EUR', 100),
                 'step' => 0.5,
@@ -402,7 +409,7 @@ class Index extends Component
             'iqot.fx_cny' => [
                 'group' => 'IQOT · анализ цен',
                 'label' => 'Курс CNY (юань) → ₽',
-                'help' => 'Приблизительный курс юаня для сравнения офферов в юанях (currency=CNY/RMB). Актуально для китайских поставщиков.',
+                'help' => 'Курс юаня для сравнения офферов в юанях (currency=CNY/RMB) — актуально для китайских поставщиков. Обновляется автоматически из ЦБ РФ.',
                 'type' => AppSetting::TYPE_FLOAT,
                 'default' => (float) config('services.iqot.fx_rates.CNY', 12.5),
                 'step' => 0.1,
