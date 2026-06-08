@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\AppSetting;
+use App\Models\IqotPosition;
 use App\Services\Iqot\CbrFxRateProvider;
 use App\Services\Settings\SettingsService;
 use Illuminate\Console\Command;
@@ -81,11 +82,40 @@ class IqotUpdateFxRatesCommand extends Command
 
         if (! $dryRun && $changed > 0) {
             $settings->set('iqot.fx_updated_at', now()->toDateTimeString().($cbrDate ? ' (ЦБ '.$cbrDate.')' : ''), AppSetting::TYPE_STRING);
+            // Кешированная «Мин. цена» (report_min_price) считается в рублях по
+            // текущему курсу — пересчитываем по новым курсам, иначе колонка в
+            // пуле/каталоге/КП отстаёт на день. Live-сравнение (priceComparison)
+            // считается в рантайме и в рефреше не нуждается.
+            $refreshed = $this->refreshCachedMinPrices($settings);
+            $this->line("Пересчитана «Мин. цена» у {$refreshed} позиций.");
         }
 
         $this->table(['Валюта', 'Было', 'Стало (за 1 ед.)'], $rows);
         $this->info(($dryRun ? '[dry-run] ' : '').'Курсы ЦБ РФ'.($cbrDate ? " на {$cbrDate}" : '').": обновлено {$changed}.");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Пересчитать кешированный report_min_price (рублёвый эквивалент) по
+     * актуальным курсам. SettingsService-кэш уже сброшен set()'ом, так что
+     * minPriceFromReport видит свежие курсы.
+     */
+    private function refreshCachedMinPrices(SettingsService $settings): int
+    {
+        $settings->forget();
+        $updated = 0;
+        IqotPosition::whereNotNull('report')->chunkById(200, function ($rows) use (&$updated) {
+            foreach ($rows as $pos) {
+                $new = $pos->minPriceFromReport();
+                $old = $pos->report_min_price === null ? null : (float) $pos->report_min_price;
+                if (($new === null ? null : round($new, 2)) !== ($old === null ? null : round($old, 2))) {
+                    $pos->forceFill(['report_min_price' => $new])->save();
+                    $updated++;
+                }
+            }
+        });
+
+        return $updated;
     }
 }
