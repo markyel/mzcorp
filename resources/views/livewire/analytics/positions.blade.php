@@ -79,7 +79,10 @@
                                     @if($hasIqot)
                                         <button type="button" @click="open = !open"
                                                 class="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10.5px] font-medium hover:bg-emerald-100">
-                                            IQOT@if($iqp->report_min_price !== null): мин. {{ number_format((float) $iqp->report_min_price, 0, ',', ' ') }} ₽@endif · {{ $iqp->report_offers_count ?? count($iqp->offers()) }} офф. <span x-text="open ? '▾' : '▸'"></span>
+                                            <span>IQOT</span>
+                                            @if($iqp->report_min_price !== null)<span>: мин. {{ number_format((float) $iqp->report_min_price, 0, ',', ' ') }} ₽</span>@endif
+                                            <span>· {{ $iqp->report_offers_count ?? count($iqp->offers()) }} офф.</span>
+                                            <span x-text="open ? '▾' : '▸'"></span>
                                         </button>
                                     @endif
                                 </td>
