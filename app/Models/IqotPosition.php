@@ -147,11 +147,13 @@ class IqotPosition extends Model
 
         $rows = [];
         foreach ($this->offers() as $o) {
-            $raw = $o['price_per_unit'] ?? $o['total_price'] ?? $o['price'] ?? null;
-            if (! is_numeric($raw)) {
+            // Цена ≤ 0 — невалидный/пустой ответ поставщика (ошибка IQOT):
+            // исключаем из сравнения, ранга и дельты (иначе «0 ₽» = ложное
+            // 1-е место и сдвиг нашего ранга). Кейс M06476 / Revator 0 ₽.
+            $raw = IqotCurrencyConverter::firstPositivePrice($o);
+            if ($raw === null) {
                 continue;
             }
-            $raw = (float) $raw;
             $inclVat = array_key_exists('price_includes_vat', $o)
                 ? (bool) $o['price_includes_vat']
                 : (isset($o['vat_label']) && mb_stripos((string) $o['vat_label'], 'без') === false);

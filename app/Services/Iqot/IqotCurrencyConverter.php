@@ -100,11 +100,30 @@ class IqotCurrencyConverter
     }
 
     /**
+     * Первая ПОЛОЖИТЕЛЬНАЯ цена оффера (price_per_unit → total_price → price).
+     * Цена ≤ 0 — невалидный/пустой ответ поставщика (ошибка IQOT, поставщик не
+     * проставил цену) — такие офферы НЕ участвуют в сравнении/ранге/мин.цене.
+     * Возвращает null, если положительной цены нет.
+     *
+     * @param  array<string, mixed>  $offer
+     */
+    public static function firstPositivePrice(array $offer): ?float
+    {
+        foreach (['price_per_unit', 'total_price', 'price'] as $k) {
+            if (isset($offer[$k]) && is_numeric($offer[$k]) && (float) $offer[$k] > 0) {
+                return (float) $offer[$k];
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Минимальная цена офферов в рублёвом эквиваленте (для «Мин. цена» в пуле).
-     * Берёт price_per_unit / total_price / price каждого оффера, конвертирует по
-     * его валюте и возвращает min среди тех, что удалось привести к рублям.
-     * Если ни один оффер не сконвертировался (неизвестные валюты) — fallback на
-     * min «голых» чисел (как раньше), чтобы не потерять значение совсем.
+     * Берёт первую ПОЛОЖИТЕЛЬНУЮ цену каждого оффера, конвертирует по его валюте
+     * и возвращает min среди приведённых к рублям. Нулевые офферы игнорируются.
+     * Если ни один не сконвертировался (неизвестные валюты) — fallback на min
+     * «голых» положительных чисел, чтобы не потерять значение совсем.
      *
      * @param  iterable<mixed>  $offers
      */
@@ -116,13 +135,7 @@ class IqotCurrencyConverter
             if (! is_array($o)) {
                 continue;
             }
-            $price = null;
-            foreach (['price_per_unit', 'total_price', 'price'] as $k) {
-                if (isset($o[$k]) && is_numeric($o[$k])) {
-                    $price = (float) $o[$k];
-                    break;
-                }
-            }
+            $price = self::firstPositivePrice($o);
             if ($price === null) {
                 continue;
             }
