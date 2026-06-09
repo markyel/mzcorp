@@ -94,17 +94,17 @@ class AssignmentService
                 JSON_UNESCAPED_UNICODE,
             );
         } else {
-            $rr = $this->pickWeightedLeastLoadedManager($managers);
+            $rr = $this->pickBalancedManager($request, $managers);
             $manager = $rr['user'] ?? null;
-            // Сохраняем загрузки + lru-pool в reason — РОПу видно почему
-            // именно этому менеджеру досталась заявка (детерминированно).
-            // Формат: auto_round_robin:{"loads":{1:5,2:8},"min_load":5,"lru_pool":[1]}
+            // Сохраняем скорость закрытия / получено сегодня / капасити-вес в
+            // reason — РОПу видно, почему именно этому менеджеру (детерминир.).
+            // Формат: auto_round_robin:{"closes":{1:140},"today":{1:6},"tw":{1:3.1}}
             $reason = $rr
                 ? 'auto_round_robin:' . json_encode(
                     [
-                        'loads' => $rr['loads'],
-                        'min_load' => $rr['min_load'],
-                        'lru_pool' => $rr['lru_pool'],
+                        'closes' => $rr['closes'],
+                        'today' => $rr['today'],
+                        'tw' => $rr['target_weights'],
                     ],
                     JSON_UNESCAPED_UNICODE,
                 )
@@ -463,134 +463,188 @@ class AssignmentService
     }
 
     /**
-     * Round-robin с приоритетом для отстающих по нагрузке (weighted random).
+     * Гладкое распределение — МИКС трёх сигналов (по ТЗ 20/40/40):
+     *   weight (0.2) — поровну по load_weight (floor: никто не в нуле);
+     *   load   (0.4) — по текущей взвешенной нагрузке (недозагруженным больше);
+     *   speed  (0.4) — по скорости закрытия за период (успех+потеря; быстрым
+     *                  больше; для 0 закрытий — base_close_rate × quota).
      *
-     * **Зачем не «strict least-loaded»**: если ввести нового менеджера с
-     * нагрузкой 0, классический «least-loaded first» отдаст ему ВСЕ новые
-     * заявки подряд, пока он не догонит остальных. Реально это плохо —
-     * нагрузка прыгает рывками, клиенты одного менеджера получают разные
-     * стили общения, нет плавного onboarding.
+     * Каждый компонент нормируется к доле (сумма=1), затем
+     *   targetWeight = 0.2·flatShare + 0.4·loadShare + 0.4·speedShare.
+     * Раздача ПРОПОРЦИОНАЛЬНО targetWeight (smooth-WRR): заявку получает
+     * менеджер с минимальным (получено_сегодня / targetWeight). Дневной поток
+     * размазывается без всплесков; детерминированно (без рулетки). Реализует
+     * «20% по весу + 40% по нагрузке + 40% по скорости» гладко — в отличие от
+     * argmin-вёдер, где один менеджер мог забрать весь поток.
      *
-     * **Алгоритм**: «коэффициент удачи» линейно интерполируется между 1
-     * (для самого загруженного) и `X` (для самого отстающего). `X` —
-     * параметр из настроек `assignment.newbie_boost`, который РОП может
-     * крутить через UI «Настройки». Семантика X — «скорость догона»:
-     *   - X=1   — плоская раздача (равные коэффициенты для всех)
-     *   - X=2   — новичок получает ×2 от самого загруженного
-     *   - X=5   — ×5 (агрессивный догон, новичок почти всю серию забирает)
+     * Пороги/доли — config `assignment.distribution` (period_days,
+     * base_close_rate, smoothing_k, mix). quota = clamp(load_weight,10..500)/100.
      *
-     * Формула:
-     *   coef = 1 + (X − 1) × (max_load − load) / max(max_load − min_load, 1)
-     *
-     * Пример (X=2, нагрузки [100, 100, 100, 100, 50, 0]):
-     *   max=100, min=0
-     *   coef для load=100: 1 + 1×(0/100) = 1.0
-     *   coef для load=50:  1 + 1×(50/100) = 1.5
-     *   coef для load=0:   1 + 1×(100/100) = 2.0
-     *
-     * Чтобы это превратить в int-веса для random_int, домножаем на 1000.
-     *
-     * Tiebreak при равных весах (все load одинаковые) — LRU (старее
-     * last_assigned_at первым).
-     *
-     * @param  Collection<int, User>  $managers  Активные менеджеры.
-     * @return array{user: User, weights: array<int, float>, loads: array<int, int>, boost: float}|null
+     * @param  Collection<int, User>  $managers  Доступные менеджеры.
+     * @return array{user: User, target_weights: array<int,float>, closes: array<int,int>, today: array<int,int>}|null
      */
-    private function pickWeightedLeastLoadedManager(Collection $managers): ?array
+    private function pickBalancedManager(Request $request, Collection $managers): ?array
     {
         if ($managers->isEmpty()) {
             return null;
         }
 
-        // Phase 1.10: load = все open-статусы (не-terminal, не-paused).
+        $cfg = (array) config('services.assignment.distribution', []);
+        $periodDays = max(1, (int) ($cfg['period_days'] ?? 14));
+        $baseClose = max(0.01, (float) ($cfg['base_close_rate'] ?? 10));
+        $K = max(0.01, (float) ($cfg['smoothing_k'] ?? 30));
+        $mix = (array) ($cfg['mix'] ?? []);
+        $mixW = (float) ($mix['weight'] ?? 0.2);  // поровну по весу
+        $mixL = (float) ($mix['load'] ?? 0.4);    // по текущей нагрузке
+        $mixS = (float) ($mix['speed'] ?? 0.4);   // по скорости закрытия
+
+        $ids = $managers->pluck('id');
         $openStatusValues = array_map(
             fn (RequestStatus $s) => $s->value,
             array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
         );
+
+        // Взвешенная по статусу текущая нагрузка (демпфер). CASE из config —
+        // КП=0.5, счёт=0.25 (status_load_weights); ключи строго матчим к enum.
+        $statusWeights = (array) config('services.assignment.status_load_weights', []);
+        $validStatuses = array_flip($openStatusValues);
+        $cases = '';
+        foreach ($statusWeights as $status => $weight) {
+            if (isset($validStatuses[$status])) {
+                $cases .= 'WHEN status = ' . DB::getPdo()->quote((string) $status) . ' THEN ' . (float) $weight . ' ';
+            }
+        }
+        $loadExpr = $cases === '' ? 'COUNT(*)' : "SUM(CASE {$cases} ELSE 1 END)";
+
         $loadByUser = Request::query()
-            ->whereIn('assigned_user_id', $managers->pluck('id'))
+            ->whereIn('assigned_user_id', $ids)
             ->whereIn('status', $openStatusValues)
             ->groupBy('assigned_user_id')
-            ->selectRaw('assigned_user_id, COUNT(*) AS load_count, MAX(assigned_at) AS last_assigned_at')
-            ->get()
-            ->keyBy('assigned_user_id');
+            ->selectRaw("assigned_user_id, {$loadExpr} AS load_count")
+            ->pluck('load_count', 'assigned_user_id');
 
-        $candidates = $managers->map(function (User $u) use ($loadByUser) {
-            $row = $loadByUser->get($u->id);
-            $load = (int) ($row->load_count ?? 0);
-            // load_weight — плановая доля относительно стандарта (100=норма).
-            // Защита от 0 / NULL — clamp 10..500 (то же что в CHECK миграции).
+        // Скорость закрытия за период — успех + потеря (closed_at в окне).
+        $since = now()->subDays($periodDays);
+        $closeByUser = Request::query()
+            ->whereIn('assigned_user_id', $ids)
+            ->whereIn('status', [RequestStatus::ClosedWon->value, RequestStatus::ClosedLost->value])
+            ->where('closed_at', '>=', $since)
+            ->groupBy('assigned_user_id')
+            ->selectRaw('assigned_user_id, COUNT(*) AS closes')
+            ->pluck('closes', 'assigned_user_id');
+
+        // Получено сегодня — счётчик для гладкой пропорциональной раздачи.
+        $todayByUser = Request::query()
+            ->whereIn('assigned_user_id', $ids)
+            ->where('assigned_at', '>=', now()->startOfDay())
+            ->groupBy('assigned_user_id')
+            ->selectRaw('assigned_user_id, COUNT(*) AS today')
+            ->pluck('today', 'assigned_user_id');
+
+        // Overall last assigned — для LRU-tiebreak в начале дня (today=0 у всех).
+        $lastByUser = Request::query()
+            ->whereIn('assigned_user_id', $ids)
+            ->whereNotNull('assigned_at')
+            ->groupBy('assigned_user_id')
+            ->selectRaw('assigned_user_id, MAX(assigned_at) AS last_assigned_at')
+            ->pluck('last_assigned_at', 'assigned_user_id');
+
+        // Три сырых компонента веса на менеджера.
+        $rows = $managers->map(function (User $u) use ($loadByUser, $closeByUser, $baseClose, $K) {
+            $load = (float) ($loadByUser[$u->id] ?? 0);
             $weight = max(10, min(500, (int) ($u->load_weight ?? 100)));
-            // Effective load: фактическая нагрузка нормализованная на квоту.
-            // Менеджер с weight=200 при load=10 имеет effective=5 —
-            // дольше остаётся «отстающим» → берёт следующую заявку первым.
-            // Менеджер с weight=50 при load=4 имеет effective=8 — наоборот.
-            $effective = $load / ($weight / 100.0);
+            $quota = $weight / 100.0;
+            $closes = (int) ($closeByUser[$u->id] ?? 0);
+            // Базовая скорость для новичков (0 закрытий) — масштаб на quota.
+            $effClose = max((float) $closes, $baseClose * $quota);
+
             return [
                 'user' => $u,
                 'load' => $load,
-                'weight' => $weight,
-                'effective_load' => $effective,
-                'last_assigned_at' => $row->last_assigned_at ?? null,
+                'closes' => $closes,
+                'w_flat' => $quota,                 // поровну по весу
+                'w_load' => $quota / ($load + $K),  // по текущей нагрузке (меньше нагрузка → больше)
+                'w_speed' => $effClose * $quota,    // по скорости закрытия (быстрее → больше)
             ];
         })->values();
 
-        // 2026-05-25: переход с weighted-random + boost на детерминированный
-        // least-loaded + LRU tiebreak. Кейс: weighted random при boost=2 и
-        // N≈50 раздач давал стат-разброс 14 vs 4 (Якубович vs Румянцев) —
-        // менеджер РОП'а просил предсказуемого распределения.
-        //
-        // 2026-05-30: добавлен load_weight (плановый % нагрузки). Min теперь
-        // считаем по effective_load = load / (weight/100). При weight=100
-        // у всех — поведение идентично прежнему (effective=load).
-        $minEffective = (float) $candidates->min('effective_load');
-        // float-сравнение с эпсилоном — два менеджера могут иметь близкие
-        // effective_load (например 4.0 и 4.0000001 из-за float-аритметики).
-        $leastLoaded = $candidates
-            ->filter(fn ($c) => abs($c['effective_load'] - $minEffective) < 0.0001)
-            ->values();
+        // Нормируем каждый компонент к сумме=1 (доли), затем микс weight/load/speed.
+        $sumFlat = max(1e-9, (float) $rows->sum('w_flat'));
+        $sumLoad = max(1e-9, (float) $rows->sum('w_load'));
+        $sumSpeed = max(1e-9, (float) $rows->sum('w_speed'));
 
-        $manager = $this->pickByLruTiebreak($leastLoaded);
+        $candidates = $rows->map(function (array $c) use ($sumFlat, $sumLoad, $sumSpeed, $mixW, $mixL, $mixS, $todayByUser, $lastByUser) {
+            $target = $mixW * ($c['w_flat'] / $sumFlat)
+                + $mixL * ($c['w_load'] / $sumLoad)
+                + $mixS * ($c['w_speed'] / $sumSpeed);
+            $today = (int) ($todayByUser[$c['user']->id] ?? 0);
+
+            return [
+                'user' => $c['user'],
+                'load' => $c['load'],
+                'closes' => $c['closes'],
+                'target_weight' => $target,
+                'today' => $today,
+                // Чем меньше fill — тем сильнее менеджеру «недодано» сегодня.
+                'fill' => $today / max($target, 1e-9),
+                'last_assigned_at' => $lastByUser[$c['user']->id] ?? null,
+            ];
+        })->values();
+
+        $manager = $this->pickBySmoothShare($candidates);
         if (! $manager) {
             return null;
         }
 
         return [
             'user' => $manager,
-            'loads' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => $c['load']])->all(),
-            'weights' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => $c['weight']])->all(),
-            'effective_loads' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => round($c['effective_load'], 2)])->all(),
-            'min_load' => $minEffective,
-            'lru_pool' => $leastLoaded->pluck('user.id')->all(),
+            'target_weights' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => round($c['target_weight'], 4)])->all(),
+            'closes' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => $c['closes']])->all(),
+            'today' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => $c['today']])->all(),
         ];
     }
 
     /**
-     * Tiebreak helper: при равных весах берём того, кому давнее назначали
-     * (NULL — никогда не получал — первым в очереди).
+     * Гладкая пропорциональная раздача: min(today / target_weight). При
+     * равенстве (начало дня, today=0 у всех) — больший target_weight первым
+     * (выше ёмкость → раньше), затем LRU.
      *
-     * @param  Collection<int, array{user: User, load: int, last_assigned_at: ?string}>  $candidates
+     * @param  Collection<int, array<string,mixed>>  $candidates
      */
-    private function pickByLruTiebreak(Collection $candidates): ?User
+    private function pickBySmoothShare(Collection $candidates): ?User
     {
         $sorted = $candidates->sort(function ($a, $b) {
-            // Сначала по effective_load (учёт load_weight, см.
-            // pickWeightedLeastLoadedManager), потом по LRU.
-            $aEff = $a['effective_load'] ?? $a['load'] ?? 0;
-            $bEff = $b['effective_load'] ?? $b['load'] ?? 0;
-            if (abs($aEff - $bEff) > 0.0001) {
-                return $aEff <=> $bEff;
+            if (abs($a['fill'] - $b['fill']) > 1e-9) {
+                return $a['fill'] <=> $b['fill'];
             }
-            if ($a['last_assigned_at'] === null) {
-                return -1;
-            }
-            if ($b['last_assigned_at'] === null) {
-                return 1;
+            if (abs($a['target_weight'] - $b['target_weight']) > 1e-9) {
+                return $b['target_weight'] <=> $a['target_weight'];
             }
 
-            return strcmp($a['last_assigned_at'], $b['last_assigned_at']);
+            return $this->lruCompare($a, $b);
         })->values();
 
         return $sorted->first()['user'] ?? null;
+    }
+
+    /**
+     * LRU-сравнение: NULL (никогда не назначали) — первым, иначе по дате asc.
+     *
+     * @param  array<string,mixed>  $a
+     * @param  array<string,mixed>  $b
+     */
+    private function lruCompare(array $a, array $b): int
+    {
+        if ($a['last_assigned_at'] === null && $b['last_assigned_at'] === null) {
+            return 0;
+        }
+        if ($a['last_assigned_at'] === null) {
+            return -1;
+        }
+        if ($b['last_assigned_at'] === null) {
+            return 1;
+        }
+
+        return strcmp((string) $a['last_assigned_at'], (string) $b['last_assigned_at']);
     }
 }
