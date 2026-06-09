@@ -149,15 +149,26 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
             $status = $folder->examine();
             $serverUidValidity = (int) ($status['uidvalidity'] ?? 0);
 
-            // Foundation: при смене UIDVALIDITY делаем full resync.
-            if ($state->uid_validity !== null && $state->uid_validity !== $serverUidValidity) {
-                Log::warning('UIDVALIDITY changed, full resync of folder', [
+            // Смена UIDVALIDITY: старый last_uid_seen больше не валиден (UID
+            // переназначены сервером). РАНЬШЕ тут стояло last_uid_seen=0 ⇒
+            // следующий fetch видел «бэклог» из всех писем папки, а срез
+            // последних 100 (см. fetchAndPersist) выкидывал остальное, двигая
+            // watermark на max — ИМЕННО ТАК была потеряна история Sent у
+            // Dmitry.Rumiantsev (15560 писем). Для папок на десятки-сотни тысяч
+            // (info@: 167k Sent) полный re-ingest вообще неподъёмен (+ LLM на
+            // каждое outbound). Решение: при смене UIDVALIDITY ре-watermark на
+            // текущий max (как first-sync) — пропускаем историю, ловим только
+            // новое. Окно потери ≤ интервала cron'а (2 мин). Историю при нужде
+            // добираем отдельной таргетной командой.
+            $uidValidityChanged = $state->uid_validity !== null
+                && $state->uid_validity !== $serverUidValidity;
+            if ($uidValidityChanged) {
+                Log::warning('UIDVALIDITY changed — re-watermark to current max (история не дренится массово)', [
                     'mailbox_id' => $mailbox->id,
                     'folder' => $folder->path,
                     'old' => $state->uid_validity,
                     'new' => $serverUidValidity,
                 ]);
-                $state->last_uid_seen = 0;
             }
 
             $state->uid_validity = $serverUidValidity;
@@ -178,15 +189,12 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
             // Старая история останется на IMAP-сервере, в email_messages не льётся.
             // Если нужно подтянуть конкретное письмо ретроспективно — отдельная
             // команда (mail:reingest-uid или ручной --mailbox=N --since-uid=K).
-            $uidValidityJustReset = $state->uid_validity === $serverUidValidity
-                && $state->last_uid_seen === 0
-                && $state->exists
-                && $state->sync_count > 0;
-
             $isFirstSync = ! $state->exists
-                || ($state->sync_count === 0 && $state->last_uid_seen === 0 && ! $uidValidityJustReset);
+                || ($state->sync_count === 0 && $state->last_uid_seen === 0);
 
-            if ($isFirstSync) {
+            // first-sync ИЛИ смена UIDVALIDITY → ставим watermark на текущий max
+            // и пропускаем историю (не тащим её в БД ретроспективно).
+            if ($isFirstSync || $uidValidityChanged) {
                 $allUids = (array) $folder->getClient()
                     ->getConnection()
                     ->getUid()
@@ -195,7 +203,7 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
 
                 $state->last_uid_seen = $maxUid;
                 $state->last_synced_at = now();
-                $state->sync_count = 1;
+                $state->sync_count = (int) $state->sync_count + 1;
                 $state->save();
 
                 $mailbox->forceFill([
@@ -204,10 +212,11 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
                     'last_error_message' => null,
                 ])->save();
 
-                Log::info('SyncMailboxFolderJob: first-time watermark set, история пропущена', [
+                Log::info('SyncMailboxFolderJob: watermark set, история пропущена', [
                     'mailbox_id' => $mailbox->id,
                     'folder' => $folder->path,
                     'watermark_uid' => $maxUid,
+                    'reason' => $isFirstSync ? 'first_sync' : 'uidvalidity_changed',
                 ]);
 
                 return;
@@ -283,15 +292,24 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
 
         sort($allUids, SORT_NUMERIC);
 
-        // Берём только новые относительно last_uid_seen, и только хвост из
-        // MAX_MESSAGES_PER_RUN свежайших — чтобы не зависнуть при first-time
-        // sync на исторически большой папке.
+        // Берём только новые относительно last_uid_seen. Если бэклог больше
+        // лимита — берём САМЫЕ СТАРЫЕ MAX_MESSAGES_PER_RUN (голова, не хвост).
+        //
+        // КРИТИЧНО: раньше тут был `array_slice(-MAX)` (хвост = свежайшие). При
+        // бэклоге >100 (догон после простоя воркера / резкий приток) джоб
+        // забирал только новейшие 100, persist'ил их и двигал last_uid_seen на
+        // MAX обработанного — а пропущенные СТАРЫЕ UID навсегда оставались ниже
+        // watermark и больше не фетчились. Так была потеряна история Sent
+        // (Dmitry.Rumiantsev: 15560 писем). Беря голову (oldest-first), мы
+        // дренируем бэклог по 100 за заход (cron каждые 2 мин) без потерь:
+        // watermark двигается только до максимума РЕАЛЬНО обработанной пачки,
+        // остаток подберётся следующими заходами.
         $newUids = array_values(array_filter(
             $allUids,
             static fn (int $u): bool => $u >= $sinceUid,
         ));
         if (count($newUids) > self::MAX_MESSAGES_PER_RUN) {
-            $newUids = array_slice($newUids, -self::MAX_MESSAGES_PER_RUN);
+            $newUids = array_slice($newUids, 0, self::MAX_MESSAGES_PER_RUN);
         }
 
         if (empty($newUids)) {
