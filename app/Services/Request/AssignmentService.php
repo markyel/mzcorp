@@ -342,6 +342,16 @@ class AssignmentService
             return null;
         }
 
+        // Адреса-агрегаторы (веб-форма сайта order@myzip.ru, маркетплейсы): за
+        // одним From стоят разные конечные клиенты — client-sticky не применяем,
+        // иначе все заявки липнут одному менеджеру. Round-robin распределит;
+        // catalog/text sticky (Level 1/3) продолжают работать. Config —
+        // services.assignment.non_sticky_client_emails.
+        $aggregators = (array) config('services.assignment.non_sticky_client_emails', []);
+        if (in_array($clientEmail, $aggregators, true)) {
+            return null;
+        }
+
         // Авто-пометка дилерских email'ов: если у этого client_email уже
         // ≥ N открытых заявок (порог из настроек), фиксируем его как
         // дилерский и пропускаем client-sticky. Поток дилера распределяется
