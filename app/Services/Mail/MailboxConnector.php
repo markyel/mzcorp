@@ -91,24 +91,61 @@ class MailboxConnector
     /**
      * Найти папку «Отправленные».
      *
-     * Foundation §1: Yandex использует русские имена. Пробуем варианты в порядке:
-     * 1) "Отправленные" — Yandex
-     * 2) "Sent" — RFC-стандартное имя многих серверов
-     * 3) "[Gmail]/Sent Mail" — Gmail-пространство (на всякий случай)
+     * ПРИОРИТЕТ — IMAP special-use атрибут \Sent (RFC 6154). Имя ненадёжно:
+     * у Yandex рядом с СИСТЕМНОЙ "Sent" (флаг \Sent) часто живёт
+     * ПОЛЬЗОВАТЕЛЬСКАЯ папка "Отправленные" (русское имя, БЕЗ \Sent) — её
+     * создаёт почтовый клиент/правило. Ручные отправки менеджера из веб-клиента
+     * Yandex падают в системную \Sent, а матч по имени "Отправленные" цеплял
+     * пользовательскую — и весь исходящий поток менеджера не синхронизировался
+     * (кейс Dmitry.Rumiantsev: системная Sent=59568 не читалась, читалась
+     * кастомная "Отправленные"=15641 с одними автоотбивками MyLift).
      *
-     * Будущая итерация: использовать LIST-EXTENDED с RETURN (SPECIAL-USE),
-     * чтобы автоматически находить \Sent на любом сервере.
+     * Фолбэк по именам — только для серверов без SPECIAL-USE в LIST.
      */
     public function findSent(Client $client): Folder
     {
-        foreach (['Отправленные', 'Sent', '[Gmail]/Sent Mail', 'Sent Items'] as $candidate) {
+        $special = $this->findFolderBySpecialUse($client, 'Sent');
+        if ($special !== null) {
+            return $special;
+        }
+
+        foreach (['Sent', 'Отправленные', '[Gmail]/Sent Mail', 'Sent Items'] as $candidate) {
             $folder = $client->getFolderByPath($candidate, soft_fail: true);
             if ($folder) {
                 return $folder;
             }
         }
 
-        throw new \RuntimeException('Sent folder not found (tried: Отправленные, Sent, [Gmail]/Sent Mail, Sent Items).');
+        throw new \RuntimeException('Sent folder not found (no \\Sent special-use; tried: Sent, Отправленные, [Gmail]/Sent Mail, Sent Items).');
+    }
+
+    /**
+     * Найти папку по IMAP special-use флагу (RFC 6154): '\Sent', '\Drafts',
+     * '\Trash', '\Junk', '\Archive'. Читает сырой LIST (path => flags[]).
+     * Возвращает Folder или null, если флаг нигде не выставлен / LIST не дал
+     * атрибутов (старые серверы).
+     *
+     * @param  string  $useFlag  имя флага без backslash, напр. 'Sent'
+     */
+    public function findFolderBySpecialUse(Client $client, string $useFlag): ?Folder
+    {
+        try {
+            $list = (array) $client->getConnection()->folders('', '*')->validatedData();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $needle = strtolower(ltrim($useFlag, '\\'));
+        foreach ($list as $path => $info) {
+            $flags = is_array($info) ? ($info['flags'] ?? $info['attributes'] ?? []) : [];
+            foreach ((array) $flags as $flag) {
+                if (strtolower(ltrim((string) $flag, '\\')) === $needle) {
+                    return $client->getFolderByPath((string) $path, soft_fail: true);
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
