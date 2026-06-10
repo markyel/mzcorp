@@ -330,7 +330,7 @@
                         @if($req->assignedUser)
                             @php $mAvatar = $req->assignedUser->avatarUrlForStatus($req->status); @endphp
                             @if($mAvatar)
-                                <img src="{{ $mAvatar }}" alt="" class="w-5 h-5 rounded-full" style="object-fit:cover;">
+                                <img src="{{ $mAvatar }}" alt="" class="rounded-full shrink-0" style="width:44px;height:44px;object-fit:cover;">
                             @else
                                 <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-neutral-200 text-fg-2 text-[9.5px] font-semibold">{{ $managerInitials }}</span>
                             @endif
