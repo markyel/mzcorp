@@ -81,6 +81,13 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/catalog/search', function () {
             return view('catalog.search');
         })->name('catalog.search');
+
+        // Раздел «Обновления» (changelog) — лента важных изменений системы.
+        // Доступен на чтение ВСЕМ ролям без разделения. Публикация — ниже,
+        // в privileged-группе (updates.manage/create/edit).
+        Route::get('/dashboard/updates', function () {
+            return view('updates.index');
+        })->name('updates.index');
     });
 
     // Раздел «Почта» — read-only листинг писем всех ящиков (общих +
@@ -175,6 +182,20 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/notifications/{template}/edit', function (\App\Models\ClientNotificationTemplate $template) {
             return view('admin.notifications.edit', ['template' => $template]);
         })->name('notifications.edit');
+
+        // Управление разделом «Обновления» (changelog) — создание/редактирование/
+        // публикация записей. Чтение ленты — всем (updates.index выше).
+        Route::get('/dashboard/updates/manage', function () {
+            return view('admin.updates.index');
+        })->name('updates.manage');
+
+        Route::get('/dashboard/updates/manage/create', function () {
+            return view('admin.updates.edit', ['entry' => new \App\Models\ChangelogEntry()]);
+        })->name('updates.create');
+
+        Route::get('/dashboard/updates/manage/{entry}/edit', function (\App\Models\ChangelogEntry $entry) {
+            return view('admin.updates.edit', ['entry' => $entry]);
+        })->name('updates.edit');
     });
 
 

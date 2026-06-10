@@ -145,6 +145,27 @@
         </div>
     </div>
 
+    {{-- ───────── Обновления системы (для всех ролей) ───────── --}}
+    @if($this->latestUpdates->isNotEmpty())
+        <div class="ds-card">
+            <div class="ds-card-header">
+                <h3>Обновления</h3>
+                <span class="flex-1"></span>
+                <a href="{{ route('updates.index') }}" class="text-[12px] text-sky-700 hover:underline">Все обновления →</a>
+            </div>
+            <div class="ds-card-body">
+                <ul class="space-y-2 text-[12.5px]">
+                    @foreach($this->latestUpdates as $upd)
+                        <li class="flex items-start gap-2.5" wire:key="dash-upd-{{ $upd->id }}">
+                            <span class="text-fg-3 text-[11.5px] mono shrink-0 mt-px w-[64px]">{{ optional($upd->published_at)->translatedFormat('d MMM') }}</span>
+                            <a href="{{ route('updates.index') }}" class="text-fg-1 hover:text-sky-700 hover:underline min-w-0">{{ $upd->title }}</a>
+                        </li>
+                    @endforeach
+                </ul>
+            </div>
+        </div>
+    @endif
+
     {{-- ───────── Funnel + conversion (за период) ─────────
          received → quoted → won/lost.
          quote_rate = quoted/received, conversion = won/(won+lost). --}}

@@ -79,6 +79,7 @@ class User extends Authenticatable
             'unavailable_auto_delegate' => 'boolean',
             'load_weight' => 'integer',
             'dashboard_period_days' => 'integer',
+            'updates_seen_at' => 'datetime',
             'password' => 'hashed',
         ];
     }

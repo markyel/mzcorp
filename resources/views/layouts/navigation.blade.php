@@ -88,6 +88,10 @@
         $navLinks[] = ['route' => 'mailboxes.index', 'label' => 'Ящики', 'pattern' => 'mailboxes.*'];
     }
 
+    // Бейдж непрочитанных обновлений (раздел «Обновления», все роли).
+    // Дешёвый индексируемый COUNT; nav рендерится на каждой странице.
+    $updatesUnread = $user ? \App\Models\ChangelogEntry::unreadCountFor($user) : 0;
+
     $disabledTitle = 'Доступно в Phase 2';
     $userInitials = collect(preg_split('/\s+/u', trim((string) ($user?->name ?? '?'))))
         ->filter()
@@ -157,6 +161,24 @@
 
             {{-- Bell — Foundation Фаза 2 in-app notifications. --}}
             <livewire:notifications.bell wire:key="notif-bell-{{ $user->id ?? 'guest' }}" />
+
+            {{-- Обновления — лента важных изменений системы (все роли).
+                 Бейдж непрочитанных сбрасывается при открытии раздела
+                 (Updates\Index::mount → users.updates_seen_at). --}}
+            <a href="{{ route('updates.index') }}"
+               class="relative inline-flex items-center justify-center w-8 h-8 rounded-md text-fg-2 hover:text-fg-1 hover:bg-[var(--bg-surface-2)]"
+               title="Обновления{{ $updatesUnread > 0 ? ' — новых: '.$updatesUnread : '' }}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="1.5"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m3 11 18-5v12L3 14v-3z"/>
+                    <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>
+                </svg>
+                @if($updatesUnread > 0)
+                    <span class="absolute -top-0.5 -right-0.5 inline-flex items-center justify-center rounded-full bg-[var(--accent)] text-[var(--fg-on-accent)] font-semibold"
+                          style="min-width:15px;height:15px;font-size:9.5px;padding:0 3px;line-height:15px;">{{ $updatesUnread > 9 ? '9+' : $updatesUnread }}</span>
+                @endif
+            </a>
 
             {{-- Документация — Lucide circle-help. Открывает /docs (Controller
                  редиректит на профильный раздел роли, если есть). --}}

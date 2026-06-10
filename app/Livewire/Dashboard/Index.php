@@ -357,6 +357,20 @@ class Index extends Component
     }
 
     /**
+     * Последние опубликованные обновления (changelog) — превью на дашборде
+     * для ВСЕХ ролей. Полная лента — раздел «Обновления» (updates.index).
+     */
+    #[Computed]
+    public function latestUpdates()
+    {
+        return \App\Models\ChangelogEntry::query()
+            ->published()
+            ->latest('published_at')
+            ->limit(3)
+            ->get(['id', 'title', 'published_at']);
+    }
+
+    /**
      * Менеджеры для фильтра круговой диаграммы (роли, обрабатывающие
      * заявки). Активные пользователи, отсортированы по имени.
      *
