@@ -1107,6 +1107,7 @@ class Index extends Component
             $result[] = [
                 'name' => $u->name,
                 'email' => $u->email,
+                'avatar_url' => $u->avatarUrl('neutral'),
                 'active' => (int) ($row->c ?? 0),
                 'active_complexity' => (int) ($row->active_complexity ?? 0),
                 'hard_count' => (int) ($row->hard_count ?? 0),
@@ -1199,6 +1200,7 @@ class Index extends Component
             $result[] = [
                 'name' => $u->name,
                 'email' => $u->email,
+                'avatar_url' => $u->avatarUrl('neutral'),
                 'assigned' => $sum,
                 'from_info_period' => (int) ($fromInfoPeriod->get($u->id)?->c ?? 0),
                 'points' => $points,

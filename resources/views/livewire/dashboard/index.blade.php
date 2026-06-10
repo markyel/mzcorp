@@ -749,8 +749,18 @@
                                         @foreach($currentLoad as $m)
                                             <tr class="border-b border-border-subtle last:border-b-0">
                                                 <td class="px-[18px] py-2">
-                                                    <div class="text-fg-1">{{ $m['name'] }}</div>
-                                                    <div class="text-[11.5px] text-fg-3 mono">{{ $m['email'] }}</div>
+                                                    <div class="flex items-center gap-2.5">
+                                                        @if(!empty($m['avatar_url']))
+                                                            <img src="{{ $m['avatar_url'] }}" alt="" class="rounded-full shrink-0" style="width:30px;height:30px;object-fit:cover;">
+                                                        @else
+                                                            @php $mInit = collect(preg_split('/\s+/u', trim((string) $m['name'])))->filter()->map(fn ($p) => mb_strtoupper(mb_substr($p, 0, 1)))->take(2)->implode(''); @endphp
+                                                            <span class="inline-flex items-center justify-center rounded-full bg-[var(--neutral-200)] text-fg-2 font-semibold text-[11px] shrink-0" style="width:30px;height:30px;">{{ $mInit ?: '?' }}</span>
+                                                        @endif
+                                                        <div class="min-w-0">
+                                                            <div class="text-fg-1">{{ $m['name'] }}</div>
+                                                            <div class="text-[11.5px] text-fg-3 mono truncate">{{ $m['email'] }}</div>
+                                                        </div>
+                                                    </div>
                                                 </td>
                                                 <td class="px-2 py-2 text-right mono tnum {{ $m['active'] > 0 ? 'text-fg-1 font-semibold' : 'text-fg-3' }}">{{ $m['active'] }}</td>
                                                 <td class="px-2 py-2 text-right mono tnum {{ $m['active_complexity'] > 0 ? 'text-fg-1' : 'text-fg-3' }}">{{ $m['active_complexity'] }}</td>
@@ -825,8 +835,18 @@
                                         @foreach($assigned as $m)
                                             <tr class="border-b border-border-subtle last:border-b-0">
                                                 <td class="px-[18px] py-2">
-                                                    <div class="text-fg-1">{{ $m['name'] }}</div>
-                                                    <div class="text-[11.5px] text-fg-3 mono">{{ $m['email'] }}</div>
+                                                    <div class="flex items-center gap-2.5">
+                                                        @if(!empty($m['avatar_url']))
+                                                            <img src="{{ $m['avatar_url'] }}" alt="" class="rounded-full shrink-0" style="width:30px;height:30px;object-fit:cover;">
+                                                        @else
+                                                            @php $mInit = collect(preg_split('/\s+/u', trim((string) $m['name'])))->filter()->map(fn ($p) => mb_strtoupper(mb_substr($p, 0, 1)))->take(2)->implode(''); @endphp
+                                                            <span class="inline-flex items-center justify-center rounded-full bg-[var(--neutral-200)] text-fg-2 font-semibold text-[11px] shrink-0" style="width:30px;height:30px;">{{ $mInit ?: '?' }}</span>
+                                                        @endif
+                                                        <div class="min-w-0">
+                                                            <div class="text-fg-1">{{ $m['name'] }}</div>
+                                                            <div class="text-[11.5px] text-fg-3 mono truncate">{{ $m['email'] }}</div>
+                                                        </div>
+                                                    </div>
                                                 </td>
                                                 <td class="px-2 py-2 text-right mono tnum {{ $m['assigned'] > 0 ? 'text-fg-1 font-semibold' : 'text-fg-3' }}">{{ $m['assigned'] }}</td>
                                                 <td class="px-2 py-2 text-right mono tnum {{ $m['from_info_period'] > 0 ? 'text-fg-2' : 'text-fg-3' }}">{{ $m['from_info_period'] }}</td>
