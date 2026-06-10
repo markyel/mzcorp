@@ -99,6 +99,16 @@ return [
         'attachment_meta_model' => env('OPENAI_ATTACHMENT_META_MODEL', 'gpt-4o-mini'),
         // Killswitch если LLM-расходы нежелательны.
         'attachment_meta_enabled' => filter_var(env('OPENAI_ATTACHMENT_META_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+        // Классификатор релевантности тяжёлых вложений (pdf/xls): несёт ли файл
+        // товарную номенклатуру или это служебный документ (реквизиты, счёт на
+        // оплату, договор). Не-номенклатурные не рубят unified-путь разбора.
+        // Короткая yes/no задача — mini. См. RequestItemParsingService.
+        'attachment_relevance_model' => env('OPENAI_ATTACHMENT_RELEVANCE_MODEL', 'gpt-4o-mini'),
+        'attachment_relevance_enabled' => filter_var(env('OPENAI_ATTACHMENT_RELEVANCE_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+        // Финальный LLM-консолидатор позиций split-пути (собирает один набор из
+        // выдач разных парсеров одной заявки, склеивая дубли photo-vs-text).
+        // Модель — parsing_model. Killswitch — fallback на механический дедуп.
+        'consolidation_enabled' => filter_var(env('OPENAI_CONSOLIDATION_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         // Phase 2 use-case C: размер батча на /v1/embeddings (OpenAI лимит 2048).
         // 100 — компромисс между latency на запрос и количеством HTTP-вызовов.
         'embedding_batch_size' => (int) env('OPENAI_EMBEDDING_BATCH_SIZE', 100),

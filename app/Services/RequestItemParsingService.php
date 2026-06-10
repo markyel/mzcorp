@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\InboundUrlFetch;
 use App\Models\RequestItem;
+use App\Prompts\Mail\ClassifyAttachmentRelevancePrompt;
+use App\Prompts\Mail\ConsolidateParsedItemsPrompt;
 use App\Prompts\Mail\DecideClarificationsPrompt;
 use App\Prompts\Mail\ParseItemsPrompt;
 use App\Prompts\Mail\ParseItemsUnifiedPrompt;
@@ -882,6 +884,29 @@ PROMPT;
         $heavyStructured = $structuredAttachments->filter(function ($a) {
             return preg_match('/\.(pdf|xls|xlsx)$/i', (string) $a->filename) === 1;
         });
+
+        // Часть A: отсечь «не-номенклатурные» тяжёлые вложения (банковские
+        // реквизиты, счета на оплату, договоры, сертификаты). Без этого любой
+        // такой PDF/XLS попадает в $heavyStructured и рубит unified-путь →
+        // split → дубли photo-vs-text. Кейс M-2026-4011: «реквизиты
+        // АЛЬФА-БАНК.pdf» при 4 фото кнопок → split → 11 позиций вместо 6.
+        // Fail-soft внутри classify…: при ошибке/неуверенности файл считается
+        // номенклатурным (не теряем позиции).
+        if ($heavyStructured->isNotEmpty()) {
+            $droppedHeavy = $heavyStructured->reject(
+                fn ($a) => $this->classifyHeavyAttachmentRelevance($a, $sourceTag)
+            );
+            if ($droppedHeavy->isNotEmpty()) {
+                $droppedIds = $droppedHeavy->pluck('id')->all();
+                $heavyStructured = $heavyStructured->reject(fn ($a) => in_array($a->id, $droppedIds, true));
+                $structuredAttachments = $structuredAttachments->reject(fn ($a) => in_array($a->id, $droppedIds, true));
+                Log::info('parseItemsFromInboundContent: dropped non-nomenclature heavy attachments', [
+                    'source' => $sourceTag,
+                    'dropped' => $droppedHeavy->map(fn ($a) => $a->filename)->values()->all(),
+                ]);
+            }
+        }
+
         $canUseUnified = $imageAttachments->count() > 0
             && $imageAttachments->count() <= self::MAX_UNIFIED_IMAGES
             && $heavyStructured->isEmpty();
@@ -1088,12 +1113,16 @@ PROMPT;
             ),
         ]);
 
-        // 4) Дедуп с уважением к invoice_index. Ключ = article + qty +
-        //    invoice_index. Multi-invoice кейсы (M33374 в счёте 1 и счёте 2
-        //    оба с qty=2) сохраняются — разные invoice_index. Реальные
-        //    дубли (photo+text дают одну позицию) — режутся (одинаковый
-        //    invoice_index, дефолт 1).
-        return $this->dedupeWithinList($items);
+        // 4) Дедуп + консолидация. Базовый dedupeWithinList суммирует точные
+        //    дубли (article+qty+invoice_index) и мерджит cross-article M-SKU.
+        //    Поверх него — Часть B: если позиции пришли из ≥2 разных источников
+        //    (photo / email_body / документ), финальную выдачу собирает
+        //    LLM-консолидатор: один и тот же товар, описанный по-разному в
+        //    фото и в тексте, склеивается в одну позицию, а глобальные
+        //    атрибуты («подсветка красная») переносятся на весь набор.
+        //    Fail-soft: при выключенном killswitch / одном источнике / ошибке
+        //    возвращается результат dedupeWithinList.
+        return $this->consolidateSplitItems($items, $subject, $referenceText ?? '', $linkedUrlsText);
     }
 
     /**
@@ -1126,6 +1155,205 @@ PROMPT;
             }
         }
         return [$images, $attachmentIds];
+    }
+
+    /**
+     * Часть A: содержит ли тяжёлое вложение (pdf/xls/xlsx) товарную
+     * номенклатуру (перечень позiций к подбору) — или это служебный документ
+     * (реквизиты, счёт на оплату, договор, сертификат), который не должен
+     * рубить unified-путь и засорять разбор.
+     *
+     * @return bool true — номенклатура (оставить в обработке);
+     *              false — служебный, отбросить.
+     *
+     * Fail-soft: killswitch off / не прочитался текст / ошибка LLM →
+     * возвращаем true (лучше лишний раз разобрать, чем потерять позиции).
+     */
+    private function classifyHeavyAttachmentRelevance(\App\Models\EmailAttachment $att, string $sourceTag): bool
+    {
+        if (! config('services.openai.attachment_relevance_enabled', true)) {
+            return true;
+        }
+
+        try {
+            $absolutePath = \Illuminate\Support\Facades\Storage::disk($att->disk)->path($att->file_path);
+            if (! file_exists($absolutePath)) {
+                return true;
+            }
+            $upload = new UploadedFile(
+                $absolutePath,
+                $att->filename ?? basename($absolutePath),
+                $att->mime_type,
+                null,
+                true,
+            );
+            $textHead = mb_substr(trim($this->extractTextFromFile($upload)), 0, 1500);
+            if ($textHead === '') {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            Log::warning('classifyHeavyAttachmentRelevance: extract failed (treat as nomenclature)', [
+                'source' => $sourceTag,
+                'attachment_id' => $att->id,
+                'filename' => $att->filename,
+                'error' => $e->getMessage(),
+            ]);
+
+            return true;
+        }
+
+        try {
+            $result = $this->openai->chat(
+                [
+                    ['role' => 'system', 'content' => ClassifyAttachmentRelevancePrompt::systemMessage()],
+                    ['role' => 'user', 'content' => ClassifyAttachmentRelevancePrompt::userMessage((string) ($att->filename ?? ''), $textHead)],
+                ],
+                config('services.openai.attachment_relevance_model', 'gpt-4o-mini'),
+                ['response_format' => ['type' => 'json_object'], 'temperature' => 0],
+            );
+
+            $parsed = json_decode($result['content'] ?? '', true);
+            if (! is_array($parsed) || ! array_key_exists('is_nomenclature', $parsed)) {
+                return true;
+            }
+            $isNomenclature = filter_var($parsed['is_nomenclature'], FILTER_VALIDATE_BOOLEAN);
+
+            Log::info('classifyHeavyAttachmentRelevance: classified', [
+                'source' => $sourceTag,
+                'attachment_id' => $att->id,
+                'filename' => $att->filename,
+                'is_nomenclature' => $isNomenclature,
+                'doc_type' => $parsed['doc_type'] ?? null,
+                'reason' => $parsed['reason'] ?? null,
+            ]);
+
+            return $isNomenclature;
+        } catch (\Throwable $e) {
+            Log::warning('classifyHeavyAttachmentRelevance: LLM failed (treat as nomenclature)', [
+                'source' => $sourceTag,
+                'attachment_id' => $att->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return true;
+        }
+    }
+
+    /**
+     * Часть B: финальная консолидация позиций split-пути одним LLM-агентом.
+     *
+     * Базовый детерминированный дедуп (`dedupeWithinList`) применяется всегда.
+     * Поверх него: если позиции собраны из ≥2 различных источников (`__source`),
+     * один и тот же товар мог попасть несколько раз с разными формулировками
+     * (фото без атрибута + текст с атрибутом). LLM-агент видит ВСЕ кандидаты +
+     * контекст письма и собирает единый список: дубли склеивает, глобальные
+     * атрибуты переносит на весь набор, явно разные товары сохраняет.
+     *
+     * Fail-soft: killswitch off / один источник / <2 позиций / ошибка / пустой
+     * ответ → возвращаем результат `dedupeWithinList`.
+     *
+     * @param array<int,array> $items позиции с метками `__source`
+     * @return array<int,array>
+     */
+    private function consolidateSplitItems(array $items, string $subject, string $body, ?string $linkedUrlsText): array
+    {
+        $deduped = $this->dedupeWithinList($items);
+
+        if (! config('services.openai.consolidation_enabled', true)) {
+            return $deduped;
+        }
+
+        // Гейт: консолидируем только мульти-источниковый split.
+        $sources = [];
+        foreach ($items as $it) {
+            $sources[$it['__source'] ?? 'unknown'] = true;
+        }
+        if (count($deduped) < 2 || count($sources) < 2) {
+            return $deduped;
+        }
+
+        $candidates = array_values($deduped);
+
+        try {
+            $payload = array_map(function (array $it, int $idx) {
+                return [
+                    'index' => $idx,
+                    'source' => $it['__source'] ?? 'unknown',
+                    'name' => (string) ($it['name'] ?? ''),
+                    'brand' => $it['brand'] ?? null,
+                    'article' => $it['article'] ?? null,
+                    'qty' => (float) ($it['__qty_summed'] ?? $it['qty'] ?? 1),
+                    'unit' => (string) ($it['unit'] ?? 'шт.'),
+                    'invoice_index' => (int) ($it['invoice_index'] ?? 1),
+                    'note' => $it['note'] ?? null,
+                    'length' => $it['length'] ?? null,
+                    'length_unit' => $it['length_unit'] ?? null,
+                    'category' => $it['category'] ?? null,
+                ];
+            }, $candidates, array_keys($candidates));
+
+            $result = $this->openai->chat(
+                [
+                    ['role' => 'system', 'content' => ConsolidateParsedItemsPrompt::systemMessage()],
+                    ['role' => 'user', 'content' => ConsolidateParsedItemsPrompt::userMessage($subject, $body, $linkedUrlsText, $payload)],
+                ],
+                config('services.openai.parsing_model', 'gpt-4.1'),
+                ['response_format' => ['type' => 'json_object'], 'temperature' => 0],
+            );
+
+            $parsed = json_decode($result['content'] ?? '', true);
+            $out = is_array($parsed) ? ($parsed['items'] ?? null) : null;
+            if (! is_array($out) || empty($out)) {
+                Log::warning('consolidateSplitItems: empty/malformed output — fallback to dedupe', [
+                    'candidates' => count($candidates),
+                ]);
+
+                return $deduped;
+            }
+
+            $consolidated = [];
+            foreach ($out as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+                // email_attachment_id наследуем от первого исходного кандидата,
+                // у которого он был (обычно vision_photo) — чтобы не потерять
+                // привязку позиции к фото.
+                $srcIdx = $row['source_indexes'] ?? [];
+                if (is_array($srcIdx)) {
+                    foreach ($srcIdx as $si) {
+                        if (is_int($si) && isset($candidates[$si]) && ! empty($candidates[$si]['email_attachment_id'])) {
+                            $row['email_attachment_id'] = (int) $candidates[$si]['email_attachment_id'];
+                            break;
+                        }
+                    }
+                }
+                $normalized = $this->normalizeParsedItem($row);
+                if ($normalized !== null) {
+                    $consolidated[] = $normalized;
+                }
+            }
+
+            if (empty($consolidated)) {
+                return $deduped;
+            }
+
+            Log::warning('consolidateSplitItems: consolidated multi-source split', [
+                'sources' => array_keys($sources),
+                'candidates' => count($candidates),
+                'result' => count($consolidated),
+                'usage' => $result['usage'] ?? null,
+            ]);
+
+            return $consolidated;
+        } catch (\Throwable $e) {
+            Log::warning('consolidateSplitItems: failed — fallback to dedupe', [
+                'candidates' => count($candidates),
+                'error' => $e->getMessage(),
+            ]);
+
+            return $deduped;
+        }
     }
 
     /**
