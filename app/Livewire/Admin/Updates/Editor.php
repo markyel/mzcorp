@@ -20,6 +20,9 @@ class Editor extends Component
     #[Validate('required|string|max:200')]
     public string $title = '';
 
+    #[Validate('nullable|string|max:300')]
+    public string $excerpt = '';
+
     #[Validate('required|string')]
     public string $body = '';
 
@@ -32,6 +35,7 @@ class Editor extends Component
         if ($entry && $entry->exists) {
             $this->entryId = $entry->id;
             $this->title = $entry->title;
+            $this->excerpt = (string) $entry->excerpt;
             $this->body = $entry->body;
             $this->isPublished = (bool) $entry->is_published;
         }
@@ -61,6 +65,7 @@ class Editor extends Component
             $entry = ChangelogEntry::findOrFail($this->entryId);
             $entry->fill([
                 'title' => $this->title,
+                'excerpt' => trim($this->excerpt) !== '' ? trim($this->excerpt) : null,
                 'body' => $this->body,
                 'is_published' => $this->isPublished,
             ]);
@@ -77,6 +82,7 @@ class Editor extends Component
 
         ChangelogEntry::create([
             'title' => $this->title,
+            'excerpt' => trim($this->excerpt) !== '' ? trim($this->excerpt) : null,
             'body' => $this->body,
             'is_published' => $this->isPublished,
             'published_at' => $this->isPublished ? now() : null,

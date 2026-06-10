@@ -28,6 +28,16 @@
 
                 <div>
                     <label class="block text-[12.5px] font-medium text-fg-2 mb-1">
+                        Краткое содержание <span class="text-fg-3 font-normal">(для превью на дашборде; если пусто — возьмём начало текста)</span>
+                    </label>
+                    <textarea wire:model="excerpt" rows="2" maxlength="300"
+                              class="w-full px-3 py-2 border border-[var(--border)] rounded-md bg-[var(--bg-app)] text-fg-1 text-[13px] leading-relaxed outline-none focus:border-[var(--sky-500)]"
+                              placeholder="1-2 предложения сути обновления"></textarea>
+                    @error('excerpt') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
+                </div>
+
+                <div>
+                    <label class="block text-[12.5px] font-medium text-fg-2 mb-1">
                         Текст <span class="text-fg-3 font-normal">(Markdown: ## заголовки, **жирный**, - списки, [ссылка](url))</span>
                     </label>
                     <textarea wire:model.live.debounce.400ms="body" rows="12"

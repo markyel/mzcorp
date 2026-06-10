@@ -154,11 +154,14 @@
                 <a href="{{ route('updates.index') }}" class="text-[12px] text-sky-700 hover:underline">Все обновления →</a>
             </div>
             <div class="ds-card-body">
-                <ul class="space-y-2 text-[12.5px]">
+                <ul class="space-y-3 text-[12.5px]">
                     @foreach($this->latestUpdates as $upd)
                         <li class="flex items-start gap-2.5" wire:key="dash-upd-{{ $upd->id }}">
-                            <span class="text-fg-3 text-[11.5px] mono shrink-0 mt-px w-[64px]">{{ optional($upd->published_at)->translatedFormat('d MMM') }}</span>
-                            <a href="{{ route('updates.index') }}" class="text-fg-1 hover:text-sky-700 hover:underline min-w-0">{{ $upd->title }}</a>
+                            <span class="text-fg-3 text-[11.5px] mono shrink-0 mt-0.5 w-[64px]">{{ optional($upd->published_at)->translatedFormat('d MMM') }}</span>
+                            <div class="min-w-0">
+                                <a href="{{ route('updates.index') }}" class="text-fg-1 font-medium hover:text-sky-700 hover:underline">{{ $upd->title }}</a>
+                                <div class="text-fg-3 mt-0.5" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">{{ $upd->previewText(180) }}</div>
+                            </div>
                         </li>
                     @endforeach
                 </ul>

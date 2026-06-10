@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 /**
  * Запись раздела «Обновления» (changelog).
@@ -20,6 +21,7 @@ class ChangelogEntry extends Model
 {
     protected $fillable = [
         'title',
+        'excerpt',
         'body',
         'is_published',
         'published_at',
@@ -37,6 +39,22 @@ class ChangelogEntry extends Model
     public function author(): BelongsTo
     {
         return $this->belongsTo(User::class, 'author_user_id');
+    }
+
+    /**
+     * Краткое содержание для превью (дашборд). Если excerpt задан вручную —
+     * берём его; иначе выводим из начала тела (markdown → plain text).
+     */
+    public function previewText(int $limit = 160): string
+    {
+        $base = trim((string) $this->excerpt);
+
+        if ($base === '') {
+            $plain = strip_tags(Str::markdown((string) $this->body));
+            $base = trim(preg_replace('/\s+/u', ' ', html_entity_decode($plain)) ?? '');
+        }
+
+        return Str::limit($base, $limit);
     }
 
     /**

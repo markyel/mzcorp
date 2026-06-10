@@ -367,7 +367,7 @@ class Index extends Component
             ->published()
             ->latest('published_at')
             ->limit(3)
-            ->get(['id', 'title', 'published_at']);
+            ->get(['id', 'title', 'excerpt', 'body', 'published_at']);
     }
 
     /**
