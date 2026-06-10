@@ -23,3 +23,6 @@ yarn-error.log
 /.zed
 /.claude/settings.local.json
 /tmp_*.php
+
+# Локальные скриншоты/артефакты разработки
+sshots/
