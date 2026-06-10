@@ -175,12 +175,16 @@ class ManagerAnalyticsService
         $idx = 0;
         foreach ($managers as $m) {
             $points = [];
+            $pointsWon = [];
+            $pointsLost = [];
             $wonTot = 0;
             $lostTot = 0;
             foreach ($dates as $day) {
                 $cell = $byUser[$m->id][$day] ?? ['won' => 0, 'lost' => 0];
                 $v = $cell['won'] + $cell['lost'];
                 $points[] = $v;
+                $pointsWon[] = $cell['won'];
+                $pointsLost[] = $cell['lost'];
                 $wonTot += $cell['won'];
                 $lostTot += $cell['lost'];
                 $max = max($max, $v);
@@ -189,7 +193,11 @@ class ManagerAnalyticsService
                 'id' => $m->id,
                 'name' => $m->name,
                 'color' => $this->colorFor($idx),
+                // points — won+lost (виджет-мультилиния дашборда);
+                // points_won / points_lost — для diverging stacked area в «Аналитике».
                 'points' => $points,
+                'points_won' => $pointsWon,
+                'points_lost' => $pointsLost,
                 'won' => $wonTot,
                 'lost' => $lostTot,
                 'total' => $wonTot + $lostTot,

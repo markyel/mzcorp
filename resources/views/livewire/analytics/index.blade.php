@@ -72,60 +72,77 @@
         </div>
     </div>
 
-    {{-- ───────── 1. Динамика закрытых заявок (stacked area) ───────── --}}
+    {{-- ───────── 1. Динамика закрытых заявок (diverging stacked area) ───────── --}}
     @php
         $dyn = $this->dynamics;
         $series = $dyn['series'];
         $labels = $dyn['labels'];
         $n = count($labels);
-        $svgW = 900; $svgH = 260; $padL = 30; $padR = 12; $padT = 12; $padB = 26;
+        $svgW = 900; $svgH = 300; $padL = 30; $padR = 12; $padT = 16; $padB = 26;
+        $drawH = $svgH - $padT - $padB;
+        $yMid = $padT + $drawH / 2;          // центральная ось (0)
+        $half = $drawH / 2;                  // высота на каждую сторону
 
-        // Stacked area: менеджеры не накладываются линиями, а складываются
-        // друг на друга — закрашенная высота за день = сумма закрытых всеми
-        // менеджерами, каждая полоса своим цветом. $cum[$i] копит накопленную
-        // сумму по дню → нижняя/верхняя граница полосы каждого менеджера.
-        $cum = array_fill(0, max(1, $n), 0);
-        $bands = [];
+        // Diverging stacked area: успешно закрытые складываются ВВЕРХ от центра,
+        // потери — ВНИЗ. Полосы каждого менеджера — его цветом (как в легенде).
+        // $cumUp/$cumDown копят накопленную сумму по дню для верха/низа.
+        $cumUp = array_fill(0, max(1, $n), 0);
+        $cumDown = array_fill(0, max(1, $n), 0);
+        $bandsWon = [];
+        $bandsLost = [];
         foreach ($series as $s) {
-            if (($s['total'] ?? 0) <= 0) { continue; }
-            $tops = []; $bottoms = [];
-            foreach ($s['points'] as $i => $v) {
-                $bottoms[$i] = $cum[$i];
-                $cum[$i] += $v;
-                $tops[$i] = $cum[$i];
+            if (($s['won'] ?? 0) > 0) {
+                $tops = []; $bottoms = [];
+                foreach (($s['points_won'] ?? []) as $i => $v) {
+                    $bottoms[$i] = $cumUp[$i];
+                    $cumUp[$i] += $v;
+                    $tops[$i] = $cumUp[$i];
+                }
+                $bandsWon[] = ['name' => $s['name'], 'color' => $s['color'], 'tops' => $tops, 'bottoms' => $bottoms];
             }
-            $bands[] = ['name' => $s['name'], 'color' => $s['color'], 'tops' => $tops, 'bottoms' => $bottoms];
+            if (($s['lost'] ?? 0) > 0) {
+                $tops = []; $bottoms = [];
+                foreach (($s['points_lost'] ?? []) as $i => $v) {
+                    $bottoms[$i] = $cumDown[$i];
+                    $cumDown[$i] += $v;
+                    $tops[$i] = $cumDown[$i];
+                }
+                $bandsLost[] = ['name' => $s['name'], 'color' => $s['color'], 'tops' => $tops, 'bottoms' => $bottoms];
+            }
         }
-        // Ось Y — по максимуму ДНЕВНОЙ СУММЫ (стопки), а не одного менеджера.
-        $maxV = max(1, ($n > 0 ? (int) max($cum) : 0));
+        // Общий масштаб для обеих сторон — чтобы успех и потеря были сравнимы.
+        $divMax = max(1, ($n > 0 ? (int) max(max($cumUp), max($cumDown)) : 0));
 
         $xAt = function ($i) use ($svgW, $padL, $padR, $n) {
             if ($n <= 1) return $padL;
             return $padL + ($i * ($svgW - $padL - $padR) / ($n - 1));
         };
-        $yAt = function ($v) use ($svgH, $padT, $padB, $maxV) {
-            return $svgH - $padB - ($v * ($svgH - $padT - $padB) / $maxV);
-        };
-        // Замкнутый полигон полосы: верхняя граница слева-направо, нижняя —
-        // справа-налево, Z. Полосы не перекрываются (низ = верх предыдущей).
-        $buildArea = function ($tops, $bottoms) use ($xAt, $yAt, $n) {
+        $yUp = function ($v) use ($yMid, $half, $divMax) { return $yMid - ($v * $half / $divMax); };
+        $yDown = function ($v) use ($yMid, $half, $divMax) { return $yMid + ($v * $half / $divMax); };
+        // Полигон полосы относительно своей оси ($ymap). Полосы не перекрываются.
+        $buildArea = function ($tops, $bottoms, $ymap) use ($xAt, $n) {
             $d = '';
             foreach ($tops as $i => $v) {
-                $d .= ($i === 0 ? 'M' : 'L') . round($xAt($i), 1) . ' ' . round($yAt($v), 1) . ' ';
+                $d .= ($i === 0 ? 'M' : 'L') . round($xAt($i), 1) . ' ' . round($ymap($v), 1) . ' ';
             }
             for ($i = $n - 1; $i >= 0; $i--) {
-                $d .= 'L' . round($xAt($i), 1) . ' ' . round($yAt($bottoms[$i] ?? 0), 1) . ' ';
+                $d .= 'L' . round($xAt($i), 1) . ' ' . round($ymap($bottoms[$i] ?? 0), 1) . ' ';
             }
             return trim($d) . ' Z';
         };
-        $yTicks = $maxV <= 4 ? range(0, $maxV) : [0, (int) round($maxV / 2), $maxV];
+        // Тики оси (зеркально вверх/вниз от центра).
+        $tickStep = $divMax <= 4 ? 1 : (int) max(1, round($divMax / 2));
+        $ticks = [];
+        for ($t = $tickStep; $t <= $divMax; $t += $tickStep) { $ticks[] = $t; }
         $xStep = max(1, (int) ceil($n / 12));
         $grandTotal = array_sum(array_map(fn ($s) => $s['total'], $series));
+        $grandWon = array_sum(array_map(fn ($s) => $s['won'], $series));
+        $grandLost = array_sum(array_map(fn ($s) => $s['lost'], $series));
     @endphp
     <div class="ds-card">
         <div class="ds-card-header">
             <h3>Динамика закрытых заявок по менеджерам</h3>
-            <span class="text-[12px] text-fg-3 ml-2">won+lost по дате закрытия · всего {{ $grandTotal }}</span>
+            <span class="text-[12px] text-fg-3 ml-2">по дате закрытия · вверх успех <span class="text-emerald-700 font-semibold">{{ $grandWon }}</span>, вниз потеря <span class="text-red-700 font-semibold">{{ $grandLost }}</span></span>
         </div>
         <div class="ds-card-body">
             @if($grandTotal === 0)
@@ -133,21 +150,37 @@
             @else
                 <svg viewBox="0 0 {{ $svgW }} {{ $svgH }}" xmlns="http://www.w3.org/2000/svg"
                      preserveAspectRatio="xMidYMid meet"
-                     style="width:100%;height:auto;max-height:280px;font-family:var(--font-sans);font-size:10px;">
-                    @foreach($yTicks as $tick)
-                        @php $ty = $yAt((int) $tick); @endphp
-                        <line x1="{{ $padL }}" x2="{{ $svgW - $padR }}" y1="{{ round($ty, 1) }}" y2="{{ round($ty, 1) }}"
-                              stroke="#e5e7eb" stroke-width="1" />
-                        <text x="{{ $padL - 5 }}" y="{{ round($ty + 3, 1) }}" text-anchor="end" fill="#9ca3af" font-size="10">{{ $tick }}</text>
+                     style="width:100%;height:auto;max-height:320px;font-family:var(--font-sans);font-size:10px;">
+                    {{-- Сетка вверх/вниз + подписи значений --}}
+                    @foreach($ticks as $tick)
+                        @php $tu = $yUp($tick); $td = $yDown($tick); @endphp
+                        <line x1="{{ $padL }}" x2="{{ $svgW - $padR }}" y1="{{ round($tu, 1) }}" y2="{{ round($tu, 1) }}" stroke="#eef0f2" stroke-width="1" />
+                        <line x1="{{ $padL }}" x2="{{ $svgW - $padR }}" y1="{{ round($td, 1) }}" y2="{{ round($td, 1) }}" stroke="#eef0f2" stroke-width="1" />
+                        <text x="{{ $padL - 5 }}" y="{{ round($tu + 3, 1) }}" text-anchor="end" fill="#9ca3af" font-size="10">{{ $tick }}</text>
+                        <text x="{{ $padL - 5 }}" y="{{ round($td + 3, 1) }}" text-anchor="end" fill="#9ca3af" font-size="10">{{ $tick }}</text>
                     @endforeach
+
+                    {{-- Полосы: успех вверх, потеря вниз --}}
+                    @foreach($bandsWon as $b)
+                        <path d="{{ $buildArea($b['tops'], $b['bottoms'], $yUp) }}" fill="{{ $b['color'] }}"
+                              fill-opacity="0.88" stroke="#ffffff" stroke-width="0.75" stroke-linejoin="round" />
+                    @endforeach
+                    @foreach($bandsLost as $b)
+                        <path d="{{ $buildArea($b['tops'], $b['bottoms'], $yDown) }}" fill="{{ $b['color'] }}"
+                              fill-opacity="0.5" stroke="#ffffff" stroke-width="0.75" stroke-linejoin="round" />
+                    @endforeach
+
+                    {{-- Центральная ось (0) поверх полос --}}
+                    <line x1="{{ $padL }}" x2="{{ $svgW - $padR }}" y1="{{ round($yMid, 1) }}" y2="{{ round($yMid, 1) }}" stroke="#9ca3af" stroke-width="1.2" />
+                    <text x="{{ $padL - 5 }}" y="{{ round($yMid + 3, 1) }}" text-anchor="end" fill="#6b7280" font-size="10">0</text>
+                    <text x="{{ $svgW - $padR }}" y="{{ round($yUp($divMax) + 2, 1) }}" text-anchor="end" fill="#059669" font-size="10" font-weight="600">успех ▲</text>
+                    <text x="{{ $svgW - $padR }}" y="{{ round($yDown($divMax) - 0, 1) }}" text-anchor="end" fill="#dc2626" font-size="10" font-weight="600">потеря ▼</text>
+
+                    {{-- Подписи дат у нижней кромки --}}
                     @foreach($labels as $i => $lab)
                         @if($i % $xStep === 0 || $i === $n - 1)
-                            <text x="{{ round($xAt($i), 1) }}" y="{{ $svgH - $padB + 14 }}" text-anchor="middle" fill="#6b7280" font-size="10">{{ $lab }}</text>
+                            <text x="{{ round($xAt($i), 1) }}" y="{{ $svgH - $padB + 16 }}" text-anchor="middle" fill="#6b7280" font-size="10">{{ $lab }}</text>
                         @endif
-                    @endforeach
-                    @foreach($bands as $b)
-                        <path d="{{ $buildArea($b['tops'], $b['bottoms']) }}" fill="{{ $b['color'] }}"
-                              fill-opacity="0.85" stroke="#ffffff" stroke-width="0.75" stroke-linejoin="round" />
                     @endforeach
                 </svg>
                 {{-- Легенда --}}
@@ -155,7 +188,7 @@
                     @foreach($series as $s)
                         @if($s['total'] > 0)
                             <span class="inline-flex items-center gap-1.5">
-                                <span class="inline-block w-3 h-[3px] rounded-full" style="background: {{ $s['color'] }}"></span>
+                                <span class="inline-block rounded-sm" style="width:12px;height:10px;background: {{ $s['color'] }}"></span>
                                 <span class="text-fg-1">{{ $s['name'] }}</span>
                                 <span class="text-fg-3">— {{ $s['total'] }} (<span class="text-emerald-700">{{ $s['won'] }}</span>/<span class="text-red-700">{{ $s['lost'] }}</span>)</span>
                             </span>
