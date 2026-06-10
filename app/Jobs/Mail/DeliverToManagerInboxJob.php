@@ -30,13 +30,20 @@ class DeliverToManagerInboxJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $tries = 3;
+    public int $tries = 4;
     public int $timeout = 60;
 
-    /** @return int[] */
+    /**
+     * Первый ретрай через 30с — основной кейс empty_raw_rfc822 это гонка с
+     * IMAP-sync (imap_uid источника ещё не проставлен); к +30с он обычно уже
+     * есть. Дальше +2м/+5м на случай Yandex-flake. Финальная страховка —
+     * 30-мин backfill-крон (mail:backfill-manager-deliveries).
+     *
+     * @return int[]
+     */
     public function backoff(): array
     {
-        return [60, 300, 900];
+        return [30, 120, 300];
     }
 
     public function __construct(

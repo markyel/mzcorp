@@ -3,6 +3,7 @@
 namespace App\Services\Mail;
 
 use App\Enums\MailboxType;
+use App\Exceptions\Mail\TransientImapException;
 use App\Models\EmailMessage;
 use App\Models\MailAppendAudit;
 use App\Models\Mailbox;
@@ -184,6 +185,33 @@ class MailDeliverToManagerService
             // LZ-REQ-1315: «Без отправителя/темы» + attachment как base64-простыня.
             $raw = $this->fetchFullRfc822($message);
             if ($raw === '') {
+                // Re-fetch не дал RFC822. Для СВЕЖЕГО письма это почти всегда
+                // гонка: deliver сработал раньше, чем IMAP-sync проставил
+                // imap_uid источнику (или письмо только что переехало в папку
+                // менеджера), либо временный обрыв соединения при FETCH. Раньше
+                // это был тихий return false → DeliverToManagerInboxJob считал
+                // попытку успешной и НЕ ретраил, и доставку вытягивал только
+                // 30-минутный backfill-крон (M-2026-4100: письмо доехало через
+                // ~34 мин). Теперь — бросаем TransientImapException, чтобы джоб
+                // повторил с backoff и доставил за ~30-120с. Для старых /
+                // неизвлекаемых писем (нет message_id или созданы давно) —
+                // прежний тихий skip.
+                $recoverable = $message->message_id
+                    && $message->created_at
+                    && $message->created_at->gt(now()->subHours(6));
+                if ($recoverable) {
+                    Log::warning('MailDeliverToManagerService: empty RFC822 — retryable, throwing for job backoff', [
+                        'email_message_id' => $message->id,
+                        'manager_id' => $manager->id,
+                        'imap_uid' => $message->imap_uid,
+                        'folder' => $message->folder,
+                    ]);
+
+                    throw new TransientImapException(
+                        sprintf('empty RFC822 for email_message=%d (re-fetch not ready, retry)', $message->id),
+                    );
+                }
+
                 Log::warning('MailDeliverToManagerService: cannot reconstruct RFC822, skip APPEND', [
                     'email_message_id' => $message->id,
                     'manager_id' => $manager->id,
