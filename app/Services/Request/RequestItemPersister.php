@@ -518,6 +518,18 @@ class RequestItemPersister
             return null;
         }
 
+        // Имена-«близнецы», различающиеся только числом/символом, — это
+        // РАЗНЫЕ товары, а не дубли. Классика для лифтовых кнопок приказа:
+        // «Кнопка приказа с символом 1» vs «…с символом 4» дают similar_text
+        // ~99%, хотя это кнопки разных этажей. similar_text посимвольный —
+        // он «не замечает» именно тот токен, что и различает позиции.
+        // Если наборы числовых токенов (со знаком, чтобы -1 ≠ 1) различаются —
+        // это не возможный дубль. Тот же принцип, что в isDuplicate
+        // (3RT2026 ≠ 3RT2025 даже при 95% похожести имён).
+        if ($this->numericTokens($aName) !== $this->numericTokens($bName)) {
+            return null;
+        }
+
         // Name match.
         if ($aName === $bName) {
             return 1.0;
@@ -532,6 +544,25 @@ class RequestItemPersister
     private function normalizeArticleKey(string $article): string
     {
         return preg_replace('/[\s\-_.\/]/u', '', mb_strtoupper(trim($article))) ?? '';
+    }
+
+    /**
+     * Отсортированный набор числовых токенов имени (со знаком):
+     * «…с символом -1» → ['-1'], «Кабель 3x2.5» → ['2', '3', '5'].
+     *
+     * Служит дискриминатором в possibleDuplicateSimilarity: позиции, чьи
+     * наборы номеров различаются, — разные товары, даже если посимвольная
+     * похожесть имени высокая. Знак сохраняем (-1 этаж ≠ 1 этаж).
+     *
+     * @return list<string>
+     */
+    private function numericTokens(string $name): array
+    {
+        preg_match_all('/-?\d+/u', $name, $m);
+        $tokens = $m[0] ?? [];
+        sort($tokens, SORT_STRING);
+
+        return $tokens;
     }
 
     /**
