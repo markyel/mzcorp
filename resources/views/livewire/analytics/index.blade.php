@@ -72,14 +72,33 @@
         </div>
     </div>
 
-    {{-- ───────── 1. Динамика закрытых заявок (мультилиния) ───────── --}}
+    {{-- ───────── 1. Динамика закрытых заявок (stacked area) ───────── --}}
     @php
         $dyn = $this->dynamics;
         $series = $dyn['series'];
         $labels = $dyn['labels'];
         $n = count($labels);
-        $maxV = max(1, (int) $dyn['max']);
         $svgW = 900; $svgH = 260; $padL = 30; $padR = 12; $padT = 12; $padB = 26;
+
+        // Stacked area: менеджеры не накладываются линиями, а складываются
+        // друг на друга — закрашенная высота за день = сумма закрытых всеми
+        // менеджерами, каждая полоса своим цветом. $cum[$i] копит накопленную
+        // сумму по дню → нижняя/верхняя граница полосы каждого менеджера.
+        $cum = array_fill(0, max(1, $n), 0);
+        $bands = [];
+        foreach ($series as $s) {
+            if (($s['total'] ?? 0) <= 0) { continue; }
+            $tops = []; $bottoms = [];
+            foreach ($s['points'] as $i => $v) {
+                $bottoms[$i] = $cum[$i];
+                $cum[$i] += $v;
+                $tops[$i] = $cum[$i];
+            }
+            $bands[] = ['name' => $s['name'], 'color' => $s['color'], 'tops' => $tops, 'bottoms' => $bottoms];
+        }
+        // Ось Y — по максимуму ДНЕВНОЙ СУММЫ (стопки), а не одного менеджера.
+        $maxV = max(1, ($n > 0 ? (int) max($cum) : 0));
+
         $xAt = function ($i) use ($svgW, $padL, $padR, $n) {
             if ($n <= 1) return $padL;
             return $padL + ($i * ($svgW - $padL - $padR) / ($n - 1));
@@ -87,12 +106,17 @@
         $yAt = function ($v) use ($svgH, $padT, $padB, $maxV) {
             return $svgH - $padB - ($v * ($svgH - $padT - $padB) / $maxV);
         };
-        $buildPath = function ($points) use ($xAt, $yAt) {
+        // Замкнутый полигон полосы: верхняя граница слева-направо, нижняя —
+        // справа-налево, Z. Полосы не перекрываются (низ = верх предыдущей).
+        $buildArea = function ($tops, $bottoms) use ($xAt, $yAt, $n) {
             $d = '';
-            foreach ($points as $i => $v) {
+            foreach ($tops as $i => $v) {
                 $d .= ($i === 0 ? 'M' : 'L') . round($xAt($i), 1) . ' ' . round($yAt($v), 1) . ' ';
             }
-            return trim($d);
+            for ($i = $n - 1; $i >= 0; $i--) {
+                $d .= 'L' . round($xAt($i), 1) . ' ' . round($yAt($bottoms[$i] ?? 0), 1) . ' ';
+            }
+            return trim($d) . ' Z';
         };
         $yTicks = $maxV <= 4 ? range(0, $maxV) : [0, (int) round($maxV / 2), $maxV];
         $xStep = max(1, (int) ceil($n / 12));
@@ -121,11 +145,9 @@
                             <text x="{{ round($xAt($i), 1) }}" y="{{ $svgH - $padB + 14 }}" text-anchor="middle" fill="#6b7280" font-size="10">{{ $lab }}</text>
                         @endif
                     @endforeach
-                    @foreach($series as $s)
-                        @if($s['total'] > 0)
-                            <path d="{{ $buildPath($s['points']) }}" fill="none" stroke="{{ $s['color'] }}"
-                                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                        @endif
+                    @foreach($bands as $b)
+                        <path d="{{ $buildArea($b['tops'], $b['bottoms']) }}" fill="{{ $b['color'] }}"
+                              fill-opacity="0.85" stroke="#ffffff" stroke-width="0.75" stroke-linejoin="round" />
                     @endforeach
                 </svg>
                 {{-- Легенда --}}
