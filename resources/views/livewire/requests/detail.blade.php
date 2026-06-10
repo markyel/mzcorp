@@ -328,7 +328,12 @@
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Менеджер</span>
                     <span class="text-fg-1 inline-flex items-center gap-1.5 flex-wrap">
                         @if($req->assignedUser)
-                            <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-neutral-200 text-fg-2 text-[9.5px] font-semibold">{{ $managerInitials }}</span>
+                            @php $mAvatar = $req->assignedUser->avatarUrlForStatus($req->status); @endphp
+                            @if($mAvatar)
+                                <img src="{{ $mAvatar }}" alt="" class="w-5 h-5 rounded-full" style="object-fit:cover;">
+                            @else
+                                <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-neutral-200 text-fg-2 text-[9.5px] font-semibold">{{ $managerInitials }}</span>
+                            @endif
                             {{ $req->assignedUser->name }}
                         @else
                             <span class="text-fg-3">— не назначен —</span>

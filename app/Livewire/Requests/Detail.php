@@ -103,7 +103,7 @@ class Detail extends Component
             : 'asc';
 
         $this->request = $request->load([
-            'assignedUser:id,name,email',
+            'assignedUser:id,name,email,avatar_neutral_path,avatar_won_path,avatar_lost_path',
             'items' => fn ($q) => $this->applyItemsFilter($q)->withCount('photos')->orderBy('position'),
             'items.brand:id,name',
             'items.kbCategory:id,slug,name',
@@ -356,7 +356,7 @@ class Detail extends Component
         $this->request = Request::query()
             ->whereKey($this->request->id)
             ->with([
-                'assignedUser:id,name,email',
+                'assignedUser:id,name,email,avatar_neutral_path,avatar_won_path,avatar_lost_path',
                 'items' => fn ($q) => $this->applyItemsFilter($q)->withCount('photos')->orderBy('position'),
                 'items.brand:id,name',
                 'items.kbCategory:id,slug,name',

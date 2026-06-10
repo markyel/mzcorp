@@ -311,7 +311,7 @@ class Pool extends Component
     {
         $query = Request::query()
             ->with([
-                'assignedUser:id,name',
+                'assignedUser:id,name,avatar_neutral_path,avatar_won_path,avatar_lost_path',
                 'emailMessage' => fn ($q) => $q
                     ->select(['id', 'from_email', 'from_name', 'mailbox_id'])
                     ->withCount('attachments')

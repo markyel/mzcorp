@@ -57,6 +57,13 @@ Route::middleware('auth')->group(function () {
             ->where('contentId', '.*')
             ->name('attachments.inline');
 
+        // Аватарки пользователей (3 варианта: neutral/won/lost). Отдача с
+        // приватного диска через контроллер. Доступно всем ролям на чтение.
+        Route::get('/avatars/{user}/{variant}', [\App\Http\Controllers\UserAvatarController::class, 'show'])
+            ->where('user', '\d+')
+            ->where('variant', 'neutral|won|lost')
+            ->name('user.avatar');
+
         // Прокси фото каталога с дисковым кэшем (Phase B / 2026-05-21).
         // Внешний photo_url (mylift.ru) делает 302 → CDN, что даёт
         // ~500-800мс на фото × 20 thumb = 10+ секунд waterfall. Прокси

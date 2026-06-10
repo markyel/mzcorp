@@ -835,7 +835,12 @@
                             @endphp
                             <span class="inline-flex items-center gap-1.5 min-w-0">
                                 @if($managerName)
-                                    <span class="w-[22px] h-[22px] rounded-full bg-[var(--neutral-200)] text-[var(--fg-2)] font-semibold text-[10px] leading-[22px] text-center flex-shrink-0">{{ $managerInitials }}</span>
+                                    @php $mAvatar = $req->assignedUser?->avatarUrl('neutral'); @endphp
+                                    @if($mAvatar)
+                                        <img src="{{ $mAvatar }}" alt="" class="w-[22px] h-[22px] rounded-full flex-shrink-0" style="object-fit:cover;">
+                                    @else
+                                        <span class="w-[22px] h-[22px] rounded-full bg-[var(--neutral-200)] text-[var(--fg-2)] font-semibold text-[10px] leading-[22px] text-center flex-shrink-0">{{ $managerInitials }}</span>
+                                    @endif
                                     <span class="text-[var(--fg-2)] truncate">{{ $managerName }}</span>
                                 @else
                                     <span class="w-[22px] h-[22px] rounded-full bg-[var(--bg-app)] border border-dashed border-[var(--border-strong)] text-[var(--fg-3)] font-semibold text-[10px] leading-[20px] text-center flex-shrink-0">?</span>

@@ -52,6 +52,11 @@ class User extends Authenticatable
         // Персональный дефолтный период дашборда (preset 1/7/30/90 дней).
         // См. App\Livewire\Dashboard\Index::setPeriod / mount.
         'dashboard_period_days',
+        // Аватарки (относительные пути на диске local). 3 варианта:
+        // нейтральный / победитель / проигравший. См. avatarUrl* ниже.
+        'avatar_neutral_path',
+        'avatar_won_path',
+        'avatar_lost_path',
     ];
 
     /**
@@ -82,6 +87,67 @@ class User extends Authenticatable
             'updates_seen_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /** Диск хранения аватарок (private). */
+    public const AVATAR_DISK = 'local';
+
+    /** Допустимые варианты аватарки. */
+    public const AVATAR_VARIANTS = ['neutral', 'won', 'lost'];
+
+    /**
+     * Относительный путь файла аватарки данного варианта (или null).
+     */
+    public function avatarPath(string $variant): ?string
+    {
+        $col = match ($variant) {
+            'neutral' => 'avatar_neutral_path',
+            'won' => 'avatar_won_path',
+            'lost' => 'avatar_lost_path',
+            default => null,
+        };
+
+        $path = $col ? ($this->{$col} ?? null) : null;
+
+        return $path !== null && $path !== '' ? $path : null;
+    }
+
+    public function hasAvatar(string $variant = 'neutral'): bool
+    {
+        return $this->avatarPath($variant) !== null;
+    }
+
+    /**
+     * URL для отдачи аватарки через UserAvatarController. Версия в query
+     * (`?v=`) завязана на путь файла → при замене картинки меняется и URL,
+     * браузерный кэш сбрасывается. null — если аватарки этого варианта нет.
+     */
+    public function avatarUrl(string $variant = 'neutral'): ?string
+    {
+        $path = $this->avatarPath($variant);
+        if ($path === null) {
+            return null;
+        }
+
+        return route('user.avatar', ['user' => $this->id, 'variant' => $variant])
+            . '?v=' . substr(md5($path), 0, 8);
+    }
+
+    /**
+     * Аватарка под статус заявки: closed_won → «победитель», closed_lost →
+     * «проигравший» (если такой вариант загружен), иначе — нейтральный.
+     * Если won/lost не загружены — fallback на нейтральный.
+     */
+    public function avatarUrlForStatus(?\App\Enums\RequestStatus $status): ?string
+    {
+        if ($status === \App\Enums\RequestStatus::ClosedWon && $this->hasAvatar('won')) {
+            return $this->avatarUrl('won');
+        }
+        if ($status === \App\Enums\RequestStatus::ClosedLost && $this->hasAvatar('lost')) {
+            return $this->avatarUrl('lost');
+        }
+
+        return $this->avatarUrl('neutral');
     }
 
     /**

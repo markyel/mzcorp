@@ -20,6 +20,10 @@
             <livewire:admin.managers.editor :user="$user" wire:key="editor-{{ $user->id ?? 'new' }}" />
 
             @if($user->exists)
+                <livewire:admin.managers.avatars :user="$user" wire:key="avatars-{{ $user->id }}" />
+            @endif
+
+            @if($user->exists)
                 @php
                     // Личный ящик подключается только для ролей, которые ведут
                     // заявки (manager / head_of_sales). Директор / секретарь /
