@@ -32,6 +32,7 @@ class OutboundQuote extends Model
         'document_type',
         'document_number',
         'document_date',
+        'valid_until',
         'currency',
         'subtotal',
         'vat_amount',
@@ -51,6 +52,7 @@ class OutboundQuote extends Model
         return [
             'document_type' => DetectorType::class,
             'document_date' => 'date',
+            'valid_until' => 'date',
             'subtotal' => 'decimal:2',
             'vat_amount' => 'decimal:2',
             'total_amount' => 'decimal:2',

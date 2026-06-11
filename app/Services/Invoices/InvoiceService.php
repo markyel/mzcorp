@@ -12,6 +12,8 @@ use App\Models\User;
 use App\Services\Calendar\RussianWorkingDayService;
 use App\Services\Request\RequestStateService;
 use Carbon\Carbon;
+use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -192,10 +194,12 @@ class InvoiceService
             return null;
         }
 
-        $validityDays = (int) config('services.invoices.default_validity_business_days', 5);
-        $expiresAt = $this->calendar->addBusinessDays($issuedAt, $validityDays)
-            ->endOfDay()
-            ->setTimezone(config('app.timezone'));
+        [$expiresAt, $validityDays] = self::computeExpiry(
+            $this->calendar,
+            $issuedAt,
+            $quote->valid_until,
+            (int) config('services.invoices.default_validity_business_days', 5),
+        );
 
         $amountSnapshot = $quote->total_amount !== null
             ? (float) $quote->total_amount
@@ -280,10 +284,12 @@ class InvoiceService
         }
 
         $issuedAt = $quote->document_date ? Carbon::parse((string) $quote->document_date) : now();
-        $validityDays = (int) config('services.invoices.default_validity_business_days', 5);
-        $expiresAt = $this->calendar->addBusinessDays($issuedAt, $validityDays)
-            ->endOfDay()
-            ->setTimezone(config('app.timezone'));
+        [$expiresAt, $validityDays] = self::computeExpiry(
+            $this->calendar,
+            $issuedAt,
+            $quote->valid_until,
+            (int) config('services.invoices.default_validity_business_days', 5),
+        );
         $amount = $quote->total_amount !== null ? (float) $quote->total_amount : $existing->amount_snapshot;
 
         $existing->update([
@@ -309,6 +315,125 @@ class InvoiceService
             'request_id' => $existing->request_id,
             'amount' => $amount,
         ]);
+    }
+
+    /**
+     * Применить срок действия из (пере)распарсенного исходящего документа к уже
+     * существующему счёту — для backfillّа исторических счетов, у которых
+     * `valid_until` появился только после введения извлечения даты.
+     *
+     * В отличие от refreshFromNewerQuote НЕ требует «более свежего источника»
+     * (источник тот же самый — это и есть тот документ, из которого счёт создан),
+     * и трогает ТОЛЬКО expires_at / validity_days, не переписывая сумму/номер.
+     * Работает только с pending-счётом. Возвращает true, если дата изменилась.
+     */
+    public function applyValidityFromQuote(Invoice $invoice, \App\Models\OutboundQuote $quote): bool
+    {
+        if ($invoice->status !== InvoiceStatus::Pending) {
+            return false;
+        }
+
+        $issuedAt = $invoice->issued_at instanceof CarbonInterface
+            ? $invoice->issued_at
+            : Carbon::parse((string) $invoice->issued_at);
+
+        [$expiresAt, $validityDays] = self::computeExpiry(
+            $this->calendar,
+            $issuedAt,
+            $quote->valid_until,
+            (int) config('services.invoices.default_validity_business_days', 5),
+        );
+
+        // Сравниваем по дню — время в expires_at всегда 23:59:59.
+        $oldExpiry = $invoice->expires_at instanceof CarbonInterface
+            ? $invoice->expires_at->toDateString()
+            : (string) $invoice->expires_at;
+        if ($oldExpiry === $expiresAt->toDateString()) {
+            return false;
+        }
+
+        $invoice->update([
+            'expires_at' => $expiresAt,
+            'validity_days' => $validityDays,
+        ]);
+
+        Log::info('InvoiceService: applied validity from quote (backfill)', [
+            'invoice_id' => $invoice->id,
+            'invoice_number' => $invoice->invoice_number,
+            'outbound_quote_id' => $quote->id,
+            'old_expires_at' => $oldExpiry,
+            'new_expires_at' => $expiresAt->toDateString(),
+            'source' => $quote->valid_until !== null ? 'document_or_email' : 'default',
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Расчёт срока действия счёта (expires_at) + validity_days.
+     *
+     * Если из документа/письма извлечена явная дата `$validUntil` (и она не
+     * раньше даты выставления) — срок = эта дата (конец дня). Иначе fallback:
+     * `$issuedAt + $defaultValidityDays` рабочих дней (российский календарь).
+     *
+     * Pure-функция (без БД/состояния) — вынесена static для тестируемости.
+     *
+     * @return array{0: CarbonImmutable, 1: int}  [$expiresAt, $validityDays]
+     */
+    public static function computeExpiry(
+        RussianWorkingDayService $calendar,
+        CarbonInterface $issuedAt,
+        ?CarbonInterface $validUntil,
+        int $defaultValidityDays,
+    ): array {
+        $tz = config('app.timezone');
+        $issuedDay = CarbonImmutable::instance($issuedAt)->startOfDay();
+
+        if ($validUntil !== null) {
+            $validDay = CarbonImmutable::instance($validUntil)->startOfDay();
+            // Дата действия не может быть раньше даты выставления — иначе это
+            // мусор от парсера (или дата из чужого контекста). Откатываемся на default.
+            if ($validDay->greaterThanOrEqualTo($issuedDay)) {
+                $expiresAt = $validDay->endOfDay()->setTimezone($tz);
+                $validityDays = self::businessDaysBetween($calendar, $issuedDay, $validDay);
+
+                return [$expiresAt, $validityDays];
+            }
+        }
+
+        $validityDays = $defaultValidityDays;
+        $expiresAt = $calendar->addBusinessDays($issuedAt, $validityDays)
+            ->endOfDay()
+            ->setTimezone($tz);
+
+        return [$expiresAt, $validityDays];
+    }
+
+    /**
+     * Кол-во рабочих дней строго ПОСЛЕ $from и по $to включительно
+     * (для записи validity_days, когда срок задан явной датой). Само $from
+     * не считается. Cap на случай далёких/кривых дат.
+     */
+    private static function businessDaysBetween(
+        RussianWorkingDayService $calendar,
+        CarbonImmutable $from,
+        CarbonImmutable $to,
+    ): int {
+        $count = 0;
+        $cursor = $from->startOfDay();
+        $end = $to->startOfDay();
+        $safety = 0;
+        while ($cursor->lessThan($end)) {
+            $cursor = $cursor->addDay();
+            if ($calendar->isBusinessDay($cursor)) {
+                $count++;
+            }
+            if (++$safety > 366) {
+                break;
+            }
+        }
+
+        return $count;
     }
 
     /**

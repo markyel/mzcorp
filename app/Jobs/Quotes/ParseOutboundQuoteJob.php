@@ -171,7 +171,8 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
             $parsed = $parser->parseWithGPT(
                 $content['text'] ?? null,
                 $content['images'] ?? [],
-                $request
+                $request,
+                $this->extractEmailBody($message),
             );
 
             $document = $parsed['document'] ?? [];
@@ -180,6 +181,13 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
             DB::transaction(function () use ($quote, $document, $items) {
                 $quote->document_number = isset($document['number']) ? mb_substr((string) $document['number'], 0, 128) : null;
                 $quote->document_date = ! empty($document['date']) ? (string) $document['date'] : null;
+                // Срок действия / резерва — только явная календарная дата YYYY-MM-DD.
+                // Парсер мог вернуть мусор/период текстом — отсекаем по формату,
+                // чтобы date-cast не упал при save().
+                $validUntil = isset($document['valid_until']) ? trim((string) $document['valid_until']) : '';
+                $quote->valid_until = preg_match('/^\d{4}-\d{2}-\d{2}$/', $validUntil) === 1
+                    ? $validUntil
+                    : null;
                 $quote->currency = (string) ($document['currency'] ?? $quote->currency ?? 'RUB');
                 $quote->subtotal = isset($document['subtotal']) && is_numeric($document['subtotal'])
                     ? (string) $document['subtotal'] : null;
@@ -337,6 +345,30 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Текст сопроводительного письма для парсера: предпочитаем plain-text,
+     * иначе грубо чистим HTML. Нужен как второй источник для valid_until —
+     * срок резерва нередко указывают в теле письма, а не в самом счёте.
+     */
+    private function extractEmailBody(EmailMessage $message): ?string
+    {
+        $plain = trim((string) ($message->body_plain ?? ''));
+        if ($plain !== '') {
+            return $plain;
+        }
+
+        $html = (string) ($message->body_html ?? '');
+        if ($html === '') {
+            return null;
+        }
+
+        // <br>/<p>/<div> → переносы строк, затем strip_tags + декод entity.
+        $text = preg_replace('/<(br|\/p|\/div|\/tr)\b[^>]*>/i', "\n", $html) ?? $html;
+        $text = trim(html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+
+        return $text !== '' ? $text : null;
     }
 
     /**

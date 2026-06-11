@@ -227,14 +227,14 @@ class OutboundQuoteParsingService
      *
      * @throws RuntimeException
      */
-    public function parseWithGPT(?string $text, array $images, Request $request): array
+    public function parseWithGPT(?string $text, array $images, Request $request, ?string $emailBody = null): array
     {
         // M-артикулы регулярно «съезжают» в PDF КП — в шаблоне МЗ-NNNNNN
         // колонка наименования узкая и последний символ артикула попадает
         // на следующую строку («M0943\n1» вместо «M09431»). Лечим ДО инжекта
         // в промпт, чтобы и Vision и text-fallback видели единый артикул.
         $repairedText = $text !== null ? $this->repairBrokenMSkus($text) : null;
-        $basePrompt = $this->buildParsingPrompt($repairedText, $request);
+        $basePrompt = $this->buildParsingPrompt($repairedText, $request, $emailBody);
 
         $model = (string) config('services.openai.quote_parser_model', 'gpt-4o');
 
@@ -703,7 +703,7 @@ class OutboundQuoteParsingService
      *  - подсказка: M-артикулы (M\d{4,}) — это наши SKU из catalog_items;
      *  - всё остальное (количества штучные/мерные, НДС, split delivery) — как в LazyLift.
      */
-    private function buildParsingPrompt(?string $text, Request $request): string
+    private function buildParsingPrompt(?string $text, Request $request, ?string $emailBody = null): string
     {
         $itemsContext = $request->items
             ->where('is_active', true)
@@ -857,6 +857,20 @@ class OutboundQuoteParsingService
 - Дата "ДД.ММ.ГГГГ" — разница с {$today} в рабочих днях.
 - null если не указано.
 
+**Срок действия документа (valid_until) — КАЛЕНДАРНАЯ дата YYYY-MM-DD:**
+Это дата, ДО которой счёт действителен / зарезервированы позиции на складе / нужно
+оплатить (для КП — до которой действует предложение/цены). Ищи формулировки:
+«счёт действителен до», «срок действия счёта», «действителен до», «оплатить до»,
+«оплата до», «резерв до», «бронь до», «срок резерва», «позиции зарезервированы до»,
+«цены действительны до», «предложение действительно до».
+- Источник — И сам документ, И сопроводительное письмо (секция «Текст сопроводительного
+  письма» ниже). Если дата есть в письме — используй её.
+- НЕ путай со сроком поставки (delivery_days) и с датой выставления документа (date).
+- Возвращай valid_until ТОЛЬКО если в тексте есть явная КАЛЕНДАРНАЯ дата. Если указан
+  лишь период («действителен 5 рабочих/банковских дней», «оплатить в течение 3 дней»),
+  но без конкретной даты — верни null, срок посчитает сама система.
+- null если явной даты нет.
+
 **Формат ответа (строго JSON):**
 ```json
 {
@@ -865,6 +879,7 @@ class OutboundQuoteParsingService
     "type": "quote|invoice",
     "number": "Номер документа",
     "date": "YYYY-MM-DD",
+    "valid_until": "YYYY-MM-DD",
     "subtotal": 130000,
     "vat_amount": 28600,
     "total_amount": 158600,
@@ -906,6 +921,13 @@ PROMPT;
 
         if (! empty($text)) {
             $prompt .= "\n\n**Извлечённый текст:**\n".mb_substr($text, 0, 8000);
+        }
+
+        // Сопроводительное письмо — второй источник для valid_until (срок резерва
+        // нередко пишут в теле письма, а не в самом счёте). Только для извлечения
+        // даты действия/резерва; позиции и суммы берём из документа.
+        if ($emailBody !== null && trim($emailBody) !== '') {
+            $prompt .= "\n\n**Текст сопроводительного письма:**\n".mb_substr(trim($emailBody), 0, 4000);
         }
 
         return $prompt;
