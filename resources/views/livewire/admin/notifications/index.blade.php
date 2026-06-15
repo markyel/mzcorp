@@ -1,9 +1,17 @@
 <div class="space-y-4">
     <div class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-        <h3 class="font-semibold text-base text-gray-900 mb-1">Автоматические письма клиенту</h3>
-        <p class="text-sm text-gray-600 leading-relaxed">
-            Список всех автоматических уведомлений, которые система отправляет клиенту от имени менеджера. Каждый тип можно включить или выключить, текст редактируется. Письма уходят как reply в треде заявки — клиент видит «продолжение переписки», его ответ автоматически попадает обратно в нужную заявку.
-        </p>
+        <div class="flex items-start justify-between gap-4">
+            <div>
+                <h3 class="font-semibold text-base text-gray-900 mb-1">Автоматические письма клиенту</h3>
+                <p class="text-sm text-gray-600 leading-relaxed">
+                    Список всех автоматических уведомлений, которые система отправляет клиенту от имени менеджера. Каждый тип можно включить или выключить, текст редактируется. Письма уходят как reply в треде заявки — клиент видит «продолжение переписки», его ответ автоматически попадает обратно в нужную заявку.
+                </p>
+            </div>
+            <a href="{{ route('notification-optouts.index') }}"
+               class="inline-flex items-center px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50 whitespace-nowrap">
+                Стоп-лист по e-mail
+            </a>
+        </div>
     </div>
 
     <div class="bg-white border border-gray-200 rounded-xl shadow-sm divide-y divide-gray-100">

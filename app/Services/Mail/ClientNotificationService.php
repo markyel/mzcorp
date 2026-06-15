@@ -45,6 +45,7 @@ class ClientNotificationService
     public function __construct(
         private readonly EmailDraftService $drafts,
         private readonly OutgoingMailSender $sender,
+        private readonly ClientNotificationOptoutService $optouts,
     ) {
     }
 
@@ -150,6 +151,17 @@ class ClientNotificationService
             Log::info('ClientNotificationService: skip — no client email', [
                 'request_id' => $request->id,
                 'type' => $type->value,
+            ]);
+
+            return false;
+        }
+
+        // Стоп-лист авто-уведомлений: клиент попросил не слать (этот тип).
+        if ($this->optouts->isSuppressed($request->client_email, $type)) {
+            Log::info('ClientNotificationService: skip — client opted out', [
+                'request_id' => $request->id,
+                'type' => $type->value,
+                'client_email' => $request->client_email,
             ]);
 
             return false;

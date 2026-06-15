@@ -190,6 +190,12 @@ Route::middleware('auth')->group(function () {
             return view('admin.notifications.edit', ['template' => $template]);
         })->name('notifications.edit');
 
+        // Стоп-лист авто-уведомлений по e-mail клиента: для адреса не слать
+        // выбранные типы уведомлений (проверяется в ClientNotificationService::dispatch).
+        Route::get('/dashboard/notification-optouts', function () {
+            return view('admin.notification-optouts.index');
+        })->name('notification-optouts.index');
+
         // Управление разделом «Обновления» (changelog) — создание/редактирование/
         // публикация записей. Чтение ленты — всем (updates.index выше).
         Route::get('/dashboard/updates/manage', function () {
