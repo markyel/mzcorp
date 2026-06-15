@@ -277,6 +277,23 @@
                 @endif
             </div>
 
+            {{-- Контакты из заявки с сайта (телефон / организация / адрес). --}}
+            @if($req->client_phone || $req->client_company || $req->client_address)
+                <div class="flex items-center gap-2 flex-wrap text-[12.5px] text-fg-3 mt-1">
+                    @if($req->client_company)
+                        <span>🏢 <span class="text-fg-1">{{ $req->client_company }}</span></span>
+                    @endif
+                    @if($req->client_phone)
+                        @if($req->client_company)<span class="text-border-strong">·</span>@endif
+                        <a href="tel:{{ $req->client_phone }}" class="text-sky-700 hover:underline">📞 {{ $req->client_phone }}</a>
+                    @endif
+                    @if($req->client_address)
+                        @if($req->client_company || $req->client_phone)<span class="text-border-strong">·</span>@endif
+                        <span>📍 {{ $req->client_address }}</span>
+                    @endif
+                </div>
+            @endif
+
             {{-- Status row --}}
             <div class="mt-3.5 pt-3.5 border-t border-border-subtle flex items-center gap-3.5 flex-wrap text-[12.5px]">
                 <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle">

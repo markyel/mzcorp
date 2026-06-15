@@ -23,6 +23,7 @@ class EmailDraftService
 {
     public function __construct(
         private readonly OutgoingMailboxResolver $resolver,
+        private readonly WebFormSubmissionParser $webForm,
     ) {
     }
 
@@ -39,6 +40,23 @@ class EmailDraftService
         $mailbox = $resolved['mailbox'];
 
         $recipients = $this->computeRecipients($replyTo, $mailbox, $replyAll);
+
+        // Заявка с сайта: письмо-якорь пришло с технического релея формы
+        // (order@myzip.ru), его from_email — НЕ клиент. computeRecipients
+        // подставил бы в «Кому» адрес релея. Реальный клиент уже сохранён в
+        // Request.client_email (WebFormSubmissionParser) — отвечаем туда, чтобы
+        // переписка шла на адрес клиента. Срабатывает только пока клиент сам не
+        // написал с реального адреса (тогда якорь — его письмо, гард не нужен).
+        if ($replyTo->direction === MailDirection::Inbound
+            && $this->webForm->isWebFormSubmission($replyTo)
+            && $request->client_email
+            && mb_strtolower($request->client_email) !== mb_strtolower((string) $replyTo->from_email)
+        ) {
+            $recipients['to'] = [[
+                'email' => $request->client_email,
+                'name' => (string) ($request->client_name ?? ''),
+            ]];
+        }
 
         $references = $this->mergeReferences(
             (array) ($replyTo->references_header ?? []),

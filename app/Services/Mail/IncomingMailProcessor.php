@@ -35,6 +35,7 @@ class IncomingMailProcessor
         private readonly RequestActivityService $activity,
         private readonly EmailTextCleanerService $cleaner,
         private readonly SenderBlocklistService $blocklist,
+        private readonly WebFormSubmissionParser $webForm,
     ) {
     }
 
@@ -94,17 +95,20 @@ class IncomingMailProcessor
             return null;
         }
 
-        $request = DB::transaction(function () use ($message) {
-            $req = Request::create([
+        // Заявка с сайта (order@myzip.ru → info@): реальный клиент указан в
+        // теле, а не в From. Извлекаем его контакты, иначе вся переписка и
+        // уведомления уходили бы на технический ящик формы.
+        $client = $this->buildClientFields($message);
+
+        $request = DB::transaction(function () use ($message, $client) {
+            $req = Request::create(array_merge([
                 'internal_code' => $this->codeGenerator->next(),
                 'email_message_id' => $message->id,
                 // Pending: парсер позиций ещё не отработал. Менеджеру
                 // в пуле такие заявки не показываются.
                 'status' => RequestStatus::Pending,
-                'client_email' => $message->from_email ?: '',
-                'client_name' => $message->from_name,
                 'subject' => $message->subject,
-            ]);
+            ], $client));
 
             $message->forceFill(['related_request_id' => $req->id])->save();
 
@@ -126,6 +130,54 @@ class IncomingMailProcessor
         ]);
 
         return $request->fresh();
+    }
+
+    /**
+     * Контактные поля клиента для Request.
+     *
+     * По умолчанию — из конверта письма (From). Для заявок с сайта
+     * (order@myzip.ru) реальный клиент указан в теле — WebFormSubmissionParser
+     * извлекает его e-mail/имя/телефон/организацию/адрес, чтобы переписка и
+     * уведомления велись на адрес клиента, а не на технический ящик формы.
+     *
+     * @return array{client_email: string, client_name: ?string, client_phone?: ?string, client_company?: ?string, client_address?: ?string}
+     */
+    private function buildClientFields(EmailMessage $message): array
+    {
+        $default = [
+            'client_email' => $message->from_email ?: '',
+            'client_name' => $message->from_name,
+        ];
+
+        if (! $this->webForm->isWebFormSubmission($message)) {
+            return $default;
+        }
+
+        $parsed = $this->webForm->parse($message);
+        if ($parsed === null) {
+            // Не распознали тело формы / нет валидного e-mail — оставляем From,
+            // чтобы заявка не потерялась. РОП увидит order@ и разберётся.
+            Log::warning('IncomingMailProcessor: web-form parse failed, keeping From', [
+                'email_message_id' => $message->id,
+                'from_email' => $message->from_email,
+            ]);
+
+            return $default;
+        }
+
+        Log::info('IncomingMailProcessor: web-form client resolved', [
+            'email_message_id' => $message->id,
+            'relay_from' => $message->from_email,
+            'client_email' => $parsed['email'],
+        ]);
+
+        return [
+            'client_email' => $parsed['email'],
+            'client_name' => $parsed['name'] ?: $parsed['company'] ?: $message->from_name,
+            'client_phone' => $parsed['phone'],
+            'client_company' => $parsed['company'],
+            'client_address' => $parsed['address'],
+        ];
     }
 
     /**

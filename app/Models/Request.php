@@ -32,6 +32,10 @@ class Request extends Model
         'peak_status',
         'client_email',
         'client_name',
+        // Контактные поля из заявок с сайта (WebFormSubmissionParser).
+        'client_phone',
+        'client_company',
+        'client_address',
         'subject',
         'assigned_at',
         // Phase 2: очередь LLM-предположений «это уточнение существующей

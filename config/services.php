@@ -298,6 +298,20 @@ return [
         )),
 
         /*
+        | Релей-ящики веб-формы сайта. Письма с этих адресов — заявки с сайта:
+        | реальный клиент указан в теле (Организация/Контактное лицо/Телефон/
+        | E-mail), а не в From. WebFormSubmissionParser извлекает контакты,
+        | IncomingMailProcessor пишет их в Request.client_*, а createReply
+        | направляет ручные ответы на client_email, а не на сам релей.
+        |
+        | Список через запятую: MAIL_WEB_FORM_SENDERS=order@myzip.ru,web@myzip.ru
+        */
+        'web_form_senders' => array_filter(array_map(
+            'trim',
+            explode(',', (string) env('MAIL_WEB_FORM_SENDERS', 'order@myzip.ru'))
+        )),
+
+        /*
         | Empty-content guard в IncomingMailProcessor. Если очищенное тело
         | inbound-письма короче порога И нет attachments — Request не
         | создаётся (письмо переписывается в category=irrelevant). Кейс:
