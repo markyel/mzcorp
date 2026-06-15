@@ -53,7 +53,12 @@ class OpenAIChatService
         try {
             $response = Http::withHeaders($headers)
                 ->timeout(120)
-                ->retry(3, 2000, function ($exception) {
+                ->retry(3, function (int $attempt, $exception) {
+                    // Уважаем Retry-After / x-ratelimit-reset (кап 10с), иначе
+                    // экспоненциальный бэкофф от 2с. Раньше фикс 2с игнорировал
+                    // подсказку сервера и жёг попытки на 429.
+                    return OpenAIRetry::backoffMs($attempt, $exception, 2000, 10000);
+                }, function ($exception) {
                     if ($exception instanceof \Illuminate\Http\Client\RequestException) {
                         $status = $exception->response?->status();
 

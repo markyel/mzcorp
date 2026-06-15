@@ -77,7 +77,12 @@ class OpenAIEmbeddingService
         $response = Http::withHeaders($headers)
             ->timeout(60)
             ->connectTimeout(15)
-            ->retry(2, 500, function ($exception) {
+            ->retry(3, function (int $attempt, $exception) {
+                // Уважаем Retry-After / x-ratelimit-reset (кап 8с), иначе
+                // экспоненциальный бэкофф от 1с. Раньше фикс 500мс игнорировал
+                // подсказку сервера → оба ретрая падали на том же 429.
+                return OpenAIRetry::backoffMs($attempt, $exception, 1000, 8000);
+            }, function ($exception) {
                 if ($exception instanceof \Illuminate\Http\Client\RequestException) {
                     $status = $exception->response?->status();
 
