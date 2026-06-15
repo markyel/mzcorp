@@ -3,13 +3,17 @@
 namespace App\Console\Commands;
 
 use App\Enums\ClientNotificationType;
+use App\Enums\DetectorType;
 use App\Enums\InvoiceStatus;
+use App\Enums\QuotationStatus;
 use App\Enums\RequestStatus;
 use App\Models\ClarificationBatch;
 use App\Models\ClientNotificationSent;
 use App\Models\ClientNotificationTemplate;
 use App\Models\EmailMessage;
 use App\Models\Invoice;
+use App\Models\OutboundQuote;
+use App\Models\Quotation;
 use App\Models\Request;
 use App\Services\Mail\ClientNotificationService;
 use App\Services\Settings\SettingsService;
@@ -198,22 +202,120 @@ class NotificationsDispatchClientCommand extends Command
             if (! $request->client_email) {
                 continue;
             }
-            $replyTo = $this->resolveThreadAnchor($request);
+
+            // Реальное отправленное КП заявки (UI-Quotation ИЛИ распарсенное
+            // внешнее OutboundQuote). Берём его номер/сумму/дату И его
+            // исходящее письмо как якорь треда — напоминание садится в ветку
+            // самого КП, клиент видит, о каком номере речь.
+            $quote = $this->resolveLastSentQuote($request);
+
+            // Якорь: письмо с КП, иначе fallback на последнее входящее клиента.
+            $replyTo = ($quote['anchor'] ?? null) ?: $this->resolveThreadAnchor($request);
             if (! $replyTo) {
                 continue;
             }
+
+            // days_since считаем от даты отправки КП (если известна), иначе от
+            // updated_at заявки — прежнее поведение.
+            $quotedAt = $quote['sent_at'] ?? $request->updated_at;
+
             $result[] = [
                 'request' => $request,
                 'scope_key' => '',
                 'reply_to' => $replyTo,
                 'extra' => [
-                    'days_since_quoted' => max(1, (int) $request->updated_at->diffInDays(now())),
-                    'quote_amount' => '—', // TODO: достать из последнего AiDecision quote payload
+                    'days_since_quoted' => max(1, (int) $quotedAt->diffInDays(now())),
+                    'quote_number' => $quote['number'] ?? '—',
+                    'quote_amount' => $quote['amount'] !== null ? $this->formatAmount($quote['amount']) : '—',
+                    'quote_date' => $quote['date'] ?? '—',
                 ],
             ];
         }
 
         return $result;
+    }
+
+    /**
+     * Найти последнее реально отправленное клиенту КП заявки.
+     *
+     * Два источника (Foundation §«2 варианта КП»):
+     *   1. Quotation (status=Sent) — КП сформировано в нашем UI и отправлено
+     *      через mzcorp. Авторитетный номер = internal_code, сумма = total,
+     *      якорь = sent_email_message_id.
+     *   2. OutboundQuote (document_type=outbound_quotation_full|partial) —
+     *      внешнее КП, отправленное менеджером по почте и распознанное
+     *      детектором. Номер = document_number, сумма = total_amount,
+     *      якорь = email_message_id.
+     *
+     * UI-КП, отправленное через mzcorp, может попасть в ОБА (исходящее письмо
+     * парсится детектором). Поэтому при равенстве по времени приоритет у
+     * Quotation (там номер авторитетный). Иначе — у того, что отправлено
+     * позже.
+     *
+     * @return array{number: ?string, amount: ?float, date: ?string, sent_at: ?Carbon, anchor: ?EmailMessage}
+     */
+    private function resolveLastSentQuote(Request $request): array
+    {
+        $empty = ['number' => null, 'amount' => null, 'date' => null, 'sent_at' => null, 'anchor' => null];
+
+        $quotation = Quotation::with('sentEmailMessage')
+            ->where('request_id', $request->id)
+            ->where('status', QuotationStatus::Sent->value)
+            ->whereNotNull('sent_at')
+            ->orderByDesc('sent_at')
+            ->first();
+
+        $outbound = OutboundQuote::with('emailMessage')
+            ->where('request_id', $request->id)
+            ->whereIn('document_type', [
+                DetectorType::OutboundQuotationFull->value,
+                DetectorType::OutboundQuotationPartial->value,
+            ])
+            ->whereIn('status', [OutboundQuote::STATUS_PARSED, OutboundQuote::STATUS_MATCHED])
+            ->orderByDesc('id')
+            ->first();
+
+        $fromQuotation = $quotation ? [
+            'number' => (string) $quotation->internal_code,
+            'amount' => $quotation->total !== null ? (float) $quotation->total : null,
+            'date' => optional($quotation->sent_at)->format('d.m.Y'),
+            'sent_at' => $quotation->sent_at,
+            'anchor' => $quotation->sentEmailMessage,
+        ] : null;
+
+        $outboundSentAt = $outbound
+            ? ($outbound->emailMessage?->sent_at
+                ?? ($outbound->document_date ? Carbon::parse((string) $outbound->document_date) : null))
+            : null;
+        $fromOutbound = $outbound ? [
+            'number' => $outbound->document_number !== null && $outbound->document_number !== ''
+                ? (string) $outbound->document_number
+                : null,
+            'amount' => $outbound->total_amount !== null ? (float) $outbound->total_amount : null,
+            'date' => $outbound->document_date?->format('d.m.Y'),
+            'sent_at' => $outboundSentAt,
+            'anchor' => $outbound->emailMessage,
+        ] : null;
+
+        if (! $fromQuotation && ! $fromOutbound) {
+            return $empty;
+        }
+        if ($fromQuotation && ! $fromOutbound) {
+            return $fromQuotation;
+        }
+        if ($fromOutbound && ! $fromQuotation) {
+            return $fromOutbound;
+        }
+
+        // Оба есть — берём отправленное позже; при равенстве/неизвестном
+        // времени приоритет Quotation (авторитетный номер).
+        $qAt = $fromQuotation['sent_at'];
+        $oAt = $fromOutbound['sent_at'];
+        if ($qAt && $oAt) {
+            return $oAt->gt($qAt) ? $fromOutbound : $fromQuotation;
+        }
+
+        return $fromQuotation;
     }
 
     /**
@@ -224,7 +326,7 @@ class NotificationsDispatchClientCommand extends Command
         $warningDays = $tmpl->warning_days ?: 3;
         $windowEnd = now()->addDays($warningDays);
 
-        $invoices = Invoice::with(['request.emailMessage'])
+        $invoices = Invoice::with(['request.emailMessage', 'emailMessage'])
             ->where('status', InvoiceStatus::Pending->value)
             ->where('expires_at', '>', now())
             ->where('expires_at', '<=', $windowEnd)
@@ -236,7 +338,10 @@ class NotificationsDispatchClientCommand extends Command
             if (! $request || ! $request->client_email) {
                 continue;
             }
-            $replyTo = $this->resolveThreadAnchor($request);
+            // Якорь — исходящее письмо самого счёта (Invoice.email_message_id),
+            // чтобы напоминание село в ветку счёта; fallback на последнее
+            // входящее клиента.
+            $replyTo = $inv->emailMessage ?: $this->resolveThreadAnchor($request);
             if (! $replyTo) {
                 continue;
             }
@@ -262,7 +367,7 @@ class NotificationsDispatchClientCommand extends Command
      */
     private function collectInvoiceExpired(ClientNotificationTemplate $tmpl): array
     {
-        $invoices = Invoice::with(['request.emailMessage'])
+        $invoices = Invoice::with(['request.emailMessage', 'emailMessage'])
             ->whereIn('status', [InvoiceStatus::Pending->value, InvoiceStatus::Expired->value])
             ->where('expires_at', '<', now())
             ->get();
@@ -273,7 +378,9 @@ class NotificationsDispatchClientCommand extends Command
             if (! $request || ! $request->client_email) {
                 continue;
             }
-            $replyTo = $this->resolveThreadAnchor($request);
+            // Якорь — исходящее письмо самого счёта; fallback на последнее
+            // входящее клиента.
+            $replyTo = $inv->emailMessage ?: $this->resolveThreadAnchor($request);
             if (! $replyTo) {
                 continue;
             }

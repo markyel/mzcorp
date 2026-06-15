@@ -201,10 +201,21 @@ class ClientNotificationService
         }
 
         // Body — наш HTML + Plain, в textarea не показываем (это автомат).
+        //
+        // Получатель — ВСЕГДА client_email заявки, переопределяем явно. Это
+        // расцепляет адресата и тред-якорь: якорем может быть наше ИСХОДЯЩЕЕ
+        // письмо с КП/счётом (чтобы напоминание село в ветку документа), а у
+        // исходящего from_email = наш ящик — computeRecipients вырезал бы его
+        // как «свой» и To оказался бы пустым. Для уведомления адресат
+        // однозначен — клиент, поэтому ставим его напрямую.
         $draft->forceFill([
             'subject' => $threadSubject,
             'body_html' => $bodyHtml,
             'body_plain' => $bodyPlain,
+            'to_recipients' => [[
+                'email' => $request->client_email,
+                'name' => (string) ($request->client_name ?? ''),
+            ]],
         ])->save();
 
         $result = $this->sender->sendDraft($draft->id);

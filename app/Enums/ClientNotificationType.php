@@ -117,7 +117,9 @@ enum ClientNotificationType: string
             ],
             self::QuoteFollowupReminder => [
                 'days_since_quoted' => 'Сколько дней назад отправили КП',
+                'quote_number' => 'Номер реально отправленного КП (напр. МЗ-357197)',
                 'quote_amount' => 'Сумма коммерческого предложения',
+                'quote_date' => 'Дата отправки КП (DD.MM.YYYY)',
             ],
             self::InvoiceExpiringSoon => [
                 'invoice_number' => 'Номер счёта',

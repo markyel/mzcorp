@@ -72,11 +72,11 @@ MD,
             ],
 
             ClientNotificationType::QuoteFollowupReminder->value => [
-                'subject_template' => 'Напоминание по заявке {{ request_code }}: ваше решение по КП',
+                'subject_template' => 'Напоминание по заявке {{ request_code }}: ваше решение по КП {{ quote_number }}',
                 'body_template' => <<<'MD'
 Здравствуйте, {{ client_name }}!
 
-Мы отправляли вам коммерческое предложение по заявке **{{ request_code }}** {{ days_since_quoted }} дн. назад на сумму {{ quote_amount }}.
+Мы отправляли вам коммерческое предложение **{{ quote_number }}** от {{ quote_date }} по заявке **{{ request_code }}** ({{ days_since_quoted }} дн. назад) на сумму {{ quote_amount }}.
 
 Подскажите, пожалуйста, есть ли по нему вопросы или готовы ли вы перейти к выставлению счёта.
 
