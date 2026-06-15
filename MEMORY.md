@@ -182,6 +182,35 @@ Cross-mailbox дедуп — 3 защитных слоя против Request-д
 
 ## Открытые вопросы / TODO
 
+### Закрыто 2026-06-15
+- ✅ **Автонапоминания клиенту: реальный номер/сумма КП + тред в ветку документа** (`2742526`). Жалоба менеджера: `quote_followup_reminder` показывал код заявки и «на сумму —» (захардкожено), без реального номера КП, плюс уходил отдельной веткой. Причина: `collectQuoteFollowupReminders` не обращался ни к `Quotation`, ни к `OutboundQuote`, а якорь треда = последнее ВХОДЯЩЕЕ письмо клиента. Фикс: `resolveLastSentQuote()` тянет реально отправленное КП из `Quotation`(status=Sent, UI) ИЛИ `OutboundQuote`(`outbound_quotation_full|partial`, внешнее), даёт `quote_number`/`quote_amount`/`quote_date` + исходящее письмо КП как якорь. Счёт-напоминания — якорь = `Invoice.email_message_id` (номер/сумма уже были реальные). `ClientNotificationService::dispatch` теперь жёстко ставит `to_recipients = client_email` (расцепил адресата и якорь — можно якорить на наше исходящее, не ломая `computeRecipients`). Новые плейсхолдеры + текст шаблона (сидер + прод-row обновлён вручную, был старый дефолт). **Грабли:** парсер кладёт `document_number` без префикса «МЗ-» (показывается «357197»). **Sync-хуки (OrderReceived/ClosedLost) живут в очереди → после деплоя рестартил воркеры.**
+- ✅ **Заявки с сайта: реальный клиент вместо order@myzip.ru** (`4397035`). Веб-форма шлёт на info@ с релея `order@myzip.ru`, реальный клиент — в HTML-теле (Организация/Адрес/Контактное лицо/Телефон/E-mail). `IncomingMailProcessor:104` писал `client_email = order@myzip.ru` → переписка/уведомления шли на технический ящик. Фикс: `WebFormSubmissionParser` (детект релей-отправителей из `services.mail.web_form_senders`, дефолт order@myzip.ru; парсинг полей из тела — **после двоеточия только горизонтальные пробелы `[^\S\r\n]*`, иначе при пустом поле regex перепрыгивал на следующую строку**). `IncomingMailProcessor` пишет реальные `client_*` (fallback на From если тело не распарсилось). `EmailDraftService::createReply` — гард: при ответе на письмо веб-релея «Кому» = `client_email` заявки (иначе ручной ответ ушёл бы на order@; авто-уведомления уже чинит подмена client_email + `to_recipients` форс). Новые колонки `client_phone/client_company/client_address` + показ в карточке. `requests:backfill-web-form-clients` — **бэкфилл: 6 открытых заявок обновлены, осталось с order@ = 0.** Теперь sticky «один клиент→один менеджер» работает по реальному клиенту (order@ в `non_sticky` оставлен).
+
+### ⏳ Под наблюдением до 2026-06-16 — OpenAI 429 морозит разбор почты (РЕШЕНИЕ ОТЛОЖЕНО)
+
+**Симптом (2026-06-15 ~13:40–15:11):** на общем ящике info@ копились неразобранные письма — Request создавались, но без менеджера (status=pending, assigned_user_id=null), висели в общем INBOX. `mail:diag-inbox --since=24` в 15:11 показал 45 `client_request_pending` + 9 `thread_reply_no_manager`. К 15:13 backlog сам разгрёбся до 2 (возраст <1 мин). Failed_jobs за сегодня нет, воркеры/крон живы, пул менеджеров здоров (7 available).
+
+**Корневая причина (цепочка):**
+1. OpenAI режет по **rate-limit (429 `rate_limit_exceeded`, НЕ `insufficient_quota`)** — ~3000+ 429/день, фоном весь день, пик 15:00–15:01 (50+29 шт) на слоте каталожного `catalog:embed` в 15:00.
+2. `ResolvePendingChunkJob` (очередь `catalog-resolve`, timeout=600, tries=1, ≤50 items × эмбеддинг+rerank) под 429-штормом прожигает ретраи по всему чанку → суммарно >600с → `TimeoutExceededException` → FAIL (сегодня 43 FAIL).
+3. **Все 4 воркера слушают общий `--queue=mail-sync,default,catalog-resolve`.** Когда все 4 разом захватывают висящие каталожные джобы (кластеры по 4 одновременно: 00:14/00:35/00:47/00:58/01:09/01:19/01:30/15:11), очередь `default` (категоризация→Request→парсинг→autoAssign) встаёт на ~10 мин → почта копится. В 15:11 джобы отвалились по таймауту → воркеры бурстом разгребли (61 Request за час 15, avg задержка 5.4 мин).
+
+**Важно:** «изоляция catalog-resolve приоритетом очередей» (коммент в supervisor) НЕ защищает — приоритет решает что взять у свободного воркера, но не вытесняет уже выполняющуюся 10-мин джобу. Это та же природа, что post-mortem 2026-05-28 (см. `## Queue topology`), но теперь триггер — rate-limit, а не зацикливание.
+
+**Слабые места в коде (для будущего фикса, НЕ трогал):**
+- `OpenAIEmbeddingService::embedBatch` — `->retry(2, 500, ...)`, фикс 500мс, **игнорит `Retry-After`**.
+- `OpenAIChatService` — `->retry(3, 2000, ...)`, фикс 2с, тоже **без `Retry-After`**.
+- `ResolvePendingChunkJob` — нет троттлинга/уважения rate-limit окна.
+
+**Связь с прошлой записью:** сессия от (см. line ~608) фиксировала «429 **insufficient_quota** — основной фактор хаоса» — сегодня тип другой (`rate_limit_exceeded`). Баланс пополнен оператором ~15:14; OpenAI поднимает tier (RPM/TPM) с суммой оплаты → пополнение может реально снизить 429. После 15:15 429 = 0.
+
+**Что наблюдаем до завтра (решение примем 2026-06-16):**
+- [ ] Следующие каталожные слоты **19:00 / 23:00 / 03:00 / 07:00 MSK** — вспыхнет ли 429 снова? (`grep 429 storage/logs/laravel.log | grep -oE 'HH:MM'`). Если нет — пополнение/tier помогли, структурный фикс можно отложить.
+- [ ] Повторяется ли «4 воркера разом на ResolvePendingChunkJob FAIL» (`grep ResolvePendingChunkJob.*FAIL /var/log/mzcorp/worker.log`).
+- [ ] Накапливается ли снова `mail:diag-inbox` backlog утром.
+
+**Кандидаты фикса (если затор повторится):** (1) отдельный supervisor-воркер под `catalog-resolve`, убрать его из почтового пула; (2) уважать `Retry-After` + экспоненциальный бэкофф в обоих OpenAI-сервисах; (3) троттлинг параллелизма каталожных эмбеддингов. Приоритет — (1). Диффы показать на ревью перед прод-деплоем.
+
 ### Закрыто 2026-05-15
 - ✅ **Filename `=?UTF-8?B?...` corruption** — фикснут через regex-fallback decode в `MessagePersister::decodeMimeHeader` + CLI `mail:redecode-attachment-names` для backfill.
 - ✅ **Quotation в compose ломается** — частично: `collapseQuotedBlocks` теперь сворачивает Yandex-attribution (Кому/Тема/Дата) вместе с blockquote. Если ещё ломается на каких-то клиентах — диагностика по конкретному эталону.
