@@ -147,12 +147,15 @@ class CatalogImportService
             $skus = array_column($normalized, 'sku');
             $existing = CatalogItem::query()
                 ->whereIn('sku', $skus)
-                ->get(['id', 'sku', 'source_hash', 'is_active'])
+                // price/price_min — чтобы зафиксировать «было → стало» в
+                // catalog_price_changes при изменении цены.
+                ->get(['id', 'sku', 'source_hash', 'is_active', 'price', 'price_min'])
                 ->keyBy('sku');
 
             $now = Carbon::now();
             $toUpdate = [];
             $toInsert = [];
+            $priceChanges = [];
 
             foreach ($normalized as $row) {
                 $existingRow = $existing->get($row['sku']);
@@ -180,6 +183,25 @@ class CatalogImportService
                     continue;
                 }
 
+                // Фиксируем изменение цены (было → стало) ДО апдейта —
+                // $existingRow ещё держит старые price/price_min.
+                if ($this->priceDiffers($existingRow->price, $row['price'] ?? null)
+                    || $this->priceDiffers($existingRow->price_min, $row['price_min'] ?? null)
+                ) {
+                    $priceChanges[] = [
+                        'catalog_item_id' => $existingRow->id,
+                        'sku' => $row['sku'],
+                        'old_price' => $existingRow->price,
+                        'new_price' => $row['price'] ?? null,
+                        'old_price_min' => $existingRow->price_min,
+                        'new_price_min' => $row['price_min'] ?? null,
+                        'import_id' => $import->id,
+                        'changed_at' => $now,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                }
+
                 $row['is_active'] = true;
                 $row['updated_at'] = $now;
                 CatalogItem::query()
@@ -193,6 +215,13 @@ class CatalogImportService
             if (! empty($toInsert)) {
                 foreach (array_chunk($toInsert, 500) as $chunk) {
                     CatalogItem::query()->insert($chunk);
+                }
+            }
+
+            // История цен: фиксируем все зафиксированные переходы «было → стало».
+            if (! empty($priceChanges)) {
+                foreach (array_chunk($priceChanges, 500) as $chunk) {
+                    \App\Models\CatalogPriceChange::query()->insert($chunk);
                 }
             }
 
@@ -589,6 +618,25 @@ class CatalogImportService
 
         // Постгрес сам приведёт строку «123.45» → numeric.
         return (string) $v;
+    }
+
+    /**
+     * Изменилась ли цена численно. null/'' с одной стороны (появилась/исчезла
+     * цена) считаем изменением; равные числа (в т.ч. «1234.50» vs «1234.5») — нет.
+     */
+    private function priceDiffers(mixed $old, mixed $new): bool
+    {
+        $a = ($old === null || $old === '') ? null : (float) $old;
+        $b = ($new === null || $new === '') ? null : (float) $new;
+
+        if ($a === null && $b === null) {
+            return false;
+        }
+        if ($a === null || $b === null) {
+            return true;
+        }
+
+        return abs($a - $b) > 0.001;
     }
 
     private function intOrNull(mixed $v): ?int
