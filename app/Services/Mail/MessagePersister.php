@@ -298,7 +298,7 @@ class MessagePersister
                 if ($bytes === false || $bytes === '') {
                     return $m[0];
                 }
-                $utf8 = @mb_convert_encoding($bytes, 'UTF-8', $charset);
+                $utf8 = $this->safeConvertToUtf8($bytes, $charset);
 
                 return is_string($utf8) && $utf8 !== '' ? $utf8 : $bytes;
             },
@@ -306,6 +306,46 @@ class MessagePersister
         );
 
         return is_string($result) && $result !== '' ? $result : $value;
+    }
+
+    /**
+     * Безопасная конвертация байтов из произвольного (возможно НЕИЗВЕСТНОГО
+     * mbstring) charset в UTF-8.
+     *
+     * PHP 8 кидает `ValueError` на неизвестном имени кодировки (напр.
+     * «ks_c_5601-1987» — корейский алиас, которым некоторые клиенты ошибочно
+     * метят кириллицу). Оператор `@` ValueError НЕ глушит, поэтому декод
+     * MIME-заголовка/имени файла падал, и письмо терялось целиком (кейс
+     * VasilievDY@trc-nora.ru «Тяговые канаты», 2026-06-16).
+     *
+     * Возвращает UTF-8 строку или null, если ничего разумного не вышло
+     * (caller сам решает, что подставить в fallback).
+     */
+    private function safeConvertToUtf8(string $bytes, string $charset): ?string
+    {
+        try {
+            $out = mb_convert_encoding($bytes, 'UTF-8', $charset);
+            if (is_string($out) && $out !== '') {
+                return $out;
+            }
+        } catch (\ValueError) {
+            // Неизвестный mbstring charset — ниже эвристика по содержимому.
+        }
+
+        // Метка charset часто битая/неверная. Если байты УЖЕ валидный UTF-8 —
+        // берём как есть; иначе пробуем Windows-1251 (типичная кириллица рунета).
+        if (mb_check_encoding($bytes, 'UTF-8')) {
+            return $bytes;
+        }
+        try {
+            $cp = mb_convert_encoding($bytes, 'UTF-8', 'Windows-1251');
+            if (is_string($cp) && $cp !== '') {
+                return $cp;
+            }
+        } catch (\ValueError) {
+        }
+
+        return null;
     }
 
     /**
@@ -387,7 +427,7 @@ class MessagePersister
             if (stripos($charset, 'UTF-8') !== false && mb_check_encoding($decoded, 'UTF-8')) {
                 return $decoded;
             }
-            $converted = @mb_convert_encoding($decoded, 'UTF-8', $charset);
+            $converted = $this->safeConvertToUtf8($decoded, $charset);
 
             return is_string($converted) && $converted !== '' ? $converted : null;
         }
@@ -628,7 +668,7 @@ class MessagePersister
             ksort($parts);
             $joined = implode('', $parts);
             if (strtoupper($charset) !== 'UTF-8') {
-                $converted = @mb_convert_encoding($joined, 'UTF-8', $charset);
+                $converted = $this->safeConvertToUtf8($joined, $charset);
                 if (is_string($converted) && $converted !== '') {
                     return $converted;
                 }
@@ -649,7 +689,7 @@ class MessagePersister
                 $decoded = rawurldecode($rest);
                 $cs = $cs !== '' ? $cs : 'UTF-8';
                 if (strtoupper($cs) !== 'UTF-8') {
-                    $converted = @mb_convert_encoding($decoded, 'UTF-8', $cs);
+                    $converted = $this->safeConvertToUtf8($decoded, $cs);
                     if (is_string($converted) && $converted !== '') {
                         return $converted;
                     }
