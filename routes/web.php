@@ -116,6 +116,11 @@ Route::middleware('auth')->group(function () {
             return view('analytics.positions');
         })->name('analytics.positions');
 
+        // Ретроспектива изменения цен каталога (было → стало, тренд).
+        Route::get('/dashboard/analytics/price-changes', function () {
+            return view('analytics.price-changes');
+        })->name('analytics.price-changes');
+
         // Foundation Фаза 2: auto-rejection — пересмотр писем, которые AI
         // классифицировал как irrelevant/reclamation/accounting/..., и
         // реоткрытие ошибочно отклонённых как Request. Секретарь отвечает за

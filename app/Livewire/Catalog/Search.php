@@ -3,6 +3,7 @@
 namespace App\Livewire\Catalog;
 
 use App\Models\CatalogItem;
+use App\Models\CatalogPriceChange;
 use App\Models\IqotPosition;
 use App\Models\Kb\EquipmentCategory;
 use App\Services\Catalog\CatalogEmbeddingService;
@@ -402,6 +403,30 @@ class Search extends Component
         }
 
         return IqotPosition::whereIn('catalog_item_id', $ids)->get()->keyBy('catalog_item_id');
+    }
+
+    /**
+     * Последнее изменение цены на каждую позицию текущей выдачи — для бейджа
+     * «подорожал / подешевел» в карточке «Цена и наличие». keyBy по
+     * catalog_item_id, берём самую свежую запись.
+     *
+     * @return \Illuminate\Support\Collection<int, CatalogPriceChange>
+     */
+    #[Computed]
+    public function lastPriceChangeByCatalogId()
+    {
+        $ids = array_map(fn ($r) => $r['catalog']->id, $this->results);
+        if ($ids === []) {
+            return collect();
+        }
+
+        return CatalogPriceChange::query()
+            ->whereIn('catalog_item_id', $ids)
+            ->orderByDesc('changed_at')
+            ->orderByDesc('id')
+            ->get()
+            ->unique('catalog_item_id')
+            ->keyBy('catalog_item_id');
     }
 
     /**

@@ -330,10 +330,43 @@
                                     @if($cat->stock_available === null) — @elseif($cat->stock_available > 0) {{ $cat->stock_available }} шт @else нет @endif
                                 </div>
                             </div>
-                            <div class="flex justify-between items-baseline px-3.5 py-2 text-[12.5px]">
+                            <div class="flex justify-between items-baseline px-3.5 py-2 border-b border-border-subtle text-[12.5px]">
                                 <div class="text-fg-3 text-[12px] font-medium">Срок поставки</div>
                                 <div class="mono text-[13px] text-fg-1">{{ $cat->lead_time_days !== null ? $cat->lead_time_days . ' дн' : '—' }}</div>
                             </div>
+
+                            {{-- Динамика цены: подорожал / подешевел по последнему
+                                 зафиксированному изменению (catalog_price_changes). --}}
+                            @php $pc = $this->lastPriceChangeByCatalogId->get($cat->id); @endphp
+                            <div class="flex justify-between items-baseline px-3.5 py-2 text-[12.5px]">
+                                <div class="text-fg-3 text-[12px] font-medium">Динамика цены</div>
+                                <div class="text-[12.5px] text-right">
+                                    @php
+                                        $pcDelta = $pc?->priceDelta();
+                                        $pcPct = ($pcDelta !== null && $pc && (float) $pc->old_price != 0.0)
+                                            ? round($pcDelta / (float) $pc->old_price * 100, 1) : null;
+                                    @endphp
+                                    @if($pc && $pcDelta !== null && $pcDelta > 0)
+                                        <span class="font-semibold text-red-600">▲ подорожал на {{ number_format($pcDelta, 2, ',', ' ') }} ₽@if($pcPct !== null) (+{{ $pcPct }}%)@endif</span>
+                                    @elseif($pc && $pcDelta !== null && $pcDelta < 0)
+                                        <span class="font-semibold text-emerald-700">▼ подешевел на {{ number_format(abs($pcDelta), 2, ',', ' ') }} ₽@if($pcPct !== null) ({{ $pcPct }}%)@endif</span>
+                                    @elseif($pc)
+                                        <span class="text-fg-3">менялась (см. историю)</span>
+                                    @else
+                                        <span class="text-fg-3">без изменений</span>
+                                    @endif
+                                    @if($pc?->changed_at)
+                                        <div class="text-[10.5px] text-fg-3 mt-0.5">с {{ $pc->changed_at->format('d.m.Y') }}</div>
+                                    @endif
+                                </div>
+                            </div>
+
+                            @if(auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'secretary', 'admin']))
+                                <div class="px-3.5 py-2 border-t border-border-subtle text-right">
+                                    <a href="{{ route('analytics.price-changes', ['q' => $cat->sku]) }}" wire:navigate
+                                       class="text-[11.5px] font-medium text-sky-700 hover:underline">История цен по позиции →</a>
+                                </div>
+                            @endif
                         </div>
 
                         {{-- IQOT · анализ цен конкурентов (РОП / директор / админ) --}}
