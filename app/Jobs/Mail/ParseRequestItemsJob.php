@@ -190,6 +190,50 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                 }
             }
 
+            // Шумовой thread-reply на ЗАКРЫТЫЙ тред: пустой ответ («так
+            // выгрузили доки?», «спасибо», вопрос по статусу), чей родитель
+            // по In-Reply-To/References — уже терминальная (закрытая) заявка.
+            // route() его не залинковал (родитель closed и/или в чужом scope,
+            // либо только дубль-копия нашего же письма), и без этого гарда
+            // assignIfStuckPending плодит пустую заявку-шум. Кейс M-2026-4688 /
+            // 4546: вопрос про выгрузку документов в треде закрытой (won)
+            // M-2026-3965. Авто-реанимация выключена → гасим пустышку.
+            //
+            // Узко и безопасно: только thread_reply + items=0 + родитель
+            // ТЕРМИНАЛЬНЫЙ. adopt-from-parent сюда не попадает (вернулся выше
+            // с уже клонированными items); открытые треды не трогаем (их
+            // родитель не terminal — reply к ним должен линковаться, не гаснуть).
+            if ($message->related_request_id && ! $this->reset
+                && $message->category === \App\Enums\EmailCategory::ThreadReply->value
+            ) {
+                $headerParent = app(\App\Services\Mail\InboundReplyLinker::class)
+                    ->findHeaderParentRequest($message);
+                $child = \App\Models\Request::find($message->related_request_id);
+                if ($headerParent
+                    && $headerParent->id !== (int) $message->related_request_id
+                    && $headerParent->status->isTerminal()
+                    && $child && ! $child->status->isTerminal()
+                    && $child->items()->count() === 0
+                ) {
+                    app(\App\Services\Request\RequestStateService::class)->systemCloseLost(
+                        $child,
+                        \App\Enums\ClosedLostReason::ParserNoContent,
+                        sprintf(
+                            'Пустой ответ в треде уже закрытой заявки %s — продолжение переписки, не новая заявка.',
+                            $headerParent->internal_code,
+                        ),
+                    );
+                    Log::info('ParseRequestItemsJob: suppressed empty thread-reply to closed thread', [
+                        'email_message_id' => $message->id,
+                        'request_id' => $child->id,
+                        'header_parent_request_id' => $headerParent->id,
+                        'header_parent_status' => $headerParent->status->value,
+                    ]);
+
+                    return;
+                }
+            }
+
             // Empty-items fallback (2026-05-26): inheritance candidate
             // отсутствует, парсер вернул []. Для personal mailbox — Level 0
             // sticky direct_mailbox автоматически назначит owner ящика

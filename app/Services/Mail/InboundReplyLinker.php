@@ -321,6 +321,33 @@ class InboundReplyLinker
     }
 
     /**
+     * Заявка, к которой письмо относится по ЗАГОЛОВКАМ треда
+     * (In-Reply-To / References) — независимо от статуса и scope.
+     *
+     * Возвращает родительскую Request, если Message-ID parent'а есть у нас в
+     * БД и привязан к заявке. Это сигнал «письмо — продолжение известного
+     * треда», даже если route() не залинковал его (родитель закрыт / в чужом
+     * scope / только дубль-копия). ParseRequestItemsJob использует это, чтобы
+     * не плодить пустую заявку из reply в уже закрытый тред.
+     */
+    public function findHeaderParentRequest(EmailMessage $message): ?Request
+    {
+        $candidateIds = $this->collectCandidateMessageIds($message);
+        if (empty($candidateIds)) {
+            return null;
+        }
+
+        $parent = EmailMessage::query()
+            ->whereIn('message_id', $candidateIds)
+            ->whereNotNull('related_request_id')
+            ->where('id', '!=', $message->id)
+            ->orderByDesc('id')
+            ->first();
+
+        return $parent ? Request::find($parent->related_request_id) : null;
+    }
+
+    /**
      * Собрать всех кандидатов на match: in_reply_to + references_header.
      * References — массив (cast в EmailMessage), идём с конца (свежие первыми).
      *
