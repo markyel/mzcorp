@@ -323,6 +323,20 @@ class MessagePersister
      */
     private function safeConvertToUtf8(string $bytes, string $charset): ?string
     {
+        // Алиасы charset'ов, которые mbstring не знает под присланным именем.
+        // Кейс «Тяговые канаты»: корейский клиент закодировал кириллицу в
+        // KS C 5601 (= EUC-KR, блок 0xAC содержит кириллицу) и пометил её
+        // «ks_c_5601-1987» — метка ВЕРНА по сути, но mbstring её не понимает.
+        static $aliases = [
+            'ks_c_5601-1987' => 'EUC-KR',
+            'ks_c_5601' => 'EUC-KR',
+            'ksc5601' => 'EUC-KR',
+            'ksc_5601' => 'EUC-KR',
+            'ks_c_5601-1989' => 'EUC-KR',
+            'cp1251' => 'Windows-1251',
+        ];
+        $charset = $aliases[strtolower(trim($charset))] ?? $charset;
+
         try {
             $out = mb_convert_encoding($bytes, 'UTF-8', $charset);
             if (is_string($out) && $out !== '') {
