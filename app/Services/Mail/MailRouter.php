@@ -70,6 +70,20 @@ class MailRouter
                 ]);
             }
 
+            // Обратный cross-mailbox дедуп. Наше исходящее, попавшее в копию
+            // (CC) во внутренний ящик коллеги, синкается как ОТДЕЛЬНОЕ inbound
+            // с тем же message_id. Если эта копия пришла РАНЬШЕ, чем outbound
+            // получил related_request_id, прямой дедуп в route() её пропустил —
+            // она осела rel=null + category=irrelevant. Потом на неё ложно
+            // срабатывал orphan-defer линкера и плодил пустую заявку (кейс
+            // M-2026-4688: «выгрузили доки?» в треде закрытой 3965). Теперь,
+            // когда исходящее залинковано, ретроактивно подшиваем такие копии
+            // к той же заявке + помечаем cross_mailbox_copy_of (UI-тред их
+            // прячет, линкер больше не считает их orphan'ами).
+            if ($linkedRequest !== null && $message->message_id) {
+                $this->backfillCrossMailboxCopies($message, $linkedRequest->id);
+            }
+
             // Phase 4 (Foundation §7.1): outbound document detector.
             // Сработает только если linker уже привязал письмо к Request —
             // иначе непонятно к чему относится «КП» (общая переписка с
@@ -571,6 +585,41 @@ class MailRouter
             'success' => true,
             'processed_at' => now(),
         ]);
+    }
+
+    /**
+     * Подшить ранее пришедшие копии того же письма (тот же message_id,
+     * rel=null) к заявке $requestId и пометить cross_mailbox_copy_of.
+     *
+     * Закрывает гонку «копия (CC во внутренний ящик) пришла раньше, чем
+     * оригинал/исходящее получило related_request_id» — без этого копия
+     * оставалась rel=null orphan'ом и линкер плодил из reply'ев пустые
+     * заявки (M-2026-4688). message_id уникален глобально, поэтому все
+     * совпадения — гарантированно копии ОДНОГО письма → одна заявка.
+     */
+    private function backfillCrossMailboxCopies(EmailMessage $message, int $requestId): void
+    {
+        $copies = EmailMessage::query()
+            ->where('message_id', $message->message_id)
+            ->where('id', '!=', $message->id)
+            ->whereNull('related_request_id')
+            ->get();
+
+        foreach ($copies as $copy) {
+            $artifacts = (array) ($copy->detected_artifacts ?? []);
+            $artifacts['cross_mailbox_copy_of'] = $message->id;
+            $copy->forceFill([
+                'related_request_id' => $requestId,
+                'detected_artifacts' => $artifacts,
+            ])->save();
+
+            Log::info('MailRouter: backfilled prior cross-mailbox copy to request', [
+                'copy_email_message_id' => $copy->id,
+                'source_email_message_id' => $message->id,
+                'request_id' => $requestId,
+                'message_id' => $message->message_id,
+            ]);
+        }
     }
 
     private function recordLoopSkipped(EmailMessage $message): void
