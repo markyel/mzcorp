@@ -139,9 +139,10 @@ class ClientsBackfillCommand extends Command
         if ($inn === '' && $name === '') {
             return null;
         }
-        // Без ИНН и не из спец-поля компании — берём только если имя похоже на
-        // юр.лицо (ООО/ИП/АО/кавычки), иначе это ФИО получателя, не организация.
-        if (! $assumeOrg && $inn === '' && ! $this->looksLikeOrg($name)) {
+        // Без ИНН и не из спец-поля компании — считаем организацией всё, что НЕ
+        // похоже на ФИО получателя (явные «Фамилия Имя [Отчество]»). Так ловим и
+        // безмаркерные компании («СтайлЛифт», «СП Интерлифт»), и отсекаем людей.
+        if (! $assumeOrg && $inn === '' && $this->looksLikePerson($name)) {
             return null;
         }
 
@@ -163,13 +164,32 @@ class ClientsBackfillCommand extends Command
      * Имя похоже на юридическое лицо (орг-форма или кавычки в названии).
      * Отсекает ФИО-получателей КП от настоящих организаций.
      */
-    private function looksLikeOrg(string $name): bool
+    /**
+     * Имя похоже на ФИО физлица: «Фамилия Имя» / «Фамилия Имя Отчество» (2–3
+     * слова с заглавной + строчные, кириллица или латиница). Орг-маркер
+     * (ООО/ИП/кавычки) — точно НЕ ФИО. Всё прочее (включая безмаркерные
+     * компании «СтайлЛифт», «СП Интерлифт») ФИО не считаем → это организация.
+     */
+    private function looksLikePerson(string $name): bool
     {
-        if (str_contains($name, '"') || str_contains($name, '«') || str_contains($name, '”')) {
+        $name = trim($name);
+        if ($name === '') {
+            return false;
+        }
+        if (str_contains($name, '"') || str_contains($name, '«') || str_contains($name, '”')
+            || preg_match('/(^|\W)(ООО|ОАО|ЗАО|АО|ПАО|ИП|НКО|ФГУП|МУП|ГУП|ГБУ|МБУ|АНО|ТСЖ|СНТ|КФХ|LLC|LTD|GMBH|INC)(\W|$)/iu', $name) === 1) {
+            return false;
+        }
+        // Кириллическое ФИО.
+        if (preg_match('/^[А-ЯЁ][а-яё]+(-[А-ЯЁ][а-яё]+)?(\s+[А-ЯЁ][а-яё.]+){1,2}$/u', $name) === 1) {
+            return true;
+        }
+        // Латинское «First Last [Middle]».
+        if (preg_match('/^[A-Z][a-z]+(\s+[A-Z][a-z.]+){1,2}$/u', $name) === 1) {
             return true;
         }
 
-        return preg_match('/(^|\W)(ООО|ОАО|ЗАО|АО|ПАО|ИП|НКО|ФГУП|МУП|ГУП|ГБУ|МБУ|АНО|ТСЖ|СНТ|КФХ|ООО|LLC|LTD|GMBH|INC)(\W|$)/iu', $name) === 1;
+        return false;
     }
 
     private function linkEmail(Organization $org, string $email, array &$stats): void
