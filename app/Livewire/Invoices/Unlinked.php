@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Invoices;
 
+use App\Enums\RequestStatus;
 use App\Enums\Role;
 use App\Models\EmailMessage;
 use App\Models\Invoice;
@@ -146,7 +147,48 @@ class Unlinked extends Component
     }
 
     /**
-     * Кандидаты-заявки для панели привязки: по коду / клиенту / теме.
+     * Email клиента привязываемого счёта (внешний получатель письма) — для
+     * подсказки «открытые заявки этого заказчика».
+     */
+    #[Computed]
+    public function attachingClientEmail(): ?string
+    {
+        if (! $this->attachingMsgId) {
+            return null;
+        }
+        $msg = EmailMessage::find($this->attachingMsgId);
+
+        return $msg ? $this->firstExternalRecipient($msg) : null;
+    }
+
+    /**
+     * Открытые (не архивные) заявки заказчика, которому ушёл счёт — главные
+     * кандидаты на привязку. Показываем сразу, до ручного поиска.
+     *
+     * @return \Illuminate\Support\Collection<int, Request>
+     */
+    #[Computed]
+    public function clientOpenRequests()
+    {
+        $email = $this->attachingClientEmail();
+        if (! $email) {
+            return collect();
+        }
+
+        return Request::query()
+            ->where('client_email', 'ilike', $email)
+            ->whereNotIn('status', [
+                RequestStatus::ClosedWon->value,
+                RequestStatus::ClosedLost->value,
+            ])
+            ->with('assignedUser:id,name')
+            ->orderByDesc('created_at')
+            ->limit(20)
+            ->get(['id', 'internal_code', 'status', 'client_email', 'client_name', 'subject', 'assigned_user_id', 'created_at']);
+    }
+
+    /**
+     * Кандидаты-заявки для ручного поиска: по коду / клиенту / теме.
      *
      * @return \Illuminate\Support\Collection<int, Request>
      */

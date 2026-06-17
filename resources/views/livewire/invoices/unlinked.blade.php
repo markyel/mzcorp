@@ -73,41 +73,41 @@
                             @if($attachingMsgId === $row['msg_id'])
                                 <tr wire:key="attach-{{ $row['msg_id'] }}" class="bg-[var(--bg-surface-2,var(--bg-hover))]">
                                     <td colspan="6" class="px-3 py-3">
-                                        <div class="max-w-[640px]">
-                                            <label class="block text-[11.5px] text-fg-3 mb-1">
-                                                Найдите заявку по коду, клиенту или теме:
-                                            </label>
-                                            <input type="text" wire:model.live.debounce.300ms="requestSearch"
-                                                   placeholder="M-2026-… / email клиента / слово из темы"
-                                                   class="w-full h-[30px] px-2 border border-border rounded-md bg-surface text-fg-1 text-[12.5px] outline-none focus:border-[var(--sky-500)]"
-                                                   autofocus>
-
-                                            @if(mb_strlen(trim($requestSearch)) >= 2)
-                                                <div class="mt-2 border border-border rounded-md divide-y divide-[var(--border)] max-h-[280px] overflow-y-auto">
-                                                    @forelse($this->requestCandidates as $cand)
-                                                        <div wire:key="cand-{{ $row['msg_id'] }}-{{ $cand->id }}"
-                                                             class="flex items-center gap-2 px-2.5 py-1.5 hover:bg-[var(--bg-hover)]">
-                                                            <div class="flex-1 min-w-0">
-                                                                <span class="mono font-semibold text-fg-1">{{ $cand->internal_code }}</span>
-                                                                <span class="ml-1 chip chip-neutral text-[10px]">{{ $cand->status?->value }}</span>
-                                                                <div class="text-[11px] text-fg-3 truncate">
-                                                                    {{ $cand->client_name ?: $cand->client_email }} ·
-                                                                    {{ \Illuminate\Support\Str::limit($cand->subject, 50) }}
-                                                                    @if($cand->assignedUser) · {{ $cand->assignedUser->name }} @endif
-                                                                </div>
-                                                            </div>
-                                                            <button type="button"
-                                                                    wire:click="attach({{ $cand->id }})"
-                                                                    wire:confirm="Привязать счёт {{ $row['number'] ?? '' }} к заявке {{ $cand->internal_code }}?"
-                                                                    class="btn btn-sm btn-primary shrink-0">Выбрать</button>
-                                                        </div>
-                                                    @empty
-                                                        <div class="px-2.5 py-3 text-[12px] text-fg-3">Ничего не найдено по «{{ $requestSearch }}».</div>
-                                                    @endforelse
+                                        <div class="max-w-[680px] space-y-3">
+                                            {{-- Открытые заявки этого заказчика — главные кандидаты --}}
+                                            <div>
+                                                <div class="text-[11.5px] text-fg-3 mb-1">
+                                                    Открытые заявки заказчика
+                                                    <span class="mono text-fg-2">{{ $this->attachingClientEmail ?? '—' }}</span>:
                                                 </div>
-                                            @else
-                                                <div class="mt-1 text-[11px] text-fg-4">Введите минимум 2 символа.</div>
-                                            @endif
+                                                @php $clientReqs = $this->clientOpenRequests; @endphp
+                                                @if($clientReqs->isEmpty())
+                                                    <div class="text-[11.5px] text-fg-4">Открытых заявок этого заказчика нет — найдите вручную ниже.</div>
+                                                @else
+                                                    <div class="border border-border rounded-md divide-y divide-[var(--border)] max-h-[240px] overflow-y-auto">
+                                                        @foreach($clientReqs as $cand)
+                                                            @include('livewire.invoices._candidate-row', ['cand' => $cand, 'msgId' => $row['msg_id'], 'number' => $row['number'], 'prefix' => 'cl'])
+                                                        @endforeach
+                                                    </div>
+                                                @endif
+                                            </div>
+
+                                            {{-- Ручной поиск любой заявки (как раньше) --}}
+                                            <div>
+                                                <label class="block text-[11.5px] text-fg-3 mb-1">Или найти другую заявку (код / клиент / тема):</label>
+                                                <input type="text" wire:model.live.debounce.300ms="requestSearch"
+                                                       placeholder="M-2026-… / email клиента / слово из темы"
+                                                       class="w-full h-[30px] px-2 border border-border rounded-md bg-surface text-fg-1 text-[12.5px] outline-none focus:border-[var(--sky-500)]">
+                                                @if(mb_strlen(trim($requestSearch)) >= 2)
+                                                    <div class="mt-2 border border-border rounded-md divide-y divide-[var(--border)] max-h-[240px] overflow-y-auto">
+                                                        @forelse($this->requestCandidates as $cand)
+                                                            @include('livewire.invoices._candidate-row', ['cand' => $cand, 'msgId' => $row['msg_id'], 'number' => $row['number'], 'prefix' => 'mn'])
+                                                        @empty
+                                                            <div class="px-2.5 py-3 text-[12px] text-fg-3">Ничего не найдено по «{{ $requestSearch }}».</div>
+                                                        @endforelse
+                                                    </div>
+                                                @endif
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>
