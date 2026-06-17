@@ -2,11 +2,11 @@
 
 namespace App\Console\Commands;
 
-use App\Enums\DetectorType;
 use App\Jobs\Quotes\ParseOutboundQuoteJob;
 use App\Models\EmailMessage;
 use App\Services\DocumentDetector\OutboundDocumentDetector;
 use App\Services\Mail\OutgoingMailLinker;
+use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
@@ -24,26 +24,33 @@ use Illuminate\Support\Facades\Log;
  * близнец. Повторно гоняет `tryLink` ТОЛЬКО по детерминированным заголовкам/
  * коду (без fuzzy L4 — ошибочная авто-привязка хуже, чем оставить в триаже
  * /dashboard/invoices/unlinked). На успехе дёргает `ParseOutboundQuoteJob`
- * по самоопределяющимся счёт/КП-вложениям → OutboundQuote → Invoice.
+ * по СВЕЖИМ самоопределяющимся счёт/КП-вложениям → OutboundQuote → Invoice.
+ *
+ * Гард свежести: разбираем только документы, чья дата в имени файла ≤ fresh-days.
+ * Иначе авто-привязка воскрешала бы пересылки архивных счетов («Счет МЗ-368 от
+ * 2025-01» как напоминание) — их место в ручном триаже, не в авто-создании.
  *
  *   php artisan mail:relink-deferred-outbound                 # dry-list
  *   php artisan mail:relink-deferred-outbound --apply         # реально
- *   php artisan mail:relink-deferred-outbound --apply --since-hours=336
+ *   php artisan mail:relink-deferred-outbound --apply --fresh-days=45
  */
 class MailRelinkDeferredOutboundCommand extends Command
 {
     protected $signature = 'mail:relink-deferred-outbound
         {--apply : Реально перепривязать + dispatch разбор (без флага — dry-list)}
         {--limit=50 : Сколько писем обработать за прогон}
-        {--since-hours=168 : Брать только за последние N часов (default 7 дней)}';
+        {--since-hours=168 : Брать только письма за последние N часов (default 7 дней)}
+        {--fresh-days=30 : Разбирать только документы с датой ≤ N дней (анти-воскрешение архива)}';
 
-    protected $description = 'Перепривязать исходящие письма со счётом/КП, зависшие без заявки (гонка отложенной привязки)';
+    protected $description = 'Перепривязать исходящие письма со свежим счётом/КП, зависшие без заявки (гонка отложенной привязки)';
 
     public function handle(OutgoingMailLinker $linker, OutboundDocumentDetector $detector): int
     {
         $apply = (bool) $this->option('apply');
         $limit = max(1, (int) $this->option('limit'));
         $sinceHours = max(1, (int) $this->option('since-hours'));
+        $freshDays = max(1, (int) $this->option('fresh-days'));
+        $freshCutoff = now()->subDays($freshDays)->startOfDay();
 
         // Кандидаты: исходящие без заявки, со ссылками на тред (in_reply_to /
         // references — иначе по заголовкам линковать не по чему) и хотя бы одним
@@ -61,6 +68,7 @@ class MailRelinkDeferredOutboundCommand extends Command
                     ->orWhere('filename', 'ilike', 'Инвойс %')
                     ->orWhere('filename', 'ilike', 'Предложение %');
             })
+            ->with('attachments')
             ->orderBy('id')
             ->limit($limit)
             ->get();
@@ -72,26 +80,51 @@ class MailRelinkDeferredOutboundCommand extends Command
         }
 
         $this->info(sprintf(
-            '%s %d писем (mode: %s).',
+            '%s %d писем (mode: %s, fresh ≤%dд).',
             $apply ? 'Обрабатываю' : 'Найдено',
             $candidates->count(),
             $apply ? 'apply' : 'dry-list',
+            $freshDays,
         ));
 
-        $stats = ['examined' => 0, 'linked' => 0, 'parse_dispatched' => 0, 'still_unlinked' => 0];
+        $stats = ['examined' => 0, 'skipped_stale' => 0, 'linked' => 0, 'parse_dispatched' => 0, 'still_unlinked' => 0];
 
         foreach ($candidates as $m) {
             $stats['examined']++;
+
+            // Свежие самоопределяющиеся документы (счёт/КП с датой ≤ fresh-days).
+            // Авто-привязку делаем ТОЛЬКО ради них; старьё — в ручной триаж.
+            $freshDocs = [];
+            foreach ($m->attachments as $att) {
+                $type = $detector->classifyAttachmentByFilename((string) $att->filename);
+                if ($type === null) {
+                    continue;
+                }
+                $date = $this->docDateFromFilename((string) $att->filename);
+                if ($date === null || $date->lt($freshCutoff)) {
+                    continue;
+                }
+                $freshDocs[] = ['att' => $att, 'type' => $type];
+            }
+
             $line = sprintf(
-                '  #%d  %s  → %s  in_reply_to=%s',
+                '  #%d  %s  → %s',
                 $m->id,
                 mb_substr((string) $m->subject, 0, 45),
                 mb_substr((string) $m->from_email, 0, 30),
-                $m->in_reply_to ? mb_substr($m->in_reply_to, 0, 28) : '-',
             );
 
+            if (empty($freshDocs)) {
+                $stats['skipped_stale']++;
+                if (! $apply) {
+                    $this->line($line . '  [нет свежих документов — пропуск]');
+                }
+
+                continue;
+            }
+
             if (! $apply) {
-                $this->line($line);
+                $this->line($line . sprintf('  [свежих док-в: %d]', count($freshDocs)));
 
                 continue;
             }
@@ -117,17 +150,9 @@ class MailRelinkDeferredOutboundCommand extends Command
             }
 
             $stats['linked']++;
-
-            // Перепривязали — теперь разобрать документы (счёт → Invoice, КП →
-            // OutboundQuote). Парсим только самоопределяющиеся по имени вложения,
-            // каждое по СВОЕМУ типу; force=true пересоздаёт quote.
             $dispatched = 0;
-            foreach ($m->attachments as $att) {
-                $type = $detector->classifyAttachmentByFilename((string) $att->filename);
-                if ($type === null) {
-                    continue;
-                }
-                ParseOutboundQuoteJob::dispatch($att->id, $type->value, true);
+            foreach ($freshDocs as $fd) {
+                ParseOutboundQuoteJob::dispatch($fd['att']->id, $fd['type']->value, true);
                 $dispatched++;
                 $stats['parse_dispatched']++;
             }
@@ -152,5 +177,21 @@ class MailRelinkDeferredOutboundCommand extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Дата документа из имени файла «… от 2026-06-15_14-29-16.pdf» (YYYY-MM-DD).
+     */
+    private function docDateFromFilename(string $filename): ?Carbon
+    {
+        if (preg_match('/(\d{4})-(\d{2})-(\d{2})/', $filename, $m)) {
+            try {
+                return Carbon::create((int) $m[1], (int) $m[2], (int) $m[3])->startOfDay();
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        return null;
     }
 }

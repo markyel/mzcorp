@@ -38,7 +38,10 @@ class Unlinked extends Component
     /** Строка поиска заявки в панели привязки. */
     public string $requestSearch = '';
 
-    private const NAME_LIKE = ['Счет %', 'Счёт %', 'Инвойс %'];
+    // Только НАШИ счета (формат «Счет МЗ-NNNN …»). Так отсекаем форварды
+    // поставщицких счетов («Счет 26-…», «… Деловые Линии Счет(-а).pdf»),
+    // которые не наши исходящие и заявку искать им не нужно.
+    private const NAME_LIKE = ['Счет МЗ-%', 'Счёт МЗ-%', 'Инвойс МЗ-%'];
 
     public function mount(): void
     {
@@ -200,9 +203,16 @@ class Unlinked extends Component
         $seenNumbers = [];
 
         foreach ($query->get() as $msg) {
+            // Клиент = первый ВНЕШНИЙ получатель. Нет такого (письмо ушло только
+            // внутренним адресам — внутренняя пересылка) → не наш клиентский счёт.
+            $client = $this->firstExternalRecipient($msg);
+            if ($client === null) {
+                continue;
+            }
+
             foreach ($msg->attachments as $att) {
                 $fn = (string) $att->filename;
-                if (! preg_match('/^(Сч[её]т|Инвойс)\s/u', $fn)) {
+                if (! preg_match('/^(Сч[её]т|Инвойс)\s+М[ЗЭ]-/u', $fn)) {
                     continue;
                 }
 
@@ -239,7 +249,7 @@ class Unlinked extends Component
                     'doc_date' => $docDate?->format('d.m.Y'),
                     'from_email' => $msg->from_email,
                     'mailbox' => $msg->mailbox?->email,
-                    'client' => $this->firstRecipient($msg),
+                    'client' => $client,
                     'subject' => (string) $msg->subject,
                     'sent_at' => $msg->sent_at?->format('d.m.Y H:i'),
                 ];
@@ -276,11 +286,32 @@ class Unlinked extends Component
         return [$number, $date];
     }
 
-    private function firstRecipient(EmailMessage $msg): ?string
+    /**
+     * Первый ВНЕШНИЙ (не наш домен) получатель письма — это клиент.
+     * Внутренние пересылки (только @myzip.ru в to) → null.
+     */
+    private function firstExternalRecipient(EmailMessage $msg): ?string
     {
+        $domains = array_values(array_filter(array_map(
+            fn ($d) => mb_strtolower(trim((string) $d)),
+            (array) config('services.mail.internal_domains', []),
+        )));
+
         foreach ((array) $msg->to_recipients as $r) {
-            if (is_array($r) && ! empty($r['email'])) {
-                return (string) $r['email'];
+            $email = is_array($r) ? ($r['email'] ?? null) : null;
+            if (! $email) {
+                continue;
+            }
+            $email = mb_strtolower(trim((string) $email));
+            $isInternal = false;
+            foreach ($domains as $d) {
+                if ($d !== '' && str_ends_with($email, '@' . $d)) {
+                    $isInternal = true;
+                    break;
+                }
+            }
+            if (! $isInternal) {
+                return $email;
             }
         }
 
