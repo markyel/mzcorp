@@ -7,6 +7,10 @@
             <span class="flex-1"></span>
             <button type="button" wire:click="openBulk" class="btn btn-sm mr-3"
                     title="Отметить оплаченными несколько счетов по списку номеров">✓ Массовая оплата</button>
+            @if($this->canSeeAll())
+                <a href="{{ route('invoices.unlinked') }}" wire:navigate class="btn btn-sm mr-3"
+                   title="Исходящие счета, не нашедшие заявку — привязать вручную">⚠ Непривязанные</a>
+            @endif
             <span class="text-[11.5px] text-fg-3 mono">{{ $this->invoices->total() }} счетов</span>
         </div>
 

@@ -141,6 +141,18 @@ Schedule::command('mail:relink-deferred --limit=50')
     ->onOneServer()
     ->runInBackground();
 
+// Self-healing (исходящий близнец предыдущего): перепривязать ИСХОДЯЩИЕ письма
+// со счётом/КП, зависшие без заявки из-за гонки отложенной привязки (счёт ушёл
+// раньше, чем родитель треда получил related_request_id — кейс 6197). Линкует
+// только по детерминированным заголовкам/коду (без fuzzy L4) и дёргает разбор
+// → Invoice. Что НЕ перепривязалось (родителя нет в БД) — оператор разбирает
+// руками на /dashboard/invoices/unlinked. См. MailRelinkDeferredOutboundCommand.
+Schedule::command('mail:relink-deferred-outbound --apply --limit=50')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Self-healing: backfill пропущенных IMAP APPEND в личные ящики менеджеров.
 // DeliverToManagerInboxJob иногда теряется (queue:restart в-флайт, worker
 // crash, manual processIfRequest пропускающий auto-assign-chain). Каждые

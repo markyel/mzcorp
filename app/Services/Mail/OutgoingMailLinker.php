@@ -37,7 +37,14 @@ class OutgoingMailLinker
     ) {
     }
 
-    public function tryLink(EmailMessage $message): ?Request
+    /**
+     * @param  bool  $allowFuzzyRecipientMatch  Разрешить L4 (привязка по
+     *   получателю + subject-similarity). Для авто-перепривязки в фоне
+     *   (`mail:relink-deferred-outbound`) передаём false: линкуем ТОЛЬКО по
+     *   детерминированным заголовкам/коду (L1/L2/L3/L3.5), без шаткого L4 —
+     *   ошибочная авто-привязка к не той заявке хуже, чем оставить в триаже.
+     */
+    public function tryLink(EmailMessage $message, bool $allowFuzzyRecipientMatch = true): ?Request
     {
         if ($message->related_request_id) {
             return Request::find($message->related_request_id);
@@ -73,8 +80,8 @@ class OutgoingMailLinker
             ? Request::find($matched->related_request_id)
             : null;
 
-        // L4: to_recipients + open Requests клиента.
-        if (! $request) {
+        // L4: to_recipients + open Requests клиента (fuzzy, по subject-similarity).
+        if (! $request && $allowFuzzyRecipientMatch) {
             $request = $this->matchByOpenRequestForRecipients($message);
             if ($request) {
                 $matchedBy = 'to_recipient_open_request';

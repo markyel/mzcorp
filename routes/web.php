@@ -128,6 +128,13 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/mail-review', function () {
             return view('admin.mail-review.index');
         })->name('mail-review.index');
+
+        // Триаж исходящих счетов, не нашедших заявку (Слой B). Авто-привязка
+        // (mail:relink-deferred-outbound) разбирает только то, что линкуется по
+        // заголовкам; остальное — сюда, привилегированный привязывает вручную.
+        Route::get('/dashboard/invoices/unlinked', function () {
+            return view('invoices.unlinked');
+        })->name('invoices.unlinked');
     });
 
     // Phase 4: раздел «Счета». Менеджер видит свои Invoice, привилегированные
