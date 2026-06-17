@@ -89,7 +89,8 @@ class ClientsExtractRequisitesCommand extends Command
                 if (! $org->exists) {
                     $stats['orgs_new']++;
                 }
-                if (trim((string) ($org->name ?? '')) === '' && $buyer['name']) {
+                $namePlaceholder = preg_match('/^ИНН \d+$/u', (string) $org->name) === 1;
+                if ((trim((string) ($org->name ?? '')) === '' || $namePlaceholder) && $buyer['name']) {
                     $org->name = $buyer['name'];
                 }
                 if (trim((string) ($org->kpp ?? '')) === '' && $buyer['kpp']) {
@@ -120,44 +121,63 @@ class ClientsExtractRequisitesCommand extends Command
     private function parseBuyer(string $text): array
     {
         $res = ['name' => null, 'inn' => null, 'kpp' => null, 'address' => null];
-
-        $block = null;
-        if (preg_match('/Покупатель\s*:?\s*(.{0,250})/iu', $text, $m)) {
-            $block = trim(preg_replace('/\s+/u', ' ', $m[1]) ?? '');
+        $flat = trim((string) preg_replace('/\s+/u', ' ', $text));
+        if ($flat === '') {
+            return $res;
         }
 
-        // ИНН покупателя: внутри блока — первый; если блока нет — любой не наш.
-        $haystack = $block ?? trim(preg_replace('/\s+/u', ' ', $text) ?? '');
-        if ($block !== null && preg_match('/ИНН\D{0,3}(\d{10,12})/iu', $block, $mm)) {
-            $res['inn'] = $mm[1];
-        } elseif (preg_match_all('/\b(\d{10}|\d{12})\b/', $haystack, $all)) {
-            foreach ($all[1] as $inn) {
-                if ($inn !== $this->ourInn) {
-                    $res['inn'] = $inn;
+        // ИНН покупателя = первый «ИНН NNN», отличный от нашего. С позицией —
+        // чтобы достать имя (назад) и КПП/адрес (вперёд).
+        $innPos = null;
+        if (preg_match_all('/ИНН\D{0,4}(\d{10,12})/iu', $flat, $m, PREG_OFFSET_CAPTURE)) {
+            foreach ($m[1] as $i => $cap) {
+                if ($cap[0] !== $this->ourInn) {
+                    $res['inn'] = $cap[0];
+                    $innPos = (int) $m[0][$i][1];
                     break;
                 }
             }
         }
-        if ($res['inn'] === $this->ourInn) {
-            $res['inn'] = null;
-        }
         if ($res['inn'] === null) {
+            // голый не-наш ИНН (без метки «ИНН») — хотя бы идентифицируем орг.
+            if (preg_match_all('/(?<!\d)(\d{10}|\d{12})(?!\d)/', $flat, $all)) {
+                foreach ($all[1] as $inn) {
+                    if ($inn !== $this->ourInn) {
+                        $res['inn'] = $inn;
+                        break;
+                    }
+                }
+            }
+
             return $res;
         }
 
-        if ($block !== null) {
-            if (preg_match('/^(.+?),?\s*ИНН/iu', $block, $mm)) {
-                $res['name'] = trim($mm[1], " ,\t\n");
-            }
-            if (preg_match('/КПП\D{0,3}(\d{9})/iu', $block, $mm)) {
-                $res['kpp'] = $mm[1];
-            }
-            if (preg_match('/КПП\D{0,3}\d{9}\s*,?\s*(.+)$/iu', $block, $mm)) {
-                $res['address'] = trim(mb_substr(trim($mm[1]), 0, 200), " ,");
-            }
+        // КПП + адрес — в окне после ИНН-метки.
+        $after = mb_substr($flat, $innPos, 260);
+        if (preg_match('/КПП\D{0,4}(\d{9})/iu', $after, $mm)) {
+            $res['kpp'] = $mm[1];
+        }
+        if (preg_match('/КПП\D{0,4}\d{9}\s*,?\s*(.+)$/iu', $after, $mm)) {
+            $res['address'] = trim(mb_substr(trim($mm[1]), 0, 180), " ,;");
+        }
+
+        // Имя — назад от ИНН (до 160 символов): орг-форма или «…»/"…".
+        $bStart = max(0, $innPos - 160);
+        $before = mb_substr($flat, $bStart, $innPos - $bStart);
+        if (preg_match('/((?:ООО|ОАО|ЗАО|ПАО|НАО|АО|ИП|НКО|ФГУП|МУП|ГУП|ГБУ|АНО|ТСЖ|СНТ)\b[^,]{0,70})\s*,?\s*$/iu', $before, $mm)) {
+            $res['name'] = $this->cleanName($mm[1]);
+        } elseif (preg_match('/([«"„][^»"“]{2,70}[»"“])\s*,?\s*$/u', $before, $mm)) {
+            $res['name'] = $this->cleanName($mm[1]);
         }
 
         return $res;
+    }
+
+    private function cleanName(string $s): string
+    {
+        $s = preg_replace('/^\s*Покупатель\s*:?\s*/iu', '', trim($s)) ?? $s;
+
+        return trim($s, " ,;:\t\n");
     }
 
     private function linkEmail(Organization $org, string $email, array &$stats): void
