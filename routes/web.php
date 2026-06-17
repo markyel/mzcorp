@@ -151,7 +151,11 @@ Route::middleware('auth')->group(function () {
             return view('clients.index');
         })->name('clients.index');
 
-        Route::get('/dashboard/clients/{organization}', function (\App\Models\Organization $organization) {
+        Route::get('/dashboard/clients/contact/{contact}', function (\App\Models\ClientContact $contact) {
+            return view('clients.contact', ['contact' => $contact]);
+        })->name('clients.contact');
+
+        Route::get('/dashboard/clients/org/{organization}', function (\App\Models\Organization $organization) {
             return view('clients.show', ['organization' => $organization]);
         })->name('clients.show');
     });
