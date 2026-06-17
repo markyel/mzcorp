@@ -103,6 +103,19 @@ Schedule::command('quotes:reboost-stuck-decisions --apply --limit=50')
     ->onOneServer()
     ->runInBackground();
 
+// Self-healing: переразбор упавших исходящих КП/счетов. Кейс 15.06.2026:
+// OpenAI insufficient_quota (429) уронил серию счетов (6190/6191/6192/6195/
+// 6198…) — OutboundQuote'ы зависли в status=failed навсегда, счета не попали
+// в /dashboard/invoices. Команда повторно дёргает ParseOutboundQuoteJob, когда
+// квота восстановилась. Сама пропускает прогон, если circuit-breaker открыт;
+// троттлинг/age-window/attempt-cap — в config('services.quotes.reparse_failed').
+// См. App\Console\Commands\QuotesReparseFailedCommand.
+Schedule::command('quotes:reparse-failed --apply')
+    ->everyThirtyMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Self-healing: подобрать письма, у которых категоризатор упал
 // (OpenAI 503/timeout / invalid JSON). Без этого письмо застревает
 // без category и не превращается в Request — кейс 25.05.2026 #3681.

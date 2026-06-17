@@ -339,6 +339,24 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
             $quote->parse_error = mb_substr($e->getMessage(), 0, 1000);
             $quote->save();
 
+            // Скормить transient-ошибку (429/insufficient_quota/503/timeout)
+            // circuit-breaker'у — чтобы простой квоты при разборе счетов тоже
+            // открыл circuit и уведомил админа (раньше его кормил только
+            // MailCategoryClassifier). Self-healing подберёт failed-quote позже
+            // через `quotes:reparse-failed`. Non-fatal: breaker — best-effort.
+            try {
+                $breaker = app(\App\Services\AI\OpenAiCircuitBreaker::class);
+                if ($breaker->isTransientError($e)) {
+                    $breaker->recordFailure($e->getMessage(), [
+                        'source' => 'ParseOutboundQuoteJob',
+                        'quote_id' => $quote->id,
+                        'attachment_id' => $attachment->id,
+                    ]);
+                }
+            } catch (\Throwable $ignore) {
+                // breaker не должен ронять основной flow
+            }
+
             Log::error('ParseOutboundQuoteJob: failed', [
                 'quote_id' => $quote->id,
                 'attachment_id' => $attachment->id,

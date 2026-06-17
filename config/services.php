@@ -168,6 +168,28 @@ return [
         'max_attachment_bytes' => (int) env('QUOTE_MAX_ATTACHMENT_BYTES', 15 * 1024 * 1024),
         // Расширения, на которых триггерится ParseOutboundQuoteJob.
         'parseable_extensions' => ['pdf', 'xlsx', 'xls', 'docx'],
+
+        /*
+        | Self-healing переразбор упавших исходящих КП/счетов
+        | (`quotes:reparse-failed`, крон каждые 30 мин). Кейс M-2026-XXXX:
+        | 15.06.2026 OpenAI вернул insufficient_quota (429) на серию счетов —
+        | OutboundQuote'ы зависли в status=failed без авто-восстановления,
+        | счета не попали в /dashboard/invoices. Команда повторно дёргает
+        | ParseOutboundQuoteJob, когда квота восстановилась.
+        */
+        'reparse_failed' => [
+            // Максимум quote'ов за один прогон (защита от лавины вызовов).
+            'limit' => (int) env('QUOTE_REPARSE_LIMIT', 50),
+            // Брать только failed-quote'ы не старше N дней (старые не воскрешаем —
+            // их заявки уже могли уйти дальше по воронке).
+            'max_age_days' => (int) env('QUOTE_REPARSE_MAX_AGE_DAYS', 14),
+            // Не повторять переразбор одного quote чаще, чем раз в N часов —
+            // чтобы при длительном простое OpenAI не жечь cap за один час.
+            'min_interval_hours' => (int) env('QUOTE_REPARSE_MIN_INTERVAL_HOURS', 2),
+            // Cap авто-переразборов на quote: после N безуспешных попыток
+            // считаем документ непарсимым (битый PDF и т.п.) и больше не трогаем.
+            'max_attempts' => (int) env('QUOTE_REPARSE_MAX_ATTEMPTS', 6),
+        ],
     ],
 
     /*
