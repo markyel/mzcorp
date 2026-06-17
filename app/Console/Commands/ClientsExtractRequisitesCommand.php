@@ -126,6 +126,23 @@ class ClientsExtractRequisitesCommand extends Command
             return $res;
         }
 
+        // 1) Чёткий блок «Покупатель: <Название>, ИНН …, КПП …, <адрес>» (счета 1С).
+        if (preg_match('/Покупатель\s*:?\s*([^,]{2,90})(.{0,200})/iu', $flat, $m)
+            && preg_match('/ИНН\D{0,4}(\d{10,12})/iu', $m[2], $mi)
+            && $mi[1] !== $this->ourInn) {
+            $res['inn'] = $mi[1];
+            $res['name'] = $this->cleanName($m[1]);
+            if (preg_match('/КПП\D{0,4}(\d{9})/iu', $m[2], $mk)) {
+                $res['kpp'] = $mk[1];
+            }
+            if (preg_match('/(?:КПП\D{0,4}\d{9}|ИНН\D{0,4}\d{10,12})\s*,?\s*(.+)$/iu', $m[2], $ma)) {
+                $res['address'] = trim(mb_substr(trim($ma[1]), 0, 160), " ,;");
+            }
+
+            return $res;
+        }
+
+        // 2) Якорь на не-наш ИНН (раскладки без чёткого блока «Покупатель»).
         // ИНН покупателя = первый «ИНН NNN», отличный от нашего. С позицией —
         // чтобы достать имя (назад) и КПП/адрес (вперёд).
         $innPos = null;
