@@ -314,6 +314,7 @@ class Unlinked extends Component
             ->get()
             ->keyBy('id');
 
+        $clientEmail = mb_strtolower((string) $this->attachingClientEmail());
         $out = collect();
         foreach ($topReqIds as $rid) {
             $req = $requests->get($rid);
@@ -329,7 +330,13 @@ class Unlinked extends Component
             $out->push(['req' => $req, 'skus' => $skus]);
         }
 
-        return $out;
+        // Ранжирование: число совпавших артикулов — главное (вес ×2), вторично —
+        // заявка ТОГО ЖЕ заказчика, что и счёт (+1, ломает только ничью по числу,
+        // т.к. шаг по числу ≥2). Так 2/2 кросс-клиента всё равно выше 1/1 своего.
+        return $out
+            ->sortByDesc(fn ($e) => count($e['skus']) * 2
+                + (mb_strtolower((string) $e['req']->client_email) === $clientEmail ? 1 : 0))
+            ->values();
     }
 
     /**
