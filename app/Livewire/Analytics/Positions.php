@@ -3,6 +3,7 @@
 namespace App\Livewire\Analytics;
 
 use App\Enums\Role as RoleEnum;
+use App\Models\CatalogPriceChange;
 use App\Models\IqotPosition;
 use App\Services\Analytics\ManagerAnalyticsService;
 use Carbon\CarbonImmutable;
@@ -120,6 +121,51 @@ class Positions extends Component
             ->whereIn('catalog_item_id', $ids)
             ->whereNotNull('analyzed_at')
             ->whereNotNull('report')
+            ->get()
+            ->keyBy('catalog_item_id');
+    }
+
+    /**
+     * Карта catalog_item_id → ПОСЛЕДНЕЕ изменение цены в выбранном периоде
+     * (по changed_at). Сигнал «цена позиции менялась» прямо в списке. Только
+     * для позиций текущей страницы и только с обеими ценами (было→стало).
+     *
+     * @return \Illuminate\Support\Collection<int, CatalogPriceChange>
+     */
+    #[Computed]
+    public function priceChangeByCatalogId()
+    {
+        $ids = collect($this->rows->items())->pluck('catalog_item_id')->filter()->all();
+        if ($ids === []) {
+            return collect();
+        }
+
+        $cutoff = match ($this->period) {
+            '30' => now()->subDays(30),
+            '365' => now()->subDays(365),
+            'all' => null,
+            default => now()->subDays(90),
+        };
+
+        $base = CatalogPriceChange::query()
+            ->whereIn('catalog_item_id', $ids)
+            ->whereNotNull('old_price')
+            ->whereNotNull('new_price');
+        if ($cutoff !== null) {
+            $base->where('changed_at', '>=', $cutoff);
+        }
+
+        // Последнее изменение на позицию (max id = самое свежее).
+        $latestIds = (clone $base)
+            ->selectRaw('max(id) as id')
+            ->groupBy('catalog_item_id')
+            ->pluck('id');
+        if ($latestIds->isEmpty()) {
+            return collect();
+        }
+
+        return CatalogPriceChange::query()
+            ->whereIn('id', $latestIds)
             ->get()
             ->keyBy('catalog_item_id');
     }

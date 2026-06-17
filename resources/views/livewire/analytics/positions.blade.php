@@ -76,6 +76,22 @@
                                 <td class="px-2 py-1.5">
                                     <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($r->name ?? '—', 70) }}</div>
                                     <div class="mono text-[11px] text-fg-3">{{ $r->sku ?? '—' }}</div>
+                                    @php $pc = $this->priceChangeByCatalogId->get($r->catalog_item_id); @endphp
+                                    @if($pc)
+                                        @php
+                                            $delta = (float) $pc->new_price - (float) $pc->old_price;
+                                            $pct = (float) $pc->old_price != 0.0 ? (int) round($delta / (float) $pc->old_price * 100) : null;
+                                            $up = $delta > 0;
+                                        @endphp
+                                        <a href="{{ route('analytics.price-changes', ['q' => $r->sku]) }}" wire:navigate
+                                           class="mt-1 mr-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-medium border
+                                                  {{ $up ? 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100' : 'bg-sky-50 border-sky-200 text-sky-800 hover:bg-sky-100' }}"
+                                           title="Цена изменилась {{ optional($pc->changed_at)->format('d.m.Y') }}: {{ number_format((float) $pc->old_price, 0, ',', ' ') }} → {{ number_format((float) $pc->new_price, 0, ',', ' ') }} ₽">
+                                            <span>{{ $up ? '↑' : '↓' }} цена</span>
+                                            @if($pct !== null)<span class="mono">{{ $up ? '+' : '' }}{{ $pct }}%</span>@endif
+                                            <span class="opacity-70">· {{ optional($pc->changed_at)->format('d.m') }}</span>
+                                        </a>
+                                    @endif
                                     @if($hasIqot)
                                         <button type="button" @click="open = !open"
                                                 class="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10.5px] font-medium hover:bg-emerald-100">
