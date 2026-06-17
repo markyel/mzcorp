@@ -1243,6 +1243,57 @@ class Index extends Component
         return app(\App\Services\Analytics\ManagerAnalyticsService::class)->wonLostByManager($from, $to);
     }
 
+    /**
+     * Прозрачность системы оживления (ClientNotificationType::RevivalOffer):
+     * сколько оживляющих писем отправлено и каков результат — оживлена
+     * (клиент согласился, заявка реанимирована), тишина (нет ответа) или
+     * ответил без оживления (отказ/неясно). Список — последние 30.
+     *
+     * @return array{total:int, revived:int, silence:int, declined:int, rows: array<int, array<string, mixed>>}
+     */
+    #[Computed]
+    public function revivalStats(): array
+    {
+        if (! $this->isPrivileged) {
+            return ['total' => 0, 'revived' => 0, 'silence' => 0, 'declined' => 0, 'rows' => []];
+        }
+
+        $base = \App\Models\ClientNotificationSent::query()
+            ->where('type', \App\Enums\ClientNotificationType::RevivalOffer->value);
+
+        $total = (clone $base)->count();
+        $revived = (clone $base)->where('response_intent', 'positive')->count();
+        $silence = (clone $base)->whereNull('responded_at')->count();
+        $declined = max(0, $total - $revived - $silence);
+
+        $rows = (clone $base)
+            ->with([
+                'request:id,internal_code,status,client_name,client_email,assigned_user_id',
+                'request.assignedUser:id,name',
+            ])
+            ->orderByDesc('sent_at')
+            ->limit(30)
+            ->get()
+            ->map(function ($s) {
+                $result = $s->response_intent === 'positive'
+                    ? 'revived'
+                    : ($s->responded_at === null ? 'silence' : 'declined');
+
+                return [
+                    'request_id' => $s->request_id,
+                    'code' => $s->request?->internal_code,
+                    'status' => $s->request?->status?->value,
+                    'client' => $s->request?->client_name ?: $s->request?->client_email,
+                    'manager' => $s->request?->assignedUser?->name,
+                    'sent_at' => $s->sent_at,
+                    'responded_at' => $s->responded_at,
+                    'result' => $result,
+                ];
+            })->all();
+
+        return compact('total', 'revived', 'silence', 'declined', 'rows');
+    }
+
     public function render()
     {
         return view('livewire.dashboard.index');

@@ -1152,4 +1152,82 @@
             @endif
         </div>
     </div>
+
+    {{-- Оживление проигранных заявок (RevivalOffer) — прозрачность результата --}}
+    @if($this->isPrivileged)
+        @php $rv = $this->revivalStats; @endphp
+        <div class="ds-card">
+            <div class="ds-card-header">
+                <h3>Оживление проигранных заявок</h3>
+                <span class="text-[12px] text-fg-3 ml-2">авто-письма по снижению цены и их результат</span>
+                <span class="flex-1"></span>
+                <a href="{{ route('updates.index') }}" wire:navigate class="text-[12px] text-sky-700 hover:underline">что это →</a>
+            </div>
+            <div class="ds-card-body">
+                @if($rv['total'] === 0)
+                    <div class="text-sm text-fg-3">Пока ни одного оживляющего письма не отправлено. Система пришлёт его автоматически, когда по проигранной заявке с КП снизится цена.</div>
+                @else
+                    {{-- Сводка --}}
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 text-center">
+                        <div class="rounded-md border border-border bg-surface px-2 py-2">
+                            <div class="text-[18px] font-semibold text-fg-1 mono">{{ $rv['total'] }}</div>
+                            <div class="text-[10.5px] uppercase tracking-wider text-fg-3">Отправлено</div>
+                        </div>
+                        <div class="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-2">
+                            <div class="text-[18px] font-semibold text-emerald-700 mono">{{ $rv['revived'] }}</div>
+                            <div class="text-[10.5px] uppercase tracking-wider text-emerald-700">Оживлено</div>
+                        </div>
+                        <div class="rounded-md border border-border bg-surface px-2 py-2">
+                            <div class="text-[18px] font-semibold text-fg-2 mono">{{ $rv['silence'] }}</div>
+                            <div class="text-[10.5px] uppercase tracking-wider text-fg-3">Тишина</div>
+                        </div>
+                        <div class="rounded-md border border-amber-200 bg-amber-50 px-2 py-2">
+                            <div class="text-[18px] font-semibold text-amber-800 mono">{{ $rv['declined'] }}</div>
+                            <div class="text-[10.5px] uppercase tracking-wider text-amber-800">Ответил, без оживления</div>
+                        </div>
+                    </div>
+
+                    {{-- Список последних --}}
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-[12px]">
+                            <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
+                                <tr>
+                                    <th class="text-left px-2 py-1.5">Заявка</th>
+                                    <th class="text-left px-2 py-1.5">Клиент</th>
+                                    <th class="text-left px-2 py-1.5">Менеджер</th>
+                                    <th class="text-left px-2 py-1.5">Отправлено</th>
+                                    <th class="text-left px-2 py-1.5">Результат</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach($rv['rows'] as $row)
+                                    <tr wire:key="rv-{{ $row['request_id'] }}-{{ $row['sent_at']?->timestamp }}" class="border-b border-border-subtle hover:bg-hover">
+                                        <td class="px-2 py-1.5 whitespace-nowrap">
+                                            @if($row['request_id'])
+                                                <a href="{{ route('requests.show', $row['request_id']) }}" wire:navigate class="mono text-sky-700 hover:underline">{{ $row['code'] ?? '—' }}</a>
+                                            @else
+                                                <span class="mono text-fg-3">{{ $row['code'] ?? '—' }}</span>
+                                            @endif
+                                        </td>
+                                        <td class="px-2 py-1.5 text-fg-2 truncate max-w-[220px]">{{ $row['client'] ?? '—' }}</td>
+                                        <td class="px-2 py-1.5 text-fg-3 whitespace-nowrap">{{ $row['manager'] ?? '—' }}</td>
+                                        <td class="px-2 py-1.5 text-fg-3 mono whitespace-nowrap">{{ $row['sent_at']?->format('d.m.Y') }}</td>
+                                        <td class="px-2 py-1.5 whitespace-nowrap">
+                                            @if($row['result'] === 'revived')
+                                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700">↻ Оживлена</span>
+                                            @elseif($row['result'] === 'silence')
+                                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-medium bg-surface border border-border text-fg-3">Тишина</span>
+                                            @else
+                                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-medium bg-amber-50 border border-amber-200 text-amber-800">Ответил, без оживления</span>
+                                            @endif
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                @endif
+            </div>
+        </div>
+    @endif
 </div>
