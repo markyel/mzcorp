@@ -462,6 +462,23 @@ return [
     ],
 
     /*
+    | Автоматические уведомления клиенту (Phase 6). Пороги для «оживляющего»
+    | письма по падению цены (ClientNotificationType::RevivalOffer). Значения —
+    | дефолты для SettingsService (ключи notifications.revival.*), которые
+    | admin может переопределить в Настройках без правки кода.
+    */
+    'notifications' => [
+        'revival' => [
+            // За сколько дней назад берём проигранные (closed_lost) заявки.
+            'period_days' => (int) env('REVIVAL_PERIOD_DAYS', 14),
+            // Минимальное падение цены позиции (%), чтобы счесть КП устаревшим.
+            'drop_threshold_pct' => (float) env('REVIVAL_DROP_THRESHOLD_PCT', 15),
+            // Фраза-подсказка, которую просим написать клиента в ответ.
+            'reply_keyword' => env('REVIVAL_REPLY_KEYWORD', 'прислать новое КП'),
+        ],
+    ],
+
+    /*
     | Phase 1.10: state-machine заявок (Foundation §5.4).
     | См. RequestPauseService и `requests:resume-paused` cron.
     */

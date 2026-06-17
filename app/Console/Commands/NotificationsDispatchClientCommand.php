@@ -7,6 +7,7 @@ use App\Enums\DetectorType;
 use App\Enums\InvoiceStatus;
 use App\Enums\QuotationStatus;
 use App\Enums\RequestStatus;
+use App\Models\CatalogPriceChange;
 use App\Models\ClarificationBatch;
 use App\Models\ClientNotificationSent;
 use App\Models\ClientNotificationTemplate;
@@ -62,6 +63,7 @@ class NotificationsDispatchClientCommand extends Command
             ClientNotificationType::QuoteFollowupReminder->value => 0,
             ClientNotificationType::InvoiceExpiringSoon->value => 0,
             ClientNotificationType::InvoiceExpired->value => 0,
+            ClientNotificationType::RevivalOffer->value => 0,
         ];
 
         $types = ClientNotificationType::cronTriggerCases();
@@ -81,6 +83,7 @@ class NotificationsDispatchClientCommand extends Command
                 ClientNotificationType::QuoteFollowupReminder => $this->collectQuoteFollowupReminders($template, $settings),
                 ClientNotificationType::InvoiceExpiringSoon => $this->collectInvoiceExpiringSoon($template),
                 ClientNotificationType::InvoiceExpired => $this->collectInvoiceExpired($template),
+                ClientNotificationType::RevivalOffer => $this->collectRevivalOffers($template, $settings),
                 default => [],
             };
 
@@ -399,6 +402,144 @@ class NotificationsDispatchClientCommand extends Command
         }
 
         return $result;
+    }
+
+    /**
+     * «Оживляющие» письма: проигранные за период заявки с КП, по позициям
+     * которых цена в каталоге упала сильнее порога уже ПОСЛЕ отправки КП.
+     * Одно письмо на КП (scope_key = номер КП).
+     *
+     * @return array<int, array{request: Request, scope_key: string, reply_to: EmailMessage, extra: array}>
+     */
+    private function collectRevivalOffers(ClientNotificationTemplate $tmpl, SettingsService $settings): array
+    {
+        $periodDays = (int) $settings->get('notifications.revival.period_days', (int) config('services.notifications.revival.period_days', 14));
+        $thresholdPct = (float) $settings->get('notifications.revival.drop_threshold_pct', (float) config('services.notifications.revival.drop_threshold_pct', 15));
+        $replyKeyword = (string) $settings->get('notifications.revival.reply_keyword', (string) config('services.notifications.revival.reply_keyword', 'прислать новое КП'));
+
+        $cutoff = now()->subDays(max(1, $periodDays));
+
+        $requests = Request::with(['emailMessage', 'items'])
+            ->where('status', RequestStatus::ClosedLost->value)
+            ->whereNotNull('closed_at')
+            ->where('closed_at', '>=', $cutoff)
+            ->whereNotNull('client_email')
+            ->get();
+
+        $result = [];
+        foreach ($requests as $request) {
+            if (! $request->client_email) {
+                continue;
+            }
+
+            // Реально отправленное КП + якорь треда (письмо с КП).
+            $quote = $this->resolveLastSentQuote($request);
+            if (($quote['number'] ?? null) === null || ($quote['anchor'] ?? null) === null) {
+                continue;
+            }
+            $quoteSentAt = $quote['sent_at'] ?? $request->closed_at;
+
+            // Падение цены по позициям заявки ПОСЛЕ отправки КП.
+            $dropped = $this->collectPriceDrops($request, $quoteSentAt, $thresholdPct);
+            if ($dropped === []) {
+                continue;
+            }
+
+            $result[] = [
+                'request' => $request,
+                'scope_key' => 'quote_' . $quote['number'], // 1 письмо на КП
+                'reply_to' => $quote['anchor'],
+                'extra' => [
+                    'quote_number' => $quote['number'],
+                    'quote_date' => $quote['date'] ?? '—',
+                    'dropped_summary' => $this->buildDroppedSummary($dropped),
+                    'reply_keyword' => $replyKeyword,
+                ],
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Позиции заявки, по которым цена в каталоге упала сильнее $thresholdPct
+     * уже ПОСЛЕ $since (одно — самое свежее — изменение на позицию).
+     *
+     * @return array<int, array{name: string, sku: ?string, old: float, new: float, pct: float}>
+     */
+    private function collectPriceDrops(Request $request, mixed $since, float $thresholdPct): array
+    {
+        $catIds = $request->items
+            ->where('is_active', true)
+            ->pluck('catalog_item_id')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        if ($catIds === []) {
+            return [];
+        }
+
+        $changes = CatalogPriceChange::query()
+            ->whereIn('catalog_item_id', $catIds)
+            ->whereNotNull('old_price')
+            ->whereNotNull('new_price')
+            ->whereColumn('new_price', '<', 'old_price')
+            ->when($since, fn ($q) => $q->where('changed_at', '>=', $since))
+            ->with('catalogItem:id,sku,name')
+            ->orderByDesc('id')
+            ->get();
+
+        $byItem = [];
+        foreach ($changes as $ch) {
+            $cid = (int) $ch->catalog_item_id;
+            if (isset($byItem[$cid])) {
+                continue; // уже взяли самое свежее изменение (orderByDesc id)
+            }
+            $old = (float) $ch->old_price;
+            $new = (float) $ch->new_price;
+            if ($old <= 0) {
+                continue;
+            }
+            $pct = round(($old - $new) / $old * 100, 1);
+            if ($pct < $thresholdPct) {
+                continue;
+            }
+            $byItem[$cid] = [
+                'name' => (string) ($ch->catalogItem?->name ?? $ch->sku ?? '—'),
+                'sku' => $ch->sku,
+                'old' => $old,
+                'new' => $new,
+                'pct' => $pct,
+            ];
+        }
+
+        $rows = array_values($byItem);
+        usort($rows, fn ($a, $b) => $b['pct'] <=> $a['pct']);
+
+        return $rows;
+    }
+
+    /**
+     * @param  array<int, array{name: string, sku: ?string, old: float, new: float, pct: float}>  $dropped
+     */
+    private function buildDroppedSummary(array $dropped): string
+    {
+        $lines = [];
+        foreach (array_slice($dropped, 0, 5) as $d) {
+            $lines[] = sprintf(
+                '· %s — было %s ₽, стало %s ₽ (−%s%%)',
+                mb_substr((string) $d['name'], 0, 80),
+                number_format($d['old'], 0, ',', ' '),
+                number_format($d['new'], 0, ',', ' '),
+                rtrim(rtrim(number_format($d['pct'], 1, '.', ''), '0'), '.'),
+            );
+        }
+        if (count($dropped) > 5) {
+            $lines[] = '· … и другие позиции';
+        }
+
+        return implode("\n", $lines);
     }
 
     /**

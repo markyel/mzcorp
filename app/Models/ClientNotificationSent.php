@@ -27,6 +27,8 @@ class ClientNotificationSent extends Model
         'body_rendered_plain',
         'sent_at',
         'triggered_by_user_id',
+        'responded_at',
+        'response_intent',
     ];
 
     protected function casts(): array
@@ -34,6 +36,7 @@ class ClientNotificationSent extends Model
         return [
             'type' => ClientNotificationType::class,
             'sent_at' => 'datetime',
+            'responded_at' => 'datetime',
         ];
     }
 

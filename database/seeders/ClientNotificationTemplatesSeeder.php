@@ -27,11 +27,19 @@ class ClientNotificationTemplatesSeeder extends Seeder
         // Существующие НЕ трогаем — admin мог отредактировать тексты или
         // включить toggle через UI, перезатереть их повторным seed'ом нельзя.
         // Если нужен явный reset — admin удаляет row через tinker и запускает seeder.
+        // is_enabled по умолчанию false; шаблон может переопределить (RevivalOffer
+        // — true, по решению заказчика «включить сразу»). Существующие наполненные
+        // row не трогаем. НО: ClientNotificationTemplate::forType() (вызывается из
+        // cron/admin) мог опередить сидер и создать ПУСТОЙ disabled-stub — такой
+        // stub (body_template пуст) наполняем реальным текстом и нужным is_enabled.
         foreach ($this->templates() as $type => $data) {
-            ClientNotificationTemplate::firstOrCreate(
+            $tmpl = ClientNotificationTemplate::firstOrCreate(
                 ['type' => $type],
-                array_merge($data, ['is_enabled' => false])
+                array_merge(['is_enabled' => false], $data)
             );
+            if (trim((string) $tmpl->body_template) === '') {
+                $tmpl->update(array_merge(['is_enabled' => false], $data));
+            }
         }
     }
 
@@ -129,6 +137,26 @@ MD,
 MD,
                 'threshold_hours' => null,
                 'warning_days' => null,
+            ],
+
+            ClientNotificationType::RevivalOffer->value => [
+                'subject_template' => 'Актуальные цены по коммерческому предложению {{ quote_number }}',
+                'body_template' => <<<'MD'
+Здравствуйте, {{ client_name }}!
+
+Ранее мы направляли вам коммерческое предложение **{{ quote_number }}** от {{ quote_date }}. С тех пор по некоторым позициям из него цена снизилась:
+
+{{ dropped_summary }}
+
+Мы можем подготовить для вас актуальное коммерческое предложение с новыми ценами. Если это интересно — просто напишите в ответ на это письмо «{{ reply_keyword }}», и мы пришлём обновлённый расчёт.
+
+Если потребность уже закрыта — отвечать не нужно.
+
+MD,
+                'threshold_hours' => null,
+                'warning_days' => null,
+                // Заказчик попросил включить сразу (остальные типы — false).
+                'is_enabled' => true,
             ],
         ];
     }

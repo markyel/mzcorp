@@ -478,6 +478,29 @@ class MailRouter
                     'error' => $e->getMessage(),
                 ]);
             }
+
+            // Оживляющее письмо (RevivalOffer): reply на проигранную заявку, по
+            // которой отправлено оживляющее письмо без ответа — async LLM-job
+            // классифицирует согласие клиента и при положительном реанимирует.
+            try {
+                if ($linkedRequest->status === \App\Enums\RequestStatus::ClosedLost) {
+                    $revivalSent = \App\Models\ClientNotificationSent::query()
+                        ->where('request_id', $linkedRequest->id)
+                        ->where('type', \App\Enums\ClientNotificationType::RevivalOffer->value)
+                        ->whereNull('responded_at')
+                        ->orderByDesc('id')
+                        ->first();
+                    if ($revivalSent) {
+                        \App\Jobs\Mail\RevivalReplyMatcherJob::dispatch($message->id, $revivalSent->id);
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: dispatch revival reply matcher failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $linkedRequest->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         // Phase 1.8: для писем-заявок создаём Request. Решение принимается
