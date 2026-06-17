@@ -621,6 +621,15 @@ return [
     'iqot' => [
         'base_url' => env('IQOT_BASE_URL', 'https://iqot.ru/api/v1'),
         'timeout' => (int) env('IQOT_TIMEOUT', 30),
+        // Поллинг submissions (iqot:poll): троттлим запросы и останавливаем
+        // прогон при rate-limit, чтобы не выгребать лимит IQOT залпом и не
+        // засорять лог сериями 429. retry_after_cap_s — потолок ожидания по
+        // Retry-After внутри HTTP-ретраев.
+        'poll' => [
+            'inter_request_ms' => (int) env('IQOT_POLL_INTER_REQUEST_MS', 300),
+            'max_per_run' => (int) env('IQOT_POLL_MAX_PER_RUN', 100),
+            'retry_after_cap_s' => (int) env('IQOT_POLL_RETRY_AFTER_CAP_S', 8),
+        ],
         'enabled' => (bool) env('IQOT_ENABLED', false),
         'api_key' => env('IQOT_API_KEY', ''),
         // Дневной лимит позиций на анализ (защита баланса). 0 = не отправлять.

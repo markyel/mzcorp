@@ -46,7 +46,20 @@ class IqotApiService
             ->acceptJson()
             ->asJson()
             ->timeout($this->timeout)
-            ->retry(2, 1000, function (\Exception $e) {
+            ->retry(2, function (int $attempt, $exception) {
+                // Уважаем Retry-After (секунды) при 429; иначе экспоненциальный
+                // бэкофф 1s→2s. Кап ожидания — services.iqot.poll.retry_after_cap_s.
+                if ($exception instanceof \Illuminate\Http\Client\RequestException && $exception->response) {
+                    $ra = trim((string) $exception->response->header('Retry-After'));
+                    if ($ra !== '' && is_numeric($ra)) {
+                        $capMs = max(1000, (int) config('services.iqot.poll.retry_after_cap_s', 8) * 1000);
+
+                        return max(1000, min((int) round(((float) $ra) * 1000), $capMs));
+                    }
+                }
+
+                return min(1000 * (2 ** max(0, $attempt - 1)), 8000);
+            }, function (\Exception $e) {
                 if ($e instanceof \Illuminate\Http\Client\RequestException) {
                     return in_array($e->response?->status(), [429, 500, 502, 503], true);
                 }
@@ -198,14 +211,21 @@ class IqotApiService
             ? $errorBody['details']
             : [];
 
-        Log::error('IqotApiService: API error', [
+        $logContext = [
             'operation' => $operation,
             'status' => $resp->status(),
             'code' => $code,
             'message' => $msg,
             'request_id' => $requestId,
             'details' => $details,
-        ]);
+        ];
+        // 429 rate-limit — ожидаемый транзиентный случай (поллер троттлит и
+        // останавливает прогон), не ERROR-шум.
+        if ($resp->status() === 429) {
+            Log::warning('IqotApiService: rate-limited (429)', $logContext);
+        } else {
+            Log::error('IqotApiService: API error', $logContext);
+        }
 
         throw new IqotApiException(
             message: sprintf(

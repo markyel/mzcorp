@@ -51,15 +51,49 @@ class PollIqotSubmissionsJob implements ShouldQueue
             return;
         }
 
+        // Троттлинг, чтобы не выгребать rate-limit IQOT залпом.
+        $delayUs = max(0, (int) config('services.iqot.poll.inter_request_ms', 300)) * 1000;
+        $maxPerRun = max(1, (int) config('services.iqot.poll.max_per_run', 100));
+        $total = $submissions->count();
+        $processed = 0;
+
         foreach ($submissions as $sub) {
+            if ($processed >= $maxPerRun) {
+                Log::info('PollIqotSubmissionsJob: достигнут max_per_run — остальное в следующий прогон', [
+                    'max_per_run' => $maxPerRun,
+                    'remaining' => $total - $processed,
+                ]);
+                break;
+            }
+
             try {
                 $this->pollOne($sub, $svc);
+            } catch (IqotApiException $e) {
+                // Rate-limit: останавливаем прогон — продолжим в следующий крон.
+                // Так лог не засоряется серией 429 и лимит IQOT не выгребается.
+                if ($e->httpStatus === 429) {
+                    Log::warning('PollIqotSubmissionsJob: IQOT rate-limited — прогон остановлен', [
+                        'processed' => $processed,
+                        'remaining' => $total - $processed,
+                    ]);
+                    break;
+                }
+                Log::error('PollIqotSubmissionsJob: ошибка опроса', [
+                    'iqot_submission_id' => $sub->id,
+                    'submission_id' => $sub->submission_id,
+                    'error' => $e->getMessage(),
+                ]);
             } catch (\Throwable $e) {
                 Log::error('PollIqotSubmissionsJob: ошибка опроса', [
                     'iqot_submission_id' => $sub->id,
                     'submission_id' => $sub->submission_id,
                     'error' => $e->getMessage(),
                 ]);
+            }
+
+            $processed++;
+            if ($delayUs > 0 && $processed < $total) {
+                usleep($delayUs);
             }
         }
     }
@@ -73,6 +107,12 @@ class PollIqotSubmissionsJob implements ShouldQueue
         try {
             $res = $svc->getSubmission($sub->submission_id);
         } catch (IqotApiException $e) {
+            // 429 rate-limit — транзиентный, не вина submission: пробрасываем
+            // наверх, чтобы джоб остановил прогон (не жёг лимит залпом) и не
+            // записывал ложный error_code в запись.
+            if ($e->httpStatus === 429) {
+                throw $e;
+            }
             $sub->forceFill([
                 'last_polled_at' => now(),
                 'error_code' => $e->errorCode,
