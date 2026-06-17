@@ -82,6 +82,9 @@ class ClientsBackfillCommand extends Command
             ->orderBy('id')
             ->chunkById(300, function ($chunk) use (&$stats) {
                 foreach ($chunk as $q) {
+                    // recipient_name в КП часто = ФИО получателя, а не юр.лицо.
+                    // Организацию создаём только если есть ИНН или имя похоже на
+                    // юр.лицо; ФИО-получатели остаются только контактами.
                     $org = $this->resolveOrg($q->recipient_name, $q->recipient_inn, $stats);
                     if (! $org) {
                         continue;
@@ -107,7 +110,9 @@ class ClientsBackfillCommand extends Command
             ->orderBy('id')
             ->chunkById(500, function ($chunk) use (&$stats) {
                 foreach ($chunk as $r) {
-                    $org = $this->resolveOrg($r->client_company, null, $stats);
+                    // client_company — спец-поле компании из веб-формы, считаем
+                    // организацией всегда (assumeOrg), даже без орг-маркера.
+                    $org = $this->resolveOrg($r->client_company, null, $stats, assumeOrg: true);
                     if (! $org) {
                         continue;
                     }
@@ -127,11 +132,16 @@ class ClientsBackfillCommand extends Command
      * firstOrNew организации по ИНН (если есть) либо по имени; гарантирует
      * непустое name. Считает новые в $stats['orgs'].
      */
-    private function resolveOrg(?string $name, ?string $inn, array &$stats): ?Organization
+    private function resolveOrg(?string $name, ?string $inn, array &$stats, bool $assumeOrg = false): ?Organization
     {
         $inn = preg_replace('/\D+/', '', (string) $inn) ?? '';
         $name = trim((string) $name);
         if ($inn === '' && $name === '') {
+            return null;
+        }
+        // Без ИНН и не из спец-поля компании — берём только если имя похоже на
+        // юр.лицо (ООО/ИП/АО/кавычки), иначе это ФИО получателя, не организация.
+        if (! $assumeOrg && $inn === '' && ! $this->looksLikeOrg($name)) {
             return null;
         }
 
@@ -147,6 +157,19 @@ class ClientsBackfillCommand extends Command
         }
 
         return $org;
+    }
+
+    /**
+     * Имя похоже на юридическое лицо (орг-форма или кавычки в названии).
+     * Отсекает ФИО-получателей КП от настоящих организаций.
+     */
+    private function looksLikeOrg(string $name): bool
+    {
+        if (str_contains($name, '"') || str_contains($name, '«') || str_contains($name, '”')) {
+            return true;
+        }
+
+        return preg_match('/(^|\W)(ООО|ОАО|ЗАО|АО|ПАО|ИП|НКО|ФГУП|МУП|ГУП|ГБУ|МБУ|АНО|ТСЖ|СНТ|КФХ|ООО|LLC|LTD|GMBH|INC)(\W|$)/iu', $name) === 1;
     }
 
     private function linkEmail(Organization $org, string $email, array &$stats): void
