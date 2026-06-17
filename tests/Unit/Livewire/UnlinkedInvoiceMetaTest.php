@@ -47,4 +47,21 @@ class UnlinkedInvoiceMetaTest extends TestCase
         $this->assertNull($number);
         $this->assertNull($date);
     }
+
+    public function test_m_codes_extracted_normalized_and_deduped(): void
+    {
+        $text = 'Поз 1 M07391 шт 2; поз 2 М08831 (кириллица); поз 3 M 17412 с пробелом; повтор M07391';
+        $codes = Unlinked::mCodesFromText($text);
+
+        // Кириллическая М→M, пробел убран, дубликаты схлопнуты.
+        $this->assertContains('M07391', $codes);
+        $this->assertContains('M08831', $codes);
+        $this->assertContains('M17412', $codes);
+        $this->assertSame(3, count($codes));
+    }
+
+    public function test_m_codes_empty_when_none(): void
+    {
+        $this->assertSame([], Unlinked::mCodesFromText('Контактор Siemens 3RT2025 без M-кодов, ИНН 7715802492'));
+    }
 }

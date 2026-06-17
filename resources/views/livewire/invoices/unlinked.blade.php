@@ -69,7 +69,7 @@
                                     @if($attachingMsgId === $row['msg_id'])
                                         <button type="button" wire:click="cancelAttach" class="btn btn-sm">Отмена</button>
                                     @else
-                                        <button type="button" wire:click="startAttach({{ $row['msg_id'] }})" class="btn btn-sm btn-primary">Привязать к заявке</button>
+                                        <button type="button" wire:click="startAttach({{ $row['msg_id'] }}, {{ $row['att_id'] }})" class="btn btn-sm btn-primary">Привязать к заявке</button>
                                     @endif
                                 </td>
                             </tr>
@@ -95,6 +95,22 @@
                                 <tr wire:key="attach-{{ $row['msg_id'] }}" class="bg-[var(--bg-surface-2,var(--bg-hover))]">
                                     <td colspan="6" class="px-3 py-3">
                                         <div class="max-w-[680px] space-y-3">
+                                            {{-- 🎯 Совпадение по M-артикулам счёта — сильнейший сигнал --}}
+                                            @php $artMatches = $this->articleMatchedRequests; @endphp
+                                            @if($artMatches->isNotEmpty())
+                                                <div>
+                                                    <div class="text-[11.5px] text-fg-3 mb-1">
+                                                        🎯 Совпадение по M-артикулам счёта
+                                                        @if(!empty($attachingMCodes))<span class="mono text-fg-4">({{ implode(', ', $attachingMCodes) }})</span>@endif:
+                                                    </div>
+                                                    <div class="border border-[var(--emerald-300,#6ee7b7)] rounded-md divide-y divide-[var(--border)] max-h-[240px] overflow-y-auto">
+                                                        @foreach($artMatches as $am)
+                                                            @include('livewire.invoices._candidate-row', ['cand' => $am['req'], 'msgId' => $row['msg_id'], 'number' => $row['number'], 'prefix' => 'art', 'badge' => count($am['skus']).' арт.: '.implode(', ', $am['skus'])])
+                                                        @endforeach
+                                                    </div>
+                                                </div>
+                                            @endif
+
                                             {{-- Открытые заявки этого заказчика — главные кандидаты --}}
                                             <div>
                                                 <div class="text-[11.5px] text-fg-3 mb-1">

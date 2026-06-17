@@ -5,6 +5,9 @@
         <div class="flex-1 min-w-0">
             <span class="mono font-semibold text-fg-1">{{ $cand->internal_code }}</span>
             <span class="ml-1 chip chip-neutral text-[10px]">{{ $cand->status?->value }}</span>
+            @if(!empty($badge ?? null))
+                <span class="ml-1 text-[10px] mono font-semibold text-[var(--emerald-700,#047857)]" title="Совпавшие M-артикулы">🎯 {{ $badge }}</span>
+            @endif
             @if($cand->relationLoaded('items') && $cand->items->isNotEmpty())
                 <button type="button" @click="open = !open"
                         class="ml-1 text-[10.5px] text-[var(--sky-700)] hover:underline align-baseline">

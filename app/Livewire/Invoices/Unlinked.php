@@ -4,12 +4,14 @@ namespace App\Livewire\Invoices;
 
 use App\Enums\RequestStatus;
 use App\Enums\Role;
+use App\Models\CatalogItem;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\Invoice;
 use App\Models\Request;
 use App\Services\DocumentDetector\OutboundDocumentDetector;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Computed;
@@ -37,6 +39,12 @@ class Unlinked extends Component
 
     /** Какой счёт сейчас привязываем (email_message_id). */
     public ?int $attachingMsgId = null;
+
+    /** Вложение-счёт привязываемого письма (для извлечения M-артикулов). */
+    public ?int $attachingAttId = null;
+
+    /** M-артикулы, извлечённые из PDF привязываемого счёта (нормализованные). */
+    public array $attachingMCodes = [];
 
     /** Строка поиска заявки в панели привязки. */
     public string $requestSearch = '';
@@ -73,15 +81,20 @@ class Unlinked extends Component
         unset($this->rows);
     }
 
-    public function startAttach(int $msgId): void
+    public function startAttach(int $msgId, ?int $attId = null): void
     {
         $this->attachingMsgId = $msgId;
+        $this->attachingAttId = $attId;
         $this->requestSearch = '';
+        // Извлекаем M-артикулы счёта один раз (кап на round-trip'ы панели).
+        $this->attachingMCodes = $attId ? $this->extractMCodesFromAttachment($attId) : [];
     }
 
     public function cancelAttach(): void
     {
         $this->attachingMsgId = null;
+        $this->attachingAttId = null;
+        $this->attachingMCodes = [];
         $this->requestSearch = '';
     }
 
@@ -104,7 +117,8 @@ class Unlinked extends Component
         $this->invoiceText = $this->extractInvoiceText($attId);
     }
 
-    private function extractInvoiceText(int $attId): ?string
+    /** Полный текстовый слой PDF вложения (Smalot, без Vision). null — не PDF / нет файла / пусто. */
+    private function pdfText(int $attId): ?string
     {
         $att = EmailAttachment::find($attId);
         if (! $att) {
@@ -128,7 +142,40 @@ class Unlinked extends Component
 
         $text = trim((string) preg_replace('/[ \t]{2,}/u', ' ', (string) $text));
 
-        return $text !== '' ? mb_substr($text, 0, 6000) : null;
+        return $text !== '' ? $text : null;
+    }
+
+    private function extractInvoiceText(int $attId): ?string
+    {
+        $text = $this->pdfText($attId);
+
+        return $text !== null ? mb_substr($text, 0, 6000) : null;
+    }
+
+    private function extractMCodesFromAttachment(int $attId): array
+    {
+        $text = $this->pdfText($attId);
+
+        return $text !== null ? self::mCodesFromText($text) : [];
+    }
+
+    /**
+     * M-артикулы (catalog SKU вида M07391) из текста. Нормализуем:
+     * кириллическая М→M, uppercase, без пробела между M и цифрами.
+     *
+     * @return array<int, string>
+     */
+    public static function mCodesFromText(string $text): array
+    {
+        if (! preg_match_all('/[MМ]\s?\d{3,}/u', $text, $m)) {
+            return [];
+        }
+        $codes = [];
+        foreach ($m[0] as $raw) {
+            $codes[strtoupper(str_replace(['М', 'м', ' '], ['M', 'M', ''], $raw))] = true;
+        }
+
+        return array_keys($codes);
     }
 
     /**
@@ -216,8 +263,78 @@ class Unlinked extends Component
     }
 
     /**
-     * Открытые (не архивные) заявки заказчика, которому ушёл счёт — главные
-     * кандидаты на привязку. Показываем сразу, до ручного поиска.
+     * Заявки, чьи M-артикулы (request_items.catalog_item_id → catalog.sku)
+     * совпадают с M-кодами из PDF счёта — СИЛЬНЕЙШИЙ сигнал привязки (счёт
+     * оплачивает ровно те позиции, что в КП/заявке). Ранжируем по числу
+     * совпавших артикулов; архивные (closed) исключаем.
+     *
+     * @return \Illuminate\Support\Collection<int, array{req: Request, skus: array<int, string>}>
+     */
+    #[Computed]
+    public function articleMatchedRequests()
+    {
+        $mcodes = $this->attachingMCodes;
+        if (empty($mcodes)) {
+            return collect();
+        }
+
+        $catalog = CatalogItem::query()
+            ->whereIn(DB::raw('upper(sku)'), $mcodes)
+            ->get(['id', 'sku']);
+        if ($catalog->isEmpty()) {
+            return collect();
+        }
+        $skuById = $catalog->pluck('sku', 'id');
+
+        // Пары заявка↔каталог-позиция (distinct) — считаем число совпадений.
+        $pairs = DB::table('request_items')
+            ->whereIn('catalog_item_id', $catalog->pluck('id')->all())
+            ->whereNotNull('request_id')
+            ->select('request_id', 'catalog_item_id')
+            ->distinct()
+            ->get();
+        if ($pairs->isEmpty()) {
+            return collect();
+        }
+
+        $byReq = [];
+        foreach ($pairs as $p) {
+            $byReq[(int) $p->request_id][(int) $p->catalog_item_id] = true;
+        }
+        uasort($byReq, fn ($a, $b) => count($b) <=> count($a)); // больше совпадений — выше
+        $topReqIds = array_slice(array_keys($byReq), 0, 8);
+
+        $requests = Request::query()
+            ->whereIn('id', $topReqIds)
+            ->whereNotIn('status', [RequestStatus::ClosedWon->value, RequestStatus::ClosedLost->value])
+            ->with([
+                'assignedUser:id,name',
+                'items:id,request_id,position,parsed_name,parsed_article,parsed_qty,parsed_unit',
+            ])
+            ->get()
+            ->keyBy('id');
+
+        $out = collect();
+        foreach ($topReqIds as $rid) {
+            $req = $requests->get($rid);
+            if (! $req) {
+                continue;
+            }
+            $skus = [];
+            foreach (array_keys($byReq[$rid]) as $cid) {
+                if (isset($skuById[$cid])) {
+                    $skus[] = $skuById[$cid];
+                }
+            }
+            $out->push(['req' => $req, 'skus' => $skus]);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Открытые (не архивные) заявки заказчика, которому ушёл счёт. Показываем
+     * после совпадений по артикулам; уже попавшие туда заявки исключаем.
      *
      * @return \Illuminate\Support\Collection<int, Request>
      */
@@ -229,8 +346,11 @@ class Unlinked extends Component
             return collect();
         }
 
+        $excludeIds = $this->articleMatchedRequests()->pluck('req.id')->all();
+
         return Request::query()
             ->where('client_email', 'ilike', $email)
+            ->when($excludeIds, fn ($q) => $q->whereNotIn('id', $excludeIds))
             ->whereNotIn('status', [
                 RequestStatus::ClosedWon->value,
                 RequestStatus::ClosedLost->value,
