@@ -62,6 +62,10 @@
                                     <span class="text-[10.5px] text-fg-4 ml-1">{{ $row['sent_at'] }}</span>
                                 </td>
                                 <td class="px-3 py-2 text-right whitespace-nowrap">
+                                    <button type="button" wire:click="toggleInvoiceText({{ $row['att_id'] }})"
+                                            class="btn btn-sm mr-1" title="Показать позиции счёта (текст из PDF)">
+                                        {{ $expandedInvoiceAtt === $row['att_id'] ? '▴ Счёт' : '▾ Счёт' }}
+                                    </button>
                                     @if($attachingMsgId === $row['msg_id'])
                                         <button type="button" wire:click="cancelAttach" class="btn btn-sm">Отмена</button>
                                     @else
@@ -69,6 +73,23 @@
                                     @endif
                                 </td>
                             </tr>
+
+                            @if($expandedInvoiceAtt === $row['att_id'])
+                                <tr wire:key="inv-text-{{ $row['att_id'] }}" class="bg-[var(--bg-surface-2,var(--bg-hover))]">
+                                    <td colspan="6" class="px-3 py-3">
+                                        <div class="flex items-center gap-3 mb-1">
+                                            <span class="text-[11.5px] text-fg-3">Позиции счёта {{ $row['number'] ? '№'.$row['number'] : '' }} (текст из PDF):</span>
+                                            <a href="{{ route('attachments.preview', $row['att_id']) }}" target="_blank" rel="noopener"
+                                               class="text-[11.5px] text-[var(--sky-700)] hover:underline">📄 Открыть оригинал ↗</a>
+                                        </div>
+                                        @if($invoiceText)
+                                            <pre class="text-[11px] text-fg-2 whitespace-pre-wrap mono bg-surface border border-border rounded-md p-2 max-h-[320px] overflow-y-auto">{{ $invoiceText }}</pre>
+                                        @else
+                                            <div class="text-[11.5px] text-fg-4">Текст из PDF не извлёкся (вероятно скан) — откройте оригинал по ссылке.</div>
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endif
 
                             @if($attachingMsgId === $row['msg_id'])
                                 <tr wire:key="attach-{{ $row['msg_id'] }}" class="bg-[var(--bg-surface-2,var(--bg-hover))]">

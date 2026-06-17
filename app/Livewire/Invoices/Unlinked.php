@@ -4,12 +4,14 @@ namespace App\Livewire\Invoices;
 
 use App\Enums\RequestStatus;
 use App\Enums\Role;
+use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\Invoice;
 use App\Models\Request;
 use App\Services\DocumentDetector\OutboundDocumentDetector;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -38,6 +40,12 @@ class Unlinked extends Component
 
     /** Строка поиска заявки в панели привязки. */
     public string $requestSearch = '';
+
+    /** Раскрытый счёт (email_attachment_id) — показываем извлечённый текст PDF. */
+    public ?int $expandedInvoiceAtt = null;
+
+    /** Извлечённый текст текущего раскрытого счёта (кап до 6000 символов). */
+    public ?string $invoiceText = null;
 
     // Только НАШИ счета (формат «Счет МЗ-NNNN …»). Так отсекаем форварды
     // поставщицких счетов («Счет 26-…», «… Деловые Линии Счет(-а).pdf»),
@@ -75,6 +83,52 @@ class Unlinked extends Component
     {
         $this->attachingMsgId = null;
         $this->requestSearch = '';
+    }
+
+    /**
+     * Раскрыть/свернуть позиции счёта. Структурных позиций у НЕпривязанного
+     * счёта ещё нет (разбор идёт только после привязки), поэтому достаём
+     * текстовый слой PDF (Smalot, без Vision/OpenAI) — в нём видны строки
+     * таблицы для сверки с позициями заявки.
+     */
+    public function toggleInvoiceText(int $attId): void
+    {
+        if ($this->expandedInvoiceAtt === $attId) {
+            $this->expandedInvoiceAtt = null;
+            $this->invoiceText = null;
+
+            return;
+        }
+
+        $this->expandedInvoiceAtt = $attId;
+        $this->invoiceText = $this->extractInvoiceText($attId);
+    }
+
+    private function extractInvoiceText(int $attId): ?string
+    {
+        $att = EmailAttachment::find($attId);
+        if (! $att) {
+            return null;
+        }
+        $disk = $att->disk ?: 'local';
+        if (! $att->file_path || ! Storage::disk($disk)->exists($att->file_path)) {
+            return null;
+        }
+        if (strtolower((string) pathinfo((string) $att->filename, PATHINFO_EXTENSION)) !== 'pdf') {
+            return null; // не-PDF (xlsx и пр.) — смотрим оригинал по ссылке «Открыть»
+        }
+
+        try {
+            $text = (new \Smalot\PdfParser\Parser())
+                ->parseFile(Storage::disk($disk)->path($att->file_path))
+                ->getText();
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        $text = trim((string) preg_replace('/[ \t]{2,}/u', ' ', (string) $text));
+
+        return $text !== '' ? mb_substr($text, 0, 6000) : null;
     }
 
     /**
@@ -181,7 +235,10 @@ class Unlinked extends Component
                 RequestStatus::ClosedWon->value,
                 RequestStatus::ClosedLost->value,
             ])
-            ->with('assignedUser:id,name')
+            ->with([
+                'assignedUser:id,name',
+                'items:id,request_id,position,parsed_name,parsed_article,parsed_qty,parsed_unit',
+            ])
             ->orderByDesc('created_at')
             ->limit(20)
             ->get(['id', 'internal_code', 'status', 'client_email', 'client_name', 'subject', 'assigned_user_id', 'created_at']);
@@ -209,7 +266,10 @@ class Unlinked extends Component
                     ->orWhere('client_name', 'ilike', $needle)
                     ->orWhere('subject', 'ilike', $needle);
             })
-            ->with('assignedUser:id,name')
+            ->with([
+                'assignedUser:id,name',
+                'items:id,request_id,position,parsed_name,parsed_article,parsed_qty,parsed_unit',
+            ])
             ->orderByDesc('created_at')
             ->limit(10)
             ->get(['id', 'internal_code', 'status', 'client_email', 'client_name', 'subject', 'assigned_user_id', 'created_at']);
