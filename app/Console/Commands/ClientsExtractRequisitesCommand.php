@@ -142,51 +142,11 @@ class ClientsExtractRequisitesCommand extends Command
             return $res;
         }
 
-        // 2) Якорь на не-наш ИНН (раскладки без чёткого блока «Покупатель»).
-        // ИНН покупателя = первый «ИНН NNN», отличный от нашего. С позицией —
-        // чтобы достать имя (назад) и КПП/адрес (вперёд).
-        $innPos = null;
-        if (preg_match_all('/ИНН\D{0,4}(\d{10,12})/iu', $flat, $m, PREG_OFFSET_CAPTURE)) {
-            foreach ($m[1] as $i => $cap) {
-                if ($cap[0] !== $this->ourInn) {
-                    $res['inn'] = $cap[0];
-                    $innPos = (int) $m[0][$i][1];
-                    break;
-                }
-            }
-        }
-        if ($res['inn'] === null) {
-            // голый не-наш ИНН (без метки «ИНН») — хотя бы идентифицируем орг.
-            if (preg_match_all('/(?<!\d)(\d{10}|\d{12})(?!\d)/', $flat, $all)) {
-                foreach ($all[1] as $inn) {
-                    if ($inn !== $this->ourInn) {
-                        $res['inn'] = $inn;
-                        break;
-                    }
-                }
-            }
-
-            return $res;
-        }
-
-        // КПП + адрес — в окне после ИНН-метки.
-        $after = mb_substr($flat, $innPos, 260);
-        if (preg_match('/КПП\D{0,4}(\d{9})/iu', $after, $mm)) {
-            $res['kpp'] = $mm[1];
-        }
-        if (preg_match('/КПП\D{0,4}\d{9}\s*,?\s*(.+)$/iu', $after, $mm)) {
-            $res['address'] = trim(mb_substr(trim($mm[1]), 0, 180), " ,;");
-        }
-
-        // Имя — назад от ИНН (до 160 символов): орг-форма или «…»/"…".
-        $bStart = max(0, $innPos - 160);
-        $before = mb_substr($flat, $bStart, $innPos - $bStart);
-        if (preg_match('/((?:ООО|ОАО|ЗАО|ПАО|НАО|АО|ИП|НКО|ФГУП|МУП|ГУП|ГБУ|АНО|ТСЖ|СНТ)\b[^,]{0,70})\s*,?\s*$/iu', $before, $mm)) {
-            $res['name'] = $this->cleanName($mm[1]);
-        } elseif (preg_match('/([«"„][^»"“]{2,70}[»"“])\s*,?\s*$/u', $before, $mm)) {
-            $res['name'] = $this->cleanName($mm[1]);
-        }
-
+        // Нет чёткого блока «Покупатель: <Название>, ИНН …» = это НЕ наш
+        // клиентский счёт/КП (входящий счёт поставщика, банковская выписка,
+        // инвойс иностранцу и т.п., пойманные в исходящей почте). Организацию-
+        // покупателя НЕ создаём — иначе реестр забивается мусорными «ИНН N»
+        // без названия (bare-ИНН фолбэк давал 17/18 мусора).
         return $res;
     }
 
