@@ -36,6 +36,7 @@
                     request()->routeIs('catalog.*')         => 'catalog',
                     request()->routeIs('mail.index')        => 'mail',
                     request()->routeIs('invoices.*')        => 'invoices',
+                    request()->routeIs('clients.*')         => 'clients',
                     default                                  => null,
                 };
                 $showRail = ($rail ?? true);

@@ -144,6 +144,16 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/invoices', function () {
             return view('invoices.index');
         })->name('invoices.index');
+
+        // Раздел «Клиенты» — реестр организаций + контактов (email). Доступен и
+        // редактируется всеми ролями (реквизиты/скидки нужны в работе).
+        Route::get('/dashboard/clients', function () {
+            return view('clients.index');
+        })->name('clients.index');
+
+        Route::get('/dashboard/clients/{organization}', function (\App\Models\Organization $organization) {
+            return view('clients.show', ['organization' => $organization]);
+        })->name('clients.show');
     });
 
     // Mail routing rules — управление правилами для РОП и директора.

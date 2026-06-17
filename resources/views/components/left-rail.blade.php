@@ -34,6 +34,9 @@
         $rail[] = ['icon' => '₽', 'label' => 'Счета', 'href' => route('invoices.index'), 'key' => 'invoices'];
     }
 
+    // «Клиенты» — реестр организаций/контактов. Доступен всем ролям.
+    $rail[] = ['icon' => '◈', 'label' => 'Клиенты', 'href' => route('clients.index'), 'key' => 'clients'];
+
     // Phase 2 placeholder'ы — disabled (без href), показываются для
     // структуры UI.
     $railDisabled = [
