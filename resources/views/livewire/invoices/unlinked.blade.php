@@ -95,6 +95,7 @@
                                 <tr wire:key="attach-{{ $row['msg_id'] }}" class="bg-[var(--bg-surface-2,var(--bg-hover))]">
                                     <td colspan="6" class="px-3 py-3">
                                         <div class="max-w-[680px] space-y-3">
+                                            @php $mgrId = $this->attachingManagerId; @endphp
                                             {{-- 🎯 Совпадение по M-артикулам счёта — сильнейший сигнал --}}
                                             @php $artMatches = $this->articleMatchedRequests; @endphp
                                             @if($artMatches->isNotEmpty())
@@ -105,7 +106,7 @@
                                                     </div>
                                                     <div class="border border-[var(--emerald-300,#6ee7b7)] rounded-md divide-y divide-[var(--border)] max-h-[240px] overflow-y-auto">
                                                         @foreach($artMatches as $am)
-                                                            @include('livewire.invoices._candidate-row', ['cand' => $am['req'], 'msgId' => $row['msg_id'], 'number' => $row['number'], 'prefix' => 'art', 'badge' => count($am['skus']).' арт.: '.implode(', ', $am['skus'])])
+                                                            @include('livewire.invoices._candidate-row', ['cand' => $am['req'], 'msgId' => $row['msg_id'], 'number' => $row['number'], 'prefix' => 'art', 'badge' => count($am['skus']).' арт.: '.implode(', ', $am['skus']), 'ownManager' => ($mgrId && (int) $am['req']->assigned_user_id === $mgrId)])
                                                         @endforeach
                                                     </div>
                                                 </div>
@@ -123,7 +124,7 @@
                                                 @else
                                                     <div class="border border-border rounded-md divide-y divide-[var(--border)] max-h-[240px] overflow-y-auto">
                                                         @foreach($clientReqs as $cand)
-                                                            @include('livewire.invoices._candidate-row', ['cand' => $cand, 'msgId' => $row['msg_id'], 'number' => $row['number'], 'prefix' => 'cl'])
+                                                            @include('livewire.invoices._candidate-row', ['cand' => $cand, 'msgId' => $row['msg_id'], 'number' => $row['number'], 'prefix' => 'cl', 'ownManager' => ($mgrId && (int) $cand->assigned_user_id === $mgrId)])
                                                         @endforeach
                                                     </div>
                                                 @endif
@@ -138,7 +139,7 @@
                                                 @if(mb_strlen(trim($requestSearch)) >= 2)
                                                     <div class="mt-2 border border-border rounded-md divide-y divide-[var(--border)] max-h-[240px] overflow-y-auto">
                                                         @forelse($this->requestCandidates as $cand)
-                                                            @include('livewire.invoices._candidate-row', ['cand' => $cand, 'msgId' => $row['msg_id'], 'number' => $row['number'], 'prefix' => 'mn'])
+                                                            @include('livewire.invoices._candidate-row', ['cand' => $cand, 'msgId' => $row['msg_id'], 'number' => $row['number'], 'prefix' => 'mn', 'ownManager' => ($mgrId && (int) $cand->assigned_user_id === $mgrId)])
                                                         @empty
                                                             <div class="px-2.5 py-3 text-[12px] text-fg-3">Ничего не найдено по «{{ $requestSearch }}».</div>
                                                         @endforelse

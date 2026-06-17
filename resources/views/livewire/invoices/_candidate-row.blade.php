@@ -8,6 +8,9 @@
             @if(!empty($badge ?? null))
                 <span class="ml-1 text-[10px] mono font-semibold text-[var(--emerald-700,#047857)]" title="Совпавшие M-артикулы">🎯 {{ $badge }}</span>
             @endif
+            @if(!empty($ownManager ?? false))
+                <span class="ml-1 text-[10px] font-semibold text-[var(--sky-700)]" title="Заявка назначена менеджеру, отправившему счёт">👤 свой</span>
+            @endif
             @if($cand->relationLoaded('items') && $cand->items->isNotEmpty())
                 <button type="button" @click="open = !open"
                         class="ml-1 text-[10.5px] text-[var(--sky-700)] hover:underline align-baseline">

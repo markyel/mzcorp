@@ -263,6 +263,35 @@ class Unlinked extends Component
     }
 
     /**
+     * Менеджер, отправивший счёт = владелец личного ящика-отправителя
+     * (`mailboxes.owner_user_id`), fallback — User с таким же email. null для
+     * shared-ящика без владельца. Сигнал: совпадение с `assigned_user_id`
+     * заявки = менеджер выставляет счёт по СВОЕЙ заявке.
+     */
+    #[Computed]
+    public function attachingManagerId(): ?int
+    {
+        if (! $this->attachingMsgId) {
+            return null;
+        }
+        $msg = EmailMessage::with('mailbox:id,email,owner_user_id')->find($this->attachingMsgId);
+        if (! $msg) {
+            return null;
+        }
+        if ($msg->mailbox && $msg->mailbox->owner_user_id) {
+            return (int) $msg->mailbox->owner_user_id;
+        }
+        if ($msg->from_email) {
+            $uid = \App\Models\User::where('email', $msg->from_email)->value('id');
+            if ($uid) {
+                return (int) $uid;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Заявки, чьи M-артикулы (request_items.catalog_item_id → catalog.sku)
      * совпадают с M-кодами из PDF счёта — СИЛЬНЕЙШИЙ сигнал привязки (счёт
      * оплачивает ровно те позиции, что в КП/заявке). Ранжируем по числу
@@ -315,6 +344,7 @@ class Unlinked extends Component
             ->keyBy('id');
 
         $clientEmail = mb_strtolower((string) $this->attachingClientEmail());
+        $managerId = $this->attachingManagerId();
         $out = collect();
         foreach ($topReqIds as $rid) {
             $req = $requests->get($rid);
@@ -330,12 +360,14 @@ class Unlinked extends Component
             $out->push(['req' => $req, 'skus' => $skus]);
         }
 
-        // Ранжирование: число совпавших артикулов — главное (вес ×2), вторично —
-        // заявка ТОГО ЖЕ заказчика, что и счёт (+1, ломает только ничью по числу,
-        // т.к. шаг по числу ≥2). Так 2/2 кросс-клиента всё равно выше 1/1 своего.
+        // Ранжирование: число совпавших артикулов — главное (вес ×3), вторично —
+        // тот же заказчик (+1) и тот же менеджер, что отправил счёт (+1). Шаг по
+        // числу ≥3, поэтому два мягких сигнала (макс +2) не перебьют более
+        // сильное совпадение по артикулам; среди равных — выше «свой клиент+менеджер».
         return $out
-            ->sortByDesc(fn ($e) => count($e['skus']) * 2
-                + (mb_strtolower((string) $e['req']->client_email) === $clientEmail ? 1 : 0))
+            ->sortByDesc(fn ($e) => count($e['skus']) * 3
+                + (mb_strtolower((string) $e['req']->client_email) === $clientEmail ? 1 : 0)
+                + ($managerId && (int) $e['req']->assigned_user_id === $managerId ? 1 : 0))
             ->values();
     }
 
@@ -354,6 +386,7 @@ class Unlinked extends Component
         }
 
         $excludeIds = $this->articleMatchedRequests()->pluck('req.id')->all();
+        $managerId = $this->attachingManagerId();
 
         return Request::query()
             ->where('client_email', 'ilike', $email)
@@ -368,7 +401,10 @@ class Unlinked extends Component
             ])
             ->orderByDesc('created_at')
             ->limit(20)
-            ->get(['id', 'internal_code', 'status', 'client_email', 'client_name', 'subject', 'assigned_user_id', 'created_at']);
+            ->get(['id', 'internal_code', 'status', 'client_email', 'client_name', 'subject', 'assigned_user_id', 'created_at'])
+            // Заявки менеджера, отправившего счёт — выше (стабильно, внутри — по дате).
+            ->sortByDesc(fn ($r) => $managerId && (int) $r->assigned_user_id === $managerId ? 1 : 0)
+            ->values();
     }
 
     /**
