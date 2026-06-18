@@ -2,8 +2,11 @@
 
 namespace App\Livewire\Suppliers;
 
+use App\Models\Kb\EquipmentCategory;
+use App\Models\Kb\ManufacturerBrand;
 use App\Models\Supplier;
 use App\Services\Supplier\SupplierMatrixBuilder;
+use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 /**
@@ -22,7 +25,15 @@ class SupplierEdit extends Component
     public string $assortment_description = '';
     public string $notes = '';
 
+    /** Ручные правила подбора с wildcard «ВСЕ»: [{brand, category}]. */
+    public array $rules = [];
+
+    public string $newRuleBrand = 'ВСЕ';
+    public string $newRuleCategory = 'ВСЕ';
+
     public bool $confirmingDelete = false;
+
+    public const ALL = 'ВСЕ';
 
     public function mount(Supplier $supplier): void
     {
@@ -40,6 +51,58 @@ class SupplierEdit extends Component
         $this->phone = (string) ($s->phone ?? '');
         $this->assortment_description = (string) ($s->assortment_description ?? '');
         $this->notes = (string) ($s->notes ?? '');
+        $matrix = is_array($s->assortment_matrix) ? $s->assortment_matrix : [];
+        $this->rules = array_values(array_filter((array) ($matrix['rules'] ?? []), 'is_array'));
+    }
+
+    /** @return array<int, string> */
+    #[Computed]
+    public function brandOptions(): array
+    {
+        return array_merge([self::ALL], ManufacturerBrand::query()->orderBy('name')->pluck('name')->all());
+    }
+
+    /** @return array<int, string> */
+    #[Computed]
+    public function categoryOptions(): array
+    {
+        return array_merge([self::ALL], EquipmentCategory::query()->orderBy('name')->pluck('name')->all());
+    }
+
+    public function addRule(): void
+    {
+        $b = trim($this->newRuleBrand) ?: self::ALL;
+        $c = trim($this->newRuleCategory) ?: self::ALL;
+        if ($b === self::ALL && $c === self::ALL) {
+            // {ВСЕ, ВСЕ} допустимо — поставщик-«универсал».
+        }
+        // Дедуп.
+        foreach ($this->rules as $r) {
+            if (($r['brand'] ?? '') === $b && ($r['category'] ?? '') === $c) {
+                return;
+            }
+        }
+        $this->rules[] = ['brand' => $b, 'category' => $c];
+        $this->persistRules();
+        $this->newRuleBrand = self::ALL;
+        $this->newRuleCategory = self::ALL;
+    }
+
+    public function removeRule(int $idx): void
+    {
+        if (isset($this->rules[$idx])) {
+            unset($this->rules[$idx]);
+            $this->rules = array_values($this->rules);
+            $this->persistRules();
+        }
+    }
+
+    private function persistRules(): void
+    {
+        $matrix = is_array($this->supplier->assortment_matrix) ? $this->supplier->assortment_matrix : [];
+        $matrix['rules'] = array_values($this->rules);
+        $this->supplier->forceFill(['assortment_matrix' => $matrix])->save();
+        $this->dispatch('toast', message: 'Правила подбора обновлены.', type: 'success');
     }
 
     public function save(): void

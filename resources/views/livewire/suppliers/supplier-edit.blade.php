@@ -97,6 +97,50 @@
         </div>
     </div>
 
+    {{-- Правила подбора с wildcard «ВСЕ» (ручные, приоритетны) --}}
+    <div class="ds-card">
+        <div class="ds-card-header">
+            <h3>Правила подбора</h3>
+            <span class="text-[12px] text-fg-3 ml-2">бренд × категория, «ВСЕ» = любой</span>
+        </div>
+        <div class="ds-card-body space-y-3">
+            <div class="text-[12px] text-fg-3">
+                Точное правило поверх авто-матрицы. Примеры: <b>Schneider</b> × <b>ВСЕ</b> — любое оборудование Schneider; <b>ВСЕ</b> × <b>Ролик</b> — ролики любых марок; <b>ВСЕ</b> × <b>ВСЕ</b> — все запросы.
+            </div>
+
+            @if(!empty($rules))
+                <div class="flex flex-wrap gap-1.5">
+                    @foreach($rules as $idx => $r)
+                        <span class="inline-flex items-center gap-1.5 chip chip-sky text-[11.5px]">
+                            <span class="font-medium">{{ $r['brand'] ?? 'ВСЕ' }}</span>
+                            <span class="text-fg-4">×</span>
+                            <span class="font-medium">{{ $r['category'] ?? 'ВСЕ' }}</span>
+                            <button type="button" wire:click="removeRule({{ $idx }})" class="text-red-600 ml-0.5" title="Удалить правило">×</button>
+                        </span>
+                    @endforeach
+                </div>
+            @else
+                <div class="text-[12px] text-fg-4">Правил нет.</div>
+            @endif
+
+            <div class="flex flex-wrap items-end gap-2 border-t border-border-subtle pt-3">
+                <div>
+                    <label class="block text-[11px] text-fg-3 mb-1">Бренд</label>
+                    <select wire:model="newRuleBrand" class="{{ $inputCls }} min-w-[180px]">
+                        @foreach($this->brandOptions as $b)<option value="{{ $b }}">{{ $b }}</option>@endforeach
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[11px] text-fg-3 mb-1">Категория</label>
+                    <select wire:model="newRuleCategory" class="{{ $inputCls }} min-w-[220px]">
+                        @foreach($this->categoryOptions as $c)<option value="{{ $c }}">{{ $c }}</option>@endforeach
+                    </select>
+                </div>
+                <button type="button" wire:click="addRule" class="btn btn-sm btn-primary">Добавить правило</button>
+            </div>
+        </div>
+    </div>
+
     {{-- Удаление --}}
     <div class="ds-card">
         <div class="ds-card-body flex items-center justify-between gap-3 flex-wrap">

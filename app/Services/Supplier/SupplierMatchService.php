@@ -67,6 +67,29 @@ class SupplierMatchService
         $brandIn = $brandListed && $brandKnown && $this->listHit($brands, [$brand]);
         $catIn = $catListed && $catKnown && $this->listHit($cats, $categoryTerms);
 
+        // Явные ПРАВИЛА с wildcard «ВСЕ» (ручные, приоритетны). Правило
+        // {brand, category}, где поле = «ВСЕ» или пусто = любой. Примеры:
+        //   {Schneider, ВСЕ} — любое оборудование Schneider;
+        //   {ВСЕ, Ролик}     — ролики любых марок;
+        //   {ВСЕ, ВСЕ}       — всё.
+        foreach ((array) ($m['rules'] ?? []) as $rule) {
+            if (! is_array($rule)) {
+                continue;
+            }
+            $rb = $this->norm((string) ($rule['brand'] ?? ''));
+            $rc = $this->norm((string) ($rule['category'] ?? ''));
+            $brandWild = $rb === '' || $rb === 'все';
+            $catWild = $rc === '' || $rc === 'все';
+            if ($brandWild && $catWild) {
+                return true; // {ВСЕ, ВСЕ} — позиция уже имеет бренд или категорию (гард в relevantSuppliers)
+            }
+            $brandOk = $brandWild || ($brandKnown && $this->listHit([$rb], [$brand]));
+            $catOk = $catWild || ($catKnown && $this->termHit([$rc], $categoryTerms));
+            if ($brandOk && $catOk) {
+                return true;
+            }
+        }
+
         // Явные пары бренд×категория — сильный сигнал.
         foreach ((array) ($m['pairs'] ?? []) as $p) {
             if (! is_array($p)) {

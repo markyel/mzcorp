@@ -26,10 +26,15 @@ class SupplierMatrixBuilder
 
     public function rebuild(Supplier $supplier): bool
     {
+        $existingRules = is_array($supplier->assortment_matrix ?? null)
+            ? (array) ($supplier->assortment_matrix['rules'] ?? [])
+            : [];
+
         $description = trim((string) $supplier->assortment_description);
         if ($description === '') {
+            // Нет описания — чистим LLM-часть, но СОХРАНЯЕМ ручные правила.
             $supplier->forceFill([
-                'assortment_matrix' => null,
+                'assortment_matrix' => $existingRules !== [] ? ['brands' => [], 'categories' => [], 'pairs' => [], 'rules' => $existingRules] : null,
                 'matrix_built_at' => now(),
                 'matrix_built_with_model' => null,
             ])->save();
@@ -85,8 +90,9 @@ class SupplierMatrixBuilder
             }
         }
 
+        // Ручные правила (wildcard «ВСЕ», $existingRules выше) не затираем.
         $supplier->forceFill([
-            'assortment_matrix' => ['brands' => $brandsOut, 'categories' => $cats, 'pairs' => $pairs],
+            'assortment_matrix' => ['brands' => $brandsOut, 'categories' => $cats, 'pairs' => $pairs, 'rules' => $existingRules],
             'matrix_built_at' => now(),
             'matrix_built_with_model' => $model,
         ])->save();
