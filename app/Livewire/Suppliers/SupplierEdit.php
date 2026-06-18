@@ -22,6 +22,7 @@ class SupplierEdit extends Component
     public string $email = '';
     public string $domain = '';
     public string $phone = '';
+    public string $language = 'ru';
     public string $assortment_description = '';
     public string $notes = '';
 
@@ -49,6 +50,7 @@ class SupplierEdit extends Component
         $this->email = (string) ($s->email ?? '');
         $this->domain = (string) ($s->domain ?? '');
         $this->phone = (string) ($s->phone ?? '');
+        $this->language = in_array($s->language, ['ru', 'en'], true) ? $s->language : 'ru';
         $this->assortment_description = (string) ($s->assortment_description ?? '');
         $this->notes = (string) ($s->notes ?? '');
         $matrix = is_array($s->assortment_matrix) ? $s->assortment_matrix : [];
@@ -129,6 +131,7 @@ class SupplierEdit extends Component
             'email' => $email !== '' ? $email : null,
             'domain' => $domain !== '' ? $domain : null,
             'phone' => trim($this->phone) !== '' ? trim($this->phone) : null,
+            'language' => in_array($this->language, ['ru', 'en'], true) ? $this->language : 'ru',
             'assortment_description' => trim($this->assortment_description) !== '' ? trim($this->assortment_description) : null,
             'notes' => trim($this->notes) !== '' ? trim($this->notes) : null,
         ]);

@@ -100,22 +100,26 @@ class SupplierDispatchService
             try {
                 $draft = $this->drafts->createCompose($request, $by);
 
-                $rows = $this->itemRows($items, $nameOverrides);
-                $personalGreeting = $this->personalGreeting($greeting, $supplier);
-                $subject = 'Запрос расценки — [' . $request->internal_code . ']';
+                $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';
+                $rows = $this->itemRows($items, $nameOverrides, $lang);
+                $personalGreeting = $this->personalGreeting($greeting, $supplier, $lang);
+                $subject = $lang === 'en'
+                    ? 'Price request — [' . $request->internal_code . ']'
+                    : 'Запрос расценки — [' . $request->internal_code . ']';
                 $bodyHtml = view('emails.supplier-rfq', [
                     'request' => $request,
                     'supplier' => $supplier,
                     'rows' => $rows,
                     'note' => trim((string) $note),
                     'greeting' => $personalGreeting,
+                    'lang' => $lang,
                 ])->render();
 
                 $this->drafts->update($draft, [
                     'to_recipients' => [['email' => $supplier->email, 'name' => $supplier->name ?: '']],
                     'subject' => $subject,
                     'body_html' => $bodyHtml,
-                    'body_plain' => $this->plainBody($request, $rows, (string) $note, $personalGreeting),
+                    'body_plain' => $this->plainBody($request, $rows, (string) $note, $personalGreeting, $lang),
                 ]);
 
                 // Вложения: файлы заявки + загруженные с диска — до отправки,
@@ -198,7 +202,7 @@ class SupplierDispatchService
             ->where('request_id', $request->id)
             ->where('is_active', true)
             ->when($itemIds !== [], fn ($q) => $q->whereIn('id', $itemIds))
-            ->with(['brand:id,name', 'kbCategory:id,name,synonyms', 'catalogItem:id,name,brand,equipment_category_id,is_price_actual', 'catalogItem.equipmentCategory:id,name,synonyms'])
+            ->with(['brand:id,name', 'kbCategory:id,name,synonyms', 'catalogItem:id,name,name_en,brand,equipment_category_id,is_price_actual', 'catalogItem.equipmentCategory:id,name,synonyms'])
             ->orderBy('position')
             ->get();
     }
@@ -208,17 +212,27 @@ class SupplierDispatchService
      * позиция сматчена (M-SKU), иначе формулировку клиента; OEM — артикул.
      *
      * @param  iterable<int, RequestItem>  $items
-     * @param  array<int, string>  $nameOverrides  item_id => отредактированное менеджером название
+     * @param  array<int, string>  $nameOverrides  item_id => отредактированное менеджером название (RU)
+     * @param  string  $lang  ru|en — для en у каталожных позиций берём name_en
      * @return array<int, array{name:string, oem:?string, brand:?string, qty:?string}>
      */
-    public function itemRows(iterable $items, array $nameOverrides = []): array
+    public function itemRows(iterable $items, array $nameOverrides = [], string $lang = 'ru'): array
     {
         $rows = [];
         foreach ($items as $it) {
             $override = isset($nameOverrides[$it->id]) ? trim((string) $nameOverrides[$it->id]) : '';
-            $catalogName = $it->catalog_item_id ? ($it->catalogItem?->name ?: null) : null;
+            $catalog = $it->catalog_item_id ? $it->catalogItem : null;
+            if ($lang === 'en') {
+                // Каталожная позиция → английское название; иначе формулировка
+                // клиента (перевода нет). RU-правки менеджера на EN не тянем.
+                $name = $catalog
+                    ? ($catalog->name_en ?: $catalog->name ?: $it->parsed_name)
+                    : ($it->parsed_name ?: '—');
+            } else {
+                $name = $override !== '' ? $override : (string) (($catalog?->name) ?: $it->parsed_name ?: '—');
+            }
             $rows[] = [
-                'name' => $override !== '' ? $override : (string) ($catalogName ?: $it->parsed_name ?: '—'),
+                'name' => (string) ($name ?: '—'),
                 'oem' => $it->parsed_article ?: null,
                 'brand' => ($it->brand?->name ?: $it->parsed_brand) ?: null,
                 'qty' => $it->parsed_qty ? trim($it->parsed_qty . ' ' . ($it->parsed_unit ?: 'шт.')) : null,
@@ -232,15 +246,21 @@ class SupplierDispatchService
      * Персональное обращение: подставляет имя поставщика в плейсхолдер
      * {поставщик}. Пустой шаблон → дефолт. Нет имени → «коллеги».
      */
-    public function personalGreeting(?string $template, \App\Models\Supplier $supplier): string
+    public function personalGreeting(?string $template, \App\Models\Supplier $supplier, string $lang = 'ru'): string
     {
         $template = trim((string) $template);
-        if ($template === '') {
-            $template = 'Здравствуйте, {поставщик}!';
+        if ($lang === 'en') {
+            // RU-шаблон менеджера на EN не используем — берём EN-дефолт.
+            $template = 'Hello {поставщик},';
+            $name = trim((string) ($supplier->name ?: '')) ?: 'colleagues';
+        } else {
+            if ($template === '') {
+                $template = 'Здравствуйте, {поставщик}!';
+            }
+            $name = trim((string) ($supplier->name ?: '')) ?: 'коллеги';
         }
-        $name = trim((string) ($supplier->name ?: '')) ?: 'коллеги';
 
-        return str_replace('{поставщик}', $name, $template);
+        return str_replace(['{поставщик}', '{supplier}'], $name, $template);
     }
 
     /**
@@ -295,9 +315,13 @@ class SupplierDispatchService
     /**
      * @param  array<int, array{name:string, oem:?string, brand:?string, qty:?string}>  $rows
      */
-    private function plainBody(RequestModel $request, array $rows, string $note, string $greeting = 'Здравствуйте!'): string
+    private function plainBody(RequestModel $request, array $rows, string $note, string $greeting = 'Здравствуйте!', string $lang = 'ru'): string
     {
-        $lines = [$greeting !== '' ? $greeting : 'Здравствуйте!', '', 'Просим дать цену, наличие и срок поставки на позиции:', ''];
+        $en = $lang === 'en';
+        $intro = $en ? 'Please quote price, availability and lead time for the following items:' : 'Просим дать цену, наличие и срок поставки на позиции:';
+        $footer = $en ? 'Request No. ' : 'Заявка № ';
+
+        $lines = [$greeting !== '' ? $greeting : ($en ? 'Hello,' : 'Здравствуйте!'), '', $intro, ''];
         $n = 1;
         foreach ($rows as $r) {
             $parts = array_filter([$r['name'], $r['oem'], $r['brand'], $r['qty']]);
@@ -308,7 +332,7 @@ class SupplierDispatchService
             $lines[] = $note;
         }
         $lines[] = '';
-        $lines[] = 'Заявка № ' . $request->internal_code;
+        $lines[] = $footer . $request->internal_code;
 
         return implode("\n", $lines);
     }

@@ -291,6 +291,26 @@ class SupplierDispatchPanel extends Component
         return app(SupplierDispatchService::class)->itemRows($items, $this->editedNames);
     }
 
+    /**
+     * Англоязычные поставщики среди отмеченных — им письмо уйдёт на EN,
+     * каталожные позиции по name_en. Для подсказки менеджеру в превью.
+     *
+     * @return array<int, string> имена поставщиков с language=en
+     */
+    #[Computed]
+    public function englishSuppliers(): array
+    {
+        $ids = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
+        if ($ids === []) {
+            return [];
+        }
+
+        return Supplier::query()->whereIn('id', $ids)->where('language', 'en')
+            ->orderBy('name')->get()
+            ->map(fn (Supplier $s) => (string) ($s->name ?: $s->email ?: ('#' . $s->id)))
+            ->all();
+    }
+
     public function render()
     {
         return view('livewire.requests.supplier-dispatch-panel');

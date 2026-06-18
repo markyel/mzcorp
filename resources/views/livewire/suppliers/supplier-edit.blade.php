@@ -36,6 +36,14 @@
                         <label class="block text-[11.5px] text-fg-3 mb-1">Телефон</label>
                         <input type="text" wire:model="phone" class="{{ $inputCls }} mono">
                     </div>
+                    <div>
+                        <label class="block text-[11.5px] text-fg-3 mb-1">Язык общения</label>
+                        <select wire:model="language" class="{{ $inputCls }}">
+                            <option value="ru">Русский</option>
+                            <option value="en">English</option>
+                        </select>
+                        <div class="text-[10.5px] text-fg-4 mt-0.5">Письмо-запрос и номенклатура — на этом языке (для каталожных позиций — англ. название).</div>
+                    </div>
                 </div>
                 <div>
                     <label class="block text-[11.5px] text-fg-3 mb-1">Описание ассортимента <span class="text-fg-4">(бренды, типы запчастей — свободным текстом)</span></label>

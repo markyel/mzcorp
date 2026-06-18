@@ -23,6 +23,8 @@ class Supplier extends Model
         'domain',
         'name',
         'phone',
+        // Язык общения (ru|en) — письмо-запрос и номенклатура на этом языке.
+        'language',
         'notes',
         // Фаза 3.1 — профиль для подбора под позицию.
         'assortment_description',

@@ -155,6 +155,14 @@
                        class="w-full px-2 h-[30px] border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
             </div>
 
+            @if(!empty($this->englishSuppliers))
+                <div class="text-[11.5px] text-sky-800 bg-sky-50 border border-sky-200 rounded-md px-3 py-2">
+                    🌐 На английском языке письмо и номенклатура уйдут поставщикам:
+                    <b>{{ implode(', ', $this->englishSuppliers) }}</b>.
+                    Для позиций из каталога подставится английское название; правки ниже применяются к русской версии.
+                </div>
+            @endif
+
             {{-- Превью позиций — РЕДАКТИРУЕМЫЕ названия --}}
             <div class="border border-border rounded-md p-3 bg-surface-2">
                 <div class="text-[11px] uppercase tracking-wider text-fg-3 mb-2">Позиции в письме (название можно править; по умолчанию — из каталога при сматченном M-артикуле)</div>
