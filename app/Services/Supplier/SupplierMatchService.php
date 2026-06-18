@@ -23,7 +23,7 @@ class SupplierMatchService
      */
     public function relevantSuppliers(RequestItem $item): Collection
     {
-        $brand = $this->norm($item->brand?->name ?: (string) $item->parsed_brand);
+        $brand = $this->itemBrand($item);
         $categoryTerms = $this->itemCategoryTerms($item);
 
         if ($brand === '' && $categoryTerms === []) {
@@ -79,14 +79,22 @@ class SupplierMatchService
     }
 
     /**
-     * Термины категории позиции: имя KB-категории + синонимы. Пусто если
-     * категория не определена.
+     * Термины категории позиции: имя KB-категории + синонимы. Фоллбэк — категория
+     * привязанного каталожного товара (55% позиций без своей KB-категории, но 70%
+     * привязаны к каталогу, который категоризирован на 91%). Пусто, если категория
+     * не определена ни у позиции, ни у каталога.
      *
      * @return array<int, string>
      */
     private function itemCategoryTerms(RequestItem $item): array
     {
         $cat = $item->relationLoaded('kbCategory') ? $item->kbCategory : $item->kbCategory()->first();
+        if ($cat === null) {
+            $catItem = $item->relationLoaded('catalogItem') ? $item->catalogItem : $item->catalogItem()->first();
+            $cat = $catItem
+                ? ($catItem->relationLoaded('equipmentCategory') ? $catItem->equipmentCategory : $catItem->equipmentCategory()->first())
+                : null;
+        }
         if ($cat === null) {
             return [];
         }
@@ -98,6 +106,21 @@ class SupplierMatchService
         }
 
         return array_values(array_unique(array_filter(array_map([$this, 'norm'], $terms))));
+    }
+
+    /**
+     * Бренд позиции: KB-бренд → parsed_brand → бренд привязанного каталожного
+     * товара (фоллбэк). Нормализованный, пустая строка если нигде не определён.
+     */
+    private function itemBrand(RequestItem $item): string
+    {
+        $brand = $item->brand?->name ?: (string) $item->parsed_brand;
+        if (trim($brand) === '') {
+            $catItem = $item->relationLoaded('catalogItem') ? $item->catalogItem : $item->catalogItem()->first();
+            $brand = (string) ($catItem->brand ?? '');
+        }
+
+        return $this->norm($brand);
     }
 
     /**
