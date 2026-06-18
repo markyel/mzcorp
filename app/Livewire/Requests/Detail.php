@@ -1082,21 +1082,8 @@ class Detail extends Component
             ->get();
     }
 
-    /**
-     * Запросы расценки поставщикам по этой заявке (Фаза 3.2). Показываем в табе
-     * «Позиции» — кому ушёл RFQ и сколько позиций/писем.
-     *
-     * @return \Illuminate\Support\Collection<int, \App\Models\SupplierInquiry>
-     */
-    #[Computed]
-    public function supplierInquiries()
-    {
-        return \App\Models\SupplierInquiry::query()
-            ->where('related_request_id', $this->request->id)
-            ->withCount(['items', 'messages'])
-            ->orderByDesc('id')
-            ->get();
-    }
+    // supplierInquiries computed убран — список «кому отправлено» теперь в
+    // табе «Поставщики» (Requests\SupplierDispatchPanel::sentInquiries).
 
     public function applyAiDecision(int $decisionId, AiDecisionService $svc): void
     {
