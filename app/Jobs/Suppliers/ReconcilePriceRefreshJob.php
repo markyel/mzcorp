@@ -42,9 +42,9 @@ class ReconcilePriceRefreshJob implements ShouldQueue
             return;
         }
 
-        // Заявки в awaiting, у которых есть отслеживаемая позиция по любому из
+        // Группа 1: RFQ-заявки в awaiting с отслеживаемой позицией по любому из
         // ставших актуальными товаров.
-        $requestIds = RequestItem::query()
+        $awaitingIds = RequestItem::query()
             ->where('price_refresh_watched', true)
             ->whereIn('catalog_item_id', $this->catalogItemIds)
             ->whereHas('request', fn ($q) => $q->where('price_refresh_state', PriceRefreshState::Awaiting->value))
@@ -52,11 +52,25 @@ class ReconcilePriceRefreshJob implements ShouldQueue
             ->pluck('request_id')
             ->all();
 
-        if ($requestIds === []) {
-            return;
+        if ($awaitingIds !== []) {
+            Request::query()->whereIn('id', $awaitingIds)->get()
+                ->each(fn (Request $r) => $reconciler->reconcile($r));
         }
 
-        Request::query()->whereIn('id', $requestIds)->get()
-            ->each(fn (Request $r) => $reconciler->reconcile($r));
+        // Группа 2: рабочие заявки БЕЗ активного цикла (state=null), у которых
+        // активная сматченная позиция = только что актуализированный товар.
+        $workingIds = RequestItem::query()
+            ->where('is_active', true)
+            ->whereNotNull('catalog_item_id')
+            ->whereIn('catalog_item_id', $this->catalogItemIds)
+            ->whereHas('request', fn ($q) => $q->whereNull('price_refresh_state'))
+            ->distinct()
+            ->pluck('request_id')
+            ->all();
+
+        if ($workingIds !== []) {
+            Request::query()->whereIn('id', $workingIds)->get()
+                ->each(fn (Request $r) => $reconciler->reconcileWorking($r));
+        }
     }
 }

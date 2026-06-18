@@ -130,6 +130,57 @@ class PriceRefreshReconciler
     }
 
     /**
+     * Рабочие статусы заявки, для которых имеет смысл алерт «цены готовы» даже
+     * без отправленного RFQ (заявка в активной работе, менеджер ещё не
+     * отквотовал). Терминальные/оплаченные/quoted/paused — исключены.
+     */
+    private const WORKING_STATUSES = [
+        'new', 'assigned', 'in_progress', 'awaiting_client_clarification',
+    ];
+
+    /**
+     * Заявка БЕЗ активного цикла обновления цен (price_refresh_state=null), но
+     * в рабочем статусе: если у неё не осталось ни одной неактуальной
+     * сматченной позиции — значит цены только что доехали (одна из позиций
+     * флипнулась в этом импорте) → алерт «цены готовы». Идемпотентно: ставим
+     * state=actualized, повторно не сработает (next import фильтрует null).
+     * Вызывается из ReconcilePriceRefreshJob для рабочих заявок, содержащих
+     * актуализированный товар.
+     */
+    public function reconcileWorking(Request $request): void
+    {
+        if ($request->price_refresh_state !== null) {
+            return; // уже в цикле (RFQ) — это группа reconcile()
+        }
+        if (! in_array($request->status->value, self::WORKING_STATUSES, true)) {
+            return;
+        }
+
+        $matched = RequestItem::query()
+            ->where('request_id', $request->id)
+            ->where('is_active', true)
+            ->whereNotNull('catalog_item_id')
+            ->with('catalogItem:id,is_price_actual')
+            ->get();
+
+        if ($matched->isEmpty()) {
+            return;
+        }
+
+        // Осталась хоть одна неактуальная сматченная позиция — рано.
+        $hasStale = $matched->contains(fn (RequestItem $it) => ! $it->catalogItem?->is_price_actual);
+        if ($hasStale) {
+            return;
+        }
+
+        // Все сматченные актуальны (а заявка попала сюда из-за только что
+        // флипнувшейся позиции) → цены доехали.
+        $request->forceFill(['price_refresh_state' => PriceRefreshState::Actualized->value])->save();
+        $this->activity->touch($request, RequestActivityType::PricesActualized);
+        $this->attention->onPricesActualized($request->fresh() ?? $request);
+    }
+
+    /**
      * Завершить цикл обновления цен (менеджер сделал КП / явный сброс): снять
      * статус и флаги отслеживания. Идемпотентно.
      */
