@@ -294,7 +294,24 @@ class SupplierDispatchService
         }
         $unit = $it->parsed_unit ?: ($lang === 'en' ? 'pcs.' : 'шт.');
 
-        return trim($it->parsed_qty . ' ' . $unit);
+        return trim($this->normalizeQtyNumber((string) $it->parsed_qty) . ' ' . $unit);
+    }
+
+    /**
+     * Нормализует число количества: «1.000»/«1,000» → «1», «2.500» → «2.5».
+     * Хвостовые нули — артефакт decimal-формата БД, без чистки «1.000 шт.»
+     * читается как «1000 шт.». Нечисловое значение возвращаем как есть.
+     */
+    public function normalizeQtyNumber(string $raw): string
+    {
+        $raw = trim($raw);
+        $candidate = str_replace([' ', ','], ['', '.'], $raw);
+        if (! is_numeric($candidate)) {
+            return $raw;
+        }
+        $s = rtrim(rtrim(number_format((float) $candidate, 3, '.', ''), '0'), '.');
+
+        return $s === '' ? '0' : $s;
     }
 
     /**

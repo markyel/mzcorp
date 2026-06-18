@@ -121,7 +121,9 @@ class SupplierDispatchPanel extends Component
             ->with(['brand:id,name', 'catalogItem:id,name,name_en,is_price_actual'])
             ->orderBy('position')->get();
 
-        return $items->map(function (RequestItem $it) use ($requested) {
+        $svc = app(SupplierDispatchService::class);
+
+        return $items->map(function (RequestItem $it) use ($requested, $svc) {
             $catName = $it->catalog_item_id ? ($it->catalogItem?->name ?: null) : null;
             $catNameEn = $it->catalog_item_id ? ($it->catalogItem?->name_en ?: $catName) : null;
 
@@ -132,9 +134,9 @@ class SupplierDispatchPanel extends Component
                 // (менеджер переведёт в превью English).
                 'en_name' => (string) ($catNameEn ?: $it->parsed_name ?: '—'),
                 'client_name' => $catName && $catName !== $it->parsed_name ? $it->parsed_name : null,
-                'oem' => $it->parsed_article ?: null,
+                'oem' => $svc->itemOem($it),
                 'brand' => ($it->brand?->name ?: $it->parsed_brand) ?: null,
-                'qty' => $it->parsed_qty ? trim($it->parsed_qty . ' ' . ($it->parsed_unit ?: 'шт.')) : null,
+                'qty' => $svc->itemQty($it),
                 'has_catalog' => (bool) $it->catalog_item_id,
                 'price_stale' => $it->catalog_item_id ? ($it->catalogItem && ! $it->catalogItem->is_price_actual) : false,
                 'requested' => in_array($it->id, $requested, true),
