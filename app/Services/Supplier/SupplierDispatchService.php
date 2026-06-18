@@ -62,21 +62,27 @@ class SupplierDispatchService
     }
 
     /**
-     * Разослать RFQ. Возвращает счётчики. Отправляет РЕАЛЬНЫЕ письма внешним
-     * поставщикам — вызывать только по явному действию оператора.
+     * Разослать RFQ ВЫБРАННЫМ поставщикам. Каждый получает письмо с теми
+     * позициями (из активных / itemIds), которые покрывает его матрица.
+     * Отправляет РЕАЛЬНЫЕ письма — только по явному действию оператора.
      *
-     * @param  array<int, int>  $itemIds
+     * @param  array<int, int>  $supplierIds  кому слать (id из preview groups)
+     * @param  array<int, int>  $itemIds      ограничение позиций ([] = все активные)
      * @return array{sent: int, failed: int, no_supplier: int, suppliers: array<int, string>}
      */
-    public function dispatch(RequestModel $request, array $itemIds, ?string $note, User $by): array
+    public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by): array
     {
         $preview = $this->preview($request, $itemIds);
         $sent = 0;
         $failed = 0;
         $suppliers = [];
+        $selected = array_flip(array_map('intval', $supplierIds));
 
         foreach ($preview['groups'] as $group) {
             $supplier = $group['supplier'];
+            if (! isset($selected[$supplier->id])) {
+                continue;
+            }
             $items = $group['items'];
             if (trim((string) $supplier->email) === '') {
                 $failed++;

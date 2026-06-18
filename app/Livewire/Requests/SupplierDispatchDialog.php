@@ -4,24 +4,23 @@ namespace App\Livewire\Requests;
 
 use App\Enums\Role;
 use App\Models\Request as RequestModel;
-use App\Models\RequestItem;
 use App\Services\Supplier\SupplierDispatchService;
-use App\Services\Supplier\SupplierMatchService;
 use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
  * Диалог рассылки запросов расценки поставщикам (Фаза 3.2). Открывается
- * событием `open-supplier-dispatch`. Менеджер выбирает позиции, видит
- * подобранных поставщиков (по матрице ассортимента), добавляет примечание и
- * отправляет — на каждого поставщика уходит одно письмо со списком его позиций.
+ * событием `open-supplier-dispatch`. Подбираем поставщиков по матрице
+ * ассортимента под активные позиции заявки; менеджер ГАЛОЧКАМИ выбирает, кому
+ * слать (по умолчанию никто — частая категория матчит много поставщиков, блас
+ * всем не нужен). Каждому уходит письмо с его позициями.
  */
 class SupplierDispatchDialog extends Component
 {
     public int $requestId;
     public bool $open = false;
 
-    /** item_id => bool (выбрана ли позиция для рассылки). */
+    /** supplier_id => bool (отправлять ли этому поставщику). */
     public array $selected = [];
 
     public string $note = '';
@@ -36,10 +35,6 @@ class SupplierDispatchDialog extends Component
     {
         $this->note = '';
         $this->selected = [];
-        foreach ($this->itemRows() as $row) {
-            // По умолчанию выбираем позиции, под которые есть поставщик.
-            $this->selected[$row['id']] = $row['supplier_count'] > 0;
-        }
         $this->resetErrorBag();
         $this->open = true;
     }
@@ -50,35 +45,29 @@ class SupplierDispatchDialog extends Component
     }
 
     /**
-     * Активные позиции заявки с числом подобранных поставщиков.
+     * Подобранные поставщики под активные позиции заявки (preview).
      *
-     * @return array<int, array{id:int, name:string, article:?string, brand:?string, qty:?string, supplier_count:int, suppliers:string}>
+     * @return array{groups: array<int, array{id:int, name:string, item_count:int, items:string}>, no_supplier: int, total_items: int}
      */
-    public function itemRows(): array
+    public function previewData(SupplierDispatchService $dispatcher): array
     {
-        $matcher = app(SupplierMatchService::class);
-        $items = RequestItem::query()
-            ->where('request_id', $this->requestId)
-            ->where('is_active', true)
-            ->with(['brand:id,name', 'kbCategory:id,name,synonyms', 'catalogItem:id,brand,equipment_category_id', 'catalogItem.equipmentCategory:id,name,synonyms'])
-            ->orderBy('position')
-            ->get();
+        $req = RequestModel::findOrFail($this->requestId);
+        $itemIds = $req->items()->where('is_active', true)->pluck('id')->all();
+        $p = $dispatcher->preview($req, $itemIds);
 
-        $rows = [];
-        foreach ($items as $it) {
-            $sups = $matcher->relevantSuppliers($it);
-            $rows[] = [
-                'id' => $it->id,
-                'name' => (string) ($it->parsed_name ?: '—'),
-                'article' => $it->parsed_article,
-                'brand' => $it->brand?->name ?: $it->parsed_brand,
-                'qty' => $it->parsed_qty ? trim($it->parsed_qty . ' ' . ($it->parsed_unit ?: 'шт.')) : null,
-                'supplier_count' => $sups->count(),
-                'suppliers' => $sups->map(fn ($s) => $s->name ?: $s->email)->take(4)->implode(', '),
+        $groups = [];
+        foreach ($p['groups'] as $g) {
+            $groups[] = [
+                'id' => $g['supplier']->id,
+                'name' => $g['supplier']->name ?: $g['supplier']->email,
+                'item_count' => count($g['items']),
+                'items' => collect($g['items'])->map(fn ($it) => $it->parsed_name)->filter()->take(4)->implode('; '),
             ];
         }
+        // Больше покрытых позиций — выше.
+        usort($groups, fn ($a, $b) => $b['item_count'] <=> $a['item_count']);
 
-        return $rows;
+        return ['groups' => $groups, 'no_supplier' => count($p['no_supplier']), 'total_items' => count($itemIds)];
     }
 
     public function send(SupplierDispatchService $dispatcher)
@@ -93,22 +82,19 @@ class SupplierDispatchDialog extends Component
             abort(403, 'Доступно назначенному менеджеру, acting или РОПу.');
         }
 
-        $itemIds = array_values(array_keys(array_filter($this->selected)));
-        if ($itemIds === []) {
-            $this->addError('selected', 'Выберите хотя бы одну позицию.');
+        $supplierIds = array_values(array_map('intval', array_keys(array_filter($this->selected))));
+        if ($supplierIds === []) {
+            $this->addError('selected', 'Отметьте хотя бы одного поставщика.');
 
             return null;
         }
 
-        $result = $dispatcher->dispatch($req, $itemIds, $this->note, $user);
+        $result = $dispatcher->dispatch($req, $supplierIds, [], $this->note, $user);
 
         $this->open = false;
         $msg = "Отправлено запросов поставщикам: {$result['sent']}.";
         if ($result['failed'] > 0) {
             $msg .= " Ошибок: {$result['failed']}.";
-        }
-        if ($result['no_supplier'] > 0) {
-            $msg .= " Позиций без поставщика: {$result['no_supplier']}.";
         }
         session()->flash('status', $msg);
 
@@ -118,8 +104,10 @@ class SupplierDispatchDialog extends Component
         );
     }
 
-    public function render()
+    public function render(SupplierDispatchService $dispatcher)
     {
-        return view('livewire.requests.supplier-dispatch-dialog', ['rows' => $this->itemRows()]);
+        return view('livewire.requests.supplier-dispatch-dialog', [
+            'preview' => $this->open ? $this->previewData($dispatcher) : ['groups' => [], 'no_supplier' => 0, 'total_items' => 0],
+        ]);
     }
 }
