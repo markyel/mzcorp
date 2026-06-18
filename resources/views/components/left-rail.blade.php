@@ -37,13 +37,15 @@
     // «Клиенты» — реестр организаций/контактов. Доступен всем ролям.
     $rail[] = ['icon' => '◈', 'label' => 'Клиенты', 'href' => route('clients.index'), 'key' => 'clients'];
 
+    // «Поставщики» — запросы расценки поставщикам (SupplierInquiry). Все роли.
+    $rail[] = ['icon' => '◇', 'label' => 'Поставщики', 'href' => route('suppliers.index'), 'key' => 'suppliers'];
+
     // Phase 2 placeholder'ы — disabled (без href), показываются для
     // структуры UI.
     $railDisabled = [
         ['icon' => '⌗', 'label' => 'Правила'],
         ['icon' => '▦', 'label' => 'KB'],
         ['sep' => true],
-        ['icon' => '◇', 'label' => 'Поставщики'],
         ['icon' => '◷', 'label' => 'SLA'],
     ];
 @endphp

@@ -9,6 +9,7 @@ use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Services\Clients\RequestOrganizationResolver;
 use App\Services\Request\AssignmentService;
+use App\Services\Supplier\SupplierInquiryService;
 use App\Services\Request\InternalCodeGenerator;
 use App\Services\Request\RequestActivityService;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +39,7 @@ class IncomingMailProcessor
         private readonly SenderBlocklistService $blocklist,
         private readonly WebFormSubmissionParser $webForm,
         private readonly RequestOrganizationResolver $orgResolver,
+        private readonly SupplierInquiryService $supplierInquiries,
     ) {
     }
 
@@ -74,6 +76,22 @@ class IncomingMailProcessor
         // Идемпотентность: уже привязали Request к этому письму.
         if ($message->related_request_id) {
             return Request::find($message->related_request_id);
+        }
+
+        // Defense-in-depth для модуля поставщиков: MailRouter уже отбивает
+        // ответы в помеченных тредах поставщиков ДО создания заявки, но
+        // cron-команды (mail:create-requests / mail:categorize --include-orphans)
+        // вызывают processIfRequest напрямую, минуя router. Повторно матчим:
+        // совпало → прицепляем как переписку с поставщиком, заявку не создаём.
+        $supplierInquiry = $this->supplierInquiries->matchInbound($message);
+        if ($supplierInquiry !== null) {
+            $this->supplierInquiries->attachMessage($supplierInquiry, $message);
+            Log::info('IncomingMailProcessor: supplier inquiry reply — attached, no request', [
+                'email_message_id' => $message->id,
+                'supplier_inquiry_id' => $supplierInquiry->id,
+            ]);
+
+            return null;
         }
 
         // Empty-content guard: если очищенное тело короче порога И нет

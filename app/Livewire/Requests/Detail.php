@@ -1576,6 +1576,70 @@ class Detail extends Component
     }
 
     /**
+     * Пометить заявку как наш запрос расценки поставщику (модуль поставщиков).
+     * Заявка-фантом создана из ответа поставщика на наш запрос (thread_reply
+     * без родителя). Создаём/находим SupplierInquiry, прицепляем письма треда
+     * как переписку с поставщиком и закрываем заявку (closed_lost,
+     * reason=supplier_reply). Будущие ответы в этом треде матчатся по цепочке
+     * и больше не плодят заявок. Owner/acting/privileged.
+     */
+    public function markAsSupplierInquiry(
+        \App\Services\Supplier\SupplierInquiryService $supplierInquiries,
+        RequestStateService $state,
+    ) {
+        $user = auth()->user();
+        if ($user === null) {
+            abort(403);
+        }
+        if ($user->hasRole(Role::Secretary->value)) {
+            abort(403, 'Секретарь только просматривает заявки.');
+        }
+        $privileged = $user->hasAnyRole([
+            Role::HeadOfSales->value,
+            Role::Director->value,
+            Role::Admin->value,
+        ]);
+        if (! $privileged && ! $this->request->isAccessibleBy($user)) {
+            abort(403, 'Доступно назначенному менеджеру, acting или РОПу.');
+        }
+
+        $req = $this->request->fresh();
+        if ($req === null || $req->status->isTerminal() || $req->status === RequestStatus::Pending) {
+            $this->dispatch('toast', message: 'Действие недоступно для этого статуса.', type: 'error');
+
+            return;
+        }
+
+        try {
+            $inquiry = $supplierInquiries->markFromRequest($req, $user);
+
+            $comment = 'Помечено как запрос поставщику · переписка #' . $inquiry->id;
+            try {
+                $state->transitionTo($req, RequestStatus::ClosedLost, $user, [
+                    'closed_lost_reason' => \App\Enums\ClosedLostReason::SupplierReply->value,
+                    'closed_lost_comment' => $comment,
+                ]);
+            } catch (\DomainException) {
+                // closed_lost из текущего статуса запрещён (edge) — закрываем
+                // системно, минуя allowedTransitions.
+                $state->systemCloseLost($req, \App\Enums\ClosedLostReason::SupplierReply, $comment);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('markAsSupplierInquiry failed', [
+                'request_id' => $this->request->id,
+                'error' => $e->getMessage(),
+            ]);
+            $this->dispatch('toast', message: 'Не удалось пометить как запрос поставщику.', type: 'error');
+
+            return;
+        }
+
+        $this->dispatch('toast', message: 'Заявка помечена как запрос поставщику и закрыта. Переписка — в разделе «Поставщики».', type: 'success');
+
+        return $this->redirectRoute('suppliers.show', ['inquiry' => $inquiry->id], navigate: true);
+    }
+
+    /**
      * Поставить / снять ручной флаг attention. Менеджер — на свою или
      * делегированную заявку; РОП/директор — на любую. Manual флаг sticky:
      * не затирается recompute/onClientReplied/onManagerOpened.

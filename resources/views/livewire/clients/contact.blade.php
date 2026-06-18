@@ -118,4 +118,36 @@
             @endif
         </div>
     </div>
+
+    {{-- Запросы поставщику (если контрагент бывает и поставщиком) --}}
+    @if($this->supplierInquiries->isNotEmpty())
+        <div class="ds-card">
+            <div class="ds-card-header">
+                <h3>Запросы поставщику</h3>
+                <span class="text-[12px] text-fg-3 ml-2">переписка по нашим запросам расценки (не заявки клиента)</span>
+            </div>
+            <div class="ds-card-body overflow-x-auto">
+                <table class="w-full text-[12px]">
+                    <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
+                        <tr>
+                            <th class="text-left px-3 py-2">Тема запроса</th>
+                            <th class="text-right px-3 py-2">Писем</th>
+                            <th class="text-left px-3 py-2">Статус</th>
+                            <th class="text-left px-3 py-2">Создан</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($this->supplierInquiries as $si)
+                            <tr wire:key="si-{{ $si->id }}" class="border-b border-border-subtle hover:bg-hover">
+                                <td class="px-3 py-2"><a href="{{ route('suppliers.show', $si->id) }}" wire:navigate class="text-sky-700 hover:underline"><span class="truncate inline-block max-w-[320px] align-bottom">{{ $si->subject ?: '—' }}</span></a></td>
+                                <td class="px-3 py-2 text-right mono text-fg-2">{{ $si->messages_count }}</td>
+                                <td class="px-3 py-2"><span class="chip {{ $si->status === 'closed' ? 'chip-neutral' : 'chip-sky' }} text-[10.5px]">{{ $si->status === 'closed' ? 'закрыт' : 'открыт' }}</span></td>
+                                <td class="px-3 py-2 text-fg-3 mono whitespace-nowrap">{{ $si->created_at?->format('d.m.Y') }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    @endif
 </div>

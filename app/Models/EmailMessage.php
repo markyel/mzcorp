@@ -43,6 +43,9 @@ class EmailMessage extends Model
         'classified_at',
         'detected_artifacts',
         'related_request_id',
+        // Модуль поставщиков: переписка с поставщиком привязана к запросу
+        // (SupplierInquiry). Заполняется SupplierInquiryService.
+        'supplier_inquiry_id',
         // Phase 1.8c — новая категоризация (LazyLift drop-in).
         'category',
         'category_confidence',
@@ -128,5 +131,11 @@ class EmailMessage extends Model
     public function relatedRequest(): BelongsTo
     {
         return $this->belongsTo(Request::class, 'related_request_id');
+    }
+
+    /** Запрос поставщику, к которому прицеплена эта переписка (если есть). */
+    public function supplierInquiry(): BelongsTo
+    {
+        return $this->belongsTo(SupplierInquiry::class);
     }
 }

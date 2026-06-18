@@ -51,6 +51,7 @@ class MailRouter
         private readonly AiDecisionService $aiDecisions,
         private readonly \App\Services\Request\AttentionService $attention,
         private readonly SenderBlocklistService $blocklist,
+        private readonly \App\Services\Supplier\SupplierInquiryService $supplierInquiries,
     ) {
     }
 
@@ -224,6 +225,32 @@ class MailRouter
 
                 return;
             }
+        }
+
+        // Переписка с поставщиком: если письмо — ответ в треде, ПОМЕЧЕННОМ как
+        // наш запрос расценки поставщику (supplier_inquiries), прицепляем его к
+        // этому запросу и НЕ создаём заявку. Тред-центрично: матч строго по
+        // цепочке (In-Reply-To/References ↔ thread_root_id / message_id уже
+        // прикреплённых писем). ДО категоризации (экономим LLM) и ДО linker'а
+        // (ответ поставщика не должен липнуть к клиентской заявке). Кейс
+        // 0028087@mail.ru: ответы поставщика плодили фантомные заявки.
+        try {
+            $supplierInquiry = $this->supplierInquiries->matchInbound($message);
+            if ($supplierInquiry !== null) {
+                $this->supplierInquiries->attachMessage($supplierInquiry, $message);
+                Log::info('MailRouter: supplier inquiry reply — attached, no request', [
+                    'email_message_id' => $message->id,
+                    'supplier_inquiry_id' => $supplierInquiry->id,
+                    'from_email' => $message->from_email,
+                ]);
+
+                return;
+            }
+        } catch (\Throwable $e) {
+            Log::warning('MailRouter: supplier inquiry match failed (non-fatal)', [
+                'email_message_id' => $message->id,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         // Phase 1.8c: категоризация (LazyLift drop-in). Заполняет

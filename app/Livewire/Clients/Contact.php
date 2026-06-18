@@ -8,6 +8,7 @@ use App\Models\ClientContact;
 use App\Models\Invoice;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
+use App\Models\SupplierInquiry;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -91,6 +92,23 @@ class Contact extends Component
             'invoices' => $invoices,
             'paid' => $paid,
         ];
+    }
+
+    /**
+     * Запросы поставщику от этого контрагента (если он бывает и поставщиком).
+     * Раздел [[suppliers]] — переписка по нашим запросам расценки.
+     *
+     * @return \Illuminate\Support\Collection<int, SupplierInquiry>
+     */
+    #[Computed]
+    public function supplierInquiries()
+    {
+        return SupplierInquiry::query()
+            ->whereRaw('lower(supplier_email) = ?', [$this->email()])
+            ->withCount('messages')
+            ->orderByDesc('id')
+            ->limit(25)
+            ->get();
     }
 
     /**

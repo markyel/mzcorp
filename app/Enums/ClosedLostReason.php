@@ -33,6 +33,11 @@ enum ClosedLostReason: string
     // отправитель добавляется в `sender_blocklist` — будущие письма не
     // создают заявок (см. CloseLostDialog → blocklistScope: email|domain).
     case Spam = 'spam';
+    // Заявка создалась ошибочно из ответа поставщика на наш запрос расценки
+    // (thread_reply без родителя в БД). Оператор пометил тред как запрос
+    // поставщику (SupplierInquiry) → заявка закрывается с этой причиной,
+    // переписка ложится в модуль поставщиков. См. SupplierInquiryService.
+    case SupplierReply = 'supplier_reply';
 
     public function label(): string
     {
@@ -51,6 +56,7 @@ enum ClosedLostReason: string
             self::Duplicate => 'Объединена с другой заявкой',
             self::ParserNoContent => 'Парсер не нашёл позиций (авто)',
             self::Spam => 'Спам — отправитель в стоп-лист',
+            self::SupplierReply => 'Не заявка — переписка с поставщиком',
         };
     }
 

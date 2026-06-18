@@ -37,6 +37,7 @@
                     request()->routeIs('mail.index')        => 'mail',
                     request()->routeIs('invoices.*')        => 'invoices',
                     request()->routeIs('clients.*')         => 'clients',
+                    request()->routeIs('suppliers.*')       => 'suppliers',
                     default                                  => null,
                 };
                 $showRail = ($rail ?? true);

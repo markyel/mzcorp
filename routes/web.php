@@ -158,6 +158,17 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/clients/org/{organization}', function (\App\Models\Organization $organization) {
             return view('clients.show', ['organization' => $organization]);
         })->name('clients.show');
+
+        // Раздел «Поставщики» — запросы расценки поставщикам (SupplierInquiry).
+        // Тред, помеченный как наш запрос поставщику; ответы в нём — переписка,
+        // не клиентские заявки. Доступ всем ролям (как «Клиенты»).
+        Route::get('/dashboard/suppliers', function () {
+            return view('suppliers.index');
+        })->name('suppliers.index');
+
+        Route::get('/dashboard/suppliers/{inquiry}', function (\App\Models\SupplierInquiry $inquiry) {
+            return view('suppliers.show', ['inquiry' => $inquiry]);
+        })->name('suppliers.show');
     });
 
     // Mail routing rules — управление правилами для РОП и директора.

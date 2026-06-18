@@ -335,6 +335,7 @@ class Index extends Component
             EmailCategory::ThreadReply->value   => 'chip-info',
             EmailCategory::PostSale->value      => 'chip-warn',
             EmailCategory::Irrelevant->value    => 'chip-paused',
+            EmailCategory::SupplierReply->value => 'chip-sky',
             default                             => 'chip-neutral',
         };
     }

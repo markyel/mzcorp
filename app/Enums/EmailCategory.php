@@ -29,6 +29,10 @@ enum EmailCategory: string
     case ThreadReply = 'thread_reply';
     case PostSale = 'post_sale';
     case Irrelevant = 'irrelevant';
+    // Переписка с поставщиком: ответ в треде, помеченном как наш запрос
+    // расценки поставщику (SupplierInquiry). Не создаёт клиентскую заявку —
+    // прикрепляется к запросу поставщику. Ставится SupplierInquiryService.
+    case SupplierReply = 'supplier_reply';
 
     public function label(): string
     {
@@ -37,6 +41,7 @@ enum EmailCategory: string
             self::ThreadReply => 'Ответ в треде',
             self::PostSale => 'Постпродажная переписка',
             self::Irrelevant => 'Не клиентская',
+            self::SupplierReply => 'Переписка с поставщиком',
         };
     }
 
