@@ -38,6 +38,12 @@ class SupplierDispatchPanel extends Component
 
     public string $supplierSearch = '';
 
+    /** Обращение в начале письма; {поставщик} подставляется персонально. */
+    public string $greeting = 'Здравствуйте, {поставщик}!';
+
+    /** item_id => отредактированное название позиции для письма. */
+    public array $editedNames = [];
+
     public string $note = '';
 
     /** attachment_id => bool — файлы заявки для вложения. */
@@ -49,11 +55,13 @@ class SupplierDispatchPanel extends Component
     public function mount(RequestModel $request): void
     {
         $this->requestId = $request->id;
-        // По умолчанию выбираем позиции с НЕАКТУАЛЬНОЙ ценой (основной кейс refresh).
+        // По умолчанию: выбираем позиции с НЕАКТУАЛЬНОЙ ценой (основной кейс
+        // refresh) + заполняем редактируемые названия (каталог/клиент).
         foreach ($this->items() as $it) {
             if ($it['price_stale']) {
                 $this->selectedItems[$it['id']] = true;
             }
+            $this->editedNames[$it['id']] = $it['name'];
         }
     }
 
@@ -225,7 +233,7 @@ class SupplierDispatchPanel extends Component
 
         $reqAttIds = array_values(array_map('intval', array_keys(array_filter($this->selectedAttachments))));
 
-        $result = $dispatcher->dispatch($req, $supplierIds, $itemIds, $this->note, $user, $reqAttIds, $extraFiles);
+        $result = $dispatcher->dispatch($req, $supplierIds, $itemIds, $this->note, $user, $reqAttIds, $extraFiles, $this->editedNames, $this->greeting);
 
         $msg = "Отправлено запросов поставщикам: {$result['sent']}.";
         if ($result['failed'] > 0) {
@@ -251,7 +259,7 @@ class SupplierDispatchPanel extends Component
         $items = RequestItem::query()->whereIn('id', $ids)
             ->with(['brand:id,name', 'catalogItem:id,name'])->orderBy('position')->get();
 
-        return app(SupplierDispatchService::class)->itemRows($items);
+        return app(SupplierDispatchService::class)->itemRows($items, $this->editedNames);
     }
 
     public function render()

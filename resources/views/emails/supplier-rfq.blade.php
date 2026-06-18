@@ -7,7 +7,7 @@
 </head>
 <body style="margin:0;padding:0;font-family:-apple-system,Arial,sans-serif;background:#f5f6f8;color:#1a1a1a">
     <div style="max-width:640px;margin:0 auto;padding:20px 14px">
-        <p style="font-size:14px;margin:0 0 14px">Здравствуйте!</p>
+        <p style="font-size:14px;margin:0 0 14px">{{ $greeting ?? 'Здравствуйте!' }}</p>
         <p style="font-size:14px;margin:0 0 16px">
             Просим дать <b>цену, наличие и срок поставки</b> на следующие позиции:
         </p>

@@ -2,7 +2,6 @@
     @php
         $items = $this->items;
         $opts = $this->supplierOptions;
-        $rows = $this->previewRows;
         $atts = $this->requestAttachments;
         $staleCount = collect($items)->where('price_stale', true)->count();
         $selItems = collect($this->selectedItems)->filter()->count();
@@ -114,24 +113,37 @@
     <div class="ds-card">
         <div class="ds-card-header"><h3>Письмо запроса</h3></div>
         <div class="ds-card-body space-y-3">
+            {{-- Обращение (персональное per поставщик) --}}
+            <div>
+                <label class="block text-[11.5px] text-fg-3 mb-1">Обращение <span class="text-fg-4">— {поставщик} подставится для каждого поставщика</span></label>
+                <input type="text" wire:model="greeting" placeholder="Здравствуйте, {поставщик}!"
+                       class="w-full px-2 h-[30px] border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+            </div>
+
+            {{-- Превью позиций — РЕДАКТИРУЕМЫЕ названия --}}
+            <div class="border border-border rounded-md p-3 bg-surface-2">
+                <div class="text-[11px] uppercase tracking-wider text-fg-3 mb-2">Позиции в письме (название можно править; по умолчанию — из каталога при сматченном M-артикуле)</div>
+                @php $selectedRows = collect($items)->filter(fn ($i) => ($this->selectedItems[$i['id']] ?? false)); @endphp
+                @if($selectedRows->isEmpty())
+                    <div class="text-[12px] text-fg-4">Выберите позиции выше — появится список.</div>
+                @else
+                    <div class="space-y-1.5">
+                        @foreach($selectedRows as $i => $it)
+                            <div class="flex items-center gap-2">
+                                <span class="text-[11px] text-fg-4 w-4 text-right">{{ $loop->iteration }}.</span>
+                                <input type="text" wire:model.lazy="editedNames.{{ $it['id'] }}"
+                                       class="flex-1 px-2 h-[28px] border border-border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                                <span class="text-[11px] text-fg-4 whitespace-nowrap">{{ trim(implode(' · ', array_filter([$it['oem'], $it['qty']]))) }}</span>
+                            </div>
+                        @endforeach
+                    </div>
+                @endif
+            </div>
+
             <div>
                 <label class="block text-[11.5px] text-fg-3 mb-1">Примечание <span class="text-fg-4">(необязательно)</span></label>
                 <textarea wire:model="note" rows="2" placeholder="Напр.: срочно; нужен аналог; уточните срок доставки"
                           class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
-            </div>
-
-            {{-- Превью --}}
-            <div class="border border-border rounded-md p-3 bg-surface-2">
-                <div class="text-[11px] uppercase tracking-wider text-fg-3 mb-2">Превью (название из каталога при сматченном M-артикуле)</div>
-                @if(count($rows) === 0)
-                    <div class="text-[12px] text-fg-4">Выберите позиции — появится список.</div>
-                @else
-                    <ol class="text-[12.5px] text-fg-1 pl-5 list-decimal space-y-0.5">
-                        @foreach($rows as $r)
-                            <li>{{ $r['name'] }}@if($r['oem']) <span class="text-fg-4">· {{ $r['oem'] }}</span>@endif @if($r['brand'])<span class="text-fg-4">· {{ $r['brand'] }}</span>@endif @if($r['qty'])<span class="mono text-fg-3">· {{ $r['qty'] }}</span>@endif</li>
-                        @endforeach
-                    </ol>
-                @endif
             </div>
 
             {{-- Вложения заявки --}}

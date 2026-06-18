@@ -74,7 +74,11 @@ class SupplierDispatchService
      * @param  array<int, int>  $itemIds      ограничение позиций ([] = все активные)
      * @return array{sent: int, failed: int, no_supplier: int, suppliers: array<int, string>}
      */
-    public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by, array $reqAttachmentIds = [], array $extraFiles = []): array
+    /**
+     * @param  array<int, string>  $nameOverrides  item_id => отредактированное название
+     * @param  ?string  $greeting  шаблон обращения с плейсхолдером {поставщик}
+     */
+    public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by, array $reqAttachmentIds = [], array $extraFiles = [], array $nameOverrides = [], ?string $greeting = null): array
     {
         $preview = $this->preview($request, $itemIds);
         $sent = 0;
@@ -96,20 +100,22 @@ class SupplierDispatchService
             try {
                 $draft = $this->drafts->createCompose($request, $by);
 
-                $rows = $this->itemRows($items);
+                $rows = $this->itemRows($items, $nameOverrides);
+                $personalGreeting = $this->personalGreeting($greeting, $supplier);
                 $subject = 'Запрос расценки — [' . $request->internal_code . ']';
                 $bodyHtml = view('emails.supplier-rfq', [
                     'request' => $request,
                     'supplier' => $supplier,
                     'rows' => $rows,
                     'note' => trim((string) $note),
+                    'greeting' => $personalGreeting,
                 ])->render();
 
                 $this->drafts->update($draft, [
                     'to_recipients' => [['email' => $supplier->email, 'name' => $supplier->name ?: '']],
                     'subject' => $subject,
                     'body_html' => $bodyHtml,
-                    'body_plain' => $this->plainBody($request, $rows, (string) $note),
+                    'body_plain' => $this->plainBody($request, $rows, (string) $note, $personalGreeting),
                 ]);
 
                 // Вложения: файлы заявки + загруженные с диска — до отправки,
@@ -202,15 +208,17 @@ class SupplierDispatchService
      * позиция сматчена (M-SKU), иначе формулировку клиента; OEM — артикул.
      *
      * @param  iterable<int, RequestItem>  $items
+     * @param  array<int, string>  $nameOverrides  item_id => отредактированное менеджером название
      * @return array<int, array{name:string, oem:?string, brand:?string, qty:?string}>
      */
-    public function itemRows(iterable $items): array
+    public function itemRows(iterable $items, array $nameOverrides = []): array
     {
         $rows = [];
         foreach ($items as $it) {
+            $override = isset($nameOverrides[$it->id]) ? trim((string) $nameOverrides[$it->id]) : '';
             $catalogName = $it->catalog_item_id ? ($it->catalogItem?->name ?: null) : null;
             $rows[] = [
-                'name' => (string) ($catalogName ?: $it->parsed_name ?: '—'),
+                'name' => $override !== '' ? $override : (string) ($catalogName ?: $it->parsed_name ?: '—'),
                 'oem' => $it->parsed_article ?: null,
                 'brand' => ($it->brand?->name ?: $it->parsed_brand) ?: null,
                 'qty' => $it->parsed_qty ? trim($it->parsed_qty . ' ' . ($it->parsed_unit ?: 'шт.')) : null,
@@ -218,6 +226,21 @@ class SupplierDispatchService
         }
 
         return $rows;
+    }
+
+    /**
+     * Персональное обращение: подставляет имя поставщика в плейсхолдер
+     * {поставщик}. Пустой шаблон → дефолт. Нет имени → «коллеги».
+     */
+    public function personalGreeting(?string $template, \App\Models\Supplier $supplier): string
+    {
+        $template = trim((string) $template);
+        if ($template === '') {
+            $template = 'Здравствуйте, {поставщик}!';
+        }
+        $name = trim((string) ($supplier->name ?: '')) ?: 'коллеги';
+
+        return str_replace('{поставщик}', $name, $template);
     }
 
     /**
@@ -272,9 +295,9 @@ class SupplierDispatchService
     /**
      * @param  array<int, array{name:string, oem:?string, brand:?string, qty:?string}>  $rows
      */
-    private function plainBody(RequestModel $request, array $rows, string $note): string
+    private function plainBody(RequestModel $request, array $rows, string $note, string $greeting = 'Здравствуйте!'): string
     {
-        $lines = ['Здравствуйте!', '', 'Просим дать цену, наличие и срок поставки на позиции:', ''];
+        $lines = [$greeting !== '' ? $greeting : 'Здравствуйте!', '', 'Просим дать цену, наличие и срок поставки на позиции:', ''];
         $n = 1;
         foreach ($rows as $r) {
             $parts = array_filter([$r['name'], $r['oem'], $r['brand'], $r['qty']]);
