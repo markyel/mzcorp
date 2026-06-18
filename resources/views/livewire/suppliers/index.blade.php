@@ -31,34 +31,30 @@
             <div class="divide-y divide-border-subtle border-t border-border">
                 @forelse($this->positions as $pos)
                     @php
-                        $name = $pos->catalog_item_id ? ($pos->catalogItem?->name ?: $pos->parsed_name) : $pos->parsed_name;
-                        $offers = $pos->supplierInquiryItems->flatMap->offers;
-                        $quoted = $offers->where('outcome', 'quoted')->filter(fn ($o) => $o->price !== null);
-                        $minP = $quoted->min('price');
-                        $maxP = $quoted->max('price');
-                        $stale = $pos->catalog_item_id && $pos->catalogItem && ! $pos->catalogItem->is_price_actual;
+                        $multi = $pos['requests']->count() > 1;
                     @endphp
-                    <div wire:key="pos-{{ $pos->id }}" class="px-4 py-3">
+                    <div wire:key="pos-{{ $pos['key'] }}" class="px-4 py-3">
                         <div class="flex items-start gap-2 flex-wrap">
                             <div class="flex-1 min-w-[260px]">
-                                <span class="text-[13px] text-fg-1 font-medium">{{ \Illuminate\Support\Str::limit($name, 70) }}</span>
+                                <span class="text-[13px] text-fg-1 font-medium">{{ \Illuminate\Support\Str::limit($pos['name'], 70) }}</span>
                                 <div class="text-[11px] text-fg-4 mt-0.5">
-                                    @if($pos->parsed_article)<span class="mono">арт. {{ $pos->parsed_article }}</span> · @endif
-                                    @if($pos->catalogItem?->sku)<span class="mono">{{ $pos->catalogItem->sku }}</span> · @endif
-                                    заявка <a href="{{ route('requests.show', $pos->request_id) }}" wire:navigate class="text-sky-700 hover:underline mono">{{ $pos->request?->internal_code }}</a>
-                                    · цена @if($pos->catalog_item_id)<span class="{{ $stale ? 'text-amber-700' : 'text-emerald-700' }}">{{ $stale ? 'неактуальна' : 'актуальна' }}</span>@else<span class="text-fg-4">не в каталоге</span>@endif
+                                    @if($pos['article'])<span class="mono">арт. {{ $pos['article'] }}</span> · @endif
+                                    @if($pos['sku'])<span class="mono">{{ $pos['sku'] }}</span> · @endif
+                                    {{ $multi ? 'заявки' : 'заявка' }}
+                                    @foreach($pos['requests'] as $r)<a href="{{ route('requests.show', $r['id']) }}" wire:navigate class="text-sky-700 hover:underline mono">{{ $r['code'] }}</a>@if(!$loop->last), @endif @endforeach
+                                    · цена @if($pos['is_catalog'])<span class="{{ $pos['stale'] ? 'text-amber-700' : 'text-emerald-700' }}">{{ $pos['stale'] ? 'неактуальна' : 'актуальна' }}</span>@else<span class="text-fg-4">не в каталоге</span>@endif
                                 </div>
                             </div>
-                            @if($quoted->isNotEmpty())
-                                <span class="chip chip-ok text-[10.5px]">{{ $minP == $maxP ? number_format((float)$minP,2,'.',' ') : number_format((float)$minP,2,'.',' ').'–'.number_format((float)$maxP,2,'.',' ') }} ₽ · предложений: {{ $quoted->count() }}</span>
+                            @if($pos['quoted_count'] > 0)
+                                <span class="chip chip-ok text-[10.5px]">{{ $pos['min'] == $pos['max'] ? number_format((float)$pos['min'],2,'.',' ') : number_format((float)$pos['min'],2,'.',' ').'–'.number_format((float)$pos['max'],2,'.',' ') }} ₽ · предложений: {{ $pos['quoted_count'] }}</span>
                             @else
                                 <span class="chip chip-sky text-[10.5px]">ждём предложений</span>
                             @endif
                         </div>
 
-                        {{-- Предложения от разных поставщиков --}}
+                        {{-- Предложения от разных поставщиков (по всем заявкам с этой номенклатурой) --}}
                         <div class="mt-2 ml-0 flex flex-wrap gap-1.5">
-                            @foreach($pos->supplierInquiryItems as $sii)
+                            @foreach($pos['siis'] as $sii)
                                 @php $o = $sii->offers->first(); @endphp
                                 <div class="inline-flex items-center gap-1.5 border border-border-subtle rounded-md px-2 py-1 bg-surface text-[11.5px]">
                                     <a href="{{ route('suppliers.show', $sii->supplier_inquiry_id) }}" wire:navigate class="text-sky-700 hover:underline">{{ $sii->inquiry?->supplier_name ?: $sii->inquiry?->supplier_email }}</a>

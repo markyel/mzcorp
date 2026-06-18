@@ -153,7 +153,46 @@ class Index extends Component
             });
         }
 
-        return $q->orderByDesc('id')->paginate(25);
+        // Схлопываем по catalog SKU: одна номенклатура из разных заявок = одна
+        // строка с офферами от всех поставщиков. Некаталожные (без SKU) — каждая
+        // отдельно (по своему id). Группировка в PHP → ручная пагинация.
+        $groups = $q->orderByDesc('id')->get()
+            ->groupBy(fn (RequestItem $it) => $it->catalog_item_id ? 'c' . $it->catalog_item_id : 'r' . $it->id)
+            ->map(function ($rows) {
+                /** @var \App\Models\RequestItem $first */
+                $first = $rows->first();
+                $isCatalog = (bool) $first->catalog_item_id;
+                $name = $isCatalog ? ($first->catalogItem?->name ?: $first->parsed_name) : $first->parsed_name;
+                $siis = $rows->flatMap->supplierInquiryItems;
+                $quoted = $siis->flatMap->offers->where('outcome', 'quoted')->filter(fn ($o) => $o->price !== null);
+
+                return [
+                    'key' => $isCatalog ? 'c' . $first->catalog_item_id : 'r' . $first->id,
+                    'name' => (string) ($name ?: '—'),
+                    'sku' => $isCatalog ? $first->catalogItem?->sku : null,
+                    'article' => $first->parsed_article,
+                    'is_catalog' => $isCatalog,
+                    'stale' => $isCatalog && $first->catalogItem && ! $first->catalogItem->is_price_actual,
+                    'requests' => $rows->map(fn ($r) => ['id' => $r->request_id, 'code' => $r->request?->internal_code])
+                        ->unique('id')->values(),
+                    'siis' => $siis,
+                    'min' => $quoted->min('price'),
+                    'max' => $quoted->max('price'),
+                    'quoted_count' => $quoted->count(),
+                ];
+            })
+            ->values();
+
+        $perPage = 25;
+        $page = \Illuminate\Pagination\Paginator::resolveCurrentPage();
+
+        return new \Illuminate\Pagination\LengthAwarePaginator(
+            $groups->slice(($page - 1) * $perPage, $perPage)->values(),
+            $groups->count(),
+            $perPage,
+            $page,
+            ['path' => \Illuminate\Pagination\Paginator::resolveCurrentPath()],
+        );
     }
 
     public function render()
