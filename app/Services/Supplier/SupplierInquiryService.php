@@ -124,6 +124,36 @@ class SupplierInquiryService
     }
 
     /**
+     * Принять входящее письмо от поставщика как переписку (для supplier-kind
+     * стоп-листа: весь ящик — поставщик). Сначала тред-матч (matchInbound),
+     * иначе общий inquiry по supplier_email (создаём, если нет). Делает письмо
+     * ЧИТАЕМЫМ в /dashboard/suppliers, не создавая клиентской заявки.
+     */
+    public function ingestSupplierMessage(EmailMessage $message): SupplierInquiry
+    {
+        $inquiry = $this->matchInbound($message);
+        if ($inquiry === null) {
+            $email = mb_strtolower(trim((string) $message->from_email));
+            $inquiry = SupplierInquiry::query()
+                ->whereRaw('lower(supplier_email) = ?', [$email])
+                ->orderByDesc('id')
+                ->first();
+            if ($inquiry === null) {
+                $inquiry = SupplierInquiry::create([
+                    'supplier_email' => $email,
+                    'supplier_name' => $message->from_name ?: null,
+                    'subject' => $message->subject ?: 'Переписка с поставщиком',
+                    'thread_root_id' => $message->message_id ?: null,
+                    'status' => 'open',
+                ]);
+            }
+        }
+        $this->attachMessage($inquiry, $message);
+
+        return $inquiry;
+    }
+
+    /**
      * Найти запрос поставщику, к которому относится входящее письмо, СТРОГО по
      * цепочке треда. null — не относится ни к одному помеченному треду.
      */

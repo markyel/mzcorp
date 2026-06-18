@@ -40,6 +40,13 @@ class CloseLostDialog extends Component
     /** 'email' | 'domain' — выбор пользователя при reason=Spam. */
     public string $blocklistScope = 'email';
 
+    /**
+     * Причина «Переписка с поставщиком»: занести отправителя в стоп-лист как
+     * поставщика (весь ящик → переписка поставщика, не заявка). Если выкл. —
+     * помечается только текущий тред (как кнопка 📦 раньше).
+     */
+    public bool $addToBlocklist = false;
+
     public function mount(RequestModel $request): void
     {
         $this->requestId = $request->id;
@@ -51,6 +58,7 @@ class CloseLostDialog extends Component
         $this->reason = '';
         $this->comment = '';
         $this->blocklistScope = 'email';
+        $this->addToBlocklist = false;
         $this->resetErrorBag();
         $this->open = true;
     }
@@ -60,8 +68,12 @@ class CloseLostDialog extends Component
         $this->open = false;
     }
 
-    public function save(RequestStateService $service, SenderBlocklistService $blocklist)
-    {
+    public function save(
+        RequestStateService $service,
+        SenderBlocklistService $blocklist,
+        \App\Services\Supplier\SupplierInquiryService $supplierInquiries,
+        \App\Services\Supplier\SupplierRegistry $supplierRegistry,
+    ) {
         $this->validate();
 
         $reasonEnum = ClosedLostReason::tryFrom($this->reason);
@@ -112,6 +124,18 @@ class CloseLostDialog extends Component
             ];
         }
 
+        // Причина «Переписка с поставщиком» + галка «занести в стоп-лист»:
+        // валидируем адрес ДО транзита. Без галки — пометим только этот тред.
+        $supplierBlockEmail = null;
+        if ($reasonEnum === ClosedLostReason::SupplierReply && $this->addToBlocklist) {
+            $fromEmail = (string) ($req->emailMessage?->from_email ?? '');
+            if ($blocklist->normalizeEmail($fromEmail) === null) {
+                $this->addError('reason', 'У заявки нет распознаваемого адреса отправителя — нельзя занести в стоп-лист. Снимите галку или выберите другую причину.');
+                return null;
+            }
+            $supplierBlockEmail = $fromEmail;
+        }
+
         try {
             $payload = [
                 'closed_lost_reason' => $reasonEnum->value,
@@ -145,6 +169,34 @@ class CloseLostDialog extends Component
                     'error' => $e->getMessage(),
                 ]);
                 session()->flash('status', 'Заявка закрыта, но добавление в стоп-лист не удалось — попробуйте вручную.');
+            }
+        } elseif ($reasonEnum === ClosedLostReason::SupplierReply) {
+            // Переписка с поставщиком: всегда помечаем этот тред (читаемо в
+            // разделе «Поставщики»); при галке — заносим весь ящик в стоп-лист
+            // как поставщика + в реестр (для матчинга/dispatch).
+            try {
+                $supplierInquiries->markFromRequest($req->fresh() ?? $req, auth()->user());
+                if ($supplierBlockEmail !== null) {
+                    $blocklist->block(
+                        $supplierBlockEmail,
+                        BlocklistEntryType::Email,
+                        BlocklistEntrySource::FromRequest,
+                        auth()->user(),
+                        $req,
+                        'Поставщик из заявки '.$req->internal_code,
+                        \App\Enums\BlocklistKind::Supplier,
+                    );
+                    $supplierRegistry->registerEmail($supplierBlockEmail, $req->emailMessage?->from_name, auth()->user());
+                    session()->flash('status', 'Закрыто как переписка с поставщиком; ящик занесён в стоп-лист (поставщик) — его письма больше не создают заявок, но читаются.');
+                } else {
+                    session()->flash('status', 'Закрыто как переписка с поставщиком (помечен только этот тред).');
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('CloseLostDialog: supplier mark failed (status already changed)', [
+                    'request_id' => $req->id,
+                    'error' => $e->getMessage(),
+                ]);
+                session()->flash('status', 'Заявка закрыта как переписка с поставщиком.');
             }
         } else {
             session()->flash('status', 'Заявка закрыта как потеря.');

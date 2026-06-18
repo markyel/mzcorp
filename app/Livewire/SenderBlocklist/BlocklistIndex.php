@@ -44,6 +44,9 @@ class BlocklistIndex extends Component
 
     public string $singleType = 'email';
 
+    /** 'supplier' (читаем как переписку) | 'spam' (отбрасываем). */
+    public string $singleKind = 'supplier';
+
     #[Validate('required_with_all:bulkMode|nullable|string|max:10000')]
     public string $bulkValues = '';
 
@@ -97,6 +100,7 @@ class BlocklistIndex extends Component
         $user = auth()->user();
 
         try {
+            $kind = \App\Enums\BlocklistKind::tryFrom($this->singleKind) ?? \App\Enums\BlocklistKind::Supplier;
             if ($this->bulkMode) {
                 $lines = preg_split('/[\r\n]+/', $this->bulkValues) ?: [];
                 $result = $svc->bulkBlock(
@@ -104,6 +108,7 @@ class BlocklistIndex extends Component
                     BlocklistEntrySource::Manual,
                     $user,
                     $this->comment !== '' ? $this->comment : null,
+                    $kind,
                 );
 
                 $parts = ["Добавлено: {$result['created']}"];
@@ -125,6 +130,7 @@ class BlocklistIndex extends Component
                     $user,
                     null,
                     $this->comment !== '' ? $this->comment : null,
+                    $kind,
                 );
                 $this->flashMessage = $entry->wasRecentlyCreated
                     ? "Добавлено: {$entry->value}"
@@ -155,6 +161,7 @@ class BlocklistIndex extends Component
         $this->bulkValues = '';
         $this->comment = '';
         $this->singleType = 'email';
+        $this->singleKind = 'supplier';
         $this->resetValidation();
     }
 

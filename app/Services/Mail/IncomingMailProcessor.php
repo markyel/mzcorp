@@ -49,8 +49,23 @@ class IncomingMailProcessor
         // ДО категоризации, но cron-команды `mail:create-requests` /
         // `mail:categorize` могут вызвать processIfRequest напрямую,
         // обходя router. Повторная проверка дешёвая (локальный SELECT).
-        if ($this->blocklist->isBlocked($message->from_email)) {
-            Log::info('IncomingMailProcessor: skip — sender in blocklist', [
+        $blockEntry = $this->blocklist->match($message->from_email);
+        if ($blockEntry !== null) {
+            if ($blockEntry->kind === \App\Enums\BlocklistKind::Supplier) {
+                // Пул поставщика — читаем как переписку, не создаём заявку.
+                try {
+                    $this->supplierInquiries->ingestSupplierMessage($message);
+                } catch (\Throwable $e) {
+                    Log::warning('IncomingMailProcessor: supplier-blocklist ingest failed', [
+                        'email_message_id' => $message->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+
+                return null;
+            }
+
+            Log::info('IncomingMailProcessor: skip — sender in blocklist (spam)', [
                 'email_message_id' => $message->id,
                 'from_email' => $message->from_email,
             ]);

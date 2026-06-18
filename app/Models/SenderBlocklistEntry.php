@@ -37,6 +37,8 @@ class SenderBlocklistEntry extends Model
         'value',
         'normalized_value',
         'source',
+        // spam (отбрасываем) | supplier (читаем как переписку поставщика).
+        'kind',
         'comment',
         'added_by_user_id',
         'added_from_request_id',
@@ -49,6 +51,7 @@ class SenderBlocklistEntry extends Model
         return [
             'type' => BlocklistEntryType::class,
             'source' => BlocklistEntrySource::class,
+            'kind' => \App\Enums\BlocklistKind::class,
             'hit_count' => 'integer',
             'last_hit_at' => 'datetime',
         ];

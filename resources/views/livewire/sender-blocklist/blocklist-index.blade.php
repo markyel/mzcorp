@@ -38,6 +38,14 @@
             </div>
 
             <form wire:submit.prevent="add" class="space-y-3">
+                <div>
+                    <label class="block text-xs text-gray-600 mb-1">Вид</label>
+                    <select wire:model="singleKind" class="w-full text-sm rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600">
+                        <option value="supplier">Поставщик — письма читаются как переписка, не создают заявок</option>
+                        <option value="spam">Спам — письма отбрасываются (не читаются)</option>
+                    </select>
+                </div>
+
                 @if(! $bulkMode)
                     <div class="grid grid-cols-12 gap-3">
                         <div class="col-span-3">
@@ -112,6 +120,7 @@
             <table class="min-w-full text-sm">
                 <thead class="bg-gray-50 dark:bg-gray-900 text-gray-600 dark:text-gray-400 text-xs uppercase">
                     <tr>
+                        <th class="px-3 py-2 text-left">Вид</th>
                         <th class="px-3 py-2 text-left">Тип</th>
                         <th class="px-3 py-2 text-left">Значение</th>
                         <th class="px-3 py-2 text-left">Комментарий</th>
@@ -125,6 +134,12 @@
                 <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
                     @foreach($this->entries as $entry)
                         <tr wire:key="entry-{{ $entry->id }}">
+                            <td class="px-3 py-2">
+                                @php $isSup = ($entry->kind?->value ?? 'spam') === 'supplier'; @endphp
+                                <span class="inline-block px-2 py-0.5 rounded text-xs {{ $isSup ? 'bg-sky-100 text-sky-800' : 'bg-gray-200 text-gray-700' }}">
+                                    {{ $entry->kind?->label() ?? 'Спам' }}
+                                </span>
+                            </td>
                             <td class="px-3 py-2">
                                 <span class="inline-block px-2 py-0.5 rounded text-xs {{ $entry->type->value === 'email' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800' }}">
                                     {{ $entry->type->label() }}

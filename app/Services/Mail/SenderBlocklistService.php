@@ -39,14 +39,24 @@ class SenderBlocklistService
      */
     public function isBlocked(?string $fromEmail): bool
     {
+        return $this->match($fromEmail) !== null;
+    }
+
+    /**
+     * Найти матчнувшую запись стоп-листа (email-точное → domain-суффикс) и
+     * инкрементнуть hit. null — не в стоп-листе. Вызывающий ветвится по
+     * `->kind` (spam → отбросить; supplier → читать как переписку поставщика).
+     */
+    public function match(?string $fromEmail): ?SenderBlocklistEntry
+    {
         $email = $this->normalizeEmail($fromEmail);
         if ($email === null) {
-            return false;
+            return null;
         }
 
         $domain = $this->extractDomain($email);
         if ($domain === null) {
-            return false;
+            return null;
         }
 
         // 1) Точное совпадение по email (нормализованному).
@@ -58,12 +68,10 @@ class SenderBlocklistService
         if ($emailMatch) {
             $this->registerHit($emailMatch);
 
-            return true;
+            return $emailMatch;
         }
 
         // 2) Domain-записи: суффикс-матч.
-        // Берём все domain-записи которые являются суффиксом домена письма.
-        // На реальных объёмах (десятки-сотни записей) этот SELECT тривиален.
         $domainCandidates = SenderBlocklistEntry::query()
             ->where('type', BlocklistEntryType::Domain->value)
             ->get();
@@ -72,11 +80,11 @@ class SenderBlocklistService
             if ($this->domainMatches($domain, $entry->normalized_value)) {
                 $this->registerHit($entry);
 
-                return true;
+                return $entry;
             }
         }
 
-        return false;
+        return null;
     }
 
     /**
@@ -92,6 +100,7 @@ class SenderBlocklistService
         ?User $byUser = null,
         ?Request $fromRequest = null,
         ?string $comment = null,
+        \App\Enums\BlocklistKind $kind = \App\Enums\BlocklistKind::Spam,
     ): SenderBlocklistEntry {
         $normalized = $this->normalizeFor($type, $rawValue);
         if ($normalized === null) {
@@ -101,7 +110,7 @@ class SenderBlocklistService
         }
 
         // findOrCreate — атомарно за счёт unique-constraint.
-        return DB::transaction(function () use ($type, $rawValue, $normalized, $source, $byUser, $fromRequest, $comment) {
+        return DB::transaction(function () use ($type, $rawValue, $normalized, $source, $byUser, $fromRequest, $comment, $kind) {
             $existing = SenderBlocklistEntry::query()
                 ->where('type', $type->value)
                 ->where('normalized_value', $normalized)
@@ -117,6 +126,7 @@ class SenderBlocklistService
                 'value' => trim($rawValue),
                 'normalized_value' => $normalized,
                 'source' => $source->value,
+                'kind' => $kind->value,
                 'comment' => $comment,
                 'added_by_user_id' => $byUser?->id,
                 'added_from_request_id' => $fromRequest?->id,
@@ -145,6 +155,7 @@ class SenderBlocklistService
         BlocklistEntrySource $source,
         ?User $byUser = null,
         ?string $comment = null,
+        \App\Enums\BlocklistKind $kind = \App\Enums\BlocklistKind::Spam,
     ): array {
         $created = 0;
         $skipped = 0;
@@ -159,7 +170,7 @@ class SenderBlocklistService
             $type = str_contains($raw, '@') ? BlocklistEntryType::Email : BlocklistEntryType::Domain;
 
             try {
-                $entry = $this->block($raw, $type, $source, $byUser, null, $comment);
+                $entry = $this->block($raw, $type, $source, $byUser, null, $comment, $kind);
                 if ($entry->wasRecentlyCreated) {
                     $created++;
                 } else {

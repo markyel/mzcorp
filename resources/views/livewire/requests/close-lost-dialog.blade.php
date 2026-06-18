@@ -30,7 +30,25 @@
                         $selected = collect($reasons)->firstWhere('value', $reason);
                         $needsComment = $selected['needsComment'] ?? false;
                         $isSpam = $reason === 'spam';
+                        $isSupplier = $reason === 'supplier_reply';
                     @endphp
+
+                    {{-- Переписка с поставщиком: занести весь ящик в стоп-лист? --}}
+                    @if($isSupplier)
+                        <div class="rounded border border-sky-200 bg-sky-50 p-3 space-y-2">
+                            <label class="flex items-start gap-2 cursor-pointer text-[13px]">
+                                <input type="checkbox" wire:model="addToBlocklist" class="mt-0.5">
+                                <span>
+                                    Занести отправителя в стоп-лист как <b>поставщика</b>
+                                    @if($senderInfo['email'])<span class="font-mono text-[12px] block text-fg-3">{{ $senderInfo['email'] }}</span>@endif
+                                </span>
+                            </label>
+                            <div class="text-[11px] text-sky-800">
+                                <b>С галкой:</b> ВСЕ письма с этого ящика будут считаться перепиской поставщика — не создают заявок, но читаются в разделе «Поставщики».<br>
+                                <b>Без галки:</b> помечается только этот тред; с адреса по-прежнему могут приходить клиентские заявки.
+                            </div>
+                        </div>
+                    @endif
 
                     {{-- Spam scope: только при reason=Spam --}}
                     @if($isSpam)

@@ -202,11 +202,33 @@ class MailRouter
         }
 
         // Стоп-лист отправителей: ДО AI-категоризации (экономим токены) и
-        // ДО reply-linker (спам не должен привязываться к существующим
-        // заявкам). Если отправитель в стоп-листе — помечаем письмо
-        // Irrelevant с reasoning'ом, выходим без routing/parser/job'ов.
-        // sender_blocklist hit_count инкрементится внутри isBlocked().
-        if ($this->blocklist->isBlocked($message->from_email)) {
+        // ДО reply-linker. Две ветки по kind записи:
+        //  - supplier → это пул поставщика: НЕ создаём заявку, но письмо
+        //    ПРОЧИТЫВАЕМ — прикрепляем как переписку поставщика (читаемо в
+        //    /dashboard/suppliers, category=supplier_reply). См. BlocklistKind.
+        //  - spam → отбрасываем (Irrelevant, как раньше).
+        // hit_count инкрементится внутри match().
+        $blockEntry = $this->blocklist->match($message->from_email);
+        if ($blockEntry !== null) {
+            if ($blockEntry->kind === \App\Enums\BlocklistKind::Supplier) {
+                try {
+                    $inquiry = $this->supplierInquiries->ingestSupplierMessage($message);
+                    Log::info('MailRouter: supplier-blocklist sender — read as supplier correspondence', [
+                        'email_message_id' => $message->id,
+                        'supplier_inquiry_id' => $inquiry->id,
+                        'from_email' => $message->from_email,
+                    ]);
+                } catch (\Throwable $e) {
+                    Log::warning('MailRouter: supplier-blocklist ingest failed (non-fatal)', [
+                        'email_message_id' => $message->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+
+                return;
+            }
+
+            // spam-kind → отбрасываем.
             $message->forceFill([
                 'category' => EmailCategory::Irrelevant->value,
                 'category_reasoning' => 'Blocked by sender_blocklist (from='.$message->from_email.')',
@@ -215,7 +237,7 @@ class MailRouter
 
             $this->recordBlocklistSkipped($message);
 
-            Log::info('MailRouter: skip — sender in blocklist', [
+            Log::info('MailRouter: skip — sender in blocklist (spam)', [
                 'email_message_id' => $message->id,
                 'from_email' => $message->from_email,
                 'subject' => mb_substr((string) $message->subject, 0, 80),
