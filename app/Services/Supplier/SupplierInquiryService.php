@@ -22,6 +22,54 @@ use Illuminate\Support\Facades\DB;
  */
 class SupplierInquiryService
 {
+    public function __construct(
+        private readonly SupplierRegistry $registry,
+    ) {
+    }
+
+    /**
+     * Зарегистрировать запрос поставщику из НАШЕГО ИСХОДЯЩЕГО письма (send-time).
+     * Триггерится из MailRouter, когда получатель в реестре поставщиков И LLM
+     * подтвердил RFQ. thread_root_id = message_id исходящего — ответ поставщика
+     * (In-Reply-To на него) поймает matchInbound. Идемпотентно по thread_root_id.
+     * Заодно регистрирует поставщика в реестре (bootstrap). null — нет финального
+     * Message-ID (рано) или нет получателя.
+     */
+    public function createFromOutbound(EmailMessage $sent, ?int $requestId, ?User $by): ?SupplierInquiry
+    {
+        $rootId = (string) $sent->message_id;
+        if ($rootId === '' || str_starts_with($rootId, 'draft.')) {
+            return null;
+        }
+
+        $recipients = (array) ($sent->to_recipients ?? []);
+        $first = is_array($recipients[0] ?? null) ? $recipients[0] : [];
+        $supplierEmail = mb_strtolower(trim((string) ($first['email'] ?? '')));
+        $supplierName = isset($first['name']) ? (string) $first['name'] : null;
+        if ($supplierEmail === '') {
+            return null;
+        }
+
+        return DB::transaction(function () use ($sent, $requestId, $by, $rootId, $supplierEmail, $supplierName) {
+            $inquiry = SupplierInquiry::query()->where('thread_root_id', $rootId)->first();
+            if ($inquiry === null) {
+                $inquiry = SupplierInquiry::create([
+                    'supplier_email' => $supplierEmail,
+                    'supplier_name' => $supplierName !== null && $supplierName !== '' ? $supplierName : null,
+                    'subject' => $sent->subject,
+                    'thread_root_id' => $rootId,
+                    'related_request_id' => $requestId,
+                    'status' => 'open',
+                    'created_by_user_id' => $by?->id,
+                ]);
+            }
+            $this->attachMessage($inquiry, $sent);
+            $this->registry->registerEmail($supplierEmail, $supplierName, $by);
+
+            return $inquiry;
+        });
+    }
+
     /**
      * Пометить тред заявки как наш запрос поставщику: создать/найти
      * SupplierInquiry по корню треда + прицепить все письма заявки как
@@ -63,6 +111,12 @@ class SupplierInquiryService
                 ->each(fn (EmailMessage $m) => $this->attachMessage($inquiry, $m));
             if ($origin !== null) {
                 $this->attachMessage($inquiry, $origin);
+            }
+
+            // Bootstrap реестра: помеченный вручную поставщик попадает в список,
+            // чтобы его будущие исходящие RFQ ловились send-time автоматически.
+            if ($supplierEmail !== '') {
+                $this->registry->registerEmail($supplierEmail, $supplierName, $by);
             }
 
             return $inquiry;

@@ -52,6 +52,8 @@ class MailRouter
         private readonly \App\Services\Request\AttentionService $attention,
         private readonly SenderBlocklistService $blocklist,
         private readonly \App\Services\Supplier\SupplierInquiryService $supplierInquiries,
+        private readonly \App\Services\Supplier\SupplierRegistry $supplierRegistry,
+        private readonly \App\Services\Supplier\SupplierRfqClassifier $supplierRfqClassifier,
     ) {
     }
 
@@ -145,6 +147,42 @@ class MailRouter
                         'error' => $e->getMessage(),
                     ]);
                 }
+            }
+
+            // Запрос расценки поставщику (модуль поставщиков, send-time): если
+            // наше исходящее ушло получателю из реестра поставщиков И LLM
+            // подтвердил, что это RFQ (мы просим цены на номенклатуру, а не
+            // отвечаем контрагенту как клиенту) — регистрируем тред
+            // (thread_root_id = message_id). Ответ поставщика (In-Reply-To на
+            // него) поймает matchInbound и не создаст фейковую заявку. Ловим и
+            // письма из почтового клиента (синкаются из Sent). Идемпотентно.
+            try {
+                if ($message->message_id) {
+                    $toSupplier = collect((array) ($message->to_recipients ?? []))
+                        ->map(fn ($r) => is_array($r) ? ($r['email'] ?? null) : $r)
+                        ->filter()
+                        ->first(fn ($e) => $this->supplierRegistry->isSupplier((string) $e));
+                    if ($toSupplier !== null) {
+                        $rfq = $this->supplierRfqClassifier->classify($message);
+                        if ($rfq['is_rfq']) {
+                            $inquiry = $this->supplierInquiries->createFromOutbound(
+                                $message,
+                                $message->related_request_id,
+                                null,
+                            );
+                            Log::info('MailRouter: outbound supplier RFQ — inquiry registered', [
+                                'email_message_id' => $message->id,
+                                'supplier_inquiry_id' => $inquiry?->id,
+                                'confidence' => $rfq['confidence'],
+                            ]);
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: supplier RFQ detect failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'error' => $e->getMessage(),
+                ]);
             }
 
             return;
