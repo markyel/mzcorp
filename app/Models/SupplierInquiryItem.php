@@ -1,0 +1,35 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+/**
+ * Позиция запроса расценки поставщику (Фаза 3.2). См. миграцию
+ * create_supplier_inquiry_items_table.
+ *
+ * @property int $supplier_inquiry_id
+ * @property ?int $request_item_id
+ * @property ?string $item_name
+ * @property string $status  pending|quoted|refused|cancelled
+ */
+class SupplierInquiryItem extends Model
+{
+    protected $fillable = [
+        'supplier_inquiry_id',
+        'request_item_id',
+        'item_name',
+        'status',
+    ];
+
+    public function inquiry(): BelongsTo
+    {
+        return $this->belongsTo(SupplierInquiry::class, 'supplier_inquiry_id');
+    }
+
+    public function requestItem(): BelongsTo
+    {
+        return $this->belongsTo(RequestItem::class, 'request_item_id');
+    }
+}

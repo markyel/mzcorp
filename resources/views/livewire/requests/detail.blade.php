@@ -975,6 +975,15 @@
                  «Закрыть как потеря» → причина «Переписка с поставщиком»
                  (+ опц. занести ящик в стоп-лист). Отдельная кнопка убрана. --}}
 
+            {{-- Фаза 3.2: запросить расценку у поставщиков по позициям заявки.
+                 Owner/acting/privileged, активные не-Pending (есть позиции). --}}
+            @if(($canManage || $canReassign) && ! $req->status->isTerminal() && $req->status !== $RS::Pending && $items->count() > 0)
+                <button type="button"
+                        wire:click="$dispatch('open-supplier-dispatch')"
+                        class="btn btn-sm">📦 Запросить расценку у поставщиков</button>
+                <livewire:requests.supplier-dispatch-dialog :request="$req" wire:key="supplier-dispatch-{{ $req->id }}" lazy />
+            @endif
+
             {{-- Разъединение заявки (split / un-merge). admin/РОП/директор.
                  Показываем только если заявка active и в треде ≥2 письма
                  (есть что выносить — иначе нечего разъединять). --}}
@@ -1695,6 +1704,38 @@
                     // не получал slots/chips (canEditItems=false) — фикс UX.
                     $canEditItems = $req->isAccessibleBy(auth()->user());
                 @endphp
+
+                {{-- Фаза 3.2: запросы расценки поставщикам по этой заявке. --}}
+                @if($this->supplierInquiries->isNotEmpty())
+                    <div class="ds-card mb-3">
+                        <div class="ds-card-header"><h3>Запросы поставщикам</h3><span class="text-[12px] text-fg-3 ml-2">{{ $this->supplierInquiries->count() }}</span></div>
+                        <div class="ds-card-body overflow-x-auto">
+                            <table class="w-full text-[12px]">
+                                <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
+                                    <tr>
+                                        <th class="text-left px-3 py-1.5">Поставщик</th>
+                                        <th class="text-right px-3 py-1.5">Позиций</th>
+                                        <th class="text-right px-3 py-1.5">Писем</th>
+                                        <th class="text-left px-3 py-1.5">Статус</th>
+                                        <th class="text-left px-3 py-1.5">Дата</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($this->supplierInquiries as $si)
+                                        <tr wire:key="si-req-{{ $si->id }}" class="border-b border-border-subtle hover:bg-hover">
+                                            <td class="px-3 py-1.5"><a href="{{ route('suppliers.show', $si->id) }}" wire:navigate class="text-sky-700 hover:underline">{{ $si->supplier_name ?: $si->supplier_email }}</a></td>
+                                            <td class="px-3 py-1.5 text-right mono text-fg-2">{{ $si->items_count }}</td>
+                                            <td class="px-3 py-1.5 text-right mono text-fg-2">{{ $si->messages_count }}</td>
+                                            <td class="px-3 py-1.5"><span class="chip {{ $si->status === 'closed' ? 'chip-neutral' : 'chip-sky' }} text-[10.5px]">{{ $si->status === 'closed' ? 'закрыт' : 'открыт' }}</span></td>
+                                            <td class="px-3 py-1.5 text-fg-3 mono whitespace-nowrap">{{ $si->created_at?->format('d.m.Y') }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                @endif
+
                 <div class="ds-card">
                     <div class="ds-card-header">
                         <h3>Позиции запроса</h3>

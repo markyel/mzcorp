@@ -41,6 +41,12 @@ class SupplierInquiry extends Model
         return $this->hasMany(EmailMessage::class)->orderBy('sent_at')->orderBy('id');
     }
 
+    /** Запрошенные позиции (Фаза 3.2). */
+    public function items(): HasMany
+    {
+        return $this->hasMany(SupplierInquiryItem::class)->orderBy('id');
+    }
+
     /** Клиентская заявка, под которую сорсим (если связана). */
     public function relatedRequest(): BelongsTo
     {
