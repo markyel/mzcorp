@@ -146,37 +146,43 @@
                           class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
             </div>
 
-            {{-- Вложения заявки: превью для картинок, ссылка для остальных --}}
+            {{-- Вложения заявки: компактные превью с лайтбоксом (как в «Переписке»),
+                 для остальных — ссылка скачать. Лайтбокс — общий (open-image). --}}
             @if($atts->isNotEmpty())
                 @php
                     $imgExt = ['jpg','jpeg','png','gif','webp','bmp','tif','tiff','svg'];
+                    $isImg = fn ($a) => ($a->mime_type && \Illuminate\Support\Str::startsWith(strtolower($a->mime_type), 'image/'))
+                        || in_array(strtolower(\Illuminate\Support\Str::afterLast($a->filename, '.')), $imgExt, true);
+                    $imgGallery = $atts->filter($isImg)->values()->map(fn ($a) => [
+                        'src' => route('attachments.preview', $a->id),
+                        'name' => $a->filename,
+                        'dl' => route('attachments.download', $a->id),
+                    ])->all();
+                    $imgIdx = 0;
                 @endphp
                 <div>
                     <label class="block text-[11.5px] text-fg-3 mb-1">Файлы из заявки</label>
-                    <div class="flex flex-wrap gap-2.5">
+                    <div class="flex flex-wrap gap-2" x-data="{ items: @js($imgGallery) }">
                         @foreach($atts as $a)
-                            @php
-                                $ext = strtolower(\Illuminate\Support\Str::afterLast($a->filename, '.'));
-                                $isImg = ($a->mime_type && \Illuminate\Support\Str::startsWith(strtolower($a->mime_type), 'image/')) || in_array($ext, $imgExt, true);
-                            @endphp
-                            <div class="border border-border rounded-md p-1.5 w-[148px] {{ ($selectedAttachments[$a->id] ?? false) ? 'ring-1 ring-sky-400 bg-sky-50' : 'bg-surface' }}">
-                                <label class="flex items-center gap-1.5 cursor-pointer mb-1">
-                                    <input type="checkbox" wire:model.live="selectedAttachments.{{ $a->id }}">
-                                    <span class="text-[11px] text-fg-2 truncate" title="{{ $a->filename }}">{{ \Illuminate\Support\Str::limit($a->filename, 18) }}</span>
-                                </label>
-                                @if($isImg)
-                                    <a href="{{ route('attachments.preview', $a->id) }}" target="_blank" rel="noopener" title="Открыть {{ $a->filename }}">
-                                        <img src="{{ route('attachments.preview', $a->id) }}" alt="{{ $a->filename }}"
-                                             class="w-full h-[88px] object-cover rounded border border-border-subtle bg-white" loading="lazy">
-                                    </a>
+                            <div class="border border-border rounded-md overflow-hidden w-[112px] {{ ($selectedAttachments[$a->id] ?? false) ? 'ring-1 ring-sky-400' : '' }} bg-surface">
+                                @if($isImg($a))
+                                    <button type="button"
+                                            x-on:click="$dispatch('open-image', { items: items, index: {{ $imgIdx }} })"
+                                            class="block w-full text-left" title="Просмотр: {{ $a->filename }}">
+                                        <img src="{{ route('attachments.preview', $a->id) }}" alt="{{ $a->filename }}" loading="lazy"
+                                             class="w-[112px] h-[78px] object-cover block bg-app">
+                                    </button>
+                                    @php $imgIdx++; @endphp
                                 @else
                                     <a href="{{ route('attachments.download', $a->id) }}" target="_blank" rel="noopener"
-                                       class="flex flex-col items-center justify-center h-[88px] rounded border border-border-subtle bg-surface-2 text-sky-700 hover:bg-hover">
-                                        <span class="text-[22px]">📄</span>
-                                        <span class="text-[10.5px] uppercase">{{ $ext ?: 'файл' }}</span>
-                                        <span class="text-[10px] underline">скачать</span>
+                                       class="flex items-center justify-center w-[112px] h-[78px] bg-surface-2 text-sky-700 hover:bg-hover text-[11px]">
+                                        <span class="text-center"><span class="text-[18px] block">📄</span>{{ \Illuminate\Support\Str::upper(\Illuminate\Support\Str::afterLast($a->filename, '.')) ?: 'BIN' }}</span>
                                     </a>
                                 @endif
+                                <label class="flex items-center gap-1 px-1.5 py-1 cursor-pointer border-t border-border-subtle">
+                                    <input type="checkbox" wire:model.live="selectedAttachments.{{ $a->id }}">
+                                    <span class="text-[10.5px] text-fg-2 truncate" title="{{ $a->filename }}">{{ \Illuminate\Support\Str::limit($a->filename, 12) }}</span>
+                                </label>
                             </div>
                         @endforeach
                     </div>
