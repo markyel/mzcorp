@@ -84,15 +84,39 @@ class SuppliersMineFromOutboundCommand extends Command
                 }
             });
 
+        // Доменный гард: домены, с которых к нам шли client_request — клиентские
+        // (адрес с client_req=0 на клиентском домене, напр. meteor.ru, — не
+        // поставщик). Считаем один раз group by домен.
+        $domainClientReq = [];
+        foreach (
+            EmailMessage::query()->where('direction', 'inbound')->where('category', 'client_request')
+                ->selectRaw("lower(split_part(from_email,'@',2)) dom, count(*) c")
+                ->groupByRaw("lower(split_part(from_email,'@',2))")->get() as $d
+        ) {
+            if ((string) $d->dom !== '') {
+                $domainClientReq[$d->dom] = (int) $d->c;
+            }
+        }
+        $domainThreshold = 3;
+
         // 2) Классификация по client_request (клиент инициирует заявки).
         $rows = [];
         foreach ($rfqOut as $email => $cnt) {
             $clientReq = EmailMessage::query()->where('direction', 'inbound')
                 ->whereRaw('lower(from_email) = ?', [$email])
                 ->where('category', 'client_request')->count();
-            $verdict = ($clientReq === 0 && $cnt >= $minRfq) ? 'supplier'
-                : ($clientReq > 0 ? 'client' : 'low');
-            $rows[] = ['email' => $email, 'rfq_out' => $cnt, 'client_req' => $clientReq, 'verdict' => $verdict];
+            $domain = substr($email, strpos($email, '@') + 1);
+            $domClient = $domainClientReq[$domain] ?? 0;
+            $isClientDomain = $domClient >= $domainThreshold;
+
+            if ($clientReq > 0 || $isClientDomain) {
+                $verdict = 'client';
+            } elseif ($cnt >= $minRfq) {
+                $verdict = 'supplier';
+            } else {
+                $verdict = 'low';
+            }
+            $rows[] = ['email' => $email, 'rfq_out' => $cnt, 'client_req' => $clientReq, 'dom_client' => $domClient, 'verdict' => $verdict];
         }
         usort($rows, fn ($a, $b) => $b['rfq_out'] <=> $a['rfq_out']);
 
@@ -111,9 +135,9 @@ class SuppliersMineFromOutboundCommand extends Command
         $this->newLine();
         $this->line('<info>ТОП поставщиков-кандидатов:</info>');
         $this->table(
-            ['email', 'rfq_out', 'client_req', 'уже в реестре'],
+            ['email', 'rfq_out', 'client_req', 'dom_client', 'уже в реестре'],
             collect($suppliers)->take(40)->map(fn ($r) => [
-                $r['email'], (string) $r['rfq_out'], (string) $r['client_req'],
+                $r['email'], (string) $r['rfq_out'], (string) $r['client_req'], (string) ($r['dom_client'] ?? 0),
                 $this->registry->isSupplier($r['email']) ? 'да' : '—',
             ])->all(),
         );
