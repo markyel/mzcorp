@@ -47,6 +47,12 @@ class SupplierInquiry extends Model
         return $this->hasMany(SupplierInquiryItem::class)->orderBy('id');
     }
 
+    /** Предложения поставщика по позициям (Фаза 3.3). */
+    public function offers(): HasMany
+    {
+        return $this->hasMany(SupplierOffer::class)->orderByDesc('id');
+    }
+
     /** Клиентская заявка, под которую сорсим (если связана). */
     public function relatedRequest(): BelongsTo
     {

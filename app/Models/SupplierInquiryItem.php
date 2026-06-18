@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Позиция запроса расценки поставщику (Фаза 3.2). См. миграцию
@@ -31,5 +32,11 @@ class SupplierInquiryItem extends Model
     public function requestItem(): BelongsTo
     {
         return $this->belongsTo(RequestItem::class, 'request_item_id');
+    }
+
+    /** Предложения поставщика по этой позиции (Фаза 3.3). */
+    public function offers(): HasMany
+    {
+        return $this->hasMany(SupplierOffer::class)->orderByDesc('id');
     }
 }

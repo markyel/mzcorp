@@ -56,6 +56,54 @@
         </div>
     </div>
 
+    {{-- Позиции и предложения (Фаза 3.3) --}}
+    @if($this->inquiryItems->isNotEmpty())
+        <div class="ds-card">
+            <div class="ds-card-header"><h3>Позиции и предложения</h3><span class="text-[12px] text-fg-3 ml-2">{{ $this->inquiryItems->count() }}</span></div>
+            <div class="ds-card-body overflow-x-auto">
+                <table class="w-full text-[12.5px]">
+                    <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
+                        <tr>
+                            <th class="text-left px-3 py-2">Позиция</th>
+                            <th class="text-left px-3 py-2">Статус</th>
+                            <th class="text-left px-3 py-2">Предложение</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($this->inquiryItems as $it)
+                            @php $offer = $it->offers->first(); @endphp
+                            <tr class="border-b border-border-subtle align-top">
+                                <td class="px-3 py-2">
+                                    <div class="text-fg-1">{{ $it->item_name ?: $it->requestItem?->parsed_name ?: '—' }}</div>
+                                    @if($it->requestItem?->parsed_article)<div class="text-[11px] text-fg-4 mono">{{ $it->requestItem->parsed_article }}</div>@endif
+                                </td>
+                                <td class="px-3 py-2">
+                                    @switch($it->status)
+                                        @case('quoted') <span class="chip chip-ok text-[10.5px]">есть цена</span> @break
+                                        @case('refused') <span class="chip chip-danger text-[10.5px]">отказ</span> @break
+                                        @case('cancelled') <span class="chip chip-neutral text-[10.5px]">отменено</span> @break
+                                        @default <span class="chip chip-sky text-[10.5px]">ждём</span>
+                                    @endswitch
+                                </td>
+                                <td class="px-3 py-2">
+                                    @if($offer && $offer->outcome === 'quoted')
+                                        <span class="text-fg-1 font-medium">{{ number_format((float) $offer->price, 2, '.', ' ') }} {{ $offer->currency ?: '' }}</span>
+                                        @if($offer->valid_until_text)<span class="text-[11px] text-fg-3"> · {{ $offer->valid_until_text }}</span>@endif
+                                        @if($offer->raw_quote)<div class="text-[11px] text-fg-4 italic mt-0.5">«{{ \Illuminate\Support\Str::limit($offer->raw_quote, 120) }}»</div>@endif
+                                    @elseif($offer && $offer->outcome === 'refused')
+                                        <span class="text-red-700 text-[12px]">{{ $offer->refusal_reason ?: 'отказ' }}</span>
+                                    @else
+                                        <span class="text-fg-4 text-[11px]">—</span>
+                                    @endif
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    @endif
+
     {{-- Переписка --}}
     <div class="ds-card">
         <div class="ds-card-header"><h3>Переписка с поставщиком</h3></div>

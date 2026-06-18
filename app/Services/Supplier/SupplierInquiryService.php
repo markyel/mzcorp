@@ -212,6 +212,12 @@ class SupplierInquiryService
         if ($fill !== []) {
             $message->forceFill($fill)->save();
         }
+
+        // Фаза 3.3: входящий ответ поставщика на запрос С ПОЗИЦИЯМИ — разобрать
+        // в предложения (async, идемпотентно по message_id).
+        if ($message->direction === MailDirection::Inbound && $inquiry->items()->exists()) {
+            \App\Jobs\Suppliers\ParseSupplierReplyJob::dispatch($message->id, $inquiry->id);
+        }
     }
 
     /** Является ли email поставщиком (есть хотя бы один помеченный запрос). */

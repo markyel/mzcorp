@@ -67,6 +67,19 @@ class Show extends Component
             ->get(['id', 'direction', 'from_email', 'from_name', 'subject', 'sent_at', 'body_plain', 'related_request_id']);
     }
 
+    /**
+     * Запрошенные позиции + предложения поставщика по ним (Фаза 3.3).
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\SupplierInquiryItem>
+     */
+    #[Computed]
+    public function inquiryItems()
+    {
+        return $this->inquiry->items()
+            ->with(['requestItem:id,parsed_name,parsed_article', 'offers'])
+            ->get();
+    }
+
     public function render()
     {
         return view('livewire.suppliers.show');
