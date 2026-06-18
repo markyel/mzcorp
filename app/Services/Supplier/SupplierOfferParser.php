@@ -8,8 +8,11 @@ use App\Models\SupplierInquiryItem;
 use App\Models\SupplierOffer;
 use App\Prompts\Suppliers\ParseSupplierReplyPrompt;
 use App\Services\AI\OpenAIChatService;
+use App\Services\Quotes\OutboundQuoteParsingService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 /**
  * Разбор ответа поставщика на RFQ в предложения по позициям (Фаза 3.3).
@@ -20,9 +23,14 @@ use Illuminate\Support\Facades\Log;
  */
 class SupplierOfferParser
 {
+    /** Лимиты разбора вложений (контроль стоимости/токенов). */
+    private const MAX_ATTACHMENTS = 6;
+    private const MAX_IMAGES = 6;
+
     public function __construct(
         private readonly OpenAIChatService $openai,
         private readonly ParseSupplierReplyPrompt $prompt,
+        private readonly OutboundQuoteParsingService $extractor,
     ) {
     }
 
@@ -57,14 +65,24 @@ class SupplierOfferParser
         if ($text === '') {
             $text = trim(strip_tags((string) $reply->body_html));
         }
-        if ($text === '') {
+
+        // Вложения-прайсы: текст (PDF/Excel/Word) + изображения (фото/скан) для Vision.
+        [$attachmentText, $images] = $this->extractAttachments($reply);
+
+        // Нечего разбирать только если пусто И в письме, И во вложениях.
+        if ($text === '' && $attachmentText === '' && $images === []) {
             return $zero;
         }
 
+        // Изображения → нужен Vision (gpt-4o); иначе дешёвый mini.
+        $model = $images !== []
+            ? config('services.openai.vision_model', 'gpt-4o')
+            : config('services.openai.intent_model', 'gpt-4o-mini');
+
         try {
             $result = $this->openai->chat(
-                $this->prompt->build($promptItems, $text),
-                config('services.openai.intent_model', 'gpt-4o-mini'),
+                $this->prompt->build($promptItems, $text, $attachmentText, $images),
+                $model,
                 ['temperature' => 0, 'max_tokens' => 1500, 'response_format' => ['type' => 'json_object']],
             );
         } catch (\Throwable $e) {
@@ -131,6 +149,102 @@ class SupplierOfferParser
         Log::info('SupplierOfferParser: parsed reply', ['inquiry_id' => $inquiry->id, 'message_id' => $reply->id] + $counts);
 
         return $counts;
+    }
+
+    /**
+     * Достаём текст и изображения из вложений ответа поставщика (прайсы).
+     * Текст — из PDF/Excel/Word; изображения — фото/сканы и страницы PDF без
+     * текстового слоя (для Vision). Inline (подписи/логотипы) пропускаем.
+     *
+     * @return array{0:string, 1:array<int,string>}  [attachmentText, images]
+     */
+    private function extractAttachments(EmailMessage $reply): array
+    {
+        $attachments = $reply->attachments()
+            ->where(fn ($q) => $q->whereNull('is_inline')->orWhere('is_inline', false))
+            ->orderBy('id')
+            ->limit(self::MAX_ATTACHMENTS)
+            ->get();
+
+        $textParts = [];
+        $images = [];
+
+        foreach ($attachments as $att) {
+            if (count($images) >= self::MAX_IMAGES) {
+                // изображений уже достаточно — но текст ещё можем добирать
+            }
+            $type = $this->classifyAttachment((string) $att->filename, (string) $att->mime_type);
+            if ($type === null) {
+                continue;
+            }
+
+            $disk = $att->disk ?: 'local';
+            $path = (string) $att->file_path;
+            if ($path === '' || ! Storage::disk($disk)->exists($path)) {
+                continue;
+            }
+            $abs = Storage::disk($disk)->path($path);
+
+            try {
+                $content = $this->extractor->extractContent($abs, $type, isAbsolute: true);
+            } catch (\Throwable $e) {
+                Log::warning('SupplierOfferParser: attachment extract failed', [
+                    'message_id' => $reply->id, 'attachment_id' => $att->id, 'error' => $e->getMessage(),
+                ]);
+                continue;
+            }
+
+            $extracted = trim((string) ($content['text'] ?? ''));
+            $contentImages = is_array($content['images'] ?? null) ? $content['images'] : [];
+
+            if ($extracted !== '') {
+                $textParts[] = '— ' . $att->filename . ":\n" . $extracted;
+            }
+
+            // Изображения: для image-вложения — всегда; для PDF — только если
+            // текстового слоя по сути нет (скан).
+            $weakText = mb_strlen($extracted) < 40;
+            if ($type === 'image' || ($type === 'pdf' && $weakText)) {
+                foreach ($contentImages as $img) {
+                    if (count($images) >= self::MAX_IMAGES) {
+                        break;
+                    }
+                    if (is_string($img) && $img !== '') {
+                        $images[] = $img;
+                    }
+                }
+            }
+        }
+
+        return [trim(implode("\n\n", $textParts)), $images];
+    }
+
+    /**
+     * Тип файла для OutboundQuoteParsingService::extractContent по расширению
+     * (приоритет) / mime. null — не разбираем.
+     */
+    private function classifyAttachment(string $filename, string $mime): ?string
+    {
+        $ext = strtolower((string) Str::afterLast($filename, '.'));
+        $map = [
+            'pdf' => 'pdf',
+            'xlsx' => 'xlsx', 'xls' => 'xls', 'xlsm' => 'xlsx',
+            'docx' => 'docx', 'doc' => 'doc',
+            'png' => 'image', 'jpg' => 'image', 'jpeg' => 'image',
+            'gif' => 'image', 'webp' => 'image', 'bmp' => 'image', 'tif' => 'image', 'tiff' => 'image',
+        ];
+        if (isset($map[$ext])) {
+            return $map[$ext];
+        }
+
+        $mime = strtolower($mime);
+        return match (true) {
+            str_contains($mime, 'pdf') => 'pdf',
+            str_contains($mime, 'spreadsheet') || str_contains($mime, 'excel') => 'xlsx',
+            str_contains($mime, 'word') || str_contains($mime, 'msword') => 'docx',
+            str_starts_with($mime, 'image/') => 'image',
+            default => null,
+        };
     }
 
     private function str(mixed $v, int $max): ?string
