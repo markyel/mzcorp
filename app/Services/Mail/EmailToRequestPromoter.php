@@ -7,6 +7,7 @@ use App\Enums\RequestStatus;
 use App\Jobs\Mail\ParseRequestItemsJob;
 use App\Models\EmailMessage;
 use App\Models\Request;
+use App\Services\Clients\RequestOrganizationResolver;
 use App\Services\Request\InternalCodeGenerator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -31,6 +32,7 @@ class EmailToRequestPromoter
 {
     public function __construct(
         private readonly InternalCodeGenerator $codeGen,
+        private readonly RequestOrganizationResolver $orgResolver,
     ) {
     }
 
@@ -68,6 +70,10 @@ class EmailToRequestPromoter
                 'subject' => $email->subject,
             ]);
             $email->forceFill(['related_request_id' => $req->id])->save();
+
+            // Точная привязка к организации (раздел «Клиенты»), если клиент
+            // уже в реестре (повторный email / совпадение client_company).
+            $this->orgResolver->attach($req);
 
             // Audit: ручной override AI-классификации.
             $existing = is_array($email->detected_artifacts ?? null)

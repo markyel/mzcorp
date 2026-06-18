@@ -85,6 +85,8 @@ class RequestSplitService
                 'status' => RequestStatus::New,
                 'client_email' => $source->client_email,
                 'client_name' => $source->client_name,
+                // Тот же клиент — наследуем точную привязку к организации.
+                'organization_id' => $source->organization_id,
                 'subject' => $seed?->subject ?: $source->subject,
             ]);
 

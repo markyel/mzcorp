@@ -123,7 +123,7 @@ class Index extends Component
     #[Computed]
     public function organizations()
     {
-        $q = Organization::query()->withCount('contacts');
+        $q = Organization::query()->withCount(['contacts', 'requests']);
 
         $s = trim($this->search);
         if ($s !== '') {

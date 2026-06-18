@@ -82,6 +82,7 @@
                             <th class="text-left px-3 py-2">Организация</th>
                             <th class="text-left px-3 py-2">ИНН · КПП</th>
                             <th class="text-right px-3 py-2">Контактов</th>
+                            <th class="text-right px-3 py-2">Заявок</th>
                             <th class="text-right px-3 py-2">Скидка</th>
                         </tr>
                     </thead>
@@ -93,10 +94,11 @@
                                 </td>
                                 <td class="px-3 py-2 mono text-fg-2 whitespace-nowrap">{{ $o->inn ?: '—' }}@if($o->kpp) · {{ $o->kpp }}@endif</td>
                                 <td class="px-3 py-2 text-right mono text-fg-2">{{ $o->contacts_count }}</td>
+                                <td class="px-3 py-2 text-right mono text-fg-2">{{ $o->requests_count ?: '—' }}</td>
                                 <td class="px-3 py-2 text-right mono {{ $o->discount_percent > 0 ? 'text-emerald-700 font-semibold' : 'text-fg-4' }}">{{ $o->discount_percent > 0 ? rtrim(rtrim(number_format($o->discount_percent, 2, '.', ''), '0'), '.') . '%' : '—' }}</td>
                             </tr>
                         @empty
-                            <tr><td colspan="4" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Пока нет организаций.' }}</td></tr>
+                            <tr><td colspan="5" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Пока нет организаций.' }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>

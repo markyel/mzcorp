@@ -36,6 +36,10 @@ class Request extends Model
         'client_phone',
         'client_company',
         'client_address',
+        // Раздел «Клиенты»: точная привязка к организации (Organization).
+        // Проставляется RequestOrganizationResolver / clients:backfill,
+        // поправима руками. См. миграцию add_organization_id_to_requests_table.
+        'organization_id',
         'subject',
         'assigned_at',
         // Phase 2: очередь LLM-предположений «это уточнение существующей
@@ -107,6 +111,7 @@ class Request extends Model
             'last_activity_type' => \App\Enums\RequestActivityType::class,
             'merged_into_id' => 'integer',
             'merged_at' => 'datetime',
+            'organization_id' => 'integer',
             'complexity_score' => 'integer',
             'complexity_level' => \App\Enums\ComplexityLevel::class,
             'parsing_meta' => 'array',
@@ -340,6 +345,15 @@ class Request extends Model
     public function assignedUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'assigned_user_id');
+    }
+
+    /**
+     * Организация-клиент (раздел «Клиенты»). Точная привязка через
+     * requests.organization_id; null пока не определена/неоднозначна.
+     */
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(Organization::class);
     }
 
     public function assignments(): HasMany

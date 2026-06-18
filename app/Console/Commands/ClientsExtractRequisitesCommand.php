@@ -6,6 +6,7 @@ use App\Models\ClientContact;
 use App\Models\EmailAttachment;
 use App\Models\Organization;
 use App\Models\OutboundQuote;
+use App\Services\Clients\RequestOrganizationResolver;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 
@@ -36,6 +37,11 @@ class ClientsExtractRequisitesCommand extends Command
 
     private string $ourInn = '';
 
+    public function __construct(private readonly RequestOrganizationResolver $orgResolver)
+    {
+        parent::__construct();
+    }
+
     public function handle(): int
     {
         $apply = (bool) $this->option('apply');
@@ -55,7 +61,7 @@ class ClientsExtractRequisitesCommand extends Command
             return self::SUCCESS;
         }
 
-        $stats = ['processed' => 0, 'with_buyer' => 0, 'orgs_new' => 0, 'links' => 0, 'no_text' => 0];
+        $stats = ['processed' => 0, 'with_buyer' => 0, 'orgs_new' => 0, 'links' => 0, 'requests_linked' => 0, 'no_text' => 0];
 
         (clone $base)->orderBy('id')->chunkById($limit > 0 ? min(200, $limit) : 200, function ($chunk) use (&$stats, $limit) {
             foreach ($chunk as $q) {
@@ -199,6 +205,10 @@ class ClientsExtractRequisitesCommand extends Command
             $org->contacts()->attach($contact->id);
             $stats['links']++;
         }
+
+        // Появилась связь email↔организация — точная привязка ещё не
+        // привязанных заявок этого email к organization_id.
+        $stats['requests_linked'] += $this->orgResolver->backfillForEmailLink($org, $email);
     }
 
     private function pdfText(int $attId): ?string

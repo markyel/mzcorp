@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Организация-клиент (раздел «Клиенты»). Юр.идентичность + реквизиты для КП/
@@ -40,6 +41,15 @@ class Organization extends Model
         return $this->belongsToMany(ClientContact::class, 'organization_contact')
             ->withTimestamps()
             ->orderBy('email');
+    }
+
+    /**
+     * Заявки, явно привязанные к этой организации (requests.organization_id).
+     * Точная связь — в отличие от косвенной «по email контактов».
+     */
+    public function requests(): HasMany
+    {
+        return $this->hasMany(Request::class);
     }
 
     /**

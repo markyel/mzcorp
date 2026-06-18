@@ -7,6 +7,7 @@ use App\Enums\RequestStatus;
 use App\Jobs\Mail\ParseRequestItemsJob;
 use App\Models\EmailMessage;
 use App\Models\Request;
+use App\Services\Clients\RequestOrganizationResolver;
 use App\Services\Request\AssignmentService;
 use App\Services\Request\InternalCodeGenerator;
 use App\Services\Request\RequestActivityService;
@@ -36,6 +37,7 @@ class IncomingMailProcessor
         private readonly EmailTextCleanerService $cleaner,
         private readonly SenderBlocklistService $blocklist,
         private readonly WebFormSubmissionParser $webForm,
+        private readonly RequestOrganizationResolver $orgResolver,
     ) {
     }
 
@@ -111,6 +113,12 @@ class IncomingMailProcessor
             ], $client));
 
             $message->forceFill(['related_request_id' => $req->id])->save();
+
+            // Точная привязка к организации (раздел «Клиенты»). Срабатывает для
+            // повторных клиентов, чей email уже привязан к одной организации,
+            // либо при совпадении client_company. Для новых — null, привязку
+            // позже доставит clients:backfill / связывание email↔организация.
+            $this->orgResolver->attach($req);
 
             $this->activity->touch($req, \App\Enums\RequestActivityType::RequestCreated);
 

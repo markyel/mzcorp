@@ -9,6 +9,7 @@ use App\Models\Invoice;
 use App\Models\Organization;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
+use App\Services\Clients\RequestOrganizationResolver;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -118,11 +119,21 @@ class Show extends Component
             $this->organization->contacts()->attach($contact->id);
         }
 
+        // Появилась связь email↔организация — подтянуть к ней ещё не
+        // привязанные заявки этого email (точная привязка organization_id).
+        $linked = app(RequestOrganizationResolver::class)
+            ->backfillForEmailLink($this->organization, $email);
+
         $this->newContactEmail = '';
         $this->newContactName = '';
         $this->newContactPhone = '';
         unset($this->contacts);
-        $this->dispatch('toast', message: 'Контакт добавлен.', type: 'success');
+        unset($this->stats);
+        unset($this->recentRequests);
+        $msg = $linked > 0
+            ? "Контакт добавлен. Привязано заявок: {$linked}."
+            : 'Контакт добавлен.';
+        $this->dispatch('toast', message: $msg, type: 'success');
     }
 
     public function startEditContact(int $contactId): void
@@ -166,6 +177,8 @@ class Show extends Component
     {
         $this->organization->contacts()->detach($contactId);
         unset($this->contacts);
+        unset($this->stats);
+        unset($this->recentRequests);
         $this->dispatch('toast', message: 'Контакт отвязан от организации.', type: 'success');
     }
 
@@ -186,26 +199,47 @@ class Show extends Component
     }
 
     /**
-     * Статистика по email'ам организации (заявки / КП / счета).
+     * Точная привязка заявки к организации: organization_id = эта орг. ИЛИ
+     * (ещё не привязана И её client_email ∈ контакты организации). Второй
+     * терм — fallback для заявок, до которых ещё не доехал бэкфилл; он не
+     * учитывает заявки, явно привязанные к ДРУГОЙ организации (тот же email
+     * у нескольких орг.), поэтому двойного счёта нет.
+     *
+     * @param  array<int, string>  $emails  email'ы контактов в нижнем регистре
+     */
+    private function requestScope(array $emails): \Closure
+    {
+        $orgId = $this->organization->id;
+
+        return function ($q) use ($orgId, $emails) {
+            $q->where('organization_id', $orgId);
+            if ($emails !== []) {
+                $q->orWhere(function ($e) use ($emails) {
+                    $e->whereNull('organization_id')
+                        ->whereIn(DB::raw('lower(client_email)'), $emails);
+                });
+            }
+        };
+    }
+
+    /**
+     * Статистика по заявкам организации (точная привязка + fallback по email).
      *
      * @return array{requests:int, won:int, lost:int, active:int, quotations:int, invoices:int, paid:int}
      */
     #[Computed]
     public function stats(): array
     {
-        $emails = $this->organization->contactEmails();
-        if ($emails === []) {
-            return ['requests' => 0, 'won' => 0, 'lost' => 0, 'active' => 0, 'quotations' => 0, 'invoices' => 0, 'paid' => 0];
-        }
+        $scope = $this->requestScope($this->organization->contactEmails());
 
-        $reqBase = RequestModel::query()->whereIn(DB::raw('lower(client_email)'), $emails);
+        $reqBase = RequestModel::query()->where($scope);
         $requests = (clone $reqBase)->count();
         $won = (clone $reqBase)->where('status', RequestStatus::ClosedWon->value)->count();
         $lost = (clone $reqBase)->where('status', RequestStatus::ClosedLost->value)->count();
 
-        $byEmail = fn ($r) => $r->whereIn(DB::raw('lower(client_email)'), $emails);
-        $quotations = Quotation::whereHas('request', $byEmail)->count();
-        $invBase = Invoice::whereHas('request', $byEmail);
+        $byScope = fn ($r) => $r->where($scope);
+        $quotations = Quotation::whereHas('request', $byScope)->count();
+        $invBase = Invoice::whereHas('request', $byScope);
         $invoices = (clone $invBase)->count();
         $paid = (clone $invBase)->where('status', InvoiceStatus::Paid->value)->count();
 
@@ -218,6 +252,22 @@ class Show extends Component
             'invoices' => $invoices,
             'paid' => $paid,
         ];
+    }
+
+    /**
+     * Последние заявки организации (точная привязка + fallback по email).
+     *
+     * @return \Illuminate\Support\Collection<int, RequestModel>
+     */
+    #[Computed]
+    public function recentRequests()
+    {
+        return RequestModel::query()
+            ->where($this->requestScope($this->organization->contactEmails()))
+            ->with('assignedUser:id,name')
+            ->orderByDesc('id')
+            ->limit(25)
+            ->get(['id', 'internal_code', 'status', 'subject', 'client_email', 'assigned_user_id', 'created_at']);
     }
 
     public function render()

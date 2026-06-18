@@ -56,7 +56,7 @@
 
         {{-- Статистика --}}
         <div class="ds-card">
-            <div class="ds-card-header"><h3>Статистика</h3><span class="text-[12px] text-fg-3 ml-2">по email'ам</span></div>
+            <div class="ds-card-header"><h3>Статистика</h3><span class="text-[12px] text-fg-3 ml-2">по заявкам организации</span></div>
             <div class="ds-card-body">
                 @php $st = $this->stats; @endphp
                 <div class="grid grid-cols-2 gap-2 text-center">
@@ -145,6 +145,44 @@
                     </tbody>
                 </table>
             </div>
+        </div>
+    </div>
+
+    {{-- Заявки организации --}}
+    <div class="ds-card">
+        <div class="ds-card-header">
+            <h3>Заявки организации</h3>
+            <span class="text-[12px] text-fg-3 ml-2">последние 25 · точная привязка + ещё не привязанные по e-mail</span>
+        </div>
+        <div class="ds-card-body overflow-x-auto">
+            @if($this->recentRequests->isEmpty())
+                <div class="text-sm text-fg-3">Заявок этой организации пока нет.</div>
+            @else
+                <table class="w-full text-[12px]">
+                    <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
+                        <tr>
+                            <th class="text-left px-3 py-2">Заявка</th>
+                            <th class="text-left px-3 py-2">Тема</th>
+                            <th class="text-left px-3 py-2">E-mail</th>
+                            <th class="text-left px-3 py-2">Статус</th>
+                            <th class="text-left px-3 py-2">Менеджер</th>
+                            <th class="text-left px-3 py-2">Создана</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($this->recentRequests as $r)
+                            <tr wire:key="org-req-{{ $r->id }}" class="border-b border-border-subtle hover:bg-hover">
+                                <td class="px-3 py-2 whitespace-nowrap"><a href="{{ route('requests.show', $r->id) }}" wire:navigate class="mono text-sky-700 hover:underline">{{ $r->internal_code }}</a></td>
+                                <td class="px-3 py-2 text-fg-2"><span class="truncate inline-block max-w-[240px] align-bottom">{{ $r->subject ?: '—' }}</span></td>
+                                <td class="px-3 py-2 text-fg-3 mono"><span class="truncate inline-block max-w-[180px] align-bottom">{{ $r->client_email ?: '—' }}</span></td>
+                                <td class="px-3 py-2"><span class="chip {{ $r->status?->chipClass() ?? 'chip-neutral' }} text-[10.5px]">{{ $r->status?->label() ?? $r->status?->value }}</span></td>
+                                <td class="px-3 py-2 text-fg-3 whitespace-nowrap">{{ $r->assignedUser?->name ?? '—' }}</td>
+                                <td class="px-3 py-2 text-fg-3 mono whitespace-nowrap">{{ $r->created_at?->format('d.m.Y') }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            @endif
         </div>
     </div>
 

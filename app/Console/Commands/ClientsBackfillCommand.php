@@ -6,6 +6,7 @@ use App\Models\ClientContact;
 use App\Models\Organization;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
+use App\Services\Clients\RequestOrganizationResolver;
 use Illuminate\Console\Command;
 
 /**
@@ -31,6 +32,11 @@ class ClientsBackfillCommand extends Command
 
     /** @var array<int, string> */
     private array $internalDomains = [];
+
+    public function __construct(private readonly RequestOrganizationResolver $orgResolver)
+    {
+        parent::__construct();
+    }
 
     public function handle(): int
     {
@@ -121,11 +127,57 @@ class ClientsBackfillCommand extends Command
                 }
             });
 
+        // 4) Точная привязка заявок к организациям (requests.organization_id).
+        //    Делаем ПОСЛЕ создания связей email↔организация (шаги 2-3), чтобы
+        //    резолвер видел готовый граф. Консервативно: только однозначные
+        //    кандидаты (email ровно с одной организацией / совпадение
+        //    client_company), неоднозначные остаются null.
+        $stats['requests_linked'] = $this->linkRequestsToOrgs();
+
         $this->newLine();
         $this->table(['metric', 'value'], collect($stats)->map(fn ($v, $k) => [$k, (string) $v])->values()->all());
         $this->info('Готово. Дубли/мусор почистите вручную в разделе «Клиенты».');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Привязать заявки к организациям через резолвер. Возвращает число заявок,
+     * получивших organization_id за этот прогон.
+     */
+    private function linkRequestsToOrgs(): int
+    {
+        $linked = 0;
+
+        // 4a) email ровно с одной организацией → set-based привязка ещё не
+        //     привязанных заявок этого email (один UPDATE на контакт).
+        ClientContact::query()
+            ->has('organizations', '=', 1)
+            ->with('organizations:id')
+            ->orderBy('id')
+            ->chunkById(500, function ($chunk) use (&$linked) {
+                foreach ($chunk as $c) {
+                    $org = $c->organizations->first();
+                    if ($org !== null) {
+                        $linked += $this->orgResolver->backfillForEmailLink($org, (string) $c->email);
+                    }
+                }
+            });
+
+        // 4b) оставшиеся без привязки — по client_company (веб-форма).
+        RequestModel::query()
+            ->whereNull('organization_id')
+            ->whereNotNull('client_company')->where('client_company', '!=', '')
+            ->orderBy('id')
+            ->chunkById(500, function ($chunk) use (&$linked) {
+                foreach ($chunk as $r) {
+                    if ($this->orgResolver->attach($r)) {
+                        $linked++;
+                    }
+                }
+            });
+
+        return $linked;
     }
 
     /**
@@ -235,10 +287,13 @@ class ClientsBackfillCommand extends Command
             ->whereNotNull('client_company')->where('client_company', '!=', '')
             ->distinct()->count('client_company');
 
+        $unlinkedRequests = RequestModel::query()->whereNull('organization_id')->count();
+
         $this->table(['кандидат', 'примерно'], [
             ['внешних email (контакты)', (string) $emails->count()],
             ['КП с реквизитами (организации)', (string) $quotesWithReq],
             ['уникальных client_company', (string) $companies],
+            ['заявок без organization_id', (string) $unlinkedRequests],
         ]);
         $this->warn('Это DRY-RUN (оценка кандидатов). Запусти с --apply, чтобы заполнить реестр.');
 
