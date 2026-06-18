@@ -101,7 +101,8 @@ class SupplierMatchService
     }
 
     /**
-     * Любой из терминов пересекается со списком (soft: подстрока в любую сторону).
+     * Пересекается ли хоть одна пара (listTerm, term) — для категорий с учётом
+     * русской морфологии (стем по общему префиксу слова).
      *
      * @param  array<int, string>  $list
      * @param  array<int, string>  $terms
@@ -124,20 +125,59 @@ class SupplierMatchService
     private function termHit(array $listTerms, array $terms): bool
     {
         foreach ($listTerms as $l) {
-            if ($l === '') {
-                continue;
-            }
             foreach ($terms as $t) {
-                if ($t === '') {
-                    continue;
-                }
-                if ($this->softEq($l, $t) || str_contains($l, $t) || str_contains($t, $l)) {
+                if ($this->phraseMatch($l, $t)) {
                     return true;
                 }
             }
         }
 
         return false;
+    }
+
+    /**
+     * Совпадение двух фраз: равенство / подстрока / пословный стем-матч
+     * (ловит «лебёдка» ↔ «лебёдки», «двери» ↔ «двери кабины»).
+     */
+    private function phraseMatch(string $a, string $b): bool
+    {
+        if ($a === '' || $b === '') {
+            return false;
+        }
+        if ($a === $b || str_contains($a, $b) || str_contains($b, $a)) {
+            return true;
+        }
+        foreach (preg_split('/\s+/u', $a) ?: [] as $wa) {
+            foreach (preg_split('/\s+/u', $b) ?: [] as $wb) {
+                if ($this->stemEq((string) $wa, (string) $wb)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Слова с одним корнем: общий префикс ≥4 символов и не короче (min длина − 2)
+     * — терпит падежные/числовые окончания («лебёдк-а» / «лебёдк-и»).
+     */
+    private function stemEq(string $w1, string $w2): bool
+    {
+        $w1 = trim($w1);
+        $w2 = trim($w2);
+        $l1 = mb_strlen($w1);
+        $l2 = mb_strlen($w2);
+        if ($l1 < 4 || $l2 < 4) {
+            return $w1 === $w2;
+        }
+        $p = 0;
+        $min = min($l1, $l2);
+        while ($p < $min && mb_substr($w1, $p, 1) === mb_substr($w2, $p, 1)) {
+            $p++;
+        }
+
+        return $p >= 4 && $p >= $min - 2;
     }
 
     private function softEq(string $a, string $b): bool
