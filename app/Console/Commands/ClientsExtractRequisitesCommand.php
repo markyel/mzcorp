@@ -89,8 +89,13 @@ class ClientsExtractRequisitesCommand extends Command
                 if (! $org->exists) {
                     $stats['orgs_new']++;
                 }
-                $namePlaceholder = preg_match('/^ИНН \d+$/u', (string) $org->name) === 1;
-                if ((trim((string) ($org->name ?? '')) === '' || $namePlaceholder) && $buyer['name']) {
+                // Перезаписываем имя, если текущее пустое / плейсхолдер «ИНН N» /
+                // мусорное (артикул) — хорошее имя из чистого документа важнее.
+                $cur = (string) ($org->name ?? '');
+                $replaceable = trim($cur) === ''
+                    || preg_match('/^ИНН \d+$/u', $cur) === 1
+                    || $this->isJunkName($cur);
+                if ($replaceable && $buyer['name']) {
                     $org->name = $buyer['name'];
                 }
                 if (trim((string) ($org->kpp ?? '')) === '' && $buyer['kpp']) {
@@ -131,7 +136,10 @@ class ClientsExtractRequisitesCommand extends Command
             && preg_match('/ИНН\D{0,4}(\d{10,12})/iu', $m[2], $mi)
             && $mi[1] !== $this->ourInn) {
             $res['inn'] = $mi[1];
-            $res['name'] = $this->cleanName($m[1]);
+            $nm = $this->cleanName($m[1]);
+            // Отбраковываем «артикульные» имена (6311-2RS и т.п.): пусть имя
+            // придёт из более чистого документа этого ИНН. ИНН/КПП/адрес — берём.
+            $res['name'] = $this->isJunkName($nm) ? null : $nm;
             if (preg_match('/КПП\D{0,4}(\d{9})/iu', $m[2], $mk)) {
                 $res['kpp'] = $mk[1];
             }
@@ -155,6 +163,29 @@ class ClientsExtractRequisitesCommand extends Command
         $s = preg_replace('/^\s*Покупатель\s*:?\s*/iu', '', trim($s)) ?? $s;
 
         return trim($s, " ,;:\t\n");
+    }
+
+    /**
+     * Имя похоже на мусор/артикул, а не на название организации:
+     *  - есть кавычки «…»/"…" → настоящее название, НЕ мусор;
+     *  - 3+ цифры подряд без кавычек («ип 6311-2RS») → артикул, мусор;
+     *  - нет ни одного слова из ≥3 букв (кроме орг-формы) → мусор.
+     */
+    private function isJunkName(string $name): bool
+    {
+        $name = trim($name);
+        if ($name === '') {
+            return true;
+        }
+        if (preg_match('/[«»"„“]/u', $name) === 1) {
+            return false;
+        }
+        if (preg_match('/\d{3,}/', $name) === 1) {
+            return true;
+        }
+        $woForm = preg_replace('/^(?:ООО|ОАО|ЗАО|ПАО|НАО|АО|ИП|НКО|ФГУП|МУП|ГУП|ГБУ|МБУ|АНО|ТСЖ|СНТ)\b/iu', '', $name) ?? $name;
+
+        return preg_match('/\p{L}{3,}/u', $woForm) !== 1;
     }
 
     private function linkEmail(Organization $org, string $email, array &$stats): void
