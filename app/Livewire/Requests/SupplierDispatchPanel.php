@@ -274,41 +274,87 @@ class SupplierDispatchPanel extends Component
     }
 
     /**
-     * Строки превью письма по выбранным позициям.
+     * Языковые блоки превью: по одному на каждый язык среди ОТМЕЧЕННЫХ
+     * поставщиков (ru перед en). Письмо уходит per supplier, поэтому при
+     * выборе поставщиков из разных языковых групп показываем 2 превью —
+     * каждое на том языке, на котором реально улетит. Пока поставщики не
+     * выбраны — один RU-блок по умолчанию.
      *
-     * @return array<int, array{name:string, oem:?string, brand:?string, qty:?string}>
+     * @return array<int, array{lang:string, label:string, suppliers:array<int,string>, greeting:string}>
      */
     #[Computed]
-    public function previewRows(): array
+    public function previewLanguages(): array
     {
+        $svc = app(SupplierDispatchService::class);
+        $ids = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
+        $suppliers = $ids === [] ? collect() : Supplier::query()->whereIn('id', $ids)->orderBy('name')->get();
+
+        /** @var array<string, array<int, Supplier>> $groups */
+        $groups = [];
+        foreach ($suppliers as $s) {
+            $lang = in_array($s->language, ['ru', 'en'], true) ? $s->language : 'ru';
+            $groups[$lang][] = $s;
+        }
+        if ($groups === []) {
+            $groups['ru'] = []; // дефолтное превью до выбора поставщиков
+        }
+
+        $out = [];
+        foreach (['ru', 'en'] as $lang) {
+            if (! array_key_exists($lang, $groups)) {
+                continue;
+            }
+            $list = $groups[$lang];
+            $first = $list[0] ?? new Supplier();
+            $out[] = [
+                'lang' => $lang,
+                'label' => $lang === 'en' ? 'English' : 'Русский',
+                'suppliers' => array_map(fn (Supplier $s) => (string) ($s->name ?: $s->email ?: ('#' . $s->id)), $list),
+                // Обращение персональное (имя первого как образец).
+                'greeting' => $svc->personalGreeting($this->greeting, $first, $lang),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Строки превью на конкретном языке. RU — название редактируемое
+     * (editedNames), EN — каталожное name_en (read-only; правки идут в RU).
+     *
+     * @return array<int, array{id:int, name:string, oem:?string, qty:?string, editable:bool}>
+     */
+    public function previewRowsForLang(string $lang): array
+    {
+        $lang = $lang === 'en' ? 'en' : 'ru';
         $ids = array_keys(array_filter($this->selectedItems));
         if ($ids === []) {
             return [];
         }
         $items = RequestItem::query()->whereIn('id', $ids)
-            ->with(['brand:id,name', 'catalogItem:id,name'])->orderBy('position')->get();
+            ->with(['brand:id,name', 'catalogItem:id,name,name_en'])->orderBy('position')->get();
 
-        return app(SupplierDispatchService::class)->itemRows($items, $this->editedNames);
-    }
-
-    /**
-     * Англоязычные поставщики среди отмеченных — им письмо уйдёт на EN,
-     * каталожные позиции по name_en. Для подсказки менеджеру в превью.
-     *
-     * @return array<int, string> имена поставщиков с language=en
-     */
-    #[Computed]
-    public function englishSuppliers(): array
-    {
-        $ids = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
-        if ($ids === []) {
-            return [];
+        $out = [];
+        foreach ($items as $it) {
+            $catalog = $it->catalog_item_id ? $it->catalogItem : null;
+            if ($lang === 'en') {
+                $name = $catalog ? ($catalog->name_en ?: $catalog->name ?: $it->parsed_name) : ($it->parsed_name ?: '—');
+                $editable = false;
+            } else {
+                $edited = isset($this->editedNames[$it->id]) ? trim((string) $this->editedNames[$it->id]) : '';
+                $name = $edited !== '' ? $edited : (($catalog?->name) ?: $it->parsed_name ?: '—');
+                $editable = true;
+            }
+            $out[] = [
+                'id' => $it->id,
+                'name' => (string) ($name ?: '—'),
+                'oem' => $it->parsed_article ?: null,
+                'qty' => $it->parsed_qty ? trim($it->parsed_qty . ' ' . ($it->parsed_unit ?: 'шт.')) : null,
+                'editable' => $editable,
+            ];
         }
 
-        return Supplier::query()->whereIn('id', $ids)->where('language', 'en')
-            ->orderBy('name')->get()
-            ->map(fn (Supplier $s) => (string) ($s->name ?: $s->email ?: ('#' . $s->id)))
-            ->all();
+        return $out;
     }
 
     public function render()

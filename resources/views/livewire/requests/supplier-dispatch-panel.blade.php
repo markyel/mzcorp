@@ -148,40 +148,57 @@
     <div class="ds-card">
         <div class="ds-card-header"><h3>Письмо запроса</h3></div>
         <div class="ds-card-body space-y-3">
-            {{-- Обращение (персональное per поставщик) --}}
+            {{-- Обращение (русский шаблон, редактируемый; для EN — фикс. «Hello …») --}}
             <div>
-                <label class="block text-[11.5px] text-fg-3 mb-1">Обращение <span class="text-fg-4">— {поставщик} подставится для каждого поставщика</span></label>
-                <input type="text" wire:model="greeting" placeholder="Здравствуйте, {поставщик}!"
+                <label class="block text-[11.5px] text-fg-3 mb-1">Обращение <span class="text-fg-4">(рус.) — {поставщик} подставится для каждого поставщика</span></label>
+                <input type="text" wire:model.live.debounce.400ms="greeting" placeholder="Здравствуйте, {поставщик}!"
                        class="w-full px-2 h-[30px] border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                <div class="text-[10.5px] text-fg-4 mt-0.5">Для англоязычных поставщиков используется «Hello {поставщик},».</div>
             </div>
 
-            @if(!empty($this->englishSuppliers))
-                <div class="text-[11.5px] text-sky-800 bg-sky-50 border border-sky-200 rounded-md px-3 py-2">
-                    🌐 На английском языке письмо и номенклатура уйдут поставщикам:
-                    <b>{{ implode(', ', $this->englishSuppliers) }}</b>.
-                    Для позиций из каталога подставится английское название; правки ниже применяются к русской версии.
-                </div>
-            @endif
+            {{-- Превью письма НА ТОМ ЯЗЫКЕ, на котором улетит. Если выбраны
+                 поставщики из разных языковых групп — несколько блоков. --}}
+            @php $selItemsCount = collect($this->selectedItems)->filter()->count(); @endphp
+            @if($selItemsCount === 0)
+                <div class="text-[12px] text-fg-4 border border-border rounded-md p-3 bg-surface-2">Выберите позиции выше — появится превью письма.</div>
+            @else
+                @foreach($this->previewLanguages as $blk)
+                    @php $rows = $this->previewRowsForLang($blk['lang']); @endphp
+                    <div class="border border-border rounded-md p-3 bg-surface-2" wire:key="prev-{{ $blk['lang'] }}">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <span class="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-fg-3">
+                                <span class="chip {{ $blk['lang'] === 'en' ? 'chip-info' : 'chip-neutral' }} text-[10px]">{{ $blk['lang'] === 'en' ? '🌐 ' : '' }}{{ $blk['label'] }}</span>
+                                Превью письма
+                            </span>
+                            @if(!empty($blk['suppliers']))
+                                <span class="text-[10.5px] text-fg-4 text-right truncate" title="{{ implode(', ', $blk['suppliers']) }}">→ {{ \Illuminate\Support\Str::limit(implode(', ', $blk['suppliers']), 50) }}</span>
+                            @endif
+                        </div>
 
-            {{-- Превью позиций — РЕДАКТИРУЕМЫЕ названия --}}
-            <div class="border border-border rounded-md p-3 bg-surface-2">
-                <div class="text-[11px] uppercase tracking-wider text-fg-3 mb-2">Позиции в письме (название можно править; по умолчанию — из каталога при сматченном M-артикуле)</div>
-                @php $selectedRows = collect($items)->filter(fn ($i) => ($this->selectedItems[$i['id']] ?? false)); @endphp
-                @if($selectedRows->isEmpty())
-                    <div class="text-[12px] text-fg-4">Выберите позиции выше — появится список.</div>
-                @else
-                    <div class="space-y-1.5">
-                        @foreach($selectedRows as $i => $it)
-                            <div class="flex items-center gap-2">
-                                <span class="text-[11px] text-fg-4 w-4 text-right">{{ $loop->iteration }}.</span>
-                                <input type="text" wire:model.lazy="editedNames.{{ $it['id'] }}"
-                                       class="flex-1 px-2 h-[28px] border border-border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500">
-                                <span class="text-[11px] text-fg-4 whitespace-nowrap">{{ trim(implode(' · ', array_filter([$it['oem'], $it['qty']]))) }}</span>
-                            </div>
-                        @endforeach
+                        {{-- Обращение (как улетит) --}}
+                        <div class="text-[12.5px] text-fg-1 mb-2">{{ $blk['greeting'] }}</div>
+
+                        {{-- Номенклатура: RU — редактируемая, EN — каталожное name_en --}}
+                        <div class="space-y-1.5">
+                            @foreach($rows as $i => $r)
+                                <div class="flex items-center gap-2" wire:key="prev-{{ $blk['lang'] }}-{{ $r['id'] }}">
+                                    <span class="text-[11px] text-fg-4 w-4 text-right">{{ $i + 1 }}.</span>
+                                    @if($r['editable'])
+                                        <input type="text" wire:model.lazy="editedNames.{{ $r['id'] }}"
+                                               class="flex-1 px-2 h-[28px] border border-border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                                    @else
+                                        <span class="flex-1 text-[12.5px] text-fg-1">{{ $r['name'] }}</span>
+                                    @endif
+                                    <span class="text-[11px] text-fg-4 whitespace-nowrap">{{ trim(implode(' · ', array_filter([$r['oem'], $r['qty']]))) }}</span>
+                                </div>
+                            @endforeach
+                        </div>
+                        @if($blk['lang'] === 'en')
+                            <div class="text-[10.5px] text-fg-4 mt-2">Каталожные позиции — английское название (name_en); правки названий применяются к русской версии.</div>
+                        @endif
                     </div>
-                @endif
-            </div>
+                @endforeach
+            @endif
 
             <div>
                 <label class="block text-[11.5px] text-fg-3 mb-1">Примечание <span class="text-fg-4">(необязательно)</span></label>
