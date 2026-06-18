@@ -113,9 +113,15 @@
             @if($selItems === 0)
                 <div class="text-[12.5px] text-fg-3">Сначала выберите позиции выше.</div>
             @else
+                @php $dupCount = collect($items)->filter(fn ($i) => ($this->selectedItems[$i['id']] ?? false) && $i['requested'])->count(); @endphp
+                @if($dupCount > 0)
+                    <div class="text-[11.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                        ⚠ По {{ $dupCount }} из выбранных позиций запрос поставщику уже отправлен — не дублируйте без необходимости. Поставщики, от которых ждём ответ, помечены ниже.
+                    </div>
+                @endif
                 <div class="border border-border rounded-md divide-y divide-border-subtle">
                     @forelse($opts as $o)
-                        <label class="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-hover">
+                        <label class="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-hover {{ ($o['already_awaiting'] ?? 0) > 0 ? 'bg-amber-50/60' : '' }}">
                             <input type="checkbox" wire:model.live="selectedSuppliers.{{ $o['id'] }}" class="mt-1">
                             <span class="flex-1">
                                 <span class="text-[13px] text-fg-1 font-medium">{{ $o['name'] }}</span>
@@ -123,6 +129,9 @@
                                     <span class="chip chip-sky text-[10px] ml-1">подходит · {{ $o['item_count'] }} поз.</span>
                                 @else
                                     <span class="chip chip-neutral text-[10px] ml-1">добавлен вручную</span>
+                                @endif
+                                @if(($o['already_awaiting'] ?? 0) > 0)
+                                    <span class="chip chip-warn text-[10px] ml-1" title="Уже отправлен запрос — ждём ответ по этим позициям">⏳ уже ждём · {{ $o['already_awaiting'] }} поз.</span>
                                 @endif
                                 @if($o['email'])<span class="block text-[11px] text-fg-4 mono">{{ $o['email'] }}</span>@endif
                             </span>

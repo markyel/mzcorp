@@ -181,9 +181,42 @@ class SupplierDispatchPanel extends Component
     /* --------------------------- Поставщики ------------------------------- */
 
     /**
+     * Поставщики, от которых мы УЖЕ ждём ответ по выбранным позициям
+     * (pending SupplierInquiryItem). email(lower) => число позиций.
+     * Защита от повторного запроса той же позиции тому же поставщику.
+     *
+     * @return array<string, int>
+     */
+    #[Computed]
+    public function awaitingByEmail(): array
+    {
+        $selIds = array_values(array_map('intval', array_keys(array_filter($this->selectedItems))));
+        if ($selIds === []) {
+            return [];
+        }
+
+        $rows = \App\Models\SupplierInquiryItem::query()
+            ->where('status', 'pending')
+            ->whereIn('request_item_id', $selIds)
+            ->with('inquiry:id,supplier_email')
+            ->get();
+
+        $map = []; // email => [request_item_id => true]
+        foreach ($rows as $sii) {
+            $email = mb_strtolower(trim((string) ($sii->inquiry?->supplier_email ?? '')));
+            if ($email === '') {
+                continue;
+            }
+            $map[$email][$sii->request_item_id] = true;
+        }
+
+        return array_map('count', $map);
+    }
+
+    /**
      * Подобранные (по выбранным позициям) + добавленные вручную.
      *
-     * @return array<int, array{id:int, name:string, email:?string, matched:bool, item_count:int}>
+     * @return array<int, array{id:int, name:string, email:?string, matched:bool, item_count:int, already_awaiting:int}>
      */
     #[Computed]
     public function supplierOptions(): array
@@ -206,6 +239,7 @@ class SupplierDispatchPanel extends Component
             return [];
         }
         $suppliers = Supplier::query()->whereIn('id', $ids)->get()->keyBy('id');
+        $awaiting = $this->awaitingByEmail;
 
         $out = [];
         foreach ($ids as $id) {
@@ -219,6 +253,7 @@ class SupplierDispatchPanel extends Component
                 'email' => $s->email,
                 'matched' => isset($coverage[$id]),
                 'item_count' => $coverage[$id] ?? 0,
+                'already_awaiting' => $awaiting[mb_strtolower(trim((string) $s->email))] ?? 0,
             ];
         }
         usort($out, fn ($a, $b) => $b['item_count'] <=> $a['item_count']);
