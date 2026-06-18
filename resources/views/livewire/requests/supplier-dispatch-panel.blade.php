@@ -164,18 +164,18 @@
                     <label class="block text-[11.5px] text-fg-3 mb-1">Файлы из заявки</label>
                     <div class="flex flex-wrap gap-2" x-data="{ items: @js($imgGallery) }">
                         @foreach($atts as $a)
-                            <div class="border border-border rounded-md overflow-hidden w-[112px] {{ ($selectedAttachments[$a->id] ?? false) ? 'ring-1 ring-sky-400' : '' }} bg-surface">
+                            <div class="border border-border rounded-md overflow-hidden {{ ($selectedAttachments[$a->id] ?? false) ? 'ring-1 ring-sky-400' : '' }} bg-surface" style="width:116px">
                                 @if($isImg($a))
                                     <button type="button"
                                             x-on:click="$dispatch('open-image', { items: items, index: {{ $imgIdx }} })"
-                                            class="block w-full text-left" title="Просмотр: {{ $a->filename }}">
+                                            class="block text-left" title="Просмотр: {{ $a->filename }}" style="width:116px">
                                         <img src="{{ route('attachments.preview', $a->id) }}" alt="{{ $a->filename }}" loading="lazy"
-                                             class="w-[112px] h-[78px] object-cover block bg-app">
+                                             style="width:116px;height:80px;object-fit:cover;display:block">
                                     </button>
                                     @php $imgIdx++; @endphp
                                 @else
                                     <a href="{{ route('attachments.download', $a->id) }}" target="_blank" rel="noopener"
-                                       class="flex items-center justify-center w-[112px] h-[78px] bg-surface-2 text-sky-700 hover:bg-hover text-[11px]">
+                                       class="flex items-center justify-center bg-surface-2 text-sky-700 hover:bg-hover text-[11px]" style="width:116px;height:80px">
                                         <span class="text-center"><span class="text-[18px] block">📄</span>{{ \Illuminate\Support\Str::upper(\Illuminate\Support\Str::afterLast($a->filename, '.')) ?: 'BIN' }}</span>
                                     </a>
                                 @endif
