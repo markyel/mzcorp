@@ -75,11 +75,11 @@ class SupplierDispatchService
      * @return array{sent: int, failed: int, no_supplier: int, suppliers: array<int, string>}
      */
     /**
-     * @param  array<int, string>  $nameOverrides    item_id => название (русская версия)
      * @param  ?string  $greeting  шаблон обращения с плейсхолдером {поставщик}
-     * @param  array<int, string>  $nameOverridesEn  item_id => название (английская версия)
+     * @param  array{names_ru?: array<int,string>, names_en?: array<int,string>, oem?: array<int,string>, qty?: array<int,string>}  $edits
+     *                        ручные правки позиций: названия по языкам + артикул + кол-во
      */
-    public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by, array $reqAttachmentIds = [], array $extraFiles = [], array $nameOverrides = [], ?string $greeting = null, array $nameOverridesEn = []): array
+    public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by, array $reqAttachmentIds = [], array $extraFiles = [], ?string $greeting = null, array $edits = []): array
     {
         $preview = $this->preview($request, $itemIds);
         $sent = 0;
@@ -102,7 +102,7 @@ class SupplierDispatchService
                 $draft = $this->drafts->createCompose($request, $by);
 
                 $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';
-                $rows = $this->itemRows($items, $lang === 'en' ? $nameOverridesEn : $nameOverrides, $lang);
+                $rows = $this->itemRows($items, $lang, $edits);
                 $personalGreeting = $this->personalGreeting($greeting, $supplier, $lang);
                 $subject = $lang === 'en'
                     ? 'Price request — [' . $request->internal_code . ']'
@@ -213,19 +213,23 @@ class SupplierDispatchService
      * позиция сматчена (M-SKU), иначе формулировку клиента; OEM — артикул.
      *
      * @param  iterable<int, RequestItem>  $items
-     * @param  array<int, string>  $nameOverrides  item_id => отредактированное менеджером название (для этого языка)
      * @param  string  $lang  ru|en — определяет дефолтное название (en: каталожный name_en)
+     * @param  array{names_ru?: array<int,string>, names_en?: array<int,string>, oem?: array<int,string>, qty?: array<int,string>}  $edits
      * @return array<int, array{name:string, oem:?string, brand:?string, qty:?string}>
      */
-    public function itemRows(iterable $items, array $nameOverrides = [], string $lang = 'ru'): array
+    public function itemRows(iterable $items, string $lang = 'ru', array $edits = []): array
     {
+        $names = $lang === 'en' ? ($edits['names_en'] ?? []) : ($edits['names_ru'] ?? []);
+        $oem = $edits['oem'] ?? [];
+        $qty = $edits['qty'] ?? [];
+
         $rows = [];
         foreach ($items as $it) {
             $rows[] = [
-                'name' => $this->itemName($it, $nameOverrides, $lang),
-                'oem' => $it->parsed_article ?: null,
+                'name' => $this->itemName($it, $names, $lang),
+                'oem' => $this->itemOem($it, $oem),
                 'brand' => ($it->brand?->name ?: $it->parsed_brand) ?: null,
-                'qty' => $it->parsed_qty ? trim($it->parsed_qty . ' ' . ($it->parsed_unit ?: 'шт.')) : null,
+                'qty' => $this->itemQty($it, $qty, $lang),
             ];
         }
 
@@ -253,6 +257,44 @@ class SupplierDispatchService
         }
 
         return (string) ($name ?: '—');
+    }
+
+    /**
+     * Артикул/OEM позиции: правка менеджера приоритетна (распознанный артикул
+     * бывает некорректным), иначе parsed_article.
+     *
+     * @param  array<int, string>  $oemOverrides
+     */
+    public function itemOem(RequestItem $it, array $oemOverrides = []): ?string
+    {
+        if (isset($oemOverrides[$it->id])) {
+            $v = trim((string) $oemOverrides[$it->id]);
+
+            return $v !== '' ? $v : null;
+        }
+
+        return $it->parsed_article ?: null;
+    }
+
+    /**
+     * Количество позиции: правка менеджера приоритетна; иначе parsed_qty + ед.
+     * (для EN пустая ед. → «pcs.», для RU → «шт.»).
+     *
+     * @param  array<int, string>  $qtyOverrides
+     */
+    public function itemQty(RequestItem $it, array $qtyOverrides = [], string $lang = 'ru'): ?string
+    {
+        if (isset($qtyOverrides[$it->id])) {
+            $v = trim((string) $qtyOverrides[$it->id]);
+
+            return $v !== '' ? $v : null;
+        }
+        if (! $it->parsed_qty) {
+            return null;
+        }
+        $unit = $it->parsed_unit ?: ($lang === 'en' ? 'pcs.' : 'шт.');
+
+        return trim($it->parsed_qty . ' ' . $unit);
     }
 
     /**
