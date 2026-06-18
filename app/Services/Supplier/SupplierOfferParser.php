@@ -177,6 +177,11 @@ class SupplierOfferParser
             if ($type === null) {
                 continue;
             }
+            // Встроенная подпись/логотип (content_id или совсем мелкое изображение)
+            // — не прайс, не тратим на неё разбор/Vision.
+            if ($type === 'image' && ($att->content_id !== null || (int) $att->size_bytes < 30000)) {
+                continue;
+            }
 
             $disk = $att->disk ?: 'local';
             $path = (string) $att->file_path;
@@ -201,8 +206,8 @@ class SupplierOfferParser
                 $textParts[] = '— ' . $att->filename . ":\n" . $extracted;
             }
 
-            // Изображения: для image-вложения — всегда; для PDF — только если
-            // текстового слоя по сути нет (скан).
+            // Изображения: image-вложение (подписи уже отфильтрованы выше) — всегда;
+            // PDF — только если текстового слоя по сути нет (скан).
             $weakText = mb_strlen($extracted) < 40;
             if ($type === 'image' || ($type === 'pdf' && $weakText)) {
                 foreach ($contentImages as $img) {
