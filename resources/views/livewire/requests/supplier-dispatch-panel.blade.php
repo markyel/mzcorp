@@ -73,8 +73,15 @@
                             <td class="px-2 py-2">
                                 <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($it['name'], 70) }}
                                     @if($it['requested'])<span class="chip chip-sky text-[10px] ml-1" title="Запрос уже отправлен — ждём предложение">📦 ждём</span>@endif
+                                    @if($it['discontinued'])<span class="chip chip-warn text-[10px] ml-1" title="Все ответы поставщиков — отказ">🚫 возможно не поставляется</span>@endif
                                 </div>
                                 @if($it['client_name'])<div class="text-[11px] text-fg-4">клиент: {{ \Illuminate\Support\Str::limit($it['client_name'], 60) }}</div>@endif
+                                @if($it['watched'])
+                                    <button type="button" wire:click="toggleDiscontinued({{ $it['id'] }})"
+                                            class="text-[10.5px] text-sky-700 hover:underline mt-0.5">
+                                        {{ $it['discontinued'] ? 'Вернуть в подбор (поставляется)' : 'Пометить «не поставляется»' }}
+                                    </button>
+                                @endif
                             </td>
                             <td class="px-2 py-2 text-fg-3">{{ trim(implode(' · ', array_filter([$it['oem'], $it['brand']]))) ?: '—' }}</td>
                             <td class="px-2 py-2 text-right mono">{{ $it['qty'] ?: '—' }}</td>

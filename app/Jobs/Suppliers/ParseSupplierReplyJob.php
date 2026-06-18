@@ -52,6 +52,7 @@ class ParseSupplierReplyJob implements ShouldQueue, ShouldBeUnique
         SupplierOfferParser $parser,
         AttentionService $attention,
         RequestActivityService $activity,
+        \App\Services\Supplier\PriceRefreshReconciler $priceRefresh,
     ): void {
         $message = EmailMessage::find($this->emailMessageId);
         $inquiry = SupplierInquiry::find($this->supplierInquiryId);
@@ -70,6 +71,10 @@ class ParseSupplierReplyJob implements ShouldQueue, ShouldBeUnique
             try {
                 $attention->onSupplierReplied($request);
                 $activity->touch($request->fresh() ?? $request, RequestActivityType::SupplierReplied, $message->sent_at);
+                // Пересчитать цикл обновления цен: ответ мог закрыть позицию
+                // отказом (possibly_discontinued) и/или довести заявку до
+                // «все поставщики отказали».
+                $priceRefresh->reconcile($request->fresh() ?? $request, markDiscontinued: true);
             } catch (\Throwable $e) {
                 Log::warning('ParseSupplierReplyJob: attention/activity failed', ['request_id' => $request->id, 'error' => $e->getMessage()]);
             }

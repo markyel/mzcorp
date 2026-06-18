@@ -69,6 +69,8 @@ class Request extends Model
         // Pool re-sort: denormalized timestamp + тип последнего события.
         'last_activity_at',
         'last_activity_type',
+        // Статус обновления цен (Фаза 3.5) — awaiting/actualized/refused.
+        'price_refresh_state',
         // Слияние заявок (RequestMergeService).
         'merged_into_id',
         'merged_at',
@@ -109,6 +111,7 @@ class Request extends Model
             'attention_manual_by_user_id' => 'integer',
             'last_activity_at' => 'datetime',
             'last_activity_type' => \App\Enums\RequestActivityType::class,
+            'price_refresh_state' => \App\Enums\PriceRefreshState::class,
             'merged_into_id' => 'integer',
             'merged_at' => 'datetime',
             'organization_id' => 'integer',

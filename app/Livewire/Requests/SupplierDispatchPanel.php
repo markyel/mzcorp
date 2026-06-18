@@ -145,8 +145,29 @@ class SupplierDispatchPanel extends Component
                 'has_catalog' => (bool) $it->catalog_item_id,
                 'price_stale' => $it->catalog_item_id ? ($it->catalogItem && ! $it->catalogItem->is_price_actual) : false,
                 'requested' => in_array($it->id, $requested, true),
+                'watched' => (bool) $it->price_refresh_watched,
+                'discontinued' => (bool) $it->possibly_discontinued,
             ];
         })->all();
+    }
+
+    /**
+     * Менеджер подтверждает/снимает «Возможно более не поставляется» по позиции.
+     * После — пересчёт цикла обновления цен (статус заявки может смениться).
+     */
+    public function toggleDiscontinued(int $itemId, \App\Services\Supplier\PriceRefreshReconciler $reconciler): void
+    {
+        $item = RequestItem::query()->where('request_id', $this->requestId)->find($itemId);
+        if ($item === null) {
+            return;
+        }
+        $item->forceFill(['possibly_discontinued' => ! $item->possibly_discontinued])->save();
+        unset($this->items);
+
+        $req = RequestModel::find($this->requestId);
+        if ($req !== null) {
+            $reconciler->reconcile($req);
+        }
     }
 
     public function selectStale(): void

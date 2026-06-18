@@ -142,14 +142,19 @@ class CatalogImportService
 
         $counts = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'soft_deleted' => 0, 'marked_unavailable' => 0];
 
-        DB::transaction(function () use ($normalized, $import, &$counts) {
+        // catalog_item_id, у которых цена стала актуальной в этом прогоне
+        // (false → true) — драйвят цикл обновления цен (Фаза 3.5).
+        $becameActual = [];
+
+        DB::transaction(function () use ($normalized, $import, &$counts, &$becameActual) {
             // Шаг A: достаём существующие записи по sku одним запросом.
             $skus = array_column($normalized, 'sku');
             $existing = CatalogItem::query()
                 ->whereIn('sku', $skus)
                 // price/price_min — чтобы зафиксировать «было → стало» в
-                // catalog_price_changes при изменении цены.
-                ->get(['id', 'sku', 'source_hash', 'is_active', 'price', 'price_min'])
+                // catalog_price_changes при изменении цены; is_price_actual —
+                // для детекта перехода «неактуальна → актуальна».
+                ->get(['id', 'sku', 'source_hash', 'is_active', 'price', 'price_min', 'is_price_actual'])
                 ->keyBy('sku');
 
             $now = Carbon::now();
@@ -200,6 +205,11 @@ class CatalogImportService
                         'created_at' => $now,
                         'updated_at' => $now,
                     ];
+                }
+
+                // Переход «цена неактуальна → актуальна» (1С обновила цену).
+                if (($row['is_price_actual'] ?? false) === true && ! $existingRow->is_price_actual) {
+                    $becameActual[] = $existingRow->id;
                 }
 
                 $row['is_active'] = true;
@@ -273,6 +283,13 @@ class CatalogImportService
             'errors' => count($errors),
             'duration_ms' => $import->duration_ms,
         ]);
+
+        // Цикл обновления цен (Фаза 3.5): по позициям, у которых цена стала
+        // актуальной, пересчитать заявки в awaiting (→ actualized/refused).
+        $becameActual = array_values(array_unique($becameActual));
+        if ($becameActual !== []) {
+            \App\Jobs\Suppliers\ReconcilePriceRefreshJob::dispatch($becameActual);
+        }
 
         return $import->refresh();
     }

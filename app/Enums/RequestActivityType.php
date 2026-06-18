@@ -34,6 +34,9 @@ enum RequestActivityType: string
     case QuoteSent = 'quote_sent';
     case InvoiceSent = 'invoice_sent';
     case SupplierInquirySent = 'supplier_inquiry_sent';
+    // Цикл обновления цен (Фаза 3.5):
+    case PricesActualized = 'prices_actualized';
+    case AllSuppliersRefused = 'all_suppliers_refused';
 
     // ─────────── Нейтральные ───────────
     case Paid = 'paid';
@@ -60,6 +63,8 @@ enum RequestActivityType: string
             self::QuoteSent => 'КП отправлено',
             self::InvoiceSent => 'Счёт отправлен',
             self::SupplierInquirySent => 'Запрос поставщику',
+            self::PricesActualized => 'Цены актуализированы',
+            self::AllSuppliersRefused => 'Поставщики отказали',
 
             self::Paid => 'Оплачено',
             self::ClosedWon => 'Закрыто success',
@@ -87,6 +92,8 @@ enum RequestActivityType: string
             self::QuoteSent => '💼',
             self::InvoiceSent => '🧾',
             self::SupplierInquirySent => '📦',
+            self::PricesActualized => '💰',
+            self::AllSuppliersRefused => '🚫',
 
             self::Paid => '💰',
             self::ClosedWon => '✓',
@@ -112,7 +119,9 @@ enum RequestActivityType: string
             self::PostSaleMessage,
             self::Resumed,
             self::Reanimated,
-            self::ManualFlagSet => true,
+            self::ManualFlagSet,
+            self::PricesActualized,
+            self::AllSuppliersRefused => true,
             default => false,
         };
     }

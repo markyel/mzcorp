@@ -608,10 +608,12 @@
                             $isFreshAssignment = $attnReason === \App\Enums\AttentionReason::FreshAssignment;
                             $isManualFlag = $attnReason === \App\Enums\AttentionReason::Manual;
                             $isSupplierReplied = $attnReason === \App\Enums\AttentionReason::SupplierReplied;
+                            $isPricesActualized = $attnReason === \App\Enums\AttentionReason::PricesActualized;
+                            $isAllSuppliersRefused = $attnReason === \App\Enums\AttentionReason::AllSuppliersRefused;
                             // info-флаги — это «есть новости» / «новая» / «🚩 пометка»,
                             // НЕ просрочка по SLA. Красным фоном не подсвечиваем,
                             // «просрочено N» текстом не пишем.
-                            $isInfoFlag = $isClientReplied || $isFreshAssignment || $isManualFlag || $isSupplierReplied;
+                            $isInfoFlag = $isClientReplied || $isFreshAssignment || $isManualFlag || $isSupplierReplied || $isPricesActualized || $isAllSuppliersRefused;
                             $isOverdueAlarm = $req->attention_level === 1 && ! $isInfoFlag;
                             $attnText = null;
                             if ($isClientReplied) {
@@ -620,6 +622,10 @@
                                 $attnText = 'новая';
                             } elseif ($isSupplierReplied) {
                                 $attnText = 'ответ поставщика';
+                            } elseif ($isPricesActualized) {
+                                $attnText = '💰 цены готовы';
+                            } elseif ($isAllSuppliersRefused) {
+                                $attnText = '🚫 отказ поставщиков';
                             } elseif ($isManualFlag) {
                                 $attnText = '🚩 пометка';
                             } elseif ($attnAt) {
@@ -821,6 +827,15 @@
                                          title="{{ $actType->label() }}{{ $actAt ? ' · ' . $actAt->format('d.m.Y H:i') : '' }}">
                                         <span>{{ $actType->icon() }}</span>
                                         <span>{{ $actType->label() }}</span>
+                                    </div>
+                                @endif
+                                {{-- Статус обновления цен (Фаза 3.5) — отдельный pill. --}}
+                                @if($req->price_refresh_state)
+                                    <div class="mt-0.5">
+                                        <span class="chip {{ $req->price_refresh_state->chipClass() }} text-[10.5px]"
+                                              title="Обновление цен: {{ $req->price_refresh_state->label() }}">
+                                            {{ $req->price_refresh_state->icon() }} {{ $req->price_refresh_state->label() }}
+                                        </span>
                                     </div>
                                 @endif
                             </span>

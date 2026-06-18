@@ -48,6 +48,11 @@ class RequestItem extends Model
         'catalog_item_id',
         'status',
         'is_active',
+        // Цикл обновления цен (Фаза 3.5): watched — позиция отслеживается
+        // (сматчена + цена неактуальна при отправке RFQ); possibly_discontinued —
+        // все ответы поставщиков = отказ, «возможно более не поставляется».
+        'price_refresh_watched',
+        'possibly_discontinued',
         // Phase 2.0 KB resolutions:
         'identification_category_id',
         'manufacturer_brand_id',
@@ -84,6 +89,8 @@ class RequestItem extends Model
             'parsed_qty' => 'decimal:3',
             'parsed_length' => 'decimal:3',
             'is_active' => 'boolean',
+            'price_refresh_watched' => 'boolean',
+            'possibly_discontinued' => 'boolean',
             'quality_assessment_payload' => 'array',
             'suggestion_confidence' => 'float',
             'suggestion_source_email_id' => 'integer',

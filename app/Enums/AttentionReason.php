@@ -35,6 +35,12 @@ namespace App\Enums;
  *                          в фокус». Самый сильный: НЕ затирается recompute()
  *                          / onClientReplied / onManagerOpened. Снимается
  *                          только явным `clearManual()`.
+ *   - PricesActualized 💰 «Цены актуализированы» — по заявке обновились цены
+ *                          всех отслеживаемых позиций (PriceRefreshReconciler).
+ *                          info-уровень. Снимается onManagerOpened / QuoteSent.
+ *   - AllSuppliersRefused 🚫 «Поставщики отказали» — по всем отслеживаемым
+ *                          позициям только отказы. info-уровень. Снимается
+ *                          onManagerOpened.
  *
  * ─────────────────────────────────────────────────────────────────────
  *  DEPRECATED (оставлены для совместимости с существующими записями БД):
@@ -51,6 +57,9 @@ enum AttentionReason: string
     case Manual = 'manual';
     case SupplierReplied = 'supplier_replied';
     case PostSale = 'post_sale';
+    // Цикл обновления цен (Фаза 3.5):
+    case PricesActualized = 'prices_actualized';
+    case AllSuppliersRefused = 'all_suppliers_refused';
 
     // ──────────── deprecated, не возвращаются compute() ────────────
     case AwaitingClient = 'awaiting_client';
@@ -69,6 +78,8 @@ enum AttentionReason: string
             self::Manual => 'Ручной флаг',
             self::SupplierReplied => 'Ответ поставщика',
             self::PostSale => 'Постпродажа',
+            self::PricesActualized => 'Цены актуализированы',
+            self::AllSuppliersRefused => 'Поставщики отказали',
             // legacy
             self::AwaitingClient => 'Жду клиента',
             self::AwaitingSupplier => 'Жду поставщика',
@@ -91,6 +102,8 @@ enum AttentionReason: string
             self::Manual => '🚩',
             self::SupplierReplied => '📦',
             self::PostSale => '🛒',
+            self::PricesActualized => '💰',
+            self::AllSuppliersRefused => '🚫',
             // legacy
             self::AwaitingClient => '👤',
             self::AwaitingSupplier => '📦',
@@ -112,7 +125,9 @@ enum AttentionReason: string
             self::Manual,
             self::PostponedResume,
             self::SupplierReplied,
-            self::PostSale => true,
+            self::PostSale,
+            self::PricesActualized,
+            self::AllSuppliersRefused => true,
             default => false,
         };
     }

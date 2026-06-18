@@ -310,6 +310,11 @@
                                 → {{ $req->status->label() }}
                             </span>
                         @endif
+                        @if($req->price_refresh_state)
+                            <span class="chip {{ $req->price_refresh_state->chipClass() }}" title="Обновление цен у поставщиков">
+                                {{ $req->price_refresh_state->icon() }} {{ $req->price_refresh_state->label() }}
+                            </span>
+                        @endif
                         @if(($req->reanimated_count ?? 0) > 0 && $req->reanimated_at)
                             @php
                                 $daysSinceReanimate = (int) abs(now()->diffInDays($req->reanimated_at, false));

@@ -31,6 +31,7 @@ class RequestStateService
     public function __construct(
         private readonly AttentionService $attention,
         private readonly RequestActivityService $activity,
+        private readonly \App\Services\Supplier\PriceRefreshReconciler $priceRefresh,
     ) {
     }
 
@@ -167,6 +168,12 @@ class RequestStateService
                 default => \App\Enums\RequestActivityType::StatusChange,
             };
             $this->activity->touch($request, $activityType);
+
+            // Менеджер сделал КП — цикл обновления цен завершён: снимаем
+            // статус/флаги отслеживания (Фаза 3.5).
+            if ($to === RequestStatus::Quoted) {
+                $this->priceRefresh->clear($request);
+            }
         });
 
         Log::info('RequestStateService: transition', [

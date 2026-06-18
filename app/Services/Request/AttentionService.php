@@ -165,6 +165,8 @@ class AttentionService
             AttentionReason::ClientReplied->value,
             AttentionReason::FreshAssignment->value,
             AttentionReason::PostSale->value,
+            AttentionReason::PricesActualized->value,
+            AttentionReason::AllSuppliersRefused->value,
         ];
         if (! in_array($this->reasonValue($request), $clearable, true)) {
             return;
@@ -198,6 +200,38 @@ class AttentionService
     }
 
     /**
+     * Hook: по заявке обновились цены всех отслеживаемых позиций
+     * (PriceRefreshReconciler) — пора делать КП. info-уровень, всплытие в Pool.
+     */
+    public function onPricesActualized(Request $request): void
+    {
+        if (in_array($request->status, $this->silentStatuses(), true) || $this->isManualSet($request)) {
+            return;
+        }
+        $request->forceFill([
+            'attention_required_at' => now(),
+            'attention_reason' => AttentionReason::PricesActualized->value,
+            'attention_level' => 1,
+        ])->save();
+    }
+
+    /**
+     * Hook: по всем отслеживаемым позициям заявки поставщики отказали
+     * (нет ни одной актуальной цены) — нужно решение менеджера.
+     */
+    public function onAllSuppliersRefused(Request $request): void
+    {
+        if (in_array($request->status, $this->silentStatuses(), true) || $this->isManualSet($request)) {
+            return;
+        }
+        $request->forceFill([
+            'attention_required_at' => now(),
+            'attention_reason' => AttentionReason::AllSuppliersRefused->value,
+            'attention_level' => 1,
+        ])->save();
+    }
+
+    /**
      * Hook: менеджер передал ход клиенту/поставщику (отправил уточнение,
      * КП, счёт или просто ответ). Снимает info-flags ClientReplied /
      * FreshAssignment / SupplierReplied — заявка должна уйти из top'а.
@@ -212,6 +246,8 @@ class AttentionService
             AttentionReason::ClientReplied->value,
             AttentionReason::FreshAssignment->value,
             AttentionReason::SupplierReplied->value,
+            AttentionReason::PricesActualized->value,
+            AttentionReason::AllSuppliersRefused->value,
         ];
         if (! in_array($this->reasonValue($request), $clearable, true)) {
             return;

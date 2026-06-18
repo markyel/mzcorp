@@ -34,6 +34,7 @@ class SupplierDispatchService
         private readonly EmailDraftService $drafts,
         private readonly OutgoingMailSender $sender,
         private readonly RequestActivityService $activity,
+        private readonly PriceRefreshReconciler $priceRefresh,
     ) {
     }
 
@@ -185,6 +186,13 @@ class SupplierDispatchService
                 $this->activity->touch($request->fresh() ?? $request, RequestActivityType::SupplierInquirySent);
             } catch (\Throwable) {
                 // не критично для отправки
+            }
+            // Запускаем цикл обновления цен: метим сматченные неактуальные
+            // позиции среди отправленных и переводим заявку в awaiting.
+            try {
+                $this->priceRefresh->markAwaiting($request->fresh() ?? $request, $itemIds);
+            } catch (\Throwable $e) {
+                Log::warning('SupplierDispatch: markAwaiting failed', ['request_id' => $request->id, 'error' => $e->getMessage()]);
             }
         }
 
