@@ -166,6 +166,12 @@ Route::middleware('auth')->group(function () {
             return view('suppliers.index');
         })->name('suppliers.index');
 
+        // Карточка поставщика из реестра (Фаза 3.1) — объявлена ДО {inquiry},
+        // чтобы статичный сегмент registry не матчился как id запроса.
+        Route::get('/dashboard/suppliers/registry/{supplier}', function (\App\Models\Supplier $supplier) {
+            return view('suppliers.supplier-edit', ['supplier' => $supplier]);
+        })->name('suppliers.registry-edit');
+
         Route::get('/dashboard/suppliers/{inquiry}', function (\App\Models\SupplierInquiry $inquiry) {
             return view('suppliers.show', ['inquiry' => $inquiry]);
         })->name('suppliers.show');

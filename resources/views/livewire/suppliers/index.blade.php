@@ -82,11 +82,12 @@
                     <tbody>
                         @forelse($this->suppliers as $s)
                             <tr wire:key="sup-{{ $s->id }}" class="border-b border-border-subtle hover:bg-hover">
-                                <td class="px-3 py-2 mono text-fg-1">{{ $s->email ?: '—' }}</td>
+                                <td class="px-3 py-2 mono"><a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="text-sky-700 hover:underline">{{ $s->email ?: '—' }}</a></td>
                                 <td class="px-3 py-2 mono text-fg-2">{{ $s->domain ?: '—' }}</td>
-                                <td class="px-3 py-2 text-fg-2">{{ $s->name ?: '—' }}</td>
+                                <td class="px-3 py-2 text-fg-2"><a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="hover:underline">{{ $s->name ?: '—' }}</a></td>
                                 <td class="px-3 py-2 text-fg-3 whitespace-nowrap">{{ $s->createdBy?->name ?? '—' }}</td>
                                 <td class="px-3 py-2 text-right">
+                                    <a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="text-[11.5px] text-sky-700 hover:underline mr-2">профиль</a>
                                     <button type="button" wire:click="removeSupplier({{ $s->id }})" wire:confirm="Удалить из реестра поставщиков?" class="text-[11.5px] text-red-600 hover:underline">удалить</button>
                                 </td>
                             </tr>

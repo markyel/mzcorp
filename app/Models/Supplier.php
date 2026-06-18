@@ -22,9 +22,23 @@ class Supplier extends Model
         'email',
         'domain',
         'name',
+        'phone',
         'notes',
+        // Фаза 3.1 — профиль для подбора под позицию.
+        'assortment_description',
+        'assortment_matrix',
+        'matrix_built_at',
+        'matrix_built_with_model',
         'created_by_user_id',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'assortment_matrix' => 'array',
+            'matrix_built_at' => 'datetime',
+        ];
+    }
 
     public function createdBy(): BelongsTo
     {
