@@ -66,32 +66,35 @@ class SupplierDispatchService
     }
 
     /**
-     * Разослать RFQ ВЫБРАННЫМ поставщикам. Каждый получает письмо с теми
-     * позициями (из активных / itemIds), которые покрывает его матрица.
-     * Отправляет РЕАЛЬНЫЕ письма — только по явному действию оператора.
+     * Разослать RFQ ВЫБРАННЫМ поставщикам. Каждый получает письмо с ВЫБРАННЫМИ
+     * позициями (itemIds). Матчер используется только для ПОДСКАЗКИ поставщиков
+     * в UI — на отправку не влияет (вручную добавленный поставщик, не попавший
+     * в матч, всё равно получает запрос). Отправляет РЕАЛЬНЫЕ письма — только по
+     * явному действию оператора.
      *
-     * @param  array<int, int>  $supplierIds  кому слать (id из preview groups)
-     * @param  array<int, int>  $itemIds      ограничение позиций ([] = все активные)
-     * @return array{sent: int, failed: int, no_supplier: int, suppliers: array<int, string>}
-     */
-    /**
+     * @param  array<int, int>  $supplierIds  кому слать (отмеченные в UI)
+     * @param  array<int, int>  $itemIds      позиции запроса ([] = все активные)
      * @param  array{names_ru?: array<int,string>, names_en?: array<int,string>, oem?: array<int,string>, qty?: array<int,string>, greeting_ru?: ?string, greeting_en?: ?string}  $edits
      *                        ручные правки письма: названия по языкам + артикул + кол-во + обращение по языкам
+     * @return array{sent: int, failed: int, no_supplier: int, suppliers: array<int, string>}
      */
     public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by, array $reqAttachmentIds = [], array $extraFiles = [], array $edits = []): array
     {
-        $preview = $this->preview($request, $itemIds);
+        $items = $this->loadItems($request, $itemIds);
         $sent = 0;
         $failed = 0;
         $suppliers = [];
-        $selected = array_flip(array_map('intval', $supplierIds));
 
-        foreach ($preview['groups'] as $group) {
-            $supplier = $group['supplier'];
-            if (! isset($selected[$supplier->id])) {
-                continue;
-            }
-            $items = $group['items'];
+        $supplierIds = array_values(array_unique(array_map('intval', $supplierIds)));
+        $selectedSuppliers = $supplierIds === []
+            ? collect()
+            : \App\Models\Supplier::query()->whereIn('id', $supplierIds)->get();
+
+        if ($items->isEmpty()) {
+            return ['sent' => 0, 'failed' => 0, 'no_supplier' => 0, 'suppliers' => []];
+        }
+
+        foreach ($selectedSuppliers as $supplier) {
             if (trim((string) $supplier->email) === '') {
                 $failed++;
                 continue;
@@ -188,7 +191,7 @@ class SupplierDispatchService
         return [
             'sent' => $sent,
             'failed' => $failed,
-            'no_supplier' => count($preview['no_supplier']),
+            'no_supplier' => 0,
             'suppliers' => $suppliers,
         ];
     }
