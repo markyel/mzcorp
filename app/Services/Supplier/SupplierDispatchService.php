@@ -75,10 +75,11 @@ class SupplierDispatchService
      * @return array{sent: int, failed: int, no_supplier: int, suppliers: array<int, string>}
      */
     /**
-     * @param  array<int, string>  $nameOverrides  item_id => отредактированное название
+     * @param  array<int, string>  $nameOverrides    item_id => название (русская версия)
      * @param  ?string  $greeting  шаблон обращения с плейсхолдером {поставщик}
+     * @param  array<int, string>  $nameOverridesEn  item_id => название (английская версия)
      */
-    public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by, array $reqAttachmentIds = [], array $extraFiles = [], array $nameOverrides = [], ?string $greeting = null): array
+    public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by, array $reqAttachmentIds = [], array $extraFiles = [], array $nameOverrides = [], ?string $greeting = null, array $nameOverridesEn = []): array
     {
         $preview = $this->preview($request, $itemIds);
         $sent = 0;
@@ -101,7 +102,7 @@ class SupplierDispatchService
                 $draft = $this->drafts->createCompose($request, $by);
 
                 $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';
-                $rows = $this->itemRows($items, $nameOverrides, $lang);
+                $rows = $this->itemRows($items, $lang === 'en' ? $nameOverridesEn : $nameOverrides, $lang);
                 $personalGreeting = $this->personalGreeting($greeting, $supplier, $lang);
                 $subject = $lang === 'en'
                     ? 'Price request — [' . $request->internal_code . ']'
@@ -212,27 +213,16 @@ class SupplierDispatchService
      * позиция сматчена (M-SKU), иначе формулировку клиента; OEM — артикул.
      *
      * @param  iterable<int, RequestItem>  $items
-     * @param  array<int, string>  $nameOverrides  item_id => отредактированное менеджером название (RU)
-     * @param  string  $lang  ru|en — для en у каталожных позиций берём name_en
+     * @param  array<int, string>  $nameOverrides  item_id => отредактированное менеджером название (для этого языка)
+     * @param  string  $lang  ru|en — определяет дефолтное название (en: каталожный name_en)
      * @return array<int, array{name:string, oem:?string, brand:?string, qty:?string}>
      */
     public function itemRows(iterable $items, array $nameOverrides = [], string $lang = 'ru'): array
     {
         $rows = [];
         foreach ($items as $it) {
-            $override = isset($nameOverrides[$it->id]) ? trim((string) $nameOverrides[$it->id]) : '';
-            $catalog = $it->catalog_item_id ? $it->catalogItem : null;
-            if ($lang === 'en') {
-                // Каталожная позиция → английское название; иначе формулировка
-                // клиента (перевода нет). RU-правки менеджера на EN не тянем.
-                $name = $catalog
-                    ? ($catalog->name_en ?: $catalog->name ?: $it->parsed_name)
-                    : ($it->parsed_name ?: '—');
-            } else {
-                $name = $override !== '' ? $override : (string) (($catalog?->name) ?: $it->parsed_name ?: '—');
-            }
             $rows[] = [
-                'name' => (string) ($name ?: '—'),
+                'name' => $this->itemName($it, $nameOverrides, $lang),
                 'oem' => $it->parsed_article ?: null,
                 'brand' => ($it->brand?->name ?: $it->parsed_brand) ?: null,
                 'qty' => $it->parsed_qty ? trim($it->parsed_qty . ' ' . ($it->parsed_unit ?: 'шт.')) : null,
@@ -240,6 +230,29 @@ class SupplierDispatchService
         }
 
         return $rows;
+    }
+
+    /**
+     * Название позиции для письма: правка менеджера (если есть для языка)
+     * приоритетна; иначе дефолт — для EN каталожный name_en (или name), иначе
+     * формулировка клиента; для RU каталожное name, иначе клиент.
+     *
+     * @param  array<int, string>  $nameOverrides
+     */
+    public function itemName(RequestItem $it, array $nameOverrides = [], string $lang = 'ru'): string
+    {
+        $override = isset($nameOverrides[$it->id]) ? trim((string) $nameOverrides[$it->id]) : '';
+        if ($override !== '') {
+            return $override;
+        }
+        $catalog = $it->catalog_item_id ? $it->catalogItem : null;
+        if ($lang === 'en') {
+            $name = $catalog ? ($catalog->name_en ?: $catalog->name ?: $it->parsed_name) : $it->parsed_name;
+        } else {
+            $name = ($catalog?->name) ?: $it->parsed_name;
+        }
+
+        return (string) ($name ?: '—');
     }
 
     /**

@@ -178,23 +178,23 @@
                         {{-- Обращение (как улетит) --}}
                         <div class="text-[12.5px] text-fg-1 mb-2">{{ $blk['greeting'] }}</div>
 
-                        {{-- Номенклатура: RU — редактируемая, EN — каталожное name_en --}}
+                        {{-- Номенклатура — название редактируемое на каждом языке
+                             (RU → editedNames, EN → editedNamesEn). --}}
                         <div class="space-y-1.5">
                             @foreach($rows as $i => $r)
                                 <div class="flex items-center gap-2" wire:key="prev-{{ $blk['lang'] }}-{{ $r['id'] }}">
                                     <span class="text-[11px] text-fg-4 w-4 text-right">{{ $i + 1 }}.</span>
-                                    @if($r['editable'])
-                                        <input type="text" wire:model.lazy="editedNames.{{ $r['id'] }}"
-                                               class="flex-1 px-2 h-[28px] border border-border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500">
-                                    @else
-                                        <span class="flex-1 text-[12.5px] text-fg-1">{{ $r['name'] }}</span>
+                                    <input type="text" wire:model.lazy="{{ $r['model'] }}.{{ $r['id'] }}"
+                                           class="flex-1 px-2 h-[28px] border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500 {{ $r['cyrillic'] ? 'border-amber-400' : 'border-border' }}">
+                                    @if($r['cyrillic'])
+                                        <span class="chip chip-warn text-[10px]" title="Похоже на русское название — переведите для англоязычного поставщика">⚠ рус.</span>
                                     @endif
                                     <span class="text-[11px] text-fg-4 whitespace-nowrap">{{ trim(implode(' · ', array_filter([$r['oem'], $r['qty']]))) }}</span>
                                 </div>
                             @endforeach
                         </div>
                         @if($blk['lang'] === 'en')
-                            <div class="text-[10.5px] text-fg-4 mt-2">Каталожные позиции — английское название (name_en); правки названий применяются к русской версии.</div>
+                            <div class="text-[10.5px] text-fg-4 mt-2">Для позиций из каталога подставлено английское название (name_en). Позиции без M-артикула — переведите вручную (⚠ помечены кириллицей).</div>
                         @endif
                     </div>
                 @endforeach

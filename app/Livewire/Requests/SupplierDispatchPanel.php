@@ -41,8 +41,11 @@ class SupplierDispatchPanel extends Component
     /** Обращение в начале письма; {поставщик} подставляется персонально. */
     public string $greeting = 'Здравствуйте, {поставщик}!';
 
-    /** item_id => отредактированное название позиции для письма. */
+    /** item_id => отредактированное название позиции для письма (рус. версия). */
     public array $editedNames = [];
+
+    /** item_id => название для письма на английском (каталог → name_en). */
+    public array $editedNamesEn = [];
 
     public string $note = '';
 
@@ -62,6 +65,7 @@ class SupplierDispatchPanel extends Component
                 $this->selectedItems[$it['id']] = true;
             }
             $this->editedNames[$it['id']] = $it['name'];
+            $this->editedNamesEn[$it['id']] = $it['en_name'];
         }
     }
 
@@ -103,15 +107,19 @@ class SupplierDispatchPanel extends Component
         $requested = $this->requestedItemIds;
         $items = RequestItem::query()
             ->where('request_id', $this->requestId)->where('is_active', true)
-            ->with(['brand:id,name', 'catalogItem:id,name,is_price_actual'])
+            ->with(['brand:id,name', 'catalogItem:id,name,name_en,is_price_actual'])
             ->orderBy('position')->get();
 
         return $items->map(function (RequestItem $it) use ($requested) {
             $catName = $it->catalog_item_id ? ($it->catalogItem?->name ?: null) : null;
+            $catNameEn = $it->catalog_item_id ? ($it->catalogItem?->name_en ?: $catName) : null;
 
             return [
                 'id' => $it->id,
                 'name' => (string) ($catName ?: $it->parsed_name ?: '—'),
+                // EN-дефолт: каталожный name_en, иначе формулировка клиента
+                // (менеджер переведёт в превью English).
+                'en_name' => (string) ($catNameEn ?: $it->parsed_name ?: '—'),
                 'client_name' => $catName && $catName !== $it->parsed_name ? $it->parsed_name : null,
                 'oem' => $it->parsed_article ?: null,
                 'brand' => ($it->brand?->name ?: $it->parsed_brand) ?: null,
@@ -262,7 +270,7 @@ class SupplierDispatchPanel extends Component
 
         $reqAttIds = array_values(array_map('intval', array_keys(array_filter($this->selectedAttachments))));
 
-        $result = $dispatcher->dispatch($req, $supplierIds, $itemIds, $this->note, $user, $reqAttIds, $extraFiles, $this->editedNames, $this->greeting);
+        $result = $dispatcher->dispatch($req, $supplierIds, $itemIds, $this->note, $user, $reqAttIds, $extraFiles, $this->editedNames, $this->greeting, $this->editedNamesEn);
 
         $msg = "Отправлено запросов поставщикам: {$result['sent']}.";
         if ($result['failed'] > 0) {
@@ -319,10 +327,12 @@ class SupplierDispatchPanel extends Component
     }
 
     /**
-     * Строки превью на конкретном языке. RU — название редактируемое
-     * (editedNames), EN — каталожное name_en (read-only; правки идут в RU).
+     * Строки превью на конкретном языке — обе версии редактируемые: RU из
+     * editedNames, EN из editedNamesEn (каталог → name_en по умолчанию). Флаг
+     * cyrillic — для EN-строк, оставшихся кириллицей (предупреждение: не
+     * отправить русское название англоязычному поставщику).
      *
-     * @return array<int, array{id:int, name:string, oem:?string, qty:?string, editable:bool}>
+     * @return array<int, array{id:int, name:string, oem:?string, qty:?string, model:string, cyrillic:bool}>
      */
     public function previewRowsForLang(string $lang): array
     {
@@ -333,24 +343,18 @@ class SupplierDispatchPanel extends Component
         }
         $items = RequestItem::query()->whereIn('id', $ids)
             ->with(['brand:id,name', 'catalogItem:id,name,name_en'])->orderBy('position')->get();
+        $overrides = $lang === 'en' ? $this->editedNamesEn : $this->editedNames;
 
         $out = [];
         foreach ($items as $it) {
-            $catalog = $it->catalog_item_id ? $it->catalogItem : null;
-            if ($lang === 'en') {
-                $name = $catalog ? ($catalog->name_en ?: $catalog->name ?: $it->parsed_name) : ($it->parsed_name ?: '—');
-                $editable = false;
-            } else {
-                $edited = isset($this->editedNames[$it->id]) ? trim((string) $this->editedNames[$it->id]) : '';
-                $name = $edited !== '' ? $edited : (($catalog?->name) ?: $it->parsed_name ?: '—');
-                $editable = true;
-            }
+            $name = app(SupplierDispatchService::class)->itemName($it, $overrides, $lang);
             $out[] = [
                 'id' => $it->id,
-                'name' => (string) ($name ?: '—'),
+                'name' => $name,
                 'oem' => $it->parsed_article ?: null,
                 'qty' => $it->parsed_qty ? trim($it->parsed_qty . ' ' . ($it->parsed_unit ?: 'шт.')) : null,
-                'editable' => $editable,
+                'model' => $lang === 'en' ? 'editedNamesEn' : 'editedNames',
+                'cyrillic' => $lang === 'en' && preg_match('/\p{Cyrillic}/u', $name) === 1,
             ];
         }
 
