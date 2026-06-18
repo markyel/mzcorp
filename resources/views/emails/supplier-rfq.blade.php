@@ -22,15 +22,15 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach($items as $i => $it)
+                @foreach($rows as $i => $r)
                     <tr>
                         <td style="padding:9px 10px;border-bottom:1px solid #eef0f3;vertical-align:top">{{ $i + 1 }}</td>
-                        <td style="padding:9px 10px;border-bottom:1px solid #eef0f3;vertical-align:top;font-weight:600">{{ $it->parsed_name ?: '—' }}</td>
+                        <td style="padding:9px 10px;border-bottom:1px solid #eef0f3;vertical-align:top;font-weight:600">{{ $r['name'] ?: '—' }}</td>
                         <td style="padding:9px 10px;border-bottom:1px solid #eef0f3;vertical-align:top;color:#4b5563">
-                            {{ trim(implode(' · ', array_filter([$it->parsed_article, $it->parsed_brand]))) ?: '—' }}
+                            {{ trim(implode(' · ', array_filter([$r['oem'] ?? null, $r['brand'] ?? null]))) ?: '—' }}
                         </td>
                         <td style="padding:9px 10px;border-bottom:1px solid #eef0f3;vertical-align:top;text-align:right;white-space:nowrap">
-                            {{ $it->parsed_qty ? trim($it->parsed_qty . ' ' . ($it->parsed_unit ?: 'шт.')) : '—' }}
+                            {{ $r['qty'] ?: '—' }}
                         </td>
                     </tr>
                 @endforeach

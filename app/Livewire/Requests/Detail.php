@@ -734,7 +734,7 @@ class Detail extends Component
             'items'     => ['label' => 'Позиции',    'count' => $items,       'disabled' => false],
             'quotes'    => ['label' => 'КП',         'count' => $quotesCount > 0 ? $quotesCount : null, 'disabled' => false],
             'invoices'  => ['label' => 'Счета',      'count' => $invCount > 0 ? $invCount : null, 'disabled' => false, 'state' => $invState],
-            'suppliers' => ['label' => 'Поставщики', 'count' => null,         'disabled' => true],
+            'suppliers' => ['label' => 'Поставщики', 'count' => null,         'disabled' => false],
             'activity'  => ['label' => 'Активность', 'count' => $activity,    'disabled' => false],
             'files'     => ['label' => 'Файлы',      'count' => $files,       'disabled' => false],
             'related'   => ['label' => 'Связанные',  'count' => null,         'disabled' => true],

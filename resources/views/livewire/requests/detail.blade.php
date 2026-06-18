@@ -975,14 +975,7 @@
                  «Закрыть как потеря» → причина «Переписка с поставщиком»
                  (+ опц. занести ящик в стоп-лист). Отдельная кнопка убрана. --}}
 
-            {{-- Фаза 3.2: запросить расценку у поставщиков по позициям заявки.
-                 Owner/acting/privileged, активные не-Pending (есть позиции). --}}
-            @if(($canManage || $canReassign) && ! $req->status->isTerminal() && $req->status !== $RS::Pending && $items->count() > 0)
-                <button type="button"
-                        wire:click="$dispatch('open-supplier-dispatch')"
-                        class="btn btn-sm">📦 Запросить расценку у поставщиков</button>
-                <livewire:requests.supplier-dispatch-dialog :request="$req" wire:key="supplier-dispatch-{{ $req->id }}" lazy />
-            @endif
+            {{-- Запрос расценки у поставщиков — в табе «Поставщики». --}}
 
             {{-- Разъединение заявки (split / un-merge). admin/РОП/директор.
                  Показываем только если заявка active и в треде ≥2 письма
@@ -2621,10 +2614,7 @@
 
             {{-- ───── ПОСТАВЩИКИ ───── --}}
             @case('suppliers')
-                <div class="ds-card p-8 text-center text-fg-3">
-                    <div class="text-fg-1 font-medium mb-1">Поставщики и refresh цен — Phase 2</div>
-                    <div class="text-sm">Привязка к поставщикам, batch-refresh запросы, latency-мониторинг.</div>
-                </div>
+                <livewire:requests.supplier-dispatch-panel :request="$req" wire:key="supplier-panel-{{ $req->id }}" />
                 @break
 
             {{-- ───── АКТИВНОСТЬ ───── --}}

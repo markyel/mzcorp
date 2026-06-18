@@ -3,6 +3,8 @@
 namespace App\Services\Supplier;
 
 use App\Enums\RequestActivityType;
+use App\Models\EmailAttachment;
+use App\Models\EmailMessage;
 use App\Models\Request as RequestModel;
 use App\Models\RequestItem;
 use App\Models\SupplierInquiry;
@@ -12,6 +14,8 @@ use App\Services\Mail\EmailDraftService;
 use App\Services\Mail\OutgoingMailSender;
 use App\Services\Request\RequestActivityService;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 /**
  * Формирование и отправка запросов расценки поставщикам из заявки (Фаза 3.2).
@@ -70,7 +74,7 @@ class SupplierDispatchService
      * @param  array<int, int>  $itemIds      ограничение позиций ([] = все активные)
      * @return array{sent: int, failed: int, no_supplier: int, suppliers: array<int, string>}
      */
-    public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by): array
+    public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by, array $reqAttachmentIds = [], array $extraFiles = []): array
     {
         $preview = $this->preview($request, $itemIds);
         $sent = 0;
@@ -92,11 +96,12 @@ class SupplierDispatchService
             try {
                 $draft = $this->drafts->createCompose($request, $by);
 
+                $rows = $this->itemRows($items);
                 $subject = 'Запрос расценки — [' . $request->internal_code . ']';
                 $bodyHtml = view('emails.supplier-rfq', [
                     'request' => $request,
                     'supplier' => $supplier,
-                    'items' => $items,
+                    'rows' => $rows,
                     'note' => trim((string) $note),
                 ])->render();
 
@@ -104,8 +109,12 @@ class SupplierDispatchService
                     'to_recipients' => [['email' => $supplier->email, 'name' => $supplier->name ?: '']],
                     'subject' => $subject,
                     'body_html' => $bodyHtml,
-                    'body_plain' => $this->plainBody($request, $items, (string) $note),
+                    'body_plain' => $this->plainBody($request, $rows, (string) $note),
                 ]);
+
+                // Вложения: файлы заявки + загруженные с диска — до отправки,
+                // чтобы попали в MIME.
+                $this->attachToDraft($draft->fresh(), $reqAttachmentIds, $extraFiles);
 
                 $result = $this->sender->sendDraft($draft->id);
                 if (! ($result['success'] ?? false)) {
@@ -183,25 +192,92 @@ class SupplierDispatchService
             ->where('request_id', $request->id)
             ->where('is_active', true)
             ->when($itemIds !== [], fn ($q) => $q->whereIn('id', $itemIds))
-            ->with(['brand:id,name', 'kbCategory:id,name,synonyms', 'catalogItem:id,brand,equipment_category_id', 'catalogItem.equipmentCategory:id,name,synonyms'])
+            ->with(['brand:id,name', 'kbCategory:id,name,synonyms', 'catalogItem:id,name,brand,equipment_category_id,is_price_actual', 'catalogItem.equipmentCategory:id,name,synonyms'])
             ->orderBy('position')
             ->get();
     }
 
     /**
+     * Отображаемые данные позиции для письма: название берём из КАТАЛОГА, если
+     * позиция сматчена (M-SKU), иначе формулировку клиента; OEM — артикул.
+     *
      * @param  iterable<int, RequestItem>  $items
+     * @return array<int, array{name:string, oem:?string, brand:?string, qty:?string}>
      */
-    private function plainBody(RequestModel $request, iterable $items, string $note): string
+    public function itemRows(iterable $items): array
+    {
+        $rows = [];
+        foreach ($items as $it) {
+            $catalogName = $it->catalog_item_id ? ($it->catalogItem?->name ?: null) : null;
+            $rows[] = [
+                'name' => (string) ($catalogName ?: $it->parsed_name ?: '—'),
+                'oem' => $it->parsed_article ?: null,
+                'brand' => ($it->brand?->name ?: $it->parsed_brand) ?: null,
+                'qty' => $it->parsed_qty ? trim($it->parsed_qty . ' ' . ($it->parsed_unit ?: 'шт.')) : null,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Прицепить к черновику вложения: копии файлов заявки (по id) + уже
+     * сохранённые на local файлы с диска ([{path,name,mime,size}]). Копируем
+     * по отдельному файлу на каждый черновик (изоляция при удалении).
+     *
+     * @param  array<int, int>  $reqAttachmentIds
+     * @param  array<int, array{path:string,name:string,mime:string,size:int}>  $extraFiles
+     */
+    private function attachToDraft(EmailMessage $draft, array $reqAttachmentIds, array $extraFiles): void
+    {
+        $copy = function (string $disk, string $srcPath, string $filename, ?string $mime, int $size) use ($draft) {
+            try {
+                if (! Storage::disk($disk)->exists($srcPath)) {
+                    return;
+                }
+                $newPath = sprintf('mail/%d/drafts/%d/%s', $draft->mailbox_id ?? 0, $draft->id, Str::random(8) . '_' . $this->safeName($filename));
+                Storage::disk('local')->put($newPath, Storage::disk($disk)->get($srcPath));
+                EmailAttachment::create([
+                    'email_message_id' => $draft->id,
+                    'filename' => mb_substr($filename, 0, 255),
+                    'mime_type' => $mime ?: 'application/octet-stream',
+                    'size_bytes' => $size,
+                    'content_id' => null,
+                    'file_path' => $newPath,
+                    'disk' => 'local',
+                    'is_inline' => false,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('SupplierDispatch: attach copy failed', ['draft_id' => $draft->id, 'file' => $filename, 'error' => $e->getMessage()]);
+            }
+        };
+
+        foreach (EmailAttachment::query()->whereIn('id', $reqAttachmentIds)->get() as $a) {
+            $copy((string) ($a->disk ?: 'local'), (string) $a->file_path, (string) $a->filename, $a->mime_type, (int) $a->size_bytes);
+        }
+        foreach ($extraFiles as $f) {
+            if (! empty($f['path'])) {
+                $copy('local', (string) $f['path'], (string) ($f['name'] ?? 'file'), $f['mime'] ?? null, (int) ($f['size'] ?? 0));
+            }
+        }
+    }
+
+    private function safeName(string $name): string
+    {
+        $name = preg_replace('/[^\p{L}\p{N}._\- ]/u', '_', $name) ?? 'file';
+
+        return mb_substr(trim($name), 0, 120) ?: 'file';
+    }
+
+    /**
+     * @param  array<int, array{name:string, oem:?string, brand:?string, qty:?string}>  $rows
+     */
+    private function plainBody(RequestModel $request, array $rows, string $note): string
     {
         $lines = ['Здравствуйте!', '', 'Просим дать цену, наличие и срок поставки на позиции:', ''];
         $n = 1;
-        foreach ($items as $it) {
-            $parts = array_filter([
-                $it->parsed_name,
-                $it->parsed_brand,
-                $it->parsed_article,
-                $it->parsed_qty ? trim($it->parsed_qty . ' ' . ($it->parsed_unit ?: 'шт.')) : null,
-            ]);
+        foreach ($rows as $r) {
+            $parts = array_filter([$r['name'], $r['oem'], $r['brand'], $r['qty']]);
             $lines[] = ($n++) . '. ' . implode(' · ', $parts);
         }
         if (trim($note) !== '') {
