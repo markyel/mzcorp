@@ -71,7 +71,9 @@
                         <tr class="border-b border-border-subtle {{ $it['price_stale'] ? 'bg-amber-50' : '' }}">
                             <td class="px-2 py-2 text-center"><input type="checkbox" wire:model.live="selectedItems.{{ $it['id'] }}"></td>
                             <td class="px-2 py-2">
-                                <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($it['name'], 70) }}</div>
+                                <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($it['name'], 70) }}
+                                    @if($it['requested'])<span class="chip chip-sky text-[10px] ml-1" title="Запрос уже отправлен — ждём предложение">📦 ждём</span>@endif
+                                </div>
                                 @if($it['client_name'])<div class="text-[11px] text-fg-4">клиент: {{ \Illuminate\Support\Str::limit($it['client_name'], 60) }}</div>@endif
                             </td>
                             <td class="px-2 py-2 text-fg-3">{{ trim(implode(' · ', array_filter([$it['oem'], $it['brand']]))) ?: '—' }}</td>

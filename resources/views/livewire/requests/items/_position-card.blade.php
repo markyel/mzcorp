@@ -208,6 +208,11 @@
                     <span class="mono text-fg-2">арт. {{ $item->parsed_article }}</span>
                 @endif
 
+                {{-- Фаза 3.2: по позиции отправлен запрос поставщику — ждём предложение. --}}
+                @if($awaitingSupplier ?? false)
+                    <span class="chip chip-sky text-[10.5px]" title="Отправлен запрос расценки поставщику — ждём предложение">📦 ждём поставщика</span>
+                @endif
+
                 {{-- Phase 7: chip «📨 в КП» — сумма позиции в исходящих КП.
                      Несколько строк КП на одну позицию = split delivery. --}}
                 @php

@@ -2141,6 +2141,7 @@
                                 // parent → коллекция child-links (несколько детей могут ссылаться).
                                 $inhLinksMap = $this->inheritanceItemLinks;
                                 $isInhChild = $req->isInheritanceChild();
+                                $requestedSupplierItemIds = $this->requestedItemIds;
                             @endphp
                             @foreach($items as $item)
                                 @php
@@ -2158,6 +2159,7 @@
                                     'galleryItems' => $positionsGallery,
                                     'inheritanceLink' => $inhLinkForItem,
                                     'inheritanceIsChild' => $isInhChild,
+                                    'awaitingSupplier' => $requestedSupplierItemIds->contains($item->id),
                                 ])
                             @endforeach
                             </div>

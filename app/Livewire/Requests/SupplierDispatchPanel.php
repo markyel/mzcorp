@@ -89,14 +89,24 @@ class SupplierDispatchPanel extends Component
      * @return array<int, array{id:int, name:string, client_name:?string, oem:?string, brand:?string, qty:?string, has_catalog:bool, price_stale:bool}>
      */
     #[Computed]
+    public function requestedItemIds(): array
+    {
+        return \App\Models\SupplierInquiryItem::query()
+            ->whereHas('inquiry', fn ($q) => $q->where('related_request_id', $this->requestId))
+            ->where('status', 'pending')
+            ->pluck('request_item_id')->filter()->unique()->values()->all();
+    }
+
+    #[Computed]
     public function items(): array
     {
+        $requested = $this->requestedItemIds;
         $items = RequestItem::query()
             ->where('request_id', $this->requestId)->where('is_active', true)
             ->with(['brand:id,name', 'catalogItem:id,name,is_price_actual'])
             ->orderBy('position')->get();
 
-        return $items->map(function (RequestItem $it) {
+        return $items->map(function (RequestItem $it) use ($requested) {
             $catName = $it->catalog_item_id ? ($it->catalogItem?->name ?: null) : null;
 
             return [
@@ -108,6 +118,7 @@ class SupplierDispatchPanel extends Component
                 'qty' => $it->parsed_qty ? trim($it->parsed_qty . ' ' . ($it->parsed_unit ?: 'шт.')) : null,
                 'has_catalog' => (bool) $it->catalog_item_id,
                 'price_stale' => $it->catalog_item_id ? ($it->catalogItem && ! $it->catalogItem->is_price_actual) : false,
+                'requested' => in_array($it->id, $requested, true),
             ];
         })->all();
     }

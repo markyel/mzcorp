@@ -725,6 +725,11 @@ class Detail extends Component
             };
         }
 
+        // Фаза 3.2: число разосланных запросов поставщикам (бейдж на табе,
+        // чтобы было видно без захода в таб).
+        $supplierInquiriesCount = \App\Models\SupplierInquiry::query()
+            ->where('related_request_id', $this->request->id)->count();
+
         // Таб «КП» всегда виден — без него менеджер не может создать первый
         // черновик КП через QuotationEditor. Counter null при нуле (чтобы
         // не показывать «КП 0»).
@@ -734,7 +739,7 @@ class Detail extends Component
             'items'     => ['label' => 'Позиции',    'count' => $items,       'disabled' => false],
             'quotes'    => ['label' => 'КП',         'count' => $quotesCount > 0 ? $quotesCount : null, 'disabled' => false],
             'invoices'  => ['label' => 'Счета',      'count' => $invCount > 0 ? $invCount : null, 'disabled' => false, 'state' => $invState],
-            'suppliers' => ['label' => 'Поставщики', 'count' => null,         'disabled' => false],
+            'suppliers' => ['label' => 'Поставщики', 'count' => $supplierInquiriesCount > 0 ? $supplierInquiriesCount : null, 'disabled' => false],
             'activity'  => ['label' => 'Активность', 'count' => $activity,    'disabled' => false],
             'files'     => ['label' => 'Файлы',      'count' => $files,       'disabled' => false],
             'related'   => ['label' => 'Связанные',  'count' => null,         'disabled' => true],
@@ -1084,6 +1089,25 @@ class Detail extends Component
 
     // supplierInquiries computed убран — список «кому отправлено» теперь в
     // табе «Поставщики» (Requests\SupplierDispatchPanel::sentInquiries).
+
+    /**
+     * id позиций, по которым отправлен запрос поставщику и ждём ответ
+     * (supplier_inquiry_items.status=pending). Для пометки «ждём поставщика»
+     * в табе «Позиции».
+     *
+     * @return \Illuminate\Support\Collection<int, int>
+     */
+    #[Computed]
+    public function requestedItemIds()
+    {
+        return \App\Models\SupplierInquiryItem::query()
+            ->whereHas('inquiry', fn ($q) => $q->where('related_request_id', $this->request->id))
+            ->where('status', 'pending')
+            ->pluck('request_item_id')
+            ->filter()
+            ->unique()
+            ->values();
+    }
 
     public function applyAiDecision(int $decisionId, AiDecisionService $svc): void
     {
