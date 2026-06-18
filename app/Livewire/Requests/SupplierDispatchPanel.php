@@ -102,6 +102,59 @@ class SupplierDispatchPanel extends Component
             ->get();
     }
 
+    /* --------------------------- Расценки (офферы) ------------------------ */
+
+    /**
+     * Сводка предложений поставщиков по позициям этой заявки (блок «Расценки»):
+     * по каждой запрошенной позиции — лучшая цена + разбивка по поставщикам
+     * (цена/срок | отказ | ждём).
+     *
+     * @return array<int, array{id:int, name:string, oem:?string, best:?float, currency:?string, offers:array<int, array<string,mixed>>, received:int}>
+     */
+    #[Computed]
+    public function offersByPosition(): array
+    {
+        $items = RequestItem::query()
+            ->where('request_id', $this->requestId)
+            ->whereHas('supplierInquiryItems')
+            ->with([
+                'catalogItem:id,name',
+                'supplierInquiryItems.inquiry:id,supplier_email,supplier_name',
+                'supplierInquiryItems.offers',
+            ])
+            ->orderBy('position')->get();
+
+        $out = [];
+        foreach ($items as $it) {
+            $offers = [];
+            foreach ($it->supplierInquiryItems as $sii) {
+                $o = $sii->offers->first();
+                $offers[] = [
+                    'supplier' => (string) ($sii->inquiry?->supplier_name ?: $sii->inquiry?->supplier_email ?: '—'),
+                    'inquiry_id' => $sii->supplier_inquiry_id,
+                    'outcome' => $o?->outcome, // quoted|refused|null(ждём)
+                    'price' => $o && $o->outcome === 'quoted' ? $o->price : null,
+                    'currency' => $o?->currency,
+                    'lead' => $o?->valid_until_text,
+                    'refusal' => $o?->refusal_reason,
+                ];
+            }
+            $quoted = collect($offers)->where('outcome', 'quoted')->filter(fn ($x) => $x['price'] !== null);
+            $best = $quoted->sortBy('price')->first();
+            $out[] = [
+                'id' => $it->id,
+                'name' => (string) (($it->catalog_item_id ? ($it->catalogItem?->name ?: $it->parsed_name) : $it->parsed_name) ?: '—'),
+                'oem' => $it->parsed_article,
+                'best' => $best['price'] ?? null,
+                'currency' => $best['currency'] ?? null,
+                'offers' => $offers,
+                'received' => collect($offers)->filter(fn ($x) => $x['outcome'] !== null)->count(),
+            ];
+        }
+
+        return $out;
+    }
+
     /* ----------------------------- Позиции -------------------------------- */
 
     /**

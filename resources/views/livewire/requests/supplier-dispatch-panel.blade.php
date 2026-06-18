@@ -45,6 +45,50 @@
         </div>
     @endif
 
+    {{-- 0.5 Расценки от поставщиков (полученные предложения по позициям) --}}
+    @php
+        $offerRows = $this->offersByPosition;
+        $offersTotal = collect($offerRows)->sum('received');
+    @endphp
+    @if($offersTotal > 0)
+        <div class="ds-card">
+            <div class="ds-card-header"><h3>Расценки от поставщиков</h3><span class="text-[12px] text-fg-3 ml-2">получено предложений: {{ $offersTotal }}</span></div>
+            <div class="ds-card-body space-y-2">
+                @foreach($offerRows as $row)
+                    @if($row['received'] > 0)
+                        <div class="border border-border-subtle rounded-md px-3 py-2" wire:key="offers-{{ $row['id'] }}">
+                            <div class="flex items-start gap-2 flex-wrap">
+                                <div class="flex-1 min-w-[240px]">
+                                    <span class="text-[12.5px] text-fg-1 font-medium">{{ \Illuminate\Support\Str::limit($row['name'], 70) }}</span>
+                                    @if($row['oem'])<span class="text-[11px] text-fg-4 mono ml-1">арт. {{ $row['oem'] }}</span>@endif
+                                </div>
+                                @if($row['best'] !== null)
+                                    <span class="chip chip-ok text-[10.5px]" title="Лучшее предложение">от {{ number_format((float) $row['best'], 2, '.', ' ') }} {{ $row['currency'] ?: '₽' }}</span>
+                                @endif
+                            </div>
+                            <div class="mt-1.5 flex flex-wrap gap-1.5">
+                                @foreach($row['offers'] as $of)
+                                    <div class="inline-flex items-center gap-1.5 border border-border-subtle rounded-md px-2 py-1 bg-surface text-[11.5px]">
+                                        <a href="{{ route('suppliers.show', $of['inquiry_id']) }}" wire:navigate class="text-sky-700 hover:underline">{{ $of['supplier'] }}</a>
+                                        @if($of['outcome'] === 'quoted')
+                                            <span class="text-emerald-700 font-medium">{{ number_format((float) $of['price'], 2, '.', ' ') }} {{ $of['currency'] ?: '₽' }}</span>
+                                            @if($of['lead'])<span class="text-fg-4">· {{ \Illuminate\Support\Str::limit($of['lead'], 24) }}</span>@endif
+                                        @elseif($of['outcome'] === 'refused')
+                                            <span class="text-red-700">отказ{{ $of['refusal'] ? ': '.\Illuminate\Support\Str::limit($of['refusal'], 28) : '' }}</span>
+                                        @else
+                                            <span class="text-fg-4">ждём</span>
+                                        @endif
+                                    </div>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endif
+                @endforeach
+                <div class="text-[11px] text-fg-4 pt-1">Выбранную цену вносят в корп. базу (1С); после импорта каталога статус цены позиции станет «актуальная».</div>
+            </div>
+        </div>
+    @endif
+
     {{-- 1. Позиции --}}
     <div class="ds-card">
         <div class="ds-card-header">
