@@ -87,6 +87,7 @@
                             <th class="text-left px-3 py-2">Поставщик</th>
                             <th class="text-left px-3 py-2">Тема запроса</th>
                             <th class="text-right px-3 py-2">Писем</th>
+                            <th class="text-left px-3 py-2">Ответ</th>
                             <th class="text-left px-3 py-2">Статус</th>
                             <th class="text-left px-3 py-2">Кто пометил</th>
                             <th class="text-left px-3 py-2">Дата</th>
@@ -101,12 +102,22 @@
                                 </td>
                                 <td class="px-3 py-2 text-fg-2"><span class="truncate inline-block max-w-[300px] align-bottom">{{ $i->subject ?: '—' }}</span></td>
                                 <td class="px-3 py-2 text-right mono text-fg-2">{{ $i->messages_count }}</td>
+                                <td class="px-3 py-2">
+                                    @php $rs = $i->responseState(); @endphp
+                                    @if($rs === 'answered')
+                                        <span class="chip chip-ok text-[10.5px]">ответил</span>
+                                    @elseif($rs === 'awaiting')
+                                        <span class="chip chip-warn text-[10.5px]">ждём{{ $i->reminders_sent > 0 ? ' · нап. '.$i->reminders_sent : '' }}</span>
+                                    @else
+                                        <span class="text-fg-4 text-[11px]">—</span>
+                                    @endif
+                                </td>
                                 <td class="px-3 py-2"><span class="chip {{ $i->status === 'closed' ? 'chip-neutral' : 'chip-sky' }} text-[10.5px]">{{ $i->status === 'closed' ? 'закрыт' : 'открыт' }}</span></td>
                                 <td class="px-3 py-2 text-fg-3 whitespace-nowrap">{{ $i->createdBy?->name ?? 'авто' }}</td>
                                 <td class="px-3 py-2 text-fg-3 mono whitespace-nowrap">{{ $i->created_at?->format('d.m.Y') }}</td>
                             </tr>
                         @empty
-                            <tr><td colspan="6" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Пока нет запросов поставщикам. Появляются автоматически при отправке RFQ поставщику из реестра.' }}</td></tr>
+                            <tr><td colspan="7" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Пока нет запросов поставщикам. Появляются автоматически при отправке RFQ поставщику из реестра.' }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>

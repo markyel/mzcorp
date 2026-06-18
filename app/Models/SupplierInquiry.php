@@ -21,6 +21,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $status
  * @property ?int $created_by_user_id
  * @property ?string $notes
+ * @property int $reminders_sent
+ * @property ?\Illuminate\Support\Carbon $last_reminder_at
  */
 class SupplierInquiry extends Model
 {
@@ -33,7 +35,41 @@ class SupplierInquiry extends Model
         'status',
         'created_by_user_id',
         'notes',
+        // Авто-напоминания (Фаза 3.5).
+        'reminders_sent',
+        'last_reminder_at',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'last_reminder_at' => 'datetime',
+            'reminders_sent' => 'integer',
+        ];
+    }
+
+    /** Входящие письма поставщика (его ответы) — для lifecycle/напоминаний. */
+    public function inboundMessages(): HasMany
+    {
+        return $this->hasMany(EmailMessage::class)->where('direction', 'inbound');
+    }
+
+    /**
+     * Состояние ответа поставщика (Фаза 3.5): closed | answered | awaiting.
+     * Использует загруженный inbound_messages_count, иначе считает запросом.
+     */
+    public function responseState(): string
+    {
+        if ($this->status === 'closed') {
+            return 'closed';
+        }
+        $inbound = $this->inbound_messages_count
+            ?? ($this->relationLoaded('inboundMessages')
+                ? $this->inboundMessages->count()
+                : $this->inboundMessages()->count());
+
+        return $inbound > 0 ? 'answered' : 'awaiting';
+    }
 
     /** Письма переписки с поставщиком (наш запрос + ответы поставщика). */
     public function messages(): HasMany

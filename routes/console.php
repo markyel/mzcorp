@@ -218,3 +218,13 @@ Schedule::command('iqot:update-fx-rates')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Фаза 3.5: авто-напоминания поставщикам по открытым RFQ без ответа.
+// Раз в день утром — поставщик увидит нудж в начале рабочего дня; интервал и
+// лимит напоминаний — config services.suppliers.reminder.* (no-op при enabled=false).
+Schedule::command('suppliers:remind')
+    ->dailyAt('09:30')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();

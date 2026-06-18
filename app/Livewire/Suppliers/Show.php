@@ -48,6 +48,23 @@ class Show extends Component
         $this->dispatch('toast', message: 'Статус запроса обновлён.', type: 'success');
     }
 
+    /** Ручное напоминание поставщику (Фаза 3.5) — вне расписания. */
+    public function remindNow(\App\Services\Supplier\SupplierReminderService $reminder): void
+    {
+        if ($this->inquiry->status === 'closed') {
+            $this->dispatch('toast', message: 'Запрос закрыт — напоминание не отправлено.', type: 'error');
+
+            return;
+        }
+        $ok = $reminder->remind($this->inquiry, auth()->user());
+        $this->inquiry->refresh();
+        $this->dispatch(
+            'toast',
+            message: $ok ? 'Напоминание отправлено поставщику.' : 'Не удалось отправить напоминание (см. лог).',
+            type: $ok ? 'success' : 'error',
+        );
+    }
+
     public function deleteInquiry()
     {
         // nullOnDelete: письма открепляются (supplier_inquiry_id → null),

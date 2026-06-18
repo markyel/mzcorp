@@ -89,7 +89,7 @@ class Index extends Component
     public function inquiries()
     {
         $q = SupplierInquiry::query()
-            ->withCount('messages')
+            ->withCount(['messages', 'inboundMessages', 'items'])
             ->with('createdBy:id,name');
 
         $s = trim($this->search);

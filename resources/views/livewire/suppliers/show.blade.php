@@ -38,9 +38,16 @@
                     <label class="block text-[11.5px] text-fg-3 mb-1">Заметки</label>
                     <textarea wire:model="notes" rows="2" class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
                 </div>
-                <div class="flex gap-2 pt-1">
+                <div class="flex gap-2 pt-1 flex-wrap">
                     <button type="button" wire:click="save" class="btn btn-sm btn-primary">Сохранить</button>
                     <button type="button" wire:click="toggleStatus" class="btn btn-sm">{{ $inquiry->status === 'closed' ? 'Открыть' : 'Закрыть запрос' }}</button>
+                    @if($inquiry->status !== 'closed' && $this->inquiryItems->isNotEmpty())
+                        <button type="button" wire:click="remindNow" wire:loading.attr="disabled" wire:target="remindNow" class="btn btn-sm"
+                                title="Отправить поставщику напоминание в этом треде">
+                            <span wire:loading.remove wire:target="remindNow">📨 Напомнить</span>
+                            <span wire:loading wire:target="remindNow">Отправляю…</span>
+                        </button>
+                    @endif
                 </div>
             </div>
         </div>
@@ -52,6 +59,17 @@
                 <div class="flex justify-between gap-2"><span class="text-fg-3">Пометил</span><span class="text-fg-1">{{ $inquiry->createdBy?->name ?? '—' }}</span></div>
                 <div class="flex justify-between gap-2"><span class="text-fg-3">Создан</span><span class="text-fg-2 mono">{{ $inquiry->created_at?->format('d.m.Y H:i') }}</span></div>
                 <div class="flex justify-between gap-2"><span class="text-fg-3">Писем в треде</span><span class="text-fg-2 mono">{{ $this->messages->count() }}</span></div>
+                @php $rs = $inquiry->responseState(); @endphp
+                <div class="flex justify-between gap-2"><span class="text-fg-3">Ответ поставщика</span>
+                    <span>
+                        @if($rs === 'answered')<span class="chip chip-ok text-[10.5px]">ответил</span>
+                        @elseif($rs === 'awaiting')<span class="chip chip-warn text-[10.5px]">ждём</span>
+                        @else<span class="text-fg-4">—</span>@endif
+                    </span>
+                </div>
+                @if($inquiry->reminders_sent > 0)
+                    <div class="flex justify-between gap-2"><span class="text-fg-3">Напоминаний</span><span class="text-fg-2 mono">{{ $inquiry->reminders_sent }}{{ $inquiry->last_reminder_at ? ' · ' . $inquiry->last_reminder_at->format('d.m.Y') : '' }}</span></div>
+                @endif
             </div>
         </div>
     </div>

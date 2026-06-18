@@ -489,6 +489,23 @@ return [
     ],
 
     /*
+    | Модуль поставщиков (Фаза 3.5): авто-напоминания молчащим поставщикам по
+    | открытым запросам расценки (RFQ). См. SupplierReminderService +
+    | `suppliers:remind` cron.
+    */
+    'suppliers' => [
+        'reminder' => [
+            'enabled' => (bool) env('SUPPLIER_REMINDER_ENABLED', true),
+            // Через сколько дней тишины после RFQ слать первое напоминание.
+            'first_after_days' => (int) env('SUPPLIER_REMINDER_FIRST_AFTER_DAYS', 3),
+            // Интервал между напоминаниями (дней).
+            'interval_days' => (int) env('SUPPLIER_REMINDER_INTERVAL_DAYS', 3),
+            // Максимум напоминаний на один запрос.
+            'max' => (int) env('SUPPLIER_REMINDER_MAX', 2),
+        ],
+    ],
+
+    /*
     | Налоговые ставки. Используются в UI карточки заявки для расчёта
     | итога по каталожным ценам. Меняем через env, если законодательство
     | сдвинет ставку — без правки кода.
