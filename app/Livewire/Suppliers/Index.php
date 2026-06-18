@@ -2,8 +2,10 @@
 
 namespace App\Livewire\Suppliers;
 
+use App\Models\RequestItem;
 use App\Models\Supplier;
 use App\Models\SupplierInquiry;
+use App\Models\SupplierInquiryItem;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -36,7 +38,7 @@ class Index extends Component
 
     public function setTab(string $t): void
     {
-        $this->tab = in_array($t, ['inquiries', 'registry'], true) ? $t : 'inquiries';
+        $this->tab = in_array($t, ['inquiries', 'registry', 'nomenclature'], true) ? $t : 'inquiries';
         $this->resetPage();
     }
 
@@ -119,6 +121,39 @@ class Index extends Component
         }
 
         return $q->orderBy('email')->orderBy('domain')->paginate(40);
+    }
+
+    /**
+     * Номенклатура: позиции, по которым запрашивали цену, + предложения
+     * поставщиков по каждой (Фаза 3.3). Группируем по RequestItem.
+     */
+    #[Computed]
+    public function positions()
+    {
+        $requestedIds = SupplierInquiryItem::query()
+            ->whereNotNull('request_item_id')->select('request_item_id');
+
+        $q = RequestItem::query()
+            ->whereIn('id', $requestedIds)
+            ->with([
+                'request:id,internal_code',
+                'brand:id,name',
+                'catalogItem:id,sku,name,is_price_actual',
+                'supplierInquiryItems.inquiry:id,supplier_email,supplier_name',
+                'supplierInquiryItems.offers',
+            ]);
+
+        $s = trim($this->search);
+        if ($s !== '') {
+            $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
+            $q->where(function ($w) use ($like) {
+                $w->where('parsed_name', 'ilike', $like)
+                    ->orWhere('parsed_article', 'ilike', $like)
+                    ->orWhereHas('catalogItem', fn ($c) => $c->where('name', 'ilike', $like)->orWhere('sku', 'ilike', $like));
+            });
+        }
+
+        return $q->orderByDesc('id')->paginate(25);
     }
 
     public function render()

@@ -246,6 +246,12 @@ class RequestItem extends Model
         return $this->belongsTo(CatalogItem::class, 'catalog_item_id');
     }
 
+    /** Запросы цены поставщикам по этой позиции (Фаза 3.2/3.3). */
+    public function supplierInquiryItems(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(\App\Models\SupplierInquiryItem::class);
+    }
+
     /**
      * Уточняющие вопросы по этой позиции (Foundation §6.2).
      * Может быть несколько — каждый batch формирует свой ряд.
