@@ -148,14 +148,6 @@
     <div class="ds-card">
         <div class="ds-card-header"><h3>Письмо запроса</h3></div>
         <div class="ds-card-body space-y-3">
-            {{-- Обращение (русский шаблон, редактируемый; для EN — фикс. «Hello …») --}}
-            <div>
-                <label class="block text-[11.5px] text-fg-3 mb-1">Обращение <span class="text-fg-4">(рус.) — {поставщик} подставится для каждого поставщика</span></label>
-                <input type="text" wire:model.live.debounce.400ms="greeting" placeholder="Здравствуйте, {поставщик}!"
-                       class="w-full px-2 h-[30px] border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
-                <div class="text-[10.5px] text-fg-4 mt-0.5">Для англоязычных поставщиков используется «Hello {поставщик},».</div>
-            </div>
-
             {{-- Превью письма НА ТОМ ЯЗЫКЕ, на котором улетит. Если выбраны
                  поставщики из разных языковых групп — несколько блоков. --}}
             @php $selItemsCount = collect($this->selectedItems)->filter()->count(); @endphp
@@ -184,8 +176,12 @@
                             </span>
                         </div>
 
-                        {{-- Обращение (как улетит) --}}
-                        <div class="text-[12.5px] text-fg-1 mb-2">{{ $blk['greeting'] }}</div>
+                        {{-- Обращение (редактируемое, на языке письма) --}}
+                        <div class="mb-2">
+                            <input type="text" wire:model.lazy="{{ $blk['greeting_model'] }}"
+                                   class="w-full px-2 h-[28px] border border-border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                            <div class="text-[10px] text-fg-4 mt-0.5">{поставщик} подставится для каждого поставщика</div>
+                        </div>
 
                         {{-- Заголовки колонок --}}
                         <div class="flex items-center gap-2 text-[10px] uppercase tracking-wider text-fg-4 px-1 mb-1">

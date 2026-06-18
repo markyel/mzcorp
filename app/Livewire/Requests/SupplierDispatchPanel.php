@@ -38,8 +38,11 @@ class SupplierDispatchPanel extends Component
 
     public string $supplierSearch = '';
 
-    /** Обращение в начале письма; {поставщик} подставляется персонально. */
+    /** Обращение в начале письма (рус.); {поставщик} подставляется персонально. */
     public string $greeting = 'Здравствуйте, {поставщик}!';
+
+    /** Обращение для англоязычных поставщиков. */
+    public string $greetingEn = 'Hello {поставщик},';
 
     /** item_id => отредактированное название позиции для письма (рус. версия). */
     public array $editedNames = [];
@@ -52,8 +55,6 @@ class SupplierDispatchPanel extends Component
 
     /** item_id => количество строкой (число + ед.). */
     public array $editedQty = [];
-
-    public bool $translating = false;
 
     public string $note = '';
 
@@ -146,6 +147,7 @@ class SupplierDispatchPanel extends Component
         foreach ($this->items() as $it) {
             $this->selectedItems[$it['id']] = $it['price_stale'];
         }
+        $this->autoTranslateIfEnglish();
     }
 
     /* --------------------------- Поставщики ------------------------------- */
@@ -221,6 +223,43 @@ class SupplierDispatchPanel extends Component
         $this->selectedSuppliers[$supplierId] = true;
         $this->supplierSearch = '';
         unset($this->supplierOptions);
+        $this->autoTranslateIfEnglish();
+    }
+
+    /* --------------- Авто-перевод письма для en-поставщиков --------------- */
+
+    public function updatedSelectedSuppliers(): void
+    {
+        $this->autoTranslateIfEnglish();
+    }
+
+    public function updatedSelectedItems(): void
+    {
+        $this->autoTranslateIfEnglish();
+    }
+
+    /**
+     * Если среди отмеченных есть англоязычный поставщик — сразу готовим
+     * английскую версию названий (каталог → name_en, остальное → LLM), чтобы
+     * превью показывало готовое письмо без нажатия кнопки. Тихо (без тоста),
+     * переводит только ещё не переведённые (кириллица/пусто) позиции.
+     */
+    private function autoTranslateIfEnglish(): void
+    {
+        if (! $this->hasEnglishSupplierSelected()) {
+            return;
+        }
+        $this->runEnglishTranslation(app(\App\Services\Supplier\SupplierItemTranslator::class), silent: true);
+    }
+
+    private function hasEnglishSupplierSelected(): bool
+    {
+        $ids = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
+        if ($ids === []) {
+            return false;
+        }
+
+        return Supplier::query()->whereIn('id', $ids)->where('language', 'en')->exists();
     }
 
     /* --------------------------- Вложения --------------------------------- */
@@ -285,8 +324,10 @@ class SupplierDispatchPanel extends Component
             'names_en' => $this->editedNamesEn,
             'oem' => $this->editedOem,
             'qty' => $this->editedQty,
+            'greeting_ru' => $this->greeting,
+            'greeting_en' => $this->greetingEn,
         ];
-        $result = $dispatcher->dispatch($req, $supplierIds, $itemIds, $this->note, $user, $reqAttIds, $extraFiles, $this->greeting, $edits);
+        $result = $dispatcher->dispatch($req, $supplierIds, $itemIds, $this->note, $user, $reqAttIds, $extraFiles, $edits);
 
         $msg = "Отправлено запросов поставщикам: {$result['sent']}.";
         if ($result['failed'] > 0) {
@@ -304,12 +345,11 @@ class SupplierDispatchPanel extends Component
      * каждое на том языке, на котором реально улетит. Пока поставщики не
      * выбраны — один RU-блок по умолчанию.
      *
-     * @return array<int, array{lang:string, label:string, suppliers:array<int,string>, greeting:string}>
+     * @return array<int, array{lang:string, label:string, suppliers:array<int,string>, greeting_model:string}>
      */
     #[Computed]
     public function previewLanguages(): array
     {
-        $svc = app(SupplierDispatchService::class);
         $ids = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
         $suppliers = $ids === [] ? collect() : Supplier::query()->whereIn('id', $ids)->orderBy('name')->get();
 
@@ -329,13 +369,11 @@ class SupplierDispatchPanel extends Component
                 continue;
             }
             $list = $groups[$lang];
-            $first = $list[0] ?? new Supplier();
             $out[] = [
                 'lang' => $lang,
                 'label' => $lang === 'en' ? 'English' : 'Русский',
                 'suppliers' => array_map(fn (Supplier $s) => (string) ($s->name ?: $s->email ?: ('#' . $s->id)), $list),
-                // Обращение персональное (имя первого как образец).
-                'greeting' => $svc->personalGreeting($this->greeting, $first, $lang),
+                'greeting_model' => $lang === 'en' ? 'greetingEn' : 'greeting',
             ];
         }
 
@@ -376,17 +414,25 @@ class SupplierDispatchPanel extends Component
     }
 
     /**
-     * LLM-перевод названий выбранных позиций на английский (для англоязычных
-     * поставщиков). Каталожные позиции с name_en — берём готовое; остальные —
-     * переводим текущее русское название через SupplierItemTranslator.
+     * Ручная (по кнопке) перегенерация английских названий выбранных позиций.
      */
     public function translateToEnglish(\App\Services\Supplier\SupplierItemTranslator $translator): void
+    {
+        $this->runEnglishTranslation($translator, silent: false);
+    }
+
+    /**
+     * LLM-перевод названий выбранных позиций на английский. Каталожные позиции
+     * с name_en — готовое; остальные, у которых EN-название ещё пустое или
+     * осталось кириллицей, — переводим через SupplierItemTranslator. silent —
+     * без тоста (для авто-перевода при выборе en-поставщика).
+     */
+    private function runEnglishTranslation(\App\Services\Supplier\SupplierItemTranslator $translator, bool $silent): void
     {
         $ids = array_keys(array_filter($this->selectedItems));
         if ($ids === []) {
             return;
         }
-        $this->translating = true;
 
         $items = RequestItem::query()->whereIn('id', $ids)
             ->with(['catalogItem:id,name,name_en'])->orderBy('position')->get();
@@ -396,6 +442,11 @@ class SupplierDispatchPanel extends Component
             $catalog = $it->catalog_item_id ? $it->catalogItem : null;
             if ($catalog && trim((string) $catalog->name_en) !== '') {
                 $this->editedNamesEn[$it->id] = $catalog->name_en; // каталог — готовый перевод
+                continue;
+            }
+            // Уже на английском (правка менеджера / прошлый перевод) — не трогаем.
+            $current = trim((string) ($this->editedNamesEn[$it->id] ?? ''));
+            if ($current !== '' && preg_match('/\p{Cyrillic}/u', $current) !== 1) {
                 continue;
             }
             $src = trim((string) ($this->editedNames[$it->id] ?? '')) ?: (string) ($it->parsed_name ?? '');
@@ -409,7 +460,9 @@ class SupplierDispatchPanel extends Component
             $this->editedNamesEn[$id] = $en;
         }
 
-        $this->translating = false;
+        if ($silent) {
+            return;
+        }
 
         $missed = count($toTranslate) - count($translated);
         if ($toTranslate !== [] && $translated === []) {

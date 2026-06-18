@@ -75,11 +75,10 @@ class SupplierDispatchService
      * @return array{sent: int, failed: int, no_supplier: int, suppliers: array<int, string>}
      */
     /**
-     * @param  ?string  $greeting  шаблон обращения с плейсхолдером {поставщик}
-     * @param  array{names_ru?: array<int,string>, names_en?: array<int,string>, oem?: array<int,string>, qty?: array<int,string>}  $edits
-     *                        ручные правки позиций: названия по языкам + артикул + кол-во
+     * @param  array{names_ru?: array<int,string>, names_en?: array<int,string>, oem?: array<int,string>, qty?: array<int,string>, greeting_ru?: ?string, greeting_en?: ?string}  $edits
+     *                        ручные правки письма: названия по языкам + артикул + кол-во + обращение по языкам
      */
-    public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by, array $reqAttachmentIds = [], array $extraFiles = [], ?string $greeting = null, array $edits = []): array
+    public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by, array $reqAttachmentIds = [], array $extraFiles = [], array $edits = []): array
     {
         $preview = $this->preview($request, $itemIds);
         $sent = 0;
@@ -103,7 +102,8 @@ class SupplierDispatchService
 
                 $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';
                 $rows = $this->itemRows($items, $lang, $edits);
-                $personalGreeting = $this->personalGreeting($greeting, $supplier, $lang);
+                $greetingTpl = $lang === 'en' ? ($edits['greeting_en'] ?? null) : ($edits['greeting_ru'] ?? null);
+                $personalGreeting = $this->personalGreeting($greetingTpl, $supplier, $lang);
                 $subject = $lang === 'en'
                     ? 'Price request — [' . $request->internal_code . ']'
                     : 'Запрос расценки — [' . $request->internal_code . ']';
@@ -304,16 +304,10 @@ class SupplierDispatchService
     public function personalGreeting(?string $template, \App\Models\Supplier $supplier, string $lang = 'ru'): string
     {
         $template = trim((string) $template);
-        if ($lang === 'en') {
-            // RU-шаблон менеджера на EN не используем — берём EN-дефолт.
-            $template = 'Hello {поставщик},';
-            $name = trim((string) ($supplier->name ?: '')) ?: 'colleagues';
-        } else {
-            if ($template === '') {
-                $template = 'Здравствуйте, {поставщик}!';
-            }
-            $name = trim((string) ($supplier->name ?: '')) ?: 'коллеги';
+        if ($template === '') {
+            $template = $lang === 'en' ? 'Hello {поставщик},' : 'Здравствуйте, {поставщик}!';
         }
+        $name = trim((string) ($supplier->name ?: '')) ?: ($lang === 'en' ? 'colleagues' : 'коллеги');
 
         return str_replace(['{поставщик}', '{supplier}'], $name, $template);
     }
