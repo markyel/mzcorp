@@ -25,6 +25,10 @@ class SupplierMatchService
     {
         $brand = $this->itemBrand($item);
         $categoryTerms = $this->itemCategoryTerms($item);
+        // Каноничный бренд = распознан KB-резолвером (manufacturer_brand_id).
+        // Только такой бренд может ИСКЛЮЧИТЬ поставщика; свободный/каталожный
+        // бренд (часто не из наших 43) — не ограничение (макс. recall).
+        $brandCanonical = $item->brand !== null;
 
         if ($brand === '' && $categoryTerms === []) {
             return collect(); // ни бренда, ни категории — подбирать не по чему
@@ -33,16 +37,23 @@ class SupplierMatchService
         return Supplier::query()
             ->whereNotNull('assortment_matrix')
             ->get()
-            ->filter(fn (Supplier $s) => $this->matches($s, $brand, $categoryTerms))
+            ->filter(fn (Supplier $s) => $this->matches($s, $brand, $categoryTerms, $brandCanonical))
             ->values();
     }
 
     /**
-     * Покрывает ли матрица поставщика данные бренд + категорию.
+     * Покрывает ли матрица поставщика позицию. Логика (recall-friendly):
+     *  - КАТЕГОРИЯ — основной ключ: если поставщик перечислил категории,
+     *    позиция должна попасть в них (иначе не подходит);
+     *  - пустой список на измерении = «любой» (не ограничивает);
+     *  - бренд ИСКЛЮЧАЕТ только при каноничном конфликте (item-бренд распознан
+     *    нашим KB, поставщик перечислил бренды, и его там нет);
+     *  - явная пара бренд×категория — сильный сигнал «подходит».
+     *  - пустая матрица (нет ни категорий, ни брендов) — не подходит.
      *
-     * @param  array<int, string>  $categoryTerms  нормализованные термины категории (имя + синонимы)
+     * @param  array<int, string>  $categoryTerms  нормализованные термины (имя + синонимы)
      */
-    public function matches(Supplier $supplier, string $brand, array $categoryTerms): bool
+    public function matches(Supplier $supplier, string $brand, array $categoryTerms, bool $brandCanonical = false): bool
     {
         $m = is_array($supplier->assortment_matrix) ? $supplier->assortment_matrix : [];
         $brands = array_map([$this, 'norm'], (array) ($m['brands'] ?? []));
@@ -50,32 +61,43 @@ class SupplierMatchService
 
         $brandKnown = $brand !== '';
         $catKnown = $categoryTerms !== [];
+        $brandListed = $brands !== [];
+        $catListed = $cats !== [];
 
-        // Явные пары бренд×категория — сильнейший сигнал.
+        $brandIn = $brandListed && $brandKnown && $this->listHit($brands, [$brand]);
+        $catIn = $catListed && $catKnown && $this->listHit($cats, $categoryTerms);
+
+        // Явные пары бренд×категория — сильный сигнал.
         foreach ((array) ($m['pairs'] ?? []) as $p) {
             if (! is_array($p)) {
                 continue;
             }
-            $pb = $this->norm((string) ($p['brand'] ?? ''));
             $pc = $this->norm((string) ($p['category'] ?? ''));
-            $pbHit = ! $brandKnown || $this->softEq($pb, $brand);
-            $pcHit = ! $catKnown || $this->termHit([$pc], $categoryTerms);
-            if ($pbHit && $pcHit && ($brandKnown || $catKnown)) {
+            $pb = $this->norm((string) ($p['brand'] ?? ''));
+            if ($pc !== '' && $catKnown && $this->termHit([$pc], $categoryTerms)
+                && (! $brandKnown || ! $brandCanonical || $pb === '' || $this->softEq($pb, $brand))) {
                 return true;
             }
         }
 
-        $brandHit = $brandKnown && $this->listHit($brands, [$brand]);
-        $catHit = $catKnown && $this->listHit($cats, $categoryTerms);
+        if ($catListed) {
+            if (! $catIn) {
+                return false; // перечислены категории, но позиция не в них
+            }
+            // Бренд исключает только при каноничном конфликте.
+            if ($brandListed && $brandCanonical && $brandKnown && ! $brandIn) {
+                return false;
+            }
 
-        if ($brandKnown && $catKnown) {
-            return $brandHit && $catHit;
-        }
-        if ($brandKnown) {
-            return $brandHit;
+            return true;
         }
 
-        return $catHit;
+        // Категории не перечислены → подбор только по бренду.
+        if ($brandListed) {
+            return $brandIn;
+        }
+
+        return false; // пустая матрица
     }
 
     /**
