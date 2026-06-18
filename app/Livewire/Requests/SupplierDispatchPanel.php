@@ -53,8 +53,11 @@ class SupplierDispatchPanel extends Component
     /** item_id => артикул/OEM (распознанный бывает некорректным — правится). */
     public array $editedOem = [];
 
-    /** item_id => количество строкой (число + ед.). */
+    /** item_id => количество строкой (число + ед., рус.). */
     public array $editedQty = [];
+
+    /** item_id => количество строкой для англоязычных (ед. переведена: pcs. и т.п.). */
+    public array $editedQtyEn = [];
 
     public string $note = '';
 
@@ -77,6 +80,7 @@ class SupplierDispatchPanel extends Component
             $this->editedNamesEn[$it['id']] = $it['en_name'];
             $this->editedOem[$it['id']] = (string) ($it['oem'] ?? '');
             $this->editedQty[$it['id']] = (string) ($it['qty'] ?? '');
+            $this->editedQtyEn[$it['id']] = (string) ($it['qty_en'] ?? '');
         }
     }
 
@@ -136,7 +140,8 @@ class SupplierDispatchPanel extends Component
                 'client_name' => $catName && $catName !== $it->parsed_name ? $it->parsed_name : null,
                 'oem' => $svc->itemOem($it),
                 'brand' => ($it->brand?->name ?: $it->parsed_brand) ?: null,
-                'qty' => $svc->itemQty($it),
+                'qty' => $svc->itemQty($it, [], 'ru'),
+                'qty_en' => $svc->itemQty($it, [], 'en'),
                 'has_catalog' => (bool) $it->catalog_item_id,
                 'price_stale' => $it->catalog_item_id ? ($it->catalogItem && ! $it->catalogItem->is_price_actual) : false,
                 'requested' => in_array($it->id, $requested, true),
@@ -326,6 +331,7 @@ class SupplierDispatchPanel extends Component
             'names_en' => $this->editedNamesEn,
             'oem' => $this->editedOem,
             'qty' => $this->editedQty,
+            'qty_en' => $this->editedQtyEn,
             'greeting_ru' => $this->greeting,
             'greeting_en' => $this->greetingEn,
         ];
@@ -408,6 +414,7 @@ class SupplierDispatchPanel extends Component
             $out[] = [
                 'id' => $it->id,
                 'name_model' => $lang === 'en' ? 'editedNamesEn' : 'editedNames',
+                'qty_model' => $lang === 'en' ? 'editedQtyEn' : 'editedQty',
                 'cyrillic' => $lang === 'en' && preg_match('/\p{Cyrillic}/u', $name) === 1,
             ];
         }

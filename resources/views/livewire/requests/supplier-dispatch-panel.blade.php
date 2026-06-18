@@ -203,7 +203,7 @@
                                     @endif
                                     <input type="text" wire:model.lazy="editedOem.{{ $r['id'] }}" placeholder="—"
                                            class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] mono outline-none focus:border-sky-500" style="width:150px">
-                                    <input type="text" wire:model.lazy="editedQty.{{ $r['id'] }}" placeholder="—"
+                                    <input type="text" wire:model.lazy="{{ $r['qty_model'] }}.{{ $r['id'] }}" placeholder="—"
                                            class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] outline-none focus:border-sky-500" style="width:96px">
                                 </div>
                             @endforeach

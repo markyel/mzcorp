@@ -74,8 +74,8 @@ class SupplierDispatchService
      *
      * @param  array<int, int>  $supplierIds  кому слать (отмеченные в UI)
      * @param  array<int, int>  $itemIds      позиции запроса ([] = все активные)
-     * @param  array{names_ru?: array<int,string>, names_en?: array<int,string>, oem?: array<int,string>, qty?: array<int,string>, greeting_ru?: ?string, greeting_en?: ?string}  $edits
-     *                        ручные правки письма: названия по языкам + артикул + кол-во + обращение по языкам
+     * @param  array{names_ru?: array<int,string>, names_en?: array<int,string>, oem?: array<int,string>, qty?: array<int,string>, qty_en?: array<int,string>, greeting_ru?: ?string, greeting_en?: ?string}  $edits
+     *                        ручные правки письма: названия/кол-во по языкам + артикул + обращение по языкам
      * @return array{sent: int, failed: int, no_supplier: int, suppliers: array<int, string>}
      */
     public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by, array $reqAttachmentIds = [], array $extraFiles = [], array $edits = []): array
@@ -224,7 +224,7 @@ class SupplierDispatchService
     {
         $names = $lang === 'en' ? ($edits['names_en'] ?? []) : ($edits['names_ru'] ?? []);
         $oem = $edits['oem'] ?? [];
-        $qty = $edits['qty'] ?? [];
+        $qty = $lang === 'en' ? ($edits['qty_en'] ?? []) : ($edits['qty'] ?? []);
 
         $rows = [];
         foreach ($items as $it) {
@@ -295,9 +295,40 @@ class SupplierDispatchService
         if (! $it->parsed_qty) {
             return null;
         }
-        $unit = $it->parsed_unit ?: ($lang === 'en' ? 'pcs.' : 'шт.');
+        $unit = $this->resolveUnit($it->parsed_unit, $lang);
+        $num = $this->normalizeQtyNumber((string) $it->parsed_qty);
 
-        return trim($this->normalizeQtyNumber((string) $it->parsed_qty) . ' ' . $unit);
+        return trim($unit !== '' ? $num . ' ' . $unit : $num);
+    }
+
+    /**
+     * Единица измерения: для EN переводим распространённые русские единицы
+     * (шт.→pcs., компл.→set и т.п.), неизвестную оставляем как есть; пустую →
+     * pcs./шт. по языку.
+     */
+    private function resolveUnit(?string $unit, string $lang): string
+    {
+        $unit = trim((string) $unit);
+        if ($lang !== 'en') {
+            return $unit !== '' ? $unit : 'шт.';
+        }
+        if ($unit === '') {
+            return 'pcs.';
+        }
+        $map = [
+            'шт' => 'pcs.', 'штук' => 'pcs.', 'штука' => 'pcs.', 'штуки' => 'pcs.', 'штамп' => 'pcs.',
+            'компл' => 'set', 'комплект' => 'set', 'комплекта' => 'set', 'к-т' => 'set', 'набор' => 'set',
+            'упак' => 'pack', 'уп' => 'pack', 'упаковка' => 'pack',
+            'пара' => 'pair', 'пар' => 'pairs',
+            'м' => 'm', 'метр' => 'm', 'метров' => 'm', 'п.м' => 'm', 'пм' => 'm',
+            'мм' => 'mm', 'см' => 'cm',
+            'кг' => 'kg', 'г' => 'g', 'гр' => 'g', 'т' => 't',
+            'л' => 'l',
+            'рулон' => 'roll', 'лист' => 'sheet', 'листов' => 'sheets',
+        ];
+        $key = mb_strtolower(rtrim($unit, '.'));
+
+        return $map[$key] ?? $unit;
     }
 
     /**
