@@ -42,9 +42,13 @@
                         <th class="text-left px-2 py-2" style="width:90px">Статус</th>
                     </tr>
                 </thead>
-                <tbody>
-                    @forelse($this->positions as $i => $p)
-                        <tr wire:key="blk-{{ $p['cid'] }}" class="border-b border-border-subtle hover:bg-hover align-top">
+                @forelse($this->positions as $i => $p)
+                    @php
+                        $iqp = $this->iqotByCatalogId->get($p['cid']);
+                        $hasIqot = $iqp !== null;
+                    @endphp
+                    <tbody x-data="{ open: false }" wire:key="blk-{{ $p['cid'] }}">
+                        <tr class="border-b border-border-subtle hover:bg-hover align-top">
                             <td class="px-2 py-2 text-right mono text-fg-4">{{ $this->positions->firstItem() + $i }}</td>
                             <td class="px-2 py-2 mono text-fg-2">{{ $p['sku'] }}</td>
                             <td class="px-2 py-2 text-fg-1">{{ \Illuminate\Support\Str::limit($p['name'], 64) }}</td>
@@ -61,9 +65,14 @@
                             </td>
                             <td class="px-2 py-2 text-right mono text-fg-3">{{ $p['price'] !== null ? number_format((float)$p['price'], 2, '.', ' ') : '—' }}</td>
                             <td class="px-2 py-2">
-                                @if($p['iqot'])
-                                    <span class="chip chip-info text-[10.5px] mono" title="Мин. цена конкурентов по IQOT{{ $p['iqot']['at'] ? ' · анализ '.\Illuminate\Support\Carbon::parse($p['iqot']['at'])->format('d.m.Y') : '' }}">от {{ number_format($p['iqot']['min'], 2, '.', ' ') }} ₽</span>
-                                    <span class="text-[10.5px] text-fg-4">· {{ $p['iqot']['offers'] }} предл.</span>
+                                @if($hasIqot)
+                                    <button type="button" @click="open = !open"
+                                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10.5px] font-medium hover:bg-emerald-100">
+                                        <span>IQOT</span>
+                                        @if($iqp->report_min_price !== null)<span>: мин. {{ number_format((float) $iqp->report_min_price, 0, ',', ' ') }} ₽</span>@endif
+                                        <span>· {{ $iqp->report_offers_count ?? count($iqp->offers()) }} офф.</span>
+                                        <span x-text="open ? '▾' : '▸'"></span>
+                                    </button>
                                 @else
                                     <span class="text-fg-4 text-[11px]">нет данных</span>
                                 @endif
@@ -76,10 +85,19 @@
                                 @endif
                             </td>
                         </tr>
-                    @empty
+                        @if($hasIqot)
+                            <tr x-show="open" x-cloak class="border-b border-border-subtle bg-surface-2">
+                                <td colspan="9" class="px-4 py-2.5">
+                                    @include('livewire.iqot._comparison', ['pos' => $iqp])
+                                </td>
+                            </tr>
+                        @endif
+                    </tbody>
+                @empty
+                    <tbody>
                         <tr><td colspan="9" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Нет позиций с неактуальной ценой в заявках до выдачи КП.' }}</td></tr>
-                    @endforelse
-                </tbody>
+                    </tbody>
+                @endforelse
             </table>
         </div>
         <div class="px-4 py-3">{{ $this->positions->links() }}</div>

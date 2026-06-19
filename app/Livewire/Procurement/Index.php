@@ -138,24 +138,6 @@ class Index extends Component
         }
         $inFlight = array_flip($inFlight);
 
-        // Расценки IQOT (анализ цен конкурентов) по этим позициям — справочно
-        // снабженцу. Одна строка IqotPosition на catalog_item; берём с ценой и
-        // не исключённые.
-        $iqot = [];
-        if ($cids !== []) {
-            foreach (\App\Models\IqotPosition::query()
-                ->whereIn('catalog_item_id', $cids)
-                ->whereNull('excluded_at')
-                ->whereNotNull('report_min_price')
-                ->get(['catalog_item_id', 'report_min_price', 'report_offers_count', 'analyzed_at']) as $ip) {
-                $iqot[$ip->catalog_item_id] = [
-                    'min' => (float) $ip->report_min_price,
-                    'offers' => (int) $ip->report_offers_count,
-                    'at' => $ip->analyzed_at,
-                ];
-            }
-        }
-
         $enriched = $slice->map(fn ($r) => [
             'cid' => $r->cid,
             'sku' => $r->sku,
@@ -165,7 +147,6 @@ class Index extends Component
             'req_count' => (int) $r->req_count,
             'codes' => $codes[$r->cid] ?? [],
             'in_flight' => isset($inFlight[$r->cid]),
-            'iqot' => $iqot[$r->cid] ?? null,
         ])->all();
 
         return new LengthAwarePaginator(
@@ -175,6 +156,30 @@ class Index extends Component
             $page,
             ['path' => Paginator::resolveCurrentPath()],
         );
+    }
+
+    /**
+     * Карта catalog_item_id → IqotPosition (анализ цен конкурентов) для позиций
+     * текущей страницы. Та же выборка, что в разделе «Аналитика → Позиции»
+     * (analyzed + report), чтобы вывод цен был единообразным (зелёный чип +
+     * раскрывающееся сравнение livewire.iqot._comparison).
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\IqotPosition>
+     */
+    #[Computed]
+    public function iqotByCatalogId()
+    {
+        $ids = collect($this->positions->items())->pluck('cid')->filter()->all();
+        if ($ids === []) {
+            return collect();
+        }
+
+        return \App\Models\IqotPosition::with('catalogItem:id,sku,name,brand,brand_article,brands,articles,price,price_min,is_price_actual,lead_time_days')
+            ->whereIn('catalog_item_id', $ids)
+            ->whereNotNull('analyzed_at')
+            ->whereNotNull('report')
+            ->get()
+            ->keyBy('catalog_item_id');
     }
 
     public function render()
