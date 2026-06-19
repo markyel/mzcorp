@@ -212,24 +212,28 @@ class NotificationsDispatchClientCommand extends Command
             // самого КП, клиент видит, о каком номере речь.
             $quote = $this->resolveLastSentQuote($request);
 
+            // Не шлём напоминание, пока не можем ДОСТОВЕРНО назвать КП (номер +
+            // дата отправки). Иначе письмо вида «КП — от — … N дн. назад» с
+            // фейковыми днями от updated_at (кейс M-2026-2302: КП ещё не был
+            // распарсен на момент отправки). Распарсится (в т.ч. крон
+            // quotes:reparse-failed) → напомним в следующий прогон корректно.
+            if (empty($quote['number']) || empty($quote['sent_at'])) {
+                continue;
+            }
+
             // Якорь: письмо с КП, иначе fallback на последнее входящее клиента.
             $replyTo = ($quote['anchor'] ?? null) ?: $this->resolveThreadAnchor($request);
             if (! $replyTo) {
                 continue;
             }
 
-            // days_since считаем от даты отправки КП (если известна), иначе от
-            // updated_at заявки — прежнее поведение.
-            $quotedAt = $quote['sent_at'] ?? $request->updated_at;
-
             $result[] = [
                 'request' => $request,
                 'scope_key' => '',
                 'reply_to' => $replyTo,
                 'extra' => [
-                    'days_since_quoted' => max(1, (int) $quotedAt->diffInDays(now())),
-                    'quote_number' => $quote['number'] ?? '—',
-                    'quote_amount' => $quote['amount'] !== null ? $this->formatAmount($quote['amount']) : '—',
+                    'days_since_quoted' => max(1, (int) $quote['sent_at']->diffInDays(now())),
+                    'quote_number' => (string) $quote['number'],
                     'quote_date' => $quote['date'] ?? '—',
                 ],
             ];
