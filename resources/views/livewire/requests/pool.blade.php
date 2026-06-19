@@ -770,7 +770,9 @@
                                     @if($attachCount > 0)
                                         <span class="inline-flex items-center gap-0.5 font-semibold text-[10px] px-1.5 py-0.5 rounded-[3px] bg-[var(--neutral-100)] text-[var(--fg-2)] flex-shrink-0">📎 {{ $attachCount }}</span>
                                     @endif
-                                    @if($attnReason && ($attnAt || $isClientReplied))
+                                    {{-- Для price-refresh (цены актуализированы / отказ поставщиков)
+                                         бейдж не дублируем — есть отдельный pill ниже. --}}
+                                    @if($attnReason && ($attnAt || $isClientReplied) && ! $isPricesActualized && ! $isAllSuppliersRefused)
                                         <span class="inline-flex items-center gap-0.5 font-semibold text-[10px] px-1.5 py-0.5 rounded-[3px] flex-shrink-0
                                                      {{ $isOverdueAlarm
                                                          ? 'bg-[var(--red-100)] text-[var(--red-700)]'
@@ -822,7 +824,14 @@
                                      статус-чип (например status=Invoiced +
                                      activity=InvoiceSent → оба «Счёт отправлен»).
                                      См. RequestActivityType::isRedundantWithStatus. --}}
-                                @if($actType && !$actType->isRedundantWithStatus($req->status))
+                                @php
+                                    // price-refresh события не показываем строкой — их несёт pill ниже.
+                                    $actIsPriceRefresh = in_array($actType, [
+                                        \App\Enums\RequestActivityType::PricesActualized,
+                                        \App\Enums\RequestActivityType::AllSuppliersRefused,
+                                    ], true);
+                                @endphp
+                                @if($actType && !$actType->isRedundantWithStatus($req->status) && ! $actIsPriceRefresh)
                                     <div class="text-[11px] mt-0.5 truncate {{ $actAccent ? 'text-[var(--amber-800)]' : 'text-[var(--fg-3)]' }}"
                                          title="{{ $actType->label() }}{{ $actAt ? ' · ' . $actAt->format('d.m.Y H:i') : '' }}">
                                         <span>{{ $actType->icon() }}</span>
