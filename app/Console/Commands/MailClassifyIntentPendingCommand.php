@@ -48,7 +48,7 @@ class MailClassifyIntentPendingCommand extends Command
                     ->whereColumn('ai_decisions.email_message_id', 'email_messages.id')
                     ->where('ai_decisions.detector_type', 'like', 'inbound_%');
             })
-            ->with('request')
+            ->with('relatedRequest')
             ->orderBy('id')
             ->limit($limit)
             ->get();
@@ -63,7 +63,7 @@ class MailClassifyIntentPendingCommand extends Command
 
         foreach ($candidates as $m) {
             $stats['scanned']++;
-            $request = $m->request;
+            $request = $m->relatedRequest;
             if ($request === null) {
                 continue;
             }
