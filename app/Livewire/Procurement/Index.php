@@ -42,10 +42,24 @@ class Index extends Component
 
     public string $greeting = 'Здравствуйте, {поставщик}!';
 
+    public string $greetingEn = 'Hello {поставщик},';
+
     public string $note = '';
 
-    /** cid => отредактированное название для письма. */
+    /** cid => название для письма (рус.). */
     public array $editedNames = [];
+
+    /** cid => название для письма (англ.; каталог → name_en, иначе LLM-перевод). */
+    public array $editedNamesEn = [];
+
+    /** cid => артикул/OEM. */
+    public array $editedOem = [];
+
+    /** cid => количество строкой (рус.). */
+    public array $editedQty = [];
+
+    /** cid => количество строкой (англ.). */
+    public array $editedQtyEn = [];
 
     public function mount(): void
     {
@@ -63,12 +77,156 @@ class Index extends Component
         $this->resetPage();
     }
 
-    /** При выборе позиции — префилл редактируемого названия. */
+    /** При выборе позиции — префилл редактируемых полей из каталога. */
     public function updatedSelected($value, $key): void
     {
-        if ($value && ! isset($this->editedNames[$key])) {
-            $this->editedNames[$key] = (string) (\App\Models\CatalogItem::whereKey((int) $key)->value('name') ?? '');
+        $cid = (int) $key;
+        if ($value && ! isset($this->editedNames[$cid])) {
+            $ci = \App\Models\CatalogItem::query()->whereKey($cid)->first(['id', 'name', 'name_en', 'brand_article']);
+            if ($ci !== null) {
+                $this->editedNames[$cid] = (string) ($ci->name ?? '');
+                $this->editedNamesEn[$cid] = (string) ($ci->name_en ?: $ci->name ?? '');
+                $this->editedOem[$cid] = (string) ($ci->brand_article ?? '');
+                $this->editedQty[$cid] = $this->editedQty[$cid] ?? '';
+                $this->editedQtyEn[$cid] = $this->editedQtyEn[$cid] ?? '';
+            }
         }
+        $this->autoTranslateIfEnglish();
+    }
+
+    public function updatedSelectedSuppliers(): void
+    {
+        $this->autoTranslateIfEnglish();
+    }
+
+    /* ----------------------- Превью письма по языкам ---------------------- */
+
+    /**
+     * Языковые блоки превью: по одному на каждый язык среди ОТМЕЧЕННЫХ
+     * поставщиков (ru перед en). Пока поставщики не выбраны — один RU-блок.
+     *
+     * @return array<int, array{lang:string, label:string, suppliers:array<int,string>, greeting_model:string}>
+     */
+    #[Computed]
+    public function previewLanguages(): array
+    {
+        $ids = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
+        $suppliers = $ids === [] ? collect() : \App\Models\Supplier::query()->whereIn('id', $ids)->orderBy('name')->get();
+
+        $groups = [];
+        foreach ($suppliers as $s) {
+            $lang = in_array($s->language, ['ru', 'en'], true) ? $s->language : 'ru';
+            $groups[$lang][] = $s;
+        }
+        if ($groups === []) {
+            $groups['ru'] = [];
+        }
+
+        $out = [];
+        foreach (['ru', 'en'] as $lang) {
+            if (! array_key_exists($lang, $groups)) {
+                continue;
+            }
+            $out[] = [
+                'lang' => $lang,
+                'label' => $lang === 'en' ? 'English' : 'Русский',
+                'suppliers' => array_map(fn ($s) => (string) ($s->name ?: $s->email ?: ('#' . $s->id)), $groups[$lang]),
+                'greeting_model' => $lang === 'en' ? 'greetingEn' : 'greeting',
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Строки превью на языке: модели для name (editedNames/editedNamesEn),
+     * артикула (editedOem), кол-ва (editedQty/editedQtyEn) + флаг cyrillic для
+     * EN-названий, оставшихся кириллицей.
+     *
+     * @return array<int, array{cid:int, name_model:string, qty_model:string, cyrillic:bool}>
+     */
+    public function previewRowsForLang(string $lang): array
+    {
+        $lang = $lang === 'en' ? 'en' : 'ru';
+        $out = [];
+        foreach ($this->selectedPositions as $ci) {
+            $enName = trim((string) ($this->editedNamesEn[$ci->id] ?? ''));
+            $out[] = [
+                'cid' => $ci->id,
+                'name_model' => $lang === 'en' ? 'editedNamesEn' : 'editedNames',
+                'qty_model' => $lang === 'en' ? 'editedQtyEn' : 'editedQty',
+                'cyrillic' => $lang === 'en' && preg_match('/\p{Cyrillic}/u', $enName) === 1,
+            ];
+        }
+
+        return $out;
+    }
+
+    public function translateToEnglish(\App\Services\Supplier\SupplierItemTranslator $translator): void
+    {
+        $this->runEnglishTranslation($translator, silent: false);
+    }
+
+    /**
+     * EN-названия выбранных позиций: каталожный name_en — готовое; пустые/
+     * кириллические — LLM-перевод. Транзиентный сбой LLM → оставляем как есть.
+     */
+    private function runEnglishTranslation(\App\Services\Supplier\SupplierItemTranslator $translator, bool $silent): void
+    {
+        $cids = $this->selectedCids();
+        if ($cids === []) {
+            return;
+        }
+        $items = \App\Models\CatalogItem::query()->whereIn('id', $cids)->get(['id', 'name', 'name_en']);
+
+        $toTranslate = [];
+        foreach ($items as $ci) {
+            if (trim((string) $ci->name_en) !== '') {
+                $this->editedNamesEn[$ci->id] = $ci->name_en;
+                continue;
+            }
+            $current = trim((string) ($this->editedNamesEn[$ci->id] ?? ''));
+            if ($current !== '' && preg_match('/\p{Cyrillic}/u', $current) !== 1) {
+                continue;
+            }
+            $src = trim((string) ($this->editedNames[$ci->id] ?? '')) ?: (string) ($ci->name ?? '');
+            if ($src !== '') {
+                $toTranslate[$ci->id] = $src;
+            }
+        }
+
+        $translated = $toTranslate !== [] ? $translator->translate($toTranslate) : [];
+        foreach ($translated as $id => $en) {
+            $this->editedNamesEn[$id] = $en;
+        }
+
+        if ($silent) {
+            return;
+        }
+        $missed = count($toTranslate) - count($translated);
+        if ($toTranslate !== [] && $translated === []) {
+            $this->dispatch('toast', message: 'Не удалось перевести (LLM недоступен) — попробуйте позже.', type: 'error');
+        } else {
+            $this->dispatch('toast', message: $missed > 0 ? "Переведено. Не удалось: {$missed}." : 'Названия переведены на английский.', type: $missed > 0 ? 'warning' : 'success');
+        }
+    }
+
+    private function autoTranslateIfEnglish(): void
+    {
+        if (! $this->hasEnglishSupplierSelected()) {
+            return;
+        }
+        $this->runEnglishTranslation(app(\App\Services\Supplier\SupplierItemTranslator::class), silent: true);
+    }
+
+    private function hasEnglishSupplierSelected(): bool
+    {
+        $ids = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
+        if ($ids === []) {
+            return false;
+        }
+
+        return \App\Models\Supplier::query()->whereIn('id', $ids)->where('language', 'en')->exists();
     }
 
     /** @return array<int, int> выбранные catalog_item_id */
@@ -187,7 +345,16 @@ class Index extends Component
             return;
         }
 
-        $result = $dispatcher->dispatch($cids, $supplierIds, $this->note, $user, $this->editedNames, $this->greeting);
+        $edits = [
+            'names_ru' => $this->editedNames,
+            'names_en' => $this->editedNamesEn,
+            'oem' => $this->editedOem,
+            'qty' => $this->editedQty,
+            'qty_en' => $this->editedQtyEn,
+            'greeting_ru' => $this->greeting,
+            'greeting_en' => $this->greetingEn,
+        ];
+        $result = $dispatcher->dispatch($cids, $supplierIds, $this->note, $user, $edits);
 
         if (($result['error'] ?? null) === 'no_mailbox') {
             $this->addError('send', 'Нет ящика для отправки (личный или общий mail@). Обратитесь к РОПу.');
@@ -205,8 +372,9 @@ class Index extends Component
         session()->flash('procurement_status', $msg);
 
         // Сброс выбора.
-        $this->reset(['selected', 'selectedSuppliers', 'addedSupplierIds', 'supplierSearch', 'note', 'editedNames']);
-        unset($this->positions, $this->supplierOptions, $this->iqotByCatalogId, $this->selectedPositions);
+        $this->reset(['selected', 'selectedSuppliers', 'addedSupplierIds', 'supplierSearch', 'note',
+            'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn']);
+        unset($this->positions, $this->supplierOptions, $this->iqotByCatalogId, $this->selectedPositions, $this->previewLanguages);
     }
 
     /** Базовый запрос блокеров (сматченные stale-позиции в до-КП заявках). */

@@ -115,21 +115,6 @@
         <div class="ds-card">
             <div class="ds-card-header"><h3>Запрос поставщикам</h3><span class="text-[12px] text-fg-3 ml-2">выбрано позиций: {{ $selPos->count() }}</span></div>
             <div class="ds-card-body space-y-3">
-                {{-- Позиции (название редактируемое) --}}
-                <div class="border border-border rounded-md p-3 bg-surface-2">
-                    <div class="text-[11px] uppercase tracking-wider text-fg-3 mb-2">Позиции в письме (название можно править; по умолчанию — из каталога)</div>
-                    <div class="space-y-1.5">
-                        @foreach($selPos as $i => $ci)
-                            <div class="flex items-center gap-2" wire:key="selpos-{{ $ci->id }}">
-                                <span class="text-[11px] text-fg-4 w-4 text-right">{{ $i + 1 }}.</span>
-                                <input type="text" wire:model.lazy="editedNames.{{ $ci->id }}"
-                                       class="flex-1 px-2 h-[28px] border border-border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500">
-                                <span class="text-[11px] text-fg-4 whitespace-nowrap mono">{{ trim(implode(' · ', array_filter([$ci->sku, $ci->brand_article]))) }}</span>
-                            </div>
-                        @endforeach
-                    </div>
-                </div>
-
                 {{-- Поставщики --}}
                 <div>
                     <label class="block text-[11.5px] text-fg-3 mb-1">Поставщики <span class="text-fg-4">— подобраны по матрице под выбранные позиции</span></label>
@@ -163,11 +148,64 @@
                     </div>
                 </div>
 
-                {{-- Обращение + примечание --}}
-                <div>
-                    <label class="block text-[11.5px] text-fg-3 mb-1">Обращение <span class="text-fg-4">— {поставщик} подставится; для англоязычных — «Hello …»</span></label>
-                    <input type="text" wire:model="greeting" class="w-full px-2 h-[30px] border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
-                </div>
+                {{-- Превью письма НА ТОМ ЯЗЫКЕ, на котором улетит (RU/EN по выбранным
+                     поставщикам). Названия/артикул/кол-во — редактируемые. --}}
+                @foreach($this->previewLanguages as $blk)
+                    @php $rows = $this->previewRowsForLang($blk['lang']); @endphp
+                    <div class="border border-border rounded-md p-3 bg-surface-2" wire:key="prev-{{ $blk['lang'] }}">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <span class="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-fg-3">
+                                <span class="chip {{ $blk['lang'] === 'en' ? 'chip-info' : 'chip-neutral' }} text-[10px]">{{ $blk['lang'] === 'en' ? '🌐 ' : '' }}{{ $blk['label'] }}</span>
+                                Превью письма
+                            </span>
+                            <span class="flex items-center gap-2">
+                                @if($blk['lang'] === 'en')
+                                    <button type="button" wire:click="translateToEnglish" wire:loading.attr="disabled" wire:target="translateToEnglish" class="btn btn-sm">
+                                        <span wire:loading.remove wire:target="translateToEnglish">🌐 Перевести позиции (ИИ)</span>
+                                        <span wire:loading wire:target="translateToEnglish">Перевожу…</span>
+                                    </button>
+                                @endif
+                                @if(!empty($blk['suppliers']))
+                                    <span class="text-[10.5px] text-fg-4 text-right truncate" style="max-width:200px" title="{{ implode(', ', $blk['suppliers']) }}">→ {{ \Illuminate\Support\Str::limit(implode(', ', $blk['suppliers']), 40) }}</span>
+                                @endif
+                            </span>
+                        </div>
+
+                        {{-- Обращение (редактируемое, на языке письма) --}}
+                        <div class="mb-2">
+                            <input type="text" wire:model.lazy="{{ $blk['greeting_model'] }}"
+                                   class="w-full px-2 h-[28px] border border-border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                            <div class="text-[10px] text-fg-4 mt-0.5">{поставщик} подставится для каждого поставщика</div>
+                        </div>
+
+                        <div class="flex items-center gap-2 text-[10px] uppercase tracking-wider text-fg-4 px-1 mb-1">
+                            <span style="width:18px"></span>
+                            <span class="flex-1">Наименование</span>
+                            <span style="width:150px">Артикул / OEM</span>
+                            <span style="width:96px">Кол-во</span>
+                        </div>
+                        <div class="space-y-1.5">
+                            @foreach($rows as $i => $r)
+                                <div class="flex items-center gap-2" wire:key="prev-{{ $blk['lang'] }}-{{ $r['cid'] }}">
+                                    <span class="text-[11px] text-fg-4 text-right" style="width:18px">{{ $i + 1 }}.</span>
+                                    <input type="text" wire:model.lazy="{{ $r['name_model'] }}.{{ $r['cid'] }}"
+                                           class="flex-1 px-2 h-[28px] border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500 {{ $r['cyrillic'] ? 'border-amber-400' : 'border-border' }}">
+                                    @if($r['cyrillic'])
+                                        <span class="chip chip-warn text-[10px]" title="Похоже на русское название — переведите для англоязычного поставщика">⚠ рус.</span>
+                                    @endif
+                                    <input type="text" wire:model.lazy="editedOem.{{ $r['cid'] }}" placeholder="—"
+                                           class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] mono outline-none focus:border-sky-500" style="width:150px">
+                                    <input type="text" wire:model.lazy="{{ $r['qty_model'] }}.{{ $r['cid'] }}" placeholder="—"
+                                           class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] outline-none focus:border-sky-500" style="width:96px">
+                                </div>
+                            @endforeach
+                        </div>
+                        @if($blk['lang'] === 'en')
+                            <div class="text-[10.5px] text-fg-4 mt-2">Каталожные позиции — английское название (name_en). Остальные — кнопка «Перевести позиции (ИИ)» или вручную (⚠ помечены кириллицей).</div>
+                        @endif
+                    </div>
+                @endforeach
+
                 <div>
                     <label class="block text-[11.5px] text-fg-3 mb-1">Примечание <span class="text-fg-4">(необязательно)</span></label>
                     <textarea wire:model="note" rows="2" class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>

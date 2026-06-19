@@ -33,10 +33,11 @@ class SupplierProcurementDispatchService
     /**
      * @param  array<int, int>  $catalogItemIds
      * @param  array<int, int>  $supplierIds
-     * @param  array<int, string>  $nameOverrides  catalog_item_id => название (RU)
+     * @param  array{names_ru?:array<int,string>, names_en?:array<int,string>, oem?:array<int,string>, qty?:array<int,string>, qty_en?:array<int,string>, greeting_ru?:?string, greeting_en?:?string}  $edits
+     *                        правки письма по catalog_item: названия/кол-во по языкам + артикул + обращение по языкам
      * @return array{sent:int, failed:int, skipped:int, suppliers:array<int,string>, error:?string}
      */
-    public function dispatch(array $catalogItemIds, array $supplierIds, ?string $note, User $by, array $nameOverrides = [], ?string $greeting = null): array
+    public function dispatch(array $catalogItemIds, array $supplierIds, ?string $note, User $by, array $edits = []): array
     {
         $zero = ['sent' => 0, 'failed' => 0, 'skipped' => 0, 'suppliers' => [], 'error' => null];
 
@@ -78,13 +79,19 @@ class SupplierProcurementDispatchService
             }
 
             try {
+                $names = $lang === 'en' ? ($edits['names_en'] ?? []) : ($edits['names_ru'] ?? []);
+                $oem = $edits['oem'] ?? [];
+                $qty = $lang === 'en' ? ($edits['qty_en'] ?? []) : ($edits['qty'] ?? []);
+                $greetingTpl = $lang === 'en' ? ($edits['greeting_en'] ?? null) : ($edits['greeting_ru'] ?? null);
+
                 $rows = $askItems->map(fn (CatalogItem $ci) => [
-                    'name' => $this->itemName($ci, $nameOverrides, $lang),
-                    'oem' => $ci->brand_article ?: null,
+                    'name' => $this->itemName($ci, $names, $lang),
+                    'oem' => $this->itemOem($ci, $oem),
                     'brand' => $ci->brand ?: null,
+                    'qty' => $this->itemQty($ci, $qty),
                 ])->all();
 
-                $personalGreeting = $this->base->personalGreeting($greeting, $supplier, $lang);
+                $personalGreeting = $this->base->personalGreeting($greetingTpl, $supplier, $lang);
                 $subject = $lang === 'en' ? 'Price request' : 'Запрос расценки';
 
                 $html = view('emails.supplier-rfq-catalog', [
@@ -149,6 +156,30 @@ class SupplierProcurementDispatchService
         return (string) ($ci->name ?: $ci->sku);
     }
 
+    /** Артикул/OEM: правка > brand_article каталога. */
+    private function itemOem(CatalogItem $ci, array $overrides): ?string
+    {
+        if (isset($overrides[$ci->id])) {
+            $v = trim((string) $overrides[$ci->id]);
+
+            return $v !== '' ? $v : null;
+        }
+
+        return $ci->brand_article ?: null;
+    }
+
+    /** Количество: правка менеджера; у каталожной позиции своего кол-ва нет. */
+    private function itemQty(CatalogItem $ci, array $overrides): ?string
+    {
+        if (isset($overrides[$ci->id])) {
+            $v = trim((string) $overrides[$ci->id]);
+
+            return $v !== '' ? $v : null;
+        }
+
+        return null;
+    }
+
     /** @return array<int, true> catalog_item_id => true (pending по открытым инквайри поставщика) */
     private function pendingCatalogIdsForSupplier(string $email): array
     {
@@ -202,7 +233,7 @@ class SupplierProcurementDispatchService
     }
 
     /**
-     * @param  array<int, array{name:string, oem:?string, brand:?string}>  $rows
+     * @param  array<int, array{name:string, oem:?string, brand:?string, qty:?string}>  $rows
      */
     private function plainBody(string $greeting, array $rows, string $note, string $lang): string
     {
@@ -211,7 +242,7 @@ class SupplierProcurementDispatchService
         $lines = [$greeting !== '' ? $greeting : ($en ? 'Hello,' : 'Здравствуйте!'), '', $intro, ''];
         $n = 1;
         foreach ($rows as $r) {
-            $lines[] = ($n++) . '. ' . implode(' · ', array_filter([$r['name'], $r['oem'], $r['brand']]));
+            $lines[] = ($n++) . '. ' . implode(' · ', array_filter([$r['name'], $r['oem'] ?? null, $r['brand'] ?? null, $r['qty'] ?? null]));
         }
         if (trim($note) !== '') {
             $lines[] = '';

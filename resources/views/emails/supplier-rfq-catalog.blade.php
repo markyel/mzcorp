@@ -9,6 +9,7 @@
             'h_no' => 'No.',
             'h_name' => 'Item',
             'h_oem' => 'OEM / brand',
+            'h_qty' => 'Qty',
             'reply' => 'Please reply to this email with prices, availability and lead times.',
             'fallback_greeting' => 'Hello,',
         ]
@@ -20,6 +21,7 @@
             'h_no' => '№',
             'h_name' => 'Наименование',
             'h_oem' => 'Артикул / бренд',
+            'h_qty' => 'Кол-во',
             'reply' => 'Ответьте, пожалуйста, на это письмо с ценами/наличием/сроками.',
             'fallback_greeting' => 'Здравствуйте!',
         ];
@@ -44,6 +46,7 @@
                     <th style="background:#f0f1f4;padding:8px 10px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">{{ $t['h_no'] }}</th>
                     <th style="background:#f0f1f4;padding:8px 10px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">{{ $t['h_name'] }}</th>
                     <th style="background:#f0f1f4;padding:8px 10px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase">{{ $t['h_oem'] }}</th>
+                    <th style="background:#f0f1f4;padding:8px 10px;text-align:right;font-size:11px;color:#6b7280;text-transform:uppercase">{{ $t['h_qty'] }}</th>
                 </tr>
             </thead>
             <tbody>
@@ -53,6 +56,9 @@
                         <td style="padding:9px 10px;border-bottom:1px solid #eef0f3;vertical-align:top;font-weight:600">{{ $r['name'] ?: '—' }}</td>
                         <td style="padding:9px 10px;border-bottom:1px solid #eef0f3;vertical-align:top;color:#4b5563">
                             {{ trim(implode(' · ', array_filter([$r['oem'] ?? null, $r['brand'] ?? null]))) ?: '—' }}
+                        </td>
+                        <td style="padding:9px 10px;border-bottom:1px solid #eef0f3;vertical-align:top;text-align:right;white-space:nowrap">
+                            {{ $r['qty'] ?? '' ?: '—' }}
                         </td>
                     </tr>
                 @endforeach
