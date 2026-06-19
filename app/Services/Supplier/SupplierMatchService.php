@@ -21,6 +21,41 @@ class SupplierMatchService
      *
      * @return Collection<int, Supplier>
      */
+    /**
+     * Подбор поставщиков под КАТАЛОЖНУЮ позицию (M-артикул) — для раздела
+     * «Снабжение» (Фаза 4B). Бренд/категория берём прямо из catalog_item.
+     * Бренд каталога — свободная строка (не обязательно из 43 KB-брендов),
+     * поэтому brandCanonical=false (не исключаем по бренду, recall-friendly).
+     *
+     * @return Collection<int, Supplier>
+     */
+    public function relevantSuppliersForCatalog(\App\Models\CatalogItem $ci): Collection
+    {
+        $brand = $this->norm((string) ($ci->brand ?? ''));
+
+        $cat = $ci->relationLoaded('equipmentCategory') ? $ci->equipmentCategory : $ci->equipmentCategory()->first();
+        $categoryTerms = [];
+        if ($cat !== null) {
+            $terms = [(string) $cat->name];
+            foreach ((array) ($cat->synonyms ?? []) as $syn) {
+                if (is_string($syn) && trim($syn) !== '') {
+                    $terms[] = $syn;
+                }
+            }
+            $categoryTerms = array_values(array_unique(array_filter(array_map([$this, 'norm'], $terms))));
+        }
+
+        if ($brand === '' && $categoryTerms === []) {
+            return collect();
+        }
+
+        return Supplier::query()
+            ->whereNotNull('assortment_matrix')
+            ->get()
+            ->filter(fn (Supplier $s) => $this->matches($s, $brand, $categoryTerms, false))
+            ->values();
+    }
+
     public function relevantSuppliers(RequestItem $item): Collection
     {
         $brand = $this->itemBrand($item);

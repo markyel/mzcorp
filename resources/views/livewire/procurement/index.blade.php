@@ -1,4 +1,8 @@
 <div class="space-y-4">
+    @if(session('procurement_status'))
+        <div class="ds-card"><div class="ds-card-body text-[13px] text-emerald-700">{{ session('procurement_status') }}</div></div>
+    @endif
+
     {{-- Заголовок + сводка --}}
     <div class="ds-card">
         <div class="ds-card-header">
@@ -31,6 +35,7 @@
             <table class="w-full text-[12.5px]">
                 <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
                     <tr>
+                        <th class="px-2 py-2" style="width:30px"></th>
                         <th class="text-right px-2 py-2" style="width:40px">#</th>
                         <th class="text-left px-2 py-2" style="width:130px">Артикул</th>
                         <th class="text-left px-2 py-2">Наименование</th>
@@ -49,6 +54,7 @@
                     @endphp
                     <tbody x-data="{ open: false }" wire:key="blk-{{ $p['cid'] }}">
                         <tr class="border-b border-border-subtle hover:bg-hover align-top">
+                            <td class="px-2 py-2 text-center"><input type="checkbox" wire:model.live="selected.{{ $p['cid'] }}"></td>
                             <td class="px-2 py-2 text-right mono text-fg-4">{{ $this->positions->firstItem() + $i }}</td>
                             <td class="px-2 py-2 mono text-fg-2">{{ $p['sku'] }}</td>
                             <td class="px-2 py-2 text-fg-1">{{ \Illuminate\Support\Str::limit($p['name'], 64) }}</td>
@@ -87,7 +93,7 @@
                         </tr>
                         @if($hasIqot)
                             <tr x-show="open" x-cloak class="border-b border-border-subtle bg-surface-2">
-                                <td colspan="9" class="px-4 py-2.5">
+                                <td colspan="10" class="px-4 py-2.5">
                                     @include('livewire.iqot._comparison', ['pos' => $iqp])
                                 </td>
                             </tr>
@@ -95,7 +101,7 @@
                     </tbody>
                 @empty
                     <tbody>
-                        <tr><td colspan="9" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Нет позиций с неактуальной ценой в заявках до выдачи КП.' }}</td></tr>
+                        <tr><td colspan="10" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Нет позиций с неактуальной ценой в заявках до выдачи КП.' }}</td></tr>
                     </tbody>
                 @endforelse
             </table>
@@ -103,7 +109,82 @@
         <div class="px-4 py-3">{{ $this->positions->links() }}</div>
     </div>
 
-    <div class="text-[11.5px] text-fg-4">
-        Формирование запросов поставщикам по выбранным позициям (по M-артикулу) — в следующем шаге раздела.
-    </div>
+    {{-- Панель запроса поставщикам (по выбранным позициям) --}}
+    @php $selPos = $this->selectedPositions; @endphp
+    @if($selPos->isNotEmpty())
+        <div class="ds-card">
+            <div class="ds-card-header"><h3>Запрос поставщикам</h3><span class="text-[12px] text-fg-3 ml-2">выбрано позиций: {{ $selPos->count() }}</span></div>
+            <div class="ds-card-body space-y-3">
+                {{-- Позиции (название редактируемое) --}}
+                <div class="border border-border rounded-md p-3 bg-surface-2">
+                    <div class="text-[11px] uppercase tracking-wider text-fg-3 mb-2">Позиции в письме (название можно править; по умолчанию — из каталога)</div>
+                    <div class="space-y-1.5">
+                        @foreach($selPos as $i => $ci)
+                            <div class="flex items-center gap-2" wire:key="selpos-{{ $ci->id }}">
+                                <span class="text-[11px] text-fg-4 w-4 text-right">{{ $i + 1 }}.</span>
+                                <input type="text" wire:model.lazy="editedNames.{{ $ci->id }}"
+                                       class="flex-1 px-2 h-[28px] border border-border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                                <span class="text-[11px] text-fg-4 whitespace-nowrap mono">{{ trim(implode(' · ', array_filter([$ci->sku, $ci->brand_article]))) }}</span>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+
+                {{-- Поставщики --}}
+                <div>
+                    <label class="block text-[11.5px] text-fg-3 mb-1">Поставщики <span class="text-fg-4">— подобраны по матрице под выбранные позиции</span></label>
+                    <div class="border border-border rounded-md divide-y divide-border-subtle">
+                        @forelse($this->supplierOptions as $o)
+                            <label class="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-hover">
+                                <input type="checkbox" wire:model.live="selectedSuppliers.{{ $o['id'] }}" class="mt-1">
+                                <span class="flex-1">
+                                    <span class="text-[13px] text-fg-1 font-medium">{{ $o['name'] }}</span>
+                                    @if($o['matched'])<span class="chip chip-sky text-[10px] ml-1">подходит · {{ $o['item_count'] }} поз.</span>
+                                    @else<span class="chip chip-neutral text-[10px] ml-1">добавлен вручную</span>@endif
+                                    @if($o['email'])<span class="block text-[11px] text-fg-4 mono">{{ $o['email'] }}</span>@endif
+                                </span>
+                            </label>
+                        @empty
+                            <div class="px-3 py-3 text-[12px] text-amber-700">По выбранным позициям нет подходящих поставщиков — добавьте вручную ниже.</div>
+                        @endforelse
+                    </div>
+                    <div class="mt-2">
+                        <input type="search" wire:model.live.debounce.300ms="supplierSearch" placeholder="Добавить поставщика: название / email / домен"
+                               class="h-[30px] w-full max-w-[420px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
+                        @if($this->searchResults->isNotEmpty())
+                            <div class="mt-1 border border-border rounded-md max-w-[420px] divide-y divide-border-subtle">
+                                @foreach($this->searchResults as $s)
+                                    <button type="button" wire:click="addSupplier({{ $s->id }})" class="w-full text-left px-3 py-1.5 hover:bg-hover text-[12.5px]">
+                                        {{ $s->name ?: $s->email }} <span class="text-fg-4 mono text-[11px]">{{ $s->email }}</span>
+                                    </button>
+                                @endforeach
+                            </div>
+                        @endif
+                    </div>
+                </div>
+
+                {{-- Обращение + примечание --}}
+                <div>
+                    <label class="block text-[11.5px] text-fg-3 mb-1">Обращение <span class="text-fg-4">— {поставщик} подставится; для англоязычных — «Hello …»</span></label>
+                    <input type="text" wire:model="greeting" class="w-full px-2 h-[30px] border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                </div>
+                <div>
+                    <label class="block text-[11.5px] text-fg-3 mb-1">Примечание <span class="text-fg-4">(необязательно)</span></label>
+                    <textarea wire:model="note" rows="2" class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
+                </div>
+
+                @error('send') <div class="text-[12px] text-red-600">{{ $message }}</div> @enderror
+
+                <div class="flex items-center gap-2 pt-2 border-t border-border-subtle">
+                    @php $selSups = collect($this->selectedSuppliers)->filter()->count(); @endphp
+                    <button type="button" wire:click="send" wire:loading.attr="disabled" wire:target="send"
+                            class="btn btn-primary" @disabled($selSups === 0)>
+                        <span wire:loading.remove wire:target="send">Отправить запросы ({{ $selSups }})</span>
+                        <span wire:loading wire:target="send">Отправляю…</span>
+                    </button>
+                    <span class="text-[11.5px] text-fg-3">по M-артикулу; цена обновится в каталоге → заявки получат сигнал «💰»</span>
+                </div>
+            </div>
+        </div>
+    @endif
 </div>

@@ -29,6 +29,24 @@ class Index extends Component
     #[Url(as: 'q', except: '')]
     public string $search = '';
 
+    /** cid => bool — выбранные позиции для запроса. */
+    public array $selected = [];
+
+    /** supplier_id => bool — кому слать. */
+    public array $selectedSuppliers = [];
+
+    /** Доп. поставщики, добавленные вручную (вне матча). */
+    public array $addedSupplierIds = [];
+
+    public string $supplierSearch = '';
+
+    public string $greeting = 'Здравствуйте, {поставщик}!';
+
+    public string $note = '';
+
+    /** cid => отредактированное название для письма. */
+    public array $editedNames = [];
+
     public function mount(): void
     {
         abort_unless(
@@ -43,6 +61,152 @@ class Index extends Component
     public function updatingSearch(): void
     {
         $this->resetPage();
+    }
+
+    /** При выборе позиции — префилл редактируемого названия. */
+    public function updatedSelected($value, $key): void
+    {
+        if ($value && ! isset($this->editedNames[$key])) {
+            $this->editedNames[$key] = (string) (\App\Models\CatalogItem::whereKey((int) $key)->value('name') ?? '');
+        }
+    }
+
+    /** @return array<int, int> выбранные catalog_item_id */
+    private function selectedCids(): array
+    {
+        return array_values(array_map('intval', array_keys(array_filter($this->selected))));
+    }
+
+    /** Выбранные позиции (для панели запроса). */
+    #[Computed]
+    public function selectedPositions()
+    {
+        $cids = $this->selectedCids();
+        if ($cids === []) {
+            return collect();
+        }
+
+        return \App\Models\CatalogItem::query()->whereIn('id', $cids)
+            ->orderBy('sku')->get(['id', 'sku', 'name', 'brand', 'brand_article']);
+    }
+
+    /**
+     * Подобранные поставщики под выбранные позиции (по матрице каталога) +
+     * добавленные вручную.
+     *
+     * @return array<int, array{id:int, name:string, email:?string, matched:bool, item_count:int}>
+     */
+    #[Computed]
+    public function supplierOptions(): array
+    {
+        $cids = $this->selectedCids();
+        if ($cids === [] && $this->addedSupplierIds === []) {
+            return [];
+        }
+
+        $matcher = app(\App\Services\Supplier\SupplierMatchService::class);
+        $items = \App\Models\CatalogItem::query()->whereIn('id', $cids)
+            ->with('equipmentCategory:id,name,synonyms')->get();
+
+        $coverage = [];
+        foreach ($items as $ci) {
+            foreach ($matcher->relevantSuppliersForCatalog($ci) as $s) {
+                $coverage[$s->id] = ($coverage[$s->id] ?? 0) + 1;
+            }
+        }
+
+        $ids = array_values(array_unique(array_merge(array_keys($coverage), array_map('intval', $this->addedSupplierIds))));
+        if ($ids === []) {
+            return [];
+        }
+        $suppliers = \App\Models\Supplier::query()->whereIn('id', $ids)->get()->keyBy('id');
+
+        $out = [];
+        foreach ($ids as $id) {
+            $s = $suppliers->get($id);
+            if (! $s) {
+                continue;
+            }
+            $out[] = [
+                'id' => $s->id,
+                'name' => (string) ($s->name ?: $s->email ?: ('#' . $s->id)),
+                'email' => $s->email,
+                'matched' => isset($coverage[$id]),
+                'item_count' => $coverage[$id] ?? 0,
+            ];
+        }
+        usort($out, fn ($a, $b) => $b['item_count'] <=> $a['item_count']);
+
+        return $out;
+    }
+
+    #[Computed]
+    public function searchResults()
+    {
+        $s = trim($this->supplierSearch);
+        if (mb_strlen($s) < 2) {
+            return collect();
+        }
+        $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
+        $existing = collect($this->supplierOptions())->pluck('id')->all();
+
+        return \App\Models\Supplier::query()
+            ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like))
+            ->whereNotIn('id', $existing ?: [0])
+            ->orderBy('name')->limit(8)->get(['id', 'name', 'email']);
+    }
+
+    public function addSupplier(int $supplierId): void
+    {
+        if (! in_array($supplierId, $this->addedSupplierIds, true)) {
+            $this->addedSupplierIds[] = $supplierId;
+        }
+        $this->selectedSuppliers[$supplierId] = true;
+        $this->supplierSearch = '';
+        unset($this->supplierOptions);
+    }
+
+    public function send(\App\Services\Supplier\SupplierProcurementDispatchService $dispatcher)
+    {
+        $user = auth()->user();
+        abort_unless($user?->hasAnyRole([
+            Role::Procurement->value, Role::Manager->value,
+            Role::HeadOfSales->value, Role::Director->value, Role::Admin->value,
+        ]), 403);
+
+        $cids = $this->selectedCids();
+        $supplierIds = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
+        if ($cids === []) {
+            $this->addError('send', 'Выберите хотя бы одну позицию.');
+
+            return;
+        }
+        if ($supplierIds === []) {
+            $this->addError('send', 'Отметьте хотя бы одного поставщика.');
+
+            return;
+        }
+
+        $result = $dispatcher->dispatch($cids, $supplierIds, $this->note, $user, $this->editedNames, $this->greeting);
+
+        if (($result['error'] ?? null) === 'no_mailbox') {
+            $this->addError('send', 'Нет ящика для отправки (личный или общий mail@). Обратитесь к РОПу.');
+
+            return;
+        }
+
+        $msg = "Отправлено запросов поставщикам: {$result['sent']}.";
+        if (($result['skipped'] ?? 0) > 0) {
+            $msg .= " Пропущено (уже запрошено): {$result['skipped']}.";
+        }
+        if (($result['failed'] ?? 0) > 0) {
+            $msg .= " Ошибок: {$result['failed']}.";
+        }
+        session()->flash('procurement_status', $msg);
+
+        // Сброс выбора.
+        $this->reset(['selected', 'selectedSuppliers', 'addedSupplierIds', 'supplierSearch', 'note', 'editedNames']);
+        unset($this->positions, $this->supplierOptions, $this->iqotByCatalogId, $this->selectedPositions);
     }
 
     /** Базовый запрос блокеров (сматченные stale-позиции в до-КП заявках). */

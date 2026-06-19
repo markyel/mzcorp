@@ -20,6 +20,9 @@ class SupplierInquiryItem extends Model
     protected $fillable = [
         'supplier_inquiry_id',
         'request_item_id',
+        // Позиция-центричный RFQ из «Снабжения» (Фаза 4B): привязка к каталожной
+        // позиции (M-артикул) вместо request_item.
+        'catalog_item_id',
         'item_name',
         'status',
     ];
@@ -32,6 +35,11 @@ class SupplierInquiryItem extends Model
     public function requestItem(): BelongsTo
     {
         return $this->belongsTo(RequestItem::class, 'request_item_id');
+    }
+
+    public function catalogItem(): BelongsTo
+    {
+        return $this->belongsTo(CatalogItem::class, 'catalog_item_id');
     }
 
     /** Предложения поставщика по этой позиции (Фаза 3.3). */
