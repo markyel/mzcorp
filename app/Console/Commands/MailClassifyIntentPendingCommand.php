@@ -38,6 +38,9 @@ class MailClassifyIntentPendingCommand extends Command
 
         $candidates = EmailMessage::query()
             ->where('direction', 'inbound')
+            // Интент классифицируем только у ОТВЕТОВ в треде (как MailRouter).
+            // Исходные письма-заявки (client_request) и шум сюда не попадают.
+            ->where('category', \App\Enums\EmailCategory::ThreadReply->value)
             ->whereNotNull('related_request_id')
             ->whereNull('intent_classified_at')
             ->where('created_at', '>=', now()->subDays($days))
