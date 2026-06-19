@@ -135,7 +135,7 @@
                     <label class="block text-[11.5px] text-fg-3 mb-1">Поставщики <span class="text-fg-4">— подобраны по матрице под выбранные позиции</span></label>
                     <div class="border border-border rounded-md divide-y divide-border-subtle">
                         @forelse($this->supplierOptions as $o)
-                            <label class="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-hover">
+                            <label wire:key="sup-opt-{{ $o['id'] }}" class="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-hover">
                                 <input type="checkbox" wire:model.live="selectedSuppliers.{{ $o['id'] }}" class="mt-1">
                                 <span class="flex-1">
                                     <span class="text-[13px] text-fg-1 font-medium">{{ $o['name'] }}</span>
