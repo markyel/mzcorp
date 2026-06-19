@@ -75,6 +75,8 @@ class EmailMessage extends Model
             // Phase 1.8c
             'category_confidence' => 'float',
             'categorized_at' => 'datetime',
+            // Phase 7.2: успешная классификация интента (для catch-up крона).
+            'intent_classified_at' => 'datetime',
             // Phase 1.9
             'is_draft' => 'bool',
             'last_edited_at' => 'datetime',

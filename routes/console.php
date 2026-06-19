@@ -219,6 +219,16 @@ Schedule::command('iqot:update-fx-rates')
     ->onOneServer()
     ->runInBackground();
 
+// Foundation §7.2: догоняющая классификация интента входящих, пролетевших в
+// окно сбоя AI (OpenAI 429/quota). Каждые 15 минут — транзиентные сбои
+// само-залечиваются, заявка не зависает в Quoted при ответе «на согласовании»
+// и т.п. См. MailClassifyIntentPendingCommand (только свежие, без бэкфилла).
+Schedule::command('mail:classify-intent-pending')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Фаза 3.5: авто-напоминания поставщикам по открытым RFQ без ответа.
 // Раз в день утром — поставщик увидит нудж в начале рабочего дня; интервал и
 // лимит напоминаний — config services.suppliers.reminder.* (no-op при enabled=false).

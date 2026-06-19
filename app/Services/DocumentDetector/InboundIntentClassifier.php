@@ -99,6 +99,12 @@ class InboundIntentClassifier
             return null;
         }
 
+        // LLM ОТВЕТИЛ (валидный JSON) — помечаем письмо как классифицированное,
+        // даже если intent окажется unclear/non-actionable. Транзиентный сбой
+        // выше (429/quota) сюда не доходит (return null без отметки), поэтому
+        // догоняющий крон повторит ТОЛЬКО реально пролетевшие письма.
+        EmailMessage::query()->whereKey($message->id)->update(['intent_classified_at' => now()]);
+
         $intent = (string) $parsed['intent'];
         $confidence = (float) ($parsed['confidence'] ?? 0);
 
