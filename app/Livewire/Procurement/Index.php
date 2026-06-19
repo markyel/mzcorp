@@ -138,6 +138,24 @@ class Index extends Component
         }
         $inFlight = array_flip($inFlight);
 
+        // Расценки IQOT (анализ цен конкурентов) по этим позициям — справочно
+        // снабженцу. Одна строка IqotPosition на catalog_item; берём с ценой и
+        // не исключённые.
+        $iqot = [];
+        if ($cids !== []) {
+            foreach (\App\Models\IqotPosition::query()
+                ->whereIn('catalog_item_id', $cids)
+                ->whereNull('excluded_at')
+                ->whereNotNull('report_min_price')
+                ->get(['catalog_item_id', 'report_min_price', 'report_offers_count', 'analyzed_at']) as $ip) {
+                $iqot[$ip->catalog_item_id] = [
+                    'min' => (float) $ip->report_min_price,
+                    'offers' => (int) $ip->report_offers_count,
+                    'at' => $ip->analyzed_at,
+                ];
+            }
+        }
+
         $enriched = $slice->map(fn ($r) => [
             'cid' => $r->cid,
             'sku' => $r->sku,
@@ -147,6 +165,7 @@ class Index extends Component
             'req_count' => (int) $r->req_count,
             'codes' => $codes[$r->cid] ?? [],
             'in_flight' => isset($inFlight[$r->cid]),
+            'iqot' => $iqot[$r->cid] ?? null,
         ])->all();
 
         return new LengthAwarePaginator(
