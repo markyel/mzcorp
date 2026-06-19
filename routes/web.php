@@ -28,7 +28,7 @@ Route::middleware('auth')->group(function () {
 
     // Заявки — пул менеджера и карточка. Все 4 роли;
     // фильтрация «своё/всё» — внутри Pool component.
-    Route::middleware('role:manager,head_of_sales,director,secretary,admin')->group(function () {
+    Route::middleware('role:manager,head_of_sales,director,secretary,admin,procurement')->group(function () {
         Route::get('/dashboard/requests', function () {
             return view('requests.index');
         })->name('requests.index');
@@ -140,7 +140,7 @@ Route::middleware('auth')->group(function () {
     // Phase 4: раздел «Счета». Менеджер видит свои Invoice, привилегированные
     // (РОП / директор / секретарь / админ) — все. Permission-фильтр scope='mine'
     // принудительно установлен для менеджеров внутри Livewire-компонента.
-    Route::middleware('role:manager,head_of_sales,secretary,director,admin')->group(function () {
+    Route::middleware('role:manager,head_of_sales,secretary,director,admin,procurement')->group(function () {
         Route::get('/dashboard/invoices', function () {
             return view('invoices.index');
         })->name('invoices.index');
@@ -175,6 +175,14 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/suppliers/{inquiry}', function (\App\Models\SupplierInquiry $inquiry) {
             return view('suppliers.show', ['inquiry' => $inquiry]);
         })->name('suppliers.show');
+
+        // Раздел «Снабжение» (Фаза 4) — топ M-позиций, сдерживающих выдачу КП
+        // (до-КП заявки с неактуальной ценой), формирование запросов
+        // поставщикам по M-артикулу, контроль обновления цен. Доступ:
+        // снабжение + менеджер (часто инициатор) + РОП/директор/админ.
+        Route::get('/dashboard/procurement', function () {
+            return view('procurement.index');
+        })->name('procurement.index');
     });
 
     // Mail routing rules — управление правилами для РОП и директора.

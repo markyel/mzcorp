@@ -14,6 +14,10 @@
     // (только свои Invoice через request.assigned_user_id), привилегированные
     // — scope='all'. Фильтр scope принудительно ограничивается в Livewire.
     $canSeeInvoices = $railUser?->hasAnyRole(['manager', 'head_of_sales', 'secretary', 'director', 'admin']);
+    // «Снабжение» — раздел снабженца (топ позиций-блокеров КП + запросы
+    // поставщикам по M-артикулу). Снабжение + менеджер (частый инициатор) +
+    // РОП/директор/админ. Секретарю не показываем.
+    $canSeeProcurement = $railUser?->hasAnyRole(['procurement', 'manager', 'head_of_sales', 'director', 'admin']);
 
     // Единый список левого rail для всех страниц с 3-col shell.
     // active маркируется по значению атрибута компонента, не по route()
@@ -39,6 +43,11 @@
 
     // «Поставщики» — запросы расценки поставщикам (SupplierInquiry). Все роли.
     $rail[] = ['icon' => '◇', 'label' => 'Поставщики', 'href' => route('suppliers.index'), 'key' => 'suppliers'];
+
+    // «Снабжение» — топ позиций, сдерживающих выдачу КП + запросы поставщикам.
+    if ($canSeeProcurement) {
+        $rail[] = ['icon' => '⛏', 'label' => 'Снабжение', 'href' => route('procurement.index'), 'key' => 'procurement'];
+    }
 
     // Phase 2 placeholder'ы — disabled (без href), показываются для
     // структуры UI.

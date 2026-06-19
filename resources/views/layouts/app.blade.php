@@ -38,6 +38,7 @@
                     request()->routeIs('invoices.*')        => 'invoices',
                     request()->routeIs('clients.*')         => 'clients',
                     request()->routeIs('suppliers.*')       => 'suppliers',
+                    request()->routeIs('procurement.*')     => 'procurement',
                     default                                  => null,
                 };
                 $showRail = ($rail ?? true);
