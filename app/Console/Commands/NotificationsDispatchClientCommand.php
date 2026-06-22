@@ -445,13 +445,17 @@ class NotificationsDispatchClientCommand extends Command
             if (($quote['number'] ?? null) === null || ($quote['anchor'] ?? null) === null) {
                 continue;
             }
-            // Падение цены В КАТАЛОГЕ уже ПОСЛЕ ЗАКРЫТИЯ заявки (closed_at):
-            // именно «с тех пор как клиент отказался — цена снизилась». Цена
-            // клиента (со скидкой) меняется пропорционально каталожной, поэтому
-            // сравниваем каталог old_price→new_price (одна база), а НЕ цену КП
-            // (со скидкой/НДС) с розницей. Изменения ДО закрытия (в т.ч. в день
-            // КП) не считаются — клиент их уже видел в КП (кейс M-2026-4639).
-            $dropped = $this->collectPriceDrops($request, $request->closed_at, $thresholdPct);
+            // Падение цены В КАТАЛОГЕ уже ПОСЛЕ ДНЯ выставления КП: снижения в
+            // САМ день КП клиент уже видел в его цене (кейс M-2026-4639: каталог
+            // в тот же день «догнал» цену КП), поэтому отсекаем по концу дня КП.
+            // Сравниваем каталог old_price→new_price (одна база) — цена клиента
+            // со скидкой меняется пропорционально, % падения тот же; сравнивать
+            // цену КП (со скидкой/НДС) с розницей НЕЛЬЗЯ. Нет sent_at → fallback
+            // на закрытие заявки.
+            $sentAt = $quote['sent_at'] ? Carbon::parse($quote['sent_at']) : null;
+            $priceGate = $sentAt ? $sentAt->copy()->endOfDay() : $request->closed_at;
+
+            $dropped = $this->collectPriceDrops($request, $priceGate, $thresholdPct);
             if ($dropped === []) {
                 continue;
             }

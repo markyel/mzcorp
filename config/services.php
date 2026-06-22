@@ -45,7 +45,7 @@ return [
         'client_secret' => env('YANDEX_OAUTH_CLIENT_SECRET'),
         'redirect_uri' => env(
             'YANDEX_OAUTH_REDIRECT_URI',
-            rtrim((string) env('APP_URL', 'http://localhost'), '/') . '/oauth/yandex/callback'
+            rtrim((string) env('APP_URL', 'http://localhost'), '/').'/oauth/yandex/callback'
         ),
         'scope' => env('YANDEX_OAUTH_SCOPE', 'mail:imap_full mail:smtp'),
     ],
@@ -472,7 +472,7 @@ return [
             // За сколько дней назад берём проигранные (closed_lost) заявки.
             'period_days' => (int) env('REVIVAL_PERIOD_DAYS', 14),
             // Минимальное падение цены позиции (%), чтобы счесть КП устаревшим.
-            'drop_threshold_pct' => (float) env('REVIVAL_DROP_THRESHOLD_PCT', 15),
+            'drop_threshold_pct' => (float) env('REVIVAL_DROP_THRESHOLD_PCT', 10),
             // Фраза-подсказка, которую просим написать клиента в ответ.
             'reply_keyword' => env('REVIVAL_REPLY_KEYWORD', 'прислать новое КП'),
         ],
