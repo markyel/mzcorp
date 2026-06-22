@@ -7,7 +7,6 @@ use App\Enums\DetectorType;
 use App\Enums\InvoiceStatus;
 use App\Enums\QuotationStatus;
 use App\Enums\RequestStatus;
-use App\Models\CatalogItem;
 use App\Models\CatalogPriceChange;
 use App\Models\ClarificationBatch;
 use App\Models\ClientNotificationSent;
@@ -16,13 +15,11 @@ use App\Models\EmailMessage;
 use App\Models\Invoice;
 use App\Models\OutboundQuote;
 use App\Models\Quotation;
-use App\Models\QuotationItem;
 use App\Models\Request;
 use App\Services\Mail\ClientNotificationService;
 use App\Services\Settings\SettingsService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -270,7 +267,7 @@ class NotificationsDispatchClientCommand extends Command
      */
     private function resolveLastSentQuote(Request $request): array
     {
-        $empty = ['number' => null, 'amount' => null, 'date' => null, 'sent_at' => null, 'anchor' => null, 'source' => null, 'source_id' => null];
+        $empty = ['number' => null, 'amount' => null, 'date' => null, 'sent_at' => null, 'anchor' => null];
 
         $quotation = Quotation::with('sentEmailMessage')
             ->where('request_id', $request->id)
@@ -295,8 +292,6 @@ class NotificationsDispatchClientCommand extends Command
             'date' => optional($quotation->sent_at)->format('d.m.Y'),
             'sent_at' => $quotation->sent_at,
             'anchor' => $quotation->sentEmailMessage,
-            'source' => 'quotation',
-            'source_id' => $quotation->id,
         ] : null;
 
         $outboundSentAt = $outbound
@@ -311,8 +306,6 @@ class NotificationsDispatchClientCommand extends Command
             'date' => $outbound->document_date?->format('d.m.Y'),
             'sent_at' => $outboundSentAt,
             'anchor' => $outbound->emailMessage,
-            'source' => 'outbound',
-            'source_id' => $outbound->id,
         ] : null;
 
         if (! $fromQuotation && ! $fromOutbound) {
@@ -452,19 +445,13 @@ class NotificationsDispatchClientCommand extends Command
             if (($quote['number'] ?? null) === null || ($quote['anchor'] ?? null) === null) {
                 continue;
             }
-            $quoteSentAt = $quote['sent_at'] ?? $request->closed_at;
-
-            // Цена, по которой клиента РЕАЛЬНО проквотировали в этом КП
-            // (по catalog_item_id) — это и есть «было» для revival; каталожный
-            // лист тут ни при чём (клиент видел цену КП, а не каталога).
-            $quotedByCatalog = $this->quotedUnitPricesByCatalogItem($quote);
-            if ($quotedByCatalog === []) {
-                continue; // без построчных цен КП «было» взять неоткуда
-            }
-
-            // Падение цены: текущая цена ниже выставленной в КП + реальное
-            // изменение каталога после КП (см. collectPriceDrops).
-            $dropped = $this->collectPriceDrops($request, $quotedByCatalog, $quoteSentAt, $thresholdPct);
+            // Падение цены В КАТАЛОГЕ уже ПОСЛЕ ЗАКРЫТИЯ заявки (closed_at):
+            // именно «с тех пор как клиент отказался — цена снизилась». Цена
+            // клиента (со скидкой) меняется пропорционально каталожной, поэтому
+            // сравниваем каталог old_price→new_price (одна база), а НЕ цену КП
+            // (со скидкой/НДС) с розницей. Изменения ДО закрытия (в т.ч. в день
+            // КП) не считаются — клиент их уже видел в КП (кейс M-2026-4639).
+            $dropped = $this->collectPriceDrops($request, $request->closed_at, $thresholdPct);
             if ($dropped === []) {
                 continue;
             }
@@ -486,133 +473,59 @@ class NotificationsDispatchClientCommand extends Command
     }
 
     /**
-     * Цена, по которой клиента РЕАЛЬНО проквотировали в последнем КП, по
-     * catalog_item_id (unit-цена). Это источник истины для «было» в revival:
-     * клиент видел цену КП, а не каталожный лист. Берётся из построчных позиций
-     * того же КП (Quotation → final_unit_price; OutboundQuote → unit_price).
+     * Позиции заявки, по которым каталожная цена РЕАЛЬНО снизилась сильнее
+     * $thresholdPct уже ПОСЛЕ $since (= closed_at). Сравниваем каталог
+     * old_price→new_price (одна база): цена клиента со скидкой меняется
+     * пропорционально каталожной, поэтому % падения каталога = % падения для
+     * клиента. Сравнивать цену из КП (со скидкой/НДС) с каталожной розницей
+     * НЕЛЬЗЯ — это разные базы. Берём по одному (самому свежему) изменению на
+     * позицию.
      *
-     * @param  array<string, mixed>  $quote  результат resolveLastSentQuote
-     * @return array<int, float> catalog_item_id => unit-цена из КП
-     */
-    private function quotedUnitPricesByCatalogItem(array $quote): array
-    {
-        $source = $quote['source'] ?? null;
-        $sourceId = $quote['source_id'] ?? null;
-        if ($sourceId === null) {
-            return [];
-        }
-
-        $map = [];
-        if ($source === 'quotation') {
-            $rows = QuotationItem::query()
-                ->where('quotation_id', $sourceId)
-                ->whereNotNull('catalog_item_id')
-                ->get(['catalog_item_id', 'final_unit_price', 'catalog_unit_price']);
-            foreach ($rows as $row) {
-                $price = $row->final_unit_price ?? $row->catalog_unit_price;
-                if ($price !== null && (float) $price > 0) {
-                    $cid = (int) $row->catalog_item_id;
-                    // Несколько строк на одну позицию — берём минимальную (что
-                    // реально предложили дешевле всего).
-                    $map[$cid] = isset($map[$cid]) ? min($map[$cid], (float) $price) : (float) $price;
-                }
-            }
-        } elseif ($source === 'outbound') {
-            $rows = DB::table('outbound_quote_items')
-                ->where('outbound_quote_id', $sourceId)
-                ->whereNotNull('matched_catalog_item_id')
-                ->get(['matched_catalog_item_id', 'unit_price']);
-            foreach ($rows as $row) {
-                if ($row->unit_price !== null && (float) $row->unit_price > 0) {
-                    $cid = (int) $row->matched_catalog_item_id;
-                    $map[$cid] = isset($map[$cid]) ? min($map[$cid], (float) $row->unit_price) : (float) $row->unit_price;
-                }
-            }
-        }
-
-        return $map;
-    }
-
-    /**
-     * Позиции заявки, по которым revival оправдан. Условие — ОБА:
-     *   1. (ГЛАВНОЕ) каталожная цена позиции РЕАЛЬНО снизилась уже ПОСЛЕ
-     *      отправки КП ($since) — есть CatalogPriceChange с падением
-     *      price_min/price. Если с момента КП каталог НЕ менялся — слать «цена
-     *      снизилась» нельзя, даже если текущий флор ниже строки КП: у исходящих
-     *      КП строка часто с НДС/наценкой, и флор каталога структурно ниже —
-     *      это разница базы, а не снижение цены (кейсы M-2026-3138/3594/3456:
-     *      каталог не менялся, а «−20…50%» было ложным).
-     *   2. текущая цена (флор) ниже выставленной клиенту в КП на ≥ порога —
-     *      гарантия, что предлагаем РЕАЛЬНО дешевле того, что клиент уже видел.
-     *      Ловит M-2026-4639: каталог в день КП лишь «догнал» цену, по которой
-     *      уже выставили КП (150 444), → с момента КП цена для клиента не
-     *      изменилась (текущая = цене КП), хоть формально CatalogPriceChange и
-     *      есть.
-     * «было» = цена КП (что видел клиент), «стало» = текущая цена (флор).
-     *
-     * @param  array<int, float>  $quotedByCatalog  catalog_item_id => unit-цена КП
      * @return array<int, array{name: string, sku: ?string, old: float, new: float, pct: float}>
      */
-    private function collectPriceDrops(Request $request, array $quotedByCatalog, mixed $since, float $thresholdPct): array
+    private function collectPriceDrops(Request $request, mixed $since, float $thresholdPct): array
     {
         $catIds = $request->items
             ->where('is_active', true)
             ->pluck('catalog_item_id')
             ->filter()
-            ->map(fn ($c) => (int) $c)
             ->unique()
-            ->filter(fn ($cid) => isset($quotedByCatalog[$cid]))
             ->values()
             ->all();
         if ($catIds === []) {
             return [];
         }
 
-        // Условие 1 (главное): по каким позициям каталог реально снизился ПОСЛЕ
-        // отправки КП. Нет записи — каталог с момента КП не менялся → не шлём.
-        $droppedAfterQuote = CatalogPriceChange::query()
+        $changes = CatalogPriceChange::query()
             ->whereIn('catalog_item_id', $catIds)
+            ->whereNotNull('old_price')
+            ->whereNotNull('new_price')
+            ->whereColumn('new_price', '<', 'old_price')
             ->when($since, fn ($q) => $q->where('changed_at', '>=', $since))
-            ->where(fn ($w) => $w
-                ->whereColumn('new_price_min', '<', 'old_price_min')
-                ->orWhereColumn('new_price', '<', 'old_price'))
-            ->pluck('catalog_item_id')
-            ->map(fn ($c) => (int) $c)
-            ->unique()
-            ->flip();
-
-        $catalog = CatalogItem::query()
-            ->whereIn('id', $catIds)
-            ->get(['id', 'sku', 'name', 'price', 'price_min'])
-            ->keyBy('id');
+            ->with('catalogItem:id,sku,name')
+            ->orderByDesc('id')
+            ->get();
 
         $byItem = [];
-        foreach ($catIds as $cid) {
-            // Условие 1: каталог реально менялся (снижался) с момента КП.
-            if (! isset($droppedAfterQuote[$cid])) {
+        foreach ($changes as $ch) {
+            $cid = (int) $ch->catalog_item_id;
+            if (isset($byItem[$cid])) {
+                continue; // уже взяли самое свежее изменение (orderByDesc id)
+            }
+            $old = (float) $ch->old_price;
+            $new = (float) $ch->new_price;
+            if ($old <= 0) {
                 continue;
             }
-            $quoted = (float) $quotedByCatalog[$cid];
-            $ci = $catalog->get($cid);
-            if ($quoted <= 0 || ! $ci) {
-                continue;
-            }
-            // Текущая цена, по которой проквотировали бы сейчас (флор-цена).
-            $current = $ci->price_min !== null ? (float) $ci->price_min : (float) $ci->price;
-            // Условие 2: дешевле, чем выставили клиенту (иначе как в M-2026-4639
-            // — цена с момента КП для клиента не изменилась).
-            if ($current <= 0 || $current >= $quoted) {
-                continue;
-            }
-            $pct = round(($quoted - $current) / $quoted * 100, 1);
+            $pct = round(($old - $new) / $old * 100, 1);
             if ($pct < $thresholdPct) {
                 continue;
             }
             $byItem[$cid] = [
-                'name' => (string) ($ci->name ?? $ci->sku ?? '—'),
-                'sku' => $ci->sku,
-                'old' => $quoted,
-                'new' => $current,
+                'name' => (string) ($ch->catalogItem?->name ?? $ch->sku ?? '—'),
+                'sku' => $ch->sku,
+                'old' => $old,
+                'new' => $new,
                 'pct' => $pct,
             ];
         }
@@ -630,11 +543,12 @@ class NotificationsDispatchClientCommand extends Command
     {
         $lines = [];
         foreach (array_slice($dropped, 0, 5) as $d) {
+            // Показываем только % снижения: он одинаков для каталога и для цены
+            // клиента (скидка — множитель, в проценте сокращается). Абсолюты не
+            // показываем — каталожная розница ≠ цене из КП клиента (со скидкой).
             $lines[] = sprintf(
-                '· %s — было %s ₽, стало %s ₽ (−%s%%)',
+                '· %s — дешевле на %s%%',
                 mb_substr((string) $d['name'], 0, 80),
-                number_format($d['old'], 0, ',', ' '),
-                number_format($d['new'], 0, ',', ' '),
                 rtrim(rtrim(number_format($d['pct'], 1, '.', ''), '0'), '.'),
             );
         }
