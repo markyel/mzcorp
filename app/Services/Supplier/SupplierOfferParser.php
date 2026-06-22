@@ -41,7 +41,12 @@ class SupplierOfferParser
     {
         $zero = ['quoted' => 0, 'refused' => 0, 'skipped' => 0];
 
-        $items = $inquiry->items()->with('requestItem:id,parsed_name,parsed_article,parsed_qty,parsed_unit')->get();
+        $items = $inquiry->items()->with([
+            'requestItem:id,parsed_name,parsed_article,parsed_qty,parsed_unit',
+            // Позиция-центричный RFQ из «Снабжения» (Фаза 4B): request_item_id=null,
+            // имя/OEM берём из каталога — иначе LLM сопоставляет ответ вслепую.
+            'catalogItem:id,name,brand_article',
+        ])->get();
         if ($items->isEmpty()) {
             return $zero;
         }
@@ -51,10 +56,11 @@ class SupplierOfferParser
         $i = 1;
         foreach ($items as $it) {
             $ri = $it->requestItem;
+            $ci = $it->catalogItem;
             $promptItems[] = [
                 'index' => $i,
-                'name' => (string) ($it->item_name ?: $ri?->parsed_name ?: '—'),
-                'oem' => $ri?->parsed_article ?: null,
+                'name' => (string) ($it->item_name ?: $ri?->parsed_name ?: $ci?->name ?: '—'),
+                'oem' => $ri?->parsed_article ?: ($ci?->brand_article ?: null),
                 'qty' => $ri && $ri->parsed_qty ? trim($ri->parsed_qty . ' ' . ($ri->parsed_unit ?: 'шт.')) : null,
             ];
             $byIndex[$i] = $it;

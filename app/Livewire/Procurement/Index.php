@@ -457,19 +457,6 @@ class Index extends Component
             }
         }
 
-        // «В работе» — по позиции есть pending supplier_inquiry_item.
-        $inFlight = [];
-        if ($cids !== []) {
-            $inFlight = DB::table('supplier_inquiry_items')
-                ->join('request_items', 'request_items.id', '=', 'supplier_inquiry_items.request_item_id')
-                ->where('supplier_inquiry_items.status', 'pending')
-                ->whereIn('request_items.catalog_item_id', $cids)
-                ->distinct()
-                ->pluck('request_items.catalog_item_id')
-                ->all();
-        }
-        $inFlight = array_flip($inFlight);
-
         $enriched = $slice->map(fn ($r) => [
             'cid' => $r->cid,
             'sku' => $r->sku,
@@ -478,7 +465,6 @@ class Index extends Component
             'price' => $r->price,
             'req_count' => (int) $r->req_count,
             'codes' => $codes[$r->cid] ?? [],
-            'in_flight' => isset($inFlight[$r->cid]),
         ])->all();
 
         return new LengthAwarePaginator(
@@ -512,6 +498,107 @@ class Index extends Component
             ->whereNotNull('report')
             ->get()
             ->keyBy('catalog_item_id');
+    }
+
+    /**
+     * Ответ поставщика по каждой M-позиции страницы (Фаза 4C — «замыкаем петлю»).
+     * Учитывает и позиция-центричные RFQ из «Снабжения» (supplier_inquiry_items
+     * по catalog_item_id), и request-центричные с того же каталожного товара
+     * (request_item → catalog_item). Состояние: quoted (есть цена) > awaiting
+     * (ждём ответ) > refused (все отказали). Берём лучшую (минимальную) цену.
+     *
+     * @return array<int, array{state:string, pending_count:int, best_price:?float, best_currency:?string, best_supplier:?string, best_valid_until:?string, offers:array<int, array{supplier:string, outcome:string, price:?float, currency:?string, valid_until:?string, refusal:?string}>}>
+     */
+    #[Computed]
+    public function responseByCatalogId(): array
+    {
+        $cids = collect($this->positions->items())->pluck('cid')->filter()->all();
+        if ($cids === []) {
+            return [];
+        }
+
+        $cidExpr = 'COALESCE(supplier_inquiry_items.catalog_item_id, request_items.catalog_item_id)';
+
+        $items = DB::table('supplier_inquiry_items')
+            ->join('supplier_inquiries', 'supplier_inquiries.id', '=', 'supplier_inquiry_items.supplier_inquiry_id')
+            ->leftJoin('request_items', 'request_items.id', '=', 'supplier_inquiry_items.request_item_id')
+            ->whereIn(DB::raw($cidExpr), $cids)
+            ->select(
+                DB::raw($cidExpr . ' as cid'),
+                'supplier_inquiry_items.id as item_id',
+                'supplier_inquiry_items.status as item_status',
+                'supplier_inquiries.supplier_name',
+                'supplier_inquiries.supplier_email',
+            )
+            ->get();
+        if ($items->isEmpty()) {
+            return [];
+        }
+
+        // Последний оффер по позиции (несколько писем → берём свежий по id).
+        $latestOffer = [];
+        DB::table('supplier_offers')
+            ->whereIn('supplier_inquiry_item_id', $items->pluck('item_id')->all())
+            ->orderBy('id')
+            ->get(['supplier_inquiry_item_id', 'outcome', 'price', 'currency', 'valid_until_text', 'refusal_reason'])
+            ->each(function ($o) use (&$latestOffer) {
+                $latestOffer[$o->supplier_inquiry_item_id] = $o;
+            });
+
+        $out = [];
+        foreach ($items->groupBy('cid') as $cid => $grp) {
+            $offers = [];
+            $pending = 0;
+            $hasQuoted = false;
+            $hasRefused = false;
+            $best = null;
+
+            foreach ($grp as $row) {
+                $supplier = (string) ($row->supplier_name ?: $row->supplier_email ?: '—');
+                $o = $latestOffer[$row->item_id] ?? null;
+                if ($o === null) {
+                    if ($row->item_status === 'pending') {
+                        $pending++;
+                    }
+                    continue;
+                }
+                $outcome = (string) $o->outcome;
+                $price = $o->price !== null ? (float) $o->price : null;
+                $offers[] = [
+                    'supplier' => $supplier,
+                    'outcome' => $outcome,
+                    'price' => $price,
+                    'currency' => $o->currency,
+                    'valid_until' => $o->valid_until_text,
+                    'refusal' => $o->refusal_reason,
+                ];
+                if ($outcome === 'quoted') {
+                    $hasQuoted = true;
+                    if ($price !== null && ($best === null || $price < $best['price'])) {
+                        $best = ['price' => $price, 'currency' => $o->currency, 'supplier' => $supplier, 'valid_until' => $o->valid_until_text];
+                    }
+                } elseif ($outcome === 'refused') {
+                    $hasRefused = true;
+                }
+            }
+
+            // Нет ни цены, ни ожидания, ни отказа (напр. всё cancelled) — не показываем.
+            if ($offers === [] && $pending === 0) {
+                continue;
+            }
+
+            $out[(int) $cid] = [
+                'state' => $hasQuoted ? 'quoted' : ($pending > 0 ? 'awaiting' : ($hasRefused ? 'refused' : 'awaiting')),
+                'pending_count' => $pending,
+                'best_price' => $best['price'] ?? null,
+                'best_currency' => $best['currency'] ?? null,
+                'best_supplier' => $best['supplier'] ?? null,
+                'best_valid_until' => $best['valid_until'] ?? null,
+                'offers' => $offers,
+            ];
+        }
+
+        return $out;
     }
 
     public function render()

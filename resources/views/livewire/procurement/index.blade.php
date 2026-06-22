@@ -44,15 +44,17 @@
                         <th class="text-left px-2 py-2">Заявки</th>
                         <th class="text-right px-2 py-2" style="width:110px">Цена (ст.)</th>
                         <th class="text-left px-2 py-2" style="width:150px">IQOT (конкуренты)</th>
-                        <th class="text-left px-2 py-2" style="width:90px">Статус</th>
+                        <th class="text-left px-2 py-2" style="width:180px">Ответ поставщика</th>
                     </tr>
                 </thead>
                 @forelse($this->positions as $i => $p)
                     @php
                         $iqp = $this->iqotByCatalogId->get($p['cid']);
                         $hasIqot = $iqp !== null;
+                        $resp = $this->responseByCatalogId[$p['cid']] ?? null;
+                        $hasOffers = $resp !== null && ! empty($resp['offers']);
                     @endphp
-                    <tbody x-data="{ open: false }" wire:key="blk-{{ $p['cid'] }}">
+                    <tbody x-data="{ open: false, sup: false }" wire:key="blk-{{ $p['cid'] }}">
                         <tr class="border-b border-border-subtle hover:bg-hover align-top">
                             <td class="px-2 py-2 text-center"><input type="checkbox" wire:model.live="selected.{{ $p['cid'] }}"></td>
                             <td class="px-2 py-2 text-right mono text-fg-4">{{ $this->positions->firstItem() + $i }}</td>
@@ -84,10 +86,25 @@
                                 @endif
                             </td>
                             <td class="px-2 py-2">
-                                @if($p['in_flight'])
-                                    <span class="chip chip-sky text-[10.5px]">⏳ запрошено</span>
-                                @else
+                                @if($resp === null)
                                     <span class="text-fg-4 text-[11px]">—</span>
+                                @else
+                                    <div class="flex items-center gap-1.5">
+                                        @if($resp['state'] === 'quoted')
+                                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10.5px] font-medium">
+                                                <span>💰 {{ $resp['best_price'] !== null ? number_format($resp['best_price'], 2, '.', ' ') : 'цена' }}{{ $resp['best_currency'] ? ' '.$resp['best_currency'] : ' ₽' }}</span>
+                                            </span>
+                                            @if($resp['best_supplier'])<span class="text-fg-3 text-[10.5px] truncate" style="max-width:80px" title="{{ $resp['best_supplier'] }}">{{ $resp['best_supplier'] }}</span>@endif
+                                            @if($resp['pending_count'] > 0)<span class="text-fg-4 text-[10px]" title="ещё ждём ответ от {{ $resp['pending_count'] }} поставщ.">+{{ $resp['pending_count'] }}</span>@endif
+                                        @elseif($resp['state'] === 'refused')
+                                            <span class="chip chip-warn text-[10.5px]">✖ отказ</span>
+                                        @else
+                                            <span class="chip chip-sky text-[10.5px]">⏳ ждём ответ{{ $resp['pending_count'] > 1 ? ' ('.$resp['pending_count'].')' : '' }}</span>
+                                        @endif
+                                        @if($hasOffers)
+                                            <button type="button" @click="sup = !sup" class="text-fg-4 text-[11px] hover:text-fg-2" x-text="sup ? '▾' : '▸'"></button>
+                                        @endif
+                                    </div>
                                 @endif
                             </td>
                         </tr>
@@ -95,6 +112,28 @@
                             <tr x-show="open" x-cloak class="border-b border-border-subtle bg-surface-2">
                                 <td colspan="10" class="px-4 py-2.5">
                                     @include('livewire.iqot._comparison', ['pos' => $iqp])
+                                </td>
+                            </tr>
+                        @endif
+                        @if($hasOffers)
+                            <tr x-show="sup" x-cloak class="border-b border-border-subtle bg-surface-2">
+                                <td colspan="10" class="px-4 py-2.5">
+                                    <div class="text-[10.5px] uppercase tracking-wider text-fg-4 mb-1.5">Ответы поставщиков</div>
+                                    <div class="space-y-1">
+                                        @foreach($resp['offers'] as $of)
+                                            <div class="flex items-center gap-2 text-[12px]">
+                                                <span class="text-fg-2 font-medium truncate" style="min-width:170px;max-width:170px" title="{{ $of['supplier'] }}">{{ $of['supplier'] }}</span>
+                                                @if($of['outcome'] === 'quoted')
+                                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10.5px] font-medium">💰 {{ $of['price'] !== null ? number_format($of['price'], 2, '.', ' ') : 'цена' }}{{ $of['currency'] ? ' '.$of['currency'] : ' ₽' }}</span>
+                                                    @if($of['valid_until'])<span class="text-fg-4 text-[11px]">до {{ $of['valid_until'] }}</span>@endif
+                                                @else
+                                                    <span class="chip chip-warn text-[10.5px]">✖ отказ</span>
+                                                    @if($of['refusal'])<span class="text-fg-3 text-[11px]">{{ \Illuminate\Support\Str::limit($of['refusal'], 70) }}</span>@endif
+                                                @endif
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                    <div class="text-[10.5px] text-fg-4 mt-2">Цена обновится в каталоге после импорта из 1С → заблокированные заявки получат сигнал «💰».</div>
                                 </td>
                             </tr>
                         @endif
