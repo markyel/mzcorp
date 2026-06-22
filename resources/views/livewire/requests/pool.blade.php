@@ -895,6 +895,13 @@
                                           title="Заявка открыта вам на время отсутствия {{ $activeDelegation->originalUser?->name ?? $managerName }}">
                                         ↺ открыто мне
                                     </span>
+                                @elseif($activeDelegation && $activeDelegation->actingUser?->name)
+                                    {{-- РОП / владелец видят, КОМУ делегирована заявка. --}}
+                                    <span class="inline-flex items-center gap-0.5 px-1.5 rounded-sm bg-sky-50 text-sky-700 font-medium text-[10.5px] flex-shrink-0 min-w-0"
+                                          title="Делегирована (временно открыта) менеджеру {{ $activeDelegation->actingUser->name }} на время отсутствия {{ $managerName }}">
+                                        <span class="flex-shrink-0">↺</span>
+                                        <span class="truncate max-w-[110px]">{{ $activeDelegation->actingUser->name }}</span>
+                                    </span>
                                 @endif
                             </span>
 

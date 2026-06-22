@@ -352,9 +352,10 @@ class Pool extends Component
                 // self-join, и колонки без префикса (request_id) дают
                 // SQLSTATE[42702] ambiguous column.
                 'latestAssignment',
-                // Phase 2 delegation: для UI badge «временно от @{owner}».
+                // Phase 2 delegation: для UI badge «временно от @{owner}» (acting'у)
+                // и «↺ → {acting}» (РОПу/владельцу — кому делегирована).
                 'activeDelegations' => fn ($q) => $q->select(['id', 'request_id', 'original_user_id', 'acting_user_id', 'started_at'])
-                    ->with(['originalUser:id,name']),
+                    ->with(['originalUser:id,name', 'actingUser:id,name']),
             ])
             ->withCount('items');
 
