@@ -122,8 +122,11 @@ class QuotationItem extends Model
             return $single($manual);
         }
 
+        // Срок под-заказа из базы (lead_time_days). Если в каталоге его нет
+        // (0/пусто, ~45% под-заказ позиций) — честное «срок уточняется» вместо
+        // выдуманного числа; явный срок показываем как «≈ N нед».
         $weeks = $this->catalog_lead_time_days ? (int) ceil($this->catalog_lead_time_days / 7) : null;
-        $orderTerm = $weeks !== null ? "Под заказ ≈ {$weeks} нед" : 'Под заказ';
+        $orderTerm = $weeks !== null ? "Под заказ ≈ {$weeks} нед" : 'Под заказ (срок уточняется)';
 
         $stock = $this->catalog_stock_available;
         if ($stock === null) {
