@@ -10,6 +10,7 @@ use App\Prompts\Mail\DecideClarificationsPrompt;
 use App\Prompts\Mail\ParseItemsPrompt;
 use App\Prompts\Mail\ParseItemsUnifiedPrompt;
 use App\Services\AI\OpenAIChatService;
+use App\Services\AI\VisionImageDownscaler;
 use App\Services\Mail\EmailTextCleanerService;
 use App\Services\Web\InboundUrlFetcherService;
 use App\Services\Web\UrlExtractor;
@@ -1144,7 +1145,8 @@ PROMPT;
                     continue;
                 }
                 $mime = $att->mime_type ?: 'image/jpeg';
-                $images[] = "data:{$mime};base64," . base64_encode($content);
+                // Фото-вложения ужимаем до 2048px/JPEG перед Vision (гард 413).
+                $images[] = VisionImageDownscaler::dataUri($content, $mime, (int) $att->id);
                 $attachmentIds[] = (int) $att->id;
             } catch (\Throwable $e) {
                 Log::warning('loadImageDataUris: image read failed', [

@@ -10,6 +10,7 @@ use App\Models\Request as RequestModel;
 use App\Models\RequestItem;
 use App\Prompts\Kb\PhotoClassifierPrompt;
 use App\Services\AI\OpenAIChatService;
+use App\Services\AI\VisionImageDownscaler;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -370,7 +371,8 @@ class PhotoSlotClassifierService
                 continue;
             }
             $mime = $att->mime_type ?: 'image/jpeg';
-            $images[] = 'data:'.$mime.';base64,'.base64_encode($content);
+            // Фото-вложения ужимаем до 2048px/JPEG перед Vision (гард 413).
+            $images[] = VisionImageDownscaler::dataUri($content, $mime, (int) $att->id);
             $ids[] = (int) $att->id;
         }
         return [$images, $ids];

@@ -4,6 +4,7 @@ namespace App\Services\Quotes;
 
 use App\Models\Request;
 use App\Services\AI\OpenAIChatService;
+use App\Services\AI\VisionImageDownscaler;
 use App\Services\Catalog\CatalogImportService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -216,7 +217,8 @@ class OutboundQuoteParsingService
 
         return [
             'text' => null,
-            'images' => ['data:'.$mimeType.';base64,'.base64_encode($imageData)],
+            // Фото-вложения ужимаем до 2048px/JPEG перед Vision (гард 413).
+            'images' => [VisionImageDownscaler::dataUri($imageData, $mimeType)],
         ];
     }
 
