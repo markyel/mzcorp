@@ -134,11 +134,42 @@
                                     <td class="px-3 py-2 text-fg-2">{{ $c->full_name ?: '—' }}</td>
                                     <td class="px-3 py-2 text-fg-2 mono">{{ $c->phone ?: '—' }}</td>
                                     <td class="px-3 py-2 text-right whitespace-nowrap">
+                                        @php $supCnt = count($this->notificationOptouts[mb_strtolower($c->email)] ?? []); @endphp
+                                        <button type="button" wire:click="toggleNotifPanel({{ $c->id }})"
+                                                class="text-[11.5px] hover:underline mr-2 {{ $supCnt > 0 ? 'text-amber-700' : 'text-fg-3' }}"
+                                                title="Персональные автоуведомления">🔔@if($supCnt > 0) <span class="mono">−{{ $supCnt }}</span>@endif</button>
                                         <button type="button" wire:click="startEditContact({{ $c->id }})" class="text-[11.5px] text-sky-700 hover:underline mr-2">✎</button>
                                         <button type="button" wire:click="detachContact({{ $c->id }})" wire:confirm="Отвязать {{ $c->email }} от организации?" class="text-[11.5px] text-red-600 hover:underline">отвязать</button>
                                     </td>
                                 @endif
                             </tr>
+                            @if($openNotifContactId === $c->id)
+                                @php $sup = $this->notificationOptouts[mb_strtolower($c->email)] ?? []; @endphp
+                                <tr wire:key="notif-{{ $c->id }}" class="bg-surface-2 border-b border-border-subtle">
+                                    <td colspan="4" class="px-3 py-3">
+                                        <div class="text-[11.5px] text-fg-3 mb-2">
+                                            🔔 Автоуведомления для <span class="mono text-fg-2">{{ $c->email }}</span>
+                                            <span class="text-fg-4">— снимите галочку, чтобы этот тип письма НЕ слать данному клиенту (по умолчанию все включены).</span>
+                                        </div>
+                                        <div class="grid gap-1.5" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr))">
+                                            @foreach($this->notificationTypes as $t)
+                                                @php $enabled = ! in_array($t->value, $sup, true); @endphp
+                                                <button type="button"
+                                                        wire:click="toggleContactNotification(@js($c->email), '{{ $t->value }}')"
+                                                        wire:key="notif-{{ $c->id }}-{{ $t->value }}"
+                                                        class="flex items-start gap-2 px-2 py-1.5 rounded border text-left w-full transition-colors {{ $enabled ? 'border-border hover:bg-hover' : 'border-amber-300 bg-amber-50' }}">
+                                                    <span class="mt-0.5 w-4 h-4 shrink-0 rounded border flex items-center justify-center text-[10px] leading-none {{ $enabled ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-border text-transparent' }}">✓</span>
+                                                    <span class="flex-1 min-w-0">
+                                                        <span class="text-[12.5px] font-medium {{ $enabled ? 'text-fg-1' : 'text-fg-3 line-through' }}">{{ $t->label() }}</span>
+                                                        @unless($enabled)<span class="text-[10px] text-amber-700 ml-1">не слать</span>@endunless
+                                                        <span class="block text-[10.5px] text-fg-4 leading-snug mt-0.5">{{ \Illuminate\Support\Str::limit($t->description(), 110) }}</span>
+                                                    </span>
+                                                </button>
+                                            @endforeach
+                                        </div>
+                                    </td>
+                                </tr>
+                            @endif
                         @empty
                             <tr><td colspan="4" class="px-3 py-6 text-center text-fg-3">Контактов пока нет — добавьте email выше.</td></tr>
                         @endforelse

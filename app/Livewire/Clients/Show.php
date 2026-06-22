@@ -2,9 +2,11 @@
 
 namespace App\Livewire\Clients;
 
+use App\Enums\ClientNotificationType;
 use App\Enums\InvoiceStatus;
 use App\Enums\RequestStatus;
 use App\Models\ClientContact;
+use App\Models\ClientNotificationOptout;
 use App\Models\Invoice;
 use App\Models\Organization;
 use App\Models\Quotation;
@@ -43,6 +45,9 @@ class Show extends Component
     public string $editPhone = '';
 
     public bool $confirmingDelete = false;
+
+    /** Контакт, у которого раскрыта панель «Автоуведомления» (id), либо null. */
+    public ?int $openNotifContactId = null;
 
     public function mount(Organization $organization): void
     {
@@ -196,6 +201,90 @@ class Show extends Component
     public function contacts()
     {
         return $this->organization->contacts()->get();
+    }
+
+    /* ------------- Персональные настройки автоуведомлений (по e-mail) -------- */
+
+    /** Раскрыть/свернуть панель автоуведомлений у контакта. */
+    public function toggleNotifPanel(int $contactId): void
+    {
+        $this->openNotifContactId = $this->openNotifContactId === $contactId ? null : $contactId;
+    }
+
+    /** Все типы автоуведомлений (для тумблеров). @return array<int, ClientNotificationType> */
+    #[Computed]
+    public function notificationTypes(): array
+    {
+        return ClientNotificationType::cases();
+    }
+
+    /**
+     * Заглушённые типы по e-mail контактов организации (стоп-лист единый с
+     * админ-страницей /dashboard/notification-optouts и гардом в
+     * ClientNotificationService::dispatch).
+     *
+     * @return array<string, array<int, string>> lower(email) => [type_value, ...]
+     */
+    #[Computed]
+    public function notificationOptouts(): array
+    {
+        $emails = $this->organization->contactEmails();
+        if ($emails === []) {
+            return [];
+        }
+
+        return ClientNotificationOptout::query()
+            ->whereIn(DB::raw('lower(email)'), $emails)
+            ->get(['email', 'suppressed_types'])
+            ->mapWithKeys(fn (ClientNotificationOptout $e) => [
+                mb_strtolower((string) $e->email) => array_values((array) $e->suppressed_types),
+            ])
+            ->all();
+    }
+
+    /**
+     * Включить ↔ заглушить один тип автоуведомления для e-mail контакта.
+     * Пишет в client_notification_optouts (suppressed_types). Пустую запись без
+     * комментария удаляем (нет опт-аутов = всё включено по умолчанию).
+     */
+    public function toggleContactNotification(string $email, string $typeValue): void
+    {
+        abort_unless(auth()->check(), 403);
+        if (ClientNotificationType::tryFrom($typeValue) === null) {
+            return;
+        }
+        $email = mb_strtolower(trim($email));
+        if ($email === '') {
+            return;
+        }
+
+        $entry = ClientNotificationOptout::query()
+            ->whereRaw('lower(email) = ?', [$email])
+            ->first() ?? new ClientNotificationOptout(['email' => $email]);
+
+        $suppressed = array_values((array) ($entry->suppressed_types ?? []));
+        if (in_array($typeValue, $suppressed, true)) {
+            // было заглушено → включаем (убираем из списка).
+            $suppressed = array_values(array_diff($suppressed, [$typeValue]));
+        } else {
+            // было включено → заглушаем.
+            $suppressed[] = $typeValue;
+        }
+
+        $hasComment = trim((string) ($entry->comment ?? '')) !== '';
+        if ($suppressed === [] && ! $hasComment) {
+            if ($entry->exists) {
+                $entry->delete();
+            }
+        } else {
+            if (! $entry->exists) {
+                $entry->created_by_user_id = auth()->id();
+            }
+            $entry->suppressed_types = $suppressed;
+            $entry->save();
+        }
+
+        unset($this->notificationOptouts);
     }
 
     /**
