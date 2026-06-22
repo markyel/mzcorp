@@ -73,6 +73,38 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 text-[12.5px]">
                 <div>
                     <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Заказчик</div>
+
+                    {{-- Подставить получателя из известной организации (у клиента
+                         может быть несколько) + её назначенная скидка. --}}
+                    @if($editable)
+                        @php $clientOrgs = $this->clientOrganizations; @endphp
+                        @if($clientOrgs->isNotEmpty())
+                            <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
+                                <span class="text-[11px] text-fg-3">Из организации:</span>
+                                @foreach($clientOrgs as $o)
+                                    @php $sel = ($o->inn && $q->recipient_inn === $o->inn) || (trim((string)$q->recipient_name) !== '' && $q->recipient_name === $o->name); @endphp
+                                    <button type="button" wire:click="applyOrganization({{ $o->id }})" wire:key="qorg-{{ $o->id }}"
+                                            class="px-2 py-0.5 rounded border text-[11.5px] {{ $sel ? 'border-sky-500 bg-sky-50 text-sky-800 font-medium' : 'border-border bg-surface text-fg-2 hover:bg-surface-2' }}">
+                                        {{ \Illuminate\Support\Str::limit($o->name, 30) }}@if($o->discount_percent > 0) <span class="text-emerald-700">·{{ rtrim(rtrim(number_format($o->discount_percent,2,'.',''),'0'),'.') }}%</span>@endif
+                                    </button>
+                                @endforeach
+                            </div>
+                        @endif
+                        <input type="text" wire:model.live.debounce.300ms="organizationSearch"
+                               placeholder="Найти другую организацию (название / ИНН)…"
+                               class="w-full text-[11.5px] text-fg-2 px-2 py-1 border border-border rounded mb-1 bg-surface">
+                        @if($this->searchedOrganizations->isNotEmpty())
+                            <div class="border border-border rounded-md divide-y divide-border-subtle mb-1.5 max-h-[180px] overflow-y-auto">
+                                @foreach($this->searchedOrganizations as $o)
+                                    <button type="button" wire:click="applyOrganization({{ $o->id }})" wire:key="qorgs-{{ $o->id }}"
+                                            class="w-full text-left px-2 py-1 hover:bg-hover text-[12px]">
+                                        {{ $o->name }}@if($o->inn) <span class="mono text-fg-4">· {{ $o->inn }}</span>@endif@if($o->discount_percent > 0) <span class="text-emerald-700">· {{ rtrim(rtrim(number_format($o->discount_percent,2,'.',''),'0'),'.') }}%</span>@endif
+                                    </button>
+                                @endforeach
+                            </div>
+                        @endif
+                    @endif
+
                     <input type="text" placeholder="Наименование / ФИО"
                            value="{{ $q->recipient_name }}"
                            @if(!$editable) disabled @endif

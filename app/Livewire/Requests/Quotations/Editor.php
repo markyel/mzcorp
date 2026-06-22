@@ -3,7 +3,9 @@
 namespace App\Livewire\Requests\Quotations;
 
 use App\Enums\Role;
+use App\Models\ClientContact;
 use App\Models\IqotPosition;
+use App\Models\Organization;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
 use App\Models\RequestItem;
@@ -45,6 +47,9 @@ class Editor extends Component
 
     /** Просмотр конкретной версии (id) — null = active draft / latest non-cancelled. */
     public ?int $viewQuotationId = null;
+
+    /** Поиск организации-получателя (если нужной нет среди привязанных к клиенту). */
+    public string $organizationSearch = '';
 
     #[Computed]
     public function request(): RequestModel
@@ -365,6 +370,97 @@ class Editor extends Component
             $svc->recalcTotals($q->fresh('items'));
         }
         unset($this->versions, $this->activeQuotation);
+    }
+
+    /**
+     * Организации этого клиента — для быстрой подстановки получателя КП.
+     * Точная привязка заявки (organization_id) + организации контакта по
+     * client_email (один email может быть у нескольких организаций — частый
+     * кейс, см. [[clients-section]]).
+     *
+     * @return \Illuminate\Support\Collection<int, Organization>
+     */
+    #[Computed]
+    public function clientOrganizations()
+    {
+        $req = $this->request;
+        $orgs = collect();
+
+        if ($req->organization_id) {
+            $o = Organization::find($req->organization_id);
+            if ($o) {
+                $orgs->push($o);
+            }
+        }
+
+        $email = mb_strtolower(trim((string) $req->client_email));
+        if ($email !== '') {
+            $contact = ClientContact::whereRaw('lower(email) = ?', [$email])->first();
+            if ($contact) {
+                foreach ($contact->organizations as $o) {
+                    $orgs->push($o);
+                }
+            }
+        }
+
+        return $orgs->unique('id')->values();
+    }
+
+    /**
+     * Поиск любой известной организации (если нужной нет среди привязанных).
+     *
+     * @return \Illuminate\Support\Collection<int, Organization>
+     */
+    #[Computed]
+    public function searchedOrganizations()
+    {
+        $s = trim($this->organizationSearch);
+        if (mb_strlen($s) < 2) {
+            return collect();
+        }
+        $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
+        $exclude = $this->clientOrganizations->pluck('id')->all();
+
+        return Organization::query()
+            ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('inn', 'ilike', $like))
+            ->whereNotIn('id', $exclude ?: [0])
+            ->orderBy('name')
+            ->limit(8)
+            ->get(['id', 'name', 'inn', 'discount_percent']);
+    }
+
+    /**
+     * Подставить получателя КП из организации: реквизиты (наименование/ИНН/
+     * адрес/банк) + НАЗНАЧЕННАЯ скидка организации (учитывается в ценах через
+     * recalcTotals; реальную скидку показывает realDiscountPercent).
+     */
+    public function applyOrganization(int $orgId, QuotationService $svc): void
+    {
+        $this->ensureCanEdit();
+        $q = $this->activeQuotation;
+        if (! $q || ! $q->status->isEditable()) {
+            return;
+        }
+        $org = Organization::find($orgId);
+        if (! $org) {
+            return;
+        }
+
+        $discount = max(0.0, min(100.0, (float) ($org->discount_percent ?? 0)));
+        $q->forceFill([
+            'recipient_name' => $org->name,
+            'recipient_inn' => $org->inn,
+            'recipient_address' => $org->address,
+            'recipient_card_text' => $org->requisites_text,
+            'discount_percent' => $discount,
+        ])->save();
+        $svc->recalcTotals($q->fresh('items'));
+
+        $this->organizationSearch = '';
+        unset($this->versions, $this->activeQuotation);
+        $this->dispatch('toast', message: 'Получатель: ' . $org->name
+            . ($discount > 0 ? ', скидка ' . rtrim(rtrim(number_format($discount, 2, '.', ''), '0'), '.') . '% применена' : ''),
+            type: 'success');
     }
 
     /**
