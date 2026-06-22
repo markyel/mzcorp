@@ -93,6 +93,25 @@ class QuotationItem extends Model
     }
 
     /**
+     * РЕАЛЬНО предоставленная скидка (%) — считается от фактической цены
+     * (`final_unit_price`), а не от назначенной `discount_percent`. Финальная
+     * цена = MAX(цена×(1−назначенная скидка), минимальная продажная price_min)
+     * (см. QuotationService::computeFinalUnitPrice), поэтому если минималка
+     * перебила скидку — фактическая скидка МЕНЬШЕ выбранной, и в КП показываем
+     * именно её. null, если по факту скидки нет (final ≥ каталожной).
+     */
+    public function realDiscountPercent(): ?float
+    {
+        $catalog = (float) $this->catalog_unit_price;
+        $final = (float) $this->final_unit_price;
+        if ($catalog <= 0.0 || $final >= $catalog) {
+            return null;
+        }
+
+        return round((1 - $final / $catalog) * 100, 2);
+    }
+
+    /**
      * Строки срока поставки для КП. Обычно одна; при ЧАСТИЧНОМ наличии
      * (0 < свободный остаток < кол-во) — ДВЕ строки: «Со склада» (из наличия)
      * + «Под заказ ≈ N нед» (остаток). Номер позиции при этом ОДИН (название и

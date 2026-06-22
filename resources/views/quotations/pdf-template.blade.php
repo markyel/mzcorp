@@ -223,12 +223,14 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
     <tbody>
       @foreach($q->items as $idx => $item)
         @php
-          $effDisc = $item->discount_percent !== null ? (float) $item->discount_percent : (float) $q->discount_percent;
           $rowClass = $idx % 2 === 1 ? 'even' : '';
           // Срок: 1 строка, либо 2 под-строки при частичном наличии (Со склада + Под заказ).
           $drows = $item->deliveryRows();
           $rspan = count($drows);
-          $showWasDisc = $effDisc > 0 && (float) $item->catalog_unit_price > (float) $item->final_unit_price;
+          // РЕАЛЬНАЯ скидка от фактической цены (могла быть урезана минимальной
+          // продажной ценой price_min) — показываем именно её, не назначенную.
+          $realDisc = $item->realDiscountPercent();
+          $showWasDisc = $realDisc !== null;
         @endphp
         @foreach($drows as $ri => $drow)
         <tr class="{{ $rowClass }}">
@@ -250,7 +252,7 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
           <td class="pricebox">
             <span class="now">{{ number_format((float) $item->final_unit_price, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></span>
             @if($showWasDisc)
-              <span class="wasline"><span class="was">{{ number_format((float) $item->catalog_unit_price, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></span> <span class="disc"><span class="rub">−</span>{{ rtrim(rtrim(number_format($effDisc, 2, ',', ''), '0'), ',') }}%</span></span>
+              <span class="wasline"><span class="was">{{ number_format((float) $item->catalog_unit_price, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></span> <span class="disc"><span class="rub">−</span>{{ rtrim(rtrim(number_format($realDisc, 2, ',', ''), '0'), ',') }}%</span></span>
             @endif
           </td>
           <td class="sum">
@@ -276,9 +278,14 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
       <div class="right">
         <table>
           <tr><td>Итого</td><td>{{ number_format((float) $q->subtotal, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></td></tr>
-          @php $hasDisc = (float) $q->discount_amount > 0; @endphp
+          @php
+            $hasDisc = (float) $q->discount_amount > 0;
+            // РЕАЛЬНЫЙ процент скидки = фактическая сумма скидки / сумма без скидки,
+            // чтобы % соответствовал ₽ (минималка price_min могла урезать скидку).
+            $realDiscPct = (float) $q->subtotal > 0 ? round((float) $q->discount_amount / (float) $q->subtotal * 100, 2) : 0.0;
+          @endphp
           @if($hasDisc)
-            <tr class="disc"><td>Скидка {{ rtrim(rtrim(number_format((float) $q->discount_percent, 2, ',', ''), '0'), ',') }} %</td><td><span class="rub">−</span>&nbsp;{{ number_format((float) $q->discount_amount, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></td></tr>
+            <tr class="disc"><td>Скидка {{ rtrim(rtrim(number_format($realDiscPct, 2, ',', ''), '0'), ',') }} %</td><td><span class="rub">−</span>&nbsp;{{ number_format((float) $q->discount_amount, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></td></tr>
             <tr><td>Итого со скидкой</td><td>{{ number_format((float) $q->total, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></td></tr>
           @endif
           <tr class="vat"><td>в т. ч. НДС {{ rtrim(rtrim(number_format((float) $q->vat_rate, 2, ',', ''), '0'), ',') }} %</td><td>{{ number_format((float) $q->vat_amount, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></td></tr>
