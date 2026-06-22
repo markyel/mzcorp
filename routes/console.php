@@ -187,6 +187,18 @@ Schedule::command('requests:auto-close-inactive')
     ->onOneServer()
     ->runInBackground();
 
+// Высвобождение хранилища: обнуление raw_source (сырой RFC822, ~464 КБ/письмо)
+// у писем ЗАКРЫТЫХ заявок и не-заявок (irrelevant) старше 3 дней. raw_source
+// открытых заявок сохраняется. email_messages раздувалась до 16 ГБ (94% БД) —
+// это бесконечный рост; крон ограничивает его по мере закрытия заявок.
+// autovacuum переиспользует освобождённое место. См. MailPruneRawSourceCommand.
+Schedule::command('mail:prune-raw-source --apply --days=3')
+    ->dailyAt('04:30')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // IQOT (анализ цен конкурентов): новые позиции отправляем ТОЛЬКО в рабочее окно
 // 8–18 MSK, каждые 2 часа → 6 заходов/день (8,10,12,14,16,18). За один заход
 // уходит порция = daily_limit / runs_per_day (см. IqotDispatchService) — лимит
