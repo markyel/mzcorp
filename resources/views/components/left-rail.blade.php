@@ -32,6 +32,10 @@
 
     if ($canSeeMail) {
         $rail[] = ['icon' => '✉', 'label' => 'Почта', 'href' => route('mail.index'), 'key' => 'mail'];
+    } elseif ($railUser?->hasRole('manager')) {
+        // Менеджеру раздел «Почта» = переписка недоступных коллег (не-заявочная),
+        // где видны назначенные ему письма. Своей общей почты у менеджера нет.
+        $rail[] = ['icon' => '✉', 'label' => 'Почта', 'href' => route('mail.absent'), 'key' => 'mail'];
     }
 
     if ($canSeeInvoices) {

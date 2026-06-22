@@ -33,6 +33,14 @@ Route::middleware('auth')->group(function () {
             return view('requests.index');
         })->name('requests.index');
 
+        // «Почта выбывших» (РОП/директор) / «Почта» (менеджер) — переписка
+        // недоступных менеджеров, НЕ привязанная к заявкам. Назначение
+        // ответственного — только привилегированным; разграничение и доступ
+        // (manager + privileged) проверяются внутри Livewire-компонента.
+        Route::get('/dashboard/mail/absent', function () {
+            return view('mail.absent');
+        })->name('mail.absent');
+
         // ВАЖНО: статичные роуты должны быть ОБЪЯВЛЕНЫ ДО `{request}`-биндинга,
         // иначе Laravel матчит `auto-closed` как ID модели → invalid integer
         // → 500. Доступ внутри страницы дополнительно фильтруется в Livewire

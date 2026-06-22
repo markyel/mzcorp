@@ -135,6 +135,12 @@ class EmailMessage extends Model
         return $this->belongsTo(Request::class, 'related_request_id');
     }
 
+    /** Назначение/прочитанность в разделе «Почта выбывших» (shared-mail). */
+    public function sharedAssignment(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(SharedMailAssignment::class);
+    }
+
     /** Запрос поставщику, к которому прицеплена эта переписка (если есть). */
     public function supplierInquiry(): BelongsTo
     {

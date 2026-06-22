@@ -34,7 +34,7 @@
                     request()->routeIs('dashboard')         => 'dashboard',
                     request()->routeIs('requests.*')        => 'requests',
                     request()->routeIs('catalog.*')         => 'catalog',
-                    request()->routeIs('mail.index')        => 'mail',
+                    request()->routeIs('mail.*')            => 'mail',
                     request()->routeIs('invoices.*')        => 'invoices',
                     request()->routeIs('clients.*')         => 'clients',
                     request()->routeIs('suppliers.*')       => 'suppliers',
