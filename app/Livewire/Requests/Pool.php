@@ -56,6 +56,14 @@ class Pool extends Component
     public string $bucket = 'active';
 
     /**
+     * Фильтр «только делегированные мне» — заявки, временно открытые мне
+     * коллегой через активную delegation (acting_user_id = me, ended_at IS NULL),
+     * БЕЗ своих. Пункт левой навигации «Делегированные» (виден при наличии).
+     */
+    #[Url(as: 'delegated', except: false)]
+    public bool $delegatedOnly = false;
+
+    /**
      * Фильтр «по конкретному менеджеру» (assigned_user_id = N) — доступен
      * только для ролей с canSeeAll (РОП / директорат / секретарь / админ).
      * Менеджер этим фильтром управлять не может (видит только свои).
@@ -105,6 +113,26 @@ class Pool extends Component
         $this->resetPage();
     }
 
+    public function updatingDelegatedOnly(): void
+    {
+        $this->resetPage();
+    }
+
+    /**
+     * Левая навигация «Делегированные» — показать ИСКЛЮЧИТЕЛЬНО заявки,
+     * открытые мне коллегой через активную delegation (без своих).
+     */
+    public function showDelegated(): void
+    {
+        $this->delegatedOnly = true;
+        $this->scope = 'mine';
+        $this->bucket = 'active';
+        $this->status = '';
+        $this->unassignedOnly = false;
+        $this->assignedUserId = null;
+        $this->resetPage();
+    }
+
     public function updatingSort(): void
     {
         $this->resetPage();
@@ -129,6 +157,7 @@ class Pool extends Component
             $this->scope = 'all';
             $this->unassignedOnly = false;
         }
+        $this->delegatedOnly = false;
         $this->resetPage();
     }
 
@@ -166,6 +195,7 @@ class Pool extends Component
         $allowed = ['active', 'overdue', 'paused', 'closed', 'postsale', 'all'];
         $this->bucket = in_array($bucket, $allowed, true) ? $bucket : 'active';
         $this->status = '';
+        $this->delegatedOnly = false;
         $this->resetPage();
     }
 
@@ -242,6 +272,7 @@ class Pool extends Component
         $this->scope = in_array($scope, ['mine', 'all'], true) ? $scope : 'mine';
         $this->status = $status;
         $this->unassignedOnly = $unassigned;
+        $this->delegatedOnly = false;
         // Для «Нераспределённые» — сбрасываем bucket в 'all' (иначе active
         // отрежет paused/closed нераспределённые, что не очевидно UX'ом).
         if ($unassigned) {
@@ -357,8 +388,18 @@ class Pool extends Component
             $query->where('assigned_user_id', $this->assignedUserId);
         }
 
-        if ($effectiveScope === 'mine' && ! $managerFilterActive) {
-            $authId = auth()->id();
+        $authId = auth()->id();
+        if ($this->delegatedOnly) {
+            // «Делегированные» — ИСКЛЮЧИТЕЛЬНО заявки, открытые мне коллегой
+            // через активную delegation (без своих). Перекрывает scope.
+            $query->whereExists(function ($sub) use ($authId) {
+                $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                    ->from('request_delegations')
+                    ->whereColumn('request_delegations.request_id', 'requests.id')
+                    ->where('request_delegations.acting_user_id', $authId)
+                    ->whereNull('request_delegations.ended_at');
+            });
+        } elseif ($effectiveScope === 'mine' && ! $managerFilterActive) {
             $query->where(function ($q) use ($authId) {
                 $q->where('assigned_user_id', $authId)
                     ->orWhereExists(function ($sub) use ($authId) {
@@ -528,7 +569,14 @@ class Pool extends Component
 
         // Счётчики для filter-chips и left-list-nav.
         $countsBase = Request::query()
-            ->when($effectiveScope === 'mine', fn ($q) => $q->where('assigned_user_id', auth()->id()));
+            ->when($this->delegatedOnly, fn ($q) => $q->whereExists(function ($sub) {
+                $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                    ->from('request_delegations')
+                    ->whereColumn('request_delegations.request_id', 'requests.id')
+                    ->where('request_delegations.acting_user_id', auth()->id())
+                    ->whereNull('request_delegations.ended_at');
+            }))
+            ->when(! $this->delegatedOnly && $effectiveScope === 'mine', fn ($q) => $q->where('assigned_user_id', auth()->id()));
 
         // Bucket-counts: для верхней chip-row (активные / на паузе / закрытые / все).
         $openValues = array_map(
@@ -620,6 +668,23 @@ class Pool extends Component
             ->whereNotNull('attention_required_at')
             ->count();
 
+        // «Делегированные» — открытые заявки, временно открытые мне коллегой
+        // через активную delegation (без своих). Пункт левой навигации виден
+        // только когда счётчик > 0.
+        $delegatedMine = Request::query()
+            ->whereExists(function ($sub) use ($authId) {
+                $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                    ->from('request_delegations')
+                    ->whereColumn('request_delegations.request_id', 'requests.id')
+                    ->where('request_delegations.acting_user_id', $authId)
+                    ->whereNull('request_delegations.ended_at');
+            })
+            ->whereIn('status', array_map(
+                fn (RequestStatus $s) => $s->value,
+                array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+            ))
+            ->count();
+
         // Counter «Нераспределённые» — только реально открытые (не closed_*).
         // Автозакрытые системой заявки имеют отдельный пул и не должны
         // подсвечивать этот счётчик.
@@ -687,6 +752,7 @@ class Pool extends Component
                 'all_open' => $allOpen,
                 'auto_closed' => $autoClosed,
                 'postsale_mine' => $myPostSale,
+                'delegated_mine' => $delegatedMine,
             ],
             'statusCounts' => $statusCounts,
             'bucketCounts' => $bucketCounts,

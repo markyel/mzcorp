@@ -59,6 +59,10 @@
 
             // Detect active query — точное совпадение scope+status+unassigned.
             $isActive = function (array $q) use ($effectiveScope, $status) {
+                // В режиме «Делегированные» обычные виды (Мои / Команда) не активны.
+                if ($this->delegatedOnly ?? false) {
+                    return false;
+                }
                 $unassignedActive = (bool) ($this->unassignedOnly ?? false);
                 $unassignedThis = (bool) ($q['unassigned'] ?? false);
                 return $q['scope'] === $effectiveScope
@@ -93,6 +97,22 @@
                     <span class="font-mono text-[11.5px] {{ $active ? 'text-[var(--fg-1)]' : 'text-[var(--fg-3)]' }}">{{ $q['count'] }}</span>
                 </a>
             @endforeach
+
+            {{-- Делегированные: заявки, временно открытые мне коллегой через
+                 активную delegation (на время его отсутствия). Пункт виден только
+                 при наличии таковых (или когда фильтр активен). Клик → showDelegated. --}}
+            @php
+                $delegatedCount = (int) ($totals['delegated_mine'] ?? 0);
+                $delegatedActive = (bool) ($this->delegatedOnly ?? false);
+            @endphp
+            @if($delegatedCount > 0 || $delegatedActive)
+                <a href="#" wire:click.prevent="showDelegated"
+                   class="{{ $renderQuery(['scope' => 'mine', 'status' => ''], $delegatedActive) }}">
+                    <span class="w-3.5 text-center">↺</span>
+                    <span class="flex-1">Делегированные</span>
+                    <span class="font-mono text-[11.5px] {{ $delegatedCount > 0 ? 'px-1.5 rounded-full bg-sky-100 text-sky-800' : ($delegatedActive ? 'text-[var(--fg-1)]' : 'text-[var(--fg-3)]') }}">{{ $delegatedCount }}</span>
+                </a>
+            @endif
 
             {{-- Постпродажа: closed_won заявки с непрочитанным постпродажным
                  письмом (вопрос сроков / сертификатов / закрывающих документов).
