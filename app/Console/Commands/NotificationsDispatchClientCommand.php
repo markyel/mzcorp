@@ -535,13 +535,20 @@ class NotificationsDispatchClientCommand extends Command
 
     /**
      * Позиции заявки, по которым revival оправдан. Условие — ОБА:
-     *   1. текущая цена позиции НИЖЕ выставленной клиенту в КП на ≥ порога
-     *      (иначе «новая» цена не выгоднее того, что клиент уже видел — ловим
-     *      именно этот баг: каталожный лист падал, но был ВЫШЕ цены КП);
-     *   2. в каталоге реально было снижение ПОСЛЕ отправки КП ($since)
-     *      (CatalogPriceChange) — отсекает «неиспользованную скидку» и держит
-     *      объём рассылки под контролем.
-     * «было» = цена КП, «стало» = текущая цена каталога (price_min).
+     *   1. (ГЛАВНОЕ) каталожная цена позиции РЕАЛЬНО снизилась уже ПОСЛЕ
+     *      отправки КП ($since) — есть CatalogPriceChange с падением
+     *      price_min/price. Если с момента КП каталог НЕ менялся — слать «цена
+     *      снизилась» нельзя, даже если текущий флор ниже строки КП: у исходящих
+     *      КП строка часто с НДС/наценкой, и флор каталога структурно ниже —
+     *      это разница базы, а не снижение цены (кейсы M-2026-3138/3594/3456:
+     *      каталог не менялся, а «−20…50%» было ложным).
+     *   2. текущая цена (флор) ниже выставленной клиенту в КП на ≥ порога —
+     *      гарантия, что предлагаем РЕАЛЬНО дешевле того, что клиент уже видел.
+     *      Ловит M-2026-4639: каталог в день КП лишь «догнал» цену, по которой
+     *      уже выставили КП (150 444), → с момента КП цена для клиента не
+     *      изменилась (текущая = цене КП), хоть формально CatalogPriceChange и
+     *      есть.
+     * «было» = цена КП (что видел клиент), «стало» = текущая цена (флор).
      *
      * @param  array<int, float>  $quotedByCatalog  catalog_item_id => unit-цена КП
      * @return array<int, array{name: string, sku: ?string, old: float, new: float, pct: float}>
@@ -561,7 +568,8 @@ class NotificationsDispatchClientCommand extends Command
             return [];
         }
 
-        // Условие 2: по каким позициям каталог реально снизился после КП.
+        // Условие 1 (главное): по каким позициям каталог реально снизился ПОСЛЕ
+        // отправки КП. Нет записи — каталог с момента КП не менялся → не шлём.
         $droppedAfterQuote = CatalogPriceChange::query()
             ->whereIn('catalog_item_id', $catIds)
             ->when($since, fn ($q) => $q->where('changed_at', '>=', $since))
@@ -580,6 +588,10 @@ class NotificationsDispatchClientCommand extends Command
 
         $byItem = [];
         foreach ($catIds as $cid) {
+            // Условие 1: каталог реально менялся (снижался) с момента КП.
+            if (! isset($droppedAfterQuote[$cid])) {
+                continue;
+            }
             $quoted = (float) $quotedByCatalog[$cid];
             $ci = $catalog->get($cid);
             if ($quoted <= 0 || ! $ci) {
@@ -587,15 +599,13 @@ class NotificationsDispatchClientCommand extends Command
             }
             // Текущая цена, по которой проквотировали бы сейчас (флор-цена).
             $current = $ci->price_min !== null ? (float) $ci->price_min : (float) $ci->price;
+            // Условие 2: дешевле, чем выставили клиенту (иначе как в M-2026-4639
+            // — цена с момента КП для клиента не изменилась).
             if ($current <= 0 || $current >= $quoted) {
-                continue; // не подешевело относительно КП
+                continue;
             }
             $pct = round(($quoted - $current) / $quoted * 100, 1);
             if ($pct < $thresholdPct) {
-                continue;
-            }
-            // Условие 2: было реальное снижение каталога после КП.
-            if (! isset($droppedAfterQuote[$cid])) {
                 continue;
             }
             $byItem[$cid] = [
