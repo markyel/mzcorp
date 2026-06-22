@@ -225,40 +225,38 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
         @php
           $effDisc = $item->discount_percent !== null ? (float) $item->discount_percent : (float) $q->discount_percent;
           $rowClass = $idx % 2 === 1 ? 'even' : '';
+          // Срок: 1 строка, либо 2 под-строки при частичном наличии (Со склада + Под заказ).
+          $drows = $item->deliveryRows();
+          $rspan = count($drows);
+          $showWasDisc = $effDisc > 0 && (float) $item->catalog_unit_price > (float) $item->final_unit_price;
         @endphp
+        @foreach($drows as $ri => $drow)
         <tr class="{{ $rowClass }}">
-          <td class="num">{{ $item->position }}</td>
-          <td class="name">
+          <td class="num">{{ $item->position }}{{ $drow['sub'] ?? '' }}</td>
+          @if($ri === 0)
+          <td class="name"@if($rspan > 1) rowspan="{{ $rspan }}"@endif>
             <div class="t">{{ $item->snapshot_name }}</div>
             @if($item->snapshot_sku)
               <div class="art">{{ $item->snapshot_sku }}</div>
             @endif
           </td>
-          <td class="term">
-            @if($item->delivery_text)
-              {{ $item->delivery_text }}
-            @elseif($item->catalog_in_stock)
-              Со склада
-            @else
-              Под заказ
-            @endif
-            @if($item->catalog_lead_time_days)<span class="s">≈ {{ (int) ceil($item->catalog_lead_time_days / 7) }} нед</span>@endif
-          </td>
-          <td class="qty">{{ rtrim(rtrim((string) $item->qty, '0'), '.') }} <small>{{ $item->unit }}</small></td>
-          <td class="pricebox">
+          @endif
+          <td class="term">{{ $drow['term'] }}</td>
+          <td class="qty">{{ rtrim(rtrim((string) $drow['qty'], '0'), '.') }} <small>{{ $item->unit }}</small></td>
+          @if($ri === 0)
+          <td class="pricebox"@if($rspan > 1) rowspan="{{ $rspan }}"@endif>
             <span class="now">{{ number_format((float) $item->final_unit_price, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></span>
-            @php
-                $showWasDisc = $effDisc > 0 && (float) $item->catalog_unit_price > (float) $item->final_unit_price;
-            @endphp
             @if($showWasDisc)
               <span class="wasline"><span class="was">{{ number_format((float) $item->catalog_unit_price, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></span> <span class="disc"><span class="rub">−</span>{{ rtrim(rtrim(number_format($effDisc, 2, ',', ''), '0'), ',') }}%</span></span>
             @endif
           </td>
+          @endif
           <td class="sum">
-            {{ number_format((float) $item->line_total, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span>
-            <span class="vat">НДС {{ number_format((float) $item->vat_amount, 2, ',', "\u{00A0}") }} ₽</span>
+            {{ number_format((float) $drow['line_total'], 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span>
+            <span class="vat">НДС {{ number_format((float) $drow['vat_amount'], 2, ',', "\u{00A0}") }} ₽</span>
           </td>
         </tr>
+        @endforeach
       @endforeach
     </tbody>
   </table>

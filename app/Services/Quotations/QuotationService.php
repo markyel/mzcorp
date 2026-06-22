@@ -348,6 +348,7 @@ class QuotationService
         $item->catalog_price_min = $cat->price_min !== null ? (float) $cat->price_min : null;
         $item->catalog_lead_time_days = $cat->lead_time_days;
         $item->catalog_in_stock = ((int) ($cat->stock_available ?? 0)) > 0;
+        $item->catalog_stock_available = $cat->stock_available;
         $item->snapshot_name = (string) $cat->name;
         $item->snapshot_sku = $cat->sku;
         $item->snapshot_brand = $cat->brand;

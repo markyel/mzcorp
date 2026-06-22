@@ -465,6 +465,7 @@ class Editor extends Component
             'catalog_price_min' => $cat->price_min !== null ? (float) $cat->price_min : null,
             'catalog_lead_time_days' => $cat->lead_time_days,
             'catalog_in_stock' => ((int) ($cat->stock_available ?? 0)) > 0,
+            'catalog_stock_available' => $cat->stock_available,
             'snapshot_name' => (string) $cat->name,
             'snapshot_sku' => $cat->sku,
             'snapshot_brand' => $cat->brand,
