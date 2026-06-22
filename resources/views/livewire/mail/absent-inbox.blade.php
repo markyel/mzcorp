@@ -69,9 +69,10 @@
                         $isExpanded = $expandedId === $em->id;
                     @endphp
                     <tbody wire:key="sm-{{ $em->id }}">
-                        <tr class="border-b border-border-subtle hover:bg-hover align-top {{ $isRead ? '' : 'font-semibold' }} {{ $iAmAssigned ? 'bg-sky-50/40' : '' }}">
+                        <tr wire:click="toggleExpand({{ $em->id }})" title="Открыть письмо"
+                            class="border-b border-border-subtle hover:bg-hover align-top cursor-pointer {{ $isRead ? '' : 'font-semibold' }} {{ $isExpanded ? 'bg-surface-2' : ($iAmAssigned ? 'bg-sky-50/40' : '') }}">
                             <td class="px-3 py-2 text-center">
-                                <button type="button" wire:click="toggleExpand({{ $em->id }})" class="text-fg-4 hover:text-fg-2" title="Показать письмо">{{ $isExpanded ? '▾' : '▸' }}</button>
+                                <span class="text-fg-4 select-none">{{ $isExpanded ? '▾' : '▸' }}</span>
                             </td>
                             <td class="px-3 py-2">
                                 <div class="text-fg-1">{{ $em->from_name ?: '—' }}</div>
@@ -86,6 +87,7 @@
                             <td class="px-3 py-2">
                                 @if($priv)
                                     <select wire:change="assign({{ $em->id }}, $event.target.value)"
+                                            onclick="event.stopPropagation()"
                                             class="h-[26px] w-full px-1.5 border border-border rounded bg-surface text-[11.5px]">
                                         <option value="">— не назначен —</option>
                                         @foreach($this->assignableManagers as $am)
