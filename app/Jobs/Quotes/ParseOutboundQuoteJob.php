@@ -312,6 +312,20 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
                         'error' => $e->getMessage(),
                     ]);
                 }
+
+                // Заявка без позиций (как правило — созданная из счёта в триаже
+                // «Непривязанные», InvoiceToRequestService): посеять позиции из
+                // распарсенного счёта, чтобы карточка не была пустой. Гард «нет
+                // активных позиций» → обычные заявки (КП→счёт) не трогаются.
+                try {
+                    $this->seedRequestItemsFromInvoiceIfEmpty($request, $quote->fresh());
+                } catch (\Throwable $e) {
+                    Log::warning('ParseOutboundQuoteJob: seed request_items failed (non-fatal)', [
+                        'quote_id' => $quote->id,
+                        'request_id' => $request->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
 
             Log::info('ParseOutboundQuoteJob: success', [
@@ -361,6 +375,58 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
                 'quote_id' => $quote->id,
                 'attachment_id' => $attachment->id,
                 'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Посеять позиции заявки из строк распарсенного счёта, ЕСЛИ у заявки ещё
+     * нет активных позиций. Кейс: заявка создана из самого счёта
+     * (InvoiceToRequestService, раздел «Непривязанные») — карточка пустая, пока
+     * не перенесём строки счёта в request_items. catalog_item_id берём из
+     * matched_catalog_item_id (matcher уже отработал). Идемпотентно по гарду
+     * «нет активных позиций».
+     */
+    private function seedRequestItemsFromInvoiceIfEmpty(Request $request, OutboundQuote $quote): void
+    {
+        if ($request->items()->where('is_active', true)->exists()) {
+            return;
+        }
+        $quoteItems = $quote->items()->orderBy('position')->get();
+        if ($quoteItems->isEmpty()) {
+            return;
+        }
+
+        $seeded = 0;
+        DB::transaction(function () use ($request, $quoteItems, &$seeded) {
+            $position = 0;
+            foreach ($quoteItems as $qi) {
+                $name = trim((string) $qi->raw_name);
+                if ($name === '') {
+                    continue;
+                }
+                $position++;
+                \App\Models\RequestItem::create([
+                    'request_id' => $request->id,
+                    'position' => $position,
+                    'parsed_name' => mb_substr($name, 0, 1000),
+                    'parsed_article' => $qi->raw_article,
+                    'parsed_brand' => $qi->raw_brand,
+                    'parsed_qty' => $qi->quantity !== null ? (float) $qi->quantity : 1,
+                    'parsed_unit' => $qi->unit_measure ?: 'шт.',
+                    'catalog_item_id' => $qi->matched_catalog_item_id,
+                    'data_source' => 'outbound_invoice',
+                    'is_active' => true,
+                ]);
+                $seeded++;
+            }
+        });
+
+        if ($seeded > 0) {
+            Log::info('ParseOutboundQuoteJob: seeded request_items from invoice', [
+                'request_id' => $request->id,
+                'quote_id' => $quote->id,
+                'seeded' => $seeded,
             ]);
         }
     }

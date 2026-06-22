@@ -146,6 +146,24 @@
                                                     </div>
                                                 @endif
                                             </div>
+
+                                            {{-- Подходящей заявки реально нет — создать новую прямо из счёта --}}
+                                            <div class="border-t border-border pt-3">
+                                                <div class="flex items-start gap-3 flex-wrap">
+                                                    <button type="button" wire:click="createRequest"
+                                                            wire:loading.attr="disabled" wire:target="createRequest"
+                                                            class="btn btn-sm btn-primary whitespace-nowrap">
+                                                        <span wire:loading.remove wire:target="createRequest">➕ Создать заявку из счёта</span>
+                                                        <span wire:loading wire:target="createRequest">Создаю…</span>
+                                                    </button>
+                                                    <div class="text-[11px] text-fg-4 leading-snug max-w-[440px]">
+                                                        Если подходящей заявки нет — создаём новую со статусом
+                                                        <b class="text-fg-2">«Счёт отправлен»</b>: клиент
+                                                        <span class="mono text-fg-3">{{ $this->attachingClientEmail ?? '—' }}</span>@if($mgrId), менеджер — отправитель счёта@endif.
+                                                        Позиции подтянутся из счёта автоматически.
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>

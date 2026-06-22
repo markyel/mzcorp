@@ -10,6 +10,7 @@ use App\Models\EmailMessage;
 use App\Models\Invoice;
 use App\Models\Request;
 use App\Services\DocumentDetector\OutboundDocumentDetector;
+use App\Services\Invoices\InvoiceToRequestService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -240,6 +241,65 @@ class Unlinked extends Component
         $this->dispatch(
             'toast',
             message: "Счёт привязан к {$request->internal_code}. Разбор запущен (документов: {$dispatched}) — счёт появится в реестре через минуту.",
+            type: 'success',
+        );
+
+        $this->cancelAttach();
+        unset($this->rows);
+    }
+
+    /**
+     * Создать НОВУЮ заявку из счёта, когда подходящей заявки реально нет.
+     * Статус сразу «Счёт отправлен»; клиент = внешний получатель, менеджер =
+     * отправитель счёта, позиции подтянутся из счёта (ParseOutboundQuoteJob).
+     */
+    public function createRequest(InvoiceToRequestService $service): void
+    {
+        abort_unless($this->isPrivileged(), 403);
+
+        $msgId = $this->attachingMsgId;
+        if (! $msgId) {
+            return;
+        }
+
+        $email = EmailMessage::find($msgId);
+        if (! $email) {
+            $this->dispatch('toast', message: 'Письмо не найдено.', type: 'error');
+
+            return;
+        }
+        if ($email->related_request_id) {
+            $this->dispatch('toast', message: 'Письмо уже привязано к заявке #' . $email->related_request_id . '.', type: 'error');
+            $this->cancelAttach();
+            unset($this->rows);
+
+            return;
+        }
+
+        $clientEmail = (string) $this->attachingClientEmail();
+        if ($clientEmail === '') {
+            $this->dispatch('toast', message: 'Не удалось определить клиента (внешнего получателя).', type: 'error');
+
+            return;
+        }
+
+        $att = $this->attachingAttId ? EmailAttachment::find($this->attachingAttId) : null;
+
+        try {
+            $request = $service->create($email, $att, $clientEmail, $this->attachingManagerId(), auth()->user());
+        } catch (\Throwable $e) {
+            Log::warning('Invoices\\Unlinked: create request from invoice failed', [
+                'email_message_id' => $msgId,
+                'error' => $e->getMessage(),
+            ]);
+            $this->dispatch('toast', message: 'Не удалось создать заявку: ' . $e->getMessage(), type: 'error');
+
+            return;
+        }
+
+        $this->dispatch(
+            'toast',
+            message: "Создана заявка {$request->internal_code} (Счёт отправлен). Позиции из счёта подтянутся через минуту.",
             type: 'success',
         );
 
