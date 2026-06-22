@@ -6,12 +6,12 @@ use App\Enums\ClientNotificationType;
 use App\Enums\InvoiceStatus;
 use App\Enums\RequestStatus;
 use App\Models\ClientContact;
-use App\Models\ClientNotificationOptout;
 use App\Models\Invoice;
 use App\Models\Organization;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
 use App\Services\Clients\RequestOrganizationResolver;
+use App\Services\Mail\ClientNotificationOptoutService;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -228,62 +228,25 @@ class Show extends Component
     #[Computed]
     public function notificationOptouts(): array
     {
-        $emails = $this->organization->contactEmails();
-        if ($emails === []) {
-            return [];
-        }
-
-        return ClientNotificationOptout::query()
-            ->whereIn(DB::raw('lower(email)'), $emails)
-            ->get(['email', 'suppressed_types'])
-            ->mapWithKeys(fn (ClientNotificationOptout $e) => [
-                mb_strtolower((string) $e->email) => array_values((array) $e->suppressed_types),
-            ])
-            ->all();
+        return app(ClientNotificationOptoutService::class)
+            ->suppressedForMany($this->organization->contactEmails());
     }
 
     /**
-     * Включить ↔ заглушить один тип автоуведомления для e-mail контакта.
-     * Пишет в client_notification_optouts (suppressed_types). Пустую запись без
-     * комментария удаляем (нет опт-аутов = всё включено по умолчанию).
+     * Включить ↔ заглушить один тип автоуведомления для e-mail контакта (единая
+     * логика в ClientNotificationOptoutService::toggle).
      */
-    public function toggleContactNotification(string $email, string $typeValue): void
-    {
+    public function toggleContactNotification(
+        string $email,
+        string $typeValue,
+        ClientNotificationOptoutService $optouts,
+    ): void {
         abort_unless(auth()->check(), 403);
-        if (ClientNotificationType::tryFrom($typeValue) === null) {
+        $type = ClientNotificationType::tryFrom($typeValue);
+        if ($type === null) {
             return;
         }
-        $email = mb_strtolower(trim($email));
-        if ($email === '') {
-            return;
-        }
-
-        $entry = ClientNotificationOptout::query()
-            ->whereRaw('lower(email) = ?', [$email])
-            ->first() ?? new ClientNotificationOptout(['email' => $email]);
-
-        $suppressed = array_values((array) ($entry->suppressed_types ?? []));
-        if (in_array($typeValue, $suppressed, true)) {
-            // было заглушено → включаем (убираем из списка).
-            $suppressed = array_values(array_diff($suppressed, [$typeValue]));
-        } else {
-            // было включено → заглушаем.
-            $suppressed[] = $typeValue;
-        }
-
-        $hasComment = trim((string) ($entry->comment ?? '')) !== '';
-        if ($suppressed === [] && ! $hasComment) {
-            if ($entry->exists) {
-                $entry->delete();
-            }
-        } else {
-            if (! $entry->exists) {
-                $entry->created_by_user_id = auth()->id();
-            }
-            $entry->suppressed_types = $suppressed;
-            $entry->save();
-        }
-
+        $optouts->toggle($email, $type, auth()->id());
         unset($this->notificationOptouts);
     }
 

@@ -86,6 +86,33 @@
         </div>
     </div>
 
+    {{-- Персональные автоуведомления (по e-mail контакта) --}}
+    <div class="ds-card">
+        <div class="ds-card-header">
+            <h3>🔔 Автоуведомления</h3>
+            <span class="text-[12px] text-fg-3 ml-2">снимите галочку, чтобы этот тип письма НЕ слать на <span class="mono">{{ $contact->email }}</span> (по умолчанию все включены)</span>
+        </div>
+        <div class="ds-card-body">
+            @php $sup = $this->suppressedTypes; @endphp
+            <div class="grid gap-1.5" style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr))">
+                @foreach($this->notificationTypes as $t)
+                    @php $enabled = ! in_array($t->value, $sup, true); @endphp
+                    <button type="button"
+                            wire:click="toggleNotification('{{ $t->value }}')"
+                            wire:key="notif-{{ $t->value }}"
+                            class="flex items-start gap-2 px-2 py-1.5 rounded border text-left w-full transition-colors {{ $enabled ? 'border-border hover:bg-hover' : 'border-amber-300 bg-amber-50' }}">
+                        <span class="mt-0.5 w-4 h-4 shrink-0 rounded border flex items-center justify-center text-[10px] leading-none {{ $enabled ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-border text-transparent' }}">✓</span>
+                        <span class="flex-1 min-w-0">
+                            <span class="text-[12.5px] font-medium {{ $enabled ? 'text-fg-1' : 'text-fg-3 line-through' }}">{{ $t->label() }}</span>
+                            @unless($enabled)<span class="text-[10px] text-amber-700 ml-1">не слать</span>@endunless
+                            <span class="block text-[10.5px] text-fg-4 leading-snug mt-0.5">{{ \Illuminate\Support\Str::limit($t->description(), 120) }}</span>
+                        </span>
+                    </button>
+                @endforeach
+            </div>
+        </div>
+    </div>
+
     {{-- История заявок --}}
     <div class="ds-card">
         <div class="ds-card-header"><h3>Заявки</h3><span class="text-[12px] text-fg-3 ml-2">последние 25</span></div>

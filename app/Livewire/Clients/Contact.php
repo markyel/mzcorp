@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Clients;
 
+use App\Enums\ClientNotificationType;
 use App\Enums\InvoiceStatus;
 use App\Enums\RequestStatus;
 use App\Models\ClientContact;
@@ -9,6 +10,7 @@ use App\Models\Invoice;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
 use App\Models\SupplierInquiry;
+use App\Services\Mail\ClientNotificationOptoutService;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -63,6 +65,37 @@ class Contact extends Component
     public function organizations()
     {
         return $this->contact->organizations()->get();
+    }
+
+    /* ----------- Персональные автоуведомления (по e-mail контакта) ---------- */
+
+    /** Все типы автоуведомлений. @return array<int, ClientNotificationType> */
+    #[Computed]
+    public function notificationTypes(): array
+    {
+        return ClientNotificationType::cases();
+    }
+
+    /** Заглушённые типы (values) для e-mail этого контакта. @return array<int, string> */
+    #[Computed]
+    public function suppressedTypes(): array
+    {
+        return app(ClientNotificationOptoutService::class)->suppressedFor($this->email());
+    }
+
+    /**
+     * Включить ↔ заглушить тип автоуведомления для e-mail контакта (единый
+     * стоп-лист client_notification_optouts + гард ClientNotificationService).
+     */
+    public function toggleNotification(string $typeValue, ClientNotificationOptoutService $optouts): void
+    {
+        abort_unless(auth()->check(), 403);
+        $type = ClientNotificationType::tryFrom($typeValue);
+        if ($type === null) {
+            return;
+        }
+        $optouts->toggle($this->email(), $type, auth()->id());
+        unset($this->suppressedTypes);
     }
 
     /**
