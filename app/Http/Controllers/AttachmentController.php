@@ -189,12 +189,14 @@ class AttachmentController extends Controller
             return;
         }
 
-        // Менеджер видит вложения только своих писем (через related Request).
+        // Менеджер видит вложения писем своей заявки. isAccessibleBy включает
+        // владельца И acting-менеджера (active delegation) — иначе КП/счёт-
+        // вложения делегированной заявки давали 403 у замещающего менеджера.
         $relatedRequest = $email?->related_request_id
             ? \App\Models\Request::find($email->related_request_id)
             : null;
 
-        if ($relatedRequest && $relatedRequest->assigned_user_id === $user->id) {
+        if ($relatedRequest && $relatedRequest->isAccessibleBy($user)) {
             return;
         }
 

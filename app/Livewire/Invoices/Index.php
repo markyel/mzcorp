@@ -127,8 +127,10 @@ class Index extends Component
         if ($this->canSeeAll()) {
             return true;
         }
-        // менеджер — только если invoice его заявки
-        return $invoice->request?->assigned_user_id === $u->id;
+        // менеджер — владелец заявки ИЛИ acting через активную делегацию.
+        $req = $invoice->request;
+
+        return $req !== null && $req->isAccessibleBy($u);
     }
 
     /* -------------------------------- Actions ------------------------------- */
@@ -247,7 +249,8 @@ class Index extends Component
         // не показываем (попадут в «не найдено», без утечки существования).
         if (! $this->canSeeAll()) {
             $uid = auth()->id();
-            $query->whereHas('request', fn ($r) => $r->where('assigned_user_id', $uid));
+            $query->whereHas('request', fn ($r) => $r->where('assigned_user_id', $uid)
+                ->orWhereHas('activeDelegations', fn ($d) => $d->where('acting_user_id', $uid)));
         }
 
         $invoices = $query->orderBy('invoice_number')->orderByDesc('id')->get();
@@ -378,10 +381,13 @@ class Index extends Component
     {
         $q = Invoice::query();
 
-        // Scope: mine vs all (для privileged).
+        // Scope: mine vs all (для privileged). «Mine» = свои заявки + те, что
+        // делегированы мне на время отсутствия владельца (active delegation) —
+        // согласовано с пулом заявок.
         $u = auth()->user();
         if ($this->scope === 'mine' || ! $this->canSeeAll()) {
-            $q->whereHas('request', fn ($r) => $r->where('assigned_user_id', $u->id));
+            $q->whereHas('request', fn ($r) => $r->where('assigned_user_id', $u->id)
+                ->orWhereHas('activeDelegations', fn ($d) => $d->where('acting_user_id', $u->id)));
         } elseif ($this->managerId) {
             $q->whereHas('request', fn ($r) => $r->where('assigned_user_id', $this->managerId));
         }
