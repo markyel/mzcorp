@@ -85,6 +85,18 @@ class AbsentInbox extends Component
         ]) ?? false;
     }
 
+    /**
+     * Директорат и админ могут отвечать на письмо БЕЗ назначения ответственного
+     * (ответ уходит с ящика выбывшего — см. SharedMailService::sendReply).
+     */
+    #[Computed]
+    public function canReplyUnassigned(): bool
+    {
+        return auth()->user()?->hasAnyRole([
+            Role::Director->value, Role::Admin->value,
+        ]) ?? false;
+    }
+
     public function updatingSearch(): void
     {
         $this->resetPage();
@@ -336,9 +348,18 @@ class AbsentInbox extends Component
         return $out;
     }
 
-    /** Может ли текущий пользователь отвечать на письмо (только назначенный). */
+    /**
+     * Может ли текущий пользователь отвечать на письмо: назначенный менеджер
+     * ИЛИ директорат/админ (без назначения — ответ с ящика выбывшего).
+     */
     private function canReplyTo(EmailMessage $email): bool
     {
+        if (auth()->user() === null) {
+            return false;
+        }
+        if ($this->canReplyUnassigned) {
+            return true;
+        }
         $assignedTo = $email->sharedAssignment?->assigned_user_id
             ?? $email->loadMissing('sharedAssignment')->sharedAssignment?->assigned_user_id;
 

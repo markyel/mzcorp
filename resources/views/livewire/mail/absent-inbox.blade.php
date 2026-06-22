@@ -65,6 +65,7 @@
                         $isRead = $sa && $sa->read_at !== null;
                         $assignedTo = $sa?->assignedUser;
                         $iAmAssigned = $assignedTo && (int) $assignedTo->id === (int) auth()->id();
+                        $canReply = $iAmAssigned || $this->canReplyUnassigned;
                         $isExpanded = $expandedId === $em->id;
                     @endphp
                     <tbody wire:key="sm-{{ $em->id }}">
@@ -110,7 +111,7 @@
                                         @if($isRead)
                                             <button type="button" wire:click="markUnread({{ $em->id }})" class="text-sky-700 hover:underline">↺ снять прочитанность</button>
                                         @endif
-                                        @if($iAmAssigned && $replyingId !== $em->id)
+                                        @if($canReply && $replyingId !== $em->id)
                                             <button type="button" wire:click="startReply({{ $em->id }})" class="btn btn-sm btn-primary ml-auto">✉ Ответить</button>
                                         @endif
                                     </div>
@@ -150,10 +151,17 @@
                                         @endforeach
                                     </div>
 
-                                    {{-- Форма ответа (только назначенный менеджер) --}}
-                                    @if($iAmAssigned && $replyingId === $em->id)
+                                    {{-- Форма ответа (назначенный менеджер ИЛИ директорат/админ) --}}
+                                    @if($canReply && $replyingId === $em->id)
                                         <div class="mt-3 border-t border-border pt-3">
-                                            <div class="text-[11.5px] text-fg-3 mb-2">Ответ уйдёт с вашего ящика на <span class="mono">{{ $em->from_email }}</span>. Оригинал процитируется автоматически.</div>
+                                            <div class="text-[11.5px] text-fg-3 mb-2">
+                                                @if($iAmAssigned)
+                                                    Ответ уйдёт с вашего ящика на <span class="mono">{{ $em->from_email }}</span>.
+                                                @else
+                                                    Ответ уйдёт с ящика выбывшего <span class="mono">{{ $em->mailbox?->email }}</span> на <span class="mono">{{ $em->from_email }}</span>.
+                                                @endif
+                                                Оригинал процитируется автоматически.
+                                            </div>
                                             <input type="text" wire:model.blur="replyCc" placeholder="Копия (CC), через запятую — необязательно"
                                                    class="w-full mb-2 px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
                                             <textarea wire:model="replyBody" rows="5" placeholder="Текст ответа…"

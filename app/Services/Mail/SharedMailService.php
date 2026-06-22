@@ -157,10 +157,15 @@ class SharedMailService
     }
 
     /**
-     * Ответить на письмо выбывшего СО СВОЕГО ящика (только назначенный менеджер).
-     * Строит reply-draft (threading + recipient = отправитель оригинала) из
-     * personal-ящика менеджера и отправляет через OutgoingMailSender. Цитата
+     * Ответить на письмо выбывшего и отправить через OutgoingMailSender. Цитата
      * оригинала и подпись приклеиваются в OutgoingMailMimeBuilder при send.
+     *
+     * Ящик отправки зависит от того, кто отвечает:
+     *   - НАЗНАЧЕННЫЙ менеджер — со СВОЕГО personal-ящика, от своего имени;
+     *   - директорат/админ БЕЗ назначения — с ЯЩИКА ВЫБЫВШЕГО (адрес, на который
+     *     писал клиент): непрерывность переписки, имя и подпись — выбывшего
+     *     менеджера. Реальный автор фиксируется в X-MyLift-Author-User-Id.
+     * Авторизацию (кто вправе отвечать) проверяет вызывающий компонент.
      *
      * @param  array<int, TemporaryUploadedFile>  $uploadedFiles  вложения, приложенные к ответу
      * @param  array<int, array{email: string, name?: string}>  $ccRecipients  копия (CC), необязательно
@@ -168,7 +173,7 @@ class SharedMailService
      */
     public function sendReply(
         EmailMessage $original,
-        User $manager,
+        User $actor,
         string $bodyPlain,
         array $uploadedFiles = [],
         array $ccRecipients = [],
@@ -178,9 +183,27 @@ class SharedMailService
             return ['success' => false, 'error' => 'Пустой текст ответа.'];
         }
 
-        $mailbox = $manager->primaryOutboundMailbox();
+        // Назначенный отвечает со своего ящика; иначе (директорат/админ) — с
+        // ящика выбывшего, от его имени.
+        $assignedId = $original->sharedAssignment?->assigned_user_id;
+        $repliesAsAssigned = $assignedId !== null && (int) $assignedId === $actor->id;
+
+        if ($repliesAsAssigned) {
+            $mailbox = $actor->primaryOutboundMailbox();
+            $identityUserId = $actor->id; // подпись/имя — отвечающего
+            $fromName = $actor->name;
+        } else {
+            $original->loadMissing('mailbox.owner');
+            $mailbox = $original->mailbox;
+            $owner = $mailbox?->owner;
+            $identityUserId = $owner?->id ?? $actor->id; // подпись/имя — выбывшего
+            $fromName = $owner?->name ?? $actor->name;
+        }
+
         if ($mailbox === null || ! $mailbox->canSendOutbound()) {
-            return ['success' => false, 'error' => 'У вас нет настроенного ящика для отправки.'];
+            return ['success' => false, 'error' => $repliesAsAssigned
+                ? 'У вас нет настроенного ящика для отправки.'
+                : 'У ящика выбывшего не настроена отправка (SMTP/OAuth).'];
         }
 
         $to = trim((string) $original->from_email);
@@ -202,16 +225,19 @@ class SharedMailService
             'references_header' => $references ?: null,
             'subject' => $this->normalizeReplySubject($original->subject),
             'from_email' => $mailbox->email,
-            'from_name' => $manager->name,
+            'from_name' => $fromName,
             'to_recipients' => [['email' => $to, 'name' => (string) ($original->from_name ?? '')]],
             'cc_recipients' => $ccRecipients ?: null,
             'sent_at' => null,
             'body_plain' => $bodyPlain,
             'body_html' => null,
-            'headers' => ['X-MyLift-Author-User-Id' => (string) $manager->id],
+            // Реальный автор ответа — для аудита (может отличаться от identity,
+            // когда директор отвечает с ящика выбывшего).
+            'headers' => ['X-MyLift-Author-User-Id' => (string) $actor->id],
             'related_request_id' => null,
             'is_draft' => true,
-            'draft_author_user_id' => $manager->id,
+            // identity для подписи/имени (composeFinalBody берёт подпись отсюда).
+            'draft_author_user_id' => $identityUserId,
             'last_edited_at' => now(),
         ]);
 
@@ -232,8 +258,8 @@ class SharedMailService
             return ['success' => false, 'error' => $result['error'] ?? 'Не удалось отправить.'];
         }
 
-        // Ответили — помечаем письмо прочитанным.
-        $this->markRead($original, $manager);
+        // Ответили — помечаем письмо прочитанным (read_by = реальный автор).
+        $this->markRead($original, $actor);
 
         return ['success' => true];
     }
