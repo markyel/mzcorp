@@ -86,14 +86,14 @@ class Detail extends Component
     public function mount(Request $request): void
     {
         $user = auth()->user();
-        $isPrivileged = $user?->hasAnyRole([
-            Role::HeadOfSales->value,
-            Role::Director->value,
-            Role::Secretary->value,
-            Role::Admin->value,
-        ]);
 
-        if (! $isPrivileged && $request->assigned_user_id !== $user?->id) {
+        // Доступ к карточке: владелец (assigned_user_id), acting-менеджер через
+        // активную delegation, ИЛИ привилегированная роль (РОП/директор/секретарь/
+        // админ). isAccessibleBy покрывает все три случая. Баг: раньше гейт
+        // проверял только assigned_user_id, поэтому делегированная заявка —
+        // показанная acting-менеджеру в пуле — на входе отбивалась 403
+        // «назначена другому менеджеру».
+        if (! $request->isAccessibleBy($user)) {
             abort(403, 'Эта заявка назначена другому менеджеру.');
         }
 
@@ -278,13 +278,10 @@ class Detail extends Component
     private function mutateClarification(string $clarificationId, bool $apply): void
     {
         $user = auth()->user();
-        $isPrivileged = $user?->hasAnyRole([
-            Role::HeadOfSales->value,
-            Role::Director->value,
-            Role::Secretary->value,
-            Role::Admin->value,
-        ]);
-        if (! $isPrivileged && $this->request->assigned_user_id !== $user?->id) {
+        // Доступ: владелец, acting через delegation, или привилегированный
+        // (isAccessibleBy покрывает все три). Раньше проверялся только
+        // assigned_user_id — acting-менеджер не мог применять/отклонять уточнения.
+        if (! $this->request->isAccessibleBy($user)) {
             abort(403);
         }
 
