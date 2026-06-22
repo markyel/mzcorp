@@ -232,8 +232,10 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
         @endphp
         @foreach($drows as $ri => $drow)
         <tr class="{{ $rowClass }}">
-          <td class="num">{{ $item->position }}{{ $drow['sub'] ?? '' }}</td>
           @if($ri === 0)
+          {{-- Один номер позиции (4), даже если строка срока раздроблена на
+               наличие + под заказ — название/цена общие (rowspan). --}}
+          <td class="num"@if($rspan > 1) rowspan="{{ $rspan }}"@endif>{{ $item->position }}</td>
           <td class="name"@if($rspan > 1) rowspan="{{ $rspan }}"@endif>
             <div class="t">{{ $item->snapshot_name }}</div>
             @if($item->snapshot_sku)

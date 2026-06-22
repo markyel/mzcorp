@@ -94,13 +94,14 @@ class QuotationItem extends Model
 
     /**
      * Строки срока поставки для КП. Обычно одна; при ЧАСТИЧНОМ наличии
-     * (0 < свободный остаток < кол-во) — ДВЕ под-строки: «Со склада» (из
-     * наличия) + «Под заказ ≈ N нед» (остаток), с под-номерами .1/.2. Суммы
-     * делятся пропорционально (вторая строка добирает остаток после округления),
-     * так что итог по позиции = сумма под-строк. Ручной delivery_text —
-     * абсолютный override (одна строка как есть, без разбивки).
+     * (0 < свободный остаток < кол-во) — ДВЕ строки: «Со склада» (из наличия)
+     * + «Под заказ ≈ N нед» (остаток). Номер позиции при этом ОДИН (название и
+     * цена общие через rowspan в шаблоне), дробится только кол-во/срок/сумма.
+     * Суммы делятся пропорционально (вторая строка добирает остаток после
+     * округления), так что итог по позиции = сумма строк. Ручной delivery_text
+     * — абсолютный override (одна строка как есть, без разбивки).
      *
-     * @return array<int, array{qty: float, term: string, sub: ?string, line_total: float, vat_amount: float}>
+     * @return array<int, array{qty: float, term: string, line_total: float, vat_amount: float}>
      */
     public function deliveryRows(): array
     {
@@ -111,7 +112,6 @@ class QuotationItem extends Model
         $single = fn (string $term): array => [[
             'qty' => $qty,
             'term' => $term,
-            'sub' => null,
             'line_total' => $lineTotal,
             'vat_amount' => $vat,
         ]];
@@ -142,7 +142,7 @@ class QuotationItem extends Model
             return $single('Со склада'); // наличия хватает на всё кол-во
         }
 
-        // Частично: наличие + остаток под заказ (две под-строки).
+        // Частично: наличие + остаток под заказ (две строки под одним номером).
         $unitPrice = (float) $this->final_unit_price;
         $sub1Total = round($stock * $unitPrice, 2);
         $sub1Vat = $lineTotal > 0.0 ? round($vat * ($sub1Total / $lineTotal), 2) : 0.0;
@@ -151,14 +151,12 @@ class QuotationItem extends Model
             [
                 'qty' => (float) $stock,
                 'term' => 'Со склада',
-                'sub' => '.1',
                 'line_total' => $sub1Total,
                 'vat_amount' => $sub1Vat,
             ],
             [
                 'qty' => $qty - $stock,
                 'term' => $orderTerm,
-                'sub' => '.2',
                 'line_total' => round($lineTotal - $sub1Total, 2),
                 'vat_amount' => round($vat - $sub1Vat, 2),
             ],
