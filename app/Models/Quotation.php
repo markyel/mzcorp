@@ -65,6 +65,8 @@ class Quotation extends Model
         'cancelled_at',
         'snapshot_company',
         'notes',
+        // Общий клиентский комментарий, печатается в PDF (≠ внутренний notes).
+        'client_comment',
         'created_by_user_id',
     ];
 

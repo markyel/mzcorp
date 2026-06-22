@@ -75,6 +75,12 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
 .tnote { font: 8pt/1.3 'PT Sans', sans-serif; color: #5c6470; padding: 1.2mm 3mm; background: #f6f7f9; border-left: 1pt solid #D32027; border-radius: 0 1mm 1mm 0; margin-bottom: 1.8mm; }
 .tnote b { color: #0f1419; }
 
+/* Комментарий менеджера по позиции (напр. «предложен аналог») */
+.items .name .note { color: #8a5a00; font-size: 7.8pt; line-height: 1.3; margin-top: 0.8mm; font-style: italic; }
+/* Общий комментарий к КП */
+.comment { font: 8.5pt/1.4 'PT Sans', sans-serif; color: #0f1419; padding: 1.5mm 3mm; background: #f6f7f9; border-left: 1pt solid #5c6470; border-radius: 0 1mm 1mm 0; margin-bottom: 1.8mm; }
+.comment .clbl { font: bold 8pt/1 'PT Sans', sans-serif; color: #5c6470; text-transform: uppercase; letter-spacing: 0.4pt; margin-bottom: 0.8mm; }
+
 /* Totals */
 .totals { display: table; width: 100%; margin-bottom: 1.8mm; }
 .totals .row { display: table-row; }
@@ -243,6 +249,9 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
             @if($item->snapshot_sku)
               <div class="art">{{ $item->snapshot_sku }}</div>
             @endif
+            @if(trim((string) $item->notes) !== '')
+              <div class="note">{{ $item->notes }}</div>
+            @endif
           </td>
           @endif
           <td class="term">{{ $drow['term'] }}</td>
@@ -294,6 +303,13 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
       </div>
     </div>
   </div>
+
+  @if(trim((string) $q->client_comment) !== '')
+    <div class="comment">
+      <div class="clbl">Комментарий</div>
+      {!! nl2br(e($q->client_comment)) !!}
+    </div>
+  @endif
 
   <table class="cond">
     <tr>

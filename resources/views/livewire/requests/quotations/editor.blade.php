@@ -212,6 +212,16 @@
                                             </a>
                                         @endif
                                     </div>
+                                    {{-- Короткий комментарий по позиции (печатается в PDF):
+                                         напр. «Предложен аналог / Замена», «Сверить параметры». --}}
+                                    @if($editable)
+                                        <input type="text" placeholder="Комментарий: Аналог / Замена / сверить параметры…"
+                                               value="{{ $item->notes }}"
+                                               wire:blur="updateItemField({{ $item->id }}, 'notes', $event.target.value)"
+                                               class="w-full mt-1 text-[11px] text-fg-2 px-1.5 py-0.5 border border-border rounded">
+                                    @elseif(trim((string)$item->notes) !== '')
+                                        <div class="text-[11px] text-amber-800 italic mt-1">{{ $item->notes }}</div>
+                                    @endif
                                 </td>
                                 <td class="px-2 py-1.5 align-top text-right">
                                     <input type="number" min="0.001" step="0.001"
@@ -285,10 +295,11 @@
             {{-- ───────── Итоги ───────── --}}
             <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="text-[12px] text-fg-3">
-                    <textarea placeholder="Примечание к КП (опционально)" rows="2"
+                    <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Комментарий к КП <span class="normal-case tracking-normal text-fg-4">(печатается в PDF)</span></div>
+                    <textarea placeholder="Общий комментарий для клиента — условия, сопроводительный текст…" rows="3"
                               @if(!$editable) disabled @endif
-                              wire:blur="updateQuotationField('notes', $event.target.value)"
-                              class="w-full px-2 py-1.5 border border-border rounded text-fg-2">{{ $q->notes }}</textarea>
+                              wire:blur="updateQuotationField('client_comment', $event.target.value)"
+                              class="w-full px-2 py-1.5 border border-border rounded text-fg-2">{{ $q->client_comment }}</textarea>
                 </div>
                 <div class="border border-border rounded p-3 bg-surface-2">
                     <div class="space-y-1 text-[12.5px]">

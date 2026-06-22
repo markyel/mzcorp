@@ -354,7 +354,7 @@ class Editor extends Component
             return;
         }
         $allowed = ['recipient_name', 'recipient_inn', 'recipient_address',
-            'recipient_card_text', 'valid_days', 'discount_percent', 'notes'];
+            'recipient_card_text', 'valid_days', 'discount_percent', 'notes', 'client_comment'];
         if (! in_array($field, $allowed, true)) {
             return;
         }
