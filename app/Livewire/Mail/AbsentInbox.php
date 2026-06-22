@@ -10,6 +10,8 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
+use Livewire\WithFileUploads;
 use Livewire\WithPagination;
 
 /**
@@ -25,6 +27,7 @@ use Livewire\WithPagination;
  */
 class AbsentInbox extends Component
 {
+    use WithFileUploads;
     use WithPagination;
 
     #[Url(as: 'mgr')]
@@ -42,11 +45,14 @@ class AbsentInbox extends Component
     #[Url(as: 'expand')]
     public ?int $expandedId = null;
 
-    public ?string $expandedBody = null;
-    public bool $expandedIsHtml = false;
-
     public ?int $replyingId = null;
+
     public string $replyBody = '';
+
+    public string $replyCc = '';
+
+    /** @var array<int, TemporaryUploadedFile> */
+    public array $newFiles = [];
 
     public function mount(): void
     {
@@ -152,7 +158,7 @@ class AbsentInbox extends Component
 
         $s = trim($this->search);
         if ($s !== '') {
-            $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
+            $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
             $q->where(fn ($w) => $w->where('subject', 'ilike', $like)
                 ->orWhere('from_email', 'ilike', $like)
                 ->orWhere('from_name', 'ilike', $like));
@@ -170,11 +176,27 @@ class AbsentInbox extends Component
             ->count();
     }
 
+    /** Тред переписки вокруг раскрытого письма (оригинал + продолжения + наши ответы). */
+    #[Computed]
+    public function thread()
+    {
+        if (! $this->expandedId) {
+            return collect();
+        }
+        $original = $this->findVisible($this->expandedId);
+        if (! $original) {
+            return collect();
+        }
+
+        return app(SharedMailService::class)->threadFor($original);
+    }
+
     public function toggleExpand(int $id): void
     {
         if ($this->expandedId === $id) {
             $this->expandedId = null;
-            $this->expandedBody = null;
+            $this->cancelReply();
+            unset($this->thread);
 
             return;
         }
@@ -183,17 +205,11 @@ class AbsentInbox extends Component
             return;
         }
         $this->expandedId = $id;
-        $html = (string) ($email->body_html ?? '');
-        if (trim($html) !== '') {
-            $this->expandedBody = $html;
-            $this->expandedIsHtml = true;
-        } else {
-            $this->expandedBody = (string) ($email->body_plain ?? '');
-            $this->expandedIsHtml = false;
-        }
+        $this->cancelReply();
         // Открыл письмо — отмечаем прочитанным.
         app(SharedMailService::class)->markRead($email, auth()->user());
         unset($this->rows);
+        unset($this->thread);
     }
 
     public function assign(int $emailId, ?int $managerId): void
@@ -230,12 +246,25 @@ class AbsentInbox extends Component
         }
         $this->replyingId = $emailId;
         $this->replyBody = '';
+        $this->replyCc = '';
+        $this->newFiles = [];
+        $this->resetErrorBag('newFiles.*');
     }
 
     public function cancelReply(): void
     {
         $this->replyingId = null;
         $this->replyBody = '';
+        $this->replyCc = '';
+        $this->newFiles = [];
+        $this->resetErrorBag('newFiles.*');
+    }
+
+    /** Убрать один из приложенных, но ещё не отправленных файлов. */
+    public function removeNewFile(int $index): void
+    {
+        unset($this->newFiles[$index]);
+        $this->newFiles = array_values($this->newFiles);
     }
 
     public function sendReply(): void
@@ -247,16 +276,64 @@ class AbsentInbox extends Component
             return;
         }
 
-        $result = app(SharedMailService::class)->sendReply($email, auth()->user(), $this->replyBody);
+        if (! empty($this->newFiles)) {
+            $this->validate(['newFiles.*' => 'file|max:25600']); // 25 МБ на файл
+        }
+
+        // SMTP-отправка с вложениями к Yandex может занимать 20-40+ сек.
+        @set_time_limit(180);
+        @ini_set('max_execution_time', '180');
+
+        $result = app(SharedMailService::class)->sendReply(
+            $email,
+            auth()->user(),
+            $this->replyBody,
+            $this->newFiles,
+            $this->parseRecipients($this->replyCc),
+        );
         if (! ($result['success'] ?? false)) {
-            $this->dispatch('toast', message: 'Не отправлено: ' . ($result['error'] ?? ''), type: 'error');
+            $this->dispatch('toast', message: 'Не отправлено: '.($result['error'] ?? ''), type: 'error');
 
             return;
         }
 
         $this->cancelReply();
         unset($this->rows);
+        unset($this->thread);
         $this->dispatch('toast', message: 'Ответ отправлен с вашего ящика.', type: 'success');
+    }
+
+    /**
+     * «Имя <email>, foo@bar» → [['email'=>…, 'name'=>…], …] (только валидные).
+     *
+     * @return array<int, array{email: string, name: string}>
+     */
+    private function parseRecipients(string $raw): array
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return [];
+        }
+        $items = preg_split('/[,;\n]+/u', $raw) ?: [];
+        $out = [];
+        foreach ($items as $item) {
+            $item = trim($item);
+            if ($item === '') {
+                continue;
+            }
+            if (preg_match('/^(.*?)<([^>]+)>$/u', $item, $m)) {
+                $email = trim($m[2]);
+                $name = trim($m[1], " \t\"");
+            } else {
+                $email = $item;
+                $name = '';
+            }
+            if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $out[] = ['email' => $email, 'name' => $name];
+            }
+        }
+
+        return $out;
     }
 
     /** Может ли текущий пользователь отвечать на письмо (только назначенный). */

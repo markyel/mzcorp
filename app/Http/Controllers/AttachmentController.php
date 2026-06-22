@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\MailDirection;
 use App\Enums\Role;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
+use App\Models\Request;
 use Illuminate\Http\Request as HttpRequest;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\HeaderUtils;
@@ -52,7 +54,7 @@ class AttachmentController extends Controller
 
         $attachment = $emailMessage->attachments()
             ->where('content_id', $contentId)
-            ->orWhere('content_id', '<' . $contentId . '>')
+            ->orWhere('content_id', '<'.$contentId.'>')
             ->first();
 
         if (! $attachment) {
@@ -189,11 +191,25 @@ class AttachmentController extends Controller
             return;
         }
 
+        // Shared-mail («Почта выбывших»): письма без заявки (related_request_id
+        // IS NULL). Доступ — у назначенного ответственного (sharedAssignment)
+        // и у автора нашего отправленного ответа. См. SharedMailService.
+        if ($email && $email->related_request_id === null) {
+            $assignedTo = $email->sharedAssignment?->assigned_user_id;
+            if ($assignedTo !== null && (int) $assignedTo === $user->id) {
+                return;
+            }
+            if ($email->direction === MailDirection::Outbound
+                && $email->draft_author_user_id === $user->id) {
+                return;
+            }
+        }
+
         // Менеджер видит вложения писем своей заявки. isAccessibleBy включает
         // владельца И acting-менеджера (active delegation) — иначе КП/счёт-
         // вложения делегированной заявки давали 403 у замещающего менеджера.
         $relatedRequest = $email?->related_request_id
-            ? \App\Models\Request::find($email->related_request_id)
+            ? Request::find($email->related_request_id)
             : null;
 
         if ($relatedRequest && $relatedRequest->isAccessibleBy($user)) {
@@ -202,5 +218,4 @@ class AttachmentController extends Controller
 
         abort(403, 'Нет доступа к этому вложению.');
     }
-
 }

@@ -105,8 +105,8 @@
                         @if($isExpanded)
                             <tr class="border-b border-border-subtle bg-surface-2">
                                 <td colspan="6" class="px-4 py-3">
-                                    <div class="flex items-center gap-3 mb-2 text-[11.5px]">
-                                        <span class="text-fg-3">От: <span class="mono text-fg-2">{{ $em->from_email }}</span></span>
+                                    <div class="flex items-center gap-3 mb-3 text-[11.5px]">
+                                        <span class="text-fg-3">Переписка ({{ $this->thread->count() }})</span>
                                         @if($isRead)
                                             <button type="button" wire:click="markUnread({{ $em->id }})" class="text-sky-700 hover:underline">↺ снять прочитанность</button>
                                         @endif
@@ -115,22 +115,72 @@
                                         @endif
                                     </div>
 
-                                    @if($expandedBody !== null)
-                                        @if($expandedIsHtml)
-                                            <iframe srcdoc="{{ $expandedBody }}" sandbox="" class="w-full bg-white border border-border rounded" style="height:320px;"></iframe>
-                                        @else
-                                            <pre class="text-[12px] text-fg-2 whitespace-pre-wrap bg-surface border border-border rounded-md p-2 max-h-[320px] overflow-y-auto">{{ $expandedBody }}</pre>
-                                        @endif
-                                    @endif
+                                    {{-- Тред: входящие клиента + наши ответы по threading-заголовкам --}}
+                                    <div class="space-y-3">
+                                        @foreach($this->thread as $m)
+                                            @php
+                                                $isOut = $m->direction?->value === 'outbound';
+                                                $mHtml = trim((string) ($m->body_html ?? ''));
+                                                $toLine = collect($m->to_recipients ?? [])->pluck('email')->filter()->implode(', ');
+                                            @endphp
+                                            <div wire:key="thr-{{ $m->id }}" class="border border-border rounded-md {{ $isOut ? 'bg-sky-50/40' : 'bg-surface' }}">
+                                                <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border-subtle text-[11px]">
+                                                    <span class="chip {{ $isOut ? 'chip-sky' : 'chip-neutral' }} text-[10px]">{{ $isOut ? 'наш ответ' : 'входящее' }}</span>
+                                                    <span class="text-fg-2 truncate">{{ $isOut ? ('→ ' . ($toLine ?: '—')) : ($m->from_name ?: $m->from_email) }}</span>
+                                                    <span class="flex-1"></span>
+                                                    <span class="mono text-fg-3 whitespace-nowrap">{{ $m->sent_at?->format('d.m.y H:i') ?: '—' }}</span>
+                                                </div>
+                                                <div class="p-2">
+                                                    @if($mHtml !== '')
+                                                        <iframe srcdoc="{{ $mHtml }}" sandbox="" class="w-full bg-white border border-border rounded" style="height:260px;"></iframe>
+                                                    @else
+                                                        <pre class="text-[12px] text-fg-2 whitespace-pre-wrap max-h-[260px] overflow-y-auto">{{ $m->body_plain }}</pre>
+                                                    @endif
+                                                    @php $atts = $m->attachments->where('is_inline', false); @endphp
+                                                    @if($atts->isNotEmpty())
+                                                        <div class="flex flex-wrap gap-2 mt-2">
+                                                            @foreach($atts as $att)
+                                                                <a href="{{ route('attachments.download', $att) }}" target="_blank"
+                                                                   class="chip chip-neutral text-[11px] hover:underline">📎 {{ \Illuminate\Support\Str::limit($att->filename, 40) }}</a>
+                                                            @endforeach
+                                                        </div>
+                                                    @endif
+                                                </div>
+                                            </div>
+                                        @endforeach
+                                    </div>
 
                                     {{-- Форма ответа (только назначенный менеджер) --}}
                                     @if($iAmAssigned && $replyingId === $em->id)
                                         <div class="mt-3 border-t border-border pt-3">
-                                            <div class="text-[11.5px] text-fg-3 mb-1">Ответ уйдёт с вашего ящика на <span class="mono">{{ $em->from_email }}</span></div>
+                                            <div class="text-[11.5px] text-fg-3 mb-2">Ответ уйдёт с вашего ящика на <span class="mono">{{ $em->from_email }}</span>. Оригинал процитируется автоматически.</div>
+                                            <input type="text" wire:model.blur="replyCc" placeholder="Копия (CC), через запятую — необязательно"
+                                                   class="w-full mb-2 px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
                                             <textarea wire:model="replyBody" rows="5" placeholder="Текст ответа…"
                                                       class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
+
+                                            {{-- Вложения --}}
+                                            <div class="mt-2">
+                                                <label class="inline-flex items-center gap-1.5 text-[12px] text-sky-700 cursor-pointer hover:underline">
+                                                    <input type="file" wire:model="newFiles" multiple class="hidden">
+                                                    📎 Прикрепить файлы
+                                                </label>
+                                                <span wire:loading wire:target="newFiles" class="text-[11px] text-fg-3 ml-2">загрузка…</span>
+                                                @error('newFiles.*')<div class="text-[11px] text-rose-600 mt-1">{{ $message }}</div>@enderror
+                                                @if(! empty($newFiles))
+                                                    <div class="flex flex-wrap gap-2 mt-1.5">
+                                                        @foreach($newFiles as $i => $f)
+                                                            <span wire:key="nf-{{ $i }}" class="chip chip-neutral text-[11px]">
+                                                                {{ \Illuminate\Support\Str::limit($f->getClientOriginalName(), 36) }}
+                                                                <button type="button" wire:click="removeNewFile({{ $i }})" class="ml-1 text-rose-600">✕</button>
+                                                            </span>
+                                                        @endforeach
+                                                    </div>
+                                                @endif
+                                            </div>
+
                                             <div class="flex items-center gap-2 mt-2">
-                                                <button type="button" wire:click="sendReply" wire:loading.attr="disabled" wire:target="sendReply" class="btn btn-sm btn-primary">
+                                                <button type="button" wire:click="sendReply" wire:loading.attr="disabled" wire:target="sendReply,newFiles" class="btn btn-sm btn-primary">
                                                     <span wire:loading.remove wire:target="sendReply">Отправить</span>
                                                     <span wire:loading wire:target="sendReply">Отправляю…</span>
                                                 </button>
