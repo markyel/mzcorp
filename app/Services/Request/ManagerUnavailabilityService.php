@@ -244,4 +244,85 @@ class ManagerUnavailabilityService
 
         return ['delegated' => $delegated, 'skipped' => $skipped];
     }
+
+    /**
+     * Делегировать ОДНУ заявку наименее загруженному доступному менеджеру.
+     * Нужно для заявок, прилетевших на недоступного менеджера УЖЕ ПОСЛЕ
+     * markUnavailable (delegateActiveRequests — одноразовый снимок): напр.
+     * sticky `direct_mailbox` назначает на личный ящик владельца, игнорируя
+     * доступность (кейс M-2026-5396). Вызывается из AssignmentService::autoAssign.
+     *
+     * Идемпотентно (active delegation уже есть → no-op). Возвращает acting_user_id
+     * или null (не open / нет доступных / уже делегирована).
+     */
+    public function delegateOne(Request $req, User $unavailable, ?User $byUser = null): ?int
+    {
+        if (! $req->status->isOpenForAssignment()) {
+            return null;
+        }
+        if (RequestDelegation::query()->where('request_id', $req->id)->whereNull('ended_at')->exists()) {
+            return null;
+        }
+
+        $available = User::role(RoleEnum::requestHandlerRoles())
+            ->available()
+            ->where('id', '!=', $unavailable->id)
+            ->get();
+        if ($available->isEmpty()) {
+            Log::warning('ManagerUnavailabilityService: delegateOne — нет доступных менеджеров', [
+                'request_id' => $req->id, 'unavailable_user_id' => $unavailable->id,
+            ]);
+
+            return null;
+        }
+
+        // Round-robin: наименее загруженный по активным делегациям.
+        $loadByActing = RequestDelegation::query()
+            ->whereIn('acting_user_id', $available->pluck('id'))
+            ->whereNull('ended_at')
+            ->selectRaw('acting_user_id, COUNT(*) as c')
+            ->groupBy('acting_user_id')
+            ->pluck('c', 'acting_user_id');
+        $actingId = (int) $available
+            ->sortBy(fn ($u) => (int) ($loadByActing[$u->id] ?? 0))
+            ->first()
+            ->id;
+
+        $reasonText = sprintf(
+            'Отсутствие %s (%s) до %s',
+            $unavailable->name,
+            $unavailable->unavailable_reason ?: 'нет причины',
+            $unavailable->unavailable_until?->format('d.m.Y') ?: '—',
+        );
+
+        DB::transaction(function () use ($req, $unavailable, $actingId, $byUser, $reasonText) {
+            RequestDelegation::create([
+                'request_id' => $req->id,
+                'original_user_id' => $unavailable->id,
+                'acting_user_id' => $actingId,
+                'started_at' => now(),
+                'reason' => $reasonText,
+            ]);
+            RequestStateChange::create([
+                'request_id' => $req->id,
+                'from_status' => $req->status->value,
+                'to_status' => $req->status->value,
+                'by_user_id' => $byUser?->id,
+                'event' => 'delegated_during_absence',
+                'comment' => $reasonText,
+                'payload' => [
+                    'original_user_id' => $unavailable->id,
+                    'acting_user_id' => $actingId,
+                ],
+            ]);
+        });
+
+        Log::info('ManagerUnavailabilityService: delegateOne done', [
+            'request_id' => $req->id,
+            'original_user_id' => $unavailable->id,
+            'acting_user_id' => $actingId,
+        ]);
+
+        return $actingId;
+    }
 }

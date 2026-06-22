@@ -136,6 +136,25 @@ class AssignmentService
             $this->activity->touch($request, \App\Enums\RequestActivityType::Assigned);
         });
 
+        // Заявка села на НЕДОСТУПНОГО менеджера? Так бывает, когда sticky
+        // `direct_mailbox` назначает на личный ящик владельца, игнорируя
+        // доступность (клиент написал лично ему). delegateActiveRequests при
+        // markUnavailable — одноразовый снимок, поэтому НОВЫЕ письма после него
+        // иначе зависают на отсутствующем (кейс M-2026-5396). Сразу делегируем
+        // доступному коллеге: assigned остаётся владельцем (sticky/возврат), но
+        // active delegation покрывает заявку на время отсутствия. Non-fatal.
+        if ($manager->isUnavailable()) {
+            try {
+                app(\App\Services\Request\ManagerUnavailabilityService::class)
+                    ->delegateOne($request->fresh(), $manager, $byUserId ? User::find($byUserId) : null);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning(
+                    'AssignmentService: auto-delegate to acting failed (non-fatal)',
+                    ['request_id' => $request->id, 'manager_id' => $manager->id, 'error' => $e->getMessage()],
+                );
+            }
+        }
+
         // Foundation Фаза 2: in-app уведомление менеджеру о новой заявке.
         try {
             $manager->notify(\App\Notifications\RequestAssignedNotification::from($request->fresh(), $reason));
