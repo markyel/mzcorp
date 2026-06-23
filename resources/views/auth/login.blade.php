@@ -61,7 +61,7 @@
             <div id="mz-heroes" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
             <canvas id="mz-canvas" style="width:100%;display:block;border-radius:10px;background:linear-gradient(#eef2ff,#f8fafc);touch-action:none;cursor:pointer"></canvas>
             <p style="margin:6px 0 0;font-size:11px;color:#9ca3af;text-align:center">
-                Лови ✉ заявки → ₽. Не хватай 🚫 спам (застрянешь) и 😡 рекламацию (надолго!). Обгони коллег за смену!
+                Лови ✉ → ₽, хватай 💎 суперзаявку (+10!). Не лови 🚫 спам и 😡 рекламацию. Обгони коллег за смену!
             </p>
         </div>
     </details>
@@ -85,7 +85,7 @@
             var W = 360, H = 420, rM = 19, baseY = 0;
             var BEST_KEY = 'mzArcadeBest';
             var best = parseInt(localStorage.getItem(BEST_KEY) || '0', 10) || 0;
-            var state = 'menu', spawnT = 0, timeLeft = 0, ROUND = 45 * 60, playerIdx = 0;
+            var state = 'menu', spawnT = 0, timeLeft = 0, ROUND = 45 * 60, playerIdx = 0, superT = 0, superFlash = 0;
 
             function fit() {
                 var cssW = canvas.clientWidth || 360, newW = cssW, newH = Math.round(cssW * 1.18);
@@ -163,6 +163,7 @@
             function start() {
                 if (!managers.length) return;
                 state = 'play'; emails = []; tokens = []; spawnT = 0; timeLeft = ROUND;
+                superT = 540 + Math.floor(Math.random() * 420); superFlash = 0; // первая 💎 через ~9–16с
                 managers.forEach(function (m) { m.score = 0; m.freeze = 0; m.mood = 'neutral'; m.moodT = 0; });
                 placeManagers();
             }
@@ -178,19 +179,34 @@
                     emails.push({ x: 18 + Math.random() * (W - 36), y: -18, vy: 1.8 + Math.random() * 1.4, type: typ });
                     spawnT = Math.max(13, 28 - Math.floor((ROUND - timeLeft) / 260));
                 }
+                if (superFlash > 0) superFlash--;
+                // редкая 💎 СУПЕРЗАЯВКА — событие, за которым охотятся ВСЕ (+10 ₽).
+                // Падает медленно (успеть сбежаться), по одной за раз.
+                if (--superT <= 0) {
+                    if (!emails.some(function (e) { return e.type === 'super'; })) {
+                        emails.push({ x: 30 + Math.random() * (W - 60), y: -20, vy: 1.1 + Math.random() * 0.5, type: 'super' });
+                        superFlash = 70;
+                    }
+                    superT = 720 + Math.floor(Math.random() * 480); // следующая через ~12–20с
+                }
+                // суперзаявка на экране — её преследуют ВСЕ AI (вне «зон»)
+                var sup = null;
+                emails.forEach(function (e) { if (e.type === 'super' && e.y > 8) sup = e; });
                 // движение менеджеров
                 managers.forEach(function (m) {
                     if (m.moodT > 0 && --m.moodT === 0) m.mood = 'neutral';
                     if (m.freeze > 0) { m.freeze--; return; }
                     if (m.ai) {
-                        // цель — ближайшее письмо в «своей» зоне (где этот менеджер ближе всех)
-                        var tgt = null, td = 1e9;
-                        emails.forEach(function (e) {
-                            if (e.y < 18 || e.y > baseY + 4 || closestMgr(e.x) !== m) return;
-                            var d = Math.abs(e.x - m.x) + (baseY - e.y) * 0.12;
-                            if (d < td) { td = d; tgt = e; }
-                        });
-                        if (tgt) m.x = Math.max(rM, Math.min(W - rM, m.x + Math.max(-3.1, Math.min(3.1, tgt.x - m.x))));
+                        var tgt = sup; // суперзаявка в приоритете для всех
+                        if (!tgt) { // иначе — ближайшее письмо в «своей» зоне
+                            var td = 1e9;
+                            emails.forEach(function (e) {
+                                if (e.y < 18 || e.y > baseY + 4 || closestMgr(e.x) !== m) return;
+                                var d = Math.abs(e.x - m.x) + (baseY - e.y) * 0.12;
+                                if (d < td) { td = d; tgt = e; }
+                            });
+                        }
+                        if (tgt) m.x = Math.max(rM, Math.min(W - rM, m.x + Math.max(-3.3, Math.min(3.3, tgt.x - m.x))));
                     }
                 });
                 // письма падают + ловля (ловит ближайший свободный менеджер)
@@ -200,7 +216,8 @@
                         var m2 = closestMgr(e.x);
                         if (m2 && m2.freeze <= 0 && Math.abs(m2.x - e.x) < rM + 9) {
                             var kind;
-                            if (e.type === 'spam') { m2.freeze = 30; m2.mood = 'lost'; kind = 'spam'; }        // спам — застрял дольше
+                            if (e.type === 'super') { m2.freeze = 16; m2.score += 10; m2.mood = 'won'; kind = 'super'; } // 💎 джекпот +10 ₽
+                            else if (e.type === 'spam') { m2.freeze = 30; m2.mood = 'lost'; kind = 'spam'; }   // спам — застрял дольше
                             else if (e.type === 'claim') { m2.freeze = 48; m2.mood = 'lost'; kind = 'claim'; } // рекламация — ещё дольше
                             else { // заявка
                                 m2.freeze = 16; // замер на мгновение
@@ -250,15 +267,27 @@
                 for (var gx = 40; gx < W; gx += 40) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
                 ctx.strokeStyle = 'rgba(99,102,241,.18)'; ctx.beginPath(); ctx.moveTo(0, baseY + rM + 3); ctx.lineTo(W, baseY + rM + 3); ctx.stroke();
 
-                // падающие: ✉ заявка / 🚫 спам / 😡 рекламация
-                ctx.font = '22px system-ui, "Segoe UI Emoji", "Apple Color Emoji"'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                // падающие: ✉ заявка / 🚫 спам / 😡 рекламация / 💎 суперзаявка
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
                 var EMO = { mail: '✉️', spam: '🚫', claim: '😡' };
-                emails.forEach(function (e) { ctx.fillText(EMO[e.type] || '✉️', e.x, e.y); });
+                emails.forEach(function (e) {
+                    if (e.type === 'super') {
+                        ctx.save();
+                        ctx.shadowColor = 'rgba(234,179,8,.95)'; ctx.shadowBlur = 16;
+                        ctx.font = (28 + 3 * Math.sin(e.y * 0.18)).toFixed(0) + 'px system-ui, "Segoe UI Emoji", "Apple Color Emoji"';
+                        ctx.fillText('💎', e.x, e.y);
+                        ctx.restore();
+                    } else {
+                        ctx.font = '22px system-ui, "Segoe UI Emoji", "Apple Color Emoji"';
+                        ctx.fillText(EMO[e.type] || '✉️', e.x, e.y);
+                    }
+                });
 
                 // токены результата
                 tokens.forEach(function (tk) {
                     var a = Math.min(1, tk.life / 24);
-                    if (tk.kind === 'ruble') { ctx.fillStyle = 'rgba(202,138,4,' + a + ')'; ctx.font = 'bold 19px system-ui'; ctx.fillText('₽', tk.x, tk.y); }
+                    if (tk.kind === 'super') { ctx.fillStyle = 'rgba(202,138,4,' + a + ')'; ctx.font = 'bold 17px system-ui'; ctx.fillText('+10 ₽', tk.x, tk.y); }
+                    else if (tk.kind === 'ruble') { ctx.fillStyle = 'rgba(202,138,4,' + a + ')'; ctx.font = 'bold 19px system-ui'; ctx.fillText('₽', tk.x, tk.y); }
                     else if (tk.kind === 'spam') { ctx.fillStyle = 'rgba(234,88,12,' + a + ')'; ctx.font = 'bold 10px system-ui'; ctx.fillText('спам', tk.x, tk.y); }
                     else if (tk.kind === 'claim') { ctx.fillStyle = 'rgba(220,38,38,' + a + ')'; ctx.font = 'bold 10px system-ui'; ctx.fillText('рекламация', tk.x, tk.y); }
                     else { ctx.fillStyle = 'rgba(148,163,184,' + a + ')'; ctx.font = '11px system-ui'; ctx.fillText('пусто', tk.x, tk.y); }
@@ -272,6 +301,13 @@
                 ctx.fillText('ВЫ: ' + (me ? me.score : 0) + ' ₽', 10, 18);
                 ctx.textAlign = 'right'; ctx.fillStyle = (state === 'play' && timeLeft < 600) ? '#ef4444' : '#6b7280'; ctx.font = 'bold 13px system-ui';
                 ctx.fillText('⏱ ' + Math.ceil(Math.max(0, timeLeft) / 60) + 'с', W - 10, 18);
+
+                // баннер появления суперзаявки
+                if (state === 'play' && superFlash > 0) {
+                    ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(202,138,4,' + Math.min(1, superFlash / 22) + ')';
+                    ctx.font = 'bold 14px system-ui';
+                    ctx.fillText('💎 СУПЕРЗАЯВКА! +10 ₽', W / 2, 40);
+                }
 
                 if (state !== 'play') {
                     ctx.fillStyle = 'rgba(15,23,42,.62)'; ctx.fillRect(0, 0, W, H);
