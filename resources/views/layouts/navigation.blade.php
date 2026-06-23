@@ -104,8 +104,9 @@
     <div class="h-full px-4 flex items-center gap-3">
 
         {{-- Brand --}}
-        <a href="{{ route('dashboard') }}" class="flex items-center gap-2 shrink-0" aria-label="MyLift CRM">
-            <img src="{{ asset('images/mylift-wordmark.svg') }}" alt="MyLift CRM" class="h-6 w-auto">
+        <a href="{{ route('dashboard') }}" class="flex items-center gap-2 shrink-0 text-fg-1" aria-label="mzCorp CRM">
+            <img src="{{ asset('images/mzcorp-emblem.png') }}" alt="mzCorp" style="height:28px;width:auto;display:block">
+            <span class="font-semibold tracking-tight" style="font-size:15px">mzCorp</span>
         </a>
 
         {{-- Workspace pill — только для привилегированных ролей.
