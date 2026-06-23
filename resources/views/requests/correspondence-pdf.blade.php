@@ -48,6 +48,9 @@
         .badge.cat { background: #d7efe0; color: #1f6b43; }
         .msg-sub { font-size: 10px; color: #666; margin-top: 2px; font-family: 'PT Mono', monospace; }
         .msg-body { padding: 9px 11px; font-size: 11.5px; word-wrap: break-word; }
+        /* Форсируем PT Sans: иначе font-family из подписи письма
+           (Helvetica/Arial) уводит dompdf на Type1-шрифт без кириллицы → «???». */
+        .msg-body, .msg-body * { font-family: 'PT Sans', sans-serif !important; }
         .msg-body img { max-width: 100%; height: auto; }
         .msg-body table { max-width: 100%; }
 

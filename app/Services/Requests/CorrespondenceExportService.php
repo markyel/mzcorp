@@ -193,6 +193,15 @@ class CorrespondenceExportService
             // протечь на следующие письма одного документа.
             $html = preg_replace('#<(script|style|head)\b[^>]*>.*?</\1>#is', '', $html) ?? $html;
 
+            // Кириллица в подписях рендерилась как «???»: подписи из почтовых
+            // клиентов (Thunderbird moz-signature и т.п.) несут собственный
+            // font-family (Helvetica/Arial), а для этих семейств dompdf берёт
+            // встроенный Type1-шрифт БЕЗ кириллицы. Снимаем декларации шрифта из
+            // inline-style и <font face=…>, чтобы текст наследовал PT Sans
+            // (defaultFont). Доп. страховка — !important в шаблоне.
+            $html = preg_replace('/font-family\s*:[^;"\']*;?/i', '', $html) ?? $html;
+            $html = preg_replace('/(<font\b[^>]*?)\s+face\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)/i', '$1', $html) ?? $html;
+
             return $this->inlineCidImages($html, $m);
         }
 
