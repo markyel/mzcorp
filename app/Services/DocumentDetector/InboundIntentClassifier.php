@@ -13,10 +13,11 @@ use Illuminate\Support\Facades\Log;
 /**
  * Inbound-классификатор клиентских ответов (Foundation §7.2).
  *
- * Триггер: входящее письмо, привязанное к Request в одном из статусов
- *   quoted / under_review / postponed_until / awaiting_client_clarification /
- *   awaiting_invoice / invoiced (см. ELIGIBLE_STATUSES). Последние два — чтобы
- *   ловить отказ клиента после выставления счёта (auto-close lost).
+ * Триггер: входящее письмо, привязанное к Request в одном из ELIGIBLE_STATUSES:
+ *   new / assigned / in_progress (ранние — но автоприменяется ТОЛЬКО decline,
+ *   чтобы ловить отмену ДО КП), quoted / under_review / postponed_until /
+ *   awaiting_client_clarification / awaiting_invoice / invoiced.
+ *   awaiting_invoice/invoiced — ловить отказ после счёта (auto-close lost).
  * LLM (gpt-4o-mini) определяет intent клиента, возвращает структурированный
  * ответ; сервис мапит intent → DetectorType и возвращает payload для
  * AiDecisionService::recordSuggestion.
@@ -34,6 +35,13 @@ class InboundIntentClassifier
      * @var array<int, RequestStatus>
      */
     private const ELIGIBLE_STATUSES = [
+        // Ранние рабочие статусы (до квотирования) — чтобы ловить явную отмену/
+        // отказ клиента ДО отправки КП (кейс M-2026-4710 «задвоила запрос,
+        // закрывайте»). В них автоприменяется ТОЛЬКО decline (см. EARLY_STATUSES
+        // ниже) — прочие интенты тут преждевременны.
+        RequestStatus::New,
+        RequestStatus::Assigned,
+        RequestStatus::InProgress,
         RequestStatus::Quoted,
         RequestStatus::UnderReview,
         RequestStatus::PostponedUntil,
@@ -42,13 +50,25 @@ class InboundIntentClassifier
         RequestStatus::Invoiced,
     ];
 
+    /**
+     * Ранние статусы (до квотирования): классифицируем reply, но автоприменяем
+     * ТОЛЬКО decline/new_request — остальные интенты (счёт/доп.позиции/
+     * согласование/отложить) преждевременны, оставляем менеджеру.
+     *
+     * @var array<int, RequestStatus>
+     */
+    private const EARLY_STATUSES = [
+        RequestStatus::New,
+        RequestStatus::Assigned,
+        RequestStatus::InProgress,
+    ];
+
     private const CONFIDENCE_FLOOR = 0.6;
 
     public function __construct(
         private readonly OpenAIChatService $openai,
         private readonly ClassifyClientResponsePrompt $prompt,
-    ) {
-    }
+    ) {}
 
     public function isApplicable(Request $request): bool
     {
@@ -57,8 +77,8 @@ class InboundIntentClassifier
 
     /**
      * @return ?array{type: ?DetectorType, confidence: float, payload: array<string, mixed>}
-     *   type === null с payload.intent === 'new_request' — сигнал «это отдельная
-     *   новая заявка в треде» (обрабатывает MailRouter, не AiDecisionService).
+     *                                                                                       type === null с payload.intent === 'new_request' — сигнал «это отдельная
+     *                                                                                       новая заявка в треде» (обрабатывает MailRouter, не AiDecisionService).
      */
     public function classify(EmailMessage $message, Request $request): ?array
     {
@@ -126,6 +146,17 @@ class InboundIntentClassifier
         // awaiting_client_clarification. Если LLM ошибся — downgrade в unclear.
         if ($type === DetectorType::InboundClarificationResponse
             && $request->status !== RequestStatus::AwaitingClientClarification
+        ) {
+            $type = DetectorType::InboundUnclear;
+        }
+
+        // В ранних статусах (до квотирования) автоприменяем ТОЛЬКО decline
+        // (явная отмена/отказ). Остальные интенты (счёт/доп.позиции/согласование/
+        // отложить) на ранней стадии преждевременны — downgrade в unclear,
+        // решает менеджер. new_request (type=null) проходит — это спин-офф.
+        if (in_array($request->status, self::EARLY_STATUSES, true)
+            && $type !== null
+            && $type !== DetectorType::InboundDecline
         ) {
             $type = DetectorType::InboundUnclear;
         }
