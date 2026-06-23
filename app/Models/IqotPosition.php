@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class IqotPosition extends Model
 {
     public const SOURCE_AUTO = 'auto';
+
     public const SOURCE_MANUAL = 'manual';
 
     protected $fillable = [
@@ -126,17 +127,22 @@ class IqotPosition extends Model
         $ourLabel = null;
         $ourNotes = null;
         $ourLead = null;
-        if ($this->our_unit_price !== null) {
+        // Цена ≤ 0 (в т.ч. каталожный 0,00 при отсутствии реальной цены —
+        // is_price_actual=false) = «цена неизвестна», НЕ «бесплатно». Иначе наша
+        // строка с 0 ₽ занимала бы ложное 1-е место и давала дельту −100%
+        // (кейс M26928). Тот же принцип, что firstPositivePrice для офферов:
+        // нет валидной цены → нашу строку в сравнение не добавляем (our_rank=null).
+        if ($this->our_unit_price !== null && (float) $this->our_unit_price > 0) {
             $ourGross = (float) $this->our_unit_price;
-            $ourLabel = 'Наше КП' . ($this->our_quotation_code ? ' ' . $this->our_quotation_code : '');
+            $ourLabel = 'Наше КП'.($this->our_quotation_code ? ' '.$this->our_quotation_code : '');
             $ourNotes = 'собственное КП';
-        } elseif ($cat && $cat->price !== null) {
+        } elseif ($cat && $cat->price !== null && (float) $cat->price > 0) {
             $ourGross = (float) $cat->price;
             $ourLabel = 'Наша цена (каталог)';
             $ourLead = $cat->lead_time_days;
             $notes = [];
             if ($cat->price_min !== null) {
-                $notes[] = 'мин. ' . number_format((float) $cat->price_min, 2, ',', ' ') . ' ₽';
+                $notes[] = 'мин. '.number_format((float) $cat->price_min, 2, ',', ' ').' ₽';
             }
             if (! $cat->is_price_actual) {
                 $notes[] = 'цена не актуальна';
@@ -168,7 +174,7 @@ class IqotPosition extends Model
 
             $rows[] = [
                 'is_ours' => false,
-                'supplier' => $o['supplier']['name'] ?? ('#' . ($o['supplier_id'] ?? '?')),
+                'supplier' => $o['supplier']['name'] ?? ('#'.($o['supplier_id'] ?? '?')),
                 'email' => $o['supplier']['email'] ?? null,
                 'phone' => $o['supplier']['phone'] ?? null,
                 'raw' => $raw,
@@ -408,12 +414,12 @@ class IqotPosition extends Model
                     ->where('cmp_deviation_pct', '>', self::attentionMinDeviationPct());
             })
             // критический: топ-N% при ≥ min_suppliers
-            ->orWhere(function (Builder $c) use ($topFraction) {
-                $c->whereNotNull('cmp_total')
-                    ->where('cmp_total', '>', 0)
-                    ->whereRaw('(cmp_total - 1) >= ?', [self::criticalMinSuppliers()])
-                    ->whereRaw('(cmp_our_rank - 1)::float / cmp_total >= ?', [$topFraction]);
-            });
+                ->orWhere(function (Builder $c) use ($topFraction) {
+                    $c->whereNotNull('cmp_total')
+                        ->where('cmp_total', '>', 0)
+                        ->whereRaw('(cmp_total - 1) >= ?', [self::criticalMinSuppliers()])
+                        ->whereRaw('(cmp_our_rank - 1)::float / cmp_total >= ?', [$topFraction]);
+                });
         });
     }
 
