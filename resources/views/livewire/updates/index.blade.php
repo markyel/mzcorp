@@ -41,7 +41,7 @@
                 <div class="ds-card" wire:key="upd-{{ $entry->id }}">
                     <div class="ds-card-body">
                         <div class="text-[11.5px] text-fg-3 mb-1">
-                            {{ optional($entry->published_at)->translatedFormat('d MMMM Y') }}
+                            {{ optional($entry->published_at)->isoFormat('D MMMM YYYY') }}
                         </div>
                         <h2 class="text-[16px] font-semibold text-fg-1 leading-snug mb-2">{{ $entry->title }}</h2>
                         <div class="changelog-prose">
