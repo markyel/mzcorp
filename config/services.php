@@ -334,6 +334,22 @@ return [
         )),
 
         /*
+        | Ящики-форвардеры. С них клиентские заявки ПЕРЕСЫЛАЮТСЯ на info@
+        | (вручную/автопереслом), поэтому from_email = технический ящик, а
+        | реальный отправитель — в блоке пересылки в теле («От: Имя <e-mail>»).
+        | ForwardedRequestParser достаёт его, IncomingMailProcessor /
+        | EmailToRequestPromoter пишут в Request.client_*, createReply шлёт
+        | ответ клиенту, а не на форвардер. Отличие от web_form_senders:
+        | произвольное письмо-пересылка, а не фиксированная HTML-форма сайта.
+        |
+        | Список через запятую: MAIL_FORWARDER_SENDERS=noreply@myzip.ru
+        */
+        'forwarder_senders' => array_filter(array_map(
+            'trim',
+            explode(',', (string) env('MAIL_FORWARDER_SENDERS', 'noreply@myzip.ru'))
+        )),
+
+        /*
         | Empty-content guard в IncomingMailProcessor. Если очищенное тело
         | inbound-письма короче порога И нет attachments — Request не
         | создаётся (письмо переписывается в category=irrelevant). Кейс:

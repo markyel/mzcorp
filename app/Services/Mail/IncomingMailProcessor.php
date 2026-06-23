@@ -2,16 +2,18 @@
 
 namespace App\Services\Mail;
 
+use App\Enums\BlocklistKind;
 use App\Enums\EmailCategory;
+use App\Enums\RequestActivityType;
 use App\Enums\RequestStatus;
 use App\Jobs\Mail\ParseRequestItemsJob;
 use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Services\Clients\RequestOrganizationResolver;
 use App\Services\Request\AssignmentService;
-use App\Services\Supplier\SupplierInquiryService;
 use App\Services\Request\InternalCodeGenerator;
 use App\Services\Request\RequestActivityService;
+use App\Services\Supplier\SupplierInquiryService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -38,10 +40,10 @@ class IncomingMailProcessor
         private readonly EmailTextCleanerService $cleaner,
         private readonly SenderBlocklistService $blocklist,
         private readonly WebFormSubmissionParser $webForm,
+        private readonly ForwardedRequestParser $forwarded,
         private readonly RequestOrganizationResolver $orgResolver,
         private readonly SupplierInquiryService $supplierInquiries,
-    ) {
-    }
+    ) {}
 
     public function processIfRequest(EmailMessage $message): ?Request
     {
@@ -51,7 +53,7 @@ class IncomingMailProcessor
         // обходя router. Повторная проверка дешёвая (локальный SELECT).
         $blockEntry = $this->blocklist->match($message->from_email);
         if ($blockEntry !== null) {
-            if ($blockEntry->kind === \App\Enums\BlocklistKind::Supplier) {
+            if ($blockEntry->kind === BlocklistKind::Supplier) {
                 // Пул поставщика — читаем как переписку, не создаём заявку.
                 try {
                     $this->supplierInquiries->ingestSupplierMessage($message);
@@ -153,7 +155,7 @@ class IncomingMailProcessor
             // позже доставит clients:backfill / связывание email↔организация.
             $this->orgResolver->attach($req);
 
-            $this->activity->touch($req, \App\Enums\RequestActivityType::RequestCreated);
+            $this->activity->touch($req, RequestActivityType::RequestCreated);
 
             return $req;
         });
@@ -190,35 +192,60 @@ class IncomingMailProcessor
             'client_name' => $message->from_name,
         ];
 
-        if (! $this->webForm->isWebFormSubmission($message)) {
-            return $default;
-        }
+        // Заявка с сайта (order@) — реальный клиент в теле HTML-формы.
+        if ($this->webForm->isWebFormSubmission($message)) {
+            $parsed = $this->webForm->parse($message);
+            if ($parsed === null) {
+                // Не распознали тело формы / нет валидного e-mail — оставляем
+                // From, чтобы заявка не потерялась. РОП увидит order@ и разберётся.
+                Log::warning('IncomingMailProcessor: web-form parse failed, keeping From', [
+                    'email_message_id' => $message->id,
+                    'from_email' => $message->from_email,
+                ]);
 
-        $parsed = $this->webForm->parse($message);
-        if ($parsed === null) {
-            // Не распознали тело формы / нет валидного e-mail — оставляем From,
-            // чтобы заявка не потерялась. РОП увидит order@ и разберётся.
-            Log::warning('IncomingMailProcessor: web-form parse failed, keeping From', [
+                return $default;
+            }
+
+            Log::info('IncomingMailProcessor: web-form client resolved', [
                 'email_message_id' => $message->id,
-                'from_email' => $message->from_email,
+                'relay_from' => $message->from_email,
+                'client_email' => $parsed['email'],
             ]);
 
-            return $default;
+            return [
+                'client_email' => $parsed['email'],
+                'client_name' => $parsed['name'] ?: $parsed['company'] ?: $message->from_name,
+                'client_phone' => $parsed['phone'],
+                'client_company' => $parsed['company'],
+                'client_address' => $parsed['address'],
+            ];
         }
 
-        Log::info('IncomingMailProcessor: web-form client resolved', [
-            'email_message_id' => $message->id,
-            'relay_from' => $message->from_email,
-            'client_email' => $parsed['email'],
-        ]);
+        // Пересланная заявка (noreply@) — реальный отправитель в блоке пересылки.
+        if ($this->forwarded->isForwarded($message)) {
+            $parsed = $this->forwarded->parse($message);
+            if ($parsed === null) {
+                Log::warning('IncomingMailProcessor: forwarded parse failed, keeping From', [
+                    'email_message_id' => $message->id,
+                    'from_email' => $message->from_email,
+                ]);
 
-        return [
-            'client_email' => $parsed['email'],
-            'client_name' => $parsed['name'] ?: $parsed['company'] ?: $message->from_name,
-            'client_phone' => $parsed['phone'],
-            'client_company' => $parsed['company'],
-            'client_address' => $parsed['address'],
-        ];
+                return $default;
+            }
+
+            Log::info('IncomingMailProcessor: forwarded client resolved', [
+                'email_message_id' => $message->id,
+                'forwarder_from' => $message->from_email,
+                'client_email' => $parsed['email'],
+            ]);
+
+            return [
+                'client_email' => $parsed['email'],
+                'client_name' => $parsed['name'] ?: $message->from_name,
+            ];
+        }
+
+        return $default;
     }
 
     /**
@@ -253,7 +280,7 @@ class IncomingMailProcessor
         // вообще пуст. Раньше guard смотрел только в body и резал такие
         // письма. Кейсы M-2026-1815 (MAA250AY301 1 штука), M-2026-1816
         // (GAA737AA1 6 штук).
-        $combined = (string) $message->subject . "\n" . $plain;
+        $combined = (string) $message->subject."\n".$plain;
 
         // M-артикул — внутренний SKU MyZip, сильнейший сигнал
         // товарной заявки. Кейс M-2026 (Liftway): subject=«Счёт»,

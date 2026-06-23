@@ -24,8 +24,8 @@ class EmailDraftService
     public function __construct(
         private readonly OutgoingMailboxResolver $resolver,
         private readonly WebFormSubmissionParser $webForm,
-    ) {
-    }
+        private readonly ForwardedRequestParser $forwarded,
+    ) {}
 
     /**
      * Создать reply-draft из существующего письма треда.
@@ -41,14 +41,15 @@ class EmailDraftService
 
         $recipients = $this->computeRecipients($replyTo, $mailbox, $replyAll);
 
-        // Заявка с сайта: письмо-якорь пришло с технического релея формы
-        // (order@myzip.ru), его from_email — НЕ клиент. computeRecipients
-        // подставил бы в «Кому» адрес релея. Реальный клиент уже сохранён в
-        // Request.client_email (WebFormSubmissionParser) — отвечаем туда, чтобы
-        // переписка шла на адрес клиента. Срабатывает только пока клиент сам не
-        // написал с реального адреса (тогда якорь — его письмо, гард не нужен).
+        // Якорь пришёл с технического ящика, а не от клиента: либо релей
+        // веб-формы (order@myzip.ru), либо форвардер пересланной заявки
+        // (noreply@myzip.ru). computeRecipients подставил бы в «Кому» этот
+        // технический адрес. Реальный клиент уже сохранён в Request.client_email
+        // (WebFormSubmissionParser / ForwardedRequestParser) — отвечаем туда.
+        // Срабатывает, только пока клиент сам не написал с реального адреса
+        // (тогда якорь — его письмо, from_email == client_email, гард не нужен).
         if ($replyTo->direction === MailDirection::Inbound
-            && $this->webForm->isWebFormSubmission($replyTo)
+            && ($this->webForm->isWebFormSubmission($replyTo) || $this->forwarded->isForwarded($replyTo))
             && $request->client_email
             && mb_strtolower($request->client_email) !== mb_strtolower((string) $replyTo->from_email)
         ) {
@@ -93,8 +94,8 @@ class EmailDraftService
             : [];
 
         $subject = $request->subject
-            ? '[' . $request->internal_code . '] ' . $request->subject
-            : '[' . $request->internal_code . ']';
+            ? '['.$request->internal_code.'] '.$request->subject
+            : '['.$request->internal_code.']';
 
         return $this->createDraft([
             'request' => $request,
@@ -185,7 +186,7 @@ class EmailDraftService
 
         // Временный message_id (UUID). Финальный пишется в OutgoingMailSender
         // при build MIME. Сейчас нужен только потому что колонка NOT NULL.
-        $tempMessageId = 'draft.' . Str::uuid()->toString() . '@mzcorp.ru';
+        $tempMessageId = 'draft.'.Str::uuid()->toString().'@mzcorp.ru';
 
         return EmailMessage::create([
             'mailbox_id' => $mailboxId,
@@ -242,7 +243,7 @@ class EmailDraftService
     }
 
     /**
-     * @return array<int, string>  lowercase emails to exclude
+     * @return array<int, string> lowercase emails to exclude
      */
     private function ourEmails(?Mailbox $fromMailbox): array
     {
@@ -317,7 +318,7 @@ class EmailDraftService
             return $s;
         }
 
-        return 'Re: ' . $s;
+        return 'Re: '.$s;
     }
 
     private function deleteAttachmentFile(EmailAttachment $attachment): void
