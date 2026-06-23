@@ -316,12 +316,13 @@ class CorrespondenceExportService
             '/^\s*Subject\s*:/i',
             '/^\s*Date\s*:/i',
             '/-{3,}\s*(Original message|Перенаправленное сообщение|Forwarded message|Пересылаемое сообщение)/iu',
-            '/\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4}.*(написал|wrote)/iu',
+            '/\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4}.*(написал|пиш[еу]т|писал|wrote|writes)/iu',
             // Текстовый месяц: «23 июн. 2026 г., … написал(а):» — точка после
             // сокращённого месяца («июн.») не должна ломать матч.
-            '/\d{1,2}\s+\p{L}+\.?\s+\d{4}.*(написал|wrote)/iu',
-            // Общий хвост attribution-строки: «… написал(а):» / «… wrote:».
-            '/(написал\(а\)|написал[аи]?|wrote)\s*:?\s*$/iu',
+            '/\d{1,2}\s+\p{L}+\.?\s+\d{4}.*(написал|пиш[еу]т|писал|wrote|writes)/iu',
+            // Общий хвост attribution-строки: «… написал(а):» / «… пишет:» /
+            // «… wrote:» (разные клиенты: Apple/Yandex — «написал(а)», Mail.ru — «пишет»).
+            '/(написал\(а\)|написал[аи]?|пиш[еу]т|писал[аи]?|wrote|writes)\s*:?\s*$/iu',
         ];
         foreach ($patterns as $p) {
             if (preg_match($p, $text)) {
@@ -342,7 +343,7 @@ class CorrespondenceExportService
         $out = [];
         foreach ($lines as $line) {
             if (preg_match('/^\s*-{2,}\s*(Original message|Перенаправленное|Forwarded|Пересылаемое)/iu', $line)
-                || preg_match('/(написал\(а\)|написал[аи]?|wrote)\s*:?\s*$/iu', $line)
+                || preg_match('/(написал\(а\)|написал[аи]?|пиш[еу]т|писал[аи]?|wrote|writes)\s*:?\s*$/iu', $line)
             ) {
                 break;
             }
