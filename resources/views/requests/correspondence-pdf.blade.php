@@ -7,8 +7,8 @@
         * { box-sizing: border-box; }
         body {
             font-family: 'PT Sans', sans-serif;
-            font-size: 12px;
-            line-height: 1.5;
+            font-size: 10.5px;
+            line-height: 1.4;
             color: #1a1a1a;
         }
         .doc-head {
@@ -24,7 +24,6 @@
             border: 1px solid #d8d8d8;
             border-radius: 5px;
             margin-bottom: 12px;
-            page-break-inside: avoid;
         }
         .msg-head {
             padding: 6px 10px;
@@ -32,7 +31,7 @@
             background: #f6f6f6;
         }
         .msg-head.out { background: #eef3fb; }
-        .msg-author { font-weight: bold; font-size: 12.5px; }
+        .msg-author { font-weight: bold; font-size: 11.5px; }
         .badge {
             display: inline-block;
             font-size: 9px;
@@ -47,17 +46,25 @@
         .badge.out { background: #2f5bbf; color: #fff; }
         .badge.cat { background: #d7efe0; color: #1f6b43; }
         .msg-sub { font-size: 10px; color: #666; margin-top: 2px; font-family: 'PT Mono', monospace; }
-        .msg-body { padding: 9px 11px; font-size: 11.5px; word-wrap: break-word; }
-        /* Форсируем PT Sans: иначе font-family из подписи письма
-           (Helvetica/Arial) уводит dompdf на Type1-шрифт без кириллицы → «???». */
-        .msg-body, .msg-body * { font-family: 'PT Sans', sans-serif !important; }
+        .msg-body { padding: 9px 11px; word-wrap: break-word; }
+        /* Нормализуем шрифт/размер/межстрочный для тела письма:
+           - font-family: иначе Helvetica/Arial из подписи уводят dompdf на
+             Type1-шрифт без кириллицы → «???»;
+           - font-size/line-height: подписи задают 15-17px и кривой line-height
+             через `font:`-shorthand → текст крупный и местами наезжает.
+           !important-longhand перекрывает и shorthand из inline-style. */
+        .msg-body, .msg-body * {
+            font-family: 'PT Sans', sans-serif !important;
+            font-size: 10.5px !important;
+            line-height: 1.4 !important;
+        }
         .msg-body img { max-width: 100%; height: auto; }
         .msg-body table { max-width: 100%; }
 
         .photos { padding: 0 11px 10px; }
         .photos .ph { display: inline-block; margin: 4px 6px 0 0; vertical-align: top; }
-        .photos img { max-width: 240px; max-height: 240px; border: 1px solid #ddd; border-radius: 4px; }
-        .photos .cap { font-size: 9px; color: #777; max-width: 240px; }
+        .photos img { max-width: 150px; max-height: 150px; border: 1px solid #ddd; border-radius: 4px; }
+        .photos .cap { font-size: 8px; color: #777; max-width: 150px; }
 
         .files {
             padding: 7px 11px;

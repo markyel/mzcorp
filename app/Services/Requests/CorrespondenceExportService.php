@@ -8,7 +8,6 @@ use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Models\User;
-use App\Services\AI\VisionImageDownscaler;
 use Dompdf\Dompdf;
 use Dompdf\Options;
 use Illuminate\Support\Collection;
@@ -145,7 +144,7 @@ class CorrespondenceExportService
 
                 return $bytes === null ? null : [
                     'name' => $a->filename,
-                    'data' => VisionImageDownscaler::dataUri($bytes, $a->mime_type, $a->id),
+                    'data' => $this->imageDataUri($bytes, $a->mime_type, $a->id),
                 ];
             })
             ->filter()
@@ -234,12 +233,82 @@ class CorrespondenceExportService
                 if ($bytes === null) {
                     return $match[0];
                 }
-                $uri = VisionImageDownscaler::dataUri($bytes, $att->mime_type, $att->id);
+                $uri = $this->imageDataUri($bytes, $att->mime_type, $att->id);
 
                 return $match[1] . '=' . $match[2] . $uri . $match[2];
             },
             $html
         ) ?? $html;
+    }
+
+    /**
+     * data-URI картинки для PDF: ужимаем до ~900px по длинной стороне + JPEG q78.
+     * На странице фото показывается мелко (~150px), поэтому крупный исходник
+     * (фото с телефона 3–6 МБ, 4000px) только раздувает PDF и ест память dompdf.
+     * Fail-soft: нет GD / битый кадр / гигапиксель → отдаём оригинал как есть.
+     */
+    private function imageDataUri(string $bytes, ?string $mime, ?int $id): string
+    {
+        $mime = $mime ?: 'image/jpeg';
+        $raw = fn () => 'data:' . $mime . ';base64,' . base64_encode($bytes);
+
+        if (! function_exists('imagecreatefromstring')) {
+            return $raw();
+        }
+
+        $maxEdge = 900;
+        $src = null;
+        $canvas = null;
+        try {
+            $dim = @getimagesizefromstring($bytes);
+            if (is_array($dim) && isset($dim[0], $dim[1]) && ($dim[0] * $dim[1]) > 60_000_000) {
+                return $raw();
+            }
+            $src = @imagecreatefromstring($bytes);
+            if ($src === false) {
+                return $raw();
+            }
+            $w = imagesx($src);
+            $h = imagesy($src);
+            if ($w < 1 || $h < 1) {
+                return $raw();
+            }
+
+            $long = max($w, $h);
+            $ratio = $long > $maxEdge ? $maxEdge / $long : 1.0;
+            $nw = max(1, (int) round($w * $ratio));
+            $nh = max(1, (int) round($h * $ratio));
+
+            $canvas = imagecreatetruecolor($nw, $nh);
+            $white = imagecolorallocate($canvas, 255, 255, 255);
+            imagefilledrectangle($canvas, 0, 0, $nw, $nh, $white);
+            imagecopyresampled($canvas, $src, 0, 0, 0, 0, $nw, $nh, $w, $h);
+
+            ob_start();
+            imagejpeg($canvas, null, 78);
+            $out = (string) ob_get_clean();
+
+            // Без ресайза и без выигрыша в байтах — смысла перепаковывать нет.
+            if ($out === '' || ($ratio === 1.0 && strlen($out) >= strlen($bytes))) {
+                return $raw();
+            }
+
+            return 'data:image/jpeg;base64,' . base64_encode($out);
+        } catch (\Throwable $e) {
+            Log::warning('CorrespondenceExport: image downscale failed', [
+                'attachment_id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $raw();
+        } finally {
+            if ($src instanceof \GdImage) {
+                imagedestroy($src);
+            }
+            if ($canvas instanceof \GdImage) {
+                imagedestroy($canvas);
+            }
+        }
     }
 
     private function isImage(EmailAttachment $a): bool
