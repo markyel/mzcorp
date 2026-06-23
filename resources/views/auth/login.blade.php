@@ -61,7 +61,7 @@
             <div id="mz-heroes" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
             <canvas id="mz-canvas" style="width:100%;display:block;border-radius:10px;background:linear-gradient(#eef2ff,#f8fafc);touch-action:none;cursor:pointer"></canvas>
             <p style="margin:6px 0 0;font-size:11px;color:#9ca3af;text-align:center">
-                Тип письма виден лишь за границей mzCorp — не липни к ней! Лови ✉ → ₽ и 💎 (+10!), уворачивайся от 🚫 спама и 😡 рекламации.
+                Тип виден лишь за границей mzCorp — не липни к ней! Лови ✉ → ₽ и 💎 (+10!). Поймал 🚫 спам / 😡 рекламацию → застрял и откат на старт!
             </p>
         </div>
     </details>
@@ -86,10 +86,11 @@
             var BEST_KEY = 'mzArcadeBest';
             var best = parseInt(localStorage.getItem(BEST_KEY) || '0', 10) || 0;
             var state = 'menu', spawnT = 0, timeLeft = 0, ROUND = 45 * 60, playerIdx = 0, superT = 0, superFlash = 0;
+            var ptx = 0, pty = 0, PSPEED = 8; // цель игрока (курсор) + макс. скорость (плавно, чтобы откат ощущался)
 
             function fit() {
                 var cssW = canvas.clientWidth || 360, newW = cssW, newH = Math.round(cssW * 1.18);
-                if (managers.length && W && H) managers.forEach(function (m) { m.x = m.x / W * newW; m.y = m.y / H * newH; });
+                if (managers.length && W && H) { managers.forEach(function (m) { m.x = m.x / W * newW; m.y = m.y / H * newH; if (m.homeX != null) m.homeX = m.homeX / W * newW; }); ptx = ptx / W * newW; pty = pty / H * newH; }
                 W = newW; H = newH;
                 canvas.style.height = H + 'px';
                 canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
@@ -136,9 +137,18 @@
 
             function placeManagers() {
                 var n = managers.length || 1, by = H - 30;
-                managers.forEach(function (m, i) { m.x = W * (i + 1) / (n + 1); m.y = by; });
+                managers.forEach(function (m, i) { m.x = W * (i + 1) / (n + 1); m.y = by; m.homeX = m.x; });
             }
-            function selectPlayer(i) { playerIdx = i; managers.forEach(function (m, idx) { m.ai = (idx !== i); }); }
+            function selectPlayer(i) {
+                playerIdx = i;
+                managers.forEach(function (m, idx) { m.ai = (idx !== i); });
+                var p = managers[i]; if (p) { ptx = p.x; pty = p.y; }
+            }
+            // откат менеджера на старт (домашняя колонка, низ) — штраф за плохое письмо
+            function resetToStart(m) {
+                m.x = (m.homeX != null ? m.homeX : W / 2); m.y = H - 30;
+                if (m === managers[playerIdx]) { ptx = m.x; pty = m.y; }
+            }
             function closestMgr(x) {
                 var bm = null, bd = 1e9;
                 managers.forEach(function (m) { var d = Math.abs(m.x - x); if (d < bd) { bd = d; bm = m; } });
@@ -147,21 +157,20 @@
 
             // Управление игроком (своего героя нельзя двигать в момент «замирания»).
             function moveTo(clientX, clientY) {
-                var rect = canvas.getBoundingClientRect(), m = managers[playerIdx];
-                if (!m || m.freeze > 0) return;
-                m.x = Math.max(rM, Math.min(W - rM, clientX - rect.left));
-                m.y = Math.max(Math.round(H * 0.50), Math.min(H - 30, clientY - rect.top));
+                var rect = canvas.getBoundingClientRect();
+                ptx = Math.max(rM, Math.min(W - rM, clientX - rect.left));
+                pty = Math.max(Math.round(H * 0.50), Math.min(H - 30, clientY - rect.top));
             }
             canvas.addEventListener('pointermove', function (e) { if (state === 'play') moveTo(e.clientX, e.clientY); });
             canvas.addEventListener('pointerdown', function (e) { if (state !== 'play') start(); else moveTo(e.clientX, e.clientY); });
             window.addEventListener('keydown', function (e) {
                 if (!details.open) return;
-                var m = managers[playerIdx], topY = Math.round(H * 0.50), botY = H - 30;
+                var topY = Math.round(H * 0.50), botY = H - 30;
                 if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].indexOf(e.key) >= 0 && state === 'play') e.preventDefault();
-                if (e.key === 'ArrowLeft' && m && m.freeze <= 0) m.x = Math.max(rM, m.x - 26);
-                else if (e.key === 'ArrowRight' && m && m.freeze <= 0) m.x = Math.min(W - rM, m.x + 26);
-                else if (e.key === 'ArrowUp' && m && m.freeze <= 0) m.y = Math.max(topY, m.y - 24);
-                else if (e.key === 'ArrowDown' && m && m.freeze <= 0) m.y = Math.min(botY, m.y + 24);
+                if (e.key === 'ArrowLeft') ptx = Math.max(rM, ptx - 26);
+                else if (e.key === 'ArrowRight') ptx = Math.min(W - rM, ptx + 26);
+                else if (e.key === 'ArrowUp') pty = Math.max(topY, pty - 24);
+                else if (e.key === 'ArrowDown') pty = Math.min(botY, pty + 24);
                 else if ((e.key === ' ' || e.key === 'Enter') && state !== 'play') { e.preventDefault(); start(); }
             });
 
@@ -171,6 +180,7 @@
                 superT = 540 + Math.floor(Math.random() * 420); superFlash = 0; // первая 💎 через ~9–16с
                 managers.forEach(function (m) { m.score = 0; m.freeze = 0; m.mood = 'neutral'; m.moodT = 0; });
                 placeManagers();
+                var pm = managers[playerIdx]; if (pm) { ptx = pm.x; pty = pm.y; }
             }
 
             function update() {
@@ -206,7 +216,11 @@
                 managers.forEach(function (m) {
                     if (m.moodT > 0 && --m.moodT === 0) m.mood = 'neutral';
                     if (m.freeze > 0) { m.freeze--; return; }
-                    if (!m.ai) return;
+                    if (!m.ai) { // игрок плавно едет к цели курсора (откат на старт ощущается)
+                        m.x = Math.max(rM, Math.min(W - rM, m.x + Math.max(-PSPEED, Math.min(PSPEED, ptx - m.x))));
+                        m.y = Math.max(topY, Math.min(baseY, m.y + Math.max(-PSPEED, Math.min(PSPEED, pty - m.y))));
+                        return;
+                    }
                     // угроза — опознанное плохое письмо рядом → уворачиваемся в сторону и вниз
                     var threat = null, thd = (rM + 36) * (rM + 36);
                     emails.forEach(function (e) {
@@ -233,7 +247,7 @@
                     if (tgt) {
                         // неопознанное — ждём ЧУТЬ НИЖЕ границы (запас на реакцию);
                         // опознанное хорошее — идём ловить.
-                        var aimY = tgt.revealed ? Math.max(topY, Math.min(baseY, tgt.y)) : Math.min(baseY, topY + 30);
+                        var aimY = tgt.revealed ? Math.max(topY, Math.min(baseY, tgt.y)) : Math.round((topY + baseY) / 2);
                         m.x = Math.max(rM, Math.min(W - rM, m.x + Math.max(-3.0, Math.min(3.0, tgt.x - m.x))));
                         m.y = Math.max(topY, Math.min(baseY, m.y + Math.max(-3.0, Math.min(3.0, aimY - m.y))));
                     }
@@ -251,8 +265,8 @@
                     if (m2) {
                         var kind;
                         if (e.type === 'super') { m2.freeze = 16; m2.score += 10; m2.mood = 'won'; kind = 'super'; } // 💎 джекпот +10 ₽
-                        else if (e.type === 'spam') { m2.freeze = 54; m2.mood = 'lost'; kind = 'spam'; }   // спам — застрял заметно дольше
-                        else if (e.type === 'claim') { m2.freeze = 96; m2.mood = 'lost'; kind = 'claim'; } // рекламация — очень надолго
+                        else if (e.type === 'spam') { m2.freeze = 54; m2.mood = 'lost'; kind = 'spam'; resetToStart(m2); }   // спам — застрял + откат на старт
+                        else if (e.type === 'claim') { m2.freeze = 96; m2.mood = 'lost'; kind = 'claim'; resetToStart(m2); } // рекламация — надолго + откат
                         else { // заявка
                             m2.freeze = 16; // замер на мгновение
                             var ruble = Math.random() < 0.62; // ₽ закрыл / пустышка
