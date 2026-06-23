@@ -1,15 +1,35 @@
 <?php
 
 use App\Http\Controllers\AttachmentController;
+use App\Http\Controllers\CatalogPhotoProxyController;
 use App\Http\Controllers\DocsController;
+use App\Http\Controllers\LoginArcadeController;
 use App\Http\Controllers\OAuthYandexController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\QuotationPdfController;
 use App\Http\Controllers\SupportAttachmentController;
+use App\Http\Controllers\UserAvatarController;
+use App\Models\ChangelogEntry;
+use App\Models\ClientContact;
+use App\Models\ClientNotificationTemplate;
+use App\Models\MailRoutingRule;
+use App\Models\Organization;
+use App\Models\Request;
+use App\Models\Supplier;
+use App\Models\SupplierInquiry;
+use App\Models\SupportTicket;
+use App\Models\User;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return redirect()->route(auth()->check() ? 'dashboard' : 'login');
 });
+
+// Публичная мини-аркада «Лови заявки» на странице входа (герои — аватарки
+// сотрудников). БЕЗ auth — логин для неавторизованных. См. LoginArcadeController
+// и resources/views/auth/login.blade.php.
+Route::get('/arcade/roster', [LoginArcadeController::class, 'roster'])->name('arcade.roster');
+Route::get('/arcade/avatar/{user}', [LoginArcadeController::class, 'avatar'])->name('arcade.avatar');
 
 Route::get('/dashboard', function () {
     return view('dashboard');
@@ -50,10 +70,11 @@ Route::middleware('auth')->group(function () {
                 auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'admin', 'secretary']),
                 403,
             );
+
             return view('admin.auto-closed.index');
         })->name('requests.auto-closed');
 
-        Route::get('/dashboard/requests/{request}', function (\App\Models\Request $request) {
+        Route::get('/dashboard/requests/{request}', function (Request $request) {
             return view('requests.show', ['request' => $request]);
         })->name('requests.show');
 
@@ -67,7 +88,7 @@ Route::middleware('auth')->group(function () {
 
         // Аватарки пользователей (3 варианта: neutral/won/lost). Отдача с
         // приватного диска через контроллер. Доступно всем ролям на чтение.
-        Route::get('/avatars/{user}/{variant}', [\App\Http\Controllers\UserAvatarController::class, 'show'])
+        Route::get('/avatars/{user}/{variant}', [UserAvatarController::class, 'show'])
             ->where('user', '\d+')
             ->where('variant', 'neutral|won|lost')
             ->name('user.avatar');
@@ -76,17 +97,17 @@ Route::middleware('auth')->group(function () {
         // Внешний photo_url (mylift.ru) делает 302 → CDN, что даёт
         // ~500-800мс на фото × 20 thumb = 10+ секунд waterfall. Прокси
         // кэширует на диск + ставит браузеру Cache-Control max-age=30days.
-        Route::get('/img/catalog/{id}', [\App\Http\Controllers\CatalogPhotoProxyController::class, 'show'])
+        Route::get('/img/catalog/{id}', [CatalogPhotoProxyController::class, 'show'])
             ->where('id', '\d+')
             ->name('catalog.photo');
 
         // КП (наши исходящие) — preview + download PDF. Permission проверяется
         // в контроллере (owner/acting/privileged).
         Route::get('/dashboard/quotations/{quotation}/preview',
-            [\App\Http\Controllers\QuotationPdfController::class, 'preview'])
+            [QuotationPdfController::class, 'preview'])
             ->name('quotations.preview');
         Route::get('/dashboard/quotations/{quotation}/download',
-            [\App\Http\Controllers\QuotationPdfController::class, 'download'])
+            [QuotationPdfController::class, 'download'])
             ->name('quotations.download');
 
         // Standalone-поиск по каталогу (без привязки к заявке) —
@@ -159,11 +180,11 @@ Route::middleware('auth')->group(function () {
             return view('clients.index');
         })->name('clients.index');
 
-        Route::get('/dashboard/clients/contact/{contact}', function (\App\Models\ClientContact $contact) {
+        Route::get('/dashboard/clients/contact/{contact}', function (ClientContact $contact) {
             return view('clients.contact', ['contact' => $contact]);
         })->name('clients.contact');
 
-        Route::get('/dashboard/clients/org/{organization}', function (\App\Models\Organization $organization) {
+        Route::get('/dashboard/clients/org/{organization}', function (Organization $organization) {
             return view('clients.show', ['organization' => $organization]);
         })->name('clients.show');
 
@@ -176,11 +197,11 @@ Route::middleware('auth')->group(function () {
 
         // Карточка поставщика из реестра (Фаза 3.1) — объявлена ДО {inquiry},
         // чтобы статичный сегмент registry не матчился как id запроса.
-        Route::get('/dashboard/suppliers/registry/{supplier}', function (\App\Models\Supplier $supplier) {
+        Route::get('/dashboard/suppliers/registry/{supplier}', function (Supplier $supplier) {
             return view('suppliers.supplier-edit', ['supplier' => $supplier]);
         })->name('suppliers.registry-edit');
 
-        Route::get('/dashboard/suppliers/{inquiry}', function (\App\Models\SupplierInquiry $inquiry) {
+        Route::get('/dashboard/suppliers/{inquiry}', function (SupplierInquiry $inquiry) {
             return view('suppliers.show', ['inquiry' => $inquiry]);
         })->name('suppliers.show');
 
@@ -206,10 +227,10 @@ Route::middleware('auth')->group(function () {
         })->name('mail-rules.index');
 
         Route::get('/dashboard/mail-rules/create', function () {
-            return view('admin.mail-rules.edit', ['rule' => new \App\Models\MailRoutingRule()]);
+            return view('admin.mail-rules.edit', ['rule' => new MailRoutingRule]);
         })->name('mail-rules.create');
 
-        Route::get('/dashboard/mail-rules/{rule}/edit', function (\App\Models\MailRoutingRule $rule) {
+        Route::get('/dashboard/mail-rules/{rule}/edit', function (MailRoutingRule $rule) {
             return view('admin.mail-rules.edit', ['rule' => $rule]);
         })->name('mail-rules.edit');
 
@@ -226,10 +247,10 @@ Route::middleware('auth')->group(function () {
         })->name('managers.index');
 
         Route::get('/dashboard/managers/create', function () {
-            return view('admin.managers.edit', ['user' => new \App\Models\User()]);
+            return view('admin.managers.edit', ['user' => new User]);
         })->name('managers.create');
 
-        Route::get('/dashboard/managers/{user}/edit', function (\App\Models\User $user) {
+        Route::get('/dashboard/managers/{user}/edit', function (User $user) {
             return view('admin.managers.edit', ['user' => $user]);
         })->name('managers.edit');
 
@@ -245,7 +266,7 @@ Route::middleware('auth')->group(function () {
             return view('admin.notifications.index');
         })->name('notifications.index');
 
-        Route::get('/dashboard/notifications/{template}/edit', function (\App\Models\ClientNotificationTemplate $template) {
+        Route::get('/dashboard/notifications/{template}/edit', function (ClientNotificationTemplate $template) {
             return view('admin.notifications.edit', ['template' => $template]);
         })->name('notifications.edit');
 
@@ -262,14 +283,13 @@ Route::middleware('auth')->group(function () {
         })->name('updates.manage');
 
         Route::get('/dashboard/updates/manage/create', function () {
-            return view('admin.updates.edit', ['entry' => new \App\Models\ChangelogEntry()]);
+            return view('admin.updates.edit', ['entry' => new ChangelogEntry]);
         })->name('updates.create');
 
-        Route::get('/dashboard/updates/manage/{entry}/edit', function (\App\Models\ChangelogEntry $entry) {
+        Route::get('/dashboard/updates/manage/{entry}/edit', function (ChangelogEntry $entry) {
             return view('admin.updates.edit', ['entry' => $entry]);
         })->name('updates.edit');
     });
-
 
     // Общие почтовые ящики (mail@myzip.ru, info@myzip.ru и т.п.) —
     // подключение, OAuth/app-password, активация/деактивация
@@ -311,7 +331,7 @@ Route::middleware('auth')->group(function () {
 
         // Динамическая страница тикета — после статичных, иначе
         // /my / /attachments / / могут схлопнуться в {ticket}.
-        Route::get('/{ticket}', function (\App\Models\SupportTicket $ticket) {
+        Route::get('/{ticket}', function (SupportTicket $ticket) {
             return view('support.show', ['ticket' => $ticket]);
         })->name('show');
     });
