@@ -1294,12 +1294,28 @@
 
             {{-- ───── ПЕРЕПИСКА ───── --}}
             @case('thread')
-                <div class="ds-card">
+                <div class="ds-card" x-data="{ selMode: false, ids: [] }">
                     <div class="ds-card-header">
                         <h3>Переписка</h3>
                         <span class="text-[10.5px] font-semibold text-fg-2 bg-neutral-100 px-1.5 py-0.5 rounded-full">{{ $tabs['thread']['count'] }}</span>
                         <span class="flex-1"></span>
                         @if(! $thread->isEmpty())
+                            {{-- Экспорт переписки в PDF. Без выбора — весь тред; режим
+                                 «Выбрать письма» даёт чекбоксы у каждого письма. Картинки
+                                 встраиваются в PDF, прочие вложения уходят в ZIP. --}}
+                            <a href="{{ route('requests.correspondence.export', $req) }}"
+                               x-show="!selMode"
+                               class="btn btn-sm mr-2"
+                               title="Скачать всю переписку в PDF (фото встроены; если есть другие вложения — ZIP с PDF и файлами)">⭳ Экспорт в PDF</a>
+                            <button type="button" x-show="!selMode" @click="selMode = true" class="btn btn-sm mr-2">Выбрать письма…</button>
+                            <template x-if="selMode">
+                                <span class="inline-flex items-center gap-2 mr-2">
+                                    <a :href="ids.length ? ('{{ route('requests.correspondence.export', $req) }}?messages=' + ids.join(',')) : '#'"
+                                       :class="ids.length ? '' : 'opacity-40 pointer-events-none'"
+                                       class="btn btn-sm btn-primary">⭳ Скачать выбранные (<span x-text="ids.length"></span>)</a>
+                                    <button type="button" @click="selMode = false; ids = []" class="btn btn-sm">Отмена</button>
+                                </span>
+                            </template>
                             {{-- Порядок писем (персональная настройка, сохраняется per-user). --}}
                             <button type="button" wire:click="toggleThreadSort" class="btn btn-sm mr-2"
                                     title="Порядок писем в переписке — переключить (сохраняется в ваших настройках, применяется ко всем заявкам)">
@@ -1327,6 +1343,11 @@
                                 @endphp
                                 <div class="border-b border-border-subtle last:border-b-0">
                                     <div class="flex items-center gap-2.5 px-[18px] py-3">
+                                        <template x-if="selMode">
+                                            <input type="checkbox" value="{{ $msg->id }}" x-model.number="ids"
+                                                   class="shrink-0 w-4 h-4 accent-accent cursor-pointer"
+                                                   title="Включить это письмо в экспорт">
+                                        </template>
                                         <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[11px] font-semibold shrink-0
                                                      {{ $isOutbound ? 'bg-accent text-fg-on-accent' : 'bg-neutral-200 text-fg-2' }}">
                                             {{ $authorInitial }}

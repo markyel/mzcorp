@@ -6,6 +6,7 @@ use App\Http\Controllers\DocsController;
 use App\Http\Controllers\LoginArcadeController;
 use App\Http\Controllers\OAuthYandexController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\CorrespondencePdfController;
 use App\Http\Controllers\QuotationPdfController;
 use App\Http\Controllers\SupportAttachmentController;
 use App\Http\Controllers\UserAvatarController;
@@ -79,6 +80,12 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/requests/{request}', function (Request $request) {
             return view('requests.show', ['request' => $request]);
         })->name('requests.show');
+
+        // Экспорт переписки заявки в PDF (или ZIP с файлами-вложениями).
+        // Permission проверяется в контроллере (owner/acting/privileged).
+        Route::get('/dashboard/requests/{request}/correspondence/export',
+            [CorrespondencePdfController::class, 'export'])
+            ->name('requests.correspondence.export');
 
         Route::get('/attachments/{attachment}', [AttachmentController::class, 'download'])
             ->name('attachments.download');
