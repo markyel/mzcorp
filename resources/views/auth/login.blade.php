@@ -61,7 +61,7 @@
             <div id="mz-heroes" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
             <canvas id="mz-canvas" style="width:100%;display:block;border-radius:10px;background:linear-gradient(#eef2ff,#f8fafc);touch-action:none;cursor:pointer"></canvas>
             <p style="margin:6px 0 0;font-size:11px;color:#9ca3af;text-align:center">
-                Лови ✉ → ₽, хватай 💎 суперзаявку (+10!). Не лови 🚫 спам и 😡 рекламацию. Обгони коллег за смену!
+                Веди героя мышью/стрелками (и вверх-вниз!). Лови ✉ → ₽ и 💎 суперзаявку (+10!), не лови 🚫 спам и 😡 рекламацию.
             </p>
         </div>
     </details>
@@ -89,7 +89,7 @@
 
             function fit() {
                 var cssW = canvas.clientWidth || 360, newW = cssW, newH = Math.round(cssW * 1.18);
-                if (managers.length && W) managers.forEach(function (m) { m.x = m.x / W * newW; });
+                if (managers.length && W && H) managers.forEach(function (m) { m.x = m.x / W * newW; m.y = m.y / H * newH; });
                 W = newW; H = newH;
                 canvas.style.height = H + 'px';
                 canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
@@ -104,7 +104,7 @@
                 return imgs;
             }
             function fallback() {
-                managers = [{ imgs: null, name: 'Игрок', x: W / 2, ai: false, freeze: 0, mood: 'neutral', moodT: 0, score: 0 }];
+                managers = [{ imgs: null, name: 'Игрок', x: W / 2, y: 0, ai: false, freeze: 0, mood: 'neutral', moodT: 0, score: 0 }];
                 heroesBar.style.display = 'none'; placeManagers();
             }
 
@@ -115,7 +115,7 @@
                     list = (Array.isArray(list) ? list : []).filter(function (h) { return h.urls && h.urls.neutral; });
                     if (!list.length) { fallback(); return; }
                     managers = list.map(function (h) {
-                        return { imgs: makeImgs(h.urls), name: h.name || '', x: 0, ai: true, freeze: 0, mood: 'neutral', moodT: 0, score: 0 };
+                        return { imgs: makeImgs(h.urls), name: h.name || '', x: 0, y: 0, ai: true, freeze: 0, mood: 'neutral', moodT: 0, score: 0 };
                     });
                     list.forEach(function (h, i) {
                         var b = document.createElement('button');
@@ -135,8 +135,8 @@
                 .catch(fallback);
 
             function placeManagers() {
-                var n = managers.length || 1;
-                managers.forEach(function (m, i) { m.x = W * (i + 1) / (n + 1); });
+                var n = managers.length || 1, by = H - 30;
+                managers.forEach(function (m, i) { m.x = W * (i + 1) / (n + 1); m.y = by; });
             }
             function selectPlayer(i) { playerIdx = i; managers.forEach(function (m, idx) { m.ai = (idx !== i); }); }
             function closestMgr(x) {
@@ -146,17 +146,22 @@
             }
 
             // Управление игроком (своего героя нельзя двигать в момент «замирания»).
-            function moveTo(clientX) {
+            function moveTo(clientX, clientY) {
                 var rect = canvas.getBoundingClientRect(), m = managers[playerIdx];
-                if (m && m.freeze <= 0) m.x = Math.max(rM, Math.min(W - rM, clientX - rect.left));
+                if (!m || m.freeze > 0) return;
+                m.x = Math.max(rM, Math.min(W - rM, clientX - rect.left));
+                m.y = Math.max(Math.round(H * 0.50), Math.min(H - 30, clientY - rect.top));
             }
-            canvas.addEventListener('pointermove', function (e) { if (state === 'play') moveTo(e.clientX); });
-            canvas.addEventListener('pointerdown', function (e) { if (state !== 'play') start(); else moveTo(e.clientX); });
+            canvas.addEventListener('pointermove', function (e) { if (state === 'play') moveTo(e.clientX, e.clientY); });
+            canvas.addEventListener('pointerdown', function (e) { if (state !== 'play') start(); else moveTo(e.clientX, e.clientY); });
             window.addEventListener('keydown', function (e) {
                 if (!details.open) return;
-                var m = managers[playerIdx];
+                var m = managers[playerIdx], topY = Math.round(H * 0.50), botY = H - 30;
+                if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].indexOf(e.key) >= 0 && state === 'play') e.preventDefault();
                 if (e.key === 'ArrowLeft' && m && m.freeze <= 0) m.x = Math.max(rM, m.x - 26);
                 else if (e.key === 'ArrowRight' && m && m.freeze <= 0) m.x = Math.min(W - rM, m.x + 26);
+                else if (e.key === 'ArrowUp' && m && m.freeze <= 0) m.y = Math.max(topY, m.y - 24);
+                else if (e.key === 'ArrowDown' && m && m.freeze <= 0) m.y = Math.min(botY, m.y + 24);
                 else if ((e.key === ' ' || e.key === 'Enter') && state !== 'play') { e.preventDefault(); start(); }
             });
 
@@ -169,7 +174,7 @@
             }
 
             function update() {
-                baseY = H - 34;
+                baseY = H - 30;
                 if (--timeLeft <= 0) { gameOver(); return; }
                 // спавн писем (распределяются по всей ширине → по менеджерам):
                 // 70% ✉ заявка, 22% 🚫 спам, 8% 😡 рекламация.
@@ -192,44 +197,54 @@
                 // суперзаявка на экране — её преследуют ВСЕ AI (вне «зон»)
                 var sup = null;
                 emails.forEach(function (e) { if (e.type === 'super' && e.y > 8) sup = e; });
-                // движение менеджеров
+                // движение менеджеров (теперь и по ВЕРТИКАЛИ — в нижней полосе
+                // [topY..baseY], чтобы не было тесно; могут перехватывать выше)
+                var topY = Math.round(H * 0.50);
                 managers.forEach(function (m) {
                     if (m.moodT > 0 && --m.moodT === 0) m.mood = 'neutral';
                     if (m.freeze > 0) { m.freeze--; return; }
                     if (m.ai) {
                         var tgt = sup; // суперзаявка в приоритете для всех
-                        if (!tgt) { // иначе — ближайшее письмо в «своей» зоне
+                        if (!tgt) { // иначе — ближайшее письмо в «своей» зоне (по x)
                             var td = 1e9;
                             emails.forEach(function (e) {
-                                if (e.y < 18 || e.y > baseY + 4 || closestMgr(e.x) !== m) return;
-                                var d = Math.abs(e.x - m.x) + (baseY - e.y) * 0.12;
+                                if (e.y > baseY + 4 || closestMgr(e.x) !== m) return;
+                                var d = Math.abs(e.x - m.x) + Math.abs(e.y - m.y) * 0.35;
                                 if (d < td) { td = d; tgt = e; }
                             });
                         }
-                        if (tgt) m.x = Math.max(rM, Math.min(W - rM, m.x + Math.max(-3.3, Math.min(3.3, tgt.x - m.x))));
-                    }
-                });
-                // письма падают + ловля (ловит ближайший свободный менеджер)
-                for (var i = emails.length - 1; i >= 0; i--) {
-                    var e = emails[i]; e.y += e.vy;
-                    if (e.y >= baseY - rM) {
-                        var m2 = closestMgr(e.x);
-                        if (m2 && m2.freeze <= 0 && Math.abs(m2.x - e.x) < rM + 9) {
-                            var kind;
-                            if (e.type === 'super') { m2.freeze = 16; m2.score += 10; m2.mood = 'won'; kind = 'super'; } // 💎 джекпот +10 ₽
-                            else if (e.type === 'spam') { m2.freeze = 30; m2.mood = 'lost'; kind = 'spam'; }   // спам — застрял дольше
-                            else if (e.type === 'claim') { m2.freeze = 48; m2.mood = 'lost'; kind = 'claim'; } // рекламация — ещё дольше
-                            else { // заявка
-                                m2.freeze = 16; // замер на мгновение
-                                var ruble = Math.random() < 0.62; // ₽ закрыл / пустышка
-                                if (ruble) { m2.score++; m2.mood = 'won'; kind = 'ruble'; } else { m2.mood = 'lost'; kind = 'dummy'; }
-                            }
-                            m2.moodT = m2.freeze + 2; // эмоция держится весь «затык»
-                            tokens.push({ x: e.x, y: baseY - rM, life: 40, kind: kind });
-                            emails.splice(i, 1); continue;
+                        if (tgt) {
+                            var ty = Math.max(topY, Math.min(baseY, tgt.y));
+                            m.x = Math.max(rM, Math.min(W - rM, m.x + Math.max(-3.0, Math.min(3.0, tgt.x - m.x))));
+                            m.y = Math.max(topY, Math.min(baseY, m.y + Math.max(-3.0, Math.min(3.0, ty - m.y))));
                         }
                     }
-                    if (e.y > baseY + 16) emails.splice(i, 1); // мимо
+                });
+                // письма падают + ловля ПО БЛИЗОСТИ (любой свободный менеджер в радиусе)
+                var CR2 = (rM + 13) * (rM + 13);
+                for (var i = emails.length - 1; i >= 0; i--) {
+                    var e = emails[i]; e.y += e.vy;
+                    var m2 = null, bd = CR2;
+                    managers.forEach(function (mm) {
+                        if (mm.freeze > 0) return;
+                        var dx = mm.x - e.x, dy = mm.y - e.y, d2 = dx * dx + dy * dy;
+                        if (d2 < bd) { bd = d2; m2 = mm; }
+                    });
+                    if (m2) {
+                        var kind;
+                        if (e.type === 'super') { m2.freeze = 16; m2.score += 10; m2.mood = 'won'; kind = 'super'; } // 💎 джекпот +10 ₽
+                        else if (e.type === 'spam') { m2.freeze = 30; m2.mood = 'lost'; kind = 'spam'; }   // спам — застрял дольше
+                        else if (e.type === 'claim') { m2.freeze = 48; m2.mood = 'lost'; kind = 'claim'; } // рекламация — ещё дольше
+                        else { // заявка
+                            m2.freeze = 16; // замер на мгновение
+                            var ruble = Math.random() < 0.62; // ₽ закрыл / пустышка
+                            if (ruble) { m2.score++; m2.mood = 'won'; kind = 'ruble'; } else { m2.mood = 'lost'; kind = 'dummy'; }
+                        }
+                        m2.moodT = m2.freeze + 2; // эмоция держится весь «затык»
+                        tokens.push({ x: e.x, y: e.y - rM, life: 40, kind: kind });
+                        emails.splice(i, 1); continue;
+                    }
+                    if (e.y > baseY + 22) emails.splice(i, 1); // мимо
                 }
                 for (var k = tokens.length - 1; k >= 0; k--) { tokens[k].y -= 1.1; if (--tokens[k].life <= 0) tokens.splice(k, 1); }
             }
@@ -241,7 +256,7 @@
             }
 
             function drawManager(m, isPlayer) {
-                var y = baseY;
+                var y = m.y; // менеджеры теперь и по вертикали
                 ctx.beginPath(); ctx.arc(m.x, y, rM, 0, 7); ctx.closePath(); ctx.fillStyle = '#e0e7ff'; ctx.fill();
                 var img = m.imgs ? (m.imgs[m.mood] || m.imgs.neutral) : null;
                 if (img && img.complete && img.naturalWidth) {
@@ -262,7 +277,7 @@
 
             function draw() {
                 ctx.clearRect(0, 0, W, H);
-                baseY = H - 34;
+                baseY = H - 30;
                 ctx.strokeStyle = 'rgba(99,102,241,.07)'; ctx.lineWidth = 1;
                 for (var gx = 40; gx < W; gx += 40) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
                 ctx.strokeStyle = 'rgba(99,102,241,.18)'; ctx.beginPath(); ctx.moveTo(0, baseY + rM + 3); ctx.lineTo(W, baseY + rM + 3); ctx.stroke();
