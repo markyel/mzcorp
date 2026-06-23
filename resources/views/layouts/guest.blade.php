@@ -20,7 +20,7 @@
                 {{-- Лого во всю ширину карточки, вплотную к форме (белый фон лого
                      сливается с белым фоном карточки). --}}
                 <a href="/" class="block">
-                    <img src="{{ asset('images/mzcorp-logo.png') }}?v=2" alt="mzCorp"
+                    <img src="{{ asset('images/mzcorp-logo.png') }}?v=3" alt="mzCorp"
                          style="width:100%;height:auto;display:block">
                 </a>
                 <div class="px-6 py-4">
