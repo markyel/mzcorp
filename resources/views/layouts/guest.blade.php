@@ -16,15 +16,16 @@
     </head>
     <body class="font-sans text-gray-900 antialiased">
         <div class="min-h-screen flex flex-col sm:justify-center items-center pt-6 sm:pt-0 bg-gray-100 dark:bg-gray-900">
-            <div>
-                <a href="/">
+            <div class="w-full sm:max-w-md mt-6 bg-white dark:bg-gray-800 shadow-md overflow-hidden sm:rounded-lg">
+                {{-- Лого во всю ширину карточки, вплотную к форме (белый фон лого
+                     сливается с белым фоном карточки). --}}
+                <a href="/" class="block">
                     <img src="{{ asset('images/mzcorp-logo.png') }}?v=2" alt="mzCorp"
-                         style="width:200px;height:auto;display:block;border-radius:12px">
+                         style="width:100%;height:auto;display:block">
                 </a>
-            </div>
-
-            <div class="w-full sm:max-w-md mt-6 px-6 py-4 bg-white dark:bg-gray-800 shadow-md overflow-hidden sm:rounded-lg">
-                {{ $slot }}
+                <div class="px-6 py-4">
+                    {{ $slot }}
+                </div>
             </div>
         </div>
     </body>
