@@ -85,28 +85,37 @@
                 ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             }
 
-            var heroImg = null, heroName = '';
+            // heroSet = {neutral, won, lost} (Image-объекты, won/lost фолбэк на
+            // neutral). mood переключает эмоцию: 'won' при «поймал», 'lost' при 💣.
+            var heroSet = null, heroName = '', mood = 'neutral', moodT = 0;
             var BEST_KEY = 'mzArcadeBest';
             var best = parseInt(localStorage.getItem(BEST_KEY) || '0', 10) || 0;
             var state = 'menu', score = 0, lives = 3, items = [], heroX = 0, spawnT = 0, t = 0;
             var R = 26; // радиус героя
 
-            // Ростер героев (аватарки сотрудников).
+            // Ростер героев (аватарки сотрудников, по 3 эмоции).
             fetch('{{ route('arcade.roster') }}', { headers: { 'Accept': 'application/json' } })
                 .then(function (r) { return r.ok ? r.json() : []; })
                 .then(function (list) {
                     if (!Array.isArray(list) || !list.length) { heroesBar.style.display = 'none'; return; }
                     list.forEach(function (h, i) {
+                        var urls = h.urls || {};
+                        if (!urls.neutral) return;
+                        // Преднагрузка 3 эмоций (won/lost → neutral если нет).
+                        var imgs = {};
+                        ['neutral', 'won', 'lost'].forEach(function (v) {
+                            var im = new Image(); im.src = urls[v] || urls.neutral; imgs[v] = im;
+                        });
                         var b = document.createElement('button');
                         b.type = 'button';
                         b.title = h.name || ('Игрок ' + (i + 1));
                         b.style.cssText = 'width:34px;height:34px;border-radius:50%;overflow:hidden;border:2px solid transparent;padding:0;cursor:pointer;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.12)';
-                        var im = new Image();
-                        im.src = h.url; im.alt = h.name || '';
-                        im.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
-                        b.appendChild(im);
+                        var pic = document.createElement('img');
+                        pic.src = urls.neutral; pic.alt = h.name || '';
+                        pic.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+                        b.appendChild(pic);
                         b.addEventListener('click', function () {
-                            heroImg = im; heroName = h.name || '';
+                            heroSet = imgs; heroName = h.name || ''; mood = 'neutral'; moodT = 0;
                             [].forEach.call(heroesBar.children, function (c) { c.style.borderColor = 'transparent'; });
                             b.style.borderColor = '#6366f1';
                         });
@@ -138,7 +147,7 @@
 
             function start() {
                 state = 'play'; score = 0; lives = 3; items = []; spawnT = 0; t = 0;
-                heroX = W / 2;
+                heroX = W / 2; mood = 'neutral'; moodT = 0;
             }
 
             function spawn() {
@@ -152,6 +161,7 @@
 
             function update() {
                 t++;
+                if (moodT > 0 && --moodT === 0) mood = 'neutral'; // вернуть нейтральную эмоцию
                 spawnT--;
                 if (spawnT <= 0) { spawn(); spawnT = Math.max(16, 42 - Math.floor(score / 60)); }
                 var hy = H - 42;
@@ -160,8 +170,8 @@
                     it.y += it.vy;
                     var dx = it.x - heroX, dy = it.y - hy;
                     if (dx * dx + dy * dy < (R + 16) * (R + 16)) {
-                        if (it.type === 'bomb') { lives--; flash = 6; if (lives <= 0) gameOver(); }
-                        else { score += (it.type === 'gear' ? 30 : 10); pop.push({ x: it.x, y: it.y, life: 18, val: (it.type === 'gear' ? '+30' : '+10') }); }
+                        if (it.type === 'bomb') { lives--; mood = 'lost'; moodT = 30; if (lives <= 0) gameOver(); }
+                        else { score += (it.type === 'gear' ? 30 : 10); mood = 'won'; moodT = 24; pop.push({ x: it.x, y: it.y, life: 18, val: (it.type === 'gear' ? '+30' : '+10') }); }
                         items.splice(i, 1); continue;
                     }
                     if (it.y > H + 24) items.splice(i, 1);
@@ -169,11 +179,11 @@
             }
 
             function gameOver() {
-                state = 'over';
+                state = 'over'; mood = 'lost'; // герой расстроен
                 if (score > best) { best = score; localStorage.setItem(BEST_KEY, String(best)); }
             }
 
-            var flash = 0, pop = [];
+            var pop = [];
 
             function draw() {
                 ctx.clearRect(0, 0, W, H);
@@ -201,17 +211,21 @@
                 ctx.save();
                 ctx.beginPath(); ctx.arc(heroX, hy, R, 0, 7); ctx.closePath();
                 ctx.fillStyle = '#e0e7ff'; ctx.fill();
-                if (heroImg && heroImg.complete && heroImg.naturalWidth) {
+                // Картинка по текущей эмоции (won/lost/neutral).
+                var hImg = heroSet ? (heroSet[mood] || heroSet.neutral) : null;
+                if (hImg && hImg.complete && hImg.naturalWidth) {
                     ctx.save(); ctx.beginPath(); ctx.arc(heroX, hy, R - 2, 0, 7); ctx.clip();
-                    ctx.drawImage(heroImg, heroX - (R - 2), hy - (R - 2), (R - 2) * 2, (R - 2) * 2);
+                    ctx.drawImage(hImg, heroX - (R - 2), hy - (R - 2), (R - 2) * 2, (R - 2) * 2);
                     ctx.restore();
                 } else {
-                    ctx.font = '30px system-ui'; ctx.fillText('🧑‍💼', heroX, hy);
+                    ctx.font = '30px system-ui';
+                    ctx.fillText(mood === 'won' ? '😄' : (mood === 'lost' ? '😞' : '🧑‍💼'), heroX, hy);
                 }
-                ctx.lineWidth = 2.5; ctx.strokeStyle = flash > 0 ? '#ef4444' : '#6366f1';
+                // Рамка-индикатор настроения: зелёная при «поймал», красная при 💣.
+                ctx.lineWidth = 2.5;
+                ctx.strokeStyle = mood === 'won' ? '#10b981' : (mood === 'lost' ? '#ef4444' : '#6366f1');
                 ctx.beginPath(); ctx.arc(heroX, hy, R, 0, 7); ctx.stroke();
                 ctx.restore();
-                if (flash > 0) flash--;
 
                 // HUD
                 ctx.textAlign = 'left'; ctx.fillStyle = '#374151'; ctx.font = 'bold 15px system-ui';

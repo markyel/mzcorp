@@ -16,27 +16,42 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class LoginArcadeController extends Controller
 {
-    /** Список героев: id, имя (только первое слово), URL neutral-аватарки. */
+    /**
+     * Список героев: id, имя (первое слово), карта URL по эмоциям
+     * (neutral всегда; won/lost — только если загружены). Игра по этим
+     * вариантам показывает радость при «поймал» и грусть при 💣.
+     */
     public function roster()
     {
         $heroes = User::query()
             ->whereNotNull('avatar_neutral_path')
             ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn (User $u) => [
-                'id' => $u->id,
-                'name' => (string) Str::of((string) $u->name)->trim()->explode(' ')->first(),
-                'url' => route('arcade.avatar', $u->id),
-            ])
+            ->get(['id', 'name', 'avatar_neutral_path', 'avatar_won_path', 'avatar_lost_path'])
+            ->map(function (User $u) {
+                $urls = [];
+                foreach (User::AVATAR_VARIANTS as $variant) {
+                    if ($u->hasAvatar($variant)) {
+                        $urls[$variant] = route('arcade.avatar', [$u->id, $variant]);
+                    }
+                }
+
+                return [
+                    'id' => $u->id,
+                    'name' => (string) Str::of((string) $u->name)->trim()->explode(' ')->first(),
+                    'urls' => $urls,
+                ];
+            })
             ->values();
 
         return response()->json($heroes);
     }
 
-    /** Публичная отдача neutral-аватарки героя (только если она есть). */
-    public function avatar(User $user): Response|BinaryFileResponse
+    /** Публичная отдача аватарки героя в нужной эмоции (neutral|won|lost). */
+    public function avatar(User $user, string $variant): Response|BinaryFileResponse
     {
-        $path = $user->avatarPath('neutral');
+        abort_unless(in_array($variant, User::AVATAR_VARIANTS, true), 404);
+
+        $path = $user->avatarPath($variant);
         abort_if($path === null, 404);
 
         $disk = Storage::disk(User::AVATAR_DISK);

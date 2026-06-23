@@ -29,7 +29,9 @@ Route::get('/', function () {
 // сотрудников). БЕЗ auth — логин для неавторизованных. См. LoginArcadeController
 // и resources/views/auth/login.blade.php.
 Route::get('/arcade/roster', [LoginArcadeController::class, 'roster'])->name('arcade.roster');
-Route::get('/arcade/avatar/{user}', [LoginArcadeController::class, 'avatar'])->name('arcade.avatar');
+Route::get('/arcade/avatar/{user}/{variant}', [LoginArcadeController::class, 'avatar'])
+    ->where('variant', 'neutral|won|lost')
+    ->name('arcade.avatar');
 
 Route::get('/dashboard', function () {
     return view('dashboard');
