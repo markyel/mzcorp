@@ -109,7 +109,7 @@
             @if($item->parsed_article)
                 @if($mylinkSku && trim((string) $item->parsed_article) === $mylinkSku)
                     {{-- parsed_article === M-SKU → весь артикул кликабельный --}}
-                    <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
+                    <a href="https://www.mylift.ru/index.php?code={{ urlencode($mylinkSku) }}&fn=view"
                        target="_blank" rel="noopener noreferrer"
                        class="mono text-sky-700 hover:text-sky-900 hover:underline"
                        title="Открыть на mylift.ru — каталог MyLift · {{ $ci?->brand_article ?: '—' }} · обн. {{ $ci?->last_imported_at?->format('d.m.Y') ?? '—' }}">{{ $item->parsed_article }} ↗</a>
@@ -119,7 +119,7 @@
                     @if($mylinkSku)
                         {{-- M-SKU отличается от parsed_article (составной артикул или
                              $ci найден через brand_article match) — отдельная ссылка. --}}
-                        <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
+                        <a href="https://www.mylift.ru/index.php?code={{ urlencode($mylinkSku) }}&fn=view"
                            target="_blank" rel="noopener noreferrer"
                            class="mono text-sky-700 hover:text-sky-900 hover:underline"
                            title="Открыть на mylift.ru">{{ $mylinkSku }} ↗</a>
@@ -127,7 +127,7 @@
                     @endif
                 @endif
             @elseif($mylinkSku)
-                <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
+                <a href="https://www.mylift.ru/index.php?code={{ urlencode($mylinkSku) }}&fn=view"
                    target="_blank" rel="noopener noreferrer"
                    class="mono text-sky-700 hover:text-sky-900 hover:underline"
                    title="Открыть на mylift.ru">{{ $mylinkSku }} ↗</a>

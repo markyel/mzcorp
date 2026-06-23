@@ -2967,7 +2967,7 @@
                                                                     <span>{{ $qi->raw_brand }}</span>
                                                                 @endif
                                                                 @if($cat)
-                                                                    <a href="https://mylift.ru/search?q={{ urlencode($cat->sku) }}" target="_blank" rel="noopener"
+                                                                    <a href="https://www.mylift.ru/index.php?code={{ urlencode($cat->sku) }}&fn=view" target="_blank" rel="noopener"
                                                                        class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200 hover:underline"
                                                                        title="{{ $cat->name }}">
                                                                         📦 каталог: <span class="mono">{{ $cat->sku }}</span>

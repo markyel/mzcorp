@@ -341,7 +341,7 @@
              Title бренда / категории / артикула — в Title-колонке слева. --}}
         <div class="flex items-center gap-1 flex-wrap text-[11.5px] min-w-0">
             @if($mylinkSku)
-                <a href="https://mylift.ru/?text={{ urlencode($mylinkSku) }}&fn=find"
+                <a href="https://www.mylift.ru/index.php?code={{ urlencode($mylinkSku) }}&fn=view"
                    target="_blank" rel="noopener noreferrer"
                    class="mono text-sky-700 hover:text-sky-900 hover:underline truncate"
                    title="Открыть на mylift.ru — каталог MyLift{{ $ci ? ' · обн. ' . ($ci->last_imported_at?->format('d.m.Y') ?? '—') : '' }}">{{ $mylinkSku }} ↗</a>

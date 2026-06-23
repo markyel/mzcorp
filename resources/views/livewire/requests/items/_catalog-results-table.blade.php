@@ -109,7 +109,7 @@
                 <td class="px-2 py-1.5 mono text-fg-1 align-top whitespace-nowrap">
                     <div class="flex items-center gap-1">
                         <span>{{ $cat->sku }}</span>
-                        <a href="https://mylift.ru/?text={{ urlencode($cat->sku) }}&fn=find"
+                        <a href="https://www.mylift.ru/index.php?code={{ urlencode($cat->sku) }}&fn=view"
                            target="_blank" rel="noopener noreferrer"
                            x-on:click.stop
                            class="text-sky-700 hover:text-sky-900 text-[11px]"

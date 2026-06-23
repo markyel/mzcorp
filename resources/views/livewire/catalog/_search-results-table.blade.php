@@ -159,7 +159,7 @@
                 {{-- SKU --}}
                 <div class="mono text-[12.5px] text-fg-2 leading-tight">
                     <span class="block text-fg-1 font-semibold mb-0.5">{{ $cat->sku }}</span>
-                    <a href="https://mylift.ru/?text={{ urlencode($cat->sku) }}&fn=find"
+                    <a href="https://www.mylift.ru/index.php?code={{ urlencode($cat->sku) }}&fn=view"
                        target="_blank" rel="noopener noreferrer"
                        @click.stop
                        class="text-[10.5px] font-medium text-sky-700 hover:text-sky-900 sans"
@@ -290,7 +290,7 @@
                         </div>
 
                         <div class="flex gap-1.5 flex-wrap">
-                            <a href="https://mylift.ru/?text={{ urlencode($cat->sku) }}&fn=find"
+                            <a href="https://www.mylift.ru/index.php?code={{ urlencode($cat->sku) }}&fn=view"
                                target="_blank" rel="noopener noreferrer"
                                class="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-surface border border-border text-sky-700 text-[11px] font-medium hover:bg-[var(--bg-hover)]">
                                 ↗ Открыть на mylift.ru

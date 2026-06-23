@@ -560,7 +560,7 @@
                                                 class="btn btn-sm flex-1 {{ $isSelected ? 'btn-primary' : '' }}">
                                             {{ $isSelected ? '✓ Выбрано' : 'Выбрать' }}
                                         </button>
-                                        <a href="https://mylift.ru/?text={{ urlencode($c->sku) }}&fn=find"
+                                        <a href="https://www.mylift.ru/index.php?code={{ urlencode($c->sku) }}&fn=view"
                                            target="_blank" rel="noopener noreferrer"
                                            class="btn btn-sm" title="Открыть на mylift.ru">↗</a>
                                     </div>
