@@ -45,18 +45,22 @@
         </div>
     </form>
 
-    {{-- 🎮 Мини-аркада «Лови заявки» — размяться перед сменой. Герой =
-         аватарка сотрудника. Полностью самодостаточно (vanilla JS + canvas),
-         без новых Tailwind-классов и зависимостей. Свёрнута по умолчанию. --}}
+    {{-- 🎮 Мини-аркада «Лови заявки» (смена отдела): ВСЕ менеджеры ловят
+         падающие письма, ОДНИМ управляешь ты, остальные — AI. Заявки условно
+         распределяются по менеджерам (по близости). Поймал → менеджер на миг
+         замирает, письмо превращается в ₽ (закрыл сделку) или в пустышку.
+         Эмоции аватарки: won при ₽, lost при пустышке. Vanilla JS + canvas,
+         без зависимостей и новых Tailwind-классов. Свёрнута по умолчанию. --}}
     <details id="mz-arcade" style="margin-top:20px;border-top:1px solid #eee;padding-top:12px">
         <summary style="cursor:pointer;list-style:none;color:#6b7280;font-size:13px;font-weight:600;user-select:none">
             🎮 Размяться перед сменой — «Лови заявки»
         </summary>
         <div style="margin-top:10px">
+            <div style="font-size:11px;color:#9ca3af;margin-bottom:4px">Ты играешь за:</div>
             <div id="mz-heroes" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
             <canvas id="mz-canvas" style="width:100%;display:block;border-radius:10px;background:linear-gradient(#eef2ff,#f8fafc);touch-action:none;cursor:pointer"></canvas>
             <p style="margin:6px 0 0;font-size:11px;color:#9ca3af;text-align:center">
-                Двигай героя мышкой/стрелками. Лови ✉ заявки (+10) и ⚙ бонус (+30), уворачивайся от 💣.
+                Веди своего героя мышкой/стрелками и лови ✉. Поймал → ₽ (закрыл сделку) или пустышка. Обгони коллег за смену!
             </p>
         </div>
     </details>
@@ -74,185 +78,211 @@
             var canvas = document.getElementById('mz-canvas');
             var ctx = canvas.getContext('2d');
             var heroesBar = document.getElementById('mz-heroes');
+            var dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
 
-            var W = 360, H = 470, dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-            function fit() {
-                var cssW = canvas.clientWidth || 360;
-                W = cssW; H = Math.round(cssW * 1.3);
-                canvas.style.height = H + 'px';
-                canvas.width = Math.round(W * dpr);
-                canvas.height = Math.round(H * dpr);
-                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            }
-
-            // heroSet = {neutral, won, lost} (Image-объекты, won/lost фолбэк на
-            // neutral). mood переключает эмоцию: 'won' при «поймал», 'lost' при 💣.
-            var heroSet = null, heroName = '', mood = 'neutral', moodT = 0;
+            var managers = [], emails = [], tokens = [];
+            var W = 360, H = 420, rM = 19, baseY = 0;
             var BEST_KEY = 'mzArcadeBest';
             var best = parseInt(localStorage.getItem(BEST_KEY) || '0', 10) || 0;
-            var state = 'menu', score = 0, lives = 3, items = [], heroX = 0, spawnT = 0, t = 0;
-            var R = 26; // радиус героя
+            var state = 'menu', spawnT = 0, timeLeft = 0, ROUND = 45 * 60, playerIdx = 0;
 
-            // Ростер героев (аватарки сотрудников, по 3 эмоции).
+            function fit() {
+                var cssW = canvas.clientWidth || 360, newW = cssW, newH = Math.round(cssW * 1.18);
+                if (managers.length && W) managers.forEach(function (m) { m.x = m.x / W * newW; });
+                W = newW; H = newH;
+                canvas.style.height = H + 'px';
+                canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            }
+            fit();
+            window.addEventListener('resize', fit);
+
+            function makeImgs(urls) {
+                var imgs = {};
+                ['neutral', 'won', 'lost'].forEach(function (v) { var im = new Image(); im.src = urls[v] || urls.neutral; imgs[v] = im; });
+                return imgs;
+            }
+            function fallback() {
+                managers = [{ imgs: null, name: 'Игрок', x: W / 2, ai: false, freeze: 0, mood: 'neutral', moodT: 0, score: 0 }];
+                heroesBar.style.display = 'none'; placeManagers();
+            }
+
+            // Ростер: один менеджер на сотрудника; пикер выбирает, за кого играешь.
             fetch('{{ route('arcade.roster') }}', { headers: { 'Accept': 'application/json' } })
                 .then(function (r) { return r.ok ? r.json() : []; })
                 .then(function (list) {
-                    if (!Array.isArray(list) || !list.length) { heroesBar.style.display = 'none'; return; }
+                    list = (Array.isArray(list) ? list : []).filter(function (h) { return h.urls && h.urls.neutral; });
+                    if (!list.length) { fallback(); return; }
+                    managers = list.map(function (h) {
+                        return { imgs: makeImgs(h.urls), name: h.name || '', x: 0, ai: true, freeze: 0, mood: 'neutral', moodT: 0, score: 0 };
+                    });
                     list.forEach(function (h, i) {
-                        var urls = h.urls || {};
-                        if (!urls.neutral) return;
-                        // Преднагрузка 3 эмоций (won/lost → neutral если нет).
-                        var imgs = {};
-                        ['neutral', 'won', 'lost'].forEach(function (v) {
-                            var im = new Image(); im.src = urls[v] || urls.neutral; imgs[v] = im;
-                        });
                         var b = document.createElement('button');
-                        b.type = 'button';
-                        b.title = h.name || ('Игрок ' + (i + 1));
-                        b.style.cssText = 'width:34px;height:34px;border-radius:50%;overflow:hidden;border:2px solid transparent;padding:0;cursor:pointer;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.12)';
-                        var pic = document.createElement('img');
-                        pic.src = urls.neutral; pic.alt = h.name || '';
-                        pic.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
-                        b.appendChild(pic);
+                        b.type = 'button'; b.title = 'Играть за ' + (h.name || ('игрока ' + (i + 1)));
+                        b.style.cssText = 'width:34px;height:34px;border-radius:50%;overflow:hidden;border:2px solid ' + (i === 0 ? '#6366f1' : 'transparent') + ';padding:0;cursor:pointer;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.12)';
+                        var pic = document.createElement('img'); pic.src = h.urls.neutral; pic.alt = h.name || '';
+                        pic.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block'; b.appendChild(pic);
                         b.addEventListener('click', function () {
-                            heroSet = imgs; heroName = h.name || ''; mood = 'neutral'; moodT = 0;
+                            selectPlayer(i);
                             [].forEach.call(heroesBar.children, function (c) { c.style.borderColor = 'transparent'; });
                             b.style.borderColor = '#6366f1';
                         });
                         heroesBar.appendChild(b);
-                        if (i === 0) b.click(); // первый герой по умолчанию
                     });
+                    placeManagers(); selectPlayer(0);
                 })
-                .catch(function () { heroesBar.style.display = 'none'; });
+                .catch(fallback);
 
-            fit();
-            window.addEventListener('resize', fit);
-
-            // Управление.
-            function moveTo(clientX) {
-                var rect = canvas.getBoundingClientRect();
-                heroX = Math.max(R, Math.min(W - R, clientX - rect.left));
+            function placeManagers() {
+                var n = managers.length || 1;
+                managers.forEach(function (m, i) { m.x = W * (i + 1) / (n + 1); });
             }
-            canvas.addEventListener('pointermove', function (e) { moveTo(e.clientX); });
-            canvas.addEventListener('pointerdown', function (e) {
-                moveTo(e.clientX);
-                if (state !== 'play') start();
-            });
+            function selectPlayer(i) { playerIdx = i; managers.forEach(function (m, idx) { m.ai = (idx !== i); }); }
+            function closestMgr(x) {
+                var bm = null, bd = 1e9;
+                managers.forEach(function (m) { var d = Math.abs(m.x - x); if (d < bd) { bd = d; bm = m; } });
+                return bm;
+            }
+
+            // Управление игроком (своего героя нельзя двигать в момент «замирания»).
+            function moveTo(clientX) {
+                var rect = canvas.getBoundingClientRect(), m = managers[playerIdx];
+                if (m && m.freeze <= 0) m.x = Math.max(rM, Math.min(W - rM, clientX - rect.left));
+            }
+            canvas.addEventListener('pointermove', function (e) { if (state === 'play') moveTo(e.clientX); });
+            canvas.addEventListener('pointerdown', function (e) { if (state !== 'play') start(); else moveTo(e.clientX); });
             window.addEventListener('keydown', function (e) {
                 if (!details.open) return;
-                if (e.key === 'ArrowLeft') heroX = Math.max(R, heroX - 28);
-                else if (e.key === 'ArrowRight') heroX = Math.min(W - R, heroX + 28);
-                else if (e.key === ' ' || e.key === 'Enter') { if (state !== 'play') { e.preventDefault(); start(); } }
+                var m = managers[playerIdx];
+                if (e.key === 'ArrowLeft' && m && m.freeze <= 0) m.x = Math.max(rM, m.x - 26);
+                else if (e.key === 'ArrowRight' && m && m.freeze <= 0) m.x = Math.min(W - rM, m.x + 26);
+                else if ((e.key === ' ' || e.key === 'Enter') && state !== 'play') { e.preventDefault(); start(); }
             });
 
             function start() {
-                state = 'play'; score = 0; lives = 3; items = []; spawnT = 0; t = 0;
-                heroX = W / 2; mood = 'neutral'; moodT = 0;
+                if (!managers.length) return;
+                state = 'play'; emails = []; tokens = []; spawnT = 0; timeLeft = ROUND;
+                managers.forEach(function (m) { m.score = 0; m.freeze = 0; m.mood = 'neutral'; m.moodT = 0; });
+                placeManagers();
             }
-
-            function spawn() {
-                var roll = Math.random();
-                var type = roll < 0.16 ? 'bomb' : (roll < 0.24 ? 'gear' : 'mail');
-                var speed = 1.7 + Math.min(3.4, score / 220) + Math.random() * 1.2;
-                items.push({ x: 24 + Math.random() * (W - 48), y: -24, vy: speed, type: type, rot: Math.random() * 6 });
-            }
-
-            var EMOJI = { mail: '✉️', gear: '⚙️', bomb: '💣' };
 
             function update() {
-                t++;
-                if (moodT > 0 && --moodT === 0) mood = 'neutral'; // вернуть нейтральную эмоцию
-                spawnT--;
-                if (spawnT <= 0) { spawn(); spawnT = Math.max(16, 42 - Math.floor(score / 60)); }
-                var hy = H - 42;
-                for (var i = items.length - 1; i >= 0; i--) {
-                    var it = items[i];
-                    it.y += it.vy;
-                    var dx = it.x - heroX, dy = it.y - hy;
-                    if (dx * dx + dy * dy < (R + 16) * (R + 16)) {
-                        if (it.type === 'bomb') { lives--; mood = 'lost'; moodT = 30; if (lives <= 0) gameOver(); }
-                        else { score += (it.type === 'gear' ? 30 : 10); mood = 'won'; moodT = 24; pop.push({ x: it.x, y: it.y, life: 18, val: (it.type === 'gear' ? '+30' : '+10') }); }
-                        items.splice(i, 1); continue;
-                    }
-                    if (it.y > H + 24) items.splice(i, 1);
+                baseY = H - 34;
+                if (--timeLeft <= 0) { gameOver(); return; }
+                // спавн писем (распределяются по всей ширине → по менеджерам)
+                if (--spawnT <= 0) {
+                    emails.push({ x: 18 + Math.random() * (W - 36), y: -18, vy: 1.8 + Math.random() * 1.4 });
+                    spawnT = Math.max(13, 28 - Math.floor((ROUND - timeLeft) / 260));
                 }
+                // движение менеджеров
+                managers.forEach(function (m) {
+                    if (m.moodT > 0 && --m.moodT === 0) m.mood = 'neutral';
+                    if (m.freeze > 0) { m.freeze--; return; }
+                    if (m.ai) {
+                        // цель — ближайшее письмо в «своей» зоне (где этот менеджер ближе всех)
+                        var tgt = null, td = 1e9;
+                        emails.forEach(function (e) {
+                            if (e.y < 18 || e.y > baseY + 4 || closestMgr(e.x) !== m) return;
+                            var d = Math.abs(e.x - m.x) + (baseY - e.y) * 0.12;
+                            if (d < td) { td = d; tgt = e; }
+                        });
+                        if (tgt) m.x = Math.max(rM, Math.min(W - rM, m.x + Math.max(-3.1, Math.min(3.1, tgt.x - m.x))));
+                    }
+                });
+                // письма падают + ловля (ловит ближайший свободный менеджер)
+                for (var i = emails.length - 1; i >= 0; i--) {
+                    var e = emails[i]; e.y += e.vy;
+                    if (e.y >= baseY - rM) {
+                        var m2 = closestMgr(e.x);
+                        if (m2 && m2.freeze <= 0 && Math.abs(m2.x - e.x) < rM + 9) {
+                            m2.freeze = 16; // замер на мгновение
+                            var ruble = Math.random() < 0.62; // ₽ закрыл / пустышка
+                            if (ruble) { m2.score++; m2.mood = 'won'; } else { m2.mood = 'lost'; }
+                            m2.moodT = 18;
+                            tokens.push({ x: e.x, y: baseY - rM, life: 38, kind: ruble ? 'ruble' : 'dummy' });
+                            emails.splice(i, 1); continue;
+                        }
+                    }
+                    if (e.y > baseY + 16) emails.splice(i, 1); // мимо
+                }
+                for (var k = tokens.length - 1; k >= 0; k--) { tokens[k].y -= 1.1; if (--tokens[k].life <= 0) tokens.splice(k, 1); }
             }
 
             function gameOver() {
-                state = 'over'; mood = 'lost'; // герой расстроен
-                if (score > best) { best = score; localStorage.setItem(BEST_KEY, String(best)); }
+                state = 'over';
+                var me = managers[playerIdx];
+                if (me && me.score > best) { best = me.score; localStorage.setItem(BEST_KEY, String(best)); }
             }
 
-            var pop = [];
+            function drawManager(m, isPlayer) {
+                var y = baseY;
+                ctx.beginPath(); ctx.arc(m.x, y, rM, 0, 7); ctx.closePath(); ctx.fillStyle = '#e0e7ff'; ctx.fill();
+                var img = m.imgs ? (m.imgs[m.mood] || m.imgs.neutral) : null;
+                if (img && img.complete && img.naturalWidth) {
+                    ctx.save(); ctx.beginPath(); ctx.arc(m.x, y, rM - 2, 0, 7); ctx.clip();
+                    ctx.drawImage(img, m.x - (rM - 2), y - (rM - 2), (rM - 2) * 2, (rM - 2) * 2); ctx.restore();
+                } else {
+                    ctx.font = '22px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    ctx.fillText(m.mood === 'won' ? '😄' : (m.mood === 'lost' ? '😞' : '🧑‍💼'), m.x, y);
+                }
+                ctx.lineWidth = isPlayer ? 3 : 2;
+                ctx.strokeStyle = m.mood === 'won' ? '#10b981' : (m.mood === 'lost' ? '#ef4444' : (isPlayer ? '#6366f1' : '#c7d2fe'));
+                ctx.beginPath(); ctx.arc(m.x, y, rM, 0, 7); ctx.stroke();
+                ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+                if (m.freeze > 0) { ctx.font = '13px system-ui'; ctx.fillStyle = '#94a3b8'; ctx.fillText('…', m.x, y - rM - 5); }
+                if (m.score > 0) { ctx.font = 'bold 11px system-ui'; ctx.fillStyle = isPlayer ? '#4f46e5' : '#9ca3af'; ctx.fillText(m.score + '₽', m.x, y - rM - (m.freeze > 0 ? 17 : 5)); }
+                if (isPlayer) { ctx.font = 'bold 9px system-ui'; ctx.fillStyle = '#4f46e5'; ctx.fillText('ВЫ', m.x, y + rM + 11); }
+            }
 
             function draw() {
                 ctx.clearRect(0, 0, W, H);
-                // лёгкая «шахта»
-                ctx.strokeStyle = 'rgba(99,102,241,.08)';
-                ctx.lineWidth = 1;
+                baseY = H - 34;
+                ctx.strokeStyle = 'rgba(99,102,241,.07)'; ctx.lineWidth = 1;
                 for (var gx = 40; gx < W; gx += 40) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+                ctx.strokeStyle = 'rgba(99,102,241,.18)'; ctx.beginPath(); ctx.moveTo(0, baseY + rM + 3); ctx.lineTo(W, baseY + rM + 3); ctx.stroke();
 
-                // падающие предметы
-                ctx.font = '26px system-ui, "Segoe UI Emoji", "Apple Color Emoji"';
-                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                items.forEach(function (it) { ctx.fillText(EMOJI[it.type], it.x, it.y); });
+                // письма
+                ctx.font = '22px system-ui, "Segoe UI Emoji", "Apple Color Emoji"'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                emails.forEach(function (e) { ctx.fillText('✉️', e.x, e.y); });
 
-                // всплывашки очков
-                for (var i = pop.length - 1; i >= 0; i--) {
-                    var p = pop[i]; p.y -= 1.2; p.life--;
-                    ctx.fillStyle = 'rgba(16,185,129,' + (p.life / 18) + ')';
-                    ctx.font = 'bold 13px system-ui';
-                    ctx.fillText(p.val, p.x, p.y);
-                    if (p.life <= 0) pop.splice(i, 1);
-                }
+                // токены: ₽ (закрыл сделку) / пустышка
+                tokens.forEach(function (tk) {
+                    var a = Math.min(1, tk.life / 24);
+                    if (tk.kind === 'ruble') { ctx.fillStyle = 'rgba(202,138,4,' + a + ')'; ctx.font = 'bold 19px system-ui'; ctx.fillText('₽', tk.x, tk.y); }
+                    else { ctx.fillStyle = 'rgba(148,163,184,' + a + ')'; ctx.font = '11px system-ui'; ctx.fillText('пусто', tk.x, tk.y); }
+                });
 
-                // герой
-                var hy = H - 42;
-                ctx.save();
-                ctx.beginPath(); ctx.arc(heroX, hy, R, 0, 7); ctx.closePath();
-                ctx.fillStyle = '#e0e7ff'; ctx.fill();
-                // Картинка по текущей эмоции (won/lost/neutral).
-                var hImg = heroSet ? (heroSet[mood] || heroSet.neutral) : null;
-                if (hImg && hImg.complete && hImg.naturalWidth) {
-                    ctx.save(); ctx.beginPath(); ctx.arc(heroX, hy, R - 2, 0, 7); ctx.clip();
-                    ctx.drawImage(hImg, heroX - (R - 2), hy - (R - 2), (R - 2) * 2, (R - 2) * 2);
-                    ctx.restore();
-                } else {
-                    ctx.font = '30px system-ui';
-                    ctx.fillText(mood === 'won' ? '😄' : (mood === 'lost' ? '😞' : '🧑‍💼'), heroX, hy);
-                }
-                // Рамка-индикатор настроения: зелёная при «поймал», красная при 💣.
-                ctx.lineWidth = 2.5;
-                ctx.strokeStyle = mood === 'won' ? '#10b981' : (mood === 'lost' ? '#ef4444' : '#6366f1');
-                ctx.beginPath(); ctx.arc(heroX, hy, R, 0, 7); ctx.stroke();
-                ctx.restore();
+                managers.forEach(function (m, i) { drawManager(m, i === playerIdx); });
 
                 // HUD
-                ctx.textAlign = 'left'; ctx.fillStyle = '#374151'; ctx.font = 'bold 15px system-ui';
-                ctx.fillText('🏆 ' + score, 10, 18);
-                ctx.textAlign = 'right'; ctx.fillStyle = '#9ca3af'; ctx.font = '12px system-ui';
-                ctx.fillText('рекорд ' + best, W - 10, 16);
-                ctx.textAlign = 'left'; ctx.font = '14px system-ui';
-                ctx.fillText('❤️'.repeat(Math.max(0, lives)), 10, 38);
+                var me = managers[playerIdx];
+                ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = '#374151'; ctx.font = 'bold 14px system-ui';
+                ctx.fillText('ВЫ: ' + (me ? me.score : 0) + ' ₽', 10, 18);
+                ctx.textAlign = 'right'; ctx.fillStyle = (state === 'play' && timeLeft < 600) ? '#ef4444' : '#6b7280'; ctx.font = 'bold 13px system-ui';
+                ctx.fillText('⏱ ' + Math.ceil(Math.max(0, timeLeft) / 60) + 'с', W - 10, 18);
 
                 if (state !== 'play') {
-                    ctx.fillStyle = 'rgba(15,23,42,.55)'; ctx.fillRect(0, 0, W, H);
-                    ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
-                    ctx.font = 'bold 22px system-ui';
-                    ctx.fillText(state === 'over' ? 'Игра окончена' : 'Лови заявки!', W / 2, H / 2 - 28);
-                    ctx.font = '15px system-ui';
-                    if (state === 'over') ctx.fillText('Счёт: ' + score + (score >= best && score > 0 ? ' · рекорд! 🎉' : ''), W / 2, H / 2 + 2);
-                    else ctx.fillText(heroName ? ('Герой: ' + heroName) : 'Выбери героя выше', W / 2, H / 2 + 2);
+                    ctx.fillStyle = 'rgba(15,23,42,.62)'; ctx.fillRect(0, 0, W, H);
+                    ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.font = 'bold 20px system-ui';
+                    ctx.fillText(state === 'over' ? 'Смена окончена' : 'Лови заявки!', W / 2, 38);
+                    if (state === 'over') {
+                        var sorted = managers.slice().sort(function (a, b) { return b.score - a.score; });
+                        sorted.slice(0, 8).forEach(function (m, idx) {
+                            var isMe = (m === managers[playerIdx]);
+                            ctx.fillStyle = isMe ? '#a5b4fc' : '#e5e7eb'; ctx.font = (isMe ? 'bold ' : '') + '13px system-ui';
+                            ctx.fillText((idx + 1) + '. ' + (m.name || 'Игрок') + ' — ' + m.score + ' ₽' + (isMe ? '  ← ВЫ' : ''), W / 2, 68 + idx * 19);
+                        });
+                        ctx.fillStyle = '#c7d2fe'; ctx.font = '12px system-ui';
+                        ctx.fillText('ваш рекорд: ' + best + ' ₽', W / 2, 68 + Math.min(8, sorted.length) * 19 + 14);
+                    } else {
+                        ctx.font = '14px system-ui'; ctx.fillText('Выбери, за кого играть, и жми старт', W / 2, H / 2);
+                    }
                     ctx.font = 'bold 14px system-ui'; ctx.fillStyle = '#a5b4fc';
-                    ctx.fillText('▶ нажми, чтобы ' + (state === 'over' ? 'сыграть ещё' : 'начать'), W / 2, H / 2 + 34);
+                    ctx.fillText('▶ нажми, чтобы ' + (state === 'over' ? 'ещё смену' : 'начать'), W / 2, H - 20);
                 }
             }
 
-            function loop() {
-                if (state === 'play') update();
-                draw();
-                requestAnimationFrame(loop);
-            }
+            function loop() { if (state === 'play') update(); draw(); requestAnimationFrame(loop); }
             loop();
         }
     })();
