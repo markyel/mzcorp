@@ -3,10 +3,10 @@
 namespace App\Livewire\Iqot;
 
 use App\Enums\IqotPositionStatus;
+use App\Jobs\Iqot\PollIqotSubmissionsJob;
 use App\Models\IqotPosition;
 use App\Services\Iqot\IqotDispatchService;
 use App\Services\Iqot\IqotPoolService;
-use App\Jobs\Iqot\PollIqotSubmissionsJob;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -108,7 +108,7 @@ class Index extends Component
             ->when($this->sourceFilter !== '', fn ($q) => $q->where('source', $this->sourceFilter))
             ->when($this->attentionOnly, fn ($q) => $q->needingPricingAttention())
             ->when($this->search !== '', function ($q) {
-                $term = '%' . $this->search . '%';
+                $term = '%'.$this->search.'%';
                 $q->whereHas('catalogItem', function ($c) use ($term) {
                     $c->where('name', 'ilike', $term)
                         ->orWhere('sku', 'ilike', $term)
@@ -140,7 +140,9 @@ class Index extends Component
     {
         $this->assertManager();
         $r = $pool->refreshPoolFromLostQuotes();
-        session()->flash('iqot-flash', "Пул обновлён: +{$r['created']} новых, {$r['updated']} обновлено, {$r['skipped_fresh']} со свежим отчётом.");
+        $removed = $r['removed'] ?? 0;
+        session()->flash('iqot-flash', "Пул обновлён: +{$r['created']} новых, {$r['updated']} обновлено, {$r['skipped_fresh']} со свежим отчётом"
+            .($removed ? ", −{$removed} неквотированных убрано" : '').'.');
         unset($this->stats, $this->positions);
     }
 
@@ -150,7 +152,7 @@ class Index extends Component
         $r = $dispatch->dispatch();
         $msg = isset($r['submitted'])
             ? "Отправлено в IQOT: {$r['submitted']} позиц. (за сегодня: {$r['used_today']})."
-            : 'IQOT: ' . ($r['skipped'] ?? $r['error'] ?? json_encode($r, JSON_UNESCAPED_UNICODE));
+            : 'IQOT: '.($r['skipped'] ?? $r['error'] ?? json_encode($r, JSON_UNESCAPED_UNICODE));
         session()->flash('iqot-flash', $msg);
         unset($this->stats, $this->positions);
     }

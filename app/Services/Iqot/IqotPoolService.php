@@ -14,8 +14,10 @@ use Illuminate\Support\Facades\DB;
  * Наполнение пула IQOT-анализа позициями каталога.
  *
  * Источники:
- *  - auto: позиции из проигранных КП (quotation.status=sent + request closed_lost),
- *    дедуп по catalog_item_id, lost_quote_count = число таких КП (приоритет);
+ *  - auto: позиции, РЕАЛЬНО проквотированные в проигранных заявках (есть строка в
+ *    структурном Quotation(sent) ИЛИ в детектор-КП с ценой > 0); дедуп по
+ *    catalog_item_id, lost_quote_count = число таких заявок (приоритет). Позиции,
+ *    что были в заявке, но в КП не попали, НЕ берутся (и чистятся из пула).
  *  - manual: ручное добавление из карточки каталога (РОП/директор), всегда приоритет.
  *
  * Позиция со свежим отчётом (окно iqot.report_fresh_days) повторно не ставится.
@@ -43,93 +45,105 @@ class IqotPoolService
     {
         $freshDays = $this->freshDays();
 
-        // Базовый фильтр: closed_lost заявки, что были «КП отправлено» (любым
-        // путём — фиксируется переходом статуса в quoted), их активные позиции,
-        // сматченные с каталогом.
-        $base = DB::table('request_items as ri')
-            ->join('requests as r', 'r.id', '=', 'ri.request_id')
+        // === Реально ПРОКВОТИРОВАННЫЕ позиции в проигранных заявках ===
+        // Позиция входит в мониторинг ТОЛЬКО если попала в КП клиенту: структурный
+        // Quotation(sent) ИЛИ распарсенное исходящее КП-вложение (детектор, цена
+        // > 0). Позиции, что были в заявке, но в КП не попали (мы их не
+        // квотировали — напр. нет цены), НЕ берём: единица IQOT-анализа — «лот, на
+        // который мы ДАЛИ цену и проиграли». Раньше брали все request_items
+        // closed_lost+quoted заявки → в пул лезли неквотированные позиции (кейс
+        // M26928: башмак был в заявке, но в КП не попал).
+        $struct = DB::table('quotation_items as qi')
+            ->join('quotations as q', 'q.id', '=', 'qi.quotation_id')
+            ->join('requests as r', 'r.id', '=', 'q.request_id')
             ->where('r.status', RequestStatus::ClosedLost->value)
-            ->where('ri.is_active', true)
-            ->whereNotNull('ri.catalog_item_id')
-            ->whereExists(function ($s) {
-                $s->from('request_state_changes as sc')
-                    ->whereColumn('sc.request_id', 'r.id')
-                    ->where('sc.to_status', RequestStatus::Quoted->value);
-            });
-
-        $rows = (clone $base)
-            ->groupBy('ri.catalog_item_id')
-            ->selectRaw('ri.catalog_item_id, COUNT(DISTINCT r.id) AS cnt')
+            ->where('q.status', QuotationStatus::Sent->value)
+            ->whereNotNull('qi.catalog_item_id')
+            ->selectRaw('qi.catalog_item_id, q.request_id, r.closed_at')
             ->get();
 
-        // Последняя (по дате закрытия) исходная позиция на каждый catalog_item —
-        // для qty/unit и нашей цены.
-        $latest = (clone $base)
-            ->orderBy('ri.catalog_item_id')
-            ->orderByRaw('r.closed_at DESC NULLS LAST')
-            ->orderByDesc('r.id')
-            ->selectRaw('DISTINCT ON (ri.catalog_item_id) ri.catalog_item_id, ri.id AS request_item_id, r.id AS request_id')
+        $det = DB::table('outbound_quote_items as oqi')
+            ->join('outbound_quotes as oq', 'oq.id', '=', 'oqi.outbound_quote_id')
+            ->join('requests as r', 'r.id', '=', 'oq.request_id')
+            ->where('r.status', RequestStatus::ClosedLost->value)
+            ->whereNotNull('oqi.matched_catalog_item_id')
+            ->where('oqi.unit_price', '>', 0)
+            ->selectRaw('oqi.matched_catalog_item_id AS catalog_item_id, oq.request_id, r.closed_at')
+            ->get();
+
+        // cid => [request_id => closed_at] — для счётчика и выбора последней заявки.
+        $quoted = [];
+        foreach ($struct->concat($det) as $r) {
+            $cid = (int) $r->catalog_item_id;
+            $quoted[$cid][(int) $r->request_id] = (string) ($r->closed_at ?? '');
+        }
+        $quotedCatIds = array_keys($quoted);
+
+        // Гард: пустой quoted-set (миграция/сбой) — пул не трогаем (иначе чистка
+        // ниже снесла бы весь auto-пул).
+        if ($quotedCatIds === []) {
+            return ['created' => 0, 'updated' => 0, 'skipped_fresh' => 0, 'removed' => 0];
+        }
+
+        // Последняя проквотированная заявка на каждый cid (по closed_at).
+        $latestReqByCid = [];
+        foreach ($quoted as $cid => $reqs) {
+            arsort($reqs); // closed_at-строки ISO сортируются хронологически
+            $latestReqByCid[$cid] = (int) array_key_first($reqs);
+        }
+        $allQuotedReqIds = array_values(array_unique(array_merge(
+            ...array_map('array_keys', array_values($quoted))
+        )));
+
+        // qty/unit — из активной позиции ПОСЛЕДНЕЙ проквотированной заявки.
+        $reqItems = RequestItem::query()
+            ->whereIn('catalog_item_id', $quotedCatIds)
+            ->whereIn('request_id', array_values($latestReqByCid))
+            ->where('is_active', true)
+            ->get()
+            ->groupBy(fn ($ri) => $ri->request_id.':'.$ri->catalog_item_id);
+
+        // Структурная цена по (request_id, cid) для последних заявок.
+        $kp = DB::table('quotation_items as qi')
+            ->join('quotations as q', 'q.id', '=', 'qi.quotation_id')
+            ->where('q.status', QuotationStatus::Sent->value)
+            ->whereIn('q.request_id', array_values($latestReqByCid))
+            ->whereNotNull('qi.catalog_item_id')
+            ->orderBy('q.request_id')
+            ->orderBy('qi.catalog_item_id')
+            ->orderByRaw('q.sent_at DESC NULLS LAST')
+            ->orderByDesc('q.id')
+            ->selectRaw('DISTINCT ON (q.request_id, qi.catalog_item_id) q.request_id, qi.catalog_item_id, qi.final_unit_price, q.internal_code')
+            ->get()
+            ->keyBy(fn ($r) => $r->request_id.':'.$r->catalog_item_id);
+
+        // Детектор-цена по cid: самая свежая сматченная строка с ценой > 0 среди
+        // ВСЕХ проигранных квот этой позиции. По одному значению на catalog_item.
+        $oq = DB::table('outbound_quote_items as oqi')
+            ->join('outbound_quotes as oq2', 'oq2.id', '=', 'oqi.outbound_quote_id')
+            ->whereIn('oq2.request_id', $allQuotedReqIds)
+            ->whereNotNull('oqi.matched_catalog_item_id')
+            ->where('oqi.unit_price', '>', 0)
+            ->orderBy('oqi.matched_catalog_item_id')
+            ->orderByRaw('oq2.document_date DESC NULLS LAST')
+            ->orderByDesc('oq2.id')
+            ->selectRaw('DISTINCT ON (oqi.matched_catalog_item_id) oqi.matched_catalog_item_id AS catalog_item_id, oqi.unit_price, oq2.document_number')
             ->get()
             ->keyBy('catalog_item_id');
-
-        $items = $latest->isEmpty()
-            ? collect()
-            : RequestItem::whereIn('id', $latest->pluck('request_item_id'))->get()->keyBy('id');
-
-        // Наша цена из структурного КП (Quotation sent) по (request_id, catalog_item_id),
-        // если он был; для детектор-пути структурного КП нет — фолбэк ниже на $oq.
-        $kp = collect();
-        if ($latest->isNotEmpty()) {
-            $kp = DB::table('quotation_items as qi')
-                ->join('quotations as q', 'q.id', '=', 'qi.quotation_id')
-                ->where('q.status', QuotationStatus::Sent->value)
-                ->whereIn('q.request_id', $latest->pluck('request_id')->unique()->values()->all())
-                ->whereNotNull('qi.catalog_item_id')
-                ->orderBy('q.request_id')
-                ->orderBy('qi.catalog_item_id')
-                ->orderByRaw('q.sent_at DESC NULLS LAST')
-                ->orderByDesc('q.id')
-                ->selectRaw('DISTINCT ON (q.request_id, qi.catalog_item_id) q.request_id, qi.catalog_item_id, qi.final_unit_price, q.internal_code')
-                ->get()
-                ->keyBy(fn ($r) => $r->request_id.':'.$r->catalog_item_id);
-        }
-
-        // Цена из ДЕТЕКТОР-КП (распарсенное исходящее КП-вложение): почти все КП
-        // в MyLift уходят так, структурного Quotation нет. Берём самую свежую
-        // сматченную строку с ценой > 0 по catalog_item среди ВСЕХ проигранных
-        // заявок этой позиции (не только последней — у последней строки может
-        // не быть). Иначе our_unit_price=null → priceComparison падал на
-        // каталожную цену (часто 0,00 при is_price_actual=false). По одному
-        // значению на catalog_item.
-        $allReqIds = (clone $base)->distinct()->pluck('r.id')->all();
-        $oq = collect();
-        if ($allReqIds !== []) {
-            $oq = DB::table('outbound_quote_items as oqi')
-                ->join('outbound_quotes as oq2', 'oq2.id', '=', 'oqi.outbound_quote_id')
-                ->whereIn('oq2.request_id', $allReqIds)
-                ->whereNotNull('oqi.matched_catalog_item_id')
-                ->where('oqi.unit_price', '>', 0)
-                ->orderBy('oqi.matched_catalog_item_id')
-                ->orderByRaw('oq2.document_date DESC NULLS LAST')
-                ->orderByDesc('oq2.id')
-                ->selectRaw('DISTINCT ON (oqi.matched_catalog_item_id) oqi.matched_catalog_item_id AS catalog_item_id, oqi.unit_price, oq2.document_number')
-                ->get()
-                ->keyBy('catalog_item_id');
-        }
 
         $created = 0;
         $updated = 0;
         $skippedFresh = 0;
 
-        foreach ($rows as $row) {
-            $catId = (int) $row->catalog_item_id;
-            $cnt = (int) $row->cnt;
+        foreach ($quotedCatIds as $catId) {
+            $cnt = count($quoted[$catId]); // distinct проигранных заявок, где КВОТИРОВАНА
             $pos = IqotPosition::firstOrNew(['catalog_item_id' => $catId]);
             $isNew = ! $pos->exists;
 
-            $lt = $latest->get($catId);
-            $ri = $lt ? $items->get($lt->request_item_id) : null;
-            $kpRow = $lt ? $kp->get($lt->request_id.':'.$catId) : null;
+            $latestReqId = $latestReqByCid[$catId];
+            $ri = optional($reqItems->get($latestReqId.':'.$catId))->first();
+            $kpRow = $kp->get($latestReqId.':'.$catId);
+            $oqRow = $oq->get($catId);
 
             // Метаданные обновляем ВСЕГДА — в т.ч. у исключённых/свежих.
             $pos->lost_quote_count = $cnt;
@@ -138,10 +152,8 @@ class IqotPoolService
                 $pos->qty = $eq > 0 ? $eq : ((float) ($ri->parsed_qty ?: 1));
                 $pos->unit = $ri->effectiveUnit() ?: (trim((string) ($ri->parsed_unit ?? '')) ?: null);
             }
-            // Приоритет: структурный КП → детектор-КП → пусто (priceComparison
-            // фолбэкнет на каталог при наличии цены > 0). Цену детектор-КП ищем
-            // по catalog_item (across all lost quotes), не привязываясь к latest.
-            $oqRow = $oq->get($catId);
+            // Приоритет нашей цены: структурный КП → детектор-КП → пусто
+            // (priceComparison фолбэкнет на каталог при цене > 0).
             if ($kpRow && $kpRow->final_unit_price !== null) {
                 $pos->our_unit_price = (float) $kpRow->final_unit_price;
                 $pos->our_quotation_code = trim((string) $kpRow->internal_code) ?: null;
@@ -179,7 +191,16 @@ class IqotPoolService
             $isNew ? $created++ : $updated++;
         }
 
-        return ['created' => $created, 'updated' => $updated, 'skipped_fresh' => $skippedFresh];
+        // Чистка legacy: auto-позиции, которые по новому алгоритму НЕ были реально
+        // квотированы (старый алгоритм брал все позиции заявки). Manual и
+        // вручную-исключённые (excluded_at) не трогаем. Гард непустого
+        // quotedCatIds — выше.
+        $removed = IqotPosition::where('source', IqotPosition::SOURCE_AUTO)
+            ->whereNull('excluded_at')
+            ->whereNotIn('catalog_item_id', $quotedCatIds)
+            ->delete();
+
+        return ['created' => $created, 'updated' => $updated, 'skipped_fresh' => $skippedFresh, 'removed' => $removed];
     }
 
     /**
