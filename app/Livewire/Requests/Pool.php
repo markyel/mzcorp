@@ -2,10 +2,14 @@
 
 namespace App\Livewire\Requests;
 
+use App\Enums\AttentionReason;
+use App\Enums\ClosedLostReason;
 use App\Enums\RequestStatus;
 use App\Enums\Role;
 use App\Models\Request;
+use App\Models\User;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -80,8 +84,8 @@ class Pool extends Component
      *   created_desc  — по дате создания заявки DESC (новые сверху).
      *   created_asc   — по дате создания заявки ASC (старые сверху — backlog).
      *
-     * Менеджер всегда видит attention (форсим в render). Для canSeeAll —
-     * dropdown с выбором.
+     * Дропдаун выбора доступен ВСЕМ ролям (вкл. менеджера); default — attention.
+     * У менеджера scope остаётся «мои», меняется только порядок.
      */
     #[Url(as: 'sort')]
     public string $sort = 'attention';
@@ -303,7 +307,7 @@ class Pool extends Component
      * Возвращается только если canSeeAll (фильтр не имеет смысла для
      * менеджера — он видит только свои).
      *
-     * @return \Illuminate\Support\Collection<int, array{id:int, name:string}>
+     * @return Collection<int, array{id:int, name:string}>
      */
     #[Computed]
     public function availableManagers(): Collection
@@ -311,7 +315,8 @@ class Pool extends Component
         if (! $this->canSeeAll) {
             return collect();
         }
-        return \App\Models\User::query()
+
+        return User::query()
             ->active()
             ->role(Role::requestHandlerRoles())
             ->orderBy('name')
@@ -335,6 +340,7 @@ class Pool extends Component
                 return $m['name'];
             }
         }
+
         return null;
     }
 
@@ -359,14 +365,14 @@ class Pool extends Component
             ])
             ->withCount('items');
 
-        // Pool re-sort. Менеджеру нужна attention-первая, РОП/директор/админ
-        // могут переключаться на created_desc / created_asc (Foundation-feedback
-        // 2026-05-22: «по дате создания заявки» для разбора backlog).
-        // Для menager force attention (он не имеет UI для смены $sort).
-        $effectiveSort = $this->canSeeAll ? $this->sort : 'attention';
+        // Pool re-sort. Сортировку могут менять ВСЕ роли (UI-дропдаун в
+        // pool.blade): attention (default) / created_desc / created_asc
+        // (Foundation-feedback 2026-05-22: «по дате создания» для разбора
+        // backlog). У менеджера scope всё равно «мои» — порядок на его выбор.
+        $effectiveSort = $this->sort;
         match ($effectiveSort) {
             'created_desc' => $query->orderByDesc('created_at')->orderByDesc('id'),
-            'created_asc'  => $query->orderBy('created_at')->orderBy('id'),
+            'created_asc' => $query->orderBy('created_at')->orderBy('id'),
             default => in_array($this->bucket, ['active', 'overdue'], true)
                 ? $query->orderByDesc('attention_level')
                     ->orderByRaw('last_activity_at DESC NULLS LAST')
@@ -394,7 +400,7 @@ class Pool extends Component
             // «Делегированные» — ИСКЛЮЧИТЕЛЬНО заявки, открытые мне коллегой
             // через активную delegation (без своих). Перекрывает scope.
             $query->whereExists(function ($sub) use ($authId) {
-                $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                $sub->select(DB::raw(1))
                     ->from('request_delegations')
                     ->whereColumn('request_delegations.request_id', 'requests.id')
                     ->where('request_delegations.acting_user_id', $authId)
@@ -404,7 +410,7 @@ class Pool extends Component
             $query->where(function ($q) use ($authId) {
                 $q->where('assigned_user_id', $authId)
                     ->orWhereExists(function ($sub) use ($authId) {
-                        $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                        $sub->select(DB::raw(1))
                             ->from('request_delegations')
                             ->whereColumn('request_delegations.request_id', 'requests.id')
                             ->where('request_delegations.acting_user_id', $authId)
@@ -430,7 +436,7 @@ class Pool extends Component
         // просрочка — их менеджер видит в active-пуле, в overdue не показываем.
         if ($this->bucket === 'overdue') {
             $query->where('attention_level', 1)
-                ->where('attention_reason', \App\Enums\AttentionReason::SlaBreach->value);
+                ->where('attention_reason', AttentionReason::SlaBreach->value);
         }
 
         // Постпродажа: closed_won заявки с непрочитанным постпродажным письмом.
@@ -438,7 +444,7 @@ class Pool extends Component
         // сбрасывает level в 0 для silent-статусов, к которым относится
         // closed_won). Снимается при открытии карточки (onManagerOpened).
         if ($this->bucket === 'postsale') {
-            $query->where('attention_reason', \App\Enums\AttentionReason::PostSale->value)
+            $query->where('attention_reason', AttentionReason::PostSale->value)
                 ->whereNotNull('attention_required_at');
         }
 
@@ -466,7 +472,7 @@ class Pool extends Component
         }
 
         if ($this->search !== '') {
-            $like = '%' . $this->search . '%';
+            $like = '%'.$this->search.'%';
             $query->where(function ($q) use ($like) {
                 // Базовые поля заявки.
                 $q->where('internal_code', 'ilike', $like)
@@ -477,7 +483,7 @@ class Pool extends Component
                     // EXISTS-subquery вместо JOIN, чтобы не дублировать
                     // строки и не ломать пагинацию.
                     ->orWhereExists(function ($sub) use ($like) {
-                        $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                        $sub->select(DB::raw(1))
                             ->from('request_items')
                             ->whereColumn('request_items.request_id', 'requests.id')
                             ->where('request_items.is_active', true)
@@ -488,7 +494,7 @@ class Pool extends Component
                     })
                     // M-SKU каталога через linked catalog_item_id.
                     ->orWhereExists(function ($sub) use ($like) {
-                        $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                        $sub->select(DB::raw(1))
                             ->from('request_items')
                             ->join('catalog_items', 'catalog_items.id', '=', 'request_items.catalog_item_id')
                             ->whereColumn('request_items.request_id', 'requests.id')
@@ -497,7 +503,7 @@ class Pool extends Component
                     })
                     // КП-коды (наши Quotation, КП-2026-NNNN).
                     ->orWhereExists(function ($sub) use ($like) {
-                        $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                        $sub->select(DB::raw(1))
                             ->from('quotations')
                             ->whereColumn('quotations.request_id', 'requests.id')
                             ->where('quotations.internal_code', 'ilike', $like);
@@ -571,7 +577,7 @@ class Pool extends Component
         // Счётчики для filter-chips и left-list-nav.
         $countsBase = Request::query()
             ->when($this->delegatedOnly, fn ($q) => $q->whereExists(function ($sub) {
-                $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                $sub->select(DB::raw(1))
                     ->from('request_delegations')
                     ->whereColumn('request_delegations.request_id', 'requests.id')
                     ->where('request_delegations.acting_user_id', auth()->id())
@@ -593,7 +599,7 @@ class Pool extends Component
                 ->count(),
             'overdue' => (clone $countsBase)
                 ->where('attention_level', 1)
-                ->where('attention_reason', \App\Enums\AttentionReason::SlaBreach->value)
+                ->where('attention_reason', AttentionReason::SlaBreach->value)
                 ->whereIn('status', array_filter(
                     $openValues,
                     fn ($v) => $this->canSeeAll || $v !== RequestStatus::Pending->value,
@@ -612,7 +618,7 @@ class Pool extends Component
             // постпродажным письмом.
             'postsale' => (clone $countsBase)
                 ->whereIn('status', $this->postSaleStatuses())
-                ->where('attention_reason', \App\Enums\AttentionReason::PostSale->value)
+                ->where('attention_reason', AttentionReason::PostSale->value)
                 ->whereNotNull('attention_required_at')
                 ->count(),
             // «Все» = Активные + Закрытые + На паузе. Pending («в разборе» —
@@ -637,7 +643,7 @@ class Pool extends Component
             ->where(function ($q) use ($authId) {
                 $q->where('assigned_user_id', $authId)
                     ->orWhereExists(function ($sub) use ($authId) {
-                        $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                        $sub->select(DB::raw(1))
                             ->from('request_delegations')
                             ->whereColumn('request_delegations.request_id', 'requests.id')
                             ->where('request_delegations.acting_user_id', $authId)
@@ -657,7 +663,7 @@ class Pool extends Component
             ->where(function ($q) use ($authId) {
                 $q->where('assigned_user_id', $authId)
                     ->orWhereExists(function ($sub) use ($authId) {
-                        $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                        $sub->select(DB::raw(1))
                             ->from('request_delegations')
                             ->whereColumn('request_delegations.request_id', 'requests.id')
                             ->where('request_delegations.acting_user_id', $authId)
@@ -665,7 +671,7 @@ class Pool extends Component
                     });
             })
             ->whereIn('status', $this->postSaleStatuses())
-            ->where('attention_reason', \App\Enums\AttentionReason::PostSale->value)
+            ->where('attention_reason', AttentionReason::PostSale->value)
             ->whereNotNull('attention_required_at')
             ->count();
 
@@ -674,7 +680,7 @@ class Pool extends Component
         // только когда счётчик > 0.
         $delegatedMine = Request::query()
             ->whereExists(function ($sub) use ($authId) {
-                $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                $sub->select(DB::raw(1))
                     ->from('request_delegations')
                     ->whereColumn('request_delegations.request_id', 'requests.id')
                     ->where('request_delegations.acting_user_id', $authId)
@@ -701,9 +707,9 @@ class Pool extends Component
         $allOpen = $this->canSeeAll
             ? Request::query()
                 ->whereIn('status', array_map(
-                fn (RequestStatus $s) => $s->value,
-                array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
-            ))
+                    fn (RequestStatus $s) => $s->value,
+                    array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+                ))
                 ->count()
             : null;
 
@@ -715,7 +721,7 @@ class Pool extends Component
             ? Request::query()
                 ->whereNull('assigned_user_id')
                 ->where('status', RequestStatus::ClosedLost->value)
-                ->where('closed_lost_reason', \App\Enums\ClosedLostReason::ParserNoContent->value)
+                ->where('closed_lost_reason', ClosedLostReason::ParserNoContent->value)
                 ->where('closed_at', '>=', now()->subDays(30))
                 ->count()
             : null;

@@ -363,9 +363,10 @@
                         @endforeach
                     </div>
                 </span>
+            @endif
 
-                {{-- Сортировка пула (для canSeeAll). Менеджер всегда видит
-                     attention-first — см. effectiveSort в Pool::render. --}}
+            {{-- Сортировка пула — доступна ВСЕМ ролям (вкл. менеджера).
+                 У менеджера scope всегда «мои», меняется только порядок. --}}
                 @php
                     $_sortLabels = [
                         'attention'    => 'По вниманию',
@@ -396,7 +397,6 @@
                         @endforeach
                     </div>
                 </span>
-            @endif
 
             {{-- Phase 1.10: bucket-chips (группа статусов). Phase 1.11
                  добавляет «Просрочено» — flat-list заявок с просроченным
