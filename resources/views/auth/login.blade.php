@@ -47,9 +47,10 @@
 
     {{-- 🎮 Мини-аркада «Лови заявки» (смена отдела): ВСЕ менеджеры ловят
          падающие письма, ОДНИМ управляешь ты, остальные — AI. Заявки условно
-         распределяются по менеджерам (по близости). Поймал → менеджер на миг
-         замирает, письмо превращается в ₽ (закрыл сделку) или в пустышку.
-         Эмоции аватарки: won при ₽, lost при пустышке. Vanilla JS + canvas,
+         распределяются по менеджерам (по близости). Поймал ✉ → менеджер на миг
+         замирает, письмо → ₽ (закрыл сделку) или пустышка. Плюс 🚫 спам (затык
+         дольше) и 😡 рекламация (ещё дольше) — их лучше не ловить.
+         Эмоции аватарки: won при ₽, lost при пустышке/спаме/рекламации. Canvas,
          без зависимостей и новых Tailwind-классов. Свёрнута по умолчанию. --}}
     <details id="mz-arcade" style="margin-top:20px;border-top:1px solid #eee;padding-top:12px">
         <summary style="cursor:pointer;list-style:none;color:#6b7280;font-size:13px;font-weight:600;user-select:none">
@@ -60,7 +61,7 @@
             <div id="mz-heroes" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
             <canvas id="mz-canvas" style="width:100%;display:block;border-radius:10px;background:linear-gradient(#eef2ff,#f8fafc);touch-action:none;cursor:pointer"></canvas>
             <p style="margin:6px 0 0;font-size:11px;color:#9ca3af;text-align:center">
-                Веди своего героя мышкой/стрелками и лови ✉. Поймал → ₽ (закрыл сделку) или пустышка. Обгони коллег за смену!
+                Лови ✉ заявки → ₽. Не хватай 🚫 спам (застрянешь) и 😡 рекламацию (надолго!). Обгони коллег за смену!
             </p>
         </div>
     </details>
@@ -169,9 +170,12 @@
             function update() {
                 baseY = H - 34;
                 if (--timeLeft <= 0) { gameOver(); return; }
-                // спавн писем (распределяются по всей ширине → по менеджерам)
+                // спавн писем (распределяются по всей ширине → по менеджерам):
+                // 70% ✉ заявка, 22% 🚫 спам, 8% 😡 рекламация.
                 if (--spawnT <= 0) {
-                    emails.push({ x: 18 + Math.random() * (W - 36), y: -18, vy: 1.8 + Math.random() * 1.4 });
+                    var rr = Math.random();
+                    var typ = rr < 0.70 ? 'mail' : (rr < 0.92 ? 'spam' : 'claim');
+                    emails.push({ x: 18 + Math.random() * (W - 36), y: -18, vy: 1.8 + Math.random() * 1.4, type: typ });
                     spawnT = Math.max(13, 28 - Math.floor((ROUND - timeLeft) / 260));
                 }
                 // движение менеджеров
@@ -195,11 +199,16 @@
                     if (e.y >= baseY - rM) {
                         var m2 = closestMgr(e.x);
                         if (m2 && m2.freeze <= 0 && Math.abs(m2.x - e.x) < rM + 9) {
-                            m2.freeze = 16; // замер на мгновение
-                            var ruble = Math.random() < 0.62; // ₽ закрыл / пустышка
-                            if (ruble) { m2.score++; m2.mood = 'won'; } else { m2.mood = 'lost'; }
-                            m2.moodT = 18;
-                            tokens.push({ x: e.x, y: baseY - rM, life: 38, kind: ruble ? 'ruble' : 'dummy' });
+                            var kind;
+                            if (e.type === 'spam') { m2.freeze = 30; m2.mood = 'lost'; kind = 'spam'; }        // спам — застрял дольше
+                            else if (e.type === 'claim') { m2.freeze = 48; m2.mood = 'lost'; kind = 'claim'; } // рекламация — ещё дольше
+                            else { // заявка
+                                m2.freeze = 16; // замер на мгновение
+                                var ruble = Math.random() < 0.62; // ₽ закрыл / пустышка
+                                if (ruble) { m2.score++; m2.mood = 'won'; kind = 'ruble'; } else { m2.mood = 'lost'; kind = 'dummy'; }
+                            }
+                            m2.moodT = m2.freeze + 2; // эмоция держится весь «затык»
+                            tokens.push({ x: e.x, y: baseY - rM, life: 40, kind: kind });
                             emails.splice(i, 1); continue;
                         }
                     }
@@ -241,14 +250,17 @@
                 for (var gx = 40; gx < W; gx += 40) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
                 ctx.strokeStyle = 'rgba(99,102,241,.18)'; ctx.beginPath(); ctx.moveTo(0, baseY + rM + 3); ctx.lineTo(W, baseY + rM + 3); ctx.stroke();
 
-                // письма
+                // падающие: ✉ заявка / 🚫 спам / 😡 рекламация
                 ctx.font = '22px system-ui, "Segoe UI Emoji", "Apple Color Emoji"'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                emails.forEach(function (e) { ctx.fillText('✉️', e.x, e.y); });
+                var EMO = { mail: '✉️', spam: '🚫', claim: '😡' };
+                emails.forEach(function (e) { ctx.fillText(EMO[e.type] || '✉️', e.x, e.y); });
 
-                // токены: ₽ (закрыл сделку) / пустышка
+                // токены результата
                 tokens.forEach(function (tk) {
                     var a = Math.min(1, tk.life / 24);
                     if (tk.kind === 'ruble') { ctx.fillStyle = 'rgba(202,138,4,' + a + ')'; ctx.font = 'bold 19px system-ui'; ctx.fillText('₽', tk.x, tk.y); }
+                    else if (tk.kind === 'spam') { ctx.fillStyle = 'rgba(234,88,12,' + a + ')'; ctx.font = 'bold 10px system-ui'; ctx.fillText('спам', tk.x, tk.y); }
+                    else if (tk.kind === 'claim') { ctx.fillStyle = 'rgba(220,38,38,' + a + ')'; ctx.font = 'bold 10px system-ui'; ctx.fillText('рекламация', tk.x, tk.y); }
                     else { ctx.fillStyle = 'rgba(148,163,184,' + a + ')'; ctx.font = '11px system-ui'; ctx.fillText('пусто', tk.x, tk.y); }
                 });
 
