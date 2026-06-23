@@ -201,6 +201,8 @@ class CorrespondenceExportService
             $html = preg_replace('/font-family\s*:[^;"\']*;?/i', '', $html) ?? $html;
             $html = preg_replace('/(<font\b[^>]*?)\s+face\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)/i', '$1', $html) ?? $html;
 
+            $html = $this->resolveRemoteImages($html);
+
             return $this->inlineCidImages($html, $m);
         }
 
@@ -309,6 +311,74 @@ class CorrespondenceExportService
                 imagedestroy($canvas);
             }
         }
+    }
+
+    /**
+     * Обработка удалённых картинок (http/https src) в теле письма.
+     *
+     * dompdf работает с isRemoteEnabled=false (защита от SSRF и трекинг-пикселей
+     * из писем), поэтому удалённую картинку он не грузит, а рисует её alt-текст —
+     * длинный alt вылезает из ячейки и НАЕЗЖАЕТ на соседний текст (кейс логотипа
+     * подписи «Мой ЗиП…»). Картинки с наших доменов инлайним из public/, любые
+     * другие удалённые картинки вырезаем (логотипы/пиксели — не контент).
+     */
+    private function resolveRemoteImages(string $html): string
+    {
+        return preg_replace_callback(
+            '/<img\b[^>]*>/i',
+            function ($m) {
+                if (! preg_match('/\bsrc\s*=\s*(["\'])(https?:\/\/[^"\']+)\1/i', $m[0], $s)) {
+                    return $m[0]; // не удалённая (cid:/data:/относительная) — не трогаем
+                }
+                $local = $this->mapToLocalAsset($s[2]);
+                if ($local !== null && is_file($local)) {
+                    $data = @file_get_contents($local);
+                    if ($data !== false) {
+                        $mime = $this->guessImageMime($local);
+                        $uri = 'data:' . $mime . ';base64,' . base64_encode($data);
+
+                        return preg_replace(
+                            '/\bsrc\s*=\s*(["\'])https?:\/\/[^"\']+\1/i',
+                            'src="' . $uri . '"',
+                            $m[0],
+                            1
+                        ) ?? $m[0];
+                    }
+                }
+
+                return ''; // чужая удалённая картинка → выкидываем (без alt-наезда)
+            },
+            $html
+        ) ?? $html;
+    }
+
+    /**
+     * Маппинг URL картинки с наших доменов на файл в public/. Только наши хосты,
+     * без path-traversal. Иначе null (картинка будет удалена вызывающим кодом).
+     */
+    private function mapToLocalAsset(string $url): ?string
+    {
+        $parts = parse_url($url);
+        $host = strtolower($parts['host'] ?? '');
+        $path = ltrim($parts['path'] ?? '', '/');
+
+        $ourHosts = ['mzcorp.ru', 'www.mzcorp.ru', 'myzip.ru', 'www.myzip.ru', 'mylift.ru', 'www.mylift.ru'];
+        if (! in_array($host, $ourHosts, true) || $path === '' || str_contains($path, '..')) {
+            return null;
+        }
+
+        return public_path($path);
+    }
+
+    private function guessImageMime(string $path): string
+    {
+        return match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            'svg' => 'image/svg+xml',
+            'webp' => 'image/webp',
+            default => 'image/png',
+        };
     }
 
     private function isImage(EmailAttachment $a): bool
