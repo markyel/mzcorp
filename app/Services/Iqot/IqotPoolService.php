@@ -34,8 +34,8 @@ class IqotPoolService
      * отправлено» (ЛЮБЫМ путём: структурный Quotation ИЛИ детектор вложения) и
      * закрыты в потерю. Дедуп по catalog_item_id; lost_quote_count = число таких
      * заявок. qty/unit — из позиции заявки (effectiveQty/effectiveUnit, последняя
-     * по дате закрытия). Наша цена — из структурного КП, если он был; иначе пусто
-     * (сравнение возьмёт цену каталога).
+     * по дате закрытия). Наша цена: структурный КП → детектор-КП (распарсенное
+     * вложение) → пусто (сравнение фолбэкнет на каталог, если цена > 0).
      *
      * @return array{created:int, updated:int, skipped_fresh:int}
      */
@@ -77,7 +77,7 @@ class IqotPoolService
             : RequestItem::whereIn('id', $latest->pluck('request_item_id'))->get()->keyBy('id');
 
         // Наша цена из структурного КП (Quotation sent) по (request_id, catalog_item_id),
-        // если он был; для детектор-пути такого КП нет — our_unit_price останется пуст.
+        // если он был; для детектор-пути структурного КП нет — фолбэк ниже на $oq.
         $kp = collect();
         if ($latest->isNotEmpty()) {
             $kp = DB::table('quotation_items as qi')
@@ -91,7 +91,30 @@ class IqotPoolService
                 ->orderByDesc('q.id')
                 ->selectRaw('DISTINCT ON (q.request_id, qi.catalog_item_id) q.request_id, qi.catalog_item_id, qi.final_unit_price, q.internal_code')
                 ->get()
-                ->keyBy(fn ($r) => $r->request_id . ':' . $r->catalog_item_id);
+                ->keyBy(fn ($r) => $r->request_id.':'.$r->catalog_item_id);
+        }
+
+        // Цена из ДЕТЕКТОР-КП (распарсенное исходящее КП-вложение): почти все КП
+        // в MyLift уходят так, структурного Quotation нет. Берём самую свежую
+        // сматченную строку с ценой > 0 по catalog_item среди ВСЕХ проигранных
+        // заявок этой позиции (не только последней — у последней строки может
+        // не быть). Иначе our_unit_price=null → priceComparison падал на
+        // каталожную цену (часто 0,00 при is_price_actual=false). По одному
+        // значению на catalog_item.
+        $allReqIds = (clone $base)->distinct()->pluck('r.id')->all();
+        $oq = collect();
+        if ($allReqIds !== []) {
+            $oq = DB::table('outbound_quote_items as oqi')
+                ->join('outbound_quotes as oq2', 'oq2.id', '=', 'oqi.outbound_quote_id')
+                ->whereIn('oq2.request_id', $allReqIds)
+                ->whereNotNull('oqi.matched_catalog_item_id')
+                ->where('oqi.unit_price', '>', 0)
+                ->orderBy('oqi.matched_catalog_item_id')
+                ->orderByRaw('oq2.document_date DESC NULLS LAST')
+                ->orderByDesc('oq2.id')
+                ->selectRaw('DISTINCT ON (oqi.matched_catalog_item_id) oqi.matched_catalog_item_id AS catalog_item_id, oqi.unit_price, oq2.document_number')
+                ->get()
+                ->keyBy('catalog_item_id');
         }
 
         $created = 0;
@@ -106,7 +129,7 @@ class IqotPoolService
 
             $lt = $latest->get($catId);
             $ri = $lt ? $items->get($lt->request_item_id) : null;
-            $kpRow = $lt ? $kp->get($lt->request_id . ':' . $catId) : null;
+            $kpRow = $lt ? $kp->get($lt->request_id.':'.$catId) : null;
 
             // Метаданные обновляем ВСЕГДА — в т.ч. у исключённых/свежих.
             $pos->lost_quote_count = $cnt;
@@ -115,8 +138,20 @@ class IqotPoolService
                 $pos->qty = $eq > 0 ? $eq : ((float) ($ri->parsed_qty ?: 1));
                 $pos->unit = $ri->effectiveUnit() ?: (trim((string) ($ri->parsed_unit ?? '')) ?: null);
             }
-            $pos->our_unit_price = $kpRow && $kpRow->final_unit_price !== null ? (float) $kpRow->final_unit_price : null;
-            $pos->our_quotation_code = $kpRow ? (trim((string) $kpRow->internal_code) ?: null) : null;
+            // Приоритет: структурный КП → детектор-КП → пусто (priceComparison
+            // фолбэкнет на каталог при наличии цены > 0). Цену детектор-КП ищем
+            // по catalog_item (across all lost quotes), не привязываясь к latest.
+            $oqRow = $oq->get($catId);
+            if ($kpRow && $kpRow->final_unit_price !== null) {
+                $pos->our_unit_price = (float) $kpRow->final_unit_price;
+                $pos->our_quotation_code = trim((string) $kpRow->internal_code) ?: null;
+            } elseif ($oqRow && (float) $oqRow->unit_price > 0) {
+                $pos->our_unit_price = (float) $oqRow->unit_price;
+                $pos->our_quotation_code = trim((string) $oqRow->document_number) ?: null;
+            } else {
+                $pos->our_unit_price = null;
+                $pos->our_quotation_code = null;
+            }
 
             // Исключена вручную («не запрашивать никогда») — статус не трогаем.
             if (! $isNew && $pos->isExcluded()) {
@@ -203,7 +238,7 @@ class IqotPoolService
         $unit = trim((string) ($pos->unit ?? '')) ?: 'шт.';
 
         $line = [
-            'client_ref' => 'pos-' . $pos->id,
+            'client_ref' => 'pos-'.$pos->id,
             'name' => $name,
             'quantity' => $qty,
             'unit' => $unit,
@@ -224,5 +259,4 @@ class IqotPoolService
 
         return $line;
     }
-
 }

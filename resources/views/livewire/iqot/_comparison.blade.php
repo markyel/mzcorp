@@ -30,10 +30,10 @@
             <tr class="border-t border-border-subtle {{ $row['is_ours'] ? 'bg-red-50' : '' }}" @if(!empty($row['notes'])) title="{{ $row['notes'] }}" @endif>
                 <td class="px-2 py-1 text-center font-bold {{ $row['is_ours'] ? 'text-red-700' : 'text-fg-3' }}">{{ $i + 1 }}</td>
                 <td class="px-2 py-1 {{ $row['is_ours'] ? 'text-red-700' : 'text-fg-1' }}">
-                    @if($row['is_ours'])<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-600 text-white mr-1">КП</span>@endif{{ $row['supplier'] }}
+                    @if($row['is_ours'])<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-600 text-white mr-1">МЫ</span>@endif{{ $row['supplier'] }}
                 </td>
                 <td class="px-2 py-1 text-fg-2 text-[11px] mono">
-                    @if($row['is_ours'])<span class="text-fg-3">собственное КП</span>@else{{ $row['phone'] }}{{ !empty($row['email']) ? ' · ' . $row['email'] : '' }}@endif
+                    @if($row['is_ours']){{ $row['notes'] ?? '' }}@else{{ $row['phone'] }}{{ !empty($row['email']) ? ' · ' . $row['email'] : '' }}@endif
                 </td>
                 <td class="px-2 py-1 text-right mono font-semibold {{ $row['is_ours'] ? 'text-red-700' : 'text-fg-1' }}">
                     {{ number_format($row['raw'], 2, ',', ' ') }} {{ $row['currency_symbol'] }}
