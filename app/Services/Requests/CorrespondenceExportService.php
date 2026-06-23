@@ -192,6 +192,10 @@ class CorrespondenceExportService
             // протечь на следующие письма одного документа.
             $html = preg_replace('#<(script|style|head)\b[^>]*>.*?</\1>#is', '', $html) ?? $html;
 
+            // В экспорт идут только сами письма — процитированную переписку
+            // («портянки» предыдущих писем) вырезаем.
+            $html = $this->stripQuotedBlocks($html);
+
             // Кириллица в подписях рендерилась как «???»: подписи из почтовых
             // клиентов (Thunderbird moz-signature и т.п.) несут собственный
             // font-family (Helvetica/Arial), а для этих семейств dompdf берёт
@@ -207,11 +211,145 @@ class CorrespondenceExportService
         }
 
         if ($m->body_plain) {
+            $plain = $this->stripQuotedPlain($m->body_plain);
+
             return '<pre style="white-space:pre-wrap;font-family:inherit;margin:0;font-size:11px;">'
-                . e($m->body_plain) . '</pre>';
+                . e($plain) . '</pre>';
         }
 
         return null;
+    }
+
+    /**
+     * Удаляет процитированные блоки из HTML письма (в экспорт идут только сами
+     * письма, без цитат предыдущей переписки). Зеркалит детект из
+     * Requests\Detail::collapseQuotedBlocks, но НЕ сворачивает в <details>, а
+     * вырезает blockquote / gmail_quote / yahoo_quoted + attribution-строки
+     * («Кому:/От:/… написал(а):») непосредственно перед цитатой.
+     */
+    private function stripQuotedBlocks(string $html): string
+    {
+        if (stripos($html, '<blockquote') === false
+            && stripos($html, 'gmail_quote') === false
+            && stripos($html, 'yahoo_quoted') === false) {
+            return $html;
+        }
+
+        $previous = libxml_use_internal_errors(true);
+        $doc = new \DOMDocument('1.0', 'UTF-8');
+        $wrapped = '<?xml encoding="UTF-8"?><div id="mylift-export-root">' . $html . '</div>';
+        $loaded = $doc->loadHTML($wrapped, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        if (! $loaded) {
+            return $html;
+        }
+
+        $xpath = new \DOMXPath($doc);
+        $nodes = $xpath->query(
+            '//blockquote[not(ancestor::blockquote)]'
+            . ' | //div[contains(@class, "gmail_quote") and not(ancestor::blockquote)]'
+            . ' | //div[contains(@class, "yahoo_quoted") and not(ancestor::blockquote)]'
+        );
+        if ($nodes === false || $nodes->length === 0) {
+            return $html;
+        }
+
+        // Сначала собираем узлы в массив — живая NodeList ломается при удалении.
+        $toRemove = [];
+        foreach ($nodes as $bq) {
+            $toRemove[] = $bq;
+            $prev = $bq->previousSibling;
+            while ($prev !== null) {
+                if ($this->looksLikeQuoteAttribution($prev)
+                    || ($prev->nodeType === XML_TEXT_NODE && trim($prev->textContent) === '')
+                    || ($prev->nodeType === XML_ELEMENT_NODE && strtolower($prev->nodeName) === 'br')
+                ) {
+                    $toRemove[] = $prev;
+                    $prev = $prev->previousSibling;
+                    continue;
+                }
+                break;
+            }
+        }
+        foreach ($toRemove as $node) {
+            $node->parentNode?->removeChild($node);
+        }
+
+        $root = $doc->getElementById('mylift-export-root');
+        if (! $root) {
+            return $html;
+        }
+
+        $out = '';
+        foreach ($root->childNodes as $child) {
+            $out .= $doc->saveHTML($child);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Эвристика attribution-строки перед цитатой (RU/EN). Копия логики из
+     * Requests\Detail::looksLikeQuoteAttribution.
+     */
+    private function looksLikeQuoteAttribution(\DOMNode $node): bool
+    {
+        if ($node->nodeType !== XML_ELEMENT_NODE) {
+            return false;
+        }
+        if (! in_array(strtolower($node->nodeName), ['div', 'p', 'span', 'blockquote'], true)) {
+            return false;
+        }
+        $text = trim($node->textContent);
+        if ($text === '' || mb_strlen($text) > 600) {
+            return false;
+        }
+        $patterns = [
+            '/^\s*Кому\s*:/iu',
+            '/^\s*Тема\s*:/iu',
+            '/^\s*От\s*:/iu',
+            '/^\s*Дата\s*:/iu',
+            '/^\s*To\s*:/i',
+            '/^\s*From\s*:/i',
+            '/^\s*Subject\s*:/i',
+            '/^\s*Date\s*:/i',
+            '/-{3,}\s*(Original message|Перенаправленное сообщение|Forwarded message|Пересылаемое сообщение)/iu',
+            '/\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4}.*(написал|wrote)/iu',
+            '/\d{1,2}\s+\p{L}+\s+\d{4}.*(написал|wrote)/iu',
+        ];
+        foreach ($patterns as $p) {
+            if (preg_match($p, $text)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Чистка цитат в plain-text письме: обрываем на attribution-строке
+     * («… написал(а):» / «--- Original message ---») и убираем `>`-цитаты.
+     */
+    private function stripQuotedPlain(string $text): string
+    {
+        $lines = preg_split('/\r\n|\r|\n/', $text) ?: [];
+        $out = [];
+        foreach ($lines as $line) {
+            if (preg_match('/^\s*-{2,}\s*(Original message|Перенаправленное|Forwarded|Пересылаемое)/iu', $line)
+                || preg_match('/\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4}.*(написал|wrote)\s*:?\s*$/iu', $line)
+                || preg_match('/\d{1,2}\s+\p{L}+\s+\d{4}.*(написал|wrote)\s*:?\s*$/iu', $line)
+            ) {
+                break;
+            }
+            if (preg_match('/^\s*>/', $line)) {
+                continue;
+            }
+            $out[] = $line;
+        }
+
+        return rtrim(implode("\n", $out));
     }
 
     /**
