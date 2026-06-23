@@ -192,11 +192,16 @@ class IqotPoolService
         }
 
         // Чистка legacy: auto-позиции, которые по новому алгоритму НЕ были реально
-        // квотированы (старый алгоритм брал все позиции заявки). Manual и
-        // вручную-исключённые (excluded_at) не трогаем. Гард непустого
-        // quotedCatIds — выше.
+        // квотированы (старый алгоритм брал все позиции заявки). Удаляем ТОЛЬКО
+        // нетронутые: не отправлялись в IQOT и без отчёта (баланс не потрачен).
+        // Позиции, по которым средства УЖЕ списаны (last_enqueued_at/analyzed_at) —
+        // НЕ трогаем, даже если по новому алгоритму они не квотированы: данные
+        // офферов конкурентов ценны и оплачены. Manual и вручную-исключённые
+        // (excluded_at) тоже не трогаем. Гард непустого quotedCatIds — выше.
         $removed = IqotPosition::where('source', IqotPosition::SOURCE_AUTO)
             ->whereNull('excluded_at')
+            ->whereNull('analyzed_at')
+            ->whereNull('last_enqueued_at')
             ->whereNotIn('catalog_item_id', $quotedCatIds)
             ->delete();
 
