@@ -61,7 +61,7 @@
             <div id="mz-heroes" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
             <canvas id="mz-canvas" style="width:100%;display:block;border-radius:10px;background:linear-gradient(#eef2ff,#f8fafc);touch-action:none;cursor:pointer"></canvas>
             <p style="margin:6px 0 0;font-size:11px;color:#9ca3af;text-align:center">
-                Веди героя мышью/стрелками (и вверх-вниз!). Лови ✉ → ₽ и 💎 суперзаявку (+10!), не лови 🚫 спам и 😡 рекламацию.
+                Тип письма виден лишь за границей mzCorp — не липни к ней! Лови ✉ → ₽ и 💎 (+10!), уворачивайся от 🚫 спама и 😡 рекламации.
             </p>
         </div>
     </details>
@@ -181,7 +181,7 @@
                 if (--spawnT <= 0) {
                     var rr = Math.random();
                     var typ = rr < 0.70 ? 'mail' : (rr < 0.92 ? 'spam' : 'claim');
-                    emails.push({ x: 18 + Math.random() * (W - 36), y: -18, vy: 1.8 + Math.random() * 1.4, type: typ });
+                    emails.push({ x: 18 + Math.random() * (W - 36), y: -18, vy: 1.8 + Math.random() * 1.4, type: typ, revealed: false });
                     spawnT = Math.max(13, 28 - Math.floor((ROUND - timeLeft) / 260));
                 }
                 if (superFlash > 0) superFlash--;
@@ -189,35 +189,53 @@
                 // Падает медленно (успеть сбежаться), по одной за раз.
                 if (--superT <= 0) {
                     if (!emails.some(function (e) { return e.type === 'super'; })) {
-                        emails.push({ x: 30 + Math.random() * (W - 60), y: -20, vy: 1.1 + Math.random() * 0.5, type: 'super' });
-                        superFlash = 70;
+                        emails.push({ x: 30 + Math.random() * (W - 60), y: -20, vy: 1.1 + Math.random() * 0.5, type: 'super', revealed: false });
                     }
                     superT = 720 + Math.floor(Math.random() * 480); // следующая через ~12–20с
                 }
-                // суперзаявка на экране — её преследуют ВСЕ AI (вне «зон»)
-                var sup = null;
-                emails.forEach(function (e) { if (e.type === 'super' && e.y > 8) sup = e; });
-                // движение менеджеров (теперь и по ВЕРТИКАЛИ — в нижней полосе
-                // [topY..baseY], чтобы не было тесно; могут перехватывать выше)
+                // ГРАНИЦА mzCorp (topY): тип письма опознаётся (виден игроку и AI)
+                // ТОЛЬКО после пересечения границы. До этого — «неопознанное»
+                // (призрачный ✉). Кто липнет к границе — ловит плохое вслепую.
                 var topY = Math.round(H * 0.50);
+                var sup = null;
+                emails.forEach(function (e) {
+                    if (!e.revealed && e.y >= topY) { e.revealed = true; if (e.type === 'super') superFlash = 70; }
+                    if (e.type === 'super' && e.revealed) sup = e; // супер преследуют все, но лишь после опознания
+                });
+                // движение менеджеров (по X и Y, в нижней полосе [topY..baseY])
                 managers.forEach(function (m) {
                     if (m.moodT > 0 && --m.moodT === 0) m.mood = 'neutral';
                     if (m.freeze > 0) { m.freeze--; return; }
-                    if (m.ai) {
-                        var tgt = sup; // суперзаявка в приоритете для всех
-                        if (!tgt) { // иначе — ближайшее письмо в «своей» зоне (по x)
-                            var td = 1e9;
-                            emails.forEach(function (e) {
-                                if (e.y > baseY + 4 || closestMgr(e.x) !== m) return;
-                                var d = Math.abs(e.x - m.x) + Math.abs(e.y - m.y) * 0.35;
-                                if (d < td) { td = d; tgt = e; }
-                            });
-                        }
-                        if (tgt) {
-                            var ty = Math.max(topY, Math.min(baseY, tgt.y));
-                            m.x = Math.max(rM, Math.min(W - rM, m.x + Math.max(-3.0, Math.min(3.0, tgt.x - m.x))));
-                            m.y = Math.max(topY, Math.min(baseY, m.y + Math.max(-3.0, Math.min(3.0, ty - m.y))));
-                        }
+                    if (!m.ai) return;
+                    // угроза — опознанное плохое письмо рядом → уворачиваемся в сторону и вниз
+                    var threat = null, thd = (rM + 36) * (rM + 36);
+                    emails.forEach(function (e) {
+                        if (!e.revealed || (e.type !== 'spam' && e.type !== 'claim')) return;
+                        var dx = e.x - m.x, dy = e.y - m.y, d2 = dx * dx + dy * dy;
+                        if (d2 < thd) { thd = d2; threat = e; }
+                    });
+                    if (threat) {
+                        m.x = Math.max(rM, Math.min(W - rM, m.x + (m.x <= threat.x ? -3.2 : 3.2)));
+                        m.y = Math.max(topY, Math.min(baseY, m.y + 2.4));
+                        return;
+                    }
+                    // цель: супер (если опознан) или ближайшее НЕ-плохое в зоне
+                    var tgt = sup;
+                    if (!tgt) {
+                        var td = 1e9;
+                        emails.forEach(function (e) {
+                            if (e.y > baseY + 4 || closestMgr(e.x) !== m) return;
+                            if (e.revealed && (e.type === 'spam' || e.type === 'claim')) return; // опознанное плохое не берём
+                            var d = Math.abs(e.x - m.x) + Math.abs(e.y - m.y) * 0.35;
+                            if (d < td) { td = d; tgt = e; }
+                        });
+                    }
+                    if (tgt) {
+                        // неопознанное — ждём ЧУТЬ НИЖЕ границы (запас на реакцию);
+                        // опознанное хорошее — идём ловить.
+                        var aimY = tgt.revealed ? Math.max(topY, Math.min(baseY, tgt.y)) : Math.min(baseY, topY + 30);
+                        m.x = Math.max(rM, Math.min(W - rM, m.x + Math.max(-3.0, Math.min(3.0, tgt.x - m.x))));
+                        m.y = Math.max(topY, Math.min(baseY, m.y + Math.max(-3.0, Math.min(3.0, aimY - m.y))));
                     }
                 });
                 // письма падают + ловля ПО БЛИЗОСТИ (любой свободный менеджер в радиусе)
@@ -233,8 +251,8 @@
                     if (m2) {
                         var kind;
                         if (e.type === 'super') { m2.freeze = 16; m2.score += 10; m2.mood = 'won'; kind = 'super'; } // 💎 джекпот +10 ₽
-                        else if (e.type === 'spam') { m2.freeze = 30; m2.mood = 'lost'; kind = 'spam'; }   // спам — застрял дольше
-                        else if (e.type === 'claim') { m2.freeze = 48; m2.mood = 'lost'; kind = 'claim'; } // рекламация — ещё дольше
+                        else if (e.type === 'spam') { m2.freeze = 54; m2.mood = 'lost'; kind = 'spam'; }   // спам — застрял заметно дольше
+                        else if (e.type === 'claim') { m2.freeze = 96; m2.mood = 'lost'; kind = 'claim'; } // рекламация — очень надолго
                         else { // заявка
                             m2.freeze = 16; // замер на мгновение
                             var ruble = Math.random() < 0.62; // ₽ закрыл / пустышка
@@ -257,6 +275,8 @@
 
             function drawManager(m, isPlayer) {
                 var y = m.y; // менеджеры теперь и по вертикали
+                ctx.save();
+                if (m.freeze > 0) ctx.globalAlpha = 0.4; // «затык» — полупрозрачный, ничего не ловит
                 ctx.beginPath(); ctx.arc(m.x, y, rM, 0, 7); ctx.closePath(); ctx.fillStyle = '#e0e7ff'; ctx.fill();
                 var img = m.imgs ? (m.imgs[m.mood] || m.imgs.neutral) : null;
                 if (img && img.complete && img.naturalWidth) {
@@ -269,6 +289,7 @@
                 ctx.lineWidth = isPlayer ? 3 : 2;
                 ctx.strokeStyle = m.mood === 'won' ? '#10b981' : (m.mood === 'lost' ? '#ef4444' : (isPlayer ? '#6366f1' : '#c7d2fe'));
                 ctx.beginPath(); ctx.arc(m.x, y, rM, 0, 7); ctx.stroke();
+                ctx.restore();
                 ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
                 if (m.freeze > 0) { ctx.font = '13px system-ui'; ctx.fillStyle = '#94a3b8'; ctx.fillText('…', m.x, y - rM - 5); }
                 if (m.score > 0) { ctx.font = 'bold 11px system-ui'; ctx.fillStyle = isPlayer ? '#4f46e5' : '#9ca3af'; ctx.fillText(m.score + '₽', m.x, y - rM - (m.freeze > 0 ? 17 : 5)); }
@@ -281,12 +302,22 @@
                 ctx.strokeStyle = 'rgba(99,102,241,.07)'; ctx.lineWidth = 1;
                 for (var gx = 40; gx < W; gx += 40) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
                 ctx.strokeStyle = 'rgba(99,102,241,.18)'; ctx.beginPath(); ctx.moveTo(0, baseY + rM + 3); ctx.lineTo(W, baseY + rM + 3); ctx.stroke();
+                // граница mzCorp — за ней письмо опознаётся (выше менеджеры не заходят)
+                var bY = Math.round(H * 0.50);
+                ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(99,102,241,.4)';
+                ctx.beginPath(); ctx.moveTo(0, bY); ctx.lineTo(W, bY); ctx.stroke(); ctx.setLineDash([]);
+                ctx.fillStyle = 'rgba(99,102,241,.6)'; ctx.font = '9px system-ui'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+                ctx.fillText('граница mzCorp ▾', W - 6, bY - 1); ctx.restore();
 
                 // падающие: ✉ заявка / 🚫 спам / 😡 рекламация / 💎 суперзаявка
                 ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
                 var EMO = { mail: '✉️', spam: '🚫', claim: '😡' };
                 emails.forEach(function (e) {
-                    if (e.type === 'super') {
+                    if (!e.revealed) { // не опознано — призрачный конверт
+                        ctx.save(); ctx.globalAlpha = 0.5;
+                        ctx.font = '20px system-ui, "Segoe UI Emoji", "Apple Color Emoji"';
+                        ctx.fillText('✉️', e.x, e.y); ctx.restore();
+                    } else if (e.type === 'super') {
                         ctx.save();
                         ctx.shadowColor = 'rgba(234,179,8,.95)'; ctx.shadowBlur = 16;
                         ctx.font = (28 + 3 * Math.sin(e.y * 0.18)).toFixed(0) + 'px system-ui, "Segoe UI Emoji", "Apple Color Emoji"';
