@@ -182,7 +182,7 @@ class CorrespondenceExportService
     private function prepareBody(EmailMessage $m): ?string
     {
         if ($m->body_html) {
-            $html = $m->body_html;
+            $html = $this->stripInvisibleChars($m->body_html);
 
             if (preg_match('#<body[^>]*>(.*)</body>#is', $html, $mm)) {
                 $html = $mm[1];
@@ -211,13 +211,24 @@ class CorrespondenceExportService
         }
 
         if ($m->body_plain) {
-            $plain = $this->stripQuotedPlain($m->body_plain);
+            $plain = $this->stripQuotedPlain($this->stripInvisibleChars($m->body_plain));
 
             return '<pre style="white-space:pre-wrap;font-family:inherit;margin:0;font-size:11px;">'
                 . e($plain) . '</pre>';
         }
 
         return null;
+    }
+
+    /**
+     * Удаляет невидимые / zero-width символы (U+200B ZWSP, U+200C/D, BOM,
+     * word-joiner, directional marks, soft hyphen). dompdf не трактует их как
+     * нулевую ширину и рисует «тофу»-боксы. Кейс M-2026-5290: клиент вставил
+     * по 7× U+200B перед номерами пунктов списка → «XXXXXXX» вместо «4. Канат».
+     */
+    private function stripInvisibleChars(string $s): string
+    {
+        return preg_replace('/[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}\x{FEFF}\x{00AD}]/u', '', $s) ?? $s;
     }
 
     /**
