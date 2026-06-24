@@ -182,7 +182,7 @@ class CorrespondenceExportService
     private function prepareBody(EmailMessage $m): ?string
     {
         if ($m->body_html) {
-            $html = $this->stripInvisibleChars($m->body_html);
+            $html = $this->stripUnrenderableChars($m->body_html);
 
             if (preg_match('#<body[^>]*>(.*)</body>#is', $html, $mm)) {
                 $html = $mm[1];
@@ -211,7 +211,7 @@ class CorrespondenceExportService
         }
 
         if ($m->body_plain) {
-            $plain = $this->stripQuotedPlain($this->stripInvisibleChars($m->body_plain));
+            $plain = $this->stripQuotedPlain($this->stripUnrenderableChars($m->body_plain));
 
             return '<pre style="white-space:pre-wrap;font-family:inherit;margin:0;font-size:11px;">'
                 . e($plain) . '</pre>';
@@ -221,14 +221,26 @@ class CorrespondenceExportService
     }
 
     /**
-     * Удаляет невидимые / zero-width символы (U+200B ZWSP, U+200C/D, BOM,
-     * word-joiner, directional marks, soft hyphen). dompdf не трактует их как
-     * нулевую ширину и рисует «тофу»-боксы. Кейс M-2026-5290: клиент вставил
-     * по 7× U+200B перед номерами пунктов списка → «XXXXXXX» вместо «4. Канат».
+     * Удаляет символы, которые dompdf не может отрисовать через PT Sans и рисует
+     * «тофу»-боксами («XX»):
+     *  - невидимые / zero-width (U+200B ZWSP, U+200C/D, BOM, word-joiner,
+     *    directional marks, soft hyphen). Кейс M-2026-5290: клиент вставил по
+     *    7× U+200B перед номерами пунктов списка → «XXXXXXX» вместо «4. Канат».
+     *  - emoji / пиктографы (misc symbols, dingbats, supplemental symbols,
+     *    variation selectors, keycap) — в PT Sans нет emoji-глифов. Кейс
+     *    M-2026-5770: 📝/🏢 на кнопках «Открыть форму ответа» / «Кабинет
+     *    поставщика» письма поставщику → «XX». Вырезаем только иконку, текст
+     *    кнопки остаётся.
+     * Типографику (— · № «») не трогаем — она вне этих диапазонов.
      */
-    private function stripInvisibleChars(string $s): string
+    private function stripUnrenderableChars(string $s): string
     {
-        return preg_replace('/[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}\x{FEFF}\x{00AD}]/u', '', $s) ?? $s;
+        return preg_replace(
+            '/[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}\x{FEFF}\x{00AD}'
+            . '\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}\x{FE00}-\x{FE0F}\x{20E3}\x{1F000}-\x{1FAFF}]/u',
+            '',
+            $s
+        ) ?? $s;
     }
 
     /**
