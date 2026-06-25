@@ -168,6 +168,18 @@ return [
         'max_attachment_bytes' => (int) env('QUOTE_MAX_ATTACHMENT_BYTES', 15 * 1024 * 1024),
         // Расширения, на которых триггерится ParseOutboundQuoteJob.
         'parseable_extensions' => ['pdf', 'xlsx', 'xls', 'docx'],
+        // Сколько символов текстового слоя PDF отдавать в базовый промпт парсера.
+        // Раньше было захардкожено 8000 → длинные сводные КП (24 позиции, ~19500
+        // символов) обрезались, и хвостовые строки не доходили до модели
+        // (кейс M-2026-4755). Поднято до 24000 (как в retry-промпте); gpt-4o 128k
+        // легко вмещает. См. OutboundQuoteParsingService::buildParsingPrompt.
+        'parser_text_limit' => (int) env('QUOTE_PARSER_TEXT_LIMIT', 24000),
+        // Порог «похоже, распарсены не все позиции»: если Σ строк.total МЕНЬШЕ
+        // итога документа сильнее этого %, помечаем КП как неполный (warning
+        // likely_missing_rows + error-лог + повторный проход с указанием искать
+        // пропущенные строки). Кейс M-2026-4755: спарсено 5 из 24 строк,
+        // Σ=312350 при итоге 472668 (−33.9%). См. validateLineTotals/shouldRetry.
+        'missing_rows_pct' => (float) env('QUOTE_MISSING_ROWS_PCT', 10),
 
         /*
         | Self-healing переразбор упавших исходящих КП/счетов

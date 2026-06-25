@@ -328,6 +328,13 @@ class OutboundQuoteParsingService
         $items = $this->autoFixRowArithmetic($items, $request);
 
         $warnings = $this->validateLineTotals($items, $document, $request);
+        // Сверка артикул↔текст: артикул, которого НЕТ в текстовом слое PDF,
+        // вероятно неверно распознан (кейс M-2026-4755: в PDF M00878, прочитано
+        // M00478 = в каталоге «Плата DOP-116»). Флагаем, чтобы не сматчить вслепую.
+        $articleWarnings = $this->verifyArticlesAgainstText($items, $repairedText, $request);
+        if (! empty($articleWarnings)) {
+            $warnings = array_merge($warnings, $articleWarnings);
+        }
         if (! empty($warnings)) {
             $document['_warnings'] = $warnings;
         }
@@ -463,6 +470,44 @@ class OutboundQuoteParsingService
         }
         $totalAmount = (float) ($document['total_amount'] ?? 0);
         $diff = $sumTotals - $totalAmount;
+
+        // Сигнатура «пропущены строки»: Σ строк заметно МЕНЬШЕ итога документа.
+        // Это НЕ арифметическая ошибка одной строки (тогда |diff| мал), а признак
+        // того, что модель не извлекла часть таблицы (кейс M-2026-4755: вернула
+        // 5 из 24 строк). Для такого случая ведём другим feedback'ом — добрать
+        // пропущенные строки, а не пересчитывать существующие.
+        $missingPct = (float) config('services.quotes.missing_rows_pct', 10);
+        $looksLikeMissingRows = $totalAmount > 0
+            && $diff < 0
+            && (abs($diff) / $totalAmount * 100) >= $missingPct;
+
+        if ($looksLikeMissingRows) {
+            $feedback = "\n\n═══ ПОВТОРНЫЙ ПРОХОД — ТЫ ПРОПУСТИЛ ПОЗИЦИИ ═══\n"
+                ."Прошлый раз ты вернул только эти строки:\n"
+                .implode("\n", $rows)
+                ."\n"
+                .sprintf("Σ извлечённых строк = %.2f\n", $sumTotals)
+                .sprintf("document.total_amount = %.2f\n", $totalAmount)
+                .sprintf("Σ строк МЕНЬШЕ итога на %.2f (%.1f%%).\n", abs($diff), abs($diff) / max($totalAmount, 1) * 100)
+                ."\n"
+                ."Это значит, что ты извлёк НЕ ВСЕ строки таблицы. Документ содержит "
+                ."больше позиций, чем ты вернул. Пройди таблицу ЗАНОВО сверху донизу "
+                ."и верни ВСЕ строки до единой (включая те, что ты пропустил). Не "
+                ."ограничивайся позициями заявки клиента — в нашем КП/счёте их может "
+                ."быть больше. Сверяйся с текстовым слоем PDF ниже: каждая строка "
+                ."таблицы с M-артикулом должна попасть в ответ.\n"
+                ."После добора Σ items.total должна стать ≈ document.total_amount.\n";
+
+            if ($repairedText !== null && $repairedText !== '') {
+                $textForRetry = mb_substr($repairedText, 0, 24000);
+                $feedback .= "\n═══ ТЕКСТОВЫЙ СЛОЙ PDF (все строки таблицы) ═══\n"
+                    ."------- BEGIN RAW PDF TEXT -------\n"
+                    .$textForRetry."\n"
+                    ."------- END RAW PDF TEXT -------\n";
+            }
+
+            return $basePrompt.$feedback;
+        }
 
         $feedback = "\n\n═══ ПОВТОРНЫЙ ПРОХОД — ИСПРАВЬ АРИФМЕТИКУ ═══\n"
             ."Прошлый раз ты вернул вот это:\n"
@@ -736,10 +781,16 @@ class OutboundQuoteParsingService
 цена/сумма которой нет в тексте — значит ты её ВЫДУМАЛ, перечитай оба источника. Image
 полезен для понимания структуры таблицы (какая колонка где), text — для надёжных цифр.
 
-**Контекст заявки клиента:**
+**Контекст заявки клиента (ТОЛЬКО подсказка для названий, НЕ ограничение!):**
 Код заявки: M-{$request->code}
 Позиции заявки клиента (как они пришли от клиента):
 {$itemsContext}
+
+⚠️ ВАЖНО: список выше — это лишь то, что прислал клиент. НАШ документ (КП/счёт)
+часто содержит БОЛЬШЕ позиций, чем в заявке (например клиент попросил «объединить»
+несколько прежних запросов, и менеджер собрал сводный КП). Твоя задача — извлечь
+ВСЕ строки таблицы документа, а НЕ только те, что совпали с заявкой. НИКОГДА не
+обрезай таблицу под список заявки. Если в таблице 24 строки — верни 24 позиции.
 
 **M-артикулы (M\d{5,})** в документе — это НАШИ внутренние SKU из корпоративного каталога,
 а не артикулы поставщика. Сохраняй их в поле `article` как есть. Пример: M07014, M02016, M09431.
@@ -757,7 +808,11 @@ class OutboundQuoteParsingService
 
 **Твоя задача:**
 1. Извлечь метаданные документа (тип: quote/invoice, номер, дата, итоговая сумма, НДС).
-2. Извлечь все позиции (название, артикул, бренд, цена, количество, сумма, срок поставки).
+2. Извлечь ВСЕ до единой позиции таблицы (название, артикул, бренд, цена, количество,
+   сумма, срок поставки). Пройди таблицу сверху донизу, не пропусти ни одной строки.
+   САМОПРОВЕРКА перед ответом: Σ(сумма по строкам) должна быть ≈ итоговой сумме
+   документа. Если Σ строк заметно МЕНЬШЕ итога — ты пропустил строки, вернись и
+   добери недостающие.
 Поле `supplier` в ответе можно оставить пустым объектом (это наш собственный документ).
 
 **ВАЖНЫЕ ПРАВИЛА:**
@@ -922,7 +977,12 @@ class OutboundQuoteParsingService
 PROMPT;
 
         if (! empty($text)) {
-            $prompt .= "\n\n**Извлечённый текст:**\n".mb_substr($text, 0, 8000);
+            // Лимит конфигурируемый: длинные сводные КП (десятки позиций) при
+            // жёстком 8000 обрезались, и хвостовые строки не доходили до модели
+            // (кейс M-2026-4755: 24 позиции / ~19500 символов, строки 14–24 не
+            // попадали в текстовый слой). gpt-4o 128k вмещает с запасом.
+            $textLimit = (int) config('services.quotes.parser_text_limit', 24000);
+            $prompt .= "\n\n**Извлечённый текст:**\n".mb_substr($text, 0, max(8000, $textLimit));
         }
 
         // Сопроводительное письмо — второй источник для valid_until (срок резерва
@@ -1009,6 +1069,65 @@ PROMPT;
     }
 
     /**
+     * Сверка распознанных M-артикулов с текстовым слоем PDF. Если артикул,
+     * который вернула модель, НЕ встречается в тексте как самостоятельный токен —
+     * скорее всего это ошибка распознавания одной цифры (кейс M-2026-4755: в PDF
+     * напечатано M00878, модель вернула M00478 — это другой каталожный товар
+     * «Плата DOP-116»). Такой артикул нельзя сматчивать вслепую.
+     *
+     * Гард от ложных срабатываний на сканах: если в тексте вообще нет ни одного
+     * M-артикула (PDF не имеет текстового слоя), проверку пропускаем.
+     *
+     * @return list<array{type: string, message: string, suspect_item_index: int, article: string}>
+     */
+    private function verifyArticlesAgainstText(array $items, ?string $text, Request $request): array
+    {
+        if ($text === null || trim($text) === '') {
+            return [];
+        }
+        $folded = CatalogImportService::cyrillicLookalikeFold($text);
+        // Текст не содержит M-артикулов вовсе → не текстовый PDF, не проверяем.
+        if (preg_match('/M\d{4,}/u', $folded) !== 1) {
+            return [];
+        }
+
+        $warnings = [];
+        foreach ($items as $idx => $item) {
+            $art = isset($item['article']) ? trim((string) $item['article']) : '';
+            if ($art === '') {
+                continue;
+            }
+            $artFolded = CatalogImportService::cyrillicLookalikeFold($art);
+            // Проверяем только М-артикулы (наши SKU). Чужие/пустые пропускаем.
+            if (preg_match('/^M\d{4,}$/u', $artFolded) !== 1) {
+                continue;
+            }
+            $pattern = '/(?<![0-9A-Za-zА-Яа-я])'.preg_quote($artFolded, '/').'(?![0-9A-Za-zА-Яа-я])/u';
+            if (preg_match($pattern, $folded) === 1) {
+                continue; // артикул найден в тексте — ок
+            }
+            Log::warning('OutboundQuoteParser: article not found in PDF text (suspect misread)', [
+                'request_id' => $request->id,
+                'article' => $art,
+                'name' => mb_substr((string) ($item['name'] ?? ''), 0, 60),
+            ]);
+            $warnings[] = [
+                'type' => 'article_not_in_text',
+                'message' => sprintf(
+                    'Поз %d (%s): артикул %s не найден в тексте PDF — возможно, цифра распознана неверно. Проверьте артикул перед матчингом.',
+                    $idx + 1,
+                    mb_substr((string) ($item['name'] ?? ''), 0, 40),
+                    $art
+                ),
+                'suspect_item_index' => $idx,
+                'article' => $art,
+            ];
+        }
+
+        return $warnings;
+    }
+
+    /**
      * Кросс-валидатор арифметики: Σ items[].total vs document.total_amount.
      *
      * Кейс quote_id=2 (МЗ-355534): Vision прилетел с row 1 завышенным ровно на
@@ -1075,7 +1194,28 @@ PROMPT;
             if ($sumTotals > 0) {
                 $diff = $sumTotals - $totalAmount;
                 $diffPct = abs($diff) / $totalAmount;
-                if ($diffPct > 0.02) {
+                // Сигнатура «распарсены не все позиции»: Σ строк заметно МЕНЬШЕ
+                // итога документа (diff < 0). Отдельный тип warning'а — это не
+                // арифметический шум одной строки, а пропуск части таблицы
+                // (кейс M-2026-4755: 5 из 24 строк, −33.9%). Используется для
+                // более явного бейджа в UI и error-лога в ParseOutboundQuoteJob.
+                $missingPct = (float) config('services.quotes.missing_rows_pct', 10);
+                if ($diff < 0 && $diffPct * 100 >= $missingPct) {
+                    $warnings[] = [
+                        'type' => 'likely_missing_rows',
+                        'message' => sprintf(
+                            'Похоже, распарсены НЕ все позиции: Σ строк (%.2f) меньше итога документа (%.2f) на %.2f (%.1f%%). Проверьте КП — возможно, часть строк не извлечена.',
+                            $sumTotals,
+                            $totalAmount,
+                            abs($diff),
+                            $diffPct * 100
+                        ),
+                        'expected' => round($totalAmount, 2),
+                        'got' => round($sumTotals, 2),
+                        'diff' => round($diff, 2),
+                        'diff_pct' => round($diffPct * 100, 1),
+                    ];
+                } elseif ($diffPct > 0.02) {
                     $warnings[] = [
                         'type' => 'sum_vs_total_mismatch',
                         'message' => sprintf(

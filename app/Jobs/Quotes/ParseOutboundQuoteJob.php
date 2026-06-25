@@ -282,6 +282,31 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
             $payloadPatch['warnings'] = is_array($parserWarnings) && ! empty($parserWarnings)
                 ? $parserWarnings
                 : null;
+            // Явный сигнал «распарсены не все позиции» (Σ строк ≪ итога). Не
+            // роняем разбор (status остаётся matched, чтобы downstream работал),
+            // но логируем ERROR и помечаем needs_review — чтобы КП не уходил в
+            // ревайвл/экспорт молча как полный. UI уже бейджит warnings.
+            $missingRows = collect(is_array($parserWarnings) ? $parserWarnings : [])
+                ->firstWhere('type', 'likely_missing_rows');
+            if ($missingRows !== null) {
+                $payloadPatch['needs_review'] = [
+                    'reason' => 'likely_missing_rows',
+                    'diff_pct' => $missingRows['diff_pct'] ?? null,
+                    'flagged_at' => now()->toIso8601String(),
+                ];
+                Log::error('ParseOutboundQuoteJob: likely incomplete parse (missing rows)', [
+                    'quote_id' => $quote->id,
+                    'request_id' => $request->id,
+                    'document_number' => $quote->document_number,
+                    'items_count' => $quote->items()->count(),
+                    'sum_got' => $missingRows['got'] ?? null,
+                    'total_expected' => $missingRows['expected'] ?? null,
+                    'diff_pct' => $missingRows['diff_pct'] ?? null,
+                ]);
+            } else {
+                // Сброс stale-флага при успешном переразборе.
+                $payloadPatch['needs_review'] = null;
+            }
             // Retry telemetry: если парсер делал второй проход с feedback'ом
             // (см. parseWithGPT::buildRetryFeedbackPrompt), сохраняем delta'ы
             // обеих попыток и какая выбрана — для аудита качества Vision'а.

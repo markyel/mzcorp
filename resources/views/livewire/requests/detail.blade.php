@@ -2837,6 +2837,12 @@
                                     ->pluck('suspect_item_index')
                                     ->filter(fn ($v) => is_int($v))
                                     ->flip();
+                                $warningTypes = collect($parseWarnings)->pluck('type')->filter()->all();
+                                $hasMissingRows = in_array('likely_missing_rows', $warningTypes, true);
+                                $hasArticleIssue = in_array('article_not_in_text', $warningTypes, true);
+                                $warnBadgeLabel = $hasMissingRows
+                                    ? '⚠ возможно, не все позиции'
+                                    : ($hasArticleIssue ? '⚠ проверь артикулы' : '⚠ проверь цифры');
                             @endphp
                             <details class="ds-card" {{ $idx === 0 ? 'open' : '' }}>
                                 <summary class="ds-card-header cursor-pointer select-none">
@@ -2851,8 +2857,8 @@
                                     </h3>
                                     @if($hasWarnings)
                                         <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-200 text-[11px]"
-                                              title="Парсер обнаружил расхождение арифметики. Раскройте карточку — детали под meta-row.">
-                                            ⚠ проверь цифры
+                                              title="Парсер обнаружил расхождение. Раскройте карточку — детали под meta-row.">
+                                            {{ $warnBadgeLabel }}
                                         </span>
                                     @endif
                                     <span class="flex-1"></span>
@@ -2934,16 +2940,26 @@
                                          (row arithmetic, Σ items vs total). --}}
                                     @if($hasWarnings)
                                         <div class="px-[18px] py-2.5 border-b border-[var(--border-subtle)] bg-amber-50/40">
-                                            <div class="text-[12px] font-semibold text-amber-800 mb-1">⚠ Парсер обнаружил расхождение арифметики</div>
+                                            <div class="text-[12px] font-semibold text-amber-800 mb-1">
+                                                @if($hasMissingRows) ⚠ Похоже, распарсены не все позиции
+                                                @elseif($hasArticleIssue) ⚠ Сомнительные артикулы
+                                                @else ⚠ Парсер обнаружил расхождение арифметики @endif
+                                            </div>
                                             <ul class="text-[11.5px] text-amber-800 space-y-0.5 list-disc pl-4">
                                                 @foreach($parseWarnings as $w)
                                                     <li>{{ $w['message'] ?? '—' }}</li>
                                                 @endforeach
                                             </ul>
                                             <div class="text-[11px] text-fg-3 mt-1.5">
-                                                Возможные причины: Vision галлюцинировал на одной из строк (прибавил подвальную скидку),
-                                                либо в PDF действительно есть структура «Σ строк ≠ Итого». Проверь подозрительные строки
-                                                в таблице ниже (помечены амбер-фоном) или перепарси с <code>quotes:parse-outbound --apply --reset --quote={{ $quote->id }}</code>.
+                                                @if($hasMissingRows)
+                                                    Σ сумм строк заметно меньше итога документа — часть строк таблицы, вероятно, не извлечена
+                                                    (например длинный сводный КП). Сверьтесь с исходным PDF и перепарсите с
+                                                @else
+                                                    Возможные причины: Vision галлюцинировал на одной из строк (прибавил подвальную скидку),
+                                                    либо в PDF действительно есть структура «Σ строк ≠ Итого», либо неверно распознан артикул.
+                                                    Проверьте подозрительные строки в таблице ниже (помечены амбер-фоном) или перепарсите с
+                                                @endif
+                                                <code>quotes:parse-outbound --apply --reset --quote={{ $quote->id }}</code>.
                                             </div>
                                         </div>
                                     @endif
