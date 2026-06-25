@@ -262,7 +262,12 @@ class MailRouter
                 ->where('id', '!=', $message->id)
                 ->whereNotNull('related_request_id')
                 ->orderBy('id')
-                ->first();
+                ->get()
+                // Совпадение Message-ID ≠ та же копия: Outlook переиспользует
+                // Thread-Index как Message-ID, поэтому исходник и пересланный
+                // follow-up («FW: …») имеют один id при разных subject/Date.
+                // Сверяем subject + sent_at (кейс M-2026-5907).
+                ->first(fn (EmailMessage $candidate): bool => CrossMailboxCopyMatcher::isSamePhysicalMessage($message, $candidate));
             if ($sameIdLinked) {
                 $artifacts = (array) ($message->detected_artifacts ?? []);
                 $artifacts['cross_mailbox_copy_of'] = $sameIdLinked->id;
@@ -704,8 +709,9 @@ class MailRouter
      * Закрывает гонку «копия (CC во внутренний ящик) пришла раньше, чем
      * оригинал/исходящее получило related_request_id» — без этого копия
      * оставалась rel=null orphan'ом и линкер плодил из reply'ев пустые
-     * заявки (M-2026-4688). message_id уникален глобально, поэтому все
-     * совпадения — гарантированно копии ОДНОГО письма → одна заявка.
+     * заявки (M-2026-4688). Совпадения по message_id фильтруем через
+     * CrossMailboxCopyMatcher (subject+Date): Outlook переиспользует
+     * Thread-Index как Message-ID, поэтому один id ≠ одно письмо.
      */
     private function backfillCrossMailboxCopies(EmailMessage $message, int $requestId): void
     {
@@ -716,6 +722,11 @@ class MailRouter
             ->get();
 
         foreach ($copies as $copy) {
+            // Тот же Message-ID, но другой subject/Date — отдельное письмо
+            // (Outlook Thread-Index reuse), а не копия. Не подшиваем.
+            if (! CrossMailboxCopyMatcher::isSamePhysicalMessage($message, $copy)) {
+                continue;
+            }
             $artifacts = (array) ($copy->detected_artifacts ?? []);
             $artifacts['cross_mailbox_copy_of'] = $message->id;
             $copy->forceFill([

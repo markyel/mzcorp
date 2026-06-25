@@ -92,7 +92,11 @@ class InboundReplyLinker
                 ->where('id', '!=', $message->id)
                 ->whereNotNull('related_request_id')
                 ->orderBy('id') // самая ранняя — родительская запись
-                ->first();
+                ->get()
+                // Совпадение Message-ID не гарантирует копию: Outlook
+                // переиспользует Thread-Index как Message-ID. Сверяем
+                // subject + Date (см. CrossMailboxCopyMatcher, M-2026-5907).
+                ->first(fn (EmailMessage $candidate): bool => CrossMailboxCopyMatcher::isSamePhysicalMessage($message, $candidate));
             if ($sameIdLinked) {
                 $request = Request::find($sameIdLinked->related_request_id);
                 if ($request) {
