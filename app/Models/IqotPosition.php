@@ -103,25 +103,33 @@ class IqotPosition extends Model
     }
 
     /**
-     * Наглядное сравнение «наше КП vs офферы IQOT» (как в LazyLift).
-     * Сортировка по цене БЕЗ НДС (офферы с НДС приводим делением на 1+ставка);
-     * в выводе сохраняем исходную цену оффера и пометку с/без НДС. Наша цена
-     * (our_unit_price) уже NET. Возвращает строки + ранг нашего КП + дельту
-     * против лучшего IQOT.
+     * Наглядное сравнение «наша цена vs офферы IQOT» (как в LazyLift).
+     * Сортировка по цене БЕЗ НДС (цены с НДС приводим делением на 1+ставка);
+     * в выводе сохраняем исходную цену и пометку с/без НДС. Возвращает строки +
+     * ранг нашей цены + дельту против лучшего IQOT.
+     *
+     * База сравнения — ТЕКУЩАЯ цена позиции (цена каталога), а не
+     * цена из выданного КП: если по позиции провели работу и цену снизили,
+     * сравнение должно это отражать. Порядок приоритета — в теле метода.
      *
      * @return array{
      *   rows: list<array<string,mixed>>, total:int, our_rank:?int,
-     *   best_iqot_net:?float, delta:?float, delta_pct:?float, our_quotation_code:?string
+     *   best_iqot_net:?float, delta:?float, delta_pct:?float, our_label:?string
      * }
      */
     public function priceComparison(): array
     {
         $rate = (float) app_setting('tax.vat_percent', config('services.tax.vat_percent', 22)) / 100;
 
-        // Наша база сравнения: цена из ПОСЛЕДНЕГО проигранного КП (our_unit_price),
-        // а если КП по позиции не было (ручной мониторинг) — фолбэк на цену
-        // КАТАЛОГА. ВАЖНО: и КП-цена, и catalog.price указаны С НДС (gross) —
-        // для сравнения приводим к без-НДС (делим на 1+ставка), как и офферы.
+        // База сравнения — ТЕКУЩАЯ цена позиции (цена КАТАЛОГА), а не цена из
+        // выданного КП. Если по позиции провели работу и цену в каталоге
+        // снизили, сравнение отражает новую цену. Приоритет:
+        //   1) цена каталога (catalog.price) — наша текущая цена (даже если
+        //      пометка is_price_actual=false: показываем с примечанием);
+        //   2) цена последнего проигранного КП (our_unit_price) — фолбэк, когда
+        //      в каталоге цены нет вовсе (ручной мониторинг).
+        // ВАЖНО: и catalog.price, и КП-цена указаны С НДС (gross) — для сравнения
+        // приводим к без-НДС (делим на 1+ставка), как и офферы.
         $cat = $this->catalogItem;
         $ourGross = null;
         $ourLabel = null;
@@ -132,12 +140,11 @@ class IqotPosition extends Model
         // строка с 0 ₽ занимала бы ложное 1-е место и давала дельту −100%
         // (кейс M26928). Тот же принцип, что firstPositivePrice для офферов:
         // нет валидной цены → нашу строку в сравнение не добавляем (our_rank=null).
-        if ($this->our_unit_price !== null && (float) $this->our_unit_price > 0) {
-            $ourGross = (float) $this->our_unit_price;
-            $ourLabel = 'Наше КП'.($this->our_quotation_code ? ' '.$this->our_quotation_code : '');
-            $ourNotes = 'собственное КП';
-        } elseif ($cat && $cat->price !== null && (float) $cat->price > 0) {
-            $ourGross = (float) $cat->price;
+        $catGross = ($cat && $cat->price !== null && (float) $cat->price > 0) ? (float) $cat->price : null;
+        $kpGross = ($this->our_unit_price !== null && (float) $this->our_unit_price > 0) ? (float) $this->our_unit_price : null;
+
+        if ($catGross !== null) {
+            $ourGross = $catGross;
             $ourLabel = 'Наша цена (каталог)';
             $ourLead = $cat->lead_time_days;
             $notes = [];
@@ -148,6 +155,10 @@ class IqotPosition extends Model
                 $notes[] = 'цена не актуальна';
             }
             $ourNotes = $notes === [] ? null : implode(' · ', $notes);
+        } elseif ($kpGross !== null) {
+            $ourGross = $kpGross;
+            $ourLabel = 'Наше КП'.($this->our_quotation_code ? ' '.$this->our_quotation_code : '');
+            $ourNotes = 'собственное КП';
         }
         $ourNet = $ourGross === null ? null : ($rate > 0 ? $ourGross / (1 + $rate) : $ourGross);
 
