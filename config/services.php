@@ -180,6 +180,12 @@ return [
         // пропущенные строки). Кейс M-2026-4755: спарсено 5 из 24 строк,
         // Σ=312350 при итоге 472668 (−33.9%). См. validateLineTotals/shouldRetry.
         'missing_rows_pct' => (float) env('QUOTE_MISSING_ROWS_PCT', 10),
+        // Детерминированная коррекция «двух колонок Кол-во» (заказано/ожидается vs
+        // к отгрузке). Если Σ строк завышена из-за выбора большей колонки, и
+        // печатная «Сумма» строки = unit_price × меньшее Кол-во — правим qty/total
+        // по тексту PDF. Кейс M-2026-4755 (quote 3122, поз.13 M24157). Откат если
+        // Σ не сошлась. См. OutboundQuoteParsingService::reconcileDualQuantityColumns.
+        'dual_qty_reconcile' => (bool) env('QUOTE_DUAL_QTY_RECONCILE', true),
 
         /*
         | Self-healing переразбор упавших исходящих КП/счетов

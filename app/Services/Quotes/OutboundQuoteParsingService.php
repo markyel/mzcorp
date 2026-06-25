@@ -327,6 +327,12 @@ class OutboundQuoteParsingService
         // в split-delivery дублирует общий total в каждую из split-строк).
         $items = $this->autoFixRowArithmetic($items, $request);
 
+        // Дет. сеть «две колонки Кол-во»: Vision взял «заказано/ожидается»
+        // вместо «к отгрузке», total = unit_price × завышенное Кол-во. autoFix
+        // молчит (up × qty == total внутренне сходится), ловит только сверка
+        // печатной «Суммы» строки в текстовом слое. См. reconcileDualQuantityColumns.
+        $items = $this->reconcileDualQuantityColumns($items, $document, $repairedText, $request);
+
         $warnings = $this->validateLineTotals($items, $document, $request);
         // Сверка артикул↔текст: артикул, которого НЕТ в текстовом слое PDF,
         // вероятно неверно распознан (кейс M-2026-4755: в PDF M00878, прочитано
@@ -412,6 +418,228 @@ class OutboundQuoteParsingService
         unset($item);
 
         return $items;
+    }
+
+    /**
+     * Детерминированная коррекция «двух колонок Кол-во».
+     *
+     * Шаблон Liftway/МЗ: в области «Кол-во» строки два числа — «заказано/
+     * ожидается» (большее, справочное) и «к отгрузке/гарантировано» (меньшее,
+     * фактическое). Сумма строки = unit_price × ВТОРАЯ колонка. Vision иногда
+     * берёт ПЕРВУЮ → возвращает завышенное quantity и сам вычисляет
+     * total = unit_price × завышенное_кол-во. autoFixRowArithmetic это НЕ ловит:
+     * unit_price × quantity == total внутренне сходится (оба завышены согласованно).
+     *
+     * Единственный надёжный сигнал — печатная «Сумма» строки в текстовом слое
+     * PDF: для завышенной строки модельный total в тексте НЕ встречается, а
+     * unit_price × k (k < quantity) — встречается (это и есть напечатанная Сумма).
+     *
+     * Кейс M-2026-4755 (quote 3122), поз.13 M24157: unit_price=1434.42,
+     * Кол-во «21,00/1,00», Сумма=1434.42. Модель вернула qty=21, total=30122.82
+     * (=up×21) → переоценка ровно 28688.40 (=up×20) = остаточный
+     * sum_vs_total_mismatch +6.1%. Фикс: qty=1, total=1434.42.
+     *
+     * КОНСЕРВАТИВНО (минимизируем риск регрессий):
+     *  • срабатывает ТОЛЬКО при переоценке (Σ строк ВЫШЕ итога > 2%), т.е. когда
+     *    выбор большей колонки реально завысил сумму — недобор сюда не попадает;
+     *  • правит лишь штучные (unit_quantity=null), целочисленные qty ≥ 2,
+     *    внутренне-консистентные (up×qty≈total) строки, чей total НЕ найден в тексте;
+     *  • выбирает k, при котором up×k напечатано в тексте И снижение up×(qty−k)
+     *    ближе всего к остатку переоценки (без перепрыгивания остатка);
+     *  • если после правок Σ НЕ сошлась с итогом (±2%) — ПОЛНЫЙ ОТКАТ (не рискуем
+     *    частичной коррекцией; остаётся обычный warning sum_vs_total_mismatch).
+     */
+    private function reconcileDualQuantityColumns(array $items, array $document, ?string $text, Request $request): array
+    {
+        if (! (bool) config('services.quotes.dual_qty_reconcile', true)) {
+            return $items;
+        }
+        if ($text === null || trim($text) === '') {
+            return $items;
+        }
+        if (($document['prices_include_vat'] ?? null) !== true) {
+            return $items;
+        }
+        $totalAmount = isset($document['total_amount']) && is_numeric($document['total_amount'])
+            ? (float) $document['total_amount'] : null;
+        if ($totalAmount === null || $totalAmount <= 0) {
+            return $items;
+        }
+
+        $sum = 0.0;
+        foreach ($items as $it) {
+            if (isset($it['total']) && is_numeric($it['total'])) {
+                $sum += (float) $it['total'];
+            }
+        }
+        if ($sum <= 0) {
+            return $items;
+        }
+        $overshoot = $sum - $totalAmount;
+        // Только переоценка (Σ строк ВЫШЕ итога). Недобор — ветка likely_missing_rows.
+        if ($overshoot / $totalAmount <= 0.02) {
+            return $items;
+        }
+
+        $tol = $totalAmount * 0.02; // допуск сходимости (2% от итога документа)
+        $remaining = $overshoot;
+        $work = $items;
+        $applied = 0;
+
+        foreach ($work as $idx => &$item) {
+            if ($remaining <= $tol) {
+                break; // переоценка уже объяснена скорректированными строками
+            }
+            $up = isset($item['unit_price']) && is_numeric($item['unit_price']) ? (float) $item['unit_price'] : null;
+            $qtyRaw = isset($item['quantity']) && is_numeric($item['quantity']) ? (float) $item['quantity'] : null;
+            $tot = isset($item['total']) && is_numeric($item['total']) ? (float) $item['total'] : null;
+            $uq = isset($item['unit_quantity']) && is_numeric($item['unit_quantity']) ? (float) $item['unit_quantity'] : null;
+
+            if ($uq !== null && $uq > 0) {
+                continue; // мерные не трогаем — у них своя арифметика
+            }
+            if ($up === null || $qtyRaw === null || $tot === null || $up <= 0 || $tot <= 0) {
+                continue;
+            }
+            // Две колонки осмысленны лишь при целом штучном Кол-ве ≥ 2.
+            if (abs($qtyRaw - round($qtyRaw)) > 1e-6) {
+                continue;
+            }
+            $qty = (int) round($qtyRaw);
+            if ($qty < 2) {
+                continue;
+            }
+            // Строка внутренне-консистентна (up×qty≈total) — признак «total вычислен из Кол-ва».
+            if (abs($up * $qty - $tot) / $tot > 0.02) {
+                continue;
+            }
+            // Печатная «Сумма» строки совпадает с total → строка корректна, не трогаем.
+            if ($this->numberAppearsInText($tot, $text)) {
+                continue;
+            }
+
+            // Ищем k (1..qty-1): up×k напечатано в тексте; снижение up×(qty−k)
+            // ближе всего к остатку переоценки, без перепрыгивания остатка.
+            $bestK = null;
+            $bestProd = null;
+            $bestDelta = null;
+            for ($k = 1; $k < $qty; $k++) {
+                $prod = round($up * $k, 2);
+                if (! $this->numberAppearsInText($prod, $text)) {
+                    continue;
+                }
+                $reduction = round($up * ($qty - $k), 2);
+                if ($reduction - $remaining > $tol) {
+                    continue; // снижение сильно перепрыгивает остаток
+                }
+                $delta = abs($reduction - $remaining);
+                if ($bestDelta === null || $delta < $bestDelta) {
+                    $bestDelta = $delta;
+                    $bestK = $k;
+                    $bestProd = $prod;
+                }
+            }
+            if ($bestK === null) {
+                continue;
+            }
+
+            $reduction = round($up * ($qty - $bestK), 2);
+            $corrections = is_array($item['_corrections'] ?? null) ? $item['_corrections'] : [];
+            $corrections[] = [
+                'field' => 'quantity',
+                'reason' => 'dual_quantity_column',
+                'before' => $qty,
+                'after' => $bestK,
+                'total_before' => $tot,
+                'total_after' => $bestProd,
+            ];
+            $item['_corrections'] = $corrections;
+            $item['quantity'] = $bestK;
+            $item['total'] = $bestProd;
+            $item['price'] = $up; // штучный: price = unit_price
+            $remaining = round($remaining - $reduction, 2);
+            $applied++;
+
+            Log::info('OutboundQuoteParser: dual-quantity column reconciled', [
+                'request_id' => $request->id,
+                'item_index' => $idx,
+                'name' => mb_substr((string) ($item['name'] ?? ''), 0, 60),
+                'qty_before' => $qty,
+                'qty_after' => $bestK,
+                'total_before' => $tot,
+                'total_after' => $bestProd,
+                'unit_price' => $up,
+            ]);
+        }
+        unset($item);
+
+        if ($applied === 0) {
+            return $items;
+        }
+
+        // Финальная сходимость: иначе откатываем (не рискуем частичной коррекцией).
+        $newSum = 0.0;
+        foreach ($work as $it) {
+            if (isset($it['total']) && is_numeric($it['total'])) {
+                $newSum += (float) $it['total'];
+            }
+        }
+        if (abs($newSum - $totalAmount) > $tol) {
+            Log::warning('OutboundQuoteParser: dual-quantity reconcile did not converge, reverting', [
+                'request_id' => $request->id,
+                'sum_before' => round($sum, 2),
+                'sum_after' => round($newSum, 2),
+                'total_amount' => $totalAmount,
+                'applied' => $applied,
+            ]);
+
+            return $items;
+        }
+
+        return $work;
+    }
+
+    /**
+     * Встречается ли денежное значение в текстовом слое PDF с учётом русского
+     * форматирования: пробел/nbsp/narrow-nbsp как разделитель тысяч, запятая ИЛИ
+     * точка как десятичный разделитель («1 434,42» = «1434.42» = «1 434.42»).
+     *
+     * Целая часть группируется по 3 цифры справа, между группами допускается
+     * опциональный разделитель. Границы:
+     *  • (?<![\d.,]) … (?!\d) — значение не должно совпасть как часть более
+     *    длинного числа без разделителя (461.20 внутри 461201);
+     *  • (?<!\d[ \xA0\x202F]) — и не как МЛАДШАЯ группа большего числа, где слева
+     *    стоит «цифра + разделитель тысяч» (461,20 внутри «11 461,20» — это часть
+     *    числа 11461.20, а не самостоятельное 461.20).
+     */
+    private function numberAppearsInText(float $value, string $text): bool
+    {
+        if ($text === '' || $value <= 0) {
+            return false;
+        }
+        $cents = (int) round($value * 100);
+        $intPart = intdiv($cents, 100);
+        $dec = $cents % 100;
+
+        $s = (string) $intPart;
+        $groups = [];
+        while (strlen($s) > 3) {
+            $groups[] = substr($s, -3);
+            $s = substr($s, 0, -3);
+        }
+        $groups[] = $s;
+        $groups = array_reverse($groups);
+
+        $sep = '[ \x{A0}\x{202F}]?'; // обычный пробел / nbsp / narrow-nbsp
+        $intPattern = implode($sep, array_map(static fn ($g) => preg_quote($g, '/'), $groups));
+        $decStr = str_pad((string) $dec, 2, '0', STR_PAD_LEFT);
+
+        // Фиксированные lookbehind'ы (PCRE требует фикс-длину) для каждого
+        // варианта разделителя тысяч слева.
+        $leftGuards = '(?<![\d.,])(?<!\d )(?<!\d\x{A0})(?<!\d\x{202F})';
+        $pattern = '/'.$leftGuards.$intPattern.'[.,]'.$decStr.'(?!\d)/u';
+
+        return preg_match($pattern, $text) === 1;
     }
 
     /**
@@ -537,6 +765,20 @@ class OutboundQuoteParsingService
             ."   Не складывай подвальную «Скидка: -Y₽» с per-row значениями — она информационная.\n"
             ."\n"
             ."После пересчёта Σ items.total ОБЯЗАТЕЛЬНО ≈ document.total_amount.\n";
+
+        // Σ строк ВЫШЕ итога (diff > 0) — характерная сигнатура «двух колонок
+        // Кол-во»: модель взяла большую колонку «заказано/ожидается» вместо
+        // «к отгрузке», и total = unit_price × завышенное Кол-во. Подсказываем
+        // это явно — обычная подсказка про разделитель тысяч тут не помогает,
+        // т.к. unit_price прочитан верно, ошибка только в выборе колонки Кол-во.
+        if ($diff > 0) {
+            $feedback .= "\n2b) ДВЕ КОЛОНКИ «КОЛ-ВО» (Σ ВЫШЕ итога — частый признак именно этого):\n"
+                ."   Если в области «Кол-во» строки два числа («21,00 / 1,00»), ты мог взять\n"
+                ."   ПЕРВОЕ (большее, «заказано/ожидается») вместо ВТОРОГО («к отгрузке»).\n"
+                ."   Для КАЖДОЙ строки выбери то Кол-во, при котором unit_price × Кол-во ≈\n"
+                ."   печатная «Сумма» строки. Печатная «Сумма» из текста ниже — истина; если\n"
+                ."   unit_price × Кол-во её превышает — ты взял не ту колонку, бери меньшую.\n";
+        }
 
         // Также: для retry даём ПОЛНЫЙ raw-text без 8000-лимита basePrompt'а.
         // Vision получит ground truth для сверки своих cifr.
@@ -845,6 +1087,22 @@ class OutboundQuoteParsingService
 - Мерный: unit_price × unit_quantity × quantity ≈ total.
 
 Шаг 5. Инвариант штучного: unit_measure='шт.' → unit_quantity ОБЯЗАТЕЛЬНО = null.
+
+**ДВЕ КОЛОНКИ «КОЛ-ВО» (частый шаблон Liftway / МЗ) — КРИТИЧЕСКИ ВАЖНО:**
+В части наших КП/счетов в области «Кол-во» стоят ДВА числа подряд, например
+«21,00 / 1,00 шт» или «21,00   1,00». Это ДВЕ РАЗНЫЕ колонки, а НЕ одно число:
+- ПЕРВАЯ (большая) — «Заказано / Ожидается» (сколько клиент запросил). Это
+  СПРАВОЧНАЯ колонка — в `quantity` её НЕ бери.
+- ВТОРАЯ — «К отгрузке / Гарантировано / Отгружается» (сколько реально отгружаем).
+  ИМЕННО это значение идёт в `quantity`.
+РЕШАЮЩАЯ ПРОВЕРКА (всегда применяй при двух числах Кол-во): правильное `quantity`
+то, при котором `unit_price × quantity ≈ «Сумма»` этой строки (печатное значение из
+колонки «Сумма»). Печатная «Сумма» — истина, подгоняй Кол-во под неё.
+Пример: unit_price = 1 434,42; в области Кол-во «21,00 / 1,00»; «Сумма» = 1 434,42 →
+`quantity = 1` (1 434,42 × 1 = 1 434,42 ✓), а НЕ 21 (1 434,42 × 21 = 30 122,82 ≠ Сумма ✗).
+НИКОГДА не бери первое (большее) число, если оно не сходится с «Суммой» строки.
+И НИКОГДА не вычисляй `total` сам из большего Кол-во — `total` ВСЕГДА равен печатной
+«Сумме» строки.
 
 **Цена (price / unit_price):**
 - Бери ФИНАЛЬНУЮ цену (со скидкой, если есть колонка «Цена со скидкой»).
