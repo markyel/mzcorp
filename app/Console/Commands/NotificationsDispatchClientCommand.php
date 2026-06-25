@@ -7,6 +7,7 @@ use App\Enums\DetectorType;
 use App\Enums\InvoiceStatus;
 use App\Enums\QuotationStatus;
 use App\Enums\RequestStatus;
+use App\Models\CatalogItem;
 use App\Models\CatalogPriceChange;
 use App\Models\ClarificationBatch;
 use App\Models\ClientNotificationSent;
@@ -267,16 +268,16 @@ class NotificationsDispatchClientCommand extends Command
      */
     private function resolveLastSentQuote(Request $request): array
     {
-        $empty = ['number' => null, 'amount' => null, 'date' => null, 'sent_at' => null, 'anchor' => null];
+        $empty = ['number' => null, 'amount' => null, 'date' => null, 'sent_at' => null, 'anchor' => null, 'lines' => []];
 
-        $quotation = Quotation::with('sentEmailMessage')
+        $quotation = Quotation::with(['sentEmailMessage', 'items:id,quotation_id,snapshot_sku,snapshot_name'])
             ->where('request_id', $request->id)
             ->where('status', QuotationStatus::Sent->value)
             ->whereNotNull('sent_at')
             ->orderByDesc('sent_at')
             ->first();
 
-        $outbound = OutboundQuote::with('emailMessage')
+        $outbound = OutboundQuote::with(['emailMessage', 'items:id,outbound_quote_id,raw_article,raw_name'])
             ->where('request_id', $request->id)
             ->whereIn('document_type', [
                 DetectorType::OutboundQuotationFull->value,
@@ -292,6 +293,11 @@ class NotificationsDispatchClientCommand extends Command
             'date' => optional($quotation->sent_at)->format('d.m.Y'),
             'sent_at' => $quotation->sent_at,
             'anchor' => $quotation->sentEmailMessage,
+            // Строки КП КАК ИХ ВИДЕЛ КЛИЕНТ: M-артикул + имя из КП. Отслеживаем
+            // цену строго по этим M-артикулам, без привязки к request_items/матчу.
+            'lines' => $quotation->items
+                ->map(fn ($i) => ['sku' => (string) $i->snapshot_sku, 'name' => (string) $i->snapshot_name])
+                ->all(),
         ] : null;
 
         $outboundSentAt = $outbound
@@ -306,6 +312,12 @@ class NotificationsDispatchClientCommand extends Command
             'date' => $outbound->document_date?->format('d.m.Y'),
             'sent_at' => $outboundSentAt,
             'anchor' => $outbound->emailMessage,
+            // Строки КП из распарсенного PDF: M-артикул (raw_article) + имя (raw_name)
+            // как их видел клиент. Имя каталога не используем — один M-артикул
+            // может числиться в каталоге под другим названием (кейс M-2026-4755).
+            'lines' => $outbound->items
+                ->map(fn ($i) => ['sku' => (string) $i->raw_article, 'name' => (string) $i->raw_name])
+                ->all(),
         ] : null;
 
         if (! $fromQuotation && ! $fromOutbound) {
@@ -427,7 +439,7 @@ class NotificationsDispatchClientCommand extends Command
 
         $cutoff = now()->subDays(max(1, $periodDays));
 
-        $requests = Request::with(['emailMessage', 'items'])
+        $requests = Request::with(['emailMessage'])
             ->where('status', RequestStatus::ClosedLost->value)
             ->whereNotNull('closed_at')
             ->where('closed_at', '>=', $cutoff)
@@ -455,7 +467,9 @@ class NotificationsDispatchClientCommand extends Command
             $sentAt = $quote['sent_at'] ? Carbon::parse($quote['sent_at']) : null;
             $priceGate = $sentAt ? $sentAt->copy()->endOfDay() : $request->closed_at;
 
-            $dropped = $this->collectPriceDrops($request, $priceGate, $thresholdPct);
+            // Отслеживаем цену строго по M-артикулам строк КП (что видел клиент),
+            // имя — тоже из КП. Без привязки к request_items и без матча.
+            $dropped = $this->collectPriceDrops($priceGate, $thresholdPct, $quote['lines'] ?? []);
             if ($dropped === []) {
                 continue;
             }
@@ -477,36 +491,56 @@ class NotificationsDispatchClientCommand extends Command
     }
 
     /**
-     * Позиции заявки, по которым каталожная цена РЕАЛЬНО снизилась сильнее
-     * $thresholdPct уже ПОСЛЕ $since (= closed_at). Сравниваем каталог
-     * old_price→new_price (одна база): цена клиента со скидкой меняется
-     * пропорционально каталожной, поэтому % падения каталога = % падения для
-     * клиента. Сравнивать цену из КП (со скидкой/НДС) с каталожной розницей
-     * НЕЛЬЗЯ — это разные базы. Берём по одному (самому свежему) изменению на
-     * позицию.
+     * Позиции ИЗ КП (по M-артикулу строк, что видел клиент), по которым
+     * каталожная цена РЕАЛЬНО снизилась сильнее $thresholdPct уже ПОСЛЕ $since.
      *
+     * Источник истины — строки самого КП (Quotation/OutboundQuote), а НЕ
+     * request_items и НЕ матч: отслеживаем ровно те M-артикулы, что были в
+     * высланном клиенту документе. Каждый M-артикул резолвим в каталог по sku,
+     * имя берём из КП. Сравниваем каталог old_price→new_price (одна база): цена
+     * клиента со скидкой меняется пропорционально, поэтому % падения каталога =
+     * % падения для клиента. Берём по одному (самому свежему) изменению на sku.
+     *
+     * @param  array<int, array{sku: string, name: string}>  $quoteLines  строки КП как их видел клиент
      * @return array<int, array{name: string, sku: ?string, old: float, new: float, pct: float}>
      */
-    private function collectPriceDrops(Request $request, mixed $since, float $thresholdPct): array
+    private function collectPriceDrops(mixed $since, float $thresholdPct, array $quoteLines): array
     {
-        $catIds = $request->items
-            ->where('is_active', true)
-            ->pluck('catalog_item_id')
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-        if ($catIds === []) {
+        // M-артикул → имя строки в КП (что видел клиент). Нормализуем sku.
+        $nameBySku = [];
+        foreach ($quoteLines as $line) {
+            $sku = mb_strtoupper(trim((string) ($line['sku'] ?? '')));
+            if ($sku === '') {
+                continue; // строка без артикула — каталожную цену не отследить
+            }
+            if (! isset($nameBySku[$sku])) {
+                $nameBySku[$sku] = trim((string) ($line['name'] ?? ''));
+            }
+        }
+        if ($nameBySku === []) {
             return [];
         }
 
+        // Резолвим M-артикулы в каталог по sku (CatalogPriceChange ведётся по
+        // catalog_item_id). Артикул, которого нет в каталоге, отслеживать нельзя.
+        $skuToCatId = CatalogItem::query()
+            ->whereIn('sku', array_keys($nameBySku))
+            ->pluck('id', 'sku')
+            ->all();
+        if ($skuToCatId === []) {
+            return [];
+        }
+        $catIdToSku = [];
+        foreach ($skuToCatId as $sku => $cid) {
+            $catIdToSku[(int) $cid] = (string) $sku;
+        }
+
         $changes = CatalogPriceChange::query()
-            ->whereIn('catalog_item_id', $catIds)
+            ->whereIn('catalog_item_id', array_keys($catIdToSku))
             ->whereNotNull('old_price')
             ->whereNotNull('new_price')
             ->whereColumn('new_price', '<', 'old_price')
             ->when($since, fn ($q) => $q->where('changed_at', '>=', $since))
-            ->with('catalogItem:id,sku,name')
             ->orderByDesc('id')
             ->get();
 
@@ -525,9 +559,11 @@ class NotificationsDispatchClientCommand extends Command
             if ($pct < $thresholdPct) {
                 continue;
             }
+            $sku = $catIdToSku[$cid] ?? null;
+            $quoteName = $sku !== null ? trim((string) ($nameBySku[$sku] ?? '')) : '';
             $byItem[$cid] = [
-                'name' => (string) ($ch->catalogItem?->name ?? $ch->sku ?? '—'),
-                'sku' => $ch->sku,
+                'name' => $quoteName !== '' ? $quoteName : ($sku ?? '—'),
+                'sku' => $sku,
                 'old' => $old,
                 'new' => $new,
                 'pct' => $pct,
