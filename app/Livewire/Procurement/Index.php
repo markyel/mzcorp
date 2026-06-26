@@ -78,25 +78,45 @@ class Index extends Component
     }
 
     /** При выборе позиции — префилл редактируемых полей из каталога. */
-    public function updatedSelected($value, $key): void
+    public function updatedSelected(): void
     {
-        $cid = (int) $key;
-        if ($value && ! isset($this->editedNames[$cid])) {
-            $ci = \App\Models\CatalogItem::query()->whereKey($cid)->first(['id', 'name', 'name_en', 'brand_article']);
-            if ($ci !== null) {
-                $this->editedNames[$cid] = (string) ($ci->name ?? '');
-                $this->editedNamesEn[$cid] = (string) ($ci->name_en ?: $ci->name ?? '');
-                $this->editedOem[$cid] = (string) ($ci->brand_article ?? '');
-                $this->editedQty[$cid] = $this->editedQty[$cid] ?? '';
-                $this->editedQtyEn[$cid] = $this->editedQtyEn[$cid] ?? '';
-            }
-        }
+        $this->prefillSelectedFields();
         $this->autoTranslateIfEnglish();
     }
 
     public function updatedSelectedSuppliers(): void
     {
+        $this->prefillSelectedFields();
         $this->autoTranslateIfEnglish();
+    }
+
+    /**
+     * Префилл редактируемых полей (рус. название, артикул, кол-во) по ВСЕМУ
+     * набору выбранных позиций из каталога — идемпотентно, не затирая ручные
+     * правки. Важно делать по всему набору, а не только по переключённой строке:
+     * Livewire объединяет частые .live-апдейты чекбоксов в один запрос, и хук
+     * updatedSelected срабатывает не на каждый cid. Иначе у части позиций рус.
+     * название оставалось пустым, тогда как EN-набор всегда полон (его так же
+     * по всему набору наполняет runEnglishTranslation).
+     */
+    private function prefillSelectedFields(): void
+    {
+        $missing = array_values(array_filter(
+            $this->selectedCids(),
+            fn ($cid) => ! isset($this->editedNames[$cid]),
+        ));
+        if ($missing === []) {
+            return;
+        }
+        $items = \App\Models\CatalogItem::query()->whereIn('id', $missing)
+            ->get(['id', 'name', 'name_en', 'brand_article']);
+        foreach ($items as $ci) {
+            $this->editedNames[$ci->id] = (string) ($ci->name ?? '');
+            $this->editedNamesEn[$ci->id] ??= (string) ($ci->name_en ?: $ci->name ?? '');
+            $this->editedOem[$ci->id] ??= (string) ($ci->brand_article ?? '');
+            $this->editedQty[$ci->id] ??= '';
+            $this->editedQtyEn[$ci->id] ??= '';
+        }
     }
 
     /* ----------------------- Превью письма по языкам ---------------------- */
