@@ -561,6 +561,40 @@ Supervisor (все 4 воркера): `--queue=mail-sync,default,catalog-resolve
 
 ## Журнал сессий
 
+### Сессия 2026-06-26 — IQOT current-price + Снабжение (RU-имена, текст письма, редактируемые intro/closing)
+
+**Контекст:** комбо-сессия из 4 мелких фич/фиксов вокруг IQOT-аналитики и раздела «Снабжение» (procurement RFQ поставщикам). Все задеплоены на прод.
+
+#### Что задеплоено
+
+| Модуль | Что | Коммит |
+|---|---|---|
+| **IQOT: сравниваем ТЕКУЩУЮ цену** | `IqotPosition::priceComparison()` — источник «нашей цены» поменян: раньше брали цену из выданного КП (`our_unit_price`), теперь ВСЕГДА берём цену каталога (`catalog.price`, даже если `is_price_actual=false` — с пометкой «цена не актуальна»), КП (`our_unit_price`) — только фолбэк, когда в каталоге цены нет вовсе (или 0). Цель: если по позиции снизили цену в каталоге — отчёт это отражает (улучшение ранга vs конкурентов). VAT: catalog.price/КП — GROSS, делим на (1+rate) для NET-ранжирования. Цена `0.00` трактуется как «нет цены» → фолбэк. Лейбл «Наша цена (каталог)» / «Наше КП {code}». Создан pure-memory unit-тест `tests/Unit/Models/IqotPositionPriceComparisonTest.php` (7 кейсов, mock SettingsService, `setRelation('catalogItem')`, без БД). Пересчитан кеш `cmp_*` (cmp_our_rank/cmp_deviation_pct/cmp_total) для 264 позиций прода (tinker → /tmp/out). | `8f8a248` |
+| **Снабжение: RU-имена позиций пустые** | На `/dashboard/procurement` при выборе нескольких позиций+поставщиков русский блок превью показывал только 1 заполненное имя, EN — все. Причина: `editedNames` (RU) наполнялся только пер-чекбоксным хуком `updatedSelected($v,$key)` по одному cid, тогда как EN полностью бэкфилился `runEnglishTranslation` по всему набору. Livewire коалесит частые `.live`-апдейты чекбоксов → хук срабатывает не на каждый cid. Фикс: `prefillSelectedFields()` бэкфилит RU name/article/qty по ВСЕМУ выбранному набору, вызывается из `updatedSelected`+`updatedSelectedSuppliers`. | `1e1c66e` |
+| **Снабжение: в превью не виден текст вопроса** | Письмо поставщику на деле НЕ пустое — шаблон `emails.supplier-rfq-catalog` и `plainBody()` всегда содержат интро «Просим дать цену/наличие/срок…» + закрывающую строку. Но превью в Livewire показывало только приветствие+таблицу позиций → казалось, уйдёт только «Привет» и список. Фикс: добавил фиксированные интро/закрытие в превью (по языку RU/EN), чтобы оно совпадало с письмом. | `a5c2177` |
+| **Снабжение: редактируемые intro/closing** | Текст вопроса (вступление) и закрывающая строка стали РЕДАКТИРУЕМЫМИ полями по языку. Новые свойства компонента: `intro/introEn`, `closing/closingEn` (дефолты = прежний текст). В `previewLanguages` добавлены `intro_model`/`closing_model`; превью рендерит их как `<textarea wire:model.lazy>`. Прокидываются в `dispatch()` через `$edits[intro_ru/intro_en/closing_ru/closing_en]` → в HTML-шаблон и `plainBody()` (с фолбэком на дефолт, если очистили). Поля НЕ в reset-списке `send()` — переживают отправку как переиспользуемый шаблон (как `greeting`). | `6f313cc` |
+
+#### Грабли сессии
+
+- **Stale composer autoloader → `Call to undefined function App\Models\app_setting()` в тестах.** `app/Support/helpers.php` был в `composer.json` `autoload.files`, но отсутствовал в `vendor/composer/autoload_files.php`. Фикс: `composer dump-autoload` (Herd php83). Тесты после этого зелёные.
+- **Тесты бьют по ПРОДОВОЙ БД.** `phpunit.xml` — `DB_CONNECTION` закомментирован → тесты используют `.env` (прод). Команда пишет ТОЛЬКО чистые unit-тесты (без `RefreshDatabase`, без DB-feature). Не запускать DB-мутирующие тесты. IqotPosition-тест сделан pure-memory (mock SettingsService, in-memory модели).
+- **3 падения в `InboundIntentClassifierEligibilityTest`** — PRE-EXISTING, не связаны с моими правками (проверено `git stash` → падения остаются). Не чинил (вне scope).
+- **Tinker на проде echo'ит файл вместо выполнения:** `php artisan tinker /tmp/x.php < /dev/null` печатает скрипт, а не вывод. Надёжный паттерн: скрипт `file_put_contents('/tmp/x.out', ...)` → потом `cat /tmp/x.out`.
+
+#### Файлы (этой сессии)
+
+- `app/Models/IqotPosition.php` — `priceComparison()` (catalog-first).
+- `tests/Unit/Models/IqotPositionPriceComparisonTest.php` — новый, 7 кейсов.
+- `app/Livewire/Procurement/Index.php` — `prefillSelectedFields()`, intro/introEn/closing/closingEn, previewLanguages, send-edits.
+- `app/Services/Supplier/SupplierProcurementDispatchService.php` — intro/closing в dispatch + plainBody (фолбэки).
+- `resources/views/emails/supplier-rfq-catalog.blade.php` — рендер intro/closing с фолбэком на `$t`.
+- `resources/views/livewire/procurement/index.blade.php` — превью: textarea для intro/closing.
+
+#### Открытые вопросы / TODO
+
+- **`note` в превью «Снабжения»** биндится `wire:model` (не `.live`), в превью НЕ дублируется (показал бы stale). Если захотят видеть примечание в превью — нужен `.live` или отдельная отрисовка.
+- **Дефолты intro/closing задвоены** в трёх местах: свойства компонента (Index.php), фолбэк в `plainBody()`, фолбэк-разметка в email-шаблоне (`$t`). При смене текста — синхронить. Можно вынести в config, если будет ещё одна правка.
+
 ### Сессия 2026-05-28 — sender-blocklist + queue topology + dashboard chart + ops-грабли
 
 **Контекст:** большая «комбо-сессия» — одна крупная фича (sender blocklist), несколько UX-фиксов, один production incident с разделением очередей, обновление manager-гайда, новый chart на дашборде. По ходу два раза заваливал прод (50 мин и ~1 час) — оба раза собственными «защитными» фиксами. Все известные грабли записал отдельно (см. секцию «Известные грабли» — добавлено 10 свежих позиций сверху списка) — следующий раз начинать с их прочтения.
