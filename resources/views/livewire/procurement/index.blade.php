@@ -217,15 +217,11 @@
                             <div class="text-[10px] text-fg-4 mt-0.5">{поставщик} подставится для каждого поставщика</div>
                         </div>
 
-                        {{-- Фиксированный текст вопроса (как в письме emails.supplier-rfq-catalog) —
-                             не редактируется, показываем для прозрачности превью. --}}
-                        <p class="text-[12.5px] text-fg-2 mb-2 px-1">
-                            @if($blk['lang'] === 'en')
-                                Please provide the <b>price, availability and lead time</b> for the following items:
-                            @else
-                                Просим дать <b>цену, наличие и срок поставки</b> на следующие позиции:
-                            @endif
-                        </p>
+                        {{-- Текст вопроса (редактируемый, на языке письма) --}}
+                        <div class="mb-2">
+                            <textarea wire:model.lazy="{{ $blk['intro_model'] }}" rows="2"
+                                      class="w-full px-2 py-1.5 border border-border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
+                        </div>
 
                         <div class="flex items-center gap-2 text-[10px] uppercase tracking-wider text-fg-4 px-1 mb-1">
                             <span style="width:18px"></span>
@@ -249,14 +245,11 @@
                                 </div>
                             @endforeach
                         </div>
-                        {{-- Закрывающая строка письма (как в emails.supplier-rfq-catalog) — превью. --}}
-                        <p class="text-[11.5px] text-fg-3 mt-2 px-1">
-                            @if($blk['lang'] === 'en')
-                                Please reply to this email with prices, availability and lead times.
-                            @else
-                                Ответьте, пожалуйста, на это письмо с ценами/наличием/сроками.
-                            @endif
-                        </p>
+                        {{-- Закрывающая строка письма (редактируемая, на языке письма) --}}
+                        <div class="mt-2">
+                            <textarea wire:model.lazy="{{ $blk['closing_model'] }}" rows="2"
+                                      class="w-full px-2 py-1.5 border border-border rounded bg-surface text-[11.5px] text-fg-3 outline-none focus:border-sky-500"></textarea>
+                        </div>
 
                         @if($blk['lang'] === 'en')
                             <div class="text-[10.5px] text-fg-4 mt-2">Каталожные позиции — английское название (name_en). Остальные — кнопка «Перевести позиции (ИИ)» или вручную (⚠ помечены кириллицей).</div>

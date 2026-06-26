@@ -3,8 +3,16 @@
 namespace App\Livewire\Procurement;
 
 use App\Enums\Role;
+use App\Models\CatalogItem;
+use App\Models\IqotPosition;
+use App\Models\Supplier;
+use App\Services\Supplier\SupplierItemTranslator;
+use App\Services\Supplier\SupplierMatchService;
+use App\Services\Supplier\SupplierProcurementDispatchService;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
@@ -43,6 +51,16 @@ class Index extends Component
     public string $greeting = 'Здравствуйте, {поставщик}!';
 
     public string $greetingEn = 'Hello {поставщик},';
+
+    /** Текст вопроса (вступление) — редактируемый, по языку письма. */
+    public string $intro = 'Просим дать цену, наличие и срок поставки на следующие позиции:';
+
+    public string $introEn = 'Please provide the price, availability and lead time for the following items:';
+
+    /** Закрывающая строка письма — редактируемая, по языку письма. */
+    public string $closing = 'Ответьте, пожалуйста, на это письмо с ценами/наличием/сроками.';
+
+    public string $closingEn = 'Please reply to this email with prices, availability and lead times.';
 
     public string $note = '';
 
@@ -108,7 +126,7 @@ class Index extends Component
         if ($missing === []) {
             return;
         }
-        $items = \App\Models\CatalogItem::query()->whereIn('id', $missing)
+        $items = CatalogItem::query()->whereIn('id', $missing)
             ->get(['id', 'name', 'name_en', 'brand_article']);
         foreach ($items as $ci) {
             $this->editedNames[$ci->id] = (string) ($ci->name ?? '');
@@ -125,13 +143,13 @@ class Index extends Component
      * Языковые блоки превью: по одному на каждый язык среди ОТМЕЧЕННЫХ
      * поставщиков (ru перед en). Пока поставщики не выбраны — один RU-блок.
      *
-     * @return array<int, array{lang:string, label:string, suppliers:array<int,string>, greeting_model:string}>
+     * @return array<int, array{lang:string, label:string, suppliers:array<int,string>, greeting_model:string, intro_model:string, closing_model:string}>
      */
     #[Computed]
     public function previewLanguages(): array
     {
         $ids = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
-        $suppliers = $ids === [] ? collect() : \App\Models\Supplier::query()->whereIn('id', $ids)->orderBy('name')->get();
+        $suppliers = $ids === [] ? collect() : Supplier::query()->whereIn('id', $ids)->orderBy('name')->get();
 
         $groups = [];
         foreach ($suppliers as $s) {
@@ -150,8 +168,10 @@ class Index extends Component
             $out[] = [
                 'lang' => $lang,
                 'label' => $lang === 'en' ? 'English' : 'Русский',
-                'suppliers' => array_map(fn ($s) => (string) ($s->name ?: $s->email ?: ('#' . $s->id)), $groups[$lang]),
+                'suppliers' => array_map(fn ($s) => (string) ($s->name ?: $s->email ?: ('#'.$s->id)), $groups[$lang]),
                 'greeting_model' => $lang === 'en' ? 'greetingEn' : 'greeting',
+                'intro_model' => $lang === 'en' ? 'introEn' : 'intro',
+                'closing_model' => $lang === 'en' ? 'closingEn' : 'closing',
             ];
         }
 
@@ -182,7 +202,7 @@ class Index extends Component
         return $out;
     }
 
-    public function translateToEnglish(\App\Services\Supplier\SupplierItemTranslator $translator): void
+    public function translateToEnglish(SupplierItemTranslator $translator): void
     {
         $this->runEnglishTranslation($translator, silent: false);
     }
@@ -191,18 +211,19 @@ class Index extends Component
      * EN-названия выбранных позиций: каталожный name_en — готовое; пустые/
      * кириллические — LLM-перевод. Транзиентный сбой LLM → оставляем как есть.
      */
-    private function runEnglishTranslation(\App\Services\Supplier\SupplierItemTranslator $translator, bool $silent): void
+    private function runEnglishTranslation(SupplierItemTranslator $translator, bool $silent): void
     {
         $cids = $this->selectedCids();
         if ($cids === []) {
             return;
         }
-        $items = \App\Models\CatalogItem::query()->whereIn('id', $cids)->get(['id', 'name', 'name_en']);
+        $items = CatalogItem::query()->whereIn('id', $cids)->get(['id', 'name', 'name_en']);
 
         $toTranslate = [];
         foreach ($items as $ci) {
             if (trim((string) $ci->name_en) !== '') {
                 $this->editedNamesEn[$ci->id] = $ci->name_en;
+
                 continue;
             }
             $current = trim((string) ($this->editedNamesEn[$ci->id] ?? ''));
@@ -236,7 +257,7 @@ class Index extends Component
         if (! $this->hasEnglishSupplierSelected()) {
             return;
         }
-        $this->runEnglishTranslation(app(\App\Services\Supplier\SupplierItemTranslator::class), silent: true);
+        $this->runEnglishTranslation(app(SupplierItemTranslator::class), silent: true);
     }
 
     private function hasEnglishSupplierSelected(): bool
@@ -246,7 +267,7 @@ class Index extends Component
             return false;
         }
 
-        return \App\Models\Supplier::query()->whereIn('id', $ids)->where('language', 'en')->exists();
+        return Supplier::query()->whereIn('id', $ids)->where('language', 'en')->exists();
     }
 
     /** @return array<int, int> выбранные catalog_item_id */
@@ -264,7 +285,7 @@ class Index extends Component
             return collect();
         }
 
-        return \App\Models\CatalogItem::query()->whereIn('id', $cids)
+        return CatalogItem::query()->whereIn('id', $cids)
             ->orderBy('sku')->get(['id', 'sku', 'name', 'brand', 'brand_article']);
     }
 
@@ -282,8 +303,8 @@ class Index extends Component
             return [];
         }
 
-        $matcher = app(\App\Services\Supplier\SupplierMatchService::class);
-        $items = \App\Models\CatalogItem::query()->whereIn('id', $cids)
+        $matcher = app(SupplierMatchService::class);
+        $items = CatalogItem::query()->whereIn('id', $cids)
             ->with('equipmentCategory:id,name,synonyms')->get();
 
         $coverage = [];
@@ -297,7 +318,7 @@ class Index extends Component
         if ($ids === []) {
             return [];
         }
-        $suppliers = \App\Models\Supplier::query()->whereIn('id', $ids)->get()->keyBy('id');
+        $suppliers = Supplier::query()->whereIn('id', $ids)->get()->keyBy('id');
 
         $out = [];
         foreach ($ids as $id) {
@@ -307,7 +328,7 @@ class Index extends Component
             }
             $out[] = [
                 'id' => $s->id,
-                'name' => (string) ($s->name ?: $s->email ?: ('#' . $s->id)),
+                'name' => (string) ($s->name ?: $s->email ?: ('#'.$s->id)),
                 'email' => $s->email,
                 'matched' => isset($coverage[$id]),
                 'item_count' => $coverage[$id] ?? 0,
@@ -325,10 +346,10 @@ class Index extends Component
         if (mb_strlen($s) < 2) {
             return collect();
         }
-        $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
+        $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
         $existing = collect($this->supplierOptions())->pluck('id')->all();
 
-        return \App\Models\Supplier::query()
+        return Supplier::query()
             ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like))
             ->whereNotIn('id', $existing ?: [0])
             ->orderBy('name')->limit(8)->get(['id', 'name', 'email']);
@@ -344,7 +365,7 @@ class Index extends Component
         unset($this->supplierOptions);
     }
 
-    public function send(\App\Services\Supplier\SupplierProcurementDispatchService $dispatcher)
+    public function send(SupplierProcurementDispatchService $dispatcher)
     {
         $user = auth()->user();
         abort_unless($user?->hasAnyRole([
@@ -373,6 +394,10 @@ class Index extends Component
             'qty_en' => $this->editedQtyEn,
             'greeting_ru' => $this->greeting,
             'greeting_en' => $this->greetingEn,
+            'intro_ru' => $this->intro,
+            'intro_en' => $this->introEn,
+            'closing_ru' => $this->closing,
+            'closing_en' => $this->closingEn,
         ];
         $result = $dispatcher->dispatch($cids, $supplierIds, $this->note, $user, $edits);
 
@@ -398,7 +423,7 @@ class Index extends Component
     }
 
     /** Базовый запрос блокеров (сматченные stale-позиции в до-КП заявках). */
-    private function baseQuery(): \Illuminate\Database\Query\Builder
+    private function baseQuery(): Builder
     {
         $q = DB::table('request_items')
             ->join('catalog_items', 'catalog_items.id', '=', 'request_items.catalog_item_id')
@@ -411,7 +436,7 @@ class Index extends Component
 
         $s = trim($this->search);
         if ($s !== '') {
-            $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
+            $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
             $q->where(function ($w) use ($like) {
                 $w->where('catalog_items.sku', 'ilike', $like)
                     ->orWhere('catalog_items.name', 'ilike', $like)
@@ -502,7 +527,7 @@ class Index extends Component
      * (analyzed + report), чтобы вывод цен был единообразным (зелёный чип +
      * раскрывающееся сравнение livewire.iqot._comparison).
      *
-     * @return \Illuminate\Support\Collection<int, \App\Models\IqotPosition>
+     * @return Collection<int, IqotPosition>
      */
     #[Computed]
     public function iqotByCatalogId()
@@ -512,7 +537,7 @@ class Index extends Component
             return collect();
         }
 
-        return \App\Models\IqotPosition::with('catalogItem:id,sku,name,brand,brand_article,brands,articles,price,price_min,is_price_actual,lead_time_days')
+        return IqotPosition::with('catalogItem:id,sku,name,brand,brand_article,brands,articles,price,price_min,is_price_actual,lead_time_days')
             ->whereIn('catalog_item_id', $ids)
             ->whereNotNull('analyzed_at')
             ->whereNotNull('report')
@@ -544,7 +569,7 @@ class Index extends Component
             ->leftJoin('request_items', 'request_items.id', '=', 'supplier_inquiry_items.request_item_id')
             ->whereIn(DB::raw($cidExpr), $cids)
             ->select(
-                DB::raw($cidExpr . ' as cid'),
+                DB::raw($cidExpr.' as cid'),
                 'supplier_inquiry_items.id as item_id',
                 'supplier_inquiry_items.status as item_status',
                 'supplier_inquiries.supplier_name',
@@ -580,6 +605,7 @@ class Index extends Component
                     if ($row->item_status === 'pending') {
                         $pending++;
                     }
+
                     continue;
                 }
                 $outcome = (string) $o->outcome;

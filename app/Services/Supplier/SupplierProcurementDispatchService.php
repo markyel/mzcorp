@@ -27,14 +27,13 @@ class SupplierProcurementDispatchService
     public function __construct(
         private readonly OutgoingMailSender $sender,
         private readonly SupplierDispatchService $base,
-    ) {
-    }
+    ) {}
 
     /**
      * @param  array<int, int>  $catalogItemIds
      * @param  array<int, int>  $supplierIds
-     * @param  array{names_ru?:array<int,string>, names_en?:array<int,string>, oem?:array<int,string>, qty?:array<int,string>, qty_en?:array<int,string>, greeting_ru?:?string, greeting_en?:?string}  $edits
-     *                        правки письма по catalog_item: названия/кол-во по языкам + артикул + обращение по языкам
+     * @param  array{names_ru?:array<int,string>, names_en?:array<int,string>, oem?:array<int,string>, qty?:array<int,string>, qty_en?:array<int,string>, greeting_ru?:?string, greeting_en?:?string, intro_ru?:?string, intro_en?:?string, closing_ru?:?string, closing_en?:?string}  $edits
+     *                                                                                                                                                                                                                                                                                         правки письма по catalog_item: названия/кол-во по языкам + артикул + обращение/вступление/закрытие по языкам
      * @return array{sent:int, failed:int, skipped:int, suppliers:array<int,string>, error:?string}
      */
     public function dispatch(array $catalogItemIds, array $supplierIds, ?string $note, User $by, array $edits = []): array
@@ -65,6 +64,7 @@ class SupplierProcurementDispatchService
         foreach ($suppliers as $supplier) {
             if (trim((string) $supplier->email) === '') {
                 $failed++;
+
                 continue;
             }
             $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';
@@ -75,6 +75,7 @@ class SupplierProcurementDispatchService
             $askItems = $items->reject(fn (CatalogItem $ci) => isset($alreadyPending[$ci->id]))->values();
             if ($askItems->isEmpty()) {
                 $skipped++;
+
                 continue;
             }
 
@@ -92,15 +93,19 @@ class SupplierProcurementDispatchService
                 ])->all();
 
                 $personalGreeting = $this->base->personalGreeting($greetingTpl, $supplier, $lang);
+                $intro = trim((string) ($lang === 'en' ? ($edits['intro_en'] ?? '') : ($edits['intro_ru'] ?? '')));
+                $closing = trim((string) ($lang === 'en' ? ($edits['closing_en'] ?? '') : ($edits['closing_ru'] ?? '')));
                 $subject = $lang === 'en' ? 'Price request' : 'Запрос расценки';
 
                 $html = view('emails.supplier-rfq-catalog', [
                     'rows' => $rows,
                     'note' => trim((string) $note),
                     'greeting' => $personalGreeting,
+                    'intro' => $intro,
+                    'closing' => $closing,
                     'lang' => $lang,
                 ])->render();
-                $plain = $this->plainBody($personalGreeting, $rows, (string) $note, $lang);
+                $plain = $this->plainBody($personalGreeting, $rows, (string) $note, $lang, $intro, $closing);
 
                 $draft = $this->createDraft($mailbox, $by, $supplier, $subject, $html, $plain);
 
@@ -108,6 +113,7 @@ class SupplierProcurementDispatchService
                 if (! ($result['success'] ?? false)) {
                     $failed++;
                     Log::warning('ProcurementDispatch: send failed', ['supplier_id' => $supplier->id, 'error' => $result['error'] ?? 'unknown']);
+
                     continue;
                 }
 
@@ -213,7 +219,7 @@ class SupplierProcurementDispatchService
             'mailbox_id' => $mailbox->id,
             'folder' => 'Sent',
             'direction' => MailDirection::Outbound,
-            'message_id' => 'draft.' . Str::uuid()->toString() . '@mzcorp.ru',
+            'message_id' => 'draft.'.Str::uuid()->toString().'@mzcorp.ru',
             'in_reply_to' => null,
             'references_header' => null,
             'subject' => mb_substr($subject, 0, 998),
@@ -235,19 +241,22 @@ class SupplierProcurementDispatchService
     /**
      * @param  array<int, array{name:string, oem:?string, brand:?string, qty:?string}>  $rows
      */
-    private function plainBody(string $greeting, array $rows, string $note, string $lang): string
+    private function plainBody(string $greeting, array $rows, string $note, string $lang, string $intro = '', string $closing = ''): string
     {
         $en = $lang === 'en';
-        $intro = $en ? 'Please quote price, availability and lead time for the following items:' : 'Просим дать цену, наличие и срок поставки на позиции:';
+        $intro = $intro !== '' ? $intro : ($en ? 'Please quote price, availability and lead time for the following items:' : 'Просим дать цену, наличие и срок поставки на позиции:');
+        $closing = $closing !== '' ? $closing : ($en ? 'Please reply to this email with prices, availability and lead times.' : 'Ответьте, пожалуйста, на это письмо с ценами/наличием/сроками.');
         $lines = [$greeting !== '' ? $greeting : ($en ? 'Hello,' : 'Здравствуйте!'), '', $intro, ''];
         $n = 1;
         foreach ($rows as $r) {
-            $lines[] = ($n++) . '. ' . implode(' · ', array_filter([$r['name'], $r['oem'] ?? null, $r['brand'] ?? null, $r['qty'] ?? null]));
+            $lines[] = ($n++).'. '.implode(' · ', array_filter([$r['name'], $r['oem'] ?? null, $r['brand'] ?? null, $r['qty'] ?? null]));
         }
         if (trim($note) !== '') {
             $lines[] = '';
             $lines[] = $note;
         }
+        $lines[] = '';
+        $lines[] = $closing;
 
         return implode("\n", $lines);
     }
