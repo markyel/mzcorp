@@ -371,10 +371,10 @@ class AssignmentService
             return null;
         }
 
-        // Авто-пометка дилерских email'ов: если у этого client_email уже
-        // ≥ N открытых заявок (порог из настроек), фиксируем его как
-        // дилерский и пропускаем client-sticky. Поток дилера распределяется
-        // через round-robin, а не липнет к одному менеджеру.
+        // Авто-пометка дилерских email'ов: если у этого client_email пришло
+        // ≥ N заявок за окно (порог из настроек), фиксируем его как дилерский
+        // и пропускаем client-sticky. Поток дилера распределяется через
+        // round-robin, а не липнет к одному менеджеру.
         // Catalog (1a) и text (1c) sticky продолжают работать.
         $this->dealers->autoMarkIfNeeded($clientEmail);
         if ($this->dealers->isDealer($clientEmail)) {

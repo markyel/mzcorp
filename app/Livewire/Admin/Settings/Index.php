@@ -130,13 +130,23 @@ class Index extends Component
             ],
             'dealer.auto_threshold' => [
                 'group' => 'Распределение заявок',
-                'label' => 'Порог автопометки дилера (открытых заявок)',
-                'help' => 'Если у одного client_email суммарно открыто столько заявок или больше — email автоматически помечается «дилерским», и client-sticky (1b) для него отключается (заявки уходят через round-robin, а не липнут к одному менеджеру). Catalog/text-sticky продолжают работать. 0 = выключить автопометку.',
+                'label' => 'Порог автопометки дилера (заявок за окно)',
+                'help' => 'Если у одного client_email пришло столько заявок или больше за «окно» (см. ниже, любой статус) — email автоматически помечается «дилерским», и client-sticky (1b) для него отключается (заявки уходят через round-robin, а не липнут к одному менеджеру). Catalog/text-sticky продолжают работать. 0 = выключить автопометку.',
                 'type' => AppSetting::TYPE_INT,
                 'default' => 8,
                 'step' => 1,
                 'min' => 0,
                 'max' => 100,
+            ],
+            'dealer.auto_window_days' => [
+                'group' => 'Распределение заявок',
+                'label' => 'Окно автопометки дилера (дней)',
+                'help' => 'За сколько последних дней считать поток заявок клиента для порога выше. По умолчанию 30. Окно (а не «N одновременно открытых») ловит и дистрибьюторов с быстрым оборотом. 0 = считать по всей истории.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => 30,
+                'step' => 1,
+                'min' => 0,
+                'max' => 365,
             ],
 
             // ─── Attention — дедлайны (Foundation §5.5) ──────────────────
@@ -501,6 +511,7 @@ class Index extends Component
             'tax.vat_percent' => 'services.tax.vat_percent',
             'assignment.newbie_boost' => 'services.assignment.newbie_boost',
             'dealer.auto_threshold' => 'services.dealer.auto_threshold',
+            'dealer.auto_window_days' => 'services.dealer.auto_window_days',
             'iqot.enabled' => 'services.iqot.enabled',
             'iqot.api_key' => 'services.iqot.api_key',
             'iqot.daily_limit' => 'services.iqot.daily_limit',

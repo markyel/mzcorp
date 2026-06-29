@@ -2,7 +2,6 @@
 
 namespace App\Services\Request;
 
-use App\Enums\RequestStatus;
 use App\Models\DealerEmail;
 use App\Models\Request;
 use Illuminate\Support\Carbon;
@@ -10,9 +9,11 @@ use Illuminate\Support\Carbon;
 /**
  * Авто-пометка «дилерских» email'ов.
  *
- * Если у одного `client_email` открыто ≥ `dealer.auto_threshold` заявок
- * во ВСЕЙ системе (не у одного менеджера, а суммарно по всем) — email
- * автоматически получает запись в `dealer_emails`.
+ * Если у одного `client_email` пришло ≥ `dealer.auto_threshold` заявок за
+ * скользящее окно `dealer.auto_window_days` (любой статус, суммарно по всей
+ * системе) — email автоматически получает запись в `dealer_emails`. Окно по
+ * потоку (а не «N одновременно открытых») ловит и дистрибьюторов с быстрым
+ * оборотом, у которых открытых мало, но общий поток заявок большой.
  *
  * AssignmentService::pickStickyByClientEmail для дилеров возвращает
  * null → client-sticky (1b) не применяется. Catalog (1a) и text (1c)
@@ -72,21 +73,25 @@ class DealerEmailService
             return;
         }
 
-        $openStatuses = array_map(
-            fn (RequestStatus $s) => $s->value,
-            array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+        // Считаем ПОТОК заявок клиента за скользящее окно (любой статус), а не
+        // «N одновременно открытых». Иначе дистрибьюторы с быстрым оборотом
+        // (быстро квотируют/закрывают) никогда не достигают порога по открытым
+        // и ускользают от пометки, хотя суммарный поток большой.
+        $windowDays = (int) app_setting(
+            'dealer.auto_window_days',
+            config('services.dealer.auto_window_days', 30),
         );
 
-        $openCount = Request::query()
-            ->whereIn('status', $openStatuses)
+        $count = Request::query()
             ->whereRaw('LOWER(client_email) = ?', [$normalized])
+            ->when($windowDays > 0, fn ($q) => $q->where('created_at', '>=', Carbon::now()->subDays($windowDays)))
             ->count();
 
-        if ($openCount >= $threshold) {
+        if ($count >= $threshold) {
             DealerEmail::query()->updateOrCreate(
                 ['email' => $normalized],
                 [
-                    'open_count_at_mark' => $openCount,
+                    'open_count_at_mark' => $count,
                     'marked_at' => Carbon::now(),
                 ],
             );
