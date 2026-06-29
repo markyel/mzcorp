@@ -94,6 +94,33 @@
                     });
                 });
             </script>
+
+            {{-- Heartbeat присутствия: пока вкладка видима, шлём лёгкий ping
+                 раз в минуту. Бэкенд (HeartbeatController) дедупит по минуте.
+                 Питает раздел «Использование системы» (метрика времени). --}}
+            <script>
+                (function () {
+                    var token = document.querySelector('meta[name="csrf-token"]');
+                    if (!token) return;
+                    var url = "{{ route('heartbeat.ping') }}";
+
+                    function beat() {
+                        if (document.visibilityState !== 'visible') return;
+                        fetch(url, {
+                            method: 'POST',
+                            headers: { 'X-CSRF-TOKEN': token.content },
+                            credentials: 'same-origin',
+                            keepalive: true,
+                        }).catch(function () { /* присутствие — best-effort, молча */ });
+                    }
+
+                    beat(); // отметить заход сразу
+                    setInterval(beat, 60000);
+                    document.addEventListener('visibilitychange', function () {
+                        if (document.visibilityState === 'visible') beat();
+                    });
+                })();
+            </script>
         @endauth
     </body>
 </html>

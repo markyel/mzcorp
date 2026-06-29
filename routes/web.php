@@ -3,6 +3,7 @@
 use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\CatalogPhotoProxyController;
 use App\Http\Controllers\DocsController;
+use App\Http\Controllers\HeartbeatController;
 use App\Http\Controllers\LoginArcadeController;
 use App\Http\Controllers\OAuthYandexController;
 use App\Http\Controllers\ProfileController;
@@ -48,6 +49,20 @@ Route::middleware('auth')->group(function () {
         ->name('oauth.yandex.authorize');
     Route::get('/oauth/yandex/callback', [OAuthYandexController::class, 'callback'])
         ->name('oauth.yandex.callback');
+
+    // Heartbeat присутствия — фронтенд (layouts/app.blade.php) пингует, пока
+    // вкладка видима. Доступен всем авторизованным (менеджеры тоже пишут).
+    // Питает раздел «Использование системы» (admin/director).
+    Route::post('/heartbeat', HeartbeatController::class)->name('heartbeat.ping');
+
+    // «Использование системы» — статистика активности менеджеров
+    // (время в системе, отправленные письма, сопоставления каталогу,
+    // уточняющие вопросы). Только директорат и админ.
+    Route::middleware('role:director,admin')->group(function () {
+        Route::get('/dashboard/usage', function () {
+            return view('usage-stats.index');
+        })->name('usage-stats.index');
+    });
 
     // Заявки — пул менеджера и карточка. Все 4 роли;
     // фильтрация «своё/всё» — внутри Pool component.

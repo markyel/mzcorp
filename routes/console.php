@@ -250,3 +250,13 @@ Schedule::command('suppliers:remind')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Прунинг heartbeat-присутствия (раздел «Использование системы»): удаление
+// строк user_activity_minutes старше года. Таблица узкая, но без прунинга
+// растёт бесконечно. См. PruneUserActivityMinutesCommand.
+Schedule::command('usage:prune-activity-minutes --days=365')
+    ->dailyAt('05:00')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();

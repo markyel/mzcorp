@@ -71,6 +71,10 @@
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin', 'secretary'])) {
         $navLinks[] = ['route' => 'analytics.index', 'label' => 'Аналитика', 'pattern' => 'analytics.*'];
     }
+    // «Использование» — статистика активности менеджеров (директорат / админ).
+    if ($user?->hasAnyRole(['director', 'admin'])) {
+        $navLinks[] = ['route' => 'usage-stats.index', 'label' => 'Использование', 'pattern' => 'usage-stats.*'];
+    }
     // «IQOT» — анализ цен конкурентов (РОП / директорат / админ).
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'iqot.index', 'label' => 'IQOT', 'pattern' => 'iqot.*'];
