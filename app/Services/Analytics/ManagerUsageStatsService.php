@@ -15,8 +15,9 @@ use Illuminate\Support\Facades\DB;
  * Метрики за период по дням и менеджерам:
  *   - время в системе (measured — heartbeat user_activity_minutes; для дней
  *     до внедрения heartbeat — estimated по таймстампам действий);
- *   - отправленные ЧЕРЕЗ СИСТЕМУ письма (email_messages, составленные в CRM:
- *     direction=outbound, is_draft=false, draft_author_user_id);
+ *   - РУЧНЫЕ письма менеджера, отправленные через систему (email_messages,
+ *     составленные в CRM: direction=outbound, is_draft=false, draft_author_user_id),
+ *     БЕЗ авто-уведомлений (исключены по client_notifications_sent);
  *   - ручные сопоставления каталогу (request_items.quality_assessment_payload
  *     → catalog_match.method=manual_link, by_user_id, matched_at);
  *   - заданные уточняющие вопросы (clarification_questions отправленных батчей).
@@ -166,25 +167,50 @@ class ManagerUsageStatsService
     }
 
     /**
-     * Письма, отправленные через систему (составленные в CRM), по дню.
+     * РУЧНЫЕ письма менеджера, отправленные через систему, по дню.
+     *
+     * ВАЖНО: исключаем авто-уведомления. ClientNotificationService при
+     * системном триггере ставит автором `assignedUser` (см. createReply),
+     * поэтому order_received / quote_followup_reminder / invoice_* /
+     * revival_offer ложно выглядят как письма менеджера (на проде это ~98%
+     * исходящих с draft_author!). Надёжный признак авто — связь
+     * `client_notifications_sent.outgoing_email_message_id`. Исключаем её.
      *
      * @param  array<int, int>  $ids
      * @return array<int, array<string, int>>
      */
     private function emailsByDay(array $ids, string $from, string $to): array
     {
-        $rows = DB::table('email_messages')
+        $rows = $this->manualOutboundQuery($ids, $from, $to)
+            ->selectRaw('draft_author_user_id AS uid, DATE(COALESCE(sent_at, created_at)) AS day, COUNT(*) AS c')
+            ->groupBy('uid', 'day')
+            ->get();
+
+        return $this->pivot($rows);
+    }
+
+    /**
+     * Базовый запрос «ручные исходящие менеджера через систему» за период:
+     * outbound, отправлено (не черновик), составлено в CRM (draft_author),
+     * и НЕ авто-уведомление (нет записи в client_notifications_sent).
+     *
+     * @param  array<int, int>  $ids
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private function manualOutboundQuery(array $ids, string $from, string $to)
+    {
+        return DB::table('email_messages')
             ->where('direction', 'outbound')
             ->where('is_draft', false)
             ->whereNotNull('draft_author_user_id')
             ->whereIn('draft_author_user_id', $ids)
             ->whereRaw('COALESCE(sent_at, created_at) >= ?', [$from])
             ->whereRaw('COALESCE(sent_at, created_at) < ?', [$to])
-            ->selectRaw('draft_author_user_id AS uid, DATE(COALESCE(sent_at, created_at)) AS day, COUNT(*) AS c')
-            ->groupBy('uid', 'day')
-            ->get();
-
-        return $this->pivot($rows);
+            ->whereNotExists(function ($q) {
+                $q->select(DB::raw(1))
+                    ->from('client_notifications_sent as cns')
+                    ->whereColumn('cns.outgoing_email_message_id', 'email_messages.id');
+            });
     }
 
     /**
@@ -255,6 +281,7 @@ class ManagerUsageStatsService
                   FROM email_messages
                  WHERE direction = 'outbound' AND is_draft = false AND draft_author_user_id IN ($idList)
                    AND COALESCE(sent_at, created_at) >= ? AND COALESCE(sent_at, created_at) < ?
+                   AND NOT EXISTS (SELECT 1 FROM client_notifications_sent cns WHERE cns.outgoing_email_message_id = email_messages.id)
                 UNION ALL
                 SELECT by_user_id, created_at FROM request_state_changes
                  WHERE by_user_id IN ($idList) AND created_at >= ? AND created_at < ?
