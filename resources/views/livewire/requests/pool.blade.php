@@ -512,7 +512,7 @@
                      описание получает приоритет (1fr). Сумма скрыта (пусто
                      до Phase 3), сложность переехала в код-ячейку иконкой,
                      статус+событие объединены в одну колонку. --}}
-                <div class="sticky top-0 bg-[var(--bg-surface)] border-b border-[var(--border-strong)] z-[2] grid items-center px-5 h-[32px] gap-x-3
+                <div wire:key="pool-thead" class="sticky top-0 bg-[var(--bg-surface)] border-b border-[var(--border-strong)] z-[2] grid items-center px-5 h-[32px] gap-x-3
                             text-[11px] font-semibold uppercase tracking-wider text-[var(--fg-3)]"
                      style="grid-template-columns: 24px 130px 170px minmax(280px,1fr) 200px 150px 80px 32px;">
                     <span></span>
@@ -906,7 +906,7 @@
                          x-intersect → $wire.loadMore(). Пока идёт догрузка —
                          спиннер; когда всё загружено — sentinel не рендерится. --}}
                     @if($hasMore)
-                        <div x-intersect.margin.300px="$wire.loadMore()"
+                        <div wire:key="pool-load-more" x-intersect.margin.300px="$wire.loadMore()"
                              class="h-[44px] flex items-center justify-center text-[11.5px] text-[var(--fg-3)]">
                             <span wire:loading.remove wire:target="loadMore">Прокрутите вниз — загрузится ещё</span>
                             <span wire:loading wire:target="loadMore" class="flex items-center gap-2">
