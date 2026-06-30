@@ -495,8 +495,14 @@
             <span class="text-[11px] uppercase tracking-wider opacity-70">Phase 2</span>
         </div>
 
-        {{-- TABLE --}}
-        <div class="flex-1 overflow-auto">
+        {{-- TABLE.
+             overflow-anchor:none — отключаем scroll anchoring браузера. Без
+             него при infinite-scroll догрузке (новые строки вставляются перед
+             sentinel'ом) браузер удерживает «якорь» в зоне видимости и
+             доскролливает вниз на высоту добавленного → пользователя выкидывает
+             в конец списка, а новые строки оказываются выше. С none — scrollTop
+             сохраняется, новые строки появляются ниже, листаем дальше вниз. --}}
+        <div class="flex-1 overflow-auto" style="overflow-anchor: none;">
             @if($total === 0)
                 <div class="p-12 text-center text-[var(--fg-3)]">
                     @if($bucket === 'postsale')
