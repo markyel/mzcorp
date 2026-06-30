@@ -698,7 +698,10 @@ class Pool extends Component
         // в Aside. Только для canSeeAll. Один GROUP BY вместо N запросов.
         $managerOpenCounts = [];
         if ($this->canSeeAll) {
-            $rows = Request::query()
+            // NB: отдельное имя ($mgrRows) — не затирать список $rows, который
+            // уходит во view (иначе route('requests.show', $req) падает на
+            // агрегатных строках без id). См. инцидент 2026-06-30.
+            $mgrRows = Request::query()
                 ->selectRaw('assigned_user_id, COUNT(*) AS cnt')
                 ->whereNotNull('assigned_user_id')
                 ->whereIn('status', array_map(
@@ -707,7 +710,7 @@ class Pool extends Component
                 ))
                 ->groupBy('assigned_user_id')
                 ->get();
-            foreach ($rows as $r) {
+            foreach ($mgrRows as $r) {
                 $managerOpenCounts[(int) $r->assigned_user_id] = (int) $r->cnt;
             }
         }
