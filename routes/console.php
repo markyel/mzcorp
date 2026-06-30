@@ -260,3 +260,14 @@ Schedule::command('usage:prune-activity-minutes --days=365')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Self-healing: догоняющий детект исходящих КП/счетов, пропущенных из-за
+// гонки «КП ушёл из почтового клиента раньше создания заявки» — детектор
+// гейтится на related_request_id, а на момент синка заявки ещё не было.
+// Ежечасно по свежему окну (заявка ещё открыта, статус занижен).
+// Идемпотентно (NOT EXISTS ai_decision). См. QuotesDetectMissedOutboundCommand.
+Schedule::command('quotes:detect-missed-outbound --apply --days=3')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();

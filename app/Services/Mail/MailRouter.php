@@ -90,63 +90,13 @@ class MailRouter
             // Phase 4 (Foundation §7.1): outbound document detector.
             // Сработает только если linker уже привязал письмо к Request —
             // иначе непонятно к чему относится «КП» (общая переписка с
-            // клиентом по другим заявкам, маркетинг и т.п.).
+            // клиентом по другим заявкам, маркетинг и т.п.). Логика вынесена в
+            // runOutboundDocumentDetection() для переиспользования командой
+            // quotes:detect-missed-outbound — она добивает письма, привязанные
+            // к заявке ПОСЛЕ синка (гонка «КП ушёл раньше создания заявки»: в
+            // момент синка linkedRequest был null → детектор пропускал письмо).
             if ($linkedRequest !== null) {
-                try {
-                    // Two-tier: rule-based (быстрое, ловит явные КП/счёт по
-                    // filename/keyword) → LLM fallback (gpt-4o-mini, добивает
-                    // edge-cases типа «Предложение МЗ-355319.pdf» / body=«КП»
-                    // / HTML-only через portal).
-                    //
-                    // 2026-05-25 (M-2026-1589): расширили fallback. Раньше LLM
-                    // дёргался только если rule-based вернул null. Но при
-                    // body-keyword без filename rule-based даёт слабые 0.60 —
-                    // ниже auto-apply threshold (0.85), decision застревает
-                    // в suggested. LLM (gpt-4o-mini) ВИДИТ attachment-список,
-                    // body, контекст заявки — может подтвердить КП/счёт с
-                    // 0.85+ → auto-apply сработает. Если LLM сам не уверен
-                    // (null или ≤ rule-based) — остаёмся на rule-based 0.60.
-                    $detected = $this->outboundDetector->analyze($message->fresh(), $linkedRequest);
-                    $autoApplyThreshold = (float) app_setting('detector.confidence_threshold', 0.85);
-                    if ($detected === null || $detected['confidence'] < $autoApplyThreshold) {
-                        $llm = $this->outboundLlmClassifier->classify($message->fresh(), $linkedRequest);
-                        if ($llm !== null
-                            && ($detected === null || $llm['confidence'] > $detected['confidence'])
-                        ) {
-                            $detected = $llm;
-                        }
-                    }
-                    if ($detected !== null) {
-                        // Для outbound_declined пробрасываем suggested_closed_lost_reason
-                        // и cited_phrase в payload — AiDecisionService::apply
-                        // прочитает их при ClosedLost-переходе (reason + цитата).
-                        $suggestionPayload = ['signals' => $detected['signals']];
-                        if (isset($detected['suggested_closed_lost_reason'])) {
-                            $suggestionPayload['suggested_closed_lost_reason'] = $detected['suggested_closed_lost_reason'];
-                        }
-                        if (isset($detected['cited_phrase']) && $detected['cited_phrase'] !== null) {
-                            $suggestionPayload['cited_phrase'] = $detected['cited_phrase'];
-                        }
-                        $this->aiDecisions->recordSuggestion(
-                            $detected['type'],
-                            $linkedRequest,
-                            $message,
-                            (float) $detected['confidence'],
-                            $suggestionPayload,
-                        );
-
-                        // Парсер исходящего КП/счёта — distill позиций+цен из PDF/XLSX/DOCX
-                        // вложений (Foundation §7, расширение DocumentDetector). Dispatch
-                        // async-job на каждое подходящее вложение; ShouldBeUnique по
-                        // attachment_id гасит дубли.
-                        $this->dispatchOutboundQuoteParsing($message, $detected['type']);
-                    }
-                } catch (\Throwable $e) {
-                    Log::warning('MailRouter: outbound document detector failed (non-fatal)', [
-                        'email_message_id' => $message->id,
-                        'error' => $e->getMessage(),
-                    ]);
-                }
+                $this->runOutboundDocumentDetection($message, $linkedRequest);
             }
 
             // Запрос расценки поставщику (модуль поставщиков, send-time): если
@@ -883,6 +833,68 @@ class MailRouter
             'internal_code' => $request->internal_code,
             'manager_id' => $request->assigned_user_id,
         ]);
+    }
+
+    /**
+     * Прогнать детектор исходящих документов по уже привязанному к заявке
+     * исходящему письму: rule-based → LLM fallback → recordSuggestion
+     * (auto-apply переводит заявку в Quoted/Invoiced/… при confidence ≥ порога)
+     * → парсер вложений (OutboundQuote/Invoice). Идемпотентно: recordSuggestion
+     * дедупит по (email_message_id, type), ParseOutboundQuoteJob — по attachment.
+     *
+     * Вызывается из route() на синке и из команды quotes:detect-missed-outbound
+     * (добивает письма, привязанные к заявке ПОСЛЕ синка — гонка «КП раньше
+     * заявки»). Сбои не фатальны (логируются, не валят синк/команду).
+     */
+    public function runOutboundDocumentDetection(EmailMessage $message, \App\Models\Request $request): void
+    {
+        try {
+            // Two-tier: rule-based (быстрое, ловит явные КП/счёт по
+            // filename/keyword) → LLM fallback (gpt-4o-mini, добивает
+            // edge-cases типа «Предложение МЗ-355319.pdf» / body=«КП»
+            // / HTML-only через portal). LLM дёргается, если rule-based
+            // null или ниже auto-apply threshold (decision иначе застрянет
+            // в suggested); при равной/меньшей уверенности — остаёмся на rule.
+            $detected = $this->outboundDetector->analyze($message->fresh(), $request);
+            $autoApplyThreshold = (float) app_setting('detector.confidence_threshold', 0.85);
+            if ($detected === null || $detected['confidence'] < $autoApplyThreshold) {
+                $llm = $this->outboundLlmClassifier->classify($message->fresh(), $request);
+                if ($llm !== null
+                    && ($detected === null || $llm['confidence'] > $detected['confidence'])
+                ) {
+                    $detected = $llm;
+                }
+            }
+            if ($detected !== null) {
+                // Для outbound_declined пробрасываем suggested_closed_lost_reason
+                // и cited_phrase в payload — AiDecisionService::apply прочитает
+                // их при ClosedLost-переходе (reason + цитата).
+                $suggestionPayload = ['signals' => $detected['signals']];
+                if (isset($detected['suggested_closed_lost_reason'])) {
+                    $suggestionPayload['suggested_closed_lost_reason'] = $detected['suggested_closed_lost_reason'];
+                }
+                if (isset($detected['cited_phrase']) && $detected['cited_phrase'] !== null) {
+                    $suggestionPayload['cited_phrase'] = $detected['cited_phrase'];
+                }
+                $this->aiDecisions->recordSuggestion(
+                    $detected['type'],
+                    $request,
+                    $message,
+                    (float) $detected['confidence'],
+                    $suggestionPayload,
+                );
+
+                // Парсер исходящего КП/счёта — distill позиций+цен из PDF/XLSX/DOCX
+                // вложений. Dispatch async-job на каждое подходящее вложение;
+                // ShouldBeUnique по attachment_id гасит дубли.
+                $this->dispatchOutboundQuoteParsing($message, $detected['type']);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('MailRouter: outbound document detector failed (non-fatal)', [
+                'email_message_id' => $message->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
