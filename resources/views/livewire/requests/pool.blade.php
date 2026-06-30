@@ -912,7 +912,22 @@
                          x-intersect → $wire.loadMore(). Пока идёт догрузка —
                          спиннер; когда всё загружено — sentinel не рендерится. --}}
                     @if($hasMore)
-                        <div wire:key="pool-load-more" x-intersect.margin.300px="$wire.loadMore()"
+                        <div wire:key="pool-load-more"
+                             x-data="{
+                                 keepScrollLoadMore() {
+                                     // Найти реальный скролл-контейнер (внутренний overflow
+                                     // или окно) и ВОССТАНОВИТЬ scrollTop после догрузки.
+                                     // Иначе при долистывании в самый низ браузерный
+                                     // momentum/anchor выкидывает в конец нового списка,
+                                     // и новые строки оказываются выше экрана.
+                                     let s = this.$el.parentElement;
+                                     while (s && !((['auto','scroll'].includes(getComputedStyle(s).overflowY)) && s.scrollHeight > s.clientHeight)) s = s.parentElement;
+                                     s = s || document.scrollingElement || document.documentElement;
+                                     const y = s.scrollTop;
+                                     this.$wire.loadMore().then(() => requestAnimationFrame(() => { s.scrollTop = y; }));
+                                 }
+                             }"
+                             x-intersect.margin.300px="keepScrollLoadMore()"
                              class="h-[44px] flex items-center justify-center text-[11.5px] text-[var(--fg-3)]">
                             <span wire:loading.remove wire:target="loadMore">Прокрутите вниз — загрузится ещё</span>
                             <span wire:loading wire:target="loadMore" class="flex items-center gap-2">
