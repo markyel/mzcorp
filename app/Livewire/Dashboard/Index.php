@@ -468,7 +468,19 @@ class Index extends Component
         $total = (clone $base)->count();
         $new = (clone $base)->where('status', RequestStatus::New->value)->count();
         $assigned = (clone $base)->where('status', RequestStatus::Assigned->value)->count();
-        $unassigned = (clone $base)->whereNull('assigned_user_id')->count();
+        // «Не назначено» = заявки без менеджера, но ТОЛЬКО не-terminal статусы —
+        // совпадает с фильтром «Нераспределённые» в пуле (Pool::applyView,
+        // unassignedOnly). Иначе счётчик копит авто-закрытые parser_no_content
+        // (closed_lost без assignee) и кричит красным числом, которого в
+        // «Нераспределённых» нет (там их 0 — распределять нечего).
+        $nonTerminal = array_map(
+            fn (RequestStatus $s) => $s->value,
+            array_filter(RequestStatus::cases(), fn (RequestStatus $s) => ! $s->isTerminal()),
+        );
+        $unassigned = (clone $base)
+            ->whereNull('assigned_user_id')
+            ->whereIn('status', $nonTerminal)
+            ->count();
 
         $today = (clone $base)->where('created_at', '>=', now()->subDay())->count();
         $week = (clone $base)->where('created_at', '>=', now()->subWeek())->count();

@@ -128,10 +128,12 @@
         </div>
 
         @if($this->isPrivileged)
-            <div class="ds-card p-4 {{ $counts['unassigned'] > 0 ? 'border-red-300' : '' }}">
+            <a href="{{ route('requests.index', ['scope' => 'all', 'unassigned' => 1, 'bucket' => 'all']) }}" wire:navigate
+               class="ds-card p-4 block transition-colors hover:border-[var(--accent)] {{ $counts['unassigned'] > 0 ? 'border-red-300' : '' }}"
+               title="Открыть «Заявки» с фильтром «Нераспределённые»">
                 <div class="text-[10.5px] uppercase tracking-wider font-semibold {{ $counts['unassigned'] > 0 ? 'text-red-700' : 'text-fg-3' }}">Не назначено</div>
                 <div class="text-[28px] leading-none font-semibold mt-2 mono tnum {{ $counts['unassigned'] > 0 ? 'text-red-700' : 'text-fg-1' }}">{{ $counts['unassigned'] }}</div>
-            </div>
+            </a>
         @endif
 
         <div class="ds-card p-4">
