@@ -90,6 +90,29 @@ class Pool extends Component
     #[Url(as: 'sort')]
     public string $sort = 'attention';
 
+    /**
+     * Окно infinite-scroll: сколько строк показывать. Растёт по loadMore() при
+     * долистывании вниз. НЕ в URL (эфемерное состояние). Любая смена фильтра
+     * сбрасывает его в 25 через override resetPage() ниже.
+     */
+    public int $perPage = 25;
+
+    /** Догрузить следующую порцию (вызывается x-intersect sentinel'ом). */
+    public function loadMore(): void
+    {
+        $this->perPage += 25;
+    }
+
+    /**
+     * Override WithPagination::resetPage — при любой смене фильтра (все
+     * updating*-хуки и action'ы зовут resetPage) скроллим список в начало,
+     * т.е. сбрасываем окно догрузки. Пагинации больше нет (infinite scroll).
+     */
+    public function resetPage($pageName = 'page'): void
+    {
+        $this->perPage = 25;
+    }
+
     public function updatingSearch(): void
     {
         $this->resetPage();
@@ -511,68 +534,13 @@ class Pool extends Component
             });
         }
 
-        $page = $query->paginate(25);
-
-        // Группировка текущей страницы по статусу — для sticky group-headers
-        // в стиле 03-requests.html.
-        //
-        // UX-bucket: Assigned объединён с InProgress в одной группе «В работе».
-        // Assigned — эфемерный статус (auto-transition в InProgress при первом
-        // открытии менеджером, см. Detail::mount implicit-state), поэтому
-        // два визуально одинаковых header'а «В РАБОТЕ · N» путали оператора.
-        // Чип в строке всё ещё показывает реальный статус (Назначена / В работе).
-        /** @var Collection<string, Collection<int, Request>> $grouped */
-        $grouped = collect($page->items())
-            ->groupBy(function (Request $r): string {
-                if ($r->status === RequestStatus::Assigned) {
-                    return RequestStatus::InProgress->value;
-                }
-
-                return $r->status->value;
-            });
-
-        // Порядок групп — от свежих к завершённым (Foundation §5.2 lifecycle).
-        // Assigned убран — слит с InProgress (см. groupBy выше).
-        $groupOrder = [
-            RequestStatus::New->value,
-            RequestStatus::InProgress->value,
-            RequestStatus::AwaitingClientClarification->value,
-            RequestStatus::Quoted->value,
-            RequestStatus::UnderReview->value,
-            RequestStatus::PostponedUntil->value,
-            RequestStatus::AwaitingInvoice->value,
-            RequestStatus::Invoiced->value,
-            RequestStatus::Paid->value,
-            RequestStatus::Paused->value,
-            RequestStatus::ClosedWon->value,
-            RequestStatus::ClosedLost->value,
-            RequestStatus::Pending->value, // для РОПа — в самом низу
-        ];
-        $groups = [];
-        if ($this->bucket === 'overdue') {
-            // Phase 1.11: bucket=overdue — flat list, attention-sorted.
-            // Один синтетический group со status=null (view не рендерит header).
-            $rows = collect($page->items());
-            if ($rows->isNotEmpty()) {
-                $groups[] = [
-                    'status' => null,
-                    'rows' => $rows,
-                    'count' => $rows->count(),
-                ];
-            }
-        } else {
-            foreach ($groupOrder as $statusValue) {
-                if (! $grouped->has($statusValue)) {
-                    continue;
-                }
-                $rows = $grouped->get($statusValue);
-                $groups[] = [
-                    'status' => RequestStatus::from($statusValue),
-                    'rows' => $rows,
-                    'count' => $rows->count(),
-                ];
-            }
-        }
+        // Плоский список с догрузкой по скроллу (infinite scroll). Группировку
+        // по статусу убрали (путала оператора) — реальный статус виден чипом в
+        // каждой строке. Тянем perPage строк в текущем порядке сортировки;
+        // $total — для футера/empty-state, $hasMore — нужен ли sentinel догрузки.
+        $total = (clone $query)->count();
+        $rows = $query->take($this->perPage)->get();
+        $hasMore = $rows->count() < $total;
 
         // Счётчики для filter-chips и left-list-nav.
         $countsBase = Request::query()
@@ -745,8 +713,9 @@ class Pool extends Component
         }
 
         return view('livewire.requests.pool', [
-            'page' => $page,
-            'groups' => $groups,
+            'rows' => $rows,
+            'total' => $total,
+            'hasMore' => $hasMore,
             'effectiveScope' => $effectiveScope,
             'totals' => [
                 // «Мои / Команда» в фильтр-баре показывают только открытые

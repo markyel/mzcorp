@@ -276,7 +276,7 @@
                     @else
                         Заявки
                     @endif
-                    <span class="text-[14px] font-medium text-[var(--fg-3)] tnum">· {{ $page->total() }}</span>
+                    <span class="text-[14px] font-medium text-[var(--fg-3)] tnum">· {{ $total }}</span>
                 </h1>
                 <div class="text-[12.5px] text-[var(--fg-3)] mt-1">
                     обновлено {{ now()->format('H:i') }} ·
@@ -497,7 +497,7 @@
 
         {{-- TABLE --}}
         <div class="flex-1 overflow-auto">
-            @if($page->total() === 0)
+            @if($total === 0)
                 <div class="p-12 text-center text-[var(--fg-3)]">
                     @if($bucket === 'postsale')
                         Нет постпродажных писем по оформленным заказам.
@@ -525,23 +525,10 @@
                     <span></span>
                 </div>
 
-                @foreach($groups as $group)
-                    {{-- Group header sticky. Phase 1.11: bucket=overdue даёт
-                         flat-list — group со status=null, header не рендерим. --}}
-                    @if($group['status'] !== null)
-                    <div class="flex items-center gap-2.5 px-5 pt-2.5 pb-2 bg-[var(--bg-surface-2)] border-t border-[var(--border)] border-b border-[var(--border-subtle)] sticky top-[32px] z-[1]">
-                        <span class="w-3.5 text-[var(--fg-3)] text-[10px]">▼</span>
-                        <h3 class="m-0 font-semibold text-[12px] uppercase tracking-wider text-[var(--fg-1)]">
-                            {{ $statusLabel[$group['status']->value] ?? $group['status']->label() }}
-                        </h3>
-                        <span class="font-semibold text-[11px] text-[var(--fg-3)] tnum">· {{ $group['count'] }}</span>
-                        <span class="ml-auto text-[11.5px] font-medium text-[var(--fg-3)] flex gap-3.5">
-                            <span title="{{ $disabledTitle }}">ср. возраст —</span>
-                        </span>
-                    </div>
-                    @endif
-
-                    @foreach($group['rows'] as $req)
+                {{-- Плоский список без группировки по статусу (группировка
+                     путала оператора). Реальный статус — чипом в каждой строке;
+                     порядок задаёт дропдаун сортировки. --}}
+                @foreach($rows as $req)
                         @php
                             $href = route('requests.show', $req);
 
@@ -913,22 +900,31 @@
                                   title="{{ $disabledTitle }}">···</span>
                         </a>
                     @endforeach
-                @endforeach
+
+                    {{-- Sentinel infinite-scroll: при попадании в зону видимости
+                         (с упреждением 300px) догружаем следующую порцию через
+                         x-intersect → $wire.loadMore(). Пока идёт догрузка —
+                         спиннер; когда всё загружено — sentinel не рендерится. --}}
+                    @if($hasMore)
+                        <div x-intersect.margin.300px="$wire.loadMore()"
+                             class="h-[44px] flex items-center justify-center text-[11.5px] text-[var(--fg-3)]">
+                            <span wire:loading.remove wire:target="loadMore">Прокрутите вниз — загрузится ещё</span>
+                            <span wire:loading wire:target="loadMore" class="flex items-center gap-2">
+                                <span class="inline-block w-3.5 h-3.5 border-2 border-[var(--fg-4)] border-t-transparent rounded-full animate-spin"></span>
+                                Загрузка…
+                            </span>
+                        </div>
+                    @endif
             @endif
         </div>
 
         {{-- FOOTER --}}
-        @if($page->total() > 0)
+        @if($total > 0)
             <div class="h-[36px] flex items-center gap-3.5 px-5 border-t border-[var(--border)] bg-[var(--bg-surface-2)] font-medium text-[11.5px] text-[var(--fg-3)] tnum">
-                <span>{{ $page->firstItem() }}–{{ $page->lastItem() }} из {{ $page->total() }}</span>
+                <span>Показано {{ $rows->count() }} из {{ $total }}</span>
                 <span class="text-[var(--border-strong)]">·</span>
                 <span class="text-[var(--fg-4)]" title="{{ $disabledTitle }}">выделено —</span>
                 <span class="flex-1"></span>
-                <div class="flex items-center gap-2">
-                    {{ $page->onEachSide(1)->links() }}
-                </div>
-                <span class="text-[var(--border-strong)]">·</span>
-                <span>25 / стр.</span>
             </div>
         @endif
     </section>
