@@ -231,11 +231,13 @@ enum RequestStatus: string
                 self::ClosedWon, self::ClosedLost,
             ],
             self::AwaitingInvoice => [
+                self::InProgress, // откат на доработку (ошибочно переведён вперёд)
                 self::Invoiced,
                 self::ClosedWon, // cash без формального учёта оплаты
                 self::ClosedLost,
             ],
             self::Invoiced => [
+                self::InProgress, // откат на доработку (счёт остаётся, меняется только статус)
                 self::Paid,
                 self::ClosedWon, // без отдельного шага Paid (упрощённый учёт)
                 self::ClosedLost,
