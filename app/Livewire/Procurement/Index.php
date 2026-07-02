@@ -52,6 +52,10 @@ class Index extends Component
     #[Url(as: 'stock', except: '')]
     public string $stockFilter = '';
 
+    /** Фильтр запросов поставщикам: '' — все, 'sent' — уже запрошены (контроль ответов), 'none' — ещё не запрошены. */
+    #[Url(as: 'rfq', except: '')]
+    public string $rfqFilter = '';
+
     /** cid => bool — выбранные позиции для запроса. */
     public array $selected = [];
 
@@ -121,6 +125,11 @@ class Index extends Component
     }
 
     public function updatingStockFilter(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatingRfqFilter(): void
     {
         $this->resetPage();
     }
@@ -492,6 +501,18 @@ class Index extends Component
             $q->where('catalog_items.stock_available', '>', 0);
         } elseif ($this->stockFilter === 'out') {
             $q->where(fn ($w) => $w->where('catalog_items.stock_available', '<=', 0)->orWhereNull('catalog_items.stock_available'));
+        }
+
+        // «Уже запрошены» — по позиции есть запрос поставщику любого вида:
+        // позиция-центричный из «Снабжения» (sii.catalog_item_id) или
+        // request-центричный из карточки заявки (sii.request_item_id → catalog).
+        $rfqExists = 'exists (select 1 from supplier_inquiry_items sii'
+            .' left join request_items ri2 on ri2.id = sii.request_item_id'
+            .' where coalesce(sii.catalog_item_id, ri2.catalog_item_id) = catalog_items.id)';
+        if ($this->rfqFilter === 'sent') {
+            $q->whereRaw($rfqExists);
+        } elseif ($this->rfqFilter === 'none') {
+            $q->whereRaw('not '.$rfqExists);
         }
 
         $s = trim($this->search);

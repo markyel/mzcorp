@@ -125,7 +125,9 @@ class Index extends Component
 
     /**
      * Номенклатура: позиции, по которым запрашивали цену, + предложения
-     * поставщиков по каждой (Фаза 3.3). Группируем по RequestItem.
+     * поставщиков по каждой (Фаза 3.3). Группируем по RequestItem; сюда же
+     * подмешиваются позиция-центричные RFQ из «Снабжения» (supplier_inquiry_items
+     * по catalog_item_id без request_item_id) — по тому же ключу c{catalog_item_id}.
      */
     #[Computed]
     public function positions()
@@ -144,8 +146,8 @@ class Index extends Component
             ]);
 
         $s = trim($this->search);
+        $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
         if ($s !== '') {
-            $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
             $q->where(function ($w) use ($like) {
                 $w->where('parsed_name', 'ilike', $like)
                     ->orWhere('parsed_article', 'ilike', $like)
@@ -180,8 +182,54 @@ class Index extends Component
                     'max' => $quoted->max('price'),
                     'quoted_count' => $quoted->count(),
                 ];
-            })
-            ->values();
+            });
+
+        // Позиция-центричные RFQ из «Снабжения»: catalog_item_id без request_item_id.
+        $catSiis = SupplierInquiryItem::query()
+            ->whereNotNull('catalog_item_id')
+            ->with([
+                'inquiry:id,supplier_email,supplier_name',
+                'offers',
+                'catalogItem:id,sku,name,is_price_actual',
+            ])
+            ->when($s !== '', fn ($w) => $w->whereHas(
+                'catalogItem',
+                fn ($c) => $c->where('name', 'ilike', $like)->orWhere('sku', 'ilike', $like),
+            ))
+            ->get()
+            ->groupBy(fn (SupplierInquiryItem $sii) => 'c' . $sii->catalog_item_id);
+
+        foreach ($catSiis as $key => $siis) {
+            $existing = $groups->get($key);
+            if ($existing !== null) {
+                $all = $existing['siis']->concat($siis)->unique('id')->values();
+                $quoted = $all->flatMap->offers->where('outcome', 'quoted')->filter(fn ($o) => $o->price !== null);
+                $existing['siis'] = $all;
+                $existing['min'] = $quoted->min('price');
+                $existing['max'] = $quoted->max('price');
+                $existing['quoted_count'] = $quoted->count();
+                $groups->put($key, $existing);
+
+                continue;
+            }
+            $ci = $siis->first()->catalogItem;
+            $quoted = $siis->flatMap->offers->where('outcome', 'quoted')->filter(fn ($o) => $o->price !== null);
+            $groups->put($key, [
+                'key' => $key,
+                'name' => (string) ($ci?->name ?: $siis->first()->item_name ?: '—'),
+                'sku' => $ci?->sku,
+                'article' => null,
+                'is_catalog' => true,
+                'stale' => $ci !== null && ! $ci->is_price_actual,
+                'requests' => collect(),
+                'siis' => $siis,
+                'min' => $quoted->min('price'),
+                'max' => $quoted->max('price'),
+                'quoted_count' => $quoted->count(),
+            ]);
+        }
+
+        $groups = $groups->values();
 
         $perPage = 25;
         $page = \Illuminate\Pagination\Paginator::resolveCurrentPage();

@@ -50,6 +50,12 @@
             <option value="in">📦 только на складе</option>
             <option value="out">только без остатка</option>
         </select>
+        <select wire:model.live="rfqFilter"
+                class="h-[32px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+            <option value="">Запрос поставщику: все</option>
+            <option value="sent">⏳ уже запрошены — контроль ответов</option>
+            <option value="none">ещё не запрошены</option>
+        </select>
     </div>
 
     {{-- Топ позиций-блокеров --}}
@@ -172,7 +178,7 @@
                     </tbody>
                 @empty
                     <tbody>
-                        <tr><td colspan="11" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' || $stockFilter !== '' ? 'Ничего не найдено по заданным фильтрам.' : ($mode === 'period' ? 'За выбранный период нет запрошенных позиций без актуальной цены.' : 'Нет позиций с неактуальной ценой в заявках до выдачи КП.') }}</td></tr>
+                        <tr><td colspan="11" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' || $stockFilter !== '' || $rfqFilter !== '' ? 'Ничего не найдено по заданным фильтрам.' : ($mode === 'period' ? 'За выбранный период нет запрошенных позиций без актуальной цены.' : 'Нет позиций с неактуальной ценой в заявках до выдачи КП.') }}</td></tr>
                     </tbody>
                 @endforelse
             </table>

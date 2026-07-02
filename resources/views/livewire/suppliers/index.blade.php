@@ -40,8 +40,12 @@
                                 <div class="text-[11px] text-fg-4 mt-0.5">
                                     @if($pos['article'])<span class="mono">арт. {{ $pos['article'] }}</span> · @endif
                                     @if($pos['sku'])<span class="mono">{{ $pos['sku'] }}</span> · @endif
-                                    {{ $multi ? 'заявки' : 'заявка' }}
-                                    @foreach($pos['requests'] as $r)<a href="{{ route('requests.show', $r['id']) }}" wire:navigate class="text-sky-700 hover:underline mono">{{ $r['code'] }}</a>@if(!$loop->last), @endif @endforeach
+                                    @if($pos['requests']->isEmpty())
+                                        <a href="{{ route('procurement.index') }}" wire:navigate class="text-sky-700 hover:underline">запрос из «Снабжения»</a>
+                                    @else
+                                        {{ $multi ? 'заявки' : 'заявка' }}
+                                        @foreach($pos['requests'] as $r)<a href="{{ route('requests.show', $r['id']) }}" wire:navigate class="text-sky-700 hover:underline mono">{{ $r['code'] }}</a>@if(!$loop->last), @endif @endforeach
+                                    @endif
                                     · цена @if($pos['is_catalog'])<span class="{{ $pos['stale'] ? 'text-amber-700' : 'text-emerald-700' }}">{{ $pos['stale'] ? 'неактуальна' : 'актуальна' }}</span>@else<span class="text-fg-4">не в каталоге</span>@endif
                                 </div>
                             </div>
@@ -71,7 +75,7 @@
                         </div>
                     </div>
                 @empty
-                    <div class="px-4 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Пока нет запросов цен. Отправьте запрос из карточки заявки → таб «Поставщики».' }}</div>
+                    <div class="px-4 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Пока нет запросов цен. Отправьте запрос из карточки заявки (таб «Поставщики») или из раздела «Снабжение».' }}</div>
                 @endforelse
             </div>
             <div class="px-4 py-3">{{ $this->positions->links() }}</div>
