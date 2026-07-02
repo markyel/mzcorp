@@ -273,10 +273,19 @@ class RequestStateService
         }
 
         $from = $request->status;
-        // Foundation §5.2: возврат в qualifying. У нас нет qualifying —
-        // используем in_progress (заявка уже была назначена + распарсена,
-        // менеджер сразу видит её в Pool).
-        $to = RequestStatus::InProgress;
+        // Возврат: если сделка доходила до ВЕХИ (Quoted+) — реанимируем НА эту
+        // веху, а не в in_progress. КП/счёт уже были выданы: клиент отвечает на
+        // КП / согласование, «В работе» занижает стадию (выглядит как новая
+        // первичная проработка). peak_status трекает furthest milestone; берём
+        // его, кроме Paid и терминальных. Если вехи не было (закрыли до КП) —
+        // in_progress, как раньше.
+        $peak = $request->peak_status;
+        $to = ($peak !== null
+            && $peak->isPostQuote()
+            && ! $peak->isTerminal()
+            && $peak !== RequestStatus::Paid)
+            ? $peak
+            : RequestStatus::InProgress;
 
         $snapshot = [
             'closed_at' => $request->closed_at?->toIso8601String(),
@@ -315,8 +324,8 @@ class RequestStateService
             }
 
             // Статус — после re-assignment'а: autoAssign внутри (если был
-            // вызван) выставил Assigned, нам же нужен InProgress (реанимация
-            // = заявка вернулась в работу, как раньше).
+            // вызван) выставил Assigned, перекрываем целевым $to (peak-веха,
+            // напр. quoted/invoiced, либо in_progress если вехи не было).
             $request->status = $to;
             $request->save();
 
