@@ -32,20 +32,20 @@
                placeholder="Поиск: артикул / наименование / бренд"
                class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
         <select wire:model.live="mode"
-                class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                class="h-[32px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
             <option value="current">Текущие блокеры (заявки до КП)</option>
             <option value="period">За период — цена до сих пор неактуальна</option>
         </select>
         @if($mode === 'period')
             <select wire:model.live="periodDays"
-                    class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                    class="h-[32px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
                 @foreach(\App\Livewire\Procurement\Index::PERIOD_DAYS as $d)
                     <option value="{{ $d }}">за {{ $d }} дн.</option>
                 @endforeach
             </select>
         @endif
         <select wire:model.live="stockFilter"
-                class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                class="h-[32px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
             <option value="">Наличие: все</option>
             <option value="in">📦 только на складе</option>
             <option value="out">только без остатка</option>
