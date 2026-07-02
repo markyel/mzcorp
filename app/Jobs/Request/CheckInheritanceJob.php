@@ -2,16 +2,20 @@
 
 namespace App\Jobs\Request;
 
+use App\Enums\ClosedLostReason;
+use App\Enums\RequestStatus;
 use App\Models\EmailMessage;
 use App\Models\Request as RequestModel;
 use App\Services\Request\InheritanceCandidateChecker;
 use App\Services\Request\RequestInheritanceService;
+use App\Services\Request\RequestStateService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -59,6 +63,7 @@ class CheckInheritanceJob implements ShouldQueue, ShouldBeUnique
     public function handle(
         InheritanceCandidateChecker $checker,
         RequestInheritanceService $inheritance,
+        RequestStateService $stateService,
     ): void {
         $newRequest = RequestModel::find($this->newRequestId);
         if (! $newRequest) {
@@ -120,9 +125,30 @@ class CheckInheritanceJob implements ShouldQueue, ShouldBeUnique
             return;
         }
 
-        // LLM подтвердил гипотезу — создаём наследование.
+        // LLM подтвердил гипотезу-продолжение. ГИБРИД:
+        //   - позиции РОВНО те же (все позиции новой совпали по АРТИКУЛУ со
+        //     старой) И старая закрыта недавно «по нет ответа» → РЕАНИМИРУЕМ
+        //     старую под тем же номером, свежесозданную новую сворачиваем;
+        //   - иначе → обычное наследование (новая = child закрытой).
+        $itemMappings = $inheritance->suggestLinks($candidate, $newRequest);
+
+        if ($this->shouldReanimateInPlace($candidate, $newRequest, $itemMappings)) {
+            try {
+                $this->reanimateInPlace($candidate, $newRequest, $inboundMessage, $stateService, $result);
+
+                return;
+            } catch (\Throwable $e) {
+                // Реанимация+свёртка не удалась (напр. FK) — откат транзакции
+                // внутри, данные целы. Падаем в безопасное наследование ниже.
+                Log::error('CheckInheritanceJob: reanimate-in-place failed, falling back to linkChild', [
+                    'new_request_id' => $newRequest->id,
+                    'candidate_id' => $candidate->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         try {
-            $itemMappings = $inheritance->suggestLinks($candidate, $newRequest);
             $inheritance->linkChild(
                 parent: $candidate,
                 child: $newRequest,
@@ -146,5 +172,109 @@ class CheckInheritanceJob implements ShouldQueue, ShouldBeUnique
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Гибрид-условие: реанимировать СТАРУЮ (переоткрыть под тем же номером)
+     * вместо создания связанной новой. Требуем МАКСИМУМ уверенности, т.к.
+     * ветка деструктивная (удаляет свежесозданную новую заявку):
+     *   - старая именно closed_lost (closed_won = сделка состоялась → новая ок);
+     *   - причина закрытия — «нет ответа» (тихое закрытие), в окне N дней;
+     *   - ВСЕ активные позиции новой заявки совпали по АРТИКУЛУ (source
+     *     auto_article) со старой — т.е. нет новой номенклатуры;
+     *   - у новой ещё нет downstream-артефактов (КП/счёт) — она свежая.
+     *
+     * @param  array<int, array{child_item_id:int, parent_item_id:int, source?:string, confidence?:float}>  $itemMappings
+     */
+    private function shouldReanimateInPlace(RequestModel $candidate, RequestModel $newRequest, array $itemMappings): bool
+    {
+        if ($candidate->status !== RequestStatus::ClosedLost) {
+            return false;
+        }
+
+        $noResponse = in_array($candidate->closed_lost_reason, [
+            ClosedLostReason::NoClientResponseToQuote->value,
+            ClosedLostReason::NoClientResponseToClarification->value,
+        ], true);
+        $maxDays = (int) config('services.inheritance.reanimate_max_days', 45);
+        $recent = $candidate->closed_at !== null
+            && $candidate->closed_at->gt(now()->subDays(max(1, $maxDays)));
+        if (! $noResponse || ! $recent) {
+            return false;
+        }
+
+        // Ровно те же позиции: каждая активная позиция новой совпала по артикулу.
+        $newActive = (int) $newRequest->items()->where('is_active', true)->count();
+        if ($newActive === 0) {
+            return false;
+        }
+        $exactArticleMapped = collect($itemMappings)
+            ->where('source', 'auto_article')
+            ->pluck('child_item_id')
+            ->unique()
+            ->count();
+        if ($exactArticleMapped !== $newActive) {
+            return false;
+        }
+
+        // Новая заявка ещё «пустая» downstream — иначе не сворачиваем.
+        $hasArtifacts = DB::table('quotations')->where('request_id', $newRequest->id)->exists()
+            || DB::table('invoices')->where('request_id', $newRequest->id)->exists()
+            || DB::table('outbound_quotes')->where('request_id', $newRequest->id)->exists();
+
+        return ! $hasArtifacts;
+    }
+
+    /**
+     * Реанимировать старую заявку под тем же номером и свернуть свежесозданную
+     * новую: переносим её письма на старую, реанимируем старую, удаляем новую
+     * (каскад чистит её items/state/assignments/views/ai_decisions). Всё в одной
+     * транзакции — атомарно.
+     *
+     * @param  array{is_continuation: bool, confidence: float, reasoning: ?string}  $llmResult
+     */
+    private function reanimateInPlace(
+        RequestModel $candidate,
+        RequestModel $newRequest,
+        EmailMessage $inbound,
+        RequestStateService $stateService,
+        array $llmResult,
+    ): void {
+        $newId = $newRequest->id;
+        $newCode = $newRequest->internal_code;
+
+        DB::transaction(function () use ($candidate, $newRequest, $inbound, $stateService, $newCode) {
+            // 1. Письма новой заявки → на старую (email_messages без FK на requests).
+            EmailMessage::query()
+                ->where('related_request_id', $newRequest->id)
+                ->update(['related_request_id' => $candidate->id]);
+
+            // 2. Клиентские авто-уведомления новой (order_received и пр.) — без FK,
+            //    иначе осиротеют + конфликт unique при слиянии. Просто удаляем.
+            DB::table('client_notifications_sent')->where('request_id', $newRequest->id)->delete();
+
+            // 3. Реанимируем старую (closed_lost → in_progress, реассесс
+            //    ответственного по входящему письму).
+            $stateService->reanimate(
+                $candidate,
+                null,
+                $inbound,
+                reassessAssignee: true,
+                event: 'reanimate_from_reply',
+                comment: "Клиент ответил в закрытый тред теми же позициями — реанимация (свёрнут дубль {$newCode}).",
+            );
+
+            // 4. Удаляем свежесозданную новую (каскад чистит зависимые строки;
+            //    письма уже перевешены на старую — не осиротеют).
+            $newRequest->delete();
+        });
+
+        Log::info('CheckInheritanceJob: reanimated parent in-place, absorbed fresh duplicate', [
+            'parent_request_id' => $candidate->id,
+            'parent_code' => $candidate->internal_code,
+            'deleted_new_request_id' => $newId,
+            'deleted_new_code' => $newCode,
+            'confidence' => $llmResult['confidence'] ?? null,
+        ]);
     }
 }
