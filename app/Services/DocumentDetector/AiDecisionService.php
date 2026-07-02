@@ -111,6 +111,14 @@ class AiDecisionService
         }
 
         $type = $decision->detector_type;
+
+        // Подсказка «возможно новая заявка» применяется НЕ сменой статуса, а
+        // разворачиванием письма в отдельную Request (spin-off). Обрабатываем
+        // до общей ветки targetStatus и выходим.
+        if ($type === DetectorType::InboundPossibleNewRequest) {
+            return $this->applyPossibleNewRequest($decision, $author);
+        }
+
         $target = $type->targetStatus();
         if ($target === null) {
             // например inbound_unclear — нечего применять, mark dismissed.
@@ -340,6 +348,62 @@ class AiDecisionService
             'status' => AiDecisionStatus::Dismissed->value,
             'applied_at' => now(),
             'applied_by_user_id' => $author?->id,
+        ]);
+
+        return $decision;
+    }
+
+    /**
+     * Применить подсказку «возможно новая заявка»: развернуть письмо в
+     * ОТДЕЛЬНУЮ заявку (spin-off), не трогая статус исходной. Если новая
+     * заявка создалась И inbound_extension ранее уже добавил позиции ЭТОГО
+     * письма в исходную — деактивируем их там (уехали в новую, иначе задвоятся).
+     */
+    private function applyPossibleNewRequest(AiDecision $decision, ?User $author): AiDecision
+    {
+        $message = $decision->email_message_id ? EmailMessage::find($decision->email_message_id) : null;
+        $source = $decision->request()->first();
+        if ($message === null || $source === null) {
+            $decision->update(['status' => AiDecisionStatus::Failed->value]);
+
+            return $decision;
+        }
+
+        $new = app(\App\Services\Request\RequestExtensionService::class)
+            ->spinOffNewRequest($message, $source);
+
+        if ($new === null) {
+            // Процессор не создал заявку (нет позиций/контента) — исходную не
+            // трогаем, подсказку оставляем висеть (менеджер создаст вручную).
+            Log::warning('AiDecisionService: possible-new-request spin-off produced no request', [
+                'decision_id' => $decision->id,
+                'email_message_id' => $message->id,
+            ]);
+
+            return $decision;
+        }
+
+        // Позиции этого письма уехали в новую заявку — снимаем их с исходной
+        // (их мог добавить авто-applied inbound_extension).
+        \App\Models\RequestItem::query()
+            ->where('request_id', $source->id)
+            ->where('source_email_message_id', $message->id)
+            ->update(['is_active' => false]);
+
+        $decision->update([
+            'status' => AiDecisionStatus::ManuallyConfirmed->value,
+            'applied_by_user_id' => $author?->id,
+            'applied_at' => now(),
+            'payload' => array_merge((array) ($decision->payload ?? []), [
+                'spun_off_request_id' => $new->id,
+                'spun_off_internal_code' => $new->internal_code,
+            ]),
+        ]);
+
+        Log::info('AiDecisionService: possible-new-request → spun off new request', [
+            'decision_id' => $decision->id,
+            'source_request_id' => $source->id,
+            'new_request_id' => $new->id,
         ]);
 
         return $decision;

@@ -93,6 +93,25 @@ enum RequestStatus: string
     }
 
     /**
+     * Заявка достигла стадии КП или дальше (quoted / согласование / ждёт счёт /
+     * счёт / оплата / закрытие). В таких заявках просьба клиента добавить
+     * позиции / выставить счёт на НОВОЕ — почти всегда отдельная новая сделка,
+     * а не расширение текущей. Используется подсказкой «возможно новая заявка».
+     */
+    public function isPostQuote(): bool
+    {
+        return in_array($this, [
+            self::Quoted,
+            self::UnderReview,
+            self::AwaitingInvoice,
+            self::Invoiced,
+            self::Paid,
+            self::ClosedWon,
+            self::ClosedLost,
+        ], true);
+    }
+
+    /**
      * Считается ли заявка «в работе» для целей AssignmentService:
      *  - load-counter (нагрузка менеджера)
      *  - sticky lookup

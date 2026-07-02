@@ -28,6 +28,11 @@ enum DetectorType: string
     // сделке (расширение). Заявку возвращаем «в работу» (InProgress), чтобы
     // менеджер пересобрал КП/счёт на расширенный состав.
     case InboundExtension = 'inbound_extension';
+    // Клиент в ПОСТ-КП треде (заявка уже отквотирована/оплачена/закрыта)
+    // просит счёт/КП на НОВЫЕ позиции — вероятно ОТДЕЛЬНАЯ новая заявка, а не
+    // расширение. НЕ авто-применяется — только ПОДСКАЗКА менеджеру. apply →
+    // spinOffNewRequest (создать новую заявку), а не смена статуса.
+    case InboundPossibleNewRequest = 'inbound_possible_new_request';
     case InboundUnclear = 'inbound_unclear';
 
     public function label(): string
@@ -44,6 +49,7 @@ enum DetectorType: string
             self::InboundDecline => 'Клиент: отказ',
             self::InboundClarificationResponse => 'Клиент: ответ на уточнение',
             self::InboundExtension => 'Клиент: добавил позиции',
+            self::InboundPossibleNewRequest => 'Клиент: возможно новая заявка',
             self::InboundUnclear => 'Клиент: непонятно',
         };
     }
@@ -77,6 +83,8 @@ enum DetectorType: string
             self::InboundDecline => RequestStatus::ClosedLost,
             self::InboundClarificationResponse => RequestStatus::InProgress,
             self::InboundExtension => RequestStatus::InProgress,
+            // apply обрабатывается отдельно (spin-off), не через смену статуса.
+            self::InboundPossibleNewRequest => null,
             self::InboundUnclear => null,
         };
     }

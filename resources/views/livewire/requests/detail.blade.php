@@ -714,6 +714,7 @@
                             'inbound_decline' => '⊘',
                             'inbound_clarification_response' => '↩',
                             'inbound_extension' => '➕',
+                            'inbound_possible_new_request' => '🔀',
                             default => '🤖',
                         };
                     @endphp
@@ -751,7 +752,16 @@
                             </div>
                         </div>
                         <div class="flex items-center gap-1.5">
-                            @if($sTarget && $allow($sTarget))
+                            @if($sType === \App\Enums\DetectorType::InboundPossibleNewRequest)
+                                {{-- Подсказка «возможно новая заявка»: применение
+                                     разворачивает письмо в ОТДЕЛЬНУЮ заявку. --}}
+                                <button type="button"
+                                        wire:click="applyAiDecision({{ $sugg->id }})"
+                                        wire:confirm="Создать ОТДЕЛЬНУЮ новую заявку из этого письма клиента? Текущая заявка не изменится."
+                                        class="btn btn-sm btn-primary flex-1">
+                                    🔀 Создать новую заявку
+                                </button>
+                            @elseif($sTarget && $allow($sTarget))
                                 <button type="button"
                                         wire:click="applyAiDecision({{ $sugg->id }})"
                                         class="btn btn-sm btn-primary flex-1">

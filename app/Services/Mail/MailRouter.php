@@ -417,6 +417,40 @@ class MailRouter
                 // спин-офф не удался — продолжаем как обычный reply ниже.
             }
 
+            // Approach B (подсказка, НЕ авто-форк): заявка уже в пост-КП стадии
+            // (quoted/согласование/счёт/оплата/закрыто), а клиент в треде просит
+            // добавить позиции / счёт на новое (intent additional_items ИЛИ
+            // new_request ниже порога авто-форка) — вероятно ОТДЕЛЬНАЯ новая
+            // заявка. Авто-классификацию НЕ трогаем (inbound_extension отработает
+            // как раньше), но поднимаем менеджеру подсказку с кнопкой «Создать
+            // новую заявку». recordSuggestion НЕ авто-применяется — auto_mode
+            // для inbound_possible_new_request выключен по умолчанию.
+            $intent = $intentResult['payload']['intent'] ?? null;
+            $intentConf = (float) ($intentResult['confidence'] ?? 0);
+            if ($shouldParse
+                && $linkedRequest->status->isPostQuote()
+                && (
+                    $intent === 'additional_items'
+                    || ($intent === 'new_request' && $intentConf < self::NEW_REQUEST_CONFIDENCE)
+                )
+            ) {
+                try {
+                    $this->aiDecisions->recordSuggestion(
+                        DetectorType::InboundPossibleNewRequest,
+                        $linkedRequest,
+                        $message,
+                        max($intentConf, 0.6),
+                        ['signals' => ['intent' => $intent, 'stage' => $linkedRequest->status->value]],
+                    );
+                } catch (\Throwable $e) {
+                    Log::warning('MailRouter: possible-new-request suggestion failed (non-fatal)', [
+                        'email_message_id' => $message->id,
+                        'request_id' => $linkedRequest->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
             if ($shouldParse) {
                 \App\Jobs\Mail\ParseRequestItemsJob::dispatch($message->id, true);
             }
