@@ -428,6 +428,18 @@ class Index extends Component
         unset($this->supplierOptions);
     }
 
+    /**
+     * Перечитать подбор поставщиков — вызывается при возврате фокуса на вкладку
+     * (карточку поставщика правят в соседней вкладке через ✎): подтягивает
+     * изменённые имя/email/язык/матрицу без потери собранного пула и правок
+     * полей письма. Язык мог смениться на en → тихий доперевод названий.
+     */
+    public function refreshSupplierOptions(): void
+    {
+        unset($this->supplierOptions, $this->previewLanguages);
+        $this->autoTranslateIfEnglish();
+    }
+
     public function send(SupplierProcurementDispatchService $dispatcher)
     {
         $user = auth()->user();

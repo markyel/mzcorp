@@ -189,12 +189,14 @@
     {{-- Панель запроса поставщикам (по выбранным позициям) --}}
     @php $selPos = $this->selectedPositions; @endphp
     @if($selPos->isNotEmpty())
-        <div class="ds-card">
+        {{-- @focus.window: карточку поставщика правят через ✎ в соседней вкладке —
+             при возврате сюда молча перечитываем подбор (имя/язык/матрица). --}}
+        <div class="ds-card" x-data @focus.window.debounce.500ms="$wire.refreshSupplierOptions()">
             <div class="ds-card-header"><h3>Запрос поставщикам</h3><span class="text-[12px] text-fg-3 ml-2">выбрано позиций: {{ $selPos->count() }}</span></div>
             <div class="ds-card-body space-y-3">
                 {{-- Поставщики --}}
                 <div>
-                    <label class="block text-[11.5px] text-fg-3 mb-1">Поставщики <span class="text-fg-4">— подобраны по матрице под выбранные позиции</span></label>
+                    <label class="block text-[11.5px] text-fg-3 mb-1">Поставщики <span class="text-fg-4">— подобраны по матрице под выбранные позиции; ✎ — карточка поставщика (правки подтянутся при возврате)</span></label>
                     <div class="border border-border rounded-md divide-y divide-border-subtle">
                         @forelse($this->supplierOptions as $o)
                             <label wire:key="sup-opt-{{ $o['id'] }}" class="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-hover">
@@ -205,6 +207,9 @@
                                     @else<span class="chip chip-neutral text-[10px] ml-1">добавлен вручную</span>@endif
                                     @if($o['email'])<span class="block text-[11px] text-fg-4 mono">{{ $o['email'] }}</span>@endif
                                 </span>
+                                <a href="{{ route('suppliers.registry-edit', $o['id']) }}" target="_blank" rel="noopener"
+                                   class="mt-0.5 px-1 text-fg-4 hover:text-sky-700 text-[13px]"
+                                   title="Открыть карточку поставщика в новой вкладке — реквизиты, язык, матрица подбора">✎</a>
                             </label>
                         @empty
                             <div class="px-3 py-3 text-[12px] text-amber-700">По выбранным позициям нет подходящих поставщиков — добавьте вручную ниже.</div>
