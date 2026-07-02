@@ -13,25 +13,48 @@
             @php $sum = $this->summary; @endphp
             <div class="flex flex-wrap gap-6 text-[13px]">
                 <div><span class="text-[22px] font-semibold text-fg-1 mono">{{ $sum['positions'] }}</span> <span class="text-fg-3">M-позиций с неактуальной ценой</span></div>
-                <div><span class="text-[22px] font-semibold text-fg-1 mono">{{ $sum['requests'] }}</span> <span class="text-fg-3">заявок ждут актуализацию (до-КП)</span></div>
+                <div><span class="text-[22px] font-semibold text-fg-1 mono">{{ $sum['requests'] }}</span> <span class="text-fg-3">{{ $mode === 'period' ? 'заявок затронуто за период' : 'заявок ждут актуализацию (до-КП)' }}</span></div>
                 <div><span class="text-[22px] font-semibold text-emerald-700 mono">{{ $sum['in_stock'] }}</span> <span class="text-fg-3">из них на складе <span class="text-fg-4">— достаточно переоценки, поставщик не нужен</span></span></div>
             </div>
             <div class="text-[11.5px] text-fg-4 mt-2">
-                Считаем заявки в статусах <b>Новая / Назначена / В работе / Уточнение</b> со сматченными позициями (M-артикул), у которых цена в каталоге неактуальна. Чем в большем числе заявок зависла позиция — тем выше приоритет обновить её цену.
+                @if($mode === 'period')
+                    Считаем все позиции, запрошенные клиентами за выбранный период (<b>{{ $periodDays }} дн.</b>, любой статус заявки — включая закрытые), сматченные на каталог и до сих пор без актуальной цены. Показывает полный поток спроса на «протухшие» позиции, а не только текущую очередь.
+                @else
+                    Считаем заявки в статусах <b>Новая / Назначена / В работе / Уточнение</b> со сматченными позициями (M-артикул), у которых цена в каталоге неактуальна. Чем в большем числе заявок зависла позиция — тем выше приоритет обновить её цену.
+                @endif
             </div>
         </div>
     </div>
 
-    {{-- Поиск --}}
-    <div>
+    {{-- Поиск + режим списка + фильтр наличия --}}
+    <div class="flex flex-wrap items-center gap-2">
         <input type="search" wire:model.live.debounce.300ms="search"
                placeholder="Поиск: артикул / наименование / бренд"
-               class="h-[32px] w-full max-w-[440px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
+               class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
+        <select wire:model.live="mode"
+                class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+            <option value="current">Текущие блокеры (заявки до КП)</option>
+            <option value="period">Запрошенные за период (все заявки)</option>
+        </select>
+        @if($mode === 'period')
+            <select wire:model.live="periodDays"
+                    class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                @foreach(\App\Livewire\Procurement\Index::PERIOD_DAYS as $d)
+                    <option value="{{ $d }}">за {{ $d }} дн.</option>
+                @endforeach
+            </select>
+        @endif
+        <select wire:model.live="stockFilter"
+                class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+            <option value="">Наличие: все</option>
+            <option value="in">📦 только на складе</option>
+            <option value="out">только без остатка</option>
+        </select>
     </div>
 
     {{-- Топ позиций-блокеров --}}
     <div class="ds-card">
-        <div class="ds-card-header"><h3>Топ позиций-блокеров</h3></div>
+        <div class="ds-card-header"><h3>{{ $mode === 'period' ? 'Топ запрошенных позиций без актуальной цены' : 'Топ позиций-блокеров' }}</h3></div>
         <div class="ds-card-body overflow-x-auto">
             <table class="w-full text-[12.5px]">
                 <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
@@ -149,7 +172,7 @@
                     </tbody>
                 @empty
                     <tbody>
-                        <tr><td colspan="11" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Нет позиций с неактуальной ценой в заявках до выдачи КП.' }}</td></tr>
+                        <tr><td colspan="11" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' || $stockFilter !== '' ? 'Ничего не найдено по заданным фильтрам.' : ($mode === 'period' ? 'За выбранный период нет запрошенных позиций без актуальной цены.' : 'Нет позиций с неактуальной ценой в заявках до выдачи КП.') }}</td></tr>
                     </tbody>
                 @endforelse
             </table>

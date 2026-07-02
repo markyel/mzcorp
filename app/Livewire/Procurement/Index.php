@@ -34,8 +34,23 @@ class Index extends Component
     /** Статусы «не дошло до КП». */
     public const PRE_QUOTE = ['new', 'assigned', 'in_progress', 'awaiting_client_clarification'];
 
+    /** Допустимые периоды (дней) для режима «за период». */
+    public const PERIOD_DAYS = [7, 14, 30, 60, 90];
+
     #[Url(as: 'q', except: '')]
     public string $search = '';
+
+    /** Режим списка: current — блокеры в текущих до-КП заявках; period — всё, что запрашивали за период (любой статус заявки). */
+    #[Url(as: 'mode', except: 'current')]
+    public string $mode = 'current';
+
+    /** Окно режима «за период», дней. */
+    #[Url(as: 'days', except: 30)]
+    public int $periodDays = 30;
+
+    /** Фильтр наличия: '' — все, 'in' — только на складе, 'out' — только без остатка. */
+    #[Url(as: 'stock', except: '')]
+    public string $stockFilter = '';
 
     /** cid => bool — выбранные позиции для запроса. */
     public array $selected = [];
@@ -93,6 +108,45 @@ class Index extends Component
     public function updatingSearch(): void
     {
         $this->resetPage();
+    }
+
+    public function updatingMode(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatingPeriodDays(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatingStockFilter(): void
+    {
+        $this->resetPage();
+    }
+
+    /* ------------------------- Режим/фильтры списка ------------------------ */
+
+    private function isPeriodMode(): bool
+    {
+        return $this->mode === 'period';
+    }
+
+    private function normalizedPeriodDays(): int
+    {
+        return in_array($this->periodDays, self::PERIOD_DAYS, true) ? $this->periodDays : 30;
+    }
+
+    /** Условия по заявке/дате для текущего режима — общие для baseQuery и выборки кодов заявок. */
+    private function applyRequestScope(Builder $q): Builder
+    {
+        if ($this->isPeriodMode()) {
+            $q->where('request_items.created_at', '>=', now()->subDays($this->normalizedPeriodDays())->startOfDay());
+        } else {
+            $q->whereIn('requests.status', self::PRE_QUOTE);
+        }
+
+        return $q;
     }
 
     /** При выборе позиции — префилл редактируемых полей из каталога. */
@@ -431,8 +485,14 @@ class Index extends Component
             ->where('request_items.is_active', true)
             ->whereNotNull('request_items.catalog_item_id')
             ->where('catalog_items.is_price_actual', false)
-            ->whereIn('requests.status', self::PRE_QUOTE)
             ->whereNull('requests.merged_into_id');
+        $this->applyRequestScope($q);
+
+        if ($this->stockFilter === 'in') {
+            $q->where('catalog_items.stock_available', '>', 0);
+        } elseif ($this->stockFilter === 'out') {
+            $q->where(fn ($w) => $w->where('catalog_items.stock_available', '<=', 0)->orWhereNull('catalog_items.stock_available'));
+        }
 
         $s = trim($this->search);
         if ($s !== '') {
@@ -490,12 +550,13 @@ class Index extends Component
         // Коды заблокированных заявок по позиции (первые несколько).
         $codes = [];
         if ($cids !== []) {
-            $codeRows = DB::table('request_items')
-                ->join('requests', 'requests.id', '=', 'request_items.request_id')
-                ->where('request_items.is_active', true)
-                ->whereIn('request_items.catalog_item_id', $cids)
-                ->whereIn('requests.status', self::PRE_QUOTE)
-                ->whereNull('requests.merged_into_id')
+            $codeRows = $this->applyRequestScope(
+                DB::table('request_items')
+                    ->join('requests', 'requests.id', '=', 'request_items.request_id')
+                    ->where('request_items.is_active', true)
+                    ->whereIn('request_items.catalog_item_id', $cids)
+                    ->whereNull('requests.merged_into_id')
+            )
                 ->select('request_items.catalog_item_id as cid', 'requests.id', 'requests.internal_code')
                 ->distinct()
                 ->get();
