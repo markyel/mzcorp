@@ -58,6 +58,14 @@
             font-size: 10.5px !important;
             line-height: 1.4 !important;
         }
+        /* Outlook кладёт каждую строку в отдельный <p class="MsoNormal"> с
+           margin:0 в <style>-блоке письма, который мы вырезаем при экспорте —
+           без него dompdf даёт <p> дефолтные ~1em сверху и снизу, и текст
+           выглядит «через строку». Прижимаем абзацы принудительно. */
+        .msg-body p {
+            margin-top: 0 !important;
+            margin-bottom: 4px !important;
+        }
         .msg-body img { max-width: 100%; height: auto; }
         .msg-body table { max-width: 100%; }
 

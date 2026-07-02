@@ -247,14 +247,19 @@ class CorrespondenceExportService
      * Удаляет процитированные блоки из HTML письма (в экспорт идут только сами
      * письма, без цитат предыдущей переписки). Зеркалит детект из
      * Requests\Detail::collapseQuotedBlocks, но НЕ сворачивает в <details>, а
-     * вырезает blockquote / gmail_quote / yahoo_quoted + attribution-строки
-     * («Кому:/От:/… написал(а):») непосредственно перед цитатой.
+     * вырезает: blockquote / gmail_quote / yahoo_quoted + attribution-строки
+     * («Кому:/От:/… написал(а):») непосредственно перед цитатой, а также
+     * Outlook-стиль без blockquote — реплай-хедер «From:/Sent:/To:»
+     * («От:/Отправлено:/Кому:») и всё после него.
      */
     private function stripQuotedBlocks(string $html): string
     {
         if (stripos($html, '<blockquote') === false
             && stripos($html, 'gmail_quote') === false
-            && stripos($html, 'yahoo_quoted') === false) {
+            && stripos($html, 'yahoo_quoted') === false
+            && preg_match('/(From|От)\s*:/iu', $html) !== 1
+            && stripos($html, 'Original Message') === false
+            && stripos($html, 'Исходное сообщение') === false) {
             return $html;
         }
 
@@ -270,13 +275,88 @@ class CorrespondenceExportService
         }
 
         $xpath = new \DOMXPath($doc);
+
+        // Порядок как в Detail: сначала Outlook-хедер (вырезает и вложенные в
+        // хвост blockquote), потом обычные blockquote-цитаты.
+        $changed = $this->stripOutlookStyleQuote($doc, $xpath);
+        $changed = $this->stripBlockquoteNodes($doc, $xpath) || $changed;
+
+        if (! $changed) {
+            return $html;
+        }
+
+        $root = $doc->getElementById('mylift-export-root');
+        if (! $root) {
+            return $html;
+        }
+
+        $out = '';
+        foreach ($root->childNodes as $child) {
+            $out .= $doc->saveHTML($child);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Outlook-стиль цитирования без blockquote: реплай-хедер + оригинал письма
+     * обычными абзацами до конца. Логика поиска — копия
+     * Requests\Detail::collapseOutlookStyleQuote, но узлы удаляются.
+     * Форвард целиком (нет собственного текста до хедера) не трогаем.
+     */
+    private function stripOutlookStyleQuote(\DOMDocument $doc, \DOMXPath $xpath): bool
+    {
+        $candidates = $xpath->query('//p[not(ancestor::blockquote)] | //div[not(ancestor::blockquote)]');
+        if ($candidates === false || $candidates->length === 0) {
+            return false;
+        }
+
+        $header = null;
+        foreach ($candidates as $el) {
+            $text = trim((string) preg_replace('/\s+/u', ' ', $el->textContent ?? ''));
+            if ($text === '' || mb_strlen($text) > 600) {
+                continue;
+            }
+            if ($this->looksLikeReplyHeader($text)) {
+                $header = $el;
+                break;
+            }
+        }
+        if ($header === null) {
+            return false;
+        }
+
+        $node = $header;
+        while ($node->parentNode instanceof \DOMElement
+            && $node->parentNode->getAttribute('id') !== 'mylift-export-root'
+            && ! $this->hasMeaningfulPrecedingSibling($node)) {
+            $node = $node->parentNode;
+        }
+        if (! $this->hasMeaningfulPrecedingSibling($node)) {
+            return false;
+        }
+
+        $toRemove = [$node];
+        for ($n = $node->nextSibling; $n !== null; $n = $n->nextSibling) {
+            $toRemove[] = $n;
+        }
+        foreach ($toRemove as $n) {
+            $n->parentNode?->removeChild($n);
+        }
+
+        return true;
+    }
+
+    /** Прежний проход: вырезание blockquote / gmail_quote / yahoo_quoted. */
+    private function stripBlockquoteNodes(\DOMDocument $doc, \DOMXPath $xpath): bool
+    {
         $nodes = $xpath->query(
             '//blockquote[not(ancestor::blockquote)]'
             . ' | //div[contains(@class, "gmail_quote") and not(ancestor::blockquote)]'
             . ' | //div[contains(@class, "yahoo_quoted") and not(ancestor::blockquote)]'
         );
         if ($nodes === false || $nodes->length === 0) {
-            return $html;
+            return false;
         }
 
         // Сначала собираем узлы в массив — живая NodeList ломается при удалении.
@@ -300,17 +380,53 @@ class CorrespondenceExportService
             $node->parentNode?->removeChild($node);
         }
 
-        $root = $doc->getElementById('mylift-export-root');
-        if (! $root) {
-            return $html;
+        return true;
+    }
+
+    /**
+     * Реплай-хедер Outlook/корп-систем: «From:» + минимум два поля из
+     * Sent/To/Subject/Date (или русские аналоги), либо «--- Original Message ---».
+     * Копия Requests\Detail::looksLikeReplyHeader.
+     */
+    private function looksLikeReplyHeader(string $text): bool
+    {
+        if (preg_match('/^-{2,}\s*(Original Message|Исходное сообщение|Forwarded message|Пересылаемое сообщение|Перенаправленное сообщение)/iu', $text)) {
+            return true;
+        }
+        if (preg_match('/(^|\s)(From|От)\s*:/iu', $text) !== 1) {
+            return false;
+        }
+        $fields = 0;
+        foreach (['/(Sent|Отправлено)\s*:/iu', '/(To|Кому)\s*:/iu', '/(Subject|Тема)\s*:/iu', '/(Date|Дата)\s*:/iu'] as $p) {
+            if (preg_match($p, $text) === 1) {
+                $fields++;
+            }
         }
 
-        $out = '';
-        foreach ($root->childNodes as $child) {
-            $out .= $doc->saveHTML($child);
+        return $fields >= 2;
+    }
+
+    /** Есть ли перед нодой содержательный контент письма (копия из Detail). */
+    private function hasMeaningfulPrecedingSibling(\DOMNode $node): bool
+    {
+        for ($p = $node->previousSibling; $p !== null; $p = $p->previousSibling) {
+            if ($p->nodeType === XML_TEXT_NODE && trim($p->textContent) !== '') {
+                return true;
+            }
+            if ($p->nodeType === XML_ELEMENT_NODE) {
+                if (in_array(strtolower($p->nodeName), ['br', 'hr'], true)) {
+                    continue;
+                }
+                if (trim($p->textContent) !== '') {
+                    return true;
+                }
+                if ($p instanceof \DOMElement && $p->getElementsByTagName('img')->length > 0) {
+                    return true;
+                }
+            }
         }
 
-        return $out;
+        return false;
     }
 
     /**
@@ -358,17 +474,34 @@ class CorrespondenceExportService
 
     /**
      * Чистка цитат в plain-text письме: обрываем на attribution-строке
-     * («… написал(а):» / «--- Original message ---») и убираем `>`-цитаты.
+     * («… написал(а):» / «--- Original message ---»), на Outlook-хедере
+     * («From:/От:» + в ближайших строках «Sent:/Отправлено:/Кому:/…»)
+     * и убираем `>`-цитаты.
      */
     private function stripQuotedPlain(string $text): string
     {
         $lines = preg_split('/\r\n|\r|\n/', $text) ?: [];
         $out = [];
-        foreach ($lines as $line) {
-            if (preg_match('/^\s*-{2,}\s*(Original message|Перенаправленное|Forwarded|Пересылаемое)/iu', $line)
+        $count = count($lines);
+        for ($i = 0; $i < $count; $i++) {
+            $line = $lines[$i];
+            if (preg_match('/^\s*-{2,}\s*(Original message|Исходное сообщение|Перенаправленное|Forwarded|Пересылаемое)/iu', $line)
                 || preg_match('/(написал\(а\)|написал[аи]?|пиш[еу]т|писал[аи]?|wrote|writes)\s*:?\s*$/iu', $line)
             ) {
                 break;
+            }
+            // Outlook-хедер: «From:/От: …» и в пределах 3 следующих строк второе поле.
+            if (preg_match('/^\s*(From|От)\s*:\s*\S/iu', $line)) {
+                $isHeader = false;
+                for ($j = $i + 1; $j <= min($i + 3, $count - 1); $j++) {
+                    if (preg_match('/^\s*(Sent|Отправлено|To|Кому|Date|Дата|Subject|Тема)\s*:/iu', $lines[$j])) {
+                        $isHeader = true;
+                        break;
+                    }
+                }
+                if ($isHeader && trim(implode('', $out)) !== '') {
+                    break;
+                }
             }
             if (preg_match('/^\s*>/', $line)) {
                 continue;
