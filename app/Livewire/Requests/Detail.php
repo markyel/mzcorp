@@ -790,12 +790,18 @@ class Detail extends Component
      *   - `<blockquote>` без атрибутов — общий fallback
      *   - `<div class*="gmail_quote">`  — Gmail обёртка
      *   - `<div class*="yahoo_quoted">` — Yahoo
+     *   - Outlook/корп-системы БЕЗ blockquote: блок «From:/Sent:/To:» или
+     *     «От:/Отправлено:/Кому:» (или «--- Original Message ---»), после
+     *     которого оригинал письма идёт обычным текстом до конца.
      */
     private function collapseQuotedBlocks(string $html): string
     {
         if (stripos($html, '<blockquote') === false
             && stripos($html, 'gmail_quote') === false
-            && stripos($html, 'yahoo_quoted') === false) {
+            && stripos($html, 'yahoo_quoted') === false
+            && preg_match('/(From|От|Von)\s*:/iu', $html) !== 1
+            && stripos($html, 'Original Message') === false
+            && stripos($html, 'Исходное сообщение') === false) {
             return $html;
         }
 
@@ -813,67 +819,14 @@ class Detail extends Component
         }
 
         $xpath = new \DOMXPath($doc);
-        // Расширенный selector: любые top-level blockquote + Gmail/Yahoo div'ы.
-        // ancestor::blockquote / ancestor::details — чтобы не оборачивать
-        // повторно при перерендере.
-        $nodes = $xpath->query(
-            '//blockquote[not(ancestor::blockquote) and not(ancestor::details)]'
-            . ' | //div[contains(@class, "gmail_quote") and not(ancestor::blockquote) and not(ancestor::details)]'
-            . ' | //div[contains(@class, "yahoo_quoted") and not(ancestor::blockquote) and not(ancestor::details)]'
-        );
-        if ($nodes === false || $nodes->length === 0) {
+
+        // Порядок важен: сначала Outlook-стиль (header + всё после него) —
+        // тогда blockquote-проход пропустит цитаты, уже попавшие внутрь details.
+        $changed = $this->collapseOutlookStyleQuote($doc, $xpath);
+        $changed = $this->collapseBlockquoteNodes($doc, $xpath) || $changed;
+
+        if (! $changed) {
             return $html;
-        }
-
-        foreach ($nodes as $bq) {
-            /** @var \DOMElement $bq */
-            $details = $doc->createElement('details');
-            $details->setAttribute(
-                'style',
-                'margin-top:6px;'
-            );
-
-            $summary = $doc->createElement('summary', '· · · показать цитату');
-            $summary->setAttribute(
-                'style',
-                'cursor:pointer;list-style:none;font-size:12px;color:#7280a0;'
-                . 'user-select:none;padding:2px 0;outline:none;'
-            );
-            $details->appendChild($summary);
-
-            // Yandex web UI кладёт attribution-header'ы (Кому: / Тема: /
-            // DATE, NAME <email>:) ПЕРЕД blockquote отдельными div/p
-            // блоками — наш сворачиватель ловил только blockquote, и эти
-            // строки оставались видимыми над «показать цитату». Затягиваем
-            // в details все «attribution-like» соседи непосредственно
-            // перед blockquote.
-            $attributionNodes = [];
-            $prev = $bq->previousSibling;
-            while ($prev !== null) {
-                if ($this->looksLikeQuoteAttribution($prev)) {
-                    $attributionNodes[] = $prev;
-                    $prev = $prev->previousSibling;
-                    continue;
-                }
-                // Пустой text-node или <br> — тоже включаем, чтобы не
-                // оставлять висящие разделители.
-                if (($prev->nodeType === XML_TEXT_NODE && trim($prev->textContent) === '')
-                    || ($prev->nodeType === XML_ELEMENT_NODE && strtolower($prev->nodeName) === 'br')
-                ) {
-                    $attributionNodes[] = $prev;
-                    $prev = $prev->previousSibling;
-                    continue;
-                }
-                break;
-            }
-
-            $bq->parentNode->replaceChild($details, $bq);
-            // Прицепляем attribution-блоки В details ПЕРЕД blockquote
-            // (в естественном порядке — мы шли назад, теперь reverse).
-            foreach (array_reverse($attributionNodes) as $node) {
-                $details->appendChild($node);
-            }
-            $details->appendChild($bq);
         }
 
         $root = $doc->getElementById('mylift-thread-root');
@@ -887,6 +840,186 @@ class Detail extends Component
         }
 
         return $out;
+    }
+
+    /**
+     * Outlook-стиль цитирования: `<blockquote>` нет вовсе — реплай-хедер
+     * («From: … Sent: … To: …» / «От: … Отправлено: … Кому: …» /
+     * «--- Original Message ---») и следом оригинал письма обычными
+     * абзацами до конца. Находим ПЕРВЫЙ такой хедер, поднимаемся до уровня,
+     * где перед ним есть собственный контент письма, и сворачиваем узел +
+     * все последующие siblings. Если собственного контента нет (форвард
+     * целиком) — не сворачиваем: читать было бы нечего.
+     */
+    private function collapseOutlookStyleQuote(\DOMDocument $doc, \DOMXPath $xpath): bool
+    {
+        $candidates = $xpath->query(
+            '//p[not(ancestor::blockquote) and not(ancestor::details)]'
+            . ' | //div[not(ancestor::blockquote) and not(ancestor::details)]'
+        );
+        if ($candidates === false || $candidates->length === 0) {
+            return false;
+        }
+
+        $header = null;
+        foreach ($candidates as $el) {
+            $text = trim((string) preg_replace('/\s+/u', ' ', $el->textContent ?? ''));
+            if ($text === '' || mb_strlen($text) > 600) {
+                continue;
+            }
+            if ($this->looksLikeReplyHeader($text)) {
+                $header = $el;
+                break; // первый в document order — самая внешняя цитата
+            }
+        }
+        if ($header === null) {
+            return false;
+        }
+
+        // Поднимаемся, пока на уровне нет содержимого ПЕРЕД узлом: хедер часто
+        // завёрнут в div>div>div, а цитируемый текст — sibling внешней обёртки.
+        $node = $header;
+        while ($node->parentNode instanceof \DOMElement
+            && $node->parentNode->getAttribute('id') !== 'mylift-thread-root'
+            && ! $this->hasMeaningfulPrecedingSibling($node)) {
+            $node = $node->parentNode;
+        }
+        if (! $this->hasMeaningfulPrecedingSibling($node)) {
+            return false;
+        }
+
+        $nodes = [$node];
+        for ($n = $node->nextSibling; $n !== null; $n = $n->nextSibling) {
+            $nodes[] = $n;
+        }
+        $this->wrapInDetails($doc, $nodes);
+
+        return true;
+    }
+
+    /** Прежний проход: blockquote + Gmail/Yahoo обёртки. */
+    private function collapseBlockquoteNodes(\DOMDocument $doc, \DOMXPath $xpath): bool
+    {
+        // Расширенный selector: любые top-level blockquote + Gmail/Yahoo div'ы.
+        // ancestor::blockquote / ancestor::details — чтобы не оборачивать
+        // повторно при перерендере (и не трогать цитаты внутри Outlook-details).
+        $nodes = $xpath->query(
+            '//blockquote[not(ancestor::blockquote) and not(ancestor::details)]'
+            . ' | //div[contains(@class, "gmail_quote") and not(ancestor::blockquote) and not(ancestor::details)]'
+            . ' | //div[contains(@class, "yahoo_quoted") and not(ancestor::blockquote) and not(ancestor::details)]'
+        );
+        if ($nodes === false || $nodes->length === 0) {
+            return false;
+        }
+
+        foreach ($nodes as $bq) {
+            /** @var \DOMElement $bq */
+            // Yandex web UI кладёт attribution-header'ы (Кому: / Тема: /
+            // DATE, NAME <email>:) ПЕРЕД blockquote отдельными div/p
+            // блоками — эти строки логически принадлежат цитате. Затягиваем
+            // в details все «attribution-like» соседи непосредственно
+            // перед blockquote (+ пустые text-nodes и <br>).
+            $attributionNodes = [];
+            $prev = $bq->previousSibling;
+            while ($prev !== null) {
+                if ($this->looksLikeQuoteAttribution($prev)) {
+                    $attributionNodes[] = $prev;
+                    $prev = $prev->previousSibling;
+                    continue;
+                }
+                if (($prev->nodeType === XML_TEXT_NODE && trim($prev->textContent) === '')
+                    || ($prev->nodeType === XML_ELEMENT_NODE && strtolower($prev->nodeName) === 'br')
+                ) {
+                    $attributionNodes[] = $prev;
+                    $prev = $prev->previousSibling;
+                    continue;
+                }
+                break;
+            }
+
+            $this->wrapInDetails($doc, array_merge(array_reverse($attributionNodes), [$bq]));
+        }
+
+        return true;
+    }
+
+    /**
+     * Завернуть последовательность нод в `<details>` со стандартным summary
+     * «показать цитату». details встаёт на место первой ноды, остальные
+     * переезжают внутрь в исходном порядке.
+     *
+     * @param  array<int, \DOMNode>  $nodes
+     */
+    private function wrapInDetails(\DOMDocument $doc, array $nodes): void
+    {
+        $first = $nodes[0] ?? null;
+        if ($first === null || $first->parentNode === null) {
+            return;
+        }
+
+        $details = $doc->createElement('details');
+        $details->setAttribute('style', 'margin-top:6px;');
+
+        $summary = $doc->createElement('summary', '· · · показать цитату');
+        $summary->setAttribute(
+            'style',
+            'cursor:pointer;list-style:none;font-size:12px;color:#7280a0;'
+            . 'user-select:none;padding:2px 0;outline:none;'
+        );
+        $details->appendChild($summary);
+
+        $first->parentNode->replaceChild($details, $first);
+        $details->appendChild($first);
+        foreach (array_slice($nodes, 1) as $node) {
+            $details->appendChild($node);
+        }
+    }
+
+    /**
+     * Похож ли текст на реплай-хедер Outlook/корп-систем: «From:» + минимум
+     * два из полей Sent/To/Subject/Date (или их русские аналоги), либо
+     * разделитель «--- Original Message ---». Порог из двух полей защищает
+     * от ложного срабатывания на «От:» внутри обычного текста письма.
+     */
+    private function looksLikeReplyHeader(string $text): bool
+    {
+        if (preg_match('/^-{2,}\s*(Original Message|Исходное сообщение|Forwarded message|Пересылаемое сообщение|Перенаправленное сообщение)/iu', $text)) {
+            return true;
+        }
+        if (preg_match('/(^|\s)(From|От)\s*:/iu', $text) !== 1) {
+            return false;
+        }
+        $fields = 0;
+        foreach (['/(Sent|Отправлено)\s*:/iu', '/(To|Кому)\s*:/iu', '/(Subject|Тема)\s*:/iu', '/(Date|Дата)\s*:/iu'] as $p) {
+            if (preg_match($p, $text) === 1) {
+                $fields++;
+            }
+        }
+
+        return $fields >= 2;
+    }
+
+    /** Есть ли перед нодой (на её уровне) содержательный контент письма. */
+    private function hasMeaningfulPrecedingSibling(\DOMNode $node): bool
+    {
+        for ($p = $node->previousSibling; $p !== null; $p = $p->previousSibling) {
+            if ($p->nodeType === XML_TEXT_NODE && trim($p->textContent) !== '') {
+                return true;
+            }
+            if ($p->nodeType === XML_ELEMENT_NODE) {
+                if (in_array(strtolower($p->nodeName), ['br', 'hr'], true)) {
+                    continue;
+                }
+                if (trim($p->textContent) !== '') {
+                    return true;
+                }
+                if ($p instanceof \DOMElement && $p->getElementsByTagName('img')->length > 0) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -937,6 +1070,50 @@ class Detail extends Component
         }
 
         return false;
+    }
+
+    /**
+     * Разбить plain-text письмо на [видимая часть, свёрнутая цитата|null] для
+     * треда: цитата = с первой строки-маркера («>»-префикс, реплай-хедер
+     * From:/От:, «--- Original Message ---», «…пишет:/wrote:») до конца.
+     * Если до маркера нет собственного текста (bottom-posting / форвард
+     * целиком) — не сворачиваем.
+     *
+     * @return array{0: string, 1: ?string}
+     */
+    public function splitPlainQuote(?string $plain): array
+    {
+        $plain = (string) $plain;
+        if (trim($plain) === '') {
+            return [$plain, null];
+        }
+
+        $patterns = [
+            '/^[ \t]*>/m',
+            '/^[ \t]*-{2,}\s*(Original Message|Исходное сообщение|Forwarded message|Пересылаемое сообщение|Перенаправленное сообщение)/miu',
+            // Outlook-хедер: «От: …» и в пределах пары строк «Отправлено:/Кому:/…».
+            '/^[ \t]*(From|От)\s*:[^\n]+\n(?:[^\n]*\n){0,3}?[ \t]*(Sent|Отправлено|To|Кому|Date|Дата|Subject|Тема)\s*:/miu',
+            // «01.06.2026 12:09, Имя пишет:» / «… wrote:»
+            '/^[^\n]{0,160}(написал\(а\)|написала?|пишет|wrote)\s*:\s*$/miu',
+        ];
+
+        $idx = null;
+        foreach ($patterns as $p) {
+            if (preg_match($p, $plain, $m, PREG_OFFSET_CAPTURE) === 1) {
+                $pos = (int) $m[0][1];
+                $idx = $idx === null ? $pos : min($idx, $pos);
+            }
+        }
+        if ($idx === null) {
+            return [$plain, null];
+        }
+
+        $visible = rtrim(substr($plain, 0, $idx));
+        if (trim($visible) === '') {
+            return [$plain, null];
+        }
+
+        return [$visible, substr($plain, $idx)];
     }
 
     /**

@@ -1439,7 +1439,14 @@
                                                 "
                                             ></iframe>
                                         @elseif($msg->body_plain)
-                                            <pre class="whitespace-pre-wrap font-sans text-[13px]">{{ $msg->body_plain }}</pre>
+                                            @php [$plainMain, $plainQuoted] = $this->splitPlainQuote($msg->body_plain); @endphp
+                                            <pre class="whitespace-pre-wrap font-sans text-[13px]">{{ $plainMain }}</pre>
+                                            @if($plainQuoted !== null)
+                                                <details class="mt-1.5">
+                                                    <summary class="cursor-pointer select-none text-[12px] text-fg-4 hover:text-fg-2">· · · показать цитату</summary>
+                                                    <pre class="whitespace-pre-wrap font-sans text-[13px] text-fg-3 mt-1">{{ $plainQuoted }}</pre>
+                                                </details>
+                                            @endif
                                         @else
                                             <div class="text-fg-3">(пустое тело)</div>
                                         @endif
