@@ -14,6 +14,7 @@
             <div class="flex flex-wrap gap-6 text-[13px]">
                 <div><span class="text-[22px] font-semibold text-fg-1 mono">{{ $sum['positions'] }}</span> <span class="text-fg-3">M-позиций с неактуальной ценой</span></div>
                 <div><span class="text-[22px] font-semibold text-fg-1 mono">{{ $sum['requests'] }}</span> <span class="text-fg-3">заявок ждут актуализацию (до-КП)</span></div>
+                <div><span class="text-[22px] font-semibold text-emerald-700 mono">{{ $sum['in_stock'] }}</span> <span class="text-fg-3">из них на складе <span class="text-fg-4">— достаточно переоценки, поставщик не нужен</span></span></div>
             </div>
             <div class="text-[11.5px] text-fg-4 mt-2">
                 Считаем заявки в статусах <b>Новая / Назначена / В работе / Уточнение</b> со сматченными позициями (M-артикул), у которых цена в каталоге неактуальна. Чем в большем числе заявок зависла позиция — тем выше приоритет обновить её цену.
@@ -42,6 +43,7 @@
                         <th class="text-left px-2 py-2" style="width:120px">Бренд</th>
                         <th class="text-right px-2 py-2" style="width:90px">Заявок</th>
                         <th class="text-left px-2 py-2">Заявки</th>
+                        <th class="text-right px-2 py-2" style="width:90px">Наличие</th>
                         <th class="text-right px-2 py-2" style="width:110px">Цена (ст.)</th>
                         <th class="text-left px-2 py-2" style="width:150px">IQOT (конкуренты)</th>
                         <th class="text-left px-2 py-2" style="width:180px">Ответ поставщика</th>
@@ -70,6 +72,13 @@
                                     @endforeach
                                     @if($p['req_count'] > count($p['codes']))<span class="text-fg-4 text-[11px]">+{{ $p['req_count'] - count($p['codes']) }}</span>@endif
                                 </span>
+                            </td>
+                            <td class="px-2 py-2 text-right">
+                                @if($p['stock'] > 0)
+                                    <span class="chip chip-ok text-[10.5px] mono" title="На складе {{ $p['stock'] }} шт — для продажи достаточно актуализировать цену">📦 {{ $p['stock'] }}</span>
+                                @else
+                                    <span class="text-fg-4 text-[11px]">нет</span>
+                                @endif
                             </td>
                             <td class="px-2 py-2 text-right mono text-fg-3">{{ $p['price'] !== null ? number_format((float)$p['price'], 2, '.', ' ') : '—' }}</td>
                             <td class="px-2 py-2">
@@ -110,14 +119,14 @@
                         </tr>
                         @if($hasIqot)
                             <tr x-show="open" x-cloak class="border-b border-border-subtle bg-surface-2">
-                                <td colspan="10" class="px-4 py-2.5">
+                                <td colspan="11" class="px-4 py-2.5">
                                     @include('livewire.iqot._comparison', ['pos' => $iqp])
                                 </td>
                             </tr>
                         @endif
                         @if($hasOffers)
                             <tr x-show="sup" x-cloak class="border-b border-border-subtle bg-surface-2">
-                                <td colspan="10" class="px-4 py-2.5">
+                                <td colspan="11" class="px-4 py-2.5">
                                     <div class="text-[10.5px] uppercase tracking-wider text-fg-4 mb-1.5">Ответы поставщиков</div>
                                     <div class="space-y-1">
                                         @foreach($resp['offers'] as $of)
@@ -140,7 +149,7 @@
                     </tbody>
                 @empty
                     <tbody>
-                        <tr><td colspan="10" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Нет позиций с неактуальной ценой в заявках до выдачи КП.' }}</td></tr>
+                        <tr><td colspan="11" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Нет позиций с неактуальной ценой в заявках до выдачи КП.' }}</td></tr>
                     </tbody>
                 @endforelse
             </table>

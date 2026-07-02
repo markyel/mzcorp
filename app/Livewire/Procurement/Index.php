@@ -447,13 +447,16 @@ class Index extends Component
         return $q;
     }
 
-    /** @return array{positions:int, requests:int} */
+    /** @return array{positions:int, requests:int, in_stock:int} */
     #[Computed]
     public function summary(): array
     {
         return [
             'positions' => (clone $this->baseQuery())->distinct()->count('catalog_items.id'),
             'requests' => (clone $this->baseQuery())->distinct()->count('requests.id'),
+            'in_stock' => (clone $this->baseQuery())
+                ->where('catalog_items.stock_available', '>', 0)
+                ->distinct()->count('catalog_items.id'),
         ];
     }
 
@@ -471,9 +474,10 @@ class Index extends Component
                 'catalog_items.name',
                 'catalog_items.brand',
                 'catalog_items.price',
+                'catalog_items.stock_available',
                 DB::raw('count(distinct requests.id) as req_count'),
             )
-            ->groupBy('catalog_items.id', 'catalog_items.sku', 'catalog_items.name', 'catalog_items.brand', 'catalog_items.price')
+            ->groupBy('catalog_items.id', 'catalog_items.sku', 'catalog_items.name', 'catalog_items.brand', 'catalog_items.price', 'catalog_items.stock_available')
             ->orderByDesc('req_count')
             ->orderBy('catalog_items.sku')
             ->get();
@@ -508,6 +512,7 @@ class Index extends Component
             'name' => $r->name,
             'brand' => $r->brand,
             'price' => $r->price,
+            'stock' => (int) ($r->stock_available ?? 0),
             'req_count' => (int) $r->req_count,
             'codes' => $codes[$r->cid] ?? [],
         ])->all();
