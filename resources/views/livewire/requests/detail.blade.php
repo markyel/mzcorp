@@ -695,8 +695,21 @@
             @endif
 
             @php
+                // Прячем шумные, практически-бесполезные подсказки с карточки:
+                //  - inbound_clarification_response — идёт отдельным потоком «уточнения»;
+                //  - inbound_unclear — «AI не понял», применять нечего (targetStatus null);
+                //  - слабые (conf < 0.7) — часто ложные keyword-срабатывания
+                //    (напр. outbound_quotation_full 0.6 на письме-уточнении со словами
+                //    «коммерческое предложение»). Остаются реально применимые подсказки.
                 $aiSuggestions = $this->pendingAiDecisions
-                    ->reject(fn ($s) => ($s->detector_type->value ?? null) === 'inbound_clarification_response');
+                    ->reject(function ($s) {
+                        $type = $s->detector_type->value ?? null;
+                        if (in_array($type, ['inbound_clarification_response', 'inbound_unclear'], true)) {
+                            return true;
+                        }
+
+                        return (float) ($s->confidence ?? 0) < 0.7;
+                    });
             @endphp
             @if($aiSuggestions->isNotEmpty() && $canManage)
                 @foreach($aiSuggestions as $sugg)
