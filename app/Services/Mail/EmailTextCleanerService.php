@@ -48,7 +48,11 @@ class EmailTextCleanerService
         // на промпт «игнорируй цитаты», но GPT всё равно парсит позиции из
         // forward'нутых блоков (см. parser-corpus.txt #349 — 9 позиций из
         // нашей же исходящей КП), поэтому здесь физически вырезаем.
-        $dequoted = $this->dequoteText($bodyText);
+        // Хвост с цитатой НАШЕГО ЖЕ исходящего режем ДО dequote: dequote
+        // выбрасывает attribution-строки («… пишет:»), по которым мы находим
+        // начало цитаты. Кейс M-2026-5848: LLM достал «новую позицию» M26966
+        // из ссылки mylift.ru в нашем процитированном письме.
+        $dequoted = $this->dequoteText($this->cutOwnQuotedTail($bodyText));
 
         ['forwarded' => $forwarded, 'original' => $original] = $this->extractForwardedContent($dequoted);
 
@@ -279,6 +283,56 @@ class EmailTextCleanerService
     }
 
     /**
+     * Обрезать хвост письма, начиная со строки-атрибуции цитаты НАШЕГО ЖЕ
+     * исходящего («понедельник, 29 июня 2026 г. в 15:28 от manager@myzip.ru:»,
+     * «29.06.2026 8:55, manager@myzip.ru пишет:», «From: manager@myzip.ru …»).
+     *
+     * Содержимое такой цитаты — наш собственный текст (КП, ссылки на каталог
+     * вида mylift.ru/…code=M26966, вопросы менеджера) плюс более старая
+     * переписка. Для парсера позиций это источник ложных «новых позиций»:
+     * dequoteText сознательно сохраняет содержимое цитат (клиент может
+     * дописать позиции под цитатой), но всё, что ниже цитаты нашего письма,
+     * клиентского текста уже не содержит. Домены — services.mail.internal_domains.
+     *
+     * Если до атрибуции текста нет (весь ответ — одна цитата) — не режем.
+     */
+    public function cutOwnQuotedTail(string $text): string
+    {
+        if (trim($text) === '') {
+            return $text;
+        }
+        $domains = array_filter(array_map('trim', (array) config('services.mail.internal_domains', [])));
+        if ($domains === []) {
+            return $text;
+        }
+        $domainRe = implode('|', array_map(fn ($d) => preg_quote($d, '/'), $domains));
+
+        $lines = preg_split("/\r?\n/", $text) ?: [];
+        foreach ($lines as $i => $line) {
+            // Возможный `>`-префикс (наша цитата может быть уже внутри чужой).
+            $t = trim((string) preg_replace('/^(\s*>)+\s?/u', '', $line));
+            if ($t === '' || mb_strlen($t) > 300) {
+                continue;
+            }
+            if (preg_match('/@(' . $domainRe . ')\b/iu', $t) !== 1) {
+                continue;
+            }
+            $isAttribution =
+                preg_match('/(пишет|написал\(а\)|написал[аи]?|wrote|writes)\s*:?\s*$/iu', $t) === 1
+                || preg_match('/\bот\b[^:]*@(' . $domainRe . ')[^:]*:\s*$/iu', $t) === 1
+                || preg_match('/^(From|От)\s*:\s*.*@(' . $domainRe . ')/iu', $t) === 1;
+            if (! $isAttribution) {
+                continue;
+            }
+            $head = trim(implode("\n", array_slice($lines, 0, $i)));
+
+            return $head !== '' ? $head : $text;
+        }
+
+        return $text;
+    }
+
+    /**
      * Снять маркеры цитирования `>` со строк, но СОХРАНИТЬ содержимое.
      * AI сам разбирёт что в цитате — позиция или старый текст диалога.
      *
@@ -306,6 +360,10 @@ class EmailTextCleanerService
                 continue;
             }
             if ($trimmed !== '' && preg_match('/^\d{2}\.\d{2}\.\d{4}.*от\s+.*:$/iu', $trimmed)) {
+                continue;
+            }
+            // mail.ru: «понедельник, 29 июня 2026 г. в 15:28 +08:00 от X <x@y>:»
+            if ($trimmed !== '' && preg_match('/^\p{L}+,\s*\d{1,2}\s+\p{L}+\s+\d{4}\s*г?\.?.*\bот\b.*:$/iu', $trimmed)) {
                 continue;
             }
             if ($trimmed !== '' && preg_match('/отправлено из/iu', $trimmed)) {
