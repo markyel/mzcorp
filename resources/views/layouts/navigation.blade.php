@@ -105,7 +105,7 @@
 @endphp
 
 <nav class="bg-surface border-b border-border sticky top-0 z-30" style="height: var(--topbar-h)">
-    <div class="h-full px-4 flex items-center gap-3">
+    <div class="h-[48px] px-4 flex items-center gap-3">
 
         {{-- Brand --}}
         <a href="{{ route('dashboard') }}" class="flex items-center gap-2 shrink-0" aria-label="mzCorp CRM">
@@ -142,17 +142,6 @@
                     </a>
                 @endforeach
             </div>
-        @endauth
-
-        {{-- Search (form GET → /dashboard/requests?q=...) --}}
-        @auth
-            <form method="GET" action="{{ route('requests.index') }}" class="hidden lg:block flex-1 max-w-[480px] relative ml-2">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-3)] text-[14px] pointer-events-none select-none">⌕</span>
-                <input type="search" name="q" value="{{ request()->routeIs('requests.*') ? request()->query('q') : '' }}"
-                       placeholder="Поиск по заявкам, клиентам, артикулам…"
-                       class="w-full h-[30px] pl-8 pr-12 border border-[var(--border)] rounded-md bg-[var(--bg-app)] text-[var(--fg-1)] text-[13px] outline-none focus:border-[var(--sky-500)]">
-                <kbd class="absolute right-2 top-[6px] font-mono text-[10.5px] font-medium text-[var(--fg-3)] border border-[var(--border)] px-1 py-0.5 rounded bg-[var(--bg-surface)]">⌘ K</kbd>
-            </form>
         @endauth
 
         <div class="flex-1"></div>
@@ -238,4 +227,25 @@
             </x-dropdown>
         @endauth
     </div>
+
+    {{-- Строка поиска — отдельная вторая строка топбара во всю ширину:
+         в первой строке поиск сжимался nav-ссылками до ~100px. Высоты:
+         48 (row1) + 1 (border-t) + 38 (row2) + 1 (border-b nav) = 88px
+         = var(--topbar-h). ⌘K / Ctrl+K фокусируют поле. --}}
+    @auth
+        <div class="h-[38px] px-4 border-t border-border-subtle flex items-center">
+            <form method="GET" action="{{ route('requests.index') }}"
+                  class="w-full max-w-[960px] relative"
+                  x-data
+                  @keydown.window.meta.k.prevent="$refs.q.focus()"
+                  @keydown.window.ctrl.k.prevent="$refs.q.focus()">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-3)] text-[14px] pointer-events-none select-none">⌕</span>
+                <input type="search" name="q" x-ref="q"
+                       value="{{ request()->routeIs('requests.*') ? request()->query('q') : '' }}"
+                       placeholder="Поиск по заявкам, клиентам, артикулам…"
+                       class="w-full h-[28px] pl-8 pr-12 border border-[var(--border)] rounded-md bg-[var(--bg-app)] text-[var(--fg-1)] text-[13px] outline-none focus:border-[var(--sky-500)]">
+                <kbd class="hidden md:block absolute right-2 top-[5px] font-mono text-[10.5px] font-medium text-[var(--fg-3)] border border-[var(--border)] px-1 py-0.5 rounded bg-[var(--bg-surface)]">⌘ K</kbd>
+            </form>
+        </div>
+    @endauth
 </nav>

@@ -116,7 +116,7 @@
   --rail-w: 56px;
   --list-w: 280px;
   --inspector-w: 360px;
-  --topbar-h: 48px;
+  --topbar-h: 88px; /* 48 топбар + 40 строка поиска */
   --row-h: 36px;
   --row-h-compact: 28px;
 }
