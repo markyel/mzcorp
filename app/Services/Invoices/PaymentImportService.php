@@ -418,7 +418,10 @@ class PaymentImportService
         return $n > 0 ? $n : null;
     }
 
-    /** «22 787,46» / «262.56» / 262.56 → float. */
+    /**
+     * «22 787,46» (1С отдаёт числа текстом с NBSP-разделителем тысяч) /
+     * «262.56» / 262.56 → float.
+     */
     private function toNumber(mixed $v): ?float
     {
         if ($v === null || $v === '') {
@@ -427,7 +430,8 @@ class PaymentImportService
         if (is_int($v) || is_float($v)) {
             return (float) $v;
         }
-        $s = str_replace([' ', ' ', ' '], '', (string) $v); // пробелы/nbsp/narrow-nbsp
+        // Убираем все пробелоподобные (включая U+00A0 / U+202F), запятая → точка.
+        $s = (string) preg_replace('/[\s\x{00A0}\x{202F}\x{2009}]+/u', '', (string) $v);
         $s = str_replace(',', '.', $s);
 
         return is_numeric($s) ? (float) $s : null;
