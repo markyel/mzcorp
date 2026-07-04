@@ -632,9 +632,12 @@ class Index extends Component
     #[Computed]
     public function periodTotals(): array
     {
+        // toBase(): агрегат без гидрации Invoice-моделей — иначе cast превратит
+        // status в enum, и строковый ключ ниже упадёт (ловили 500 на проде).
         $rows = $this->buildQuery(withStatusFilter: false)
             ->selectRaw('status, count(*) as c, coalesce(sum(amount_snapshot), 0) as s, coalesce(sum(paid_amount), 0) as received')
             ->groupBy('status')
+            ->toBase()
             ->get();
 
         $by = [];
