@@ -1415,9 +1415,15 @@
                                                 x-init="
                                                     const fit = () => {
                                                         try {
-                                                            const h = $el.contentDocument && $el.contentDocument.documentElement
-                                                                ? $el.contentDocument.documentElement.scrollHeight
-                                                                : 0;
+                                                            const doc = $el.contentDocument;
+                                                            if (!doc || !doc.documentElement) return;
+                                                            {{-- Сброс высоты перед замером: scrollHeight не бывает меньше
+                                                                 viewport (= текущей высоты iframe), поэтому после сворачивания
+                                                                 details высота «залипала» на раскрытом значении. Сброс+замер
+                                                                 синхронные — браузер не успевает отрисовать промежуточное
+                                                                 состояние, мигания нет. --}}
+                                                            $el.style.height = '8px';
+                                                            const h = doc.documentElement.scrollHeight;
                                                             $el.style.height = (h + 4) + 'px';
                                                         } catch (e) {}
                                                     };
@@ -1433,6 +1439,9 @@
                                                             s.textContent = 'html,body{margin:0;padding:0}body{padding:8px 12px;font:13px/1.55 system-ui,-apple-system,Segoe UI,Inter,sans-serif;color:#0a0a0a;word-break:break-word}img{max-width:100%;height:auto}';
                                                             (doc.head || doc.documentElement).appendChild(s);
                                                             try { new ResizeObserver(fit).observe(doc.documentElement); } catch (e) {}
+                                                            {{-- toggle не всплывает, ловим на capture: сворачивание цитаты
+                                                                 меняет высоту мгновенно — не ждём ResizeObserver. --}}
+                                                            doc.addEventListener('toggle', fit, true);
                                                             fit();
                                                         } catch (e) {}
                                                     });
