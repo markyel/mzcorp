@@ -8,6 +8,10 @@
             <button type="button" wire:click="openBulk" class="btn btn-sm mr-3"
                     title="Отметить оплаченными несколько счетов по списку номеров">✓ Массовая оплата</button>
             @if($this->canSeeAll())
+                <button type="button" wire:click="openImport" class="btn btn-sm mr-3"
+                        title="Загрузить выгрузку оплат из 1С: отметить оплаченные счета и зафиксировать оплаты по неизвестным">⬇ Оплаты из 1С</button>
+                <a href="{{ route('invoices.external') }}" wire:navigate class="btn btn-sm mr-3"
+                   title="Оплаченные по банку счета, которых нет в CRM (из импорта 1С)">💳 Внешние оплаты</a>
                 <a href="{{ route('invoices.unlinked') }}" wire:navigate class="btn btn-sm mr-3"
                    title="Исходящие счета, не нашедшие заявку — привязать вручную">⚠ Непривязанные</a>
             @endif
@@ -22,6 +26,7 @@
                         'pending'   => 'Ожидает',
                         'overdue'   => 'Просрочены',
                         'paid'      => 'Оплачены',
+                        'partially_paid' => 'Частично',
                         'cancelled' => 'Аннулированы',
                         'expired'   => 'Истекли',
                         'all'       => 'Все',
@@ -157,7 +162,7 @@
                             $req = $inv->request;
                             $isPending = $inv->status?->value === 'pending';
                             $isCancelled = $inv->status?->value === 'cancelled';
-                            $canMarkPaid = in_array($inv->status?->value, ['pending', 'expired', 'cancelled'], true);
+                            $canMarkPaid = in_array($inv->status?->value, ['pending', 'expired', 'cancelled', 'partially_paid'], true);
                             $isOverdue = $isPending && $inv->expires_at?->isPast();
                             $daysRemain = $inv->expires_at ? now()->diffInDays($inv->expires_at, false) : null;
                         @endphp
@@ -245,6 +250,99 @@
             @endif
         @endif
     </div>
+
+    {{-- ============== Импорт оплат из 1С (xlsx) ============== --}}
+    @if($importOpen)
+        <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 24px;"
+             wire:mousedown.self="closeImport">
+            <div class="ds-card p-0 w-full max-w-[860px] max-h-[85vh] flex flex-col overflow-hidden" wire:click.stop>
+                <div class="px-5 pt-5 pb-3 border-b border-border-subtle shrink-0">
+                    <h3 class="text-[15px] font-semibold text-fg-1 mb-1">Импорт оплат из 1С</h3>
+                    <div class="text-[12px] text-fg-3">
+                        Выгрузка оплат (xlsx, колонки «Номер счета» / «Дата оплаты» / «Оп%» / «Сумма &lt;Оплата&gt;»).
+                        Найденные счета будут отмечены оплаченными (частичные — «частично оплачен», заявка закроется успехом),
+                        неизвестные — зафиксированы как внешние оплаты. Сначала предпросмотр, ничего не применяется без подтверждения.
+                    </div>
+                </div>
+
+                @if(! $importPreviewed)
+                    <form wire:submit="previewImport" class="flex flex-col min-h-0 flex-1">
+                        <div class="px-5 py-4 overflow-y-auto flex-1 min-h-0 space-y-3">
+                            <input type="file" wire:model="importFile" accept=".xlsx,.xls"
+                                   class="block w-full text-[13px] text-fg-2 file:mr-3 file:px-3 file:h-[30px] file:border file:border-border file:rounded-md file:bg-surface file:text-fg-1 file:text-[12.5px] file:cursor-pointer" />
+                            @error('importFile')<div class="text-[12px] text-red-600">{{ $message }}</div>@enderror
+                            <div wire:loading wire:target="importFile" class="text-[12px] text-fg-3">Загружаю файл…</div>
+                        </div>
+                        <div class="px-5 py-3 border-t border-border-subtle flex items-center gap-2 shrink-0">
+                            <button type="submit" class="btn btn-primary" wire:loading.attr="disabled" wire:target="previewImport,importFile"
+                                    @disabled($importFile === null)>
+                                <span wire:loading.remove wire:target="previewImport">Проверить файл →</span>
+                                <span wire:loading wire:target="previewImport">Сверяю со счетами…</span>
+                            </button>
+                            <button type="button" wire:click="closeImport" class="btn">Отмена</button>
+                        </div>
+                    </form>
+                @else
+                    <div class="flex flex-col min-h-0 flex-1">
+                        <div class="px-5 py-3 border-b border-border-subtle shrink-0">
+                            <div class="text-[12px] text-fg-3 mb-1.5 mono">{{ $importFileName }}</div>
+                            <div class="flex flex-wrap gap-2">
+                                @foreach($importSummary as $action => $s)
+                                    @php [$label, $chip] = $this->importActionLabel($action); @endphp
+                                    <span class="chip {{ $chip }} text-[11px]">{{ $label }}: <b class="mono">{{ $s['count'] }}</b> · {{ number_format($s['sum'], 0, '.', ' ') }} ₽</span>
+                                @endforeach
+                            </div>
+                        </div>
+                        <div class="px-5 py-2 overflow-y-auto flex-1 min-h-0">
+                            <table class="w-full text-[12px]">
+                                <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border sticky top-0 bg-surface">
+                                    <tr>
+                                        <th class="text-left px-1.5 py-1.5">№ счёта</th>
+                                        <th class="text-left px-1.5 py-1.5">Контрагент</th>
+                                        <th class="text-right px-1.5 py-1.5">Оплата, ₽</th>
+                                        <th class="text-right px-1.5 py-1.5">Оп%</th>
+                                        <th class="text-left px-1.5 py-1.5">Дата оплаты</th>
+                                        <th class="text-left px-1.5 py-1.5">Заявка</th>
+                                        <th class="text-left px-1.5 py-1.5">Результат</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($importPreviewRows as $i => $r)
+                                        @php [$label, $chip] = $this->importActionLabel($r['action']); @endphp
+                                        <tr class="border-b border-border-subtle" wire:key="imp-{{ $i }}">
+                                            <td class="px-1.5 py-1 mono">{{ $r['number'] }}</td>
+                                            <td class="px-1.5 py-1 text-fg-2">{{ $r['client'] }}</td>
+                                            <td class="px-1.5 py-1 text-right mono">{{ number_format((float) $r['paid_sum'], 2, '.', ' ') }}</td>
+                                            <td class="px-1.5 py-1 text-right mono {{ $r['percent'] < 100 ? 'text-amber-700 font-semibold' : 'text-fg-3' }}">{{ $r['percent'] }}</td>
+                                            <td class="px-1.5 py-1 mono text-fg-3">{{ $r['paid_date'] }}</td>
+                                            <td class="px-1.5 py-1 mono text-sky-700">{{ $r['request_code'] ?? '—' }}</td>
+                                            <td class="px-1.5 py-1">
+                                                <span class="chip {{ $chip }} text-[10.5px]">{{ $label }}</span>
+                                                @if($r['sum_mismatch'])<span class="text-amber-700 text-[10.5px]" title="Сумма оплаты отличается от суммы счёта в CRM">⚠ сумма</span>@endif
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                            @if(count($importPreviewRows) === 250)
+                                <div class="text-[11px] text-fg-4 py-2">Показаны первые 250 строк — применение затронет весь файл.</div>
+                            @endif
+                        </div>
+                        <div class="px-5 py-3 border-t border-border-subtle flex items-center gap-2 shrink-0">
+                            <button type="button" wire:click="applyImport" wire:loading.attr="disabled" wire:target="applyImport"
+                                    class="btn btn-primary"
+                                    wire:confirm="Применить импорт? Счета будут отмечены оплаченными, заявки закроются. Действие не отменить.">
+                                <span wire:loading.remove wire:target="applyImport">Применить импорт</span>
+                                <span wire:loading wire:target="applyImport">Применяю…</span>
+                            </button>
+                            <button type="button" wire:click="backToImportUpload" class="btn">← Другой файл</button>
+                            <button type="button" wire:click="closeImport" class="btn">Отмена</button>
+                        </div>
+                    </div>
+                @endif
+            </div>
+        </div>
+    @endif
 
     {{-- ============== Массовая оплата по списку номеров ============== --}}
     @if($bulkOpen)

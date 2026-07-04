@@ -57,7 +57,7 @@ class InvoiceService
         // Snapshot total из последней sent quotation (или active draft если sent нет).
         $amountSnapshot = $this->resolveAmountSnapshot($request);
 
-        return DB::transaction(function () use (
+        $invoice = DB::transaction(function () use (
             $request, $invoiceNumber, $issuedAt, $expiresAt, $validityDays, $comment, $author, $amountSnapshot
         ) {
             $invoice = Invoice::create([
@@ -107,6 +107,29 @@ class InvoiceService
 
             return $invoice->fresh();
         });
+
+        return $this->applyExternalPaymentIfAny($invoice);
+    }
+
+    /**
+     * Автопривязка внешней оплаты: если по номеру только что созданного счёта
+     * в журнале импорта 1С уже есть «внешняя» оплата (счёт оплачен по банку
+     * раньше, чем появился в CRM) — сразу отмечаем оплату. Fail-soft.
+     */
+    private function applyExternalPaymentIfAny(Invoice $invoice): Invoice
+    {
+        try {
+            if (app(PaymentImportService::class)->tryApplyExternalPayment($invoice)) {
+                return $invoice->fresh();
+            }
+        } catch (\Throwable $e) {
+            Log::warning('InvoiceService: external payment auto-apply failed (non-fatal)', [
+                'invoice_id' => $invoice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $invoice;
     }
 
     /**
@@ -205,7 +228,7 @@ class InvoiceService
             ? (float) $quote->total_amount
             : $this->resolveAmountSnapshot($request);
 
-        return DB::transaction(function () use (
+        $invoice = DB::transaction(function () use (
             $request, $quote, $number, $issuedAt, $expiresAt, $validityDays, $author, $amountSnapshot
         ) {
             $invoice = Invoice::create([
@@ -262,6 +285,8 @@ class InvoiceService
 
             return $invoice->fresh();
         });
+
+        return $this->applyExternalPaymentIfAny($invoice);
     }
 
     /**
@@ -514,16 +539,31 @@ class InvoiceService
      * но клиент всё-таки оплатил, а заявку вернули в работу (тикет M-2026-2195).
      * Paid — терминальный, повторно не оплачиваем.
      */
-    public const PAYABLE_STATUSES = [InvoiceStatus::Pending, InvoiceStatus::Expired, InvoiceStatus::Cancelled];
+    public const PAYABLE_STATUSES = [InvoiceStatus::Pending, InvoiceStatus::Expired, InvoiceStatus::Cancelled, InvoiceStatus::PartiallyPaid];
 
     /**
      * Пометить счёт оплаченным + перевести Request → Paid.
+     *
+     * @param  \DateTimeInterface|null  $paidAt  фактическая дата оплаты (импорт
+     *                                           из 1С); null → now().
+     * @param  float|null  $paidAmount  фактически поступившая сумма (1С).
+     * @param  string|null  $note  доп. строка в комментарий аудита (например,
+     *                             предупреждение о расхождении сумм).
+     * @param  bool  $systemTransition  переход статуса заявки без permission-гейта
+     *                                  (импорт оплат: загрузивший может не иметь
+     *                                  прав на чужие заявки — секретарь).
      */
-    public function markPaid(Invoice $invoice, User $author): Invoice
-    {
+    public function markPaid(
+        Invoice $invoice,
+        User $author,
+        ?\DateTimeInterface $paidAt = null,
+        ?float $paidAmount = null,
+        ?string $note = null,
+        bool $systemTransition = false,
+    ): Invoice {
         if (! in_array($invoice->status, self::PAYABLE_STATUSES, true)) {
             throw new \DomainException(sprintf(
-                'Нельзя оплатить счёт в статусе %s. Допустимо pending, expired или cancelled.',
+                'Нельзя оплатить счёт в статусе %s. Допустимо pending, expired, cancelled или partially_paid.',
                 $invoice->status->value
             ));
         }
@@ -533,42 +573,136 @@ class InvoiceService
         // «оплачен»). Сам факт оплаты фиксируется в request_state_changes.
         $wasCancelled = $invoice->status === InvoiceStatus::Cancelled;
 
-        return DB::transaction(function () use ($invoice, $author, $wasCancelled) {
+        return DB::transaction(function () use ($invoice, $author, $wasCancelled, $paidAt, $paidAmount, $note, $systemTransition) {
             $invoice->update([
                 'status' => InvoiceStatus::Paid->value,
-                'paid_at' => now(),
+                'paid_at' => $paidAt ?? now(),
                 'paid_by_user_id' => $author->id,
+                'paid_amount' => $paidAmount ?? $invoice->paid_amount,
                 'cancelled_at' => $wasCancelled ? null : $invoice->cancelled_at,
                 'cancellation_reason' => $wasCancelled ? null : $invoice->cancellation_reason,
             ]);
 
-            try {
-                $this->stateService->transitionTo(
-                    $invoice->request,
-                    RequestStatus::Paid,
-                    $author,
-                    [
-                        'event' => 'invoice_paid',
-                        'comment' => $wasCancelled
-                            ? sprintf('Ранее аннулированный счёт №%s оплачен (реанимация).', $invoice->invoice_number)
-                            : sprintf('Счёт №%s оплачен.', $invoice->invoice_number),
-                        'payload' => [
-                            'invoice_id' => $invoice->id,
-                            'invoice_number' => $invoice->invoice_number,
-                            'reanimated' => $wasCancelled,
-                        ],
-                    ],
-                );
-            } catch (\Throwable $e) {
-                Log::warning('InvoiceService::markPaid: transitionTo failed (non-fatal)', [
-                    'request_id' => $invoice->request_id,
-                    'invoice_id' => $invoice->id,
-                    'error' => $e->getMessage(),
-                ]);
+            $comment = $wasCancelled
+                ? sprintf('Ранее аннулированный счёт №%s оплачен (реанимация).', $invoice->invoice_number)
+                : sprintf('Счёт №%s оплачен.', $invoice->invoice_number);
+            if ($note !== null && trim($note) !== '') {
+                $comment .= ' '.trim($note);
             }
+
+            $this->transitionAfterPayment($invoice, RequestStatus::Paid, $author, [
+                'event' => 'invoice_paid',
+                'comment' => $comment,
+                'payload' => [
+                    'invoice_id' => $invoice->id,
+                    'invoice_number' => $invoice->invoice_number,
+                    'reanimated' => $wasCancelled,
+                ],
+            ], $systemTransition);
 
             return $invoice->fresh();
         });
+    }
+
+    /**
+     * Частичная оплата (импорт 1С, Оп% < 100): счёт → partially_paid,
+     * заявка закрывается как успех (решение заказчика: деньги пришли — сделка
+     * состоялась; остаток контролирует бухгалтерия в 1С). Доплата до 100%
+     * позже переводит счёт в Paid обычным markPaid.
+     */
+    public function markPartiallyPaid(
+        Invoice $invoice,
+        User $author,
+        float $paidAmount,
+        ?\DateTimeInterface $paidAt = null,
+        ?string $note = null,
+        bool $systemTransition = false,
+    ): Invoice {
+        // PartiallyPaid входит в PAYABLE_STATUSES: повторная частичная оплата
+        // допустима (обновит сумму/дату).
+        if (! in_array($invoice->status, self::PAYABLE_STATUSES, true)) {
+            throw new \DomainException(sprintf(
+                'Нельзя провести частичную оплату счёта в статусе %s.',
+                $invoice->status->value
+            ));
+        }
+
+        $wasCancelled = $invoice->status === InvoiceStatus::Cancelled;
+
+        return DB::transaction(function () use ($invoice, $author, $wasCancelled, $paidAt, $paidAmount, $note, $systemTransition) {
+            $invoice->update([
+                'status' => InvoiceStatus::PartiallyPaid->value,
+                'partially_paid_at' => $paidAt ?? now(),
+                'paid_by_user_id' => $author->id,
+                'paid_amount' => $paidAmount,
+                'cancelled_at' => $wasCancelled ? null : $invoice->cancelled_at,
+                'cancellation_reason' => $wasCancelled ? null : $invoice->cancellation_reason,
+            ]);
+
+            $comment = sprintf(
+                'Счёт №%s оплачен частично: %s из %s.',
+                $invoice->invoice_number,
+                number_format($paidAmount, 2, '.', ' '),
+                $invoice->amount_snapshot !== null ? number_format((float) $invoice->amount_snapshot, 2, '.', ' ') : '—',
+            );
+            if ($note !== null && trim($note) !== '') {
+                $comment .= ' '.trim($note);
+            }
+
+            $this->transitionAfterPayment($invoice, RequestStatus::ClosedWon, $author, [
+                'event' => 'invoice_partially_paid',
+                'comment' => $comment,
+                'payload' => [
+                    'invoice_id' => $invoice->id,
+                    'invoice_number' => $invoice->invoice_number,
+                    'paid_amount' => $paidAmount,
+                ],
+            ], $systemTransition);
+
+            return $invoice->fresh();
+        });
+    }
+
+    /**
+     * Перевод заявки после оплаты счёта, с реанимацией закрытой как потеря:
+     * заявка могла быть авто-закрыта «счёт не оплачен», а клиент заплатил
+     * позже — деньги пришли, значит возвращаем в работу и закрываем успехом.
+     * Ошибка перехода не валит отметку оплаты (non-fatal, как раньше).
+     */
+    private function transitionAfterPayment(
+        Invoice $invoice,
+        RequestStatus $to,
+        User $author,
+        array $context,
+        bool $systemTransition,
+    ): void {
+        try {
+            $request = $invoice->request;
+            if ($request === null) {
+                return;
+            }
+
+            if ($request->status === RequestStatus::ClosedLost) {
+                $this->stateService->reanimate(
+                    $request,
+                    $author,
+                    null,
+                    reassessAssignee: false,
+                    event: 'reanimated_by_payment',
+                    comment: sprintf('Оплата по счёту №%s после закрытия — реанимация.', $invoice->invoice_number),
+                );
+                $request->refresh();
+            }
+
+            $this->stateService->transitionTo($request, $to, $author, $context, $systemTransition);
+        } catch (\Throwable $e) {
+            Log::warning('InvoiceService: post-payment transition failed (non-fatal)', [
+                'request_id' => $invoice->request_id,
+                'invoice_id' => $invoice->id,
+                'to' => $to->value,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

@@ -10,9 +10,13 @@ use App\Services\Invoices\InvoiceService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use App\Services\Invoices\PaymentImportService;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 use Livewire\WithPagination;
 
 /**
@@ -30,6 +34,7 @@ use Livewire\WithPagination;
  */
 class Index extends Component
 {
+    use WithFileUploads;
     use WithPagination;
 
     #[Url(as: 'status')]
@@ -62,6 +67,25 @@ class Index extends Component
     /** @var array<int, int> id выбранных к оплате счетов */
     public array $bulkSelectedIds = [];
 
+    /* --- Импорт оплат из 1С (xlsx) --- */
+    public bool $importOpen = false;
+
+    /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
+    public $importFile = null;
+
+    public bool $importPreviewed = false;
+
+    /** Ключ кэша с классифицированными строками (между превью и применением). */
+    public ?string $importToken = null;
+
+    public ?string $importFileName = null;
+
+    /** @var array<string, array{count:int, sum:float}> итоги классификации */
+    public array $importSummary = [];
+
+    /** @var array<int, array<string, mixed>> строки для превью-таблицы (обрезаны) */
+    public array $importPreviewRows = [];
+
     public function mount(): void
     {
         $user = auth()->user();
@@ -82,7 +106,7 @@ class Index extends Component
 
     public function setStatus(string $s): void
     {
-        $allowed = ['all', 'pending', 'paid', 'expired', 'cancelled', 'overdue'];
+        $allowed = ['all', 'pending', 'paid', 'partially_paid', 'expired', 'cancelled', 'overdue'];
         $this->statusFilter = in_array($s, $allowed, true) ? $s : 'pending';
         $this->resetPage();
     }
@@ -339,6 +363,134 @@ class Index extends Component
         $this->resetBulk();
     }
 
+    /* ------------------------- Импорт оплат из 1С --------------------------- */
+
+    public function openImport(): void
+    {
+        if (! $this->canSeeAll()) {
+            return;
+        }
+        $this->resetImport();
+        $this->importOpen = true;
+    }
+
+    public function closeImport(): void
+    {
+        $this->importOpen = false;
+        $this->resetImport();
+    }
+
+    public function backToImportUpload(): void
+    {
+        $this->importPreviewed = false;
+        $this->importFile = null;
+        $this->importToken = null;
+        $this->importSummary = [];
+        $this->importPreviewRows = [];
+    }
+
+    private function resetImport(): void
+    {
+        $this->importFile = null;
+        $this->importPreviewed = false;
+        $this->importToken = null;
+        $this->importFileName = null;
+        $this->importSummary = [];
+        $this->importPreviewRows = [];
+    }
+
+    /**
+     * Шаг 1→2: распарсить xlsx, классифицировать против БД, показать превью.
+     * Классифицированные строки — в кэш (state Livewire не тянет сотни строк).
+     */
+    public function previewImport(PaymentImportService $service): void
+    {
+        abort_unless($this->canSeeAll(), 403);
+        $this->validate(
+            ['importFile' => 'required|file|mimes:xlsx,xls|max:10240'],
+            [],
+            ['importFile' => 'файл выгрузки'],
+        );
+
+        $parsed = $service->parse($this->importFile->getRealPath());
+        if ($parsed['error'] !== null) {
+            $this->dispatch('toast', message: $parsed['error'], type: 'error');
+
+            return;
+        }
+        if ($parsed['rows'] === []) {
+            $this->dispatch('toast', message: 'В файле не найдено строк с оплатами.', type: 'error');
+
+            return;
+        }
+
+        $classified = $service->classify($parsed['rows']);
+
+        $this->importToken = (string) Str::uuid();
+        Cache::put('payment-import:'.$this->importToken, $classified['rows'], now()->addHours(2));
+        $this->importFileName = $this->importFile->getClientOriginalName();
+        $this->importSummary = $classified['summary'];
+
+        // Превью: сначала строки, требующие действий, потом остальное; режем до 250.
+        $order = ['mark_paid' => 1, 'mark_partial' => 2, 'unknown' => 3, 'already_recorded' => 4, 'skipped_old' => 5, 'already_paid' => 6];
+        $rows = $classified['rows'];
+        usort($rows, fn ($a, $b) => ($order[$a['action']] ?? 9) <=> ($order[$b['action']] ?? 9));
+        $this->importPreviewRows = array_map(fn ($r) => [
+            'number' => $r['number_raw'],
+            'client' => mb_substr((string) $r['client'], 0, 45),
+            'paid_date' => $r['paid_date'],
+            'paid_sum' => $r['paid_sum'],
+            'percent' => $r['percent'],
+            'action' => $r['action'],
+            'request_code' => $r['request_code'] ?? null,
+            'crm_status' => $r['crm_status'] ?? null,
+            'sum_mismatch' => $r['sum_mismatch'] ?? false,
+        ], array_slice($rows, 0, 250));
+        $this->importPreviewed = true;
+    }
+
+    /** Шаг 2: применить импорт (отметить оплаты + журнал). */
+    public function applyImport(PaymentImportService $service): void
+    {
+        abort_unless($this->canSeeAll(), 403);
+        if ($this->importToken === null) {
+            return;
+        }
+        $rows = Cache::pull('payment-import:'.$this->importToken);
+        if ($rows === null) {
+            $this->dispatch('toast', message: 'Превью устарело — загрузите файл заново.', type: 'error');
+            $this->backToImportUpload();
+
+            return;
+        }
+
+        $import = $service->apply($rows, (string) $this->importFileName, auth()->user());
+
+        $msg = "Импорт применён: оплачено {$import->marked_paid}, частично {$import->marked_partial}, "
+            ."внешних оплат {$import->unknown_recorded}, уже были оплачены {$import->already_paid}"
+            .($import->errors > 0 ? ", ошибок {$import->errors}" : '').'.';
+        $this->dispatch('toast', message: $msg, type: $import->errors > 0 ? 'warning' : 'success');
+        session()->flash('invoices_status', $msg);
+
+        $this->importOpen = false;
+        $this->resetImport();
+        unset($this->invoices);
+    }
+
+    /** Человекочитаемые метки классификации для превью. */
+    public function importActionLabel(string $action): array
+    {
+        return match ($action) {
+            'mark_paid' => ['✓ будет оплачен', 'chip-ok'],
+            'mark_partial' => ['◐ частичная оплата', 'chip-sky'],
+            'unknown' => ['? нет в системе → внешняя', 'chip-warn'],
+            'already_recorded' => ['внешняя уже записана', 'chip-neutral'],
+            'skipped_old' => ['до запуска — пропуск', 'chip-neutral'],
+            'already_paid' => ['уже оплачен', 'chip-neutral'],
+            default => [$action, 'chip-neutral'],
+        };
+    }
+
     /* ------------------------------ Computed -------------------------------- */
 
     #[Computed]
@@ -355,9 +507,10 @@ class Index extends Component
                 CASE status
                     WHEN \'pending\' THEN 1
                     WHEN \'expired\' THEN 2
-                    WHEN \'paid\' THEN 3
-                    WHEN \'cancelled\' THEN 4
-                    ELSE 5
+                    WHEN \'partially_paid\' THEN 3
+                    WHEN \'paid\' THEN 4
+                    WHEN \'cancelled\' THEN 5
+                    ELSE 6
                 END
             ')
             ->orderByDesc('id')

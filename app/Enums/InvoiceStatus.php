@@ -15,6 +15,8 @@ enum InvoiceStatus: string
 {
     case Pending = 'pending';
     case Paid = 'paid';
+    /** Частичная оплата (импорт оплат 1С, Оп% < 100). Заявка закрывается как успех; доплата переводит счёт в Paid. */
+    case PartiallyPaid = 'partially_paid';
     case Expired = 'expired';
     case Cancelled = 'cancelled';
 
@@ -23,6 +25,7 @@ enum InvoiceStatus: string
         return match ($this) {
             self::Pending => 'Ожидает оплаты',
             self::Paid => 'Оплачен',
+            self::PartiallyPaid => 'Частично оплачен',
             self::Expired => 'Просрочен',
             self::Cancelled => 'Аннулирован',
         };
@@ -34,6 +37,7 @@ enum InvoiceStatus: string
         return match ($this) {
             self::Pending => 'chip-warn',
             self::Paid => 'chip-ok',
+            self::PartiallyPaid => 'chip-sky',
             self::Expired => 'chip-danger',
             self::Cancelled => 'chip-paused',
         };

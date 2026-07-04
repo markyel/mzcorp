@@ -29,6 +29,8 @@ class Invoice extends Model
         'created_by_user_id',
         'email_message_id',
         'amount_snapshot',
+        'partially_paid_at',
+        'paid_amount',
     ];
 
     protected function casts(): array
@@ -39,8 +41,10 @@ class Invoice extends Model
             'expires_at' => 'datetime',
             'paid_at' => 'datetime',
             'cancelled_at' => 'datetime',
+            'partially_paid_at' => 'datetime',
             'validity_days' => 'integer',
             'amount_snapshot' => 'decimal:2',
+            'paid_amount' => 'decimal:2',
         ];
     }
 

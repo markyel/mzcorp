@@ -188,6 +188,12 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/invoices/unlinked', function () {
             return view('invoices.unlinked');
         })->name('invoices.unlinked');
+
+        // Внешние оплаты из импорта 1С: оплаченные по банку счета, которых нет
+        // в CRM. Привязка к заявке / игнор; автопривязка при появлении счёта.
+        Route::get('/dashboard/invoices/external', function () {
+            return view('invoices.external');
+        })->name('invoices.external');
     });
 
     // Phase 4: раздел «Счета». Менеджер видит свои Invoice, привилегированные
