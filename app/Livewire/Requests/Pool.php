@@ -530,6 +530,22 @@ class Pool extends Component
                             ->from('quotations')
                             ->whereColumn('quotations.request_id', 'requests.id')
                             ->where('quotations.internal_code', 'ilike', $like);
+                    })
+                    // Номер выставленного счёта (Invoice, «6847»).
+                    ->orWhereExists(function ($sub) use ($like) {
+                        $sub->select(DB::raw(1))
+                            ->from('invoices')
+                            ->whereColumn('invoices.request_id', 'requests.id')
+                            ->where('invoices.invoice_number', 'ilike', $like);
+                    })
+                    // Номер отправленного КП/счёта из исходящих писем
+                    // (outbound_quotes.document_number — реальные КП идут
+                    // через детектор, не через внутренний редактор Quotation).
+                    ->orWhereExists(function ($sub) use ($like) {
+                        $sub->select(DB::raw(1))
+                            ->from('outbound_quotes')
+                            ->whereColumn('outbound_quotes.request_id', 'requests.id')
+                            ->where('outbound_quotes.document_number', 'ilike', $like);
                     });
             });
         }

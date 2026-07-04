@@ -242,7 +242,7 @@
                 <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-3)] text-[14px] pointer-events-none select-none">⌕</span>
                 <input type="search" name="q" x-ref="q"
                        value="{{ request()->routeIs('requests.*') ? request()->query('q') : '' }}"
-                       placeholder="Поиск по заявкам, клиентам, артикулам…"
+                       placeholder="Поиск по заявкам, клиентам, артикулам, № счёта / КП…"
                        class="w-full h-[28px] pl-8 pr-12 border border-[var(--border)] rounded-md bg-[var(--bg-app)] text-[var(--fg-1)] text-[13px] outline-none focus:border-[var(--sky-500)]">
                 <kbd class="hidden md:block absolute right-2 top-[5px] font-mono text-[10.5px] font-medium text-[var(--fg-3)] border border-[var(--border)] px-1 py-0.5 rounded bg-[var(--bg-surface)]">⌘ K</kbd>
             </form>
