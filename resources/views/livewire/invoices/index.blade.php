@@ -43,16 +43,31 @@
             </div>
 
             {{-- Период --}}
+            @php $customRange = trim($dateFrom) !== '' || trim($dateTo) !== ''; @endphp
             <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden">
                 @php $periods = ['today' => 'Сегодня', '7d' => '7 дн.', '30d' => '30 дн.', '90d' => '90 дн.', 'all' => 'Всё']; @endphp
                 @foreach($periods as $k => $label)
-                    @php $on = $period === $k; @endphp
+                    @php $on = ! $customRange && $period === $k; @endphp
                     <button type="button" wire:click="setPeriod('{{ $k }}')"
                             class="h-[26px] px-2.5 whitespace-nowrap font-medium border-r border-border last:border-r-0
                                    {{ $on ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface text-fg-2 hover:text-fg-1' }}">
                         {{ $label }}
                     </button>
                 @endforeach
+            </div>
+
+            {{-- Произвольный диапазон по дате выставления (приоритетнее пресета) --}}
+            <div class="inline-flex items-center gap-1 {{ $customRange ? 'text-fg-1' : 'text-fg-3' }}">
+                <input type="date" wire:model.live="dateFrom"
+                       class="h-[26px] px-1.5 border {{ $customRange ? 'border-[var(--accent)]' : 'border-border' }} rounded-md bg-surface text-[12px] outline-none focus:border-[var(--sky-500)]"
+                       title="Счета, выписанные с даты (включительно)">
+                <span class="text-fg-4">—</span>
+                <input type="date" wire:model.live="dateTo"
+                       class="h-[26px] px-1.5 border {{ $customRange ? 'border-[var(--accent)]' : 'border-border' }} rounded-md bg-surface text-[12px] outline-none focus:border-[var(--sky-500)]"
+                       title="Счета, выписанные по дату (включительно)">
+                @if($customRange)
+                    <button type="button" wire:click="setPeriod('30d')" class="text-fg-4 hover:text-fg-1 px-1" title="Сбросить диапазон">✕</button>
+                @endif
             </div>
 
             {{-- Scope (только для privileged) --}}
@@ -87,6 +102,36 @@
                    wire:model.live.debounce.350ms="search"
                    placeholder="№ счёта…"
                    class="h-[26px] px-2 border border-border rounded-md bg-surface text-fg-1 text-[12px] outline-none focus:border-[var(--sky-500)] min-w-[180px] mono" />
+        </div>
+
+        {{-- Итоги за период (фильтр статуса не применяется — тут разбивка по статусам).
+             Быстрая сверка: выставлено vs оплачено/частично vs ждёт денег. --}}
+        @php
+            $tot = $this->periodTotals;
+            $fmt = fn (float $v) => number_format($v, 0, '.', ' ');
+            $paidB = $tot['by']['paid'] ?? null;
+            $partB = $tot['by']['partially_paid'] ?? null;
+            $pendB = $tot['by']['pending'] ?? null;
+            $expB  = $tot['by']['expired'] ?? null;
+            $cancB = $tot['by']['cancelled'] ?? null;
+            $waitCount = ($pendB['count'] ?? 0) + ($expB['count'] ?? 0);
+            $waitSum = ($pendB['sum'] ?? 0) + ($expB['sum'] ?? 0);
+        @endphp
+        <div class="px-4 pb-3 flex items-center gap-x-4 gap-y-1 flex-wrap text-[12px] border-t border-border-subtle pt-2.5">
+            <span class="text-fg-2">За период выставлено:
+                <b class="mono text-fg-1">{{ $tot['total']['count'] }}</b> счетов на
+                <b class="mono text-fg-1">{{ $fmt($tot['total']['sum']) }} ₽</b>
+            </span>
+            <span class="text-emerald-700">✓ оплачено {{ $paidB['count'] ?? 0 }} · {{ $fmt($paidB['sum'] ?? 0) }} ₽</span>
+            @if($partB)
+                <span class="text-sky-700">◐ частично {{ $partB['count'] }} · {{ $fmt($partB['sum']) }} ₽ <span class="text-fg-4">(поступило {{ $fmt($partB['received']) }})</span></span>
+            @endif
+            <span class="{{ $waitSum > 0 ? 'text-amber-700' : 'text-fg-4' }}">⏳ ждут оплаты {{ $waitCount }} · {{ $fmt($waitSum) }} ₽
+                @if(($expB['count'] ?? 0) > 0)<span class="text-fg-4">(из них истекло {{ $expB['count'] }} · {{ $fmt($expB['sum']) }})</span>@endif
+            </span>
+            @if($cancB)
+                <span class="text-fg-4">✕ аннулировано {{ $cancB['count'] }} · {{ $fmt($cancB['sum']) }} ₽</span>
+            @endif
         </div>
     </div>
 

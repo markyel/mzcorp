@@ -43,6 +43,13 @@ class Index extends Component
     #[Url(as: 'period')]
     public string $period = '30d';
 
+    /** Произвольный диапазон по дате выставления (имеет приоритет над period). */
+    #[Url(as: 'from', except: '')]
+    public string $dateFrom = '';
+
+    #[Url(as: 'to', except: '')]
+    public string $dateTo = '';
+
     #[Url(as: 'q')]
     public string $search = '';
 
@@ -114,7 +121,33 @@ class Index extends Component
     public function setPeriod(string $p): void
     {
         $this->period = in_array($p, ['today', '7d', '30d', '90d', 'all'], true) ? $p : '30d';
+        // Пресет отменяет произвольный диапазон.
+        $this->dateFrom = '';
+        $this->dateTo = '';
         $this->resetPage();
+    }
+
+    public function updatingDateFrom(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatingDateTo(): void
+    {
+        $this->resetPage();
+    }
+
+    /** Валидная дата 'Y-m-d' из поля или null. */
+    private function parseDateFilter(string $value): ?\Illuminate\Support\Carbon
+    {
+        if (trim($value) === '') {
+            return null;
+        }
+        try {
+            return \Illuminate\Support\Carbon::createFromFormat('Y-m-d', trim($value));
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     public function setScope(string $s): void
@@ -530,7 +563,7 @@ class Index extends Component
             ->get(['id', 'name']);
     }
 
-    private function buildQuery(): Builder
+    private function buildQuery(bool $withStatusFilter = true): Builder
     {
         $q = Invoice::query();
 
@@ -545,26 +578,39 @@ class Index extends Component
             $q->whereHas('request', fn ($r) => $r->where('assigned_user_id', $this->managerId));
         }
 
-        // Статус.
-        if ($this->statusFilter === 'overdue') {
-            // overdue = pending + expires_at < now
-            $q->where('status', InvoiceStatus::Pending->value)
-              ->where('expires_at', '<', now());
-        } elseif ($this->statusFilter !== 'all'
-            && in_array($this->statusFilter, InvoiceStatus::values(), true)) {
-            $q->where('status', $this->statusFilter);
+        // Статус (для строки итогов отключается — там разбивка по статусам).
+        if ($withStatusFilter) {
+            if ($this->statusFilter === 'overdue') {
+                // overdue = pending + expires_at < now
+                $q->where('status', InvoiceStatus::Pending->value)
+                  ->where('expires_at', '<', now());
+            } elseif ($this->statusFilter !== 'all'
+                && in_array($this->statusFilter, InvoiceStatus::values(), true)) {
+                $q->where('status', $this->statusFilter);
+            }
         }
 
-        // Период (по issued_at).
-        $cutoff = match ($this->period) {
-            'today' => now()->startOfDay(),
-            '7d'    => now()->subDays(7),
-            '30d'   => now()->subDays(30),
-            '90d'   => now()->subDays(90),
-            default => null,
-        };
-        if ($cutoff !== null) {
-            $q->where('issued_at', '>=', $cutoff);
+        // Период (по issued_at): произвольный диапазон приоритетнее пресета.
+        $from = $this->parseDateFilter($this->dateFrom);
+        $to = $this->parseDateFilter($this->dateTo);
+        if ($from !== null || $to !== null) {
+            if ($from !== null) {
+                $q->where('issued_at', '>=', $from->startOfDay());
+            }
+            if ($to !== null) {
+                $q->where('issued_at', '<=', $to->endOfDay());
+            }
+        } else {
+            $cutoff = match ($this->period) {
+                'today' => now()->startOfDay(),
+                '7d'    => now()->subDays(7),
+                '30d'   => now()->subDays(30),
+                '90d'   => now()->subDays(90),
+                default => null,
+            };
+            if ($cutoff !== null) {
+                $q->where('issued_at', '>=', $cutoff);
+            }
         }
 
         // Search по invoice_number.
@@ -574,6 +620,36 @@ class Index extends Component
         }
 
         return $q;
+    }
+
+    /**
+     * Итоги за отфильтрованный период (scope/менеджер/даты/поиск учитываются,
+     * фильтр статуса — нет: строка показывает разбивку ПО статусам). Позволяет
+     * сверить «все ли счета за период оплачены или частично оплачены».
+     *
+     * @return array{total: array{count:int, sum:float}, by: array<string, array{count:int, sum:float, received:float}>}
+     */
+    #[Computed]
+    public function periodTotals(): array
+    {
+        $rows = $this->buildQuery(withStatusFilter: false)
+            ->selectRaw('status, count(*) as c, coalesce(sum(amount_snapshot), 0) as s, coalesce(sum(paid_amount), 0) as received')
+            ->groupBy('status')
+            ->get();
+
+        $by = [];
+        $total = ['count' => 0, 'sum' => 0.0];
+        foreach ($rows as $r) {
+            $by[(string) $r->status] = [
+                'count' => (int) $r->c,
+                'sum' => (float) $r->s,
+                'received' => (float) $r->received,
+            ];
+            $total['count'] += (int) $r->c;
+            $total['sum'] += (float) $r->s;
+        }
+
+        return ['total' => $total, 'by' => $by];
     }
 
     public function statusChipClass(string $status): string
