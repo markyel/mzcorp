@@ -657,6 +657,8 @@ class Index extends Component
         // Показываем предупреждением, лишнюю сумму считаем сверх максимального
         // снапшота по каждому номеру.
         $dupRows = $this->buildQuery(withStatusFilter: false)
+            // Аннулированные копии — уже разжалованные дубли, не считаем.
+            ->where('status', '!=', InvoiceStatus::Cancelled->value)
             ->selectRaw("nullif(regexp_replace(invoice_number, '\\D', '', 'g'), '') as num, count(*) as c, sum(coalesce(amount_snapshot, 0)) as s, max(coalesce(amount_snapshot, 0)) as mx")
             ->groupBy('num')
             ->havingRaw('count(*) > 1')
