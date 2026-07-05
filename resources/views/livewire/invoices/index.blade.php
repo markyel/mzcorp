@@ -5,6 +5,12 @@
             <h3>Счета</h3>
             <span class="text-[12px] text-fg-3 ml-2">Учёт выставленных счетов и оплат</span>
             <span class="flex-1"></span>
+            <button type="button" wire:click="exportExcel" wire:loading.attr="disabled" wire:target="exportExcel"
+                    class="btn btn-sm mr-3"
+                    title="Выгрузить весь отфильтрованный список (все страницы) в Excel">
+                <span wire:loading.remove wire:target="exportExcel">📥 Excel</span>
+                <span wire:loading wire:target="exportExcel">Формирую…</span>
+            </button>
             <button type="button" wire:click="openBulk" class="btn btn-sm mr-3"
                     title="Отметить оплаченными несколько счетов по списку номеров">✓ Массовая оплата</button>
             @if($this->canSeeAll())

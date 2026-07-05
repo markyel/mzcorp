@@ -524,6 +524,80 @@ class Index extends Component
         };
     }
 
+    /* ------------------------------ Экспорт --------------------------------- */
+
+    /**
+     * Выгрузка ВСЕГО отфильтрованного списка (не только страницы) в xlsx.
+     * Учитывает все активные фильтры: статус, период/даты, охват, менеджера,
+     * поиск. Менеджер выгружает только свои счета (scope в buildQuery).
+     */
+    public function exportExcel()
+    {
+        $invoices = $this->buildQuery()
+            ->with(['request:id,internal_code,client_name,client_email,assigned_user_id', 'request.assignedUser:id,name'])
+            ->orderBy('issued_at')
+            ->orderBy('id')
+            ->get();
+
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Счета');
+
+        $headers = ['№ счёта', 'Заявка', 'Клиент', 'Менеджер', 'Статус', 'Выставлен', 'Действует до',
+            'Сумма счёта, ₽', 'Поступило (1С), ₽', 'Дата оплаты', 'Комментарий'];
+        foreach ($headers as $col => $h) {
+            $cell = $sheet->getCell([$col + 1, 1]);
+            $cell->setValue($h);
+            $cell->getStyle()->getFont()->setBold(true);
+        }
+
+        $row = 2;
+        foreach ($invoices as $inv) {
+            $paidDate = $inv->paid_at ?? $inv->partially_paid_at;
+            $sheet->fromArray([
+                (string) $inv->invoice_number,
+                $inv->request?->internal_code,
+                $inv->request?->client_name ?: $inv->request?->client_email,
+                $inv->request?->assignedUser?->name,
+                $inv->status->label(),
+                $inv->issued_at?->format('d.m.Y'),
+                $inv->expires_at?->format('d.m.Y'),
+                $inv->amount_snapshot !== null ? (float) $inv->amount_snapshot : null,
+                $inv->paid_amount !== null ? (float) $inv->paid_amount : null,
+                $paidDate?->format('d.m.Y'),
+                $inv->cancellation_reason ?: $inv->comment,
+            ], null, 'A'.$row);
+            $row++;
+        }
+
+        $last = $row - 1;
+        if ($last >= 2) {
+            $sheet->setCellValue('G'.$row, 'ИТОГО:');
+            $sheet->getStyle('G'.$row)->getFont()->setBold(true);
+            $sheet->setCellValue('H'.$row, "=SUM(H2:H{$last})");
+            $sheet->setCellValue('I'.$row, "=SUM(I2:I{$last})");
+            $sheet->getStyle('H'.$row.':I'.$row)->getFont()->setBold(true);
+        }
+        $sheet->getStyle("H2:I{$row}")->getNumberFormat()->setFormatCode('#,##0.00');
+        foreach (['A' => 12, 'B' => 14, 'C' => 40, 'D' => 22, 'E' => 16, 'F' => 11, 'G' => 12, 'H' => 15, 'I' => 15, 'J' => 11, 'K' => 50] as $col => $w) {
+            $sheet->getColumnDimension($col)->setWidth($w);
+        }
+        $sheet->setAutoFilter("A1:K{$last}");
+        $sheet->freezePane('A2');
+
+        $suffix = trim($this->dateFrom) !== '' || trim($this->dateTo) !== ''
+            ? trim($this->dateFrom.'-'.$this->dateTo, '-')
+            : $this->period;
+        $filename = 'Счета_'.($this->statusFilter === 'all' ? 'все' : $this->statusFilter).'_'.$suffix.'.xlsx';
+
+        $path = tempnam(sys_get_temp_dir(), 'inv_export');
+        (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($path);
+
+        return response()->download($path, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ])->deleteFileAfterSend(true);
+    }
+
     /* ------------------------------ Computed -------------------------------- */
 
     #[Computed]
