@@ -42,6 +42,31 @@ class InvoiceService
      * @param  string|null            $comment        Свободный комментарий.
      * @param  User                   $author         Кто выставляет (для audit).
      */
+    /**
+     * Счёт с этим номером (по числовой части) уже привязан к ДРУГОЙ заявке?
+     * Политика «первая привязка выигрывает»: счёт остаётся за заявкой, к
+     * которой был прикреплён первым; повторные привязки — дубли, не создаём.
+     * Аннулированные копии не считаем (их уже разжаловали).
+     */
+    public function findDuplicateOnOtherRequest(string $invoiceNumber, int $requestId): ?Invoice
+    {
+        if (preg_match('/(\d+)\s*$/', trim($invoiceNumber), $m) !== 1) {
+            return null;
+        }
+        $num = (int) ltrim($m[1], '0');
+        if ($num <= 0) {
+            return null;
+        }
+
+        return Invoice::query()
+            ->with('request:id,internal_code')
+            ->whereRaw("nullif(regexp_replace(invoice_number, '\\D', '', 'g'), '')::bigint = ?", [$num])
+            ->where('request_id', '!=', $requestId)
+            ->where('status', '!=', InvoiceStatus::Cancelled->value)
+            ->orderBy('id')
+            ->first();
+    }
+
     public function issue(
         Request $request,
         string $invoiceNumber,
@@ -50,6 +75,15 @@ class InvoiceService
         ?string $comment,
         User $author,
     ): Invoice {
+        $dup = $this->findDuplicateOnOtherRequest($invoiceNumber, $request->id);
+        if ($dup !== null) {
+            throw new \DomainException(sprintf(
+                'Счёт №%s уже привязан к заявке %s — дубль не создан. Если счёт должен быть здесь, сначала аннулируйте его там.',
+                $invoiceNumber,
+                $dup->request?->internal_code ?? ('#'.$dup->request_id),
+            ));
+        }
+
         $expiresAt = $this->calendar->addBusinessDays($issuedAt, $validityDays)
             ->endOfDay()
             ->setTimezone(config('app.timezone'));
@@ -200,6 +234,40 @@ class InvoiceService
             $this->refreshFromNewerQuote($existing, $quote, $number);
 
             return $existing->fresh();
+        }
+
+        // Защита от дублей: этот номер уже привязан к другой заявке — «первая
+        // привязка выигрывает», здесь копию не создаём. След — в активности
+        // заявки (audit-row без смены статуса), чтобы менеджер видел, куда
+        // ушёл счёт (кейс: одно письмо со счётом в двух тредах клиента).
+        $dup = $this->findDuplicateOnOtherRequest($number, $request->id);
+        if ($dup !== null) {
+            Log::info('InvoiceService::autoIssueFromOutboundQuote: skip — duplicate number on another request', [
+                'outbound_quote_id' => $quote->id,
+                'request_id' => $request->id,
+                'number' => $number,
+                'original_invoice_id' => $dup->id,
+                'original_request_id' => $dup->request_id,
+            ]);
+            try {
+                \App\Models\RequestStateChange::create([
+                    'request_id' => $request->id,
+                    'from_status' => $request->status->value,
+                    'to_status' => $request->status->value,
+                    'by_user_id' => null,
+                    'event' => 'invoice_duplicate_skipped',
+                    'comment' => sprintf(
+                        'Счёт №%s уже привязан к заявке %s — здесь не создан (защита от дублей).',
+                        $number,
+                        $dup->request?->internal_code ?? ('#'.$dup->request_id),
+                    ),
+                    'payload' => ['original_invoice_id' => $dup->id, 'original_request_id' => $dup->request_id],
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('InvoiceService: duplicate-skip audit failed (non-fatal)', ['error' => $e->getMessage()]);
+            }
+
+            return null;
         }
 
         $issuedAt = $quote->document_date

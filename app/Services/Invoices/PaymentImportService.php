@@ -436,6 +436,16 @@ class PaymentImportService
             throw new \DomainException('Эта внешняя оплата уже привязана или обработана.');
         }
 
+        // Защита от дублей: «первая привязка выигрывает».
+        $dup = $this->invoices->findDuplicateOnOtherRequest((string) ($ext->invoice_number_int ?? $ext->invoice_number), $request->id);
+        if ($dup !== null) {
+            throw new \DomainException(sprintf(
+                'Счёт №%s уже привязан к заявке %s — привяжите оплату туда.',
+                $ext->invoice_number_int ?? $ext->invoice_number,
+                $dup->request?->internal_code ?? ('#'.$dup->request_id),
+            ));
+        }
+
         $paidAt = $ext->paid_date ? Carbon::parse($ext->paid_date)->setTime(12, 0) : now();
 
         $invoice = Invoice::create([
