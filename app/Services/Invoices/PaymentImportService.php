@@ -277,7 +277,7 @@ class PaymentImportService
                 continue;
             }
 
-            ImportedPayment::create([
+            $journalRow = ImportedPayment::create([
                 'payment_import_id' => $import->id,
                 'invoice_number' => mb_substr((string) $row['number_raw'], 0, 64),
                 'invoice_number_int' => $row['number_int'],
@@ -297,6 +297,20 @@ class PaymentImportService
                 'profit_sum' => $row['profit_sum'] ?? null,
                 'note' => $note,
             ]);
+
+            // Неизвестный счёт: пробуем привязаться через уже распознанный
+            // исходящий документ с этим номером (детектор знает заявку, но
+            // Invoice не создался — гард договоров/сбой). Успех → создаётся
+            // оплаченный счёт, запись из «внешних» уходит в linked.
+            if ($outcome === ImportedPayment::OUTCOME_UNKNOWN
+                && $this->tryLinkViaOutboundQuote($journalRow, $author)) {
+                $counters['unknown_recorded']--;
+                if ((int) ($row['percent'] ?? 100) >= 100) {
+                    $counters['marked_paid']++;
+                } else {
+                    $counters['marked_partial']++;
+                }
+            }
         }
 
         $import->update($counters);
@@ -356,6 +370,49 @@ class PaymentImportService
             'resolved_at' => now(),
             'resolved_by_user_id' => $author->id,
         ])->save();
+
+        return true;
+    }
+
+    /**
+     * Автопривязка внешней оплаты через распознанные исходящие: если документ
+     * с этим номером уже задетекчен и привязан к заявке (outbound_quotes),
+     * заявка известна — создаём оплаченный счёт без участия человека.
+     * Предпочитаем документ типа «счёт», затем свежайший.
+     */
+    public function tryLinkViaOutboundQuote(ImportedPayment $ext, User $author): bool
+    {
+        if ($ext->invoice_number_int === null) {
+            return false;
+        }
+
+        $quote = \App\Models\OutboundQuote::query()
+            ->whereNotNull('request_id')
+            ->whereRaw("nullif(regexp_replace(coalesce(document_number, ''), '\\D', '', 'g'), '')::bigint = ?", [$ext->invoice_number_int])
+            ->orderByRaw("case when document_type = 'outbound_invoice' then 0 else 1 end")
+            ->orderByDesc('id')
+            ->first();
+        if ($quote === null || $quote->request === null) {
+            return false;
+        }
+
+        try {
+            $this->linkExternalToRequest($ext, $quote->request, $author);
+        } catch (\Throwable $e) {
+            Log::warning('PaymentImport: auto-link via outbound quote failed', [
+                'imported_payment_id' => $ext->id,
+                'outbound_quote_id' => $quote->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
+
+        Log::info('PaymentImport: external payment auto-linked via outbound quote', [
+            'imported_payment_id' => $ext->id,
+            'outbound_quote_id' => $quote->id,
+            'request_id' => $quote->request_id,
+        ]);
 
         return true;
     }

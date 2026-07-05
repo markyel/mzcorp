@@ -122,7 +122,7 @@
                 <b class="mono text-fg-1">{{ $tot['total']['count'] }}</b> счетов на
                 <b class="mono text-fg-1">{{ $fmt($tot['total']['sum']) }} ₽</b>
             </span>
-            <span class="text-emerald-700">✓ оплачено {{ $paidB['count'] ?? 0 }} · {{ $fmt($paidB['sum'] ?? 0) }} ₽</span>
+            <span class="text-emerald-700">✓ оплачено {{ $paidB['count'] ?? 0 }} · {{ $fmt($paidB['sum'] ?? 0) }} ₽@if(($paidB['received'] ?? 0) > 0) <span class="text-fg-4" title="Фактически поступившая сумма по данным импорта оплат 1С (заполнена не у всех счетов — только у прошедших через импорт)">(по 1С поступило {{ $fmt($paidB['received']) }})</span>@endif</span>
             @if($partB)
                 <span class="text-sky-700">◐ частично {{ $partB['count'] }} · {{ $fmt($partB['sum']) }} ₽ <span class="text-fg-4">(поступило {{ $fmt($partB['received']) }})</span></span>
             @endif
@@ -131,6 +131,11 @@
             </span>
             @if($cancB)
                 <span class="text-fg-4">✕ аннулировано {{ $cancB['count'] }} · {{ $fmt($cancB['sum']) }} ₽</span>
+            @endif
+            @if(($tot['dups']['numbers'] ?? 0) > 0)
+                <span class="text-red-700" title="Один и тот же номер счёта числится на нескольких заявках — сумма периода завышена. Найдите дубли поиском по номеру и аннулируйте лишний счёт.">
+                    ⚠ дубли номеров: {{ $tot['dups']['numbers'] }} (+{{ $fmt($tot['dups']['extra_sum']) }} ₽ задвоено)
+                </span>
             @endif
         </div>
     </div>

@@ -652,7 +652,24 @@ class Index extends Component
             $total['sum'] += (float) $r->s;
         }
 
-        return ['total' => $total, 'by' => $by];
+        // Дубли номеров: один номер счёта на нескольких заявках задваивает
+        // сумму периода (детектор когда-то привязал документ к двум заявкам).
+        // Показываем предупреждением, лишнюю сумму считаем сверх максимального
+        // снапшота по каждому номеру.
+        $dupRows = $this->buildQuery(withStatusFilter: false)
+            ->selectRaw("nullif(regexp_replace(invoice_number, '\\D', '', 'g'), '') as num, count(*) as c, sum(coalesce(amount_snapshot, 0)) as s, max(coalesce(amount_snapshot, 0)) as mx")
+            ->groupBy('num')
+            ->havingRaw('count(*) > 1')
+            ->toBase()
+            ->get();
+        $dups = ['numbers' => 0, 'extra_rows' => 0, 'extra_sum' => 0.0];
+        foreach ($dupRows as $d) {
+            $dups['numbers']++;
+            $dups['extra_rows'] += (int) $d->c - 1;
+            $dups['extra_sum'] += (float) $d->s - (float) $d->mx;
+        }
+
+        return ['total' => $total, 'by' => $by, 'dups' => $dups];
     }
 
     public function statusChipClass(string $status): string
