@@ -254,6 +254,14 @@ class PaymentImportService
                 } elseif ($action === 'already_paid' || $action === 'already_recorded') {
                     $outcome = ImportedPayment::OUTCOME_ALREADY_PAID;
                     $counters['already_paid']++;
+                    // Обогащение: счёт оплатили до внедрения импорта — факт
+                    // поступления из 1С дописываем (для «по 1С поступило»
+                    // в итогах), статус/даты не трогаем.
+                    if ($invoiceId !== null && $row['paid_sum'] !== null) {
+                        Invoice::whereKey($invoiceId)
+                            ->whereNull('paid_amount')
+                            ->update(['paid_amount' => (float) $row['paid_sum']]);
+                    }
                 } elseif ($action === 'skipped_old') {
                     $outcome = ImportedPayment::OUTCOME_SKIPPED_OLD;
                     $counters['skipped_old']++;
