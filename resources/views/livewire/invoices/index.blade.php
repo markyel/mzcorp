@@ -132,6 +132,11 @@
             @if($cancB)
                 <span class="text-fg-4">✕ аннулировано {{ $cancB['count'] }} · {{ $fmt($cancB['sum']) }} ₽</span>
             @endif
+            @if(($tot['paid_in_period']['count'] ?? 0) > 0)
+                <span class="text-fg-2" title="Счета этого периода, оплаченные (в т.ч. частично) внутри этого же периода — по дате оплаты. Сопоставимо с выгрузкой оплат 1С, отфильтрованной по дате счёта: количество и поступившие суммы.">
+                    💰 из них оплачено в этом же периоде: <b class="mono">{{ $tot['paid_in_period']['count'] }}</b> · <b class="mono">{{ $fmt($tot['paid_in_period']['received']) }} ₽</b>
+                </span>
+            @endif
             @if(($tot['dups']['numbers'] ?? 0) > 0)
                 <span class="text-red-700" title="Один и тот же номер счёта числится на нескольких заявках — сумма периода завышена. Найдите дубли поиском по номеру и аннулируйте лишний счёт.">
                     ⚠ дубли номеров: {{ $tot['dups']['numbers'] }} (+{{ $fmt($tot['dups']['extra_sum']) }} ₽ задвоено)

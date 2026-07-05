@@ -669,7 +669,34 @@ class Index extends Component
             $dups['extra_sum'] += (float) $d->s - (float) $d->mx;
         }
 
-        return ['total' => $total, 'by' => $by, 'dups' => $dups];
+        // Сопоставимый с выгрузкой 1С срез: счета периода, оплаченные (полностью
+        // или частично) В ЭТОМ ЖЕ периоде — по дате оплаты, суммы = поступления.
+        $paidInPeriod = ['count' => 0, 'received' => 0.0];
+        $from = $this->parseDateFilter($this->dateFrom);
+        $to = $this->parseDateFilter($this->dateTo);
+        if ($from !== null || $to !== null) {
+            $fromTs = $from?->copy()->startOfDay();
+            $toTs = $to?->copy()->endOfDay();
+            $range = function ($q, string $col) use ($fromTs, $toTs): void {
+                if ($fromTs !== null) {
+                    $q->where($col, '>=', $fromTs);
+                }
+                if ($toTs !== null) {
+                    $q->where($col, '<=', $toTs);
+                }
+            };
+            $row = $this->buildQuery(withStatusFilter: false)
+                ->where(function ($q) use ($range) {
+                    $q->where(fn ($w) => $range($w->whereNotNull('paid_at'), 'paid_at'))
+                        ->orWhere(fn ($w) => $range($w->whereNotNull('partially_paid_at'), 'partially_paid_at'));
+                })
+                ->selectRaw('count(*) as c, coalesce(sum(paid_amount), 0) as received')
+                ->toBase()
+                ->first();
+            $paidInPeriod = ['count' => (int) ($row->c ?? 0), 'received' => (float) ($row->received ?? 0)];
+        }
+
+        return ['total' => $total, 'by' => $by, 'dups' => $dups, 'paid_in_period' => $paidInPeriod];
     }
 
     public function statusChipClass(string $status): string
