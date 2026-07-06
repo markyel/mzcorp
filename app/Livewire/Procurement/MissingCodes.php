@@ -109,11 +109,16 @@ class MissingCodes extends Component
         $page = Paginator::resolveCurrentPage();
         $slice = array_slice($rows, ($page - 1) * $perPage, $perPage);
 
+        // Разбор кодов: KB-маска / кэш ИИ-анализа («что это за код и чей»).
+        $insights = app(\App\Services\Kb\ArticleInsightService::class)
+            ->resolveMany(array_map(fn ($r) => (string) $r->code, $slice));
+
         // Обогащение страницы: товар может УЖЕ быть в каталоге — код в названии
         // или в алиасах, но не в артикулах позиции (автопривязка его не видит).
         // Ищем «мягко»: разделители (точки/дефисы/пробелы) заменяем на wildcard —
         // клиент пишет «IDD32.001.P», в названии каталога «IDD32.001P».
         foreach ($slice as $row) {
+            $row->insight = $insights[(string) $row->code] ?? null;
             $escaped = str_replace(['%', '_'], ['\\%', '\\_'], (string) $row->code);
             $loose = '%'.preg_replace('/[^\p{L}\p{N}\\\\%_]+/u', '%', $escaped).'%';
             $row->in_catalog_now = DB::selectOne(
@@ -127,6 +132,50 @@ class MissingCodes extends Component
         }
 
         return new LengthAwarePaginator($slice, count($rows), $perPage, $page, ['path' => Paginator::resolveCurrentPath()]);
+    }
+
+    /**
+     * Фоновый ИИ-разбор кодов текущей выборки, ещё не имеющих вердикта
+     * (до 150 за запуск, батчи по 25 внутри job'а). Результат появится в
+     * колонке «Что это / чей» по мере обработки очереди.
+     */
+    public function analyzeCodes(): void
+    {
+        $rows = $this->allRows();
+        $svc = app(\App\Services\Kb\ArticleInsightService::class);
+
+        $known = \App\Models\ArticleCodeInsight::query()
+            ->whereIn('code_normalized', array_values(array_filter(array_map(
+                fn ($r) => \App\Services\Kb\ArticleInsightService::normalize((string) $r->code),
+                $rows,
+            ))))
+            ->pluck('code_normalized')
+            ->flip();
+
+        $todo = [];
+        foreach ($rows as $r) {
+            $norm = \App\Services\Kb\ArticleInsightService::normalize((string) $r->code);
+            if ($norm === null || $known->has($norm)) {
+                continue;
+            }
+            // KB-маска уже отвечает — ИИ не нужен.
+            if ($svc->resolve((string) $r->code)?->source === 'kb_pattern') {
+                continue;
+            }
+            $todo[] = ['code' => (string) $r->code, 'name' => (string) $r->sample_name, 'brand' => (string) $r->brand];
+            if (count($todo) >= 150) {
+                break;
+            }
+        }
+
+        if ($todo === []) {
+            $this->dispatch('toast', message: 'Все коды выборки уже разобраны.', type: 'success');
+
+            return;
+        }
+
+        \App\Jobs\Kb\AnalyzeArticleCodesJob::dispatch($todo);
+        $this->dispatch('toast', message: 'Разбор '.count($todo).' кодов запущен — результаты появятся в колонке «Что это / чей» через несколько минут.', type: 'success');
     }
 
     /** Выгрузка всего списка в xlsx (текущие фильтры). */

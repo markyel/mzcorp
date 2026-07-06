@@ -4,6 +4,11 @@
             <h2 class="text-[16px] font-semibold text-fg-1">🔍 Не найдено в каталоге</h2>
             <span class="text-[12px] text-fg-3 ml-2">повторяющиеся OEM-коды из заявок без совпадения в каталоге</span>
             <span class="flex-1"></span>
+            <button type="button" wire:click="analyzeCodes" wire:loading.attr="disabled" wire:target="analyzeCodes" class="btn btn-sm mr-3"
+                    title="ИИ-разбор кодов выборки: настоящий ли OEM-артикул и какому производителю принадлежит формат (до 150 за запуск, фоново)">
+                <span wire:loading.remove wire:target="analyzeCodes">🤖 Разобрать коды</span>
+                <span wire:loading wire:target="analyzeCodes">Запускаю…</span>
+            </button>
             <button type="button" wire:click="exportExcel" wire:loading.attr="disabled" wire:target="exportExcel" class="btn btn-sm mr-3">
                 <span wire:loading.remove wire:target="exportExcel">📥 Excel</span>
                 <span wire:loading wire:target="exportExcel">Формирую…</span>
@@ -44,6 +49,7 @@
                         <th class="text-left px-2 py-2" style="width:190px">OEM-код</th>
                         <th class="text-left px-2 py-2">Как назвал клиент</th>
                         <th class="text-left px-2 py-2" style="width:150px">Марка</th>
+                        <th class="text-left px-2 py-2" style="width:185px">Что это / чей</th>
                         <th class="text-right px-2 py-2" style="width:70px">Заявок</th>
                         <th class="text-right px-2 py-2" style="width:110px">Исход (✓/✕)</th>
                         <th class="text-left px-2 py-2" style="width:95px">Последний</th>
@@ -62,6 +68,16 @@
                             </td>
                             <td class="px-2 py-2 text-fg-2">{{ \Illuminate\Support\Str::limit($row->sample_name, 70) }}</td>
                             <td class="px-2 py-2 text-fg-3">{{ $row->brand ?: '—' }}</td>
+                            <td class="px-2 py-2">
+                                @if($row->insight === null)
+                                    <span class="text-fg-4 text-[11px]" title="Нажмите «🤖 Разобрать коды», чтобы определить">не разобран</span>
+                                @elseif($row->insight->kind === 'oem')
+                                    <span class="text-[12px] text-fg-1 font-medium">{{ $row->insight->manufacturer_name ?: 'OEM' }}</span>
+                                    <span class="text-fg-4 text-[10.5px]">{{ $row->insight->source === 'kb_pattern' ? '· KB' : '· ИИ' }}{{ $row->insight->series_hint ? ' · '.\Illuminate\Support\Str::limit($row->insight->series_hint, 22) : '' }}</span>
+                                @else
+                                    <span class="chip chip-neutral text-[10.5px]" title="Это не OEM-артикул — точный поиск в каталоге по нему бесполезен">{{ $row->insight->kindLabel() }}</span>
+                                @endif
+                            </td>
                             <td class="px-2 py-2 text-right"><span class="chip chip-warn text-[11px] mono">{{ $row->reqs }}</span></td>
                             <td class="px-2 py-2 text-right mono">
                                 <span class="text-emerald-700">{{ $row->won }}</span> / <span class="text-red-700">{{ $row->lost }}</span>
@@ -79,7 +95,7 @@
                             </td>
                         </tr>
                     @empty
-                        <tr><td colspan="8" class="px-3 py-10 text-center text-fg-3 text-[13px]">Ничего не найдено.</td></tr>
+                        <tr><td colspan="9" class="px-3 py-10 text-center text-fg-3 text-[13px]">Ничего не найдено.</td></tr>
                     @endforelse
                 </tbody>
             </table>
