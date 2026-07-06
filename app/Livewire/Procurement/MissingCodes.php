@@ -109,12 +109,17 @@ class MissingCodes extends Component
         $page = Paginator::resolveCurrentPage();
         $slice = array_slice($rows, ($page - 1) * $perPage, $perPage);
 
-        // Обогащение страницы: код мог уже появиться в каталоге позже
-        // (articles_search содержит все алиасы позиции).
+        // Обогащение страницы: товар может УЖЕ быть в каталоге — код в названии
+        // или в алиасах, но не в артикулах позиции (автопривязка его не видит).
+        // Ищем «мягко»: разделители (точки/дефисы/пробелы) заменяем на wildcard —
+        // клиент пишет «IDD32.001.P», в названии каталога «IDD32.001P».
         foreach ($slice as $row) {
+            $escaped = str_replace(['%', '_'], ['\\%', '\\_'], (string) $row->code);
+            $loose = '%'.preg_replace('/[^\p{L}\p{N}\\\\%_]+/u', '%', $escaped).'%';
             $row->in_catalog_now = DB::selectOne(
-                'select exists(select 1 from catalog_items where is_active and articles_search ilike ?) as e',
-                ['%'.str_replace(['%', '_'], ['\\%', '\\_'], (string) $row->code).'%'],
+                'select exists(select 1 from catalog_items where is_active
+                    and (articles_search ilike ? or name ilike ? or name_en ilike ?)) as e',
+                [$loose, $loose, $loose],
             )->e;
             $row->request_codes = array_values(array_filter(
                 array_map('trim', explode(',', trim((string) $row->codes, '{}"'))),
