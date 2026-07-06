@@ -37,6 +37,12 @@
             <option value="90">запросы за 90 дн.</option>
             <option value="0">за всё время</option>
         </select>
+        <select wire:model.live="kindFilter"
+                class="h-[32px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+            <option value="">Вид кода: все</option>
+            <option value="oem">только настоящие OEM</option>
+            <option value="nonoem">маркировки / коды клиентов</option>
+        </select>
         <span class="text-[11.5px] text-fg-3 mono">{{ $this->codes->total() }} кодов</span>
     </div>
 

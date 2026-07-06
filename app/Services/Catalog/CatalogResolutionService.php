@@ -150,6 +150,41 @@ class CatalogResolutionService
                 continue;
             }
 
+            // Вердикт по коду (KB-маска / кэш ИИ-разбора): часть «кодов» —
+            // не OEM-артикулы, а маркировка модели с шильдика или внутренний
+            // номер клиента. Точный матч по ним бессмыслен, а digit-signature
+            // опасен ложными совпадениями. Обрывки пропускаем совсем; для
+            // маркировок/кодов клиента пробуем только выученный алиас (менеджеры
+            // могли уже показать, какому товару соответствует эта маркировка).
+            $insight = app(\App\Services\Kb\ArticleInsightService::class)->resolve($tok);
+            $insightKind = $insight?->kind;
+            $insightConfident = ($insight?->confidence ?? 0) >= 0.6;
+            if ($insightConfident && $insightKind === \App\Models\ArticleCodeInsight::KIND_FRAGMENT) {
+                continue;
+            }
+            if ($insightConfident && in_array($insightKind, [
+                \App\Models\ArticleCodeInsight::KIND_MODEL,
+                \App\Models\ArticleCodeInsight::KIND_INTERNAL,
+            ], true)) {
+                $learned = app(LearnedAliasService::class)->lookup($norm);
+                if ($learned !== null) {
+                    $this->applyCatalogToItem($item, $learned, promoteStatus: false, matchMethod: 'D_learned_alias', extraPayload: [
+                        'matched_token' => $tok,
+                        'matched_token_normalized' => $norm,
+                    ]);
+                    Log::info('CatalogResolutionService: non-OEM token matched via learned alias', [
+                        'request_item_id' => $item->id,
+                        'matched_token' => $tok,
+                        'kind' => $insightKind,
+                        'catalog_item_id' => $learned->id,
+                    ]);
+
+                    return true;
+                }
+
+                continue; // маркировку/код клиента подберёт C-step по названию
+            }
+
             // Сначала пробуем как sku (на случай если клиент написал точный
             // M-SKU, например «M02016»), потом как brand_article_normalized
             // (primary OEM-артикул). Если и это не нашло — лезем в массив

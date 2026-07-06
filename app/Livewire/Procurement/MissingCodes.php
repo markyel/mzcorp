@@ -30,6 +30,10 @@ class MissingCodes extends Component
     #[Url(as: 'days', except: 60)]
     public int $periodDays = 60;
 
+    /** Фильтр по виду кода: '' — все, 'oem' — только OEM, 'nonoem' — маркировки/коды клиентов/обрывки. */
+    #[Url(as: 'kind', except: '')]
+    public string $kindFilter = '';
+
     public function mount(): void
     {
         abort_unless(auth()->user()?->hasAnyRole([
@@ -44,6 +48,11 @@ class MissingCodes extends Component
     }
 
     public function updatingPeriodDays(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatingKindFilter(): void
     {
         $this->resetPage();
     }
@@ -88,9 +97,24 @@ class MissingCodes extends Component
             $sql .= ' and (ri.parsed_article ilike ? or ri.parsed_name ilike ? or coalesce(mb.name, ri.parsed_brand) ilike ?)';
             array_push($bindings, $like, $like, $like);
         }
-        $sql .= ' group by 1 order by count(distinct ri.request_id) desc, count(*) desc, 1';
+        $sql .= ' group by 1';
 
-        return ['sql' => $sql, 'bindings' => $bindings];
+        // Обогащение вердиктом «что это за код» + приоритизация: настоящие OEM
+        // выше, маркировки/коды клиентов/обрывки — вниз (по ним точный поиск
+        // в каталоге бессмыслен). kind null = ещё не разобран, считаем как OEM.
+        $outer = "select t.*, aci.kind as insight_kind
+            from ({$sql}) t
+            left join article_code_insights aci
+              on aci.code_normalized = upper(regexp_replace(t.code, '[\\s\\-_./]+', '', 'g'))";
+        if ($this->kindFilter === 'oem') {
+            $outer .= " where aci.kind = 'oem'";
+        } elseif ($this->kindFilter === 'nonoem') {
+            $outer .= " where aci.kind in ('model', 'internal', 'fragment')";
+        }
+        $outer .= " order by case when aci.kind in ('model', 'internal', 'fragment') then 1 else 0 end,
+            t.reqs desc, t.items desc, t.code";
+
+        return ['sql' => $outer, 'bindings' => $bindings];
     }
 
     /** @return array<int, object> */
@@ -187,16 +211,18 @@ class MissingCodes extends Component
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('OEM не в каталоге');
 
-        $headers = ['OEM-код', 'Пример названия из заявки', 'Марка', 'Заявок', 'Позиций', 'Выиграно', 'Проиграно', 'Последний запрос', 'Заявки'];
+        $headers = ['OEM-код', 'Вид кода', 'Пример названия из заявки', 'Марка', 'Заявок', 'Позиций', 'Выиграно', 'Проиграно', 'Последний запрос', 'Заявки'];
         foreach ($headers as $col => $h) {
             $cell = $sheet->getCell([$col + 1, 1]);
             $cell->setValue($h);
             $cell->getStyle()->getFont()->setBold(true);
         }
+        $kindLabels = ['oem' => 'OEM-артикул', 'model' => 'маркировка модели', 'internal' => 'код клиента', 'fragment' => 'обрывок'];
         $r = 2;
         foreach ($rows as $row) {
             $sheet->fromArray([
                 (string) $row->code,
+                $kindLabels[$row->insight_kind ?? ''] ?? 'не разобран',
                 (string) $row->sample_name,
                 (string) $row->brand,
                 (int) $row->reqs,
@@ -208,10 +234,10 @@ class MissingCodes extends Component
             ], null, 'A'.$r);
             $r++;
         }
-        foreach (['A' => 24, 'B' => 55, 'C' => 26, 'D' => 9, 'E' => 9, 'F' => 10, 'G' => 11, 'H' => 15, 'I' => 55] as $col => $w) {
+        foreach (['A' => 24, 'B' => 18, 'C' => 55, 'D' => 26, 'E' => 9, 'F' => 9, 'G' => 10, 'H' => 11, 'I' => 15, 'J' => 55] as $col => $w) {
             $sheet->getColumnDimension($col)->setWidth($w);
         }
-        $sheet->setAutoFilter('A1:I'.max(2, $r - 1));
+        $sheet->setAutoFilter('A1:J'.max(2, $r - 1));
         $sheet->freezePane('A2');
 
         $filename = 'OEM_не_в_каталоге_'.($this->periodDays > 0 ? $this->periodDays.'дн' : 'всё').'.xlsx';
