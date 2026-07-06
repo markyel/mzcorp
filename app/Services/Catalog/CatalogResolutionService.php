@@ -201,6 +201,33 @@ class CatalogResolutionService
                 })
                 ->first();
             if ($catalog === null) {
+                // Шаг D: выученный алиас — менеджеры уже повторно привязывали
+                // этот код к конкретной M-позиции руками (LearnedAliasService).
+                // Точный матч бессилен (код в склейке/названии/опечатке 1С),
+                // а подтверждённое людьми соответствие — надёжный сигнал.
+                $learned = app(LearnedAliasService::class)->lookup($norm);
+                if ($learned !== null) {
+                    $this->applyCatalogToItem(
+                        $item,
+                        $learned,
+                        promoteStatus: false,
+                        matchMethod: 'D_learned_alias',
+                        extraPayload: [
+                            'matched_token' => $tok,
+                            'matched_token_normalized' => $norm,
+                        ],
+                    );
+                    Log::info('CatalogResolutionService: item matched (D:learned-alias)', [
+                        'request_item_id' => $item->id,
+                        'matched_token' => $tok,
+                        'normalized' => $norm,
+                        'catalog_item_id' => $learned->id,
+                        'catalog_sku' => $learned->sku,
+                    ]);
+
+                    return true;
+                }
+
                 continue;
             }
 

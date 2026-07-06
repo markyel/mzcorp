@@ -412,6 +412,19 @@ class RequestItemEditor
             'by' => $author->id,
         ]);
 
+        // Обучение автоматчинга: запоминаем «код клиента → эта M-позиция».
+        // После повторного подтверждения такой же привязки код начнёт
+        // матчиться автоматически (шаг D). Fail-soft — обучение не должно
+        // ломать саму привязку.
+        try {
+            app(LearnedAliasService::class)->learnFromManualLink($item->fresh(), $catalog, $author);
+        } catch (\Throwable $e) {
+            Log::warning('RequestItemEditor: learned-alias record failed (non-fatal)', [
+                'request_item_id' => $item->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return $item;
     }
 
