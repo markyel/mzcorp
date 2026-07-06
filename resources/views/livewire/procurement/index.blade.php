@@ -8,6 +8,9 @@
         <div class="ds-card-header">
             <h2 class="text-[16px] font-semibold text-fg-1">⛏ Снабжение</h2>
             <span class="text-[12px] text-fg-3 ml-2">позиции, сдерживающие выдачу КП</span>
+            <span class="flex-1"></span>
+            <a href="{{ route('procurement.missing-codes') }}" wire:navigate class="btn btn-sm"
+               title="Повторяющиеся OEM-коды из заявок, не найденные в каталоге — пробелы базы синонимов и кандидаты в ассортимент">🔍 Не найдено в каталоге</a>
         </div>
         <div class="ds-card-body">
             @php $sum = $this->summary; @endphp

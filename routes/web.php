@@ -242,6 +242,13 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/procurement', function () {
             return view('procurement.index');
         })->name('procurement.index');
+
+        // «Не найдено в каталоге» — топ повторяющихся OEM-кодов из заявок без
+        // совпадения в каталоге: пробелы базы синонимов + кандидаты на
+        // расширение ассортимента.
+        Route::get('/dashboard/procurement/missing-codes', function () {
+            return view('procurement.missing-codes');
+        })->name('procurement.missing-codes');
     });
 
     // Mail routing rules — управление правилами для РОП и директора.
