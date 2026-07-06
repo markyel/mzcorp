@@ -359,6 +359,7 @@
                                 <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border sticky top-0 bg-surface">
                                     <tr>
                                         <th class="text-left px-1.5 py-1.5">№ счёта</th>
+                                        <th class="text-left px-1.5 py-1.5">Дата счёта</th>
                                         <th class="text-left px-1.5 py-1.5">Контрагент</th>
                                         <th class="text-right px-1.5 py-1.5">Оплата, ₽</th>
                                         <th class="text-right px-1.5 py-1.5">Оп%</th>
@@ -372,6 +373,7 @@
                                         @php [$label, $chip] = $this->importActionLabel($r['action']); @endphp
                                         <tr class="border-b border-border-subtle" wire:key="imp-{{ $i }}">
                                             <td class="px-1.5 py-1 mono">{{ $r['number'] }}</td>
+                                            <td class="px-1.5 py-1 mono text-fg-3">{{ $r['invoice_date'] ? \Illuminate\Support\Carbon::parse($r['invoice_date'])->format('d.m.Y') : '—' }}</td>
                                             <td class="px-1.5 py-1 text-fg-2">{{ $r['client'] }}</td>
                                             <td class="px-1.5 py-1 text-right mono">{{ number_format((float) $r['paid_sum'], 2, '.', ' ') }}</td>
                                             <td class="px-1.5 py-1 text-right mono {{ $r['percent'] < 100 ? 'text-amber-700 font-semibold' : 'text-fg-3' }}">{{ $r['percent'] }}</td>

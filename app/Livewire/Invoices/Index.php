@@ -471,6 +471,7 @@ class Index extends Component
         $this->importPreviewRows = array_map(fn ($r) => [
             'number' => $r['number_raw'],
             'client' => mb_substr((string) $r['client'], 0, 45),
+            'invoice_date' => $r['invoice_date'],
             'paid_date' => $r['paid_date'],
             'paid_sum' => $r['paid_sum'],
             'percent' => $r['percent'],
