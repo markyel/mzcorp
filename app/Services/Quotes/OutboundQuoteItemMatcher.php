@@ -120,6 +120,37 @@ class OutboundQuoteItemMatcher
         }
         $stats['unmatched'] = $stats['total'] - $stats['matched_request'];
 
+        // Обучение автоматчинга (шаг D, LearnedAliasService): строка КП/счёта,
+        // связанная с позицией заявки ПО ИМЕНИ (не через уже существующую
+        // каталожную привязку), — это менеджер в 1С выбрал конкретный товар под
+        // клиентский код. Запоминаем «parsed_article → catalog_item»; шум
+        // одиночных ошибок отсекает порог подтверждений (>= 2 разных документов).
+        // Fail-soft: обучение не должно влиять на матчинг.
+        try {
+            $learnSources = [
+                OutboundQuoteItem::MATCH_SOURCE_CATALOG_NAME_TO_REQUEST,
+                OutboundQuoteItem::MATCH_SOURCE_FUZZY_ARTICLE,
+            ];
+            $learner = app(\App\Services\Catalog\LearnedAliasService::class);
+            foreach ($items as $it) {
+                if ($it->matched_request_item_id === null
+                    || $it->matched_catalog_item_id === null
+                    || ! in_array($it->match_source, $learnSources, true)) {
+                    continue;
+                }
+                $ri = $request->items->firstWhere('id', $it->matched_request_item_id);
+                $catalog = \App\Models\CatalogItem::find($it->matched_catalog_item_id);
+                if ($ri !== null && $catalog !== null) {
+                    $learner->learnFromManualLink($ri, $catalog, null);
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('OutboundQuoteItemMatcher: alias learning failed (non-fatal)', [
+                'outbound_quote_id' => $quote->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return $stats;
     }
 
