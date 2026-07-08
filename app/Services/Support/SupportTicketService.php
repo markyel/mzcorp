@@ -118,6 +118,8 @@ class SupportTicketService
             return $ticket;
         }
 
+        $from = $ticket->status;
+
         $ticket->status = $to;
         if ($to === SupportTicketStatus::Resolved && $ticket->resolved_at === null) {
             $ticket->resolved_at = now();
@@ -130,6 +132,32 @@ class SupportTicketService
             $ticket->assigned_to_user_id ??= $actor->id;
         }
         $ticket->save();
+
+        // Автору — письмо «обращение решено» с вопросом и последним ответом
+        // админа. Только при ПЕРВОМ переходе в resolved/closed и только если
+        // закрыл не сам автор (сам закрыл — знает).
+        $terminal = [SupportTicketStatus::Resolved, SupportTicketStatus::Closed];
+        if (in_array($to, $terminal, true)
+            && ! in_array($from, $terminal, true)
+            && $actor->id !== $ticket->user_id
+            && $ticket->user?->email) {
+            try {
+                $lastAnswer = $ticket->messages()
+                    ->where('is_internal', false)
+                    ->where('user_id', '!=', $ticket->user_id)
+                    ->orderByDesc('id')
+                    ->first();
+                app(\App\Services\Mail\SystemNotificationMailer::class)->sendMailable(
+                    $ticket->user->email,
+                    new \App\Mail\SupportTicketResolvedMail($ticket, $lastAnswer),
+                );
+            } catch (\Throwable $e) {
+                Log::warning('Support: resolved mail failed (non-fatal)', [
+                    'ticket_id' => $ticket->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return $ticket;
     }
