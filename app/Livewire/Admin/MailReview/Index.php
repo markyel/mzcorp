@@ -139,7 +139,10 @@ class Index extends Component
             ->where('direction', MailDirection::Inbound->value)
             ->whereNotNull('categorized_at')
             ->whereNull('related_request_id')
-            ->where('category', EmailCategory::Irrelevant->value);
+            ->where('category', EmailCategory::Irrelevant->value)
+            // Служебные уведомления MyLift (поддержка) — не для ревью.
+            // jsonb_exists вместо оператора `?` — тот конфликтует с PDO-плейсхолдерами.
+            ->whereRaw("not coalesce(jsonb_exists(headers, 'x_mylift_system_notification'), false)");
 
         $since = match ($this->window) {
             'today' => now()->subDay(),

@@ -59,6 +59,26 @@ class MailRouter
 
     public function route(EmailMessage $message): void
     {
+        // Служебные письма системы (уведомления поддержки и т.п., шлёт
+        // SystemNotificationMailer с заголовком X-MyLift-System-Notification):
+        // копия из «Отправленных» общего ящика и входящие копии в личных
+        // ящиках сотрудников НЕ должны линковаться к заявкам (в теме бывает
+        // код заявки!), детектиться как документы или плодить заявки/шум в
+        // mail-review. Помечаем категорией и выходим из обработки.
+        $sysHeaders = (array) ($message->headers ?? []);
+        if (isset($sysHeaders['x_mylift_system_notification'])) {
+            if ($message->category === null) {
+                $message->forceFill([
+                    'category' => \App\Enums\EmailCategory::Irrelevant->value,
+                    'category_reasoning' => 'Служебное уведомление MyLift (поддержка) — вне обработки.',
+                    'categorized_at' => now(),
+                    'classified_at' => now(),
+                ])->save();
+            }
+
+            return;
+        }
+
         // Phase 1.9 outbound: исходящие из Sent — линкуем к существующей
         // Request, не пропускаем через categorize/rules/IncomingProcessor
         // (это наше письмо, не клиентский запрос). Отдельная короткая ветка.

@@ -51,6 +51,10 @@ class SystemNotificationMailer
                 ->to($to)
                 ->subject($subject)
                 ->html($html);
+            // Маркер для пайплайна: копия из «Отправленных» и входящие копии
+            // в личных ящиках НЕ должны линковаться к заявкам / плодить
+            // заявки / попадать в mail-review (гард в MailRouter::route).
+            $email->getHeaders()->addTextHeader('X-MyLift-System-Notification', '1');
 
             $this->sender->buildSmtpTransport($mailbox)->send($email);
 
