@@ -4,12 +4,12 @@
 **{{ $ticket->subject }}**
 Ответил: **{{ $author->name }}** · {{ $message->created_at?->format('d.m.Y H:i') }}
 
-@if(($question ?? null) !== null)
+@if(($questionBody ?? null) !== null)
 ---
 
-**Ваш вопрос** ({{ $question->created_at?->format('d.m.Y H:i') }}):
+**Ваш вопрос** ({{ $questionAt?->format('d.m.Y H:i') }}):
 
-> {{ str_replace("\n", "\n> ", trim($question->body)) }}
+> {{ str_replace("\n", "\n> ", $questionBody) }}
 @endif
 
 ---

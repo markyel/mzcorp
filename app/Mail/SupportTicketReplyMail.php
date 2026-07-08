@@ -32,12 +32,19 @@ class SupportTicketReplyMail extends Mailable
     {
         $this->message->loadMissing(['author']);
 
-        // Исходный вопрос (первое видимое сообщение тикета) — дублируем в
-        // письме, чтобы спрашивающий видел контекст без перехода в CRM.
-        $question = $this->ticket->messages()
+        // Исходный вопрос — дублируем в письме, чтобы спрашивающий видел
+        // контекст без перехода в CRM. Первичный текст вопроса живёт в
+        // support_tickets.body (сообщения — только последующие реплики).
+        $firstMessage = $this->ticket->messages()
             ->where('is_internal', false)
             ->orderBy('id')
             ->first();
+        $questionBody = trim((string) $this->ticket->body);
+        $questionAt = $this->ticket->created_at;
+        if ($questionBody === '' && $firstMessage !== null && $firstMessage->id !== $this->message->id) {
+            $questionBody = trim((string) $firstMessage->body);
+            $questionAt = $firstMessage->created_at;
+        }
 
         return new Content(
             markdown: 'mail.support.ticket-reply',
@@ -45,7 +52,8 @@ class SupportTicketReplyMail extends Mailable
                 'ticket' => $this->ticket,
                 'message' => $this->message,
                 'author' => $this->message->author,
-                'question' => ($question !== null && $question->id !== $this->message->id) ? $question : null,
+                'questionBody' => $questionBody !== '' ? $questionBody : null,
+                'questionAt' => $questionAt,
                 'url' => route('support.show', $this->ticket),
             ],
         );
