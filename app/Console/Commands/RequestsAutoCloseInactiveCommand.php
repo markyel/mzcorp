@@ -210,6 +210,40 @@ class RequestsAutoCloseInactiveCommand extends Command
             }
         }
 
+        // (c2) Статус «счёт выставлен», но живых счетов у заявки нет: все
+        // аннулированы (типовой случай — разжалованный дубль номера, кейс
+        // M-2026-5892: счёт №6613-копия аннулирован, оригинал на другой
+        // заявке) либо Invoice вовсе не создан (детектор поднял статус, а
+        // создание счёта отсёк гард). Ветка (c) таких не видит — она идёт
+        // от pending/expired счетов. Закрываем по той же политике при полной
+        // тишине клиента; якорь — last_activity_at.
+        if ($invoiceDays > 0 && ! $reachedLimit()) {
+            $reqs = Request::query()
+                ->where('status', RequestStatus::Invoiced->value)
+                ->whereRaw('COALESCE(last_activity_at, updated_at) < ?', [now()->subDays($invoiceDays)])
+                ->whereNotExists(function ($q) {
+                    $q->selectRaw('1')
+                        ->from('invoices')
+                        ->whereColumn('invoices.request_id', 'requests.id')
+                        ->where('invoices.status', '!=', InvoiceStatus::Cancelled->value);
+                })
+                ->get();
+            foreach ($reqs as $req) {
+                if ($reachedLimit()) {
+                    break;
+                }
+                if (! $this->isClosable($req)) {
+                    continue;
+                }
+                if (! $this->dueBusiness($cal, $req->last_activity_at ?? $req->updated_at, $invoiceDays)
+                    || $this->clientEngagedRecently($cal, $req, $invoiceDays)) {
+                    continue;
+                }
+                $close($req, ClosedLostReason::InvoiceUnpaid,
+                    sprintf('Живых счетов по заявке нет (аннулированы или не зафиксированы), клиент молчит более %d раб. дн.', $invoiceDays), 'invoice');
+            }
+        }
+
         $this->info(sprintf(
             'Закрыто: уточнение=%d · КП=%d · счёт=%d (всего %d)%s',
             $stats['clarification'], $stats['quote'], $stats['invoice'], $closed,
