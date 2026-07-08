@@ -1182,6 +1182,11 @@ class Detail extends Component
         }
 
         $value = trim($this->oneCNumberInput);
+        // Нормализация: 1С показывает номера с ведущими нулями («КП 000327068»),
+        // канонический номер — без них. Убираем нули перед каждой цифровой
+        // группой + схлопываем повторные пробелы.
+        $value = (string) preg_replace('/(?<!\d)0+(?=\d)/', '', $value);
+        $value = trim((string) preg_replace('/\s+/u', ' ', $value));
         if ($value === '' || mb_strlen($value) > 64) {
             $this->dispatch('toast', message: 'Укажите номер из 1С (до 64 символов).', type: 'error');
 
