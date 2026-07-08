@@ -39,7 +39,7 @@ class Editor extends Component
      * для secretary / director / admin поле скрыто, значение хранится но игнорируется
      * в AssignmentService (они не попадают в available()).
      */
-    #[Validate('required|integer|between:10,500')]
+    #[Validate('required|integer|between:1,500')]
     public int $loadWeight = 100;
 
     public function mount(?User $user = null): void

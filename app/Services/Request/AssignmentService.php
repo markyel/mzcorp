@@ -507,7 +507,7 @@ class AssignmentService
      * argmin-вёдер, где один менеджер мог забрать весь поток.
      *
      * Пороги/доли — config `assignment.distribution` (period_days,
-     * base_close_rate, smoothing_k, mix). quota = clamp(load_weight,10..500)/100.
+     * base_close_rate, smoothing_k, mix). quota = clamp(load_weight,1..500)/100.
      *
      * @param  Collection<int, User>  $managers  Доступные менеджеры.
      * @return array{user: User, target_weights: array<int,float>, closes: array<int,int>, today: array<int,int>}|null
@@ -581,7 +581,10 @@ class AssignmentService
         // Три сырых компонента веса на менеджера.
         $rows = $managers->map(function (User $u) use ($loadByUser, $closeByUser, $baseClose, $K) {
             $load = (float) ($loadByUser[$u->id] ?? 0);
-            $weight = max(10, min(500, (int) ($u->load_weight ?? 100)));
+            // Нижняя граница 1 (не 10): заказчику нужна возможность почти
+            // выключить менеджера из распределения (квота 0.01), сохранив
+            // sticky-приоритеты. Ноль не допускаем — деление на quota ниже.
+            $weight = max(1, min(500, (int) ($u->load_weight ?? 100)));
             $quota = $weight / 100.0;
             $closes = (int) ($closeByUser[$u->id] ?? 0);
             // Базовая скорость для новичков (0 закрытий) — масштаб на quota.
