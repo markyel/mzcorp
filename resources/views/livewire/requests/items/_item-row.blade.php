@@ -61,9 +61,21 @@
             $itemPreviewUrl = route('attachments.preview', $itemImg);
             $itemDownloadUrl = route('attachments.download', $itemImg);
         @endphp
+        @php
+            // Галерея для лайтбокса: все фото позиции (главное — первым, как в
+            // сортировке relation). Если pivot-связей нет (старые позиции с
+            // одним image_attachment_id) — одиночная картинка.
+            $itemGallery = $photoCount > 1
+                ? $item->photos->map(fn ($ph) => [
+                    'src' => route('attachments.preview', $ph),
+                    'name' => $ph->filename,
+                    'dl' => route('attachments.download', $ph),
+                ])->values()->all()
+                : [['src' => $itemPreviewUrl, 'name' => $itemImg->filename, 'dl' => $itemDownloadUrl]];
+        @endphp
         <div class="relative w-8 h-8 shrink-0">
             <button type="button"
-                    x-on:click="$dispatch('open-image', { src: @js($itemPreviewUrl), name: @js($itemImg->filename), dl: @js($itemDownloadUrl) })"
+                    x-on:click="$dispatch('open-image', { items: @js($itemGallery), index: 0 })"
                     class="w-8 h-8 border border-border rounded-sm overflow-hidden bg-app block"
                     title="{{ $itemImg->filename }}{{ $photoCount > 1 ? ' · фото: ' . $photoCount : '' }} — открыть">
                 <img src="{{ $itemPreviewUrl }}"

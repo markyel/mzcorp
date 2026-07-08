@@ -2228,6 +2228,25 @@
                                         ];
                                     }
                                 }
+                                // Плюс фото, привязанные к позициям pivot'ом
+                                // (мульти-фото на позицию / фото из других писем
+                                // треда / перепривязка): их может не быть среди
+                                // вложений триггерного письма — без этого второе
+                                // фото позиции не листалось (кейс M-2026-6469).
+                                $items->loadMissing('photos');
+                                foreach ($items as $_pos) {
+                                    foreach ($_pos->photos as $_ph) {
+                                        if (! $isImageAttachment($_ph) || isset($positionsImgIndex[$_ph->id])) {
+                                            continue;
+                                        }
+                                        $positionsImgIndex[$_ph->id] = count($positionsGallery);
+                                        $positionsGallery[] = [
+                                            'src' => route('attachments.preview', $_ph),
+                                            'name' => $_ph->filename,
+                                            'dl' => route('attachments.download', $_ph),
+                                        ];
+                                    }
+                                }
                                 // Карта item.id → idx в галерее (через
                                 // image_attachment_id, если есть).
                                 $positionsItemIdx = [];
