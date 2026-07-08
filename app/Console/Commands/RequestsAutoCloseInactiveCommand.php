@@ -116,6 +116,41 @@ class RequestsAutoCloseInactiveCommand extends Command
             }
         }
 
+        // (a2) Уточнение БЕЗ формального батча: статус awaiting_client_clarification
+        // в большинстве случаев ставит AI-интент-детектор по обычному письму
+        // менеджера (или менеджер вручную) — ClarificationBatch при этом не
+        // создаётся, и ветка (a) таких заявок не видит. Кейс M-2026-5102:
+        // 322 заявки висели «в уточнении» в среднем 18 дней, автозакрытие
+        // находило 0 кандидатов. Якорь тишины — last_activity_at (таймер
+        // сбрасывается ответом клиента / действием менеджера, как в ветке b).
+        if ($clarDays > 0 && ! $reachedLimit()) {
+            $reqs = Request::query()
+                ->where('status', RequestStatus::AwaitingClientClarification->value)
+                ->whereRaw('COALESCE(last_activity_at, updated_at) < ?', [now()->subDays($clarDays)])
+                ->whereNotExists(function ($q) {
+                    $q->selectRaw('1')
+                        ->from('clarification_batches')
+                        ->whereColumn('clarification_batches.request_id', 'requests.id')
+                        ->where('clarification_batches.status', ClarificationBatch::STATUS_SENT)
+                        ->whereNull('clarification_batches.answered_at');
+                })
+                ->get();
+            foreach ($reqs as $req) {
+                if ($reachedLimit()) {
+                    break;
+                }
+                if (! $this->isClosable($req)) {
+                    continue;
+                }
+                if (! $this->dueBusiness($cal, $req->last_activity_at ?? $req->updated_at, $clarDays)
+                    || $this->clientEngagedRecently($cal, $req, $clarDays)) {
+                    continue;
+                }
+                $close($req, ClosedLostReason::NoClientResponseToClarification,
+                    sprintf('Клиент не ответил на уточнение более %d раб. дн.', $clarDays), 'clarification');
+            }
+        }
+
         // (b) Молчание после КП. Anchor — last_activity_at (таймер тишины:
         // сбрасывается при ответе клиента / действии менеджера).
         if ($quoteDays > 0 && ! $reachedLimit()) {
