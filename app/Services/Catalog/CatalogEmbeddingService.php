@@ -1578,7 +1578,9 @@ class CatalogEmbeddingService
     /**
      * Человекочитаемая «нужная» категория позиции заявки для LLM-сверки класса
      * детали: KB-категория (identification_category_id → name), иначе
-     * detailed_category из quality_assessment_payload. null = не определена.
+     * detailed_category из quality_assessment_payload, иначе строковая
+     * категория позиции от парсера (request_items.category — «Безопасность»,
+     * «Электроника и платы»…). null = не определена.
      */
     private function requestCategoryText(RequestItem $item): ?string
     {
@@ -1587,8 +1589,12 @@ class CatalogEmbeddingService
             return $name;
         }
         $dc = $item->quality_assessment_payload['detailed_category']['name'] ?? null;
+        if (is_string($dc) && trim($dc) !== '') {
+            return $dc;
+        }
+        $cat = $item->category;
 
-        return is_string($dc) && trim($dc) !== '' ? $dc : null;
+        return is_string($cat) && trim($cat) !== '' ? $cat : null;
     }
 
     /**
