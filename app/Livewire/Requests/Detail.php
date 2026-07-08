@@ -1237,6 +1237,52 @@ class Detail extends Component
         $this->dispatch('toast', message: "Номер 1С сохранён: {$value}.", type: 'success');
     }
 
+    /**
+     * Сбросить номер 1С (только РОП/директор/админ): заявка возвращается в
+     * состояние «номер не указан» — менеджер сможет ввести правильный заново,
+     * а пул снова пометит её «⚠ нет № 1С».
+     */
+    public function clearOneCNumber(): void
+    {
+        $user = auth()->user();
+        if ($user === null || ! $this->canChangeOneCNumber()) {
+            $this->dispatch('toast', message: 'Сбросить номер 1С может только РОП или директор.', type: 'error');
+
+            return;
+        }
+
+        $old = trim((string) $this->request->onec_number);
+        if ($old === '') {
+            $this->editingOneCNumber = false;
+
+            return;
+        }
+
+        $this->request->forceFill(['onec_number' => null])->save();
+
+        try {
+            \App\Models\RequestStateChange::create([
+                'request_id' => $this->request->id,
+                'from_status' => $this->request->status->value,
+                'to_status' => $this->request->status->value,
+                'by_user_id' => $user->id,
+                'event' => 'onec_number_cleared',
+                'comment' => sprintf('Номер 1С сброшен (был: %s).', $old),
+                'payload' => ['old' => $old, 'new' => null],
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Detail: onec number clear audit failed (non-fatal)', [
+                'request_id' => $this->request->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->editingOneCNumber = false;
+        $this->oneCNumberInput = '';
+        $this->reloadRequest();
+        $this->dispatch('toast', message: "Номер 1С сброшен (был: {$old}).", type: 'success');
+    }
+
     /** Менять УЖЕ установленный номер 1С — только РОП/директор/админ. */
     public function canChangeOneCNumber(): bool
     {

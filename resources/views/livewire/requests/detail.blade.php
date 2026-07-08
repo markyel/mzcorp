@@ -273,6 +273,10 @@
                     <button type="button" wire:click="saveOneCNumber" class="btn btn-sm btn-primary" style="height:24px; padding:0 8px">Сохранить</button>
                     @if($editingOneCNumber)
                         <button type="button" wire:click="cancelEditOneCNumber" class="btn btn-sm" style="height:24px; padding:0 8px">✕</button>
+                        <button type="button" wire:click="clearOneCNumber"
+                                wire:confirm="Сбросить номер 1С у заявки? Она снова будет помечена «нет № 1С», менеджер сможет ввести номер заново."
+                                class="btn btn-sm text-red-700" style="height:24px; padding:0 8px"
+                                title="Сбросить номер (только РОП/директор)">Сбросить номер</button>
                     @elseif($this->oneCNumberSuggestion)
                         <button type="button" wire:click="applyOneCNumberSuggestion"
                                 class="text-sky-700 hover:underline text-[11.5px]"
