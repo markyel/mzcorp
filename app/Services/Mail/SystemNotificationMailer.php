@@ -74,7 +74,16 @@ class SystemNotificationMailer
             ->whereRaw('LOWER(email) = ?', [mb_strtolower($sharedEmail)])
             ->where('is_active', true)
             ->first();
+        if ($mailbox !== null && $mailbox->canSendOutbound()) {
+            return $mailbox;
+        }
 
-        return ($mailbox !== null && $mailbox->canSendOutbound()) ? $mailbox : null;
+        // Настроенный общий ящик отключён (на проде mail@ выключен, живой —
+        // info@): берём любой активный shared-ящик, способный отправлять.
+        return Mailbox::query()
+            ->where('type', \App\Enums\MailboxType::Shared->value)
+            ->where('is_active', true)
+            ->get()
+            ->first(fn (Mailbox $m) => $m->canSendOutbound());
     }
 }
