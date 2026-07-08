@@ -516,12 +516,17 @@ class Pool extends Component
         if ($this->search !== '') {
             $like = '%'.$this->search.'%';
             // Номер 1С хранится без ведущих нулей — ищем и по введённой форме,
-            // и по форме без нулей («000327068» находит «327068»).
+            // и по форме без нулей («000327068» находит «327068»), и по чистой
+            // цифровой части («КП 000327068» из буфера 1С тоже находит).
             $searchNoZeros = trim((string) preg_replace('/(?<!\d)0+(?=\d)/', '', $this->search));
             $likeNoZeros = $searchNoZeros !== '' && $searchNoZeros !== $this->search
                 ? '%'.$searchNoZeros.'%'
                 : null;
-            $query->where(function ($q) use ($like, $likeNoZeros) {
+            $digits = preg_match('/(\d{4,})/', $searchNoZeros, $dm) === 1 ? $dm[1] : null;
+            $likeDigits = $digits !== null && $digits !== $searchNoZeros && $digits !== $this->search
+                ? '%'.$digits.'%'
+                : null;
+            $query->where(function ($q) use ($like, $likeNoZeros, $likeDigits) {
                 // Базовые поля заявки.
                 $q->where('internal_code', 'ilike', $like)
                     ->orWhere('subject', 'ilike', $like)
@@ -530,6 +535,7 @@ class Pool extends Component
                     // Номер заявки/КП из 1С.
                     ->orWhere('onec_number', 'ilike', $like)
                     ->when($likeNoZeros !== null, fn ($w) => $w->orWhere('onec_number', 'ilike', $likeNoZeros))
+                    ->when($likeDigits !== null, fn ($w) => $w->orWhere('onec_number', 'ilike', $likeDigits))
                     // Позиции заявки — артикул / название (parsed_*).
                     // EXISTS-subquery вместо JOIN, чтобы не дублировать
                     // строки и не ломать пагинацию.
