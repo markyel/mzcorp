@@ -1248,8 +1248,10 @@ class Detail extends Component
     }
 
     /**
-     * Подсказка для поля: номер последнего распознанного исходящего КП/счёта
-     * (детектор уже видел документ 1С в письмах — вероятно, это и есть номер).
+     * Подсказка для поля: номер последнего распознанного исходящего КП
+     * (детектор уже видел документ 1С в письмах — вероятно, это и есть номер
+     * заявки). Счета (outbound_invoice) сознательно НЕ берём: у них свой
+     * номер, а правило требует номер именно заявки/КП.
      */
     #[Computed]
     public function oneCNumberSuggestion(): ?string
@@ -1260,6 +1262,7 @@ class Detail extends Component
 
         return \App\Models\OutboundQuote::query()
             ->where('request_id', $this->request->id)
+            ->where('document_type', 'like', 'outbound_quotation%')
             ->whereNotNull('document_number')
             ->orderByDesc('id')
             ->value('document_number');
