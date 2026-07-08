@@ -28,6 +28,7 @@ class SupportTicket extends Model
         'first_response_at',
         'resolved_at',
         'closed_at',
+        'flagged_at',
     ];
 
     protected function casts(): array
@@ -38,6 +39,7 @@ class SupportTicket extends Model
             'first_response_at' => 'datetime',
             'resolved_at' => 'datetime',
             'closed_at' => 'datetime',
+            'flagged_at' => 'datetime',
         ];
     }
 
