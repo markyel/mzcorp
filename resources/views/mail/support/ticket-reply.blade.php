@@ -4,7 +4,17 @@
 **{{ $ticket->subject }}**
 Ответил: **{{ $author->name }}** · {{ $message->created_at?->format('d.m.Y H:i') }}
 
+@if(($question ?? null) !== null)
 ---
+
+**Ваш вопрос** ({{ $question->created_at?->format('d.m.Y H:i') }}):
+
+> {{ str_replace("\n", "\n> ", trim($question->body)) }}
+@endif
+
+---
+
+**Ответ:**
 
 {{ $message->body }}
 

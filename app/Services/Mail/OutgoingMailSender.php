@@ -117,7 +117,7 @@ class OutgoingMailSender
         return ['success' => true, 'draft' => $draft->fresh()];
     }
 
-    private function buildSmtpTransport(\App\Models\Mailbox $mailbox): TransportInterface
+    public function buildSmtpTransport(\App\Models\Mailbox $mailbox): TransportInterface
     {
         $factory = new EsmtpTransportFactory();
         $dsn = new Dsn(

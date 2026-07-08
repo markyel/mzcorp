@@ -190,7 +190,8 @@ class SupportTicketService
             return;
         }
         try {
-            Mail::to($to)->send(new SupportTicketCreatedMail($ticket));
+            app(\App\Services\Mail\SystemNotificationMailer::class)
+                ->sendMailable($to, new SupportTicketCreatedMail($ticket));
         } catch (\Throwable $e) {
             // Письмо — best-effort, тикет уже создан и виден в админке.
             Log::error('Failed to send support ticket created mail', [
@@ -227,7 +228,8 @@ class SupportTicketService
             return;
         }
         try {
-            Mail::to($to)->send(new SupportTicketReplyMail($ticket, $message));
+            app(\App\Services\Mail\SystemNotificationMailer::class)
+                ->sendMailable($to, new SupportTicketReplyMail($ticket, $message));
         } catch (\Throwable $e) {
             Log::error('Failed to send support ticket reply mail', [
                 'ticket_id' => $ticket->id,
