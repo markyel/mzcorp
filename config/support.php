@@ -18,4 +18,12 @@ return [
      */
     'developer_name' => env('SUPPORT_DEVELOPER_NAME'),
 
+    /*
+     * «Тихое окно» email-дайджеста (минуты): ответы уходят почтой не раньше,
+     * чем через N минут после ПОСЛЕДНЕГО неотправленного сообщения пачки —
+     * серия ответов подряд склеивается в одно письмо. Крон
+     * support:email-pending-replies.
+     */
+    'digest_quiet_minutes' => (int) env('SUPPORT_DIGEST_QUIET_MINUTES', 5),
+
 ];

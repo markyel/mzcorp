@@ -164,6 +164,17 @@ Schedule::command('mail:backfill-manager-deliveries --apply')
     ->onOneServer()
     ->runInBackground();
 
+// Email-дайджест ответов по support-тикетам: письма не уходят на каждый
+// комментарий (кейс тикета #70 — 3 почти одинаковых письма за 15 минут),
+// а копятся (emailed_at IS NULL) и раз в прогон уходят одним письмом на
+// пачку, после «тихого окна» support.digest_quiet_minutes (по умолч. 5 мин).
+// In-app уведомления (bell, жирный в «Моих обращениях») — по-прежнему сразу.
+Schedule::command('support:email-pending-replies')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Phase 6: автоматические уведомления клиенту (clarification reminder /
 // quote followup / invoice expiring soon / invoice expired). Каждый тип
 // проверяет is_enabled — по умолчанию все выключены, admin включает через

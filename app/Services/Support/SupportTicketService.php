@@ -4,7 +4,6 @@ namespace App\Services\Support;
 
 use App\Enums\SupportTicketStatus;
 use App\Mail\SupportTicketCreatedMail;
-use App\Mail\SupportTicketReplyMail;
 use App\Models\SupportTicket;
 use App\Models\SupportTicketAttachment;
 use App\Models\SupportTicketMessage;
@@ -133,24 +132,39 @@ class SupportTicketService
         }
         $ticket->save();
 
-        // Автору — письмо «обращение решено» с вопросом и последним ответом
-        // админа. Только при ПЕРВОМ переходе в resolved/closed и только если
-        // закрыл не сам автор (сам закрыл — знает).
+        // Автору — письмо «обращение решено» с вопросом и ответами админа.
+        // Только при ПЕРВОМ переходе в resolved/closed и только если закрыл
+        // не сам автор (сам закрыл — знает). Письмо вбирает ВСЕ ещё не
+        // отправленные почтой ответы (emailed_at IS NULL) и штампует их —
+        // чтобы дайджест-крон не прислал их вторым письмом (кейс тикета #70:
+        // 2 ответа + «решено» = 3 почти одинаковых письма подряд).
         $terminal = [SupportTicketStatus::Resolved, SupportTicketStatus::Closed];
         if (in_array($to, $terminal, true)
             && ! in_array($from, $terminal, true)
             && $actor->id !== $ticket->user_id
             && $ticket->user?->email) {
             try {
-                $lastAnswer = $ticket->messages()
+                $staffAnswers = $ticket->messages()
                     ->where('is_internal', false)
                     ->where('user_id', '!=', $ticket->user_id)
-                    ->orderByDesc('id')
-                    ->first();
+                    ->orderBy('id')
+                    ->get();
+                $pending = $staffAnswers->whereNull('emailed_at')->values();
+                // Всё уже уходило дайджестами — приложим последний ответ,
+                // чтобы письмо «решено» не осталось без контекста.
+                $answers = $pending->isNotEmpty()
+                    ? $pending
+                    : collect([$staffAnswers->last()])->filter()->values();
+
                 app(\App\Services\Mail\SystemNotificationMailer::class)->sendMailable(
                     $ticket->user->email,
-                    new \App\Mail\SupportTicketResolvedMail($ticket, $lastAnswer),
+                    new \App\Mail\SupportTicketResolvedMail($ticket, $answers),
                 );
+                if ($pending->isNotEmpty()) {
+                    SupportTicketMessage::query()
+                        ->whereIn('id', $pending->pluck('id'))
+                        ->update(['emailed_at' => now()]);
+                }
             } catch (\Throwable $e) {
                 Log::warning('Support: resolved mail failed (non-fatal)', [
                     'ticket_id' => $ticket->id,
@@ -231,11 +245,16 @@ class SupportTicketService
 
     private function notifyOnReply(SupportTicket $ticket, SupportTicketMessage $message): void
     {
-        // Если ответил автор — шлём админу. Если админ — шлём автору.
+        // Если ответил админ — in-app нотификация автору тикета мгновенно
+        // (bell-dropdown, badge, жирный в «Моих обращениях»).
+        //
+        // EMAIL здесь НЕ шлём: письма уходят дайджестом — крон
+        // support:email-pending-replies собирает сообщения с
+        // emailed_at IS NULL в одно письмо на пачку (тихое окно ~5 мин).
+        // Иначе серия ответов подряд = серия почти одинаковых писем
+        // (кейс тикета #70: 3 письма за 15 минут).
         $isAuthorReply = $message->user_id === $ticket->user_id;
 
-        // In-app нотификация автору тикета — для bell-dropdown и badge на
-        // иконке «связь с создателем». Email — отдельным путём ниже.
         if (! $isAuthorReply) {
             try {
                 $ticket->user->notify(new \App\Notifications\SupportTicketReplyNotification($ticket, $message));
@@ -246,24 +265,6 @@ class SupportTicketService
                     'error' => $e->getMessage(),
                 ]);
             }
-        }
-
-        $to = $isAuthorReply
-            ? config('support.developer_email')
-            : $ticket->user->email;
-
-        if (! $to) {
-            return;
-        }
-        try {
-            app(\App\Services\Mail\SystemNotificationMailer::class)
-                ->sendMailable($to, new SupportTicketReplyMail($ticket, $message));
-        } catch (\Throwable $e) {
-            Log::error('Failed to send support ticket reply mail', [
-                'ticket_id' => $ticket->id,
-                'message_id' => $message->id,
-                'error' => $e->getMessage(),
-            ]);
         }
     }
 }

@@ -3,16 +3,20 @@
 namespace App\Mail;
 
 use App\Models\SupportTicket;
-use App\Models\SupportTicketMessage;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Collection;
 
 /**
  * Автору обращения: вопрос решён (админ перевёл тикет в resolved/closed).
- * Дублирует исходный вопрос и последний ответ создателя.
+ * Дублирует исходный вопрос и ответы создателя — все ещё не отправленные
+ * почтой (дайджест-логика, см. SupportTicketService::changeStatus), либо
+ * последний ответ, если все уже уходили.
+ *
+ * @property Collection<int, \App\Models\SupportTicketMessage> $answers
  */
 class SupportTicketResolvedMail extends Mailable
 {
@@ -20,7 +24,7 @@ class SupportTicketResolvedMail extends Mailable
 
     public function __construct(
         public SupportTicket $ticket,
-        public ?SupportTicketMessage $lastAnswer = null,
+        public Collection $answers,
     ) {
     }
 
@@ -33,13 +37,13 @@ class SupportTicketResolvedMail extends Mailable
 
     public function content(): Content
     {
-        $this->lastAnswer?->loadMissing('author');
+        $this->answers->each(fn ($m) => $m->loadMissing('author'));
 
         return new Content(
             markdown: 'mail.support.ticket-resolved',
             with: [
                 'ticket' => $this->ticket,
-                'answer' => $this->lastAnswer,
+                'answers' => $this->answers,
                 'questionBody' => trim((string) $this->ticket->body) ?: null,
                 'url' => route('support.show', $this->ticket),
             ],

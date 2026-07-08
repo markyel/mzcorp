@@ -13,12 +13,14 @@ class SupportTicketMessage extends Model
         'user_id',
         'body',
         'is_internal',
+        'emailed_at',
     ];
 
     protected function casts(): array
     {
         return [
             'is_internal' => 'bool',
+            'emailed_at' => 'datetime',
         ];
     }
 

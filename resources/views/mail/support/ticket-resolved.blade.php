@@ -9,13 +9,13 @@
 > {{ str_replace("\n", "\n> ", $questionBody) }}
 @endif
 
-@if($answer !== null)
+@foreach($answers as $answer)
 ---
 
 **Ответ** ({{ $answer->author?->name }} · {{ $answer->created_at?->format('d.m.Y H:i') }}):
 
 {{ $answer->body }}
-@endif
+@endforeach
 
 <x-mail::button :url="$url">
 Открыть обращение
