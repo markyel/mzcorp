@@ -766,7 +766,10 @@
                                 @if($createdShort)
                                     <div class="text-[10.5px] text-[var(--fg-4)] font-mono mt-0.5 pl-[14px]">{{ $createdShort }}</div>
                                 @endif
-                                @if(! $req->onec_number)
+                                @if($req->onec_number)
+                                    <div class="text-[10px] text-emerald-700 font-mono mt-0.5 pl-[14px] whitespace-nowrap truncate"
+                                         title="Номер заявки/КП в 1С">1С: {{ $req->onec_number }}</div>
+                                @else
                                     <div class="text-[10px] text-amber-700 font-mono mt-0.5 pl-[14px] whitespace-nowrap"
                                          title="У заявки не указан номер заявки/КП из 1С — заполните в шапке заявки">⚠ нет № 1С</div>
                                 @endif
