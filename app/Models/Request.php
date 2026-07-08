@@ -71,6 +71,8 @@ class Request extends Model
         'last_activity_type',
         // Статус обновления цен (Фаза 3.5) — awaiting/actualized/refused.
         'price_refresh_state',
+        // Номер заявки/КП из 1С (синхрон с корп. базой; менять — только РОП/директор).
+        'onec_number',
         // Слияние заявок (RequestMergeService).
         'merged_into_id',
         'merged_at',

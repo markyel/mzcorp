@@ -248,6 +248,41 @@
                 @endif
             </div>
 
+            {{-- Номер заявки/КП из 1С: обязателен для всех заявок (синхрон с 1С).
+                 Ввод — менеджер; изменение установленного — только РОП/директор. --}}
+            <div class="flex items-center gap-2 mb-1.5 text-[12px] flex-wrap">
+                @if($req->onec_number && ! $editingOneCNumber)
+                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 mono text-[12px]"
+                          title="Номер заявки/КП в 1С">
+                        1С: <b>{{ $req->onec_number }}</b>
+                    </span>
+                    @if($this->canChangeOneCNumber())
+                        <button type="button" wire:click="startEditOneCNumber"
+                                class="text-fg-4 hover:text-sky-700 text-[12px]"
+                                title="Изменить номер 1С (только РОП/директор)">✎</button>
+                    @endif
+                @else
+                    <span class="inline-flex items-center gap-1 text-amber-700 text-[11.5px]"
+                          title="У каждой заявки должен быть номер заявки/КП из 1С — даже если КП ещё не выдано">
+                        ⚠ № 1С:
+                    </span>
+                    <input type="text" wire:model="oneCNumberInput" wire:keydown.enter="saveOneCNumber"
+                           placeholder="номер из 1С…"
+                           class="h-[24px] px-2 border border-amber-300 rounded-md bg-surface text-[12px] mono outline-none focus:border-sky-500"
+                           style="width:140px">
+                    <button type="button" wire:click="saveOneCNumber" class="btn btn-sm btn-primary" style="height:24px; padding:0 8px">Сохранить</button>
+                    @if($editingOneCNumber)
+                        <button type="button" wire:click="cancelEditOneCNumber" class="btn btn-sm" style="height:24px; padding:0 8px">✕</button>
+                    @elseif($this->oneCNumberSuggestion)
+                        <button type="button" wire:click="applyOneCNumberSuggestion"
+                                class="text-sky-700 hover:underline text-[11.5px]"
+                                title="Номер распознан из отправленного КП/счёта в переписке">
+                            из письма: {{ $this->oneCNumberSuggestion }} — подставить
+                        </button>
+                    @endif
+                @endif
+            </div>
+
             {{-- Title --}}
             <h1 class="text-[22px] leading-tight font-semibold text-fg-1 mb-1.5 flex items-center gap-2 flex-wrap"
                 style="letter-spacing: -0.005em">

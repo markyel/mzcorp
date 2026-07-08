@@ -91,6 +91,13 @@ class Pool extends Component
     public string $sort = 'attention';
 
     /**
+     * Фильтр по номеру заявки/КП из 1С (контроль дисциплины):
+     * '' — все, 'missing' — без номера, 'present' — с номером.
+     */
+    #[Url(as: 'onec', except: '')]
+    public string $oneCFilter = '';
+
+    /**
      * Окно infinite-scroll: сколько строк показывать. Растёт по loadMore() при
      * долистывании вниз. НЕ в URL (эфемерное состояние). Любая смена фильтра
      * сбрасывает его в 25 через override resetPage() ниже.
@@ -157,6 +164,11 @@ class Pool extends Component
         $this->status = '';
         $this->unassignedOnly = false;
         $this->assignedUserId = null;
+        $this->resetPage();
+    }
+
+    public function updatingOneCFilter(): void
+    {
         $this->resetPage();
     }
 
@@ -492,6 +504,13 @@ class Pool extends Component
                     fn (RequestStatus $s) => $s->value,
                     array_filter(RequestStatus::cases(), fn (RequestStatus $s) => ! $s->isTerminal()),
                 ));
+        }
+
+        // Контроль номера 1С: пометка в строках + фильтр по наличию.
+        if ($this->oneCFilter === 'missing') {
+            $query->whereNull('onec_number');
+        } elseif ($this->oneCFilter === 'present') {
+            $query->whereNotNull('onec_number');
         }
 
         if ($this->search !== '') {

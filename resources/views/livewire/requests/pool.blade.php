@@ -398,6 +398,16 @@
                     </div>
                 </span>
 
+                {{-- Контроль номера 1С: фильтр по наличию (правило: у каждой
+                     заявки должен быть номер заявки/КП из 1С). --}}
+                <select wire:model.live="oneCFilter"
+                        class="h-[26px] pl-2 pr-7 rounded-md border bg-[var(--bg-surface)] text-[var(--fg-2)] {{ $oneCFilter === 'missing' ? 'border-amber-400 text-amber-800' : 'border-[var(--border-strong)]' }} text-[12px] font-medium outline-none focus:border-sky-500"
+                        title="Фильтр по номеру заявки/КП из 1С">
+                    <option value="">№ 1С: все</option>
+                    <option value="missing">⚠ без номера 1С</option>
+                    <option value="present">с номером 1С</option>
+                </select>
+
             {{-- Phase 1.10: bucket-chips (группа статусов). Phase 1.11
                  добавляет «Просрочено» — flat-list заявок с просроченным
                  attention_required_at; кнопка красная если счётчик > 0. --}}
@@ -755,6 +765,10 @@
                                 </div>
                                 @if($createdShort)
                                     <div class="text-[10.5px] text-[var(--fg-4)] font-mono mt-0.5 pl-[14px]">{{ $createdShort }}</div>
+                                @endif
+                                @if(! $req->onec_number)
+                                    <div class="text-[10px] text-amber-700 font-mono mt-0.5 pl-[14px] whitespace-nowrap"
+                                         title="У заявки не указан номер заявки/КП из 1С — заполните в шапке заявки">⚠ нет № 1С</div>
                                 @endif
                             </span>
 

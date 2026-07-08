@@ -1143,6 +1143,137 @@ class Detail extends Component
      * Переключить порядок писем в «Переписке» (старые/новые сверху) и сохранить
      * выбор в настройках пользователя — он применится во всех заявках.
      */
+    /* -------------------- Номер заявки/КП из 1С (шапка) -------------------- */
+
+    /** Поле ввода номера 1С в шапке. */
+    public string $oneCNumberInput = '';
+
+    /** Режим правки уже установленного номера (только РОП/директор/админ). */
+    public bool $editingOneCNumber = false;
+
+    public function startEditOneCNumber(): void
+    {
+        if (! $this->canChangeOneCNumber()) {
+            $this->dispatch('toast', message: 'Менять номер 1С может только РОП или директор.', type: 'error');
+
+            return;
+        }
+        $this->oneCNumberInput = (string) $this->request->onec_number;
+        $this->editingOneCNumber = true;
+    }
+
+    public function cancelEditOneCNumber(): void
+    {
+        $this->editingOneCNumber = false;
+        $this->oneCNumberInput = '';
+    }
+
+    /**
+     * Сохранить номер заявки/КП из 1С. Первичный ввод — менеджер заявки
+     * (owner/acting/privileged); ИЗМЕНЕНИЕ уже установленного номера — только
+     * РОП/директор/админ (правило заказчика: менеджер ошибся — исправляет РОП).
+     * Аудит — request_state_changes (event onec_number_set/changed).
+     */
+    public function saveOneCNumber(): void
+    {
+        $user = auth()->user();
+        if ($user === null) {
+            return;
+        }
+
+        $value = trim($this->oneCNumberInput);
+        if ($value === '' || mb_strlen($value) > 64) {
+            $this->dispatch('toast', message: 'Укажите номер из 1С (до 64 символов).', type: 'error');
+
+            return;
+        }
+
+        $old = trim((string) $this->request->onec_number);
+        if ($old === $value) {
+            $this->editingOneCNumber = false;
+
+            return;
+        }
+
+        if ($old !== '') {
+            if (! $this->canChangeOneCNumber()) {
+                $this->dispatch('toast', message: 'Номер 1С уже установлен — изменить может только РОП или директор.', type: 'error');
+
+                return;
+            }
+        } else {
+            if ($user->hasRole(\App\Enums\Role::Secretary->value)
+                || ! $this->request->isAccessibleBy($user)) {
+                $this->dispatch('toast', message: 'Нет прав указать номер 1С для этой заявки.', type: 'error');
+
+                return;
+            }
+        }
+
+        $this->request->forceFill(['onec_number' => $value])->save();
+
+        try {
+            \App\Models\RequestStateChange::create([
+                'request_id' => $this->request->id,
+                'from_status' => $this->request->status->value,
+                'to_status' => $this->request->status->value,
+                'by_user_id' => $user->id,
+                'event' => $old === '' ? 'onec_number_set' : 'onec_number_changed',
+                'comment' => $old === ''
+                    ? sprintf('Указан номер 1С: %s.', $value)
+                    : sprintf('Номер 1С изменён: %s → %s.', $old, $value),
+                'payload' => ['old' => $old ?: null, 'new' => $value],
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Detail: onec number audit failed (non-fatal)', [
+                'request_id' => $this->request->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->editingOneCNumber = false;
+        $this->oneCNumberInput = '';
+        $this->reloadRequest();
+        $this->dispatch('toast', message: "Номер 1С сохранён: {$value}.", type: 'success');
+    }
+
+    /** Менять УЖЕ установленный номер 1С — только РОП/директор/админ. */
+    public function canChangeOneCNumber(): bool
+    {
+        return auth()->user()?->hasAnyRole([
+            \App\Enums\Role::HeadOfSales->value,
+            \App\Enums\Role::Director->value,
+            \App\Enums\Role::Admin->value,
+        ]) ?? false;
+    }
+
+    /**
+     * Подсказка для поля: номер последнего распознанного исходящего КП/счёта
+     * (детектор уже видел документ 1С в письмах — вероятно, это и есть номер).
+     */
+    #[Computed]
+    public function oneCNumberSuggestion(): ?string
+    {
+        if ($this->request->onec_number !== null) {
+            return null;
+        }
+
+        return \App\Models\OutboundQuote::query()
+            ->where('request_id', $this->request->id)
+            ->whereNotNull('document_number')
+            ->orderByDesc('id')
+            ->value('document_number');
+    }
+
+    public function applyOneCNumberSuggestion(): void
+    {
+        $suggestion = $this->oneCNumberSuggestion();
+        if ($suggestion !== null) {
+            $this->oneCNumberInput = (string) $suggestion;
+            $this->saveOneCNumber();
+        }
+    }
+
     public function toggleThreadSort(): void
     {
         $this->threadSort = $this->threadSort === 'asc' ? 'desc' : 'asc';
