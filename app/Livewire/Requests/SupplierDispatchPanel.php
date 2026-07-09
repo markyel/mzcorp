@@ -455,6 +455,142 @@ class SupplierDispatchPanel extends Component
         return $this->redirect(route('requests.show', ['request' => $req, 'tab' => 'suppliers']), navigate: false);
     }
 
+    /* ------------------------ Превью письма (модалка) --------------------- */
+
+    public bool $previewOpen = false;
+
+    public ?int $previewSupplierId = null;
+
+    /**
+     * Открыть полное превью письма — ровно то, что уйдёт поставщику
+     * (та же view emails.supplier-rfq, те же правки/обращение/язык).
+     */
+    public function openEmailPreview(): void
+    {
+        $supplierIds = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
+        if (array_keys(array_filter($this->selectedItems)) === []) {
+            $this->addError('send', 'Выберите хотя бы одну позицию.');
+
+            return;
+        }
+        if ($supplierIds === []) {
+            $this->addError('send', 'Отметьте хотя бы одного поставщика.');
+
+            return;
+        }
+        $this->resetErrorBag('send');
+        if (! in_array((int) $this->previewSupplierId, $supplierIds, true)) {
+            $this->previewSupplierId = $supplierIds[0];
+        }
+        $this->previewOpen = true;
+    }
+
+    public function setPreviewSupplier(int $supplierId): void
+    {
+        $this->previewSupplierId = $supplierId;
+    }
+
+    public function closeEmailPreview(): void
+    {
+        $this->previewOpen = false;
+    }
+
+    /**
+     * Табы модалки превью — отмеченные поставщики (письмо у каждого своё:
+     * язык + персональное обращение).
+     *
+     * @return array<int, array{id:int, label:string, lang:string}>
+     */
+    #[Computed]
+    public function previewSupplierTabs(): array
+    {
+        $ids = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
+        if ($ids === []) {
+            return [];
+        }
+
+        return Supplier::query()->whereIn('id', $ids)->orderBy('name')->get()
+            ->map(fn (Supplier $s) => [
+                'id' => $s->id,
+                'label' => (string) ($s->name ?: $s->email ?: ('#' . $s->id)),
+                'lang' => in_array($s->language, ['ru', 'en'], true) ? $s->language : 'ru',
+            ])->all();
+    }
+
+    /**
+     * Собранное письмо для выбранного в модалке поставщика. Использует ТОТ ЖЕ
+     * код, что и dispatch(): itemRows с правками менеджера, personalGreeting,
+     * view emails.supplier-rfq — превью не может разойтись с реальным письмом.
+     *
+     * @return array{supplier:string, to:string, lang:string, subject:string, html:string, attachments:array<int,string>}|null
+     */
+    #[Computed]
+    public function emailPreview(): ?array
+    {
+        if (! $this->previewOpen || ! $this->previewSupplierId) {
+            return null;
+        }
+        $supplier = Supplier::find($this->previewSupplierId);
+        $req = RequestModel::find($this->requestId);
+        if (! $supplier || ! $req) {
+            return null;
+        }
+
+        $itemIds = array_values(array_map('intval', array_keys(array_filter($this->selectedItems))));
+        $items = RequestItem::query()
+            ->where('request_id', $this->requestId)->where('is_active', true)
+            ->when($itemIds !== [], fn ($q) => $q->whereIn('id', $itemIds))
+            ->with(['brand:id,name', 'catalogItem:id,name,name_en'])
+            ->orderBy('position')->get();
+
+        $svc = app(SupplierDispatchService::class);
+        $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';
+        $edits = [
+            'names_ru' => $this->editedNames,
+            'names_en' => $this->editedNamesEn,
+            'oem' => $this->editedOem,
+            'qty' => $this->editedQty,
+            'qty_en' => $this->editedQtyEn,
+        ];
+        $rows = $svc->itemRows($items, $lang, $edits);
+        $greeting = $svc->personalGreeting($lang === 'en' ? $this->greetingEn : $this->greeting, $supplier, $lang);
+        $subject = $lang === 'en'
+            ? 'Price request — [' . $req->internal_code . ']'
+            : 'Запрос расценки — [' . $req->internal_code . ']';
+        $html = view('emails.supplier-rfq', [
+            'request' => $req,
+            'supplier' => $supplier,
+            'rows' => $rows,
+            'note' => trim($this->note),
+            'greeting' => $greeting,
+            'lang' => $lang,
+        ])->render();
+
+        $attNames = [];
+        foreach (array_keys(array_filter($this->selectedAttachments)) as $aid) {
+            $a = $this->requestAttachments->firstWhere('id', (int) $aid);
+            if ($a) {
+                $attNames[] = (string) $a->filename;
+            }
+        }
+        foreach ($this->newFiles as $f) {
+            try {
+                $attNames[] = (string) $f->getClientOriginalName();
+            } catch (\Throwable) {
+                // temp-файл мог протухнуть — не валим превью
+            }
+        }
+
+        return [
+            'supplier' => (string) ($supplier->name ?: $supplier->email),
+            'to' => (string) $supplier->email,
+            'lang' => $lang,
+            'subject' => $subject,
+            'html' => $html,
+            'attachments' => $attNames,
+        ];
+    }
+
     /**
      * Языковые блоки превью: по одному на каждый язык среди ОТМЕЧЕННЫХ
      * поставщиков (ru перед en). Письмо уходит per supplier, поэтому при

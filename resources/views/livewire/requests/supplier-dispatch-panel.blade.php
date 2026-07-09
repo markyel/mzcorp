@@ -344,6 +344,12 @@
             @error('send') <div class="text-[12px] text-red-600">{{ $message }}</div> @enderror
 
             <div class="flex items-center gap-2 pt-2 border-t border-border-subtle">
+                <button type="button" wire:click="openEmailPreview" wire:loading.attr="disabled" wire:target="openEmailPreview,newFiles"
+                        class="btn" @disabled($selItems === 0 || $selSups === 0)
+                        title="Посмотреть письмо каждого поставщика — ровно как оно уйдёт">
+                    <span wire:loading.remove wire:target="openEmailPreview">👁 Предпросмотр письма</span>
+                    <span wire:loading wire:target="openEmailPreview">Собираю…</span>
+                </button>
                 <button type="button" wire:click="send" wire:loading.attr="disabled" wire:target="send,newFiles"
                         class="btn btn-primary" @disabled($selItems === 0 || $selSups === 0)>
                     <span wire:loading.remove wire:target="send">Отправить запросы ({{ $selSups }})</span>
@@ -353,4 +359,70 @@
             </div>
         </div>
     </div>
+
+    {{-- ─────────── МОДАЛКА «Предпросмотр письма» ───────────
+         Рендерит РОВНО то, что уйдёт (та же view emails.supplier-rfq, те же
+         правки/язык/обращение) — по табу на каждого отмеченного поставщика.
+         x-teleport=body обязателен: у предков есть transform, fixed без
+         телепорта уезжает в подвал (см. плавающий композер). --}}
+    @if($previewOpen && $this->emailPreview)
+        @php $p = $this->emailPreview; @endphp
+        <template x-teleport="body">
+            <div style="position: fixed; inset: 0; z-index: 70; background: rgba(15, 23, 42, 0.45);
+                        display: flex; align-items: center; justify-content: center; padding: 16px;"
+                 wire:click.self="closeEmailPreview">
+                <div style="width: min(780px, 96vw); max-height: 92vh; display: flex; flex-direction: column;
+                            background: var(--bg-surface); border: 1px solid var(--border-strong);
+                            border-radius: 10px; box-shadow: 0 18px 50px rgba(15, 23, 42, 0.35); overflow: hidden;">
+                    {{-- Шапка + табы поставщиков --}}
+                    <div style="flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+                                padding: 10px 14px; background: var(--bg-surface-2); border-bottom: 1px solid var(--border-subtle);">
+                        <span class="text-[13px] font-semibold text-fg-1">👁 Предпросмотр письма</span>
+                        @foreach($this->previewSupplierTabs as $tab)
+                            <button type="button" wire:click="setPreviewSupplier({{ $tab['id'] }})"
+                                    class="chip {{ $tab['id'] === $previewSupplierId ? 'chip-info' : 'chip-neutral' }}">
+                                {{ \Illuminate\Support\Str::limit($tab['label'], 28) }}@if($tab['lang'] === 'en') · EN @endif
+                            </button>
+                        @endforeach
+                        <span style="flex: 1;"></span>
+                        <button type="button" wire:click="closeEmailPreview"
+                                class="text-fg-3 hover:text-fg-1 text-[14px]" style="padding: 2px 6px; line-height: 1;">✕</button>
+                    </div>
+
+                    {{-- Кому / Тема --}}
+                    <div style="flex: 0 0 auto; padding: 8px 14px; border-bottom: 1px solid var(--border-subtle);"
+                         class="text-[12.5px]">
+                        <div><span class="text-fg-3 uppercase text-[11px] tracking-wider font-semibold">Кому:</span>
+                            <span class="text-fg-1 mono">{{ $p['supplier'] }} &lt;{{ $p['to'] }}&gt;</span></div>
+                        <div class="mt-0.5"><span class="text-fg-3 uppercase text-[11px] tracking-wider font-semibold">Тема:</span>
+                            <span class="text-fg-1">{{ $p['subject'] }}</span></div>
+                    </div>
+
+                    {{-- Само письмо (изолированно в iframe — стили письма не текут в CRM) --}}
+                    <iframe sandbox="" srcdoc="{{ $p['html'] }}"
+                            style="flex: 1 1 auto; width: 100%; min-height: 320px; height: 52vh; border: none; background: #f5f6f8;"></iframe>
+
+                    {{-- Вложения + подпись --}}
+                    <div style="flex: 0 0 auto; padding: 8px 14px; border-top: 1px solid var(--border-subtle);" class="text-[12px]">
+                        @if(count($p['attachments']) > 0)
+                            <div class="text-fg-2">📎 Вложения ({{ count($p['attachments']) }}):
+                                {{ \Illuminate\Support\Str::limit(implode(', ', $p['attachments']), 160) }}</div>
+                        @endif
+                        <div class="text-fg-3 mt-0.5">К письму автоматически добавится подпись менеджера.</div>
+                    </div>
+
+                    {{-- Действия --}}
+                    <div style="flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+                                padding: 10px 14px; background: var(--bg-surface-2); border-top: 1px solid var(--border-subtle);">
+                        <button type="button" wire:click="send" wire:loading.attr="disabled" wire:target="send"
+                                class="btn btn-primary">
+                            <span wire:loading.remove wire:target="send">Отправить запросы ({{ $selSups }})</span>
+                            <span wire:loading wire:target="send">Отправляю…</span>
+                        </button>
+                        <button type="button" wire:click="closeEmailPreview" class="btn">Вернуться к правкам</button>
+                    </div>
+                </div>
+            </div>
+        </template>
+    @endif
 </div>
