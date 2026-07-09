@@ -275,6 +275,9 @@ class Detail extends Component
         }
 
         $drafts->delete($draft);
+        // $thread — snapshot, заполненный в mount(); без чистки коллекции
+        // удалённый черновик остаётся в UI до перезагрузки страницы.
+        $this->thread = $this->thread->reject(fn ($m) => $m->id === $draftId)->values();
         session()->flash('status', 'Черновик удалён.');
     }
 
