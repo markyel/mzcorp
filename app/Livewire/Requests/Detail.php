@@ -260,6 +260,12 @@ class Detail extends Component
     #[On('composer-draft-closed')]
     public function showThreadDraft(int $draftId, ?int $requestId = null): void
     {
+        \Illuminate\Support\Facades\Log::info('Detail: composer-draft-closed received', [
+            'draft_id' => $draftId,
+            'request_id' => $requestId,
+            'detail_request_id' => $this->request->id,
+            'in_thread' => $this->thread->contains(fn ($m) => $m->id === $draftId),
+        ]);
         if ($requestId !== null && $requestId !== $this->request->id) {
             return;
         }
