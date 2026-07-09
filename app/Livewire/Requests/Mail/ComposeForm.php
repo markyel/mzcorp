@@ -223,6 +223,11 @@ class ComposeForm extends Component
     public function close(): void
     {
         $this->open = false;
+        // Черновик остаётся — покажем его бейджем в треде сразу, без
+        // перезагрузки страницы (Detail::$thread — mount-снапшот).
+        if ($this->draftId) {
+            $this->dispatch('composer-draft-closed', draftId: $this->draftId, requestId: $this->requestId);
+        }
     }
 
     /**
@@ -384,6 +389,8 @@ class ComposeForm extends Component
             ->first();
         if ($draft) {
             $drafts->delete($draft);
+            // Убрать бейдж черновика из треда без перезагрузки.
+            $this->dispatch('composer-draft-discarded', draftId: $draft->id, requestId: $this->requestId);
         }
         $this->reset(['draftId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bodyText']);
         $this->open = false;

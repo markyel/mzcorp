@@ -254,6 +254,48 @@ class Detail extends Component
     }
 
     /**
+     * Композер закрыл окно с живым черновиком — дорисовать его бейджем в
+     * треде без перезагрузки ($thread — mount-снапшот, сам не обновится).
+     */
+    #[On('composer-draft-closed')]
+    public function showThreadDraft(int $draftId, ?int $requestId = null): void
+    {
+        if ($requestId !== null && $requestId !== $this->request->id) {
+            return;
+        }
+        if ($this->thread->contains(fn ($m) => $m->id === $draftId)) {
+            return;
+        }
+        $draft = \App\Models\EmailMessage::query()
+            ->where('related_request_id', $this->request->id)
+            ->where('is_draft', true)
+            ->where('draft_author_user_id', auth()->id())
+            ->whereKey($draftId)
+            ->with([
+                'attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline',
+                'mailbox:id,email,name',
+            ])
+            ->first();
+        if ($draft !== null) {
+            // Черновики без sent_at и так сортируются в конец — push сохраняет порядок.
+            $this->thread = $this->thread->push($draft);
+        }
+    }
+
+    /**
+     * Композер удалил черновик (кнопка «Удалить черновик» в окне) — убрать
+     * бейдж из треда без перезагрузки.
+     */
+    #[On('composer-draft-discarded')]
+    public function hideThreadDraft(int $draftId, ?int $requestId = null): void
+    {
+        if ($requestId !== null && $requestId !== $this->request->id) {
+            return;
+        }
+        $this->thread = $this->thread->reject(fn ($m) => $m->id === $draftId)->values();
+    }
+
+    /**
      * Удалить черновик прямо из треда (бейдж «Черновик» → «Удалить черновик»),
      * не заходя в редактирование. Автор — свой черновик; admin/РОП/директор —
      * любой (подчистить брошенные черновики коллег).
