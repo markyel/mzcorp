@@ -260,7 +260,7 @@
                         <div class="mb-2">
                             <input type="text" wire:model.lazy="{{ $blk['greeting_model'] }}"
                                    class="w-full px-2 h-[28px] border border-border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500">
-                            <div class="text-[10px] text-fg-4 mt-0.5">{поставщик} подставится для каждого поставщика</div>
+                            <div class="text-[10px] text-fg-4 mt-0.5">{поставщик} → контактное лицо из карточки поставщика (если заполнено), иначе название</div>
                         </div>
 
                         {{-- Текст вопроса (редактируемый, на языке письма) --}}

@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property ?string $email
  * @property ?string $domain
  * @property ?string $name
+ * @property ?string $contact_person
  * @property ?string $notes
  * @property ?int $created_by_user_id
  */
@@ -22,6 +23,8 @@ class Supplier extends Model
         'email',
         'domain',
         'name',
+        // Контактное лицо — подставляется в обращение письма вместо названия.
+        'contact_person',
         'phone',
         // Язык общения (ru|en) — письмо-запрос и номенклатура на этом языке.
         'language',
@@ -45,5 +48,16 @@ class Supplier extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
+    /**
+     * Имя для обращения в письме («Здравствуйте, …!»): контактное лицо,
+     * иначе название компании, иначе null (вызывающий подставит «коллеги»).
+     */
+    public function greetingName(): ?string
+    {
+        $v = trim((string) ($this->contact_person ?: $this->name ?: ''));
+
+        return $v !== '' ? $v : null;
     }
 }

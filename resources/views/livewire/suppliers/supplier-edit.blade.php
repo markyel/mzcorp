@@ -19,9 +19,15 @@
             <div class="ds-card-header"><h3>Поставщик</h3></div>
             <div class="ds-card-body space-y-3">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div class="sm:col-span-2">
+                    <div>
                         <label class="block text-[11.5px] text-fg-3 mb-1">Название</label>
                         <input type="text" wire:model="name" class="{{ $inputCls }}">
+                    </div>
+                    <div>
+                        <label class="block text-[11.5px] text-fg-3 mb-1">Контактное лицо</label>
+                        <input type="text" wire:model="contact_person" class="{{ $inputCls }}" placeholder="Имя (Отчество)">
+                        <div class="text-[10.5px] text-fg-4 mt-0.5">Подставляется в обращение письма: «Здравствуйте, {Имя}!» — вместо названия компании.</div>
+                        @error('contact_person') <div class="text-[11px] text-red-600 mt-0.5">{{ $message }}</div> @enderror
                     </div>
                     <div>
                         <label class="block text-[11.5px] text-fg-3 mb-1">E-mail</label>

@@ -19,6 +19,7 @@ class SupplierEdit extends Component
     public Supplier $supplier;
 
     public string $name = '';
+    public string $contact_person = '';
     public string $email = '';
     public string $domain = '';
     public string $phone = '';
@@ -47,6 +48,7 @@ class SupplierEdit extends Component
     {
         $s = $this->supplier;
         $this->name = (string) ($s->name ?? '');
+        $this->contact_person = (string) ($s->contact_person ?? '');
         $this->email = (string) ($s->email ?? '');
         $this->domain = (string) ($s->domain ?? '');
         $this->phone = (string) ($s->phone ?? '');
@@ -111,6 +113,7 @@ class SupplierEdit extends Component
     {
         $this->validate([
             'name' => 'nullable|string|max:255',
+            'contact_person' => 'nullable|string|max:255',
             'email' => 'nullable|email|max:255',
             'domain' => 'nullable|string|max:255',
             'phone' => 'nullable|string|max:64',
@@ -128,6 +131,7 @@ class SupplierEdit extends Component
 
         $this->supplier->update([
             'name' => trim($this->name) !== '' ? trim($this->name) : null,
+            'contact_person' => trim($this->contact_person) !== '' ? trim($this->contact_person) : null,
             'email' => $email !== '' ? $email : null,
             'domain' => $domain !== '' ? $domain : null,
             'phone' => trim($this->phone) !== '' ? trim($this->phone) : null,

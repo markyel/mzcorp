@@ -103,7 +103,11 @@ class SupplierReminderService
                 $draft->forceFill(['in_reply_to' => $orig->message_id, 'references_header' => $refs])->save();
             }
 
-            $name = trim((string) ($inquiry->supplier_name ?: '')) ?: ($lang === 'en' ? 'colleagues' : 'коллеги');
+            // Обращение — к контактному лицу из карточки поставщика; иначе
+            // название (supplier_name инквайри), иначе «коллеги».
+            $name = $supplier?->greetingName()
+                ?? (trim((string) ($inquiry->supplier_name ?: '')) ?: null)
+                ?? ($lang === 'en' ? 'colleagues' : 'коллеги');
             $subject = $this->reminderSubject($orig?->subject ?: $inquiry->subject, $lang);
             [$plain, $html] = $this->reminderBody($name, $lang);
 

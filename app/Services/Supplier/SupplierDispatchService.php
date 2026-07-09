@@ -357,8 +357,10 @@ class SupplierDispatchService
     }
 
     /**
-     * Персональное обращение: подставляет имя поставщика в плейсхолдер
-     * {поставщик}. Пустой шаблон → дефолт. Нет имени → «коллеги».
+     * Персональное обращение: подставляет в плейсхолдер {поставщик}
+     * КОНТАКТНОЕ ЛИЦО поставщика (suppliers.contact_person), если оно
+     * заполнено в карточке, иначе название компании. Пустой шаблон → дефолт.
+     * Нет ни контакта, ни названия → «коллеги»/colleagues.
      */
     public function personalGreeting(?string $template, \App\Models\Supplier $supplier, string $lang = 'ru'): string
     {
@@ -366,7 +368,7 @@ class SupplierDispatchService
         if ($template === '') {
             $template = $lang === 'en' ? 'Hello {поставщик},' : 'Здравствуйте, {поставщик}!';
         }
-        $name = trim((string) ($supplier->name ?: '')) ?: ($lang === 'en' ? 'colleagues' : 'коллеги');
+        $name = $supplier->greetingName() ?? ($lang === 'en' ? 'colleagues' : 'коллеги');
 
         return str_replace(['{поставщик}', '{supplier}'], $name, $template);
     }
