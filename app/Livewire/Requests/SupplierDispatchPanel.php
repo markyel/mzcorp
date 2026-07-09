@@ -44,6 +44,16 @@ class SupplierDispatchPanel extends Component
     /** Обращение для англоязычных поставщиков. */
     public string $greetingEn = 'Hello {поставщик},';
 
+    /** Вступительная фраза перед таблицей позиций (рус., редактируемая). */
+    public string $intro = 'Просим дать цену, наличие и срок поставки на следующие позиции:';
+
+    public string $introEn = 'Please provide the price, availability and lead time for the following items:';
+
+    /** Заключительная фраза после позиций (рус., редактируемая). */
+    public string $closing = 'Ответьте, пожалуйста, на это письмо с ценами/наличием/сроками.';
+
+    public string $closingEn = 'Please reply to this email with prices, availability and lead times.';
+
     /** item_id => отредактированное название позиции для письма (рус. версия). */
     public array $editedNames = [];
 
@@ -443,6 +453,10 @@ class SupplierDispatchPanel extends Component
             'qty_en' => $this->editedQtyEn,
             'greeting_ru' => $this->greeting,
             'greeting_en' => $this->greetingEn,
+            'intro_ru' => $this->intro,
+            'intro_en' => $this->introEn,
+            'closing_ru' => $this->closing,
+            'closing_en' => $this->closingEn,
         ];
         $result = $dispatcher->dispatch($req, $supplierIds, $itemIds, $this->note, $user, $reqAttIds, $extraFiles, $edits);
 
@@ -564,6 +578,8 @@ class SupplierDispatchPanel extends Component
             'note' => trim($this->note),
             'greeting' => $greeting,
             'lang' => $lang,
+            'intro' => trim($lang === 'en' ? $this->introEn : $this->intro),
+            'closing' => trim($lang === 'en' ? $this->closingEn : $this->closing),
         ])->render();
 
         $attNames = [];
@@ -598,7 +614,7 @@ class SupplierDispatchPanel extends Component
      * каждое на том языке, на котором реально улетит. Пока поставщики не
      * выбраны — один RU-блок по умолчанию.
      *
-     * @return array<int, array{lang:string, label:string, suppliers:array<int,string>, greeting_model:string}>
+     * @return array<int, array{lang:string, label:string, suppliers:array<int,string>, greeting_model:string, intro_model:string, closing_model:string}>
      */
     #[Computed]
     public function previewLanguages(): array
@@ -627,6 +643,8 @@ class SupplierDispatchPanel extends Component
                 'label' => $lang === 'en' ? 'English' : 'Русский',
                 'suppliers' => array_map(fn (Supplier $s) => (string) ($s->name ?: $s->email ?: ('#' . $s->id)), $list),
                 'greeting_model' => $lang === 'en' ? 'greetingEn' : 'greeting',
+                'intro_model' => $lang === 'en' ? 'introEn' : 'intro',
+                'closing_model' => $lang === 'en' ? 'closingEn' : 'closing',
             ];
         }
 

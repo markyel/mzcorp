@@ -243,6 +243,13 @@
                             <div class="text-[10px] text-fg-4 mt-0.5">{поставщик} → контактное лицо из карточки поставщика (если заполнено), иначе название</div>
                         </div>
 
+                        {{-- Вступительная фраза перед таблицей позиций (редактируемая) --}}
+                        <div class="mb-2">
+                            <input type="text" wire:model.lazy="{{ $blk['intro_model'] }}"
+                                   class="w-full px-2 h-[28px] border border-border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500"
+                                   title="Фраза перед списком позиций">
+                        </div>
+
                         {{-- Заголовки колонок --}}
                         <div class="flex items-center gap-2 text-[10px] uppercase tracking-wider text-fg-4 px-1 mb-1">
                             <span style="width:18px"></span>
@@ -267,6 +274,12 @@
                                            class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] outline-none focus:border-sky-500" style="width:96px">
                                 </div>
                             @endforeach
+                        </div>
+                        {{-- Заключительная фраза после позиций (редактируемая) --}}
+                        <div class="mt-2">
+                            <input type="text" wire:model.lazy="{{ $blk['closing_model'] }}"
+                                   class="w-full px-2 h-[28px] border border-border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500"
+                                   title="Фраза после списка позиций (перед № заявки)">
                         </div>
                         @if($blk['lang'] === 'en')
                             <div class="text-[10.5px] text-fg-4 mt-2">Каталожные позиции — английское название (name_en). Остальные — кнопка «Перевести позиции (ИИ)» или вручную (⚠ помечены кириллицей). Артикул и кол-во правятся при неверном распознавании.</div>

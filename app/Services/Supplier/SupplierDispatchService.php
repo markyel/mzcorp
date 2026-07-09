@@ -75,8 +75,8 @@ class SupplierDispatchService
      *
      * @param  array<int, int>  $supplierIds  кому слать (отмеченные в UI)
      * @param  array<int, int>  $itemIds      позиции запроса ([] = все активные)
-     * @param  array{names_ru?: array<int,string>, names_en?: array<int,string>, oem?: array<int,string>, qty?: array<int,string>, qty_en?: array<int,string>, greeting_ru?: ?string, greeting_en?: ?string}  $edits
-     *                        ручные правки письма: названия/кол-во по языкам + артикул + обращение по языкам
+     * @param  array{names_ru?: array<int,string>, names_en?: array<int,string>, oem?: array<int,string>, qty?: array<int,string>, qty_en?: array<int,string>, greeting_ru?: ?string, greeting_en?: ?string, intro_ru?: ?string, intro_en?: ?string, closing_ru?: ?string, closing_en?: ?string}  $edits
+     *                        ручные правки письма: названия/кол-во по языкам + артикул + обращение/вступление/заключение по языкам
      * @return array{sent: int, failed: int, no_supplier: int, suppliers: array<int, string>}
      */
     public function dispatch(RequestModel $request, array $supplierIds, array $itemIds, ?string $note, User $by, array $reqAttachmentIds = [], array $extraFiles = [], array $edits = []): array
@@ -108,6 +108,8 @@ class SupplierDispatchService
                 $rows = $this->itemRows($items, $lang, $edits);
                 $greetingTpl = $lang === 'en' ? ($edits['greeting_en'] ?? null) : ($edits['greeting_ru'] ?? null);
                 $personalGreeting = $this->personalGreeting($greetingTpl, $supplier, $lang);
+                $intro = trim((string) ($lang === 'en' ? ($edits['intro_en'] ?? '') : ($edits['intro_ru'] ?? '')));
+                $closing = trim((string) ($lang === 'en' ? ($edits['closing_en'] ?? '') : ($edits['closing_ru'] ?? '')));
                 $subject = $lang === 'en'
                     ? 'Price request — [' . $request->internal_code . ']'
                     : 'Запрос расценки — [' . $request->internal_code . ']';
@@ -118,13 +120,15 @@ class SupplierDispatchService
                     'note' => trim((string) $note),
                     'greeting' => $personalGreeting,
                     'lang' => $lang,
+                    'intro' => $intro,
+                    'closing' => $closing,
                 ])->render();
 
                 $this->drafts->update($draft, [
                     'to_recipients' => [['email' => $supplier->email, 'name' => $supplier->name ?: '']],
                     'subject' => $subject,
                     'body_html' => $bodyHtml,
-                    'body_plain' => $this->plainBody($request, $rows, (string) $note, $personalGreeting, $lang),
+                    'body_plain' => $this->plainBody($request, $rows, (string) $note, $personalGreeting, $lang, $intro, $closing),
                 ]);
 
                 // Вложения: файлы заявки + загруженные с диска — до отправки,
@@ -425,10 +429,13 @@ class SupplierDispatchService
     /**
      * @param  array<int, array{name:string, oem:?string, brand:?string, qty:?string}>  $rows
      */
-    private function plainBody(RequestModel $request, array $rows, string $note, string $greeting = 'Здравствуйте!', string $lang = 'ru'): string
+    private function plainBody(RequestModel $request, array $rows, string $note, string $greeting = 'Здравствуйте!', string $lang = 'ru', string $intro = '', string $closing = ''): string
     {
         $en = $lang === 'en';
-        $intro = $en ? 'Please quote price, availability and lead time for the following items:' : 'Просим дать цену, наличие и срок поставки на позиции:';
+        $intro = $intro !== '' ? $intro
+            : ($en ? 'Please quote price, availability and lead time for the following items:' : 'Просим дать цену, наличие и срок поставки на позиции:');
+        $closing = $closing !== '' ? $closing
+            : ($en ? 'Please reply to this email with prices, availability and lead times.' : 'Ответьте, пожалуйста, на это письмо с ценами/наличием/сроками.');
         $footer = $en ? 'Request No. ' : 'Заявка № ';
 
         $lines = [$greeting !== '' ? $greeting : ($en ? 'Hello,' : 'Здравствуйте!'), '', $intro, ''];
@@ -441,6 +448,8 @@ class SupplierDispatchService
             $lines[] = '';
             $lines[] = $note;
         }
+        $lines[] = '';
+        $lines[] = $closing;
         $lines[] = '';
         $lines[] = $footer . $request->internal_code;
 

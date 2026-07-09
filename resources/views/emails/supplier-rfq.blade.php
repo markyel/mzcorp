@@ -38,9 +38,15 @@
 <body style="margin:0;padding:0;font-family:-apple-system,Arial,sans-serif;background:#f5f6f8;color:#1a1a1a">
     <div style="max-width:640px;margin:0 auto;padding:20px 14px">
         <p style="font-size:14px;margin:0 0 14px">{{ $greeting ?? $t['fallback_greeting'] }}</p>
-        <p style="font-size:14px;margin:0 0 16px">
-            {{ $t['intro_a'] }} <b>{{ $t['intro_b'] }}</b> {{ $t['intro_c'] }}
-        </p>
+        {{-- Вступление: правка менеджера из панели рассылки приоритетна,
+             иначе дефолтная фраза с выделением. --}}
+        @if(trim((string) ($intro ?? '')) !== '')
+            <p style="font-size:14px;margin:0 0 16px">{{ trim($intro) }}</p>
+        @else
+            <p style="font-size:14px;margin:0 0 16px">
+                {{ $t['intro_a'] }} <b>{{ $t['intro_b'] }}</b> {{ $t['intro_c'] }}
+            </p>
+        @endif
 
         <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:18px">
             <thead>
@@ -72,7 +78,7 @@
         @endif
 
         <p style="font-size:13px;color:#4b5563;margin:0 0 4px">
-            {{ $t['reply'] }}
+            {{ trim((string) ($closing ?? '')) !== '' ? trim($closing) : $t['reply'] }}
         </p>
         <p style="font-size:12px;color:#9ca3af;margin:16px 0 0">
             {{ $t['request'] }} {{ $request->internal_code }}
