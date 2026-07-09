@@ -757,11 +757,14 @@ class MessagePersister
             return null;
         }
 
-        // References — это разделённый пробелами список <message-ids>.
+        // References — по RFC разделённый пробелами список <message-ids>,
+        // но некоторые клиенты (mail.ru) разделяют запятыми. Режем по обоим
+        // и срезаем запятые/скобки по краям — битый токен (голая ',') потом
+        // роняет отправку reply в Symfony Address (кейс 2026-07-09, mb 13).
         $ids = [];
-        foreach (preg_split('/\s+/', $raw) ?: [] as $id) {
-            $id = trim($id, "<> \t\r\n");
-            if ($id !== '') {
+        foreach (preg_split('/[\s,;]+/', $raw) ?: [] as $id) {
+            $id = trim($id, "<>, \t\r\n;");
+            if ($id !== '' && str_contains($id, '@')) {
                 $ids[] = $id;
             }
         }
