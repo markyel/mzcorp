@@ -21,12 +21,19 @@
                 x: null, y: null,
                 w: Math.min(720, window.innerWidth - 32),
                 h: Math.min(640, window.innerHeight - 110),
+                // ВАЖНО: возвращаем ОБЪЕКТ, не строку. Alpine :style со строкой
+                // ЗАМЕНЯЕТ весь атрибут style (стирая position:fixed из статичного
+                // style → окно падало в поток документа, «в подвал»); объектный
+                // синтаксис мержит по-свойственно. Неиспользуемые якоря сбрасываем
+                // в 'auto' явно — иначе после перетаскивания останутся оба.
                 styleStr() {
-                    const pos = this.x === null
-                        ? 'right:16px;bottom:16px;'
-                        : 'left:' + this.x + 'px;top:' + this.y + 'px;';
-                    const size = 'width:' + this.w + 'px;' + (this.min ? '' : 'height:' + this.h + 'px;');
-                    return pos + size;
+                    const s = { width: this.w + 'px', height: this.min ? 'auto' : this.h + 'px' };
+                    if (this.x === null) {
+                        s.right = '16px'; s.bottom = '16px'; s.left = 'auto'; s.top = 'auto';
+                    } else {
+                        s.left = this.x + 'px'; s.top = this.y + 'px'; s.right = 'auto'; s.bottom = 'auto';
+                    }
+                    return s;
                 },
                 startDrag(e) {
                     if (e.button !== undefined && e.button !== 0) return;
