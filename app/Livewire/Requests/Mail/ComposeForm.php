@@ -226,10 +226,6 @@ class ComposeForm extends Component
         // Черновик остаётся — покажем его бейджем в треде сразу, без
         // перезагрузки страницы (Detail::$thread — mount-снапшот).
         if ($this->draftId) {
-            \Illuminate\Support\Facades\Log::info('ComposeForm: close, dispatching composer-draft-closed', [
-                'draft_id' => $this->draftId,
-                'request_id' => $this->requestId,
-            ]);
             $this->dispatch('composer-draft-closed', draftId: $this->draftId, requestId: $this->requestId);
         }
     }
