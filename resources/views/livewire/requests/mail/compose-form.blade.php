@@ -11,6 +11,11 @@
      переживает. Все новые стили — inline (прод не пересобирает Tailwind). --}}
 <div class="compose-form">
     @if($open)
+        {{-- x-teleport="body" ОБЯЗАТЕЛЕН: у предков в layout есть transform,
+             и position:fixed позиционируется относительно него, а не viewport
+             — окно «уезжало в подвал» страницы (баг-репорт 2026-07-09).
+             Телепорт в body делает fixed честным оверлеем. --}}
+        <template x-teleport="body">
         <div x-data="{
                 min: false,
                 x: null, y: null,
@@ -285,5 +290,6 @@
                         user-select: none; line-height: 1;"
                  title="Растянуть окно">◢</div>
         </div>
+        </template>
     @endif
 </div>
