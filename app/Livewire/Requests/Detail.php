@@ -243,7 +243,9 @@ class Detail extends Component
      */
     public function composeReply(?int $messageId = null): void
     {
-        $this->tab = 'thread';
+        // Таб НЕ переключаем: композер — плавающее окно поверх любой
+        // вкладки (зарегистрирован вне @switch табов в detail.blade).
+        // Менеджер пишет ответ и параллельно смотрит «Позиции».
         if ($messageId) {
             $this->dispatch('open-reply', messageId: $messageId, requestId: $this->request->id);
         } else {
@@ -1757,22 +1759,23 @@ class Detail extends Component
     #[On('clarification-letter-ready')]
     public function openClarificationDraft(int $draftId): void
     {
-        $this->tab = 'thread';
+        // Таб не переключаем: ComposeForm — глобальное плавающее окно
+        // (вне @switch табов), менеджер остаётся на «Позициях» и пишет
+        // уточнение, глядя на список позиций.
         $this->dispatch('open-draft', draftId: $draftId, requestId: $this->request->id);
     }
 
     /**
      * Phase 4: «📨 Отправить КП клиенту» — Editor сгенерировал PDF
-     * + создал draft с прикреплённым КП. Переключаем таб на «Переписка»
-     * (где зарегистрирован ComposeForm) и просим его открыть draft —
-     * менеджер видит готовое письмо, может править recipients/body
-     * и отправить. После send'а ComposeForm::applyPostSendHooks подхватит
-     * marker `quotation_sent` и переведёт заявку в Quoted.
+     * + создал draft с прикреплённым КП. ComposeForm (плавающее окно,
+     * живёт вне табов) открывает draft — менеджер видит готовое письмо,
+     * может править recipients/body и отправить. После send'а
+     * ComposeForm::applyPostSendHooks подхватит marker `quotation_sent`
+     * и переведёт заявку в Quoted.
      */
     #[On('quotation-send-ready')]
     public function openQuotationDraft(int $draftId): void
     {
-        $this->tab = 'thread';
         $this->dispatch('open-draft', draftId: $draftId, requestId: $this->request->id);
     }
 

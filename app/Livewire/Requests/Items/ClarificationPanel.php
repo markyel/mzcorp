@@ -310,10 +310,9 @@ class ClarificationPanel extends Component
         $this->generalQuestion = '';
         $this->expanded = false;
 
-        // Уведомляем parent Detail — он переключит таб на «Переписка»
-        // (там зарегистрирован ComposeForm) и сам сделает dispatch open-draft.
-        // Прямой open-draft из таба «Позиции» не работает: ComposeForm
-        // не отрендерен, событие никто не ловит.
+        // Уведомляем parent Detail — он сделает dispatch open-draft.
+        // ComposeForm — плавающее окно вне табов: откроется поверх
+        // «Позиций», менеджер пишет уточнение, глядя на список позиций.
         $this->dispatch('clarification-letter-ready', draftId: $draft->id);
 
         session()->flash('status', sprintf(

@@ -987,8 +987,9 @@
                 @endif
 
                 {{-- Ответить — отдельной строкой (Phase 1.9).
-                     Переключает таб на «Переписка» (где зарегистрирован
-                     ComposeForm) И диспатчит open-reply одной операцией. --}}
+                     Открывает ПЛАВАЮЩЕЕ окно ответа (ComposeForm живёт вне
+                     табов) — текущая вкладка не меняется, можно писать письмо
+                     и параллельно смотреть «Позиции». --}}
                 <div class="flex gap-1.5">
                     @if($canReply)
                         <button type="button"
@@ -1593,7 +1594,7 @@
                                  даже если отправляет админ. --}}
                             @if($canReply)
                                 <div class="px-[18px] py-3.5 bg-surface-2 border-t border-border">
-                                    <div class="flex items-center gap-2 mb-2">
+                                    <div class="flex items-center gap-2">
                                         <span class="text-[12px] text-fg-3">
                                             Ответ клиенту через MyLift — копия сохранится в Sent ящика
                                             @if(! $isOwner && ! $isDelegate && $req->assignedUser)
@@ -1602,6 +1603,8 @@
                                             @else
                                                 ящика.
                                             @endif
+                                            Письмо пишется в плавающем окне — можно параллельно
+                                            переключаться на другие вкладки.
                                         </span>
                                         <span class="flex-1"></span>
                                         @if($req->client_email)
@@ -1610,9 +1613,9 @@
                                                     class="btn btn-sm">＋ Новое сообщение клиенту</button>
                                         @endif
                                     </div>
-                                    <livewire:requests.mail.compose-form
-                                        :request-id="$req->id"
-                                        wire:key="compose-{{ $req->id }}" />
+                                    {{-- Сам композер — плавающее окно, зарегистрирован ГЛОБАЛЬНО
+                                         внизу шаблона (вне @switch табов), чтобы жить при
+                                         переключении вкладок. --}}
                                 </div>
                             @else
                                 <div class="px-[18px] py-3.5 bg-surface-2 border-t border-border text-[12px] text-fg-3">
@@ -3341,6 +3344,17 @@
 
         @endswitch
     </div>
+
+    {{-- ────────── ПЛАВАЮЩИЙ КОМПОЗЕР ──────────
+         Вне @switch табов: окно ответа живёт при переключении вкладок —
+         менеджер пишет письмо и параллельно смотрит «Позиции». Открывается
+         событиями open-reply / open-reply-all / open-compose / open-draft
+         (кнопка «✉ Ответить» в шапке, inline-кнопки треда, draft-бейдж). --}}
+    @if($canReply)
+        <livewire:requests.mail.compose-form
+            :request-id="$req->id"
+            wire:key="compose-{{ $req->id }}" />
+    @endif
 
     {{-- ────────── LIGHTBOX (просмотр картинок) ──────────
          Открывается событием window:open-image с detail:
