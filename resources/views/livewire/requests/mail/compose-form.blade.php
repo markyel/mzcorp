@@ -155,18 +155,20 @@
                     @error('bodyText') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
                 </div>
 
-                {{-- Preview: подпись + цитата исходного письма. --}}
+                {{-- Preview: подпись + цитата исходного письма. Цитата — тот же
+                     HTML, что уйдёт в письмо (MailQuoteBuilder), в sandbox-iframe:
+                     выглядит как во вкладке «Переписка», стили письма изолированы. --}}
                 @php
                     $sig = $this->signaturePreview;
-                    $quotePlain = $this->quotePreviewPlain;
+                    $quoteHtml = $this->quotePreviewHtml;
                 @endphp
-                @if($sig || $quotePlain)
+                @if($sig || $quoteHtml)
                     <details class="border border-border rounded-md bg-surface" style="flex: 0 0 auto;">
                         <summary class="cursor-pointer px-3 py-2 text-[12px] text-fg-3 select-none hover:bg-surface-2">
                             При отправке к письму добавятся:
                             @if($sig) <span class="text-fg-1 font-medium">подпись</span> @endif
-                            @if($sig && $quotePlain) <span>+</span> @endif
-                            @if($quotePlain) <span class="text-fg-1 font-medium">цитата исходного письма</span> @endif
+                            @if($sig && $quoteHtml) <span>+</span> @endif
+                            @if($quoteHtml) <span class="text-fg-1 font-medium">цитата исходного письма</span> @endif
                             <span> · нажмите чтобы посмотреть</span>
                         </summary>
                         <div class="border-t border-border-subtle">
@@ -176,10 +178,12 @@
                                     <pre class="whitespace-pre-wrap font-sans m-0 text-fg-1">{{ $sig }}</pre>
                                 </div>
                             @endif
-                            @if($quotePlain)
+                            @if($quoteHtml)
                                 <div class="px-3 py-2">
                                     <div class="text-[11px] text-fg-3 uppercase tracking-wider mb-1.5 font-semibold">Цитата исходного письма</div>
-                                    <pre class="whitespace-pre-wrap font-sans m-0 text-fg-2 text-[12px] leading-[1.5] max-h-[260px] overflow-auto pl-3 border-l-2 border-border-strong">{{ $quotePlain }}</pre>
+                                    <iframe sandbox="" srcdoc="{{ $quoteHtml }}"
+                                            style="width: 100%; height: 240px; border: 1px solid var(--border-subtle);
+                                                   border-radius: 6px; background: #fff; display: block;"></iframe>
                                 </div>
                             @endif
                         </div>

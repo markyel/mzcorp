@@ -417,16 +417,18 @@ class ComposeForm extends Component
     }
 
     /**
-     * Plain-text превью цитируемого исходного письма (под textarea).
-     * Plain, а не HTML, потому что:
-     *   - менеджеру важно увидеть «что прицепится», а не идеальный рендер;
-     *   - iframe с srcdoc даёт ноль высоты в момент Livewire-render'а
-     *     (Alpine fit() не успевает, ResizeObserver не подключён);
-     *   - реальная HTML-цитата (с blockquote) собирается в MailQuoteBuilder
-     *     при send и идёт в само письмо клиенту.
+     * HTML-превью цитируемого исходного письма (под textarea) — ровно та
+     * цитата, что уйдёт в письмо: собирается тем же MailQuoteBuilder, что и
+     * при send (attribution + blockquote из body_html). Рендерится в
+     * sandbox-iframe с фиксированной высотой — стили письма не текут в CRM.
+     *
+     * Раньше превью строилось из body_plain (plain-часть письма клиента
+     * бывает склеена без переносов — «Просьба выставить счет.Карточка
+     * клиента…») и выглядело не так, как то же письмо во вкладке
+     * «Переписка» (там рендерится body_html). Баг-репорт 2026-07-09.
      */
     #[Computed]
-    public function quotePreviewPlain(): ?string
+    public function quotePreviewHtml(): ?string
     {
         if (! $this->draftId) {
             return null;
@@ -442,23 +444,15 @@ class ComposeForm extends Component
         if (! $replyTo) {
             return null;
         }
-        $from = trim(($replyTo->from_name ? $replyTo->from_name . ' ' : '')
-            . '<' . $replyTo->from_email . '>');
-        $date = $replyTo->sent_at?->format('d.m.Y H:i') ?? '';
-        $header = sprintf('%s, %s писал(а):', $date, $from);
 
-        $body = (string) ($replyTo->body_plain ?: strip_tags(
-            (string) $replyTo->body_html
-        ));
-        // HTML-entity → plain (на случай если body_plain в письме был nl2br'нут).
-        $body = html_entity_decode($body, ENT_QUOTES, 'UTF-8');
-        $body = preg_replace('/\n{3,}/', "\n\n", trim($body));
-        // Лимит ~3 КБ — preview, не репродукция письма; раздувать DOM не надо.
-        if (mb_strlen($body) > 3000) {
-            $body = mb_substr($body, 0, 3000) . "\n\n…(сокращено, полностью пойдёт в письмо)";
-        }
+        $quote = app(\App\Services\Mail\MailQuoteBuilder::class)->build($replyTo);
 
-        return $header . "\n\n" . $body;
+        // Мини-документ для iframe: базовый шрифт как в письме.
+        return '<!DOCTYPE html><html><head><meta charset="utf-8"></head>'
+            . '<body style="margin:8px 10px;font-family:-apple-system,Arial,sans-serif;'
+            . 'font-size:13px;line-height:1.5;color:#374151;word-break:break-word">'
+            . $quote['html']
+            . '</body></html>';
     }
 
     /**
