@@ -1416,7 +1416,7 @@
                                         ? (\App\Enums\EmailCategory::tryFrom($msg->category)?->label() ?? $msg->category)
                                         : null;
                                 @endphp
-                                <div class="border-b border-border-subtle last:border-b-0">
+                                <div class="border-b border-border-subtle last:border-b-0" wire:key="thread-msg-{{ $msg->id }}">
                                     <div class="flex items-center gap-2.5 px-[18px] py-3">
                                         <template x-if="selMode">
                                             <input type="checkbox" value="{{ $msg->id }}" x-model.number="ids"
@@ -1456,8 +1456,17 @@
                                         @if($html)
                                             {{-- Письмо рендерится в sandbox-iframe (srcdoc), чтобы <style>-блоки
                                                  из тела письма не утекали на страницу и не ломали .btn / шрифты CRM.
-                                                 sandbox без allow-scripts — JS из письма не выполнится. --}}
+                                                 sandbox без allow-scripts — JS из письма не выполнится.
+
+                                                 wire:ignore.self ОБЯЗАТЕЛЕН: высоту ставит fit() в inline style,
+                                                 а любой Livewire-морф Detail (открытие окна ответа, смена
+                                                 фильтра…) без него сбрасывал style обратно в height:0 из
+                                                 серверной разметки; load повторно не стреляет → письма
+                                                 «схлопывались» до заголовков (на маке ResizeObserver не
+                                                 спасал — баг-репорт 2026-07-09). Контент письма статичен,
+                                                 элемент стабилен по wire:key — игнорировать морф безопасно. --}}
                                             <iframe
+                                                wire:ignore.self
                                                 sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
                                                 srcdoc="{{ $html }}"
                                                 loading="lazy"
