@@ -254,6 +254,31 @@ class Detail extends Component
     }
 
     /**
+     * Удалить черновик прямо из треда (бейдж «Черновик» → «Удалить черновик»),
+     * не заходя в редактирование. Автор — свой черновик; admin/РОП/директор —
+     * любой (подчистить брошенные черновики коллег).
+     */
+    public function discardThreadDraft(int $draftId, \App\Services\Mail\EmailDraftService $drafts): void
+    {
+        $draft = \App\Models\EmailMessage::query()
+            ->where('related_request_id', $this->request->id)
+            ->where('is_draft', true)
+            ->whereKey($draftId)
+            ->first();
+        if ($draft === null) {
+            return;
+        }
+        $user = auth()->user();
+        $privileged = $user?->hasAnyRole(['admin', 'head_of_sales', 'director']) ?? false;
+        if (! $privileged && $draft->draft_author_user_id !== $user?->id) {
+            abort(403, 'Удалить можно только свой черновик.');
+        }
+
+        $drafts->delete($draft);
+        session()->flash('status', 'Черновик удалён.');
+    }
+
+    /**
      * Phase 2: применить LLM-предположение «это уточнение существующей
      * позиции» — дописать additional_article к parsed_article + (опц.)
      * brand, удалить запись из pending_clarifications.

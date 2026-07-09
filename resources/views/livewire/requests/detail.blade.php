@@ -1531,12 +1531,19 @@
                                             $isMyDraft = $isDraftMsg && $msg->draft_author_user_id === auth()->id();
                                         @endphp
                                         @if($isDraftMsg)
+                                            @php $canDiscardDraft = $isMyDraft || auth()->user()?->hasAnyRole(['admin', 'head_of_sales', 'director']); @endphp
                                             <div class="mt-2 flex items-center gap-2 text-[11.5px] text-amber-700">
                                                 <span class="chip chip-attn"><span class="dot"></span>Черновик</span>
                                                 @if($isMyDraft)
                                                     <button type="button"
                                                             wire:click="$dispatch('open-draft', { draftId: {{ $msg->id }}, requestId: {{ $req->id }} })"
                                                             class="underline">Продолжить редактирование</button>
+                                                @endif
+                                                @if($canDiscardDraft)
+                                                    <button type="button"
+                                                            wire:click="discardThreadDraft({{ $msg->id }})"
+                                                            wire:confirm="Удалить черновик? Текст и вложения черновика будут потеряны."
+                                                            class="underline text-red-700 hover:text-red-900">Удалить черновик</button>
                                                 @endif
                                             </div>
                                         @elseif($canReplyHere && ! $isOutbound)
