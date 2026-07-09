@@ -59,6 +59,18 @@ class EmailDraftService
             ]];
         }
 
+        // Страховка «Кому пусто»: якорь — НАШЕ письмо (менеджер ответил на
+        // собственное outbound) или внутреннее письмо коллеги с @myzip.ru
+        // (from попал в ourEmails и был вырезан dedup'ом). Отвечаем клиенту
+        // заявки. Кейс M-2026-5226: последний inbound — пересылка от коллеги
+        // andrey.boev@ → «Кому» оставалось пустым.
+        if (empty($recipients['to']) && $request->client_email) {
+            $recipients['to'] = [[
+                'email' => $request->client_email,
+                'name' => (string) ($request->client_name ?? ''),
+            ]];
+        }
+
         $references = $this->mergeReferences(
             (array) ($replyTo->references_header ?? []),
             $replyTo->message_id,

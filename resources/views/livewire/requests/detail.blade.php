@@ -642,8 +642,20 @@
             // Разъединение заявки (split / un-merge) — только admin/director/РОП
             // (секретарь не разъединяет, у него read-only по операциям).
             $canSplit = $authUser?->hasAnyRole(['head_of_sales', 'director', 'admin']);
+            // Якорь для «✉ Ответить» — последнее входящее ОТ КЛИЕНТА.
+            // Внутренние письма коллег (@myzip.ru, пересылки «Заявка mzcorp…»)
+            // пропускаем: якорение на них давало «Re: <внутренняя тема>» и
+            // пустое «Кому» (наш домен вырезается из получателей). Кейс
+            // M-2026-5226. Fallback — любое входящее, если внешних нет.
+            $internalDomains = array_map('mb_strtolower', (array) config('services.mail.internal_domains', []));
+            $isInternalSender = function ($m) use ($internalDomains) {
+                $dom = mb_strtolower((string) Str::afterLast((string) $m->from_email, '@'));
+                return $dom !== '' && in_array($dom, $internalDomains, true);
+            };
             $lastInbound = $thread->reverse()
-                ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound);
+                ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound && ! $isInternalSender($m))
+                ?? $thread->reverse()
+                    ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound);
             $allowed = $req->status->allowedTransitions();
             $allow = fn (\App\Enums\RequestStatus $t) => in_array($t, $allowed, true);
             $RS = \App\Enums\RequestStatus::class;
