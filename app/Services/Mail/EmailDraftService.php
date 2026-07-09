@@ -294,7 +294,19 @@ class EmailDraftService
      */
     private function mergeReferences(array $existing, string $replyToMessageId): array
     {
-        $merged = array_values(array_unique(array_merge($existing, [$replyToMessageId])));
+        // Санитизация: References входящих от некоторых клиентов (mail.ru)
+        // разделены запятыми — токены приходят с хвостовой ',' или вовсе
+        // одиночной ','. Битый ID роняет отправку в Symfony Address
+        // («Email "," does not comply with addr-spec»). Дубль-защита есть и
+        // в OutgoingMailMimeBuilder::sanitizeMessageIds на build.
+        $clean = [];
+        foreach (array_merge($existing, [$replyToMessageId]) as $id) {
+            $id = trim((string) $id, " \t\r\n<>,;");
+            if ($id !== '' && str_contains($id, '@') && ! preg_match('/\s/', $id)) {
+                $clean[] = $id;
+            }
+        }
+        $merged = array_values(array_unique($clean));
 
         // Защита от overflow по RFC 5322 998 char/header.
         $joinedLen = strlen(implode(' ', $merged));

@@ -151,11 +151,19 @@ class OutgoingMailMimeBuilder
         }
 
         // Threading headers (RFC 5322 §3.6.4).
+        //
+        // Санитизация ОБЯЗАТЕЛЬНА: некоторые клиенты (mail.ru) разделяют
+        // References запятыми, а не пробелами — при IMAP-парсинге токены
+        // сохраняются с хвостовой запятой, а одиночная ',' становится
+        // отдельным «ID». Symfony Address тогда роняет весь send:
+        // «Email "," does not comply with addr-spec» (кейс 2026-07-09,
+        // mailbox 13 — менеджер не мог ответить, revival_offer падал).
         $headers = $email->getHeaders();
-        if ($draft->in_reply_to) {
-            $headers->addIdHeader('In-Reply-To', $draft->in_reply_to);
+        $inReplyTo = $this->sanitizeMessageIds([(string) $draft->in_reply_to]);
+        if ($inReplyTo !== []) {
+            $headers->addIdHeader('In-Reply-To', $inReplyTo[0]);
         }
-        $refs = (array) ($draft->references_header ?? []);
+        $refs = $this->sanitizeMessageIds((array) ($draft->references_header ?? []));
         if ($refs !== []) {
             // Symfony addIdHeader умеет принимать массив.
             $headers->addIdHeader('References', $refs);
@@ -258,6 +266,29 @@ class OutgoingMailMimeBuilder
     private function formatSignature(?User $author): array
     {
         return $this->signatureService->render($author);
+    }
+
+    /**
+     * Очистить список Message-ID для In-Reply-To/References: срезать
+     * угловые скобки, запятые/точки с запятой по краям, выбросить пустые
+     * и явный мусор (без '@' или с пробелами) — Symfony валидирует каждый
+     * ID как addr-spec и один битый токен роняет всю отправку.
+     *
+     * @param  array<int, string>  $ids
+     * @return list<string>
+     */
+    private function sanitizeMessageIds(array $ids): array
+    {
+        $out = [];
+        foreach ($ids as $id) {
+            $id = trim((string) $id, " \t\r\n<>,;");
+            if ($id === '' || ! str_contains($id, '@') || preg_match('/\s/', $id)) {
+                continue;
+            }
+            $out[] = $id;
+        }
+
+        return array_values(array_unique($out));
     }
 
     /**
