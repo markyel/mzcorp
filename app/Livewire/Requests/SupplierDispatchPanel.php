@@ -50,9 +50,9 @@ class SupplierDispatchPanel extends Component
     public string $introEn = 'Please provide the price, availability and lead time for the following items:';
 
     /** Заключительная фраза после позиций (рус., редактируемая). */
-    public string $closing = 'Ответьте, пожалуйста, на это письмо с ценами/наличием/сроками.';
+    public string $closing = 'Отвечайте, пожалуйста, на это письмо, сохраняя тему переписки.';
 
-    public string $closingEn = 'Please reply to this email with prices, availability and lead times.';
+    public string $closingEn = 'Please reply to this email keeping the subject line unchanged.';
 
     /** item_id => отредактированное название позиции для письма (рус. версия). */
     public array $editedNames = [];

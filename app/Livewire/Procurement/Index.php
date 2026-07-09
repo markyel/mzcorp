@@ -77,9 +77,9 @@ class Index extends Component
     public string $introEn = 'Please provide the price, availability and lead time for the following items:';
 
     /** Закрывающая строка письма — редактируемая, по языку письма. */
-    public string $closing = 'Ответьте, пожалуйста, на это письмо с ценами/наличием/сроками.';
+    public string $closing = 'Отвечайте, пожалуйста, на это письмо, сохраняя тему переписки.';
 
-    public string $closingEn = 'Please reply to this email with prices, availability and lead times.';
+    public string $closingEn = 'Please reply to this email keeping the subject line unchanged.';
 
     public string $note = '';
 

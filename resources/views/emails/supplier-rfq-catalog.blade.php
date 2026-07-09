@@ -10,7 +10,7 @@
             'h_name' => 'Item',
             'h_oem' => 'OEM / brand',
             'h_qty' => 'Qty',
-            'reply' => 'Please reply to this email with prices, availability and lead times.',
+            'reply' => 'Please reply to this email keeping the subject line unchanged.',
             'fallback_greeting' => 'Hello,',
         ]
         : [
@@ -22,7 +22,7 @@
             'h_name' => 'Наименование',
             'h_oem' => 'Артикул / бренд',
             'h_qty' => 'Кол-во',
-            'reply' => 'Ответьте, пожалуйста, на это письмо с ценами/наличием/сроками.',
+            'reply' => 'Отвечайте, пожалуйста, на это письмо, сохраняя тему переписки.',
             'fallback_greeting' => 'Здравствуйте!',
         ];
 @endphp

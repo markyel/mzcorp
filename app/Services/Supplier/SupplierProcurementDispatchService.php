@@ -245,7 +245,7 @@ class SupplierProcurementDispatchService
     {
         $en = $lang === 'en';
         $intro = $intro !== '' ? $intro : ($en ? 'Please quote price, availability and lead time for the following items:' : 'Просим дать цену, наличие и срок поставки на позиции:');
-        $closing = $closing !== '' ? $closing : ($en ? 'Please reply to this email with prices, availability and lead times.' : 'Ответьте, пожалуйста, на это письмо с ценами/наличием/сроками.');
+        $closing = $closing !== '' ? $closing : ($en ? 'Please reply to this email keeping the subject line unchanged.' : 'Отвечайте, пожалуйста, на это письмо, сохраняя тему переписки.');
         $lines = [$greeting !== '' ? $greeting : ($en ? 'Hello,' : 'Здравствуйте!'), '', $intro, ''];
         $n = 1;
         foreach ($rows as $r) {

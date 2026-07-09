@@ -435,7 +435,7 @@ class SupplierDispatchService
         $intro = $intro !== '' ? $intro
             : ($en ? 'Please quote price, availability and lead time for the following items:' : 'Просим дать цену, наличие и срок поставки на позиции:');
         $closing = $closing !== '' ? $closing
-            : ($en ? 'Please reply to this email with prices, availability and lead times.' : 'Ответьте, пожалуйста, на это письмо с ценами/наличием/сроками.');
+            : ($en ? 'Please reply to this email keeping the subject line unchanged.' : 'Отвечайте, пожалуйста, на это письмо, сохраняя тему переписки.');
         $footer = $en ? 'Request No. ' : 'Заявка № ';
 
         $lines = [$greeting !== '' ? $greeting : ($en ? 'Hello,' : 'Здравствуйте!'), '', $intro, ''];
