@@ -762,6 +762,31 @@ class InvoiceService
                 $request->refresh();
             }
 
+            // Уже в целевом статусе или закрыта успехом (повторный импорт,
+            // второй счёт той же заявки) — переводить некуда.
+            if ($request->status === $to || $request->status === RequestStatus::ClosedWon) {
+                return;
+            }
+
+            // Стейт-машина допускает Paid только из Invoiced, а оплата может
+            // прийти на заявку в ЛЮБОМ рабочем статусе (внешний счёт из 1С,
+            // привязка задним числом, реанимация из closed_lost попадает в
+            // in_progress). Без моста заявка застревала: «Запрещённый переход:
+            // in_progress → paid» — кейс M-2026-1530, 15 заявок 08.07.
+            $allowed = $request->status->allowedTransitions();
+            if (! in_array($to, $allowed, true)
+                && $to !== RequestStatus::Invoiced
+                && in_array(RequestStatus::Invoiced, $allowed, true)) {
+                $this->stateService->transitionTo($request, RequestStatus::Invoiced, $author, [
+                    'event' => 'payment_status_bridge',
+                    'comment' => sprintf(
+                        'Промежуточный переход к «Оплачен»: оплата счёта №%s пришла на заявку вне цепочки счёт→оплата.',
+                        $invoice->invoice_number,
+                    ),
+                ], $systemTransition);
+                $request->refresh();
+            }
+
             $this->stateService->transitionTo($request, $to, $author, $context, $systemTransition);
         } catch (\Throwable $e) {
             Log::warning('InvoiceService: post-payment transition failed (non-fatal)', [
