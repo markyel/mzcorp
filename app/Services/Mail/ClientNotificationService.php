@@ -237,6 +237,18 @@ class ClientNotificationService
                 'type' => $type->value,
                 'error' => $result['error'] ?? 'unknown',
             ]);
+            // Драфт автоматный (менеджер его не видел и не писал) — при сбое
+            // удаляем, следующий прогон создаст новый. Иначе ретраи копят
+            // мусор: revival_offer по заявке 5426 падал 11 дней каждый час
+            // (битые References от mail.ru) → 257 драфтов-дублей в треде.
+            try {
+                $draft->delete();
+            } catch (\Throwable $e) {
+                Log::warning('ClientNotificationService: failed-draft cleanup failed', [
+                    'draft_id' => $draft->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             return false;
         }
