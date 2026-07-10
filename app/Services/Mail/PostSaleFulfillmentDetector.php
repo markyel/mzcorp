@@ -66,6 +66,63 @@ class PostSaleFulfillmentDetector
     ];
 
     /**
+     * Лексика «закрывающие документы / реквизиты» — постпродажный документо-
+     * оборот по СОСТОЯВШЕЙСЯ сделке. Используется ТОЛЬКО в контексте, где сделка
+     * уже подтверждена (ответ в закрытый тред + у клиента есть оплаченный заказ,
+     * см. detectDocsOrFulfillment) — в общем inbox эти слова слишком общие.
+     */
+    private const DOCS_STEMS = [
+        'реквизит',
+        'закрывающ',       // закрывающие документы
+        'упд',
+        'счет-фактур', 'счёт-фактур',
+        'акт сверки',
+        'оригинал документ', 'оригиналы документ',
+        'товарн', // товарная накладная / товарно-транспортная
+    ];
+
+    /**
+     * Расширенный детект для гарда наследования: письмо в ЗАКРЫТЫЙ тред от
+     * клиента с недавним оплаченным/выигранным заказом. Ловит и отгрузку
+     * (detect), и документооборот по сделке (реквизиты/УПД/акты). Гварды
+     * «нет признаков нового заказа» — те же.
+     *
+     * @return string|null  Причина либо null.
+     */
+    public function detectDocsOrFulfillment(EmailMessage $message): ?string
+    {
+        $base = $this->detect($message);
+        if ($base !== null) {
+            return $base;
+        }
+
+        $subject = mb_strtolower((string) $message->subject);
+        $body = mb_strtolower((string) $message->body_plain);
+        $haystack = $subject . "\n" . $body;
+
+        $matched = null;
+        foreach (self::DOCS_STEMS as $stem) {
+            if (str_contains($haystack, $stem)) {
+                $matched = $stem;
+                break;
+            }
+        }
+        if ($matched === null) {
+            return null;
+        }
+        if (preg_match('/\d+\s*шт/u', $haystack) === 1) {
+            return null;
+        }
+        foreach (self::NEW_ORDER_MARKERS as $marker) {
+            if (str_contains($haystack, $marker)) {
+                return null;
+            }
+        }
+
+        return "документооборот по сделке («{$matched}»), без запроса цены/КП — постпродажное письмо";
+    }
+
+    /**
      * @return string|null  Причина (для лога/reasoning) либо null — паттерн не сработал.
      */
     public function detect(EmailMessage $message): ?string

@@ -90,6 +90,17 @@ class CheckInheritanceJob implements ShouldQueue, ShouldBeUnique
             return;
         }
 
+        // ГАРД «это постпродажа, не новая заявка»: клиент ответил в закрытый
+        // тред письмом про документооборот/отгрузку (реквизиты, УПД, закрывающие,
+        // комплектация) И у него есть недавний оплаченный/выигранный заказ →
+        // переписка уходит на этот заказ, свежесозданная заявка сворачивается.
+        // Кейс M-2026-7877: реквизиты для документов по оплаченной M-2026-6184
+        // прилетели ответом в тред давно проигранной M-2026-4581 — inheritance
+        // создал фантомную заявку-наследника.
+        if ($this->rerouteAsPostSale($newRequest, $inboundMessage)) {
+            return;
+        }
+
         $candidate = RequestModel::find($candidateId);
         if (! $candidate) {
             Log::info('CheckInheritanceJob: candidate not found, skip', [
@@ -171,6 +182,84 @@ class CheckInheritanceJob implements ShouldQueue, ShouldBeUnique
                 'candidate_id' => $candidate->id,
                 'error' => $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Перехват постпродажи: если письмо-триггер — документооборот/отгрузка по
+     * состоявшейся сделке и у клиента есть недавний оплаченный (paid) или
+     * выигранный (closed_won) заказ, то:
+     *   1) вся переписка свежесозданной заявки перевешивается на этот заказ
+     *      (входящие получают category=post_sale);
+     *   2) на заказе поднимается attention «🛒 Постпродажное сообщение»;
+     *   3) свежесозданная заявка удаляется (как в reanimateInPlace).
+     * Возвращает true, если перехват сработал (наследование не нужно).
+     */
+    private function rerouteAsPostSale(RequestModel $newRequest, EmailMessage $inbound): bool
+    {
+        try {
+            $signal = app(\App\Services\Mail\PostSaleFulfillmentDetector::class)
+                ->detectDocsOrFulfillment($inbound);
+            if ($signal === null) {
+                return false;
+            }
+
+            $clientEmail = trim((string) $newRequest->client_email);
+            if ($clientEmail === '') {
+                return false;
+            }
+            $maxDays = (int) config('services.inheritance.post_sale_reroute_max_days', 60);
+            $order = RequestModel::query()
+                ->where('client_email', $clientEmail)
+                ->where('id', '!=', $newRequest->id)
+                ->whereIn('status', [RequestStatus::Paid->value, RequestStatus::ClosedWon->value])
+                ->where('updated_at', '>', now()->subDays(max(1, $maxDays)))
+                ->orderByDesc('id')
+                ->first();
+            if ($order === null) {
+                return false;
+            }
+
+            $newId = $newRequest->id;
+            $newCode = $newRequest->internal_code;
+
+            DB::transaction(function () use ($newRequest, $order) {
+                $moved = EmailMessage::query()
+                    ->where('related_request_id', $newRequest->id)
+                    ->get();
+                foreach ($moved as $m) {
+                    $upd = ['related_request_id' => $order->id];
+                    if ($m->direction === \App\Enums\MailDirection::Inbound) {
+                        $upd['category'] = \App\Enums\EmailCategory::PostSale->value;
+                    }
+                    $m->forceFill($upd)->save();
+                }
+                DB::table('client_notifications_sent')->where('request_id', $newRequest->id)->delete();
+                $newRequest->delete();
+            });
+
+            try {
+                app(\App\Services\Request\AttentionService::class)->onPostSaleMessage($order->fresh());
+            } catch (\Throwable) {
+                // attention — best-effort
+            }
+
+            Log::info('CheckInheritanceJob: rerouted as post_sale, absorbed fresh request', [
+                'deleted_new_request_id' => $newId,
+                'deleted_new_code' => $newCode,
+                'order_request_id' => $order->id,
+                'order_code' => $order->internal_code,
+                'signal' => $signal,
+            ]);
+
+            return true;
+        } catch (\Throwable $e) {
+            Log::error('CheckInheritanceJob: post_sale reroute failed, continuing with inheritance', [
+                'new_request_id' => $newRequest->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return false;
         }
     }
 
