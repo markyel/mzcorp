@@ -325,13 +325,21 @@ class QuotationService
                 continue;
             }
             $position++;
+            // Мерность считаем через RequestItem::effectiveQty()/effectiveUnit()
+            // — та же формула, что и при ручном добавлении (Editor::addItemFromRequest).
+            // Если менеджер переключил billing_unit на parsed_length_unit (напр. «м»),
+            // effectiveQty вернёт parsed_qty × parsed_length (6 × 55 = 330 м); иначе —
+            // обычное parsed_qty. Без этого черновик КП терял длину мерных позиций.
+            $effQty = $reqItem->effectiveQty();
+            $billingQty = $effQty > 0 ? $effQty : ((float) ($reqItem->parsed_qty ?: 1));
+            $billingUnit = $reqItem->effectiveUnit() ?: 'шт';
             $item = new QuotationItem([
                 'quotation_id' => $quotation->id,
                 'position' => $position,
                 'request_item_id' => $reqItem->id,
                 'catalog_item_id' => $cat->id,
-                'qty' => (float) ($reqItem->parsed_qty ?: 1),
-                'unit' => $reqItem->parsed_unit ?: 'шт',
+                'qty' => $billingQty,
+                'unit' => $billingUnit,
             ]);
             $this->fillSnapshotFromCatalog($item, $cat);
             $item->save();
