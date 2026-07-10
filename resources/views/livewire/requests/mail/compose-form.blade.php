@@ -150,11 +150,11 @@
                      плавающее меню в правом верхнем углу поля (в стиле Gmail). --}}
                 <div style="position: relative; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 150px;">
                     {{-- Меню «Шаблоны»: вставить / сохранить как / управление. --}}
-                    <div x-data="{ open: false, saving: false, tplName: '', tplParent: '' }"
-                         @click.outside="open = false; saving = false"
+                    <div x-data="{ open: false, saving: false, inserting: false, tplName: '', tplParent: '' }"
+                         @click.outside="open = false; saving = false; inserting = false"
                          style="position: absolute; top: 6px; right: 6px; z-index: 6;">
                         <button type="button"
-                                x-on:click="open = !open; saving = false"
+                                x-on:click="open = !open; saving = false; inserting = false"
                                 class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-surface text-[12px] text-fg-2 hover:text-fg-1 hover:border-border-strong shadow-sm"
                                 title="Шаблоны писем">
                             📄 Шаблоны <span class="text-[10px]">▾</span>
@@ -165,12 +165,11 @@
                                     width: 300px; background: var(--bg-surface); border: 1px solid var(--border-strong);
                                     border-radius: 8px; box-shadow: 0 12px 32px rgba(15,23,42,0.25); padding: 6px;">
                             {{-- Основное меню. --}}
-                            <div x-show="!saving">
+                            <div x-show="!saving && !inserting">
                                 <button type="button"
-                                        wire:click="$dispatch('open-template-picker', { requestId: {{ $requestId }} })"
-                                        x-on:click="open = false"
+                                        x-on:click="inserting = true"
                                         class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded hover:bg-surface-2 text-[13px] text-fg-1">
-                                    <span>↧</span> Вставить шаблон
+                                    <span>↧</span> Вставить шаблон <span class="ml-auto text-fg-3 text-[11px]">›</span>
                                 </button>
                                 <button type="button"
                                         x-on:click="saving = true"
@@ -183,6 +182,26 @@
                                    title="Открыть управление библиотекой шаблонов в новой вкладке">
                                     <span>⚙</span> Управление шаблонами →
                                 </a>
+                            </div>
+
+                            {{-- Подпанель «Вставить шаблон»: дерево библиотеки. --}}
+                            <div x-show="inserting" x-cloak>
+                                <div class="flex items-center gap-2 px-1 pb-2">
+                                    <button type="button" x-on:click="inserting = false" class="text-fg-3 hover:text-fg-1 text-[15px] leading-none" title="Назад">‹</button>
+                                    <span class="text-[12px] text-fg-3 uppercase tracking-wider font-semibold">Вставить шаблон</span>
+                                </div>
+                                @php $tplTree = $this->templateTree; @endphp
+                                @if($tplTree->isEmpty())
+                                    <div class="text-[12px] text-fg-3 px-2 py-3 text-center">
+                                        Библиотека пуста. Сохраните текущее письмо как шаблон.
+                                    </div>
+                                @else
+                                    <div class="overflow-auto" style="max-height: 260px;">
+                                        @foreach($tplTree as $node)
+                                            @include('livewire.requests.mail._compose-template-node', ['node' => $node, 'depth' => 0])
+                                        @endforeach
+                                    </div>
+                                @endif
                             </div>
 
                             {{-- Подпанель «Сохранить как шаблон». --}}

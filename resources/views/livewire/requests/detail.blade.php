@@ -3382,12 +3382,6 @@
         <livewire:requests.mail.compose-form
             :request-id="$req->id"
             wire:key="compose-{{ $req->id }}" />
-
-        {{-- Пикер шаблонов писем — тоже вне @switch, переживает смену вкладок.
-             Открывается из footer'а композера (open-template-picker). --}}
-        <livewire:requests.mail.template-picker
-            :request-id="$req->id"
-            wire:key="tpl-picker-{{ $req->id }}" />
     @endif
 
     {{-- ────────── LIGHTBOX (просмотр картинок) ──────────

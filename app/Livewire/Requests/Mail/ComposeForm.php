@@ -275,6 +275,24 @@ class ComposeForm extends Component
     }
 
     /**
+     * Вставить шаблон по id — из inline-меню «Шаблоны» (без модалки-пикера).
+     * Тонкая обёртка над insertTemplate(): грузит тело/тему шаблона и делает append.
+     */
+    public function insertTemplateById(int $id, EmailDraftService $drafts): void
+    {
+        $tpl = LetterTemplate::templates()->find($id);
+        if (! $tpl) {
+            return;
+        }
+        $this->insertTemplate(
+            body: (string) $tpl->body,
+            drafts: $drafts,
+            subject: (string) ($tpl->subject ?? ''),
+            requestId: $this->requestId,
+        );
+    }
+
+    /**
      * Папки для выбора при «Сохранить как шаблон».
      *
      * @return \Illuminate\Support\Collection<int, LetterTemplate>
@@ -283,6 +301,17 @@ class ComposeForm extends Component
     public function templateFolders()
     {
         return LetterTemplate::folders()->orderBy('name')->get(['id', 'name']);
+    }
+
+    /**
+     * Дерево шаблонов для inline-меню вставки.
+     *
+     * @return \Illuminate\Support\Collection<int, LetterTemplate>
+     */
+    #[Computed]
+    public function templateTree()
+    {
+        return app(LetterTemplateService::class)->tree();
     }
 
     public function close(): void
