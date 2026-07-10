@@ -15,8 +15,9 @@ use Livewire\Component;
  * Дерево слишком богато для модалки → отдельная страница. Один самодостаточный
  * компонент с inline-редактором (по образцу RuleList/RuleEditor).
  *
- * Библиотека ОБЩАЯ (shared): создавать/редактировать может любой request-handler
- * (manager/РОП) + admin. created_by/updated_by пишем для аудита.
+ * Библиотека ЛИЧНАЯ: пользователь видит и правит только свои шаблоны
+ * (owner_user_id = auth). Роль-гейт (manager/РОП/директор/admin) отвечает лишь
+ * за доступ к самой странице.
  */
 class TemplateManager extends Component
 {
@@ -38,18 +39,31 @@ class TemplateManager extends Component
     #[Computed]
     public function tree()
     {
-        return app(LetterTemplateService::class)->tree();
+        return app(LetterTemplateService::class)->tree((int) auth()->id());
     }
 
     /**
      * Плоский список папок для селекта «переместить в…» / выбора родителя.
+     * Только свои папки (личная библиотека).
      *
      * @return \Illuminate\Support\Collection<int, LetterTemplate>
      */
     #[Computed]
     public function folders()
     {
-        return LetterTemplate::folders()->orderBy('name')->get(['id', 'name', 'parent_id']);
+        return LetterTemplate::folders()
+            ->ownedBy((int) auth()->id())
+            ->orderBy('name')
+            ->get(['id', 'name', 'parent_id']);
+    }
+
+    /**
+     * Узел из личной библиотеки текущего пользователя (иначе null).
+     * Защита от правки чужих шаблонов по прямому id.
+     */
+    private function ownedNode(int $id): ?LetterTemplate
+    {
+        return LetterTemplate::ownedBy((int) auth()->id())->find($id);
     }
 
     public function newTemplate(?int $parentId = null): void
@@ -73,7 +87,10 @@ class TemplateManager extends Component
     public function edit(int $id): void
     {
         $this->ensureCanEdit();
-        $node = LetterTemplate::findOrFail($id);
+        $node = $this->ownedNode($id);
+        if (! $node) {
+            abort(404);
+        }
         $this->editingId = $node->id;
         $this->creating = false;
         $this->isFolder = (bool) $node->is_folder;
@@ -96,7 +113,10 @@ class TemplateManager extends Component
         }
 
         if ($this->editingId) {
-            $node = LetterTemplate::findOrFail($this->editingId);
+            $node = $this->ownedNode($this->editingId);
+            if (! $node) {
+                abort(404);
+            }
             $service->update($node, [
                 'name' => $this->name,
                 'subject' => $this->isFolder ? null : ($this->subject ?: null),
@@ -127,7 +147,7 @@ class TemplateManager extends Component
     public function delete(int $id, LetterTemplateService $service): void
     {
         $this->ensureCanEdit();
-        $node = LetterTemplate::find($id);
+        $node = $this->ownedNode($id);
         if ($node) {
             $service->delete($node);
         }
@@ -150,8 +170,9 @@ class TemplateManager extends Component
     public function moveTo(int $id, ?int $newParentId, LetterTemplateService $service): void
     {
         $this->ensureCanEdit();
-        $node = LetterTemplate::find($id);
-        if ($node) {
+        $node = $this->ownedNode($id);
+        // Целевая папка тоже должна быть своей (или корень).
+        if ($node && ($newParentId === null || $this->ownedNode($newParentId))) {
             $service->move($node, $newParentId);
         }
         unset($this->tree, $this->folders);
@@ -163,12 +184,13 @@ class TemplateManager extends Component
     private function swapWithSibling(int $id, int $direction, LetterTemplateService $service): void
     {
         $this->ensureCanEdit();
-        $node = LetterTemplate::find($id);
+        $node = $this->ownedNode($id);
         if (! $node) {
             return;
         }
 
         $siblings = LetterTemplate::query()
+            ->ownedBy((int) auth()->id())
             ->when($node->parent_id === null,
                 fn ($q) => $q->whereNull('parent_id'),
                 fn ($q) => $q->where('parent_id', $node->parent_id),

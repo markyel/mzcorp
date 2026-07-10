@@ -224,11 +224,11 @@ class ComposeForm extends Component
 
     /**
      * Вставить шаблон письма в тело (append в конец через пустую строку).
-     * Диспатчится из TemplatePicker. Тело — plain-text (как и $bodyText);
-     * подпись/цитата приклеиваются при отправке, поэтому шаблон их не несёт.
-     * Тема подставляется только если она сейчас пуста — не затираем ввод.
+     * Вызывается из insertTemplateById() (inline-меню «Шаблоны»). Тело —
+     * plain-text (как и $bodyText); подпись/цитата приклеиваются при отправке,
+     * поэтому шаблон их не несёт. Тема подставляется только если она сейчас
+     * пуста — не затираем ввод.
      */
-    #[On('insert-template')]
     public function insertTemplate(string $body, EmailDraftService $drafts, ?string $subject = null, ?int $requestId = null): void
     {
         if ($requestId !== null && $requestId !== $this->requestId) {
@@ -280,7 +280,9 @@ class ComposeForm extends Component
      */
     public function insertTemplateById(int $id, EmailDraftService $drafts): void
     {
-        $tpl = LetterTemplate::templates()->find($id);
+        $tpl = LetterTemplate::templates()
+            ->ownedBy((int) auth()->id())
+            ->find($id);
         if (! $tpl) {
             return;
         }
@@ -293,25 +295,28 @@ class ComposeForm extends Component
     }
 
     /**
-     * Папки для выбора при «Сохранить как шаблон».
+     * Свои папки для выбора при «Сохранить как шаблон» (личная библиотека).
      *
      * @return \Illuminate\Support\Collection<int, LetterTemplate>
      */
     #[Computed]
     public function templateFolders()
     {
-        return LetterTemplate::folders()->orderBy('name')->get(['id', 'name']);
+        return LetterTemplate::folders()
+            ->ownedBy((int) auth()->id())
+            ->orderBy('name')
+            ->get(['id', 'name']);
     }
 
     /**
-     * Дерево шаблонов для inline-меню вставки.
+     * Личное дерево шаблонов для inline-меню вставки.
      *
      * @return \Illuminate\Support\Collection<int, LetterTemplate>
      */
     #[Computed]
     public function templateTree()
     {
-        return app(LetterTemplateService::class)->tree();
+        return app(LetterTemplateService::class)->tree((int) auth()->id());
     }
 
     public function close(): void

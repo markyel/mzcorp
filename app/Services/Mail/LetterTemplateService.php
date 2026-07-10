@@ -11,6 +11,9 @@ use Illuminate\Support\Collection;
  *
  * Тонкие Livewire-компоненты → логика дерева (guard от циклов, sort_order,
  * «сохранить письмо как шаблон») живёт здесь.
+ *
+ * Библиотека ЛИЧНАЯ: каждый узел принадлежит владельцу (owner_user_id).
+ * Дерево грузится и правится только в рамках своего владельца.
  */
 class LetterTemplateService
 {
@@ -20,6 +23,7 @@ class LetterTemplateService
     public function create(array $data, ?User $by = null): LetterTemplate
     {
         $parentId = $data['parent_id'] ?? null;
+        $ownerId = $by?->id;
 
         return LetterTemplate::create([
             'parent_id' => $parentId,
@@ -27,9 +31,10 @@ class LetterTemplateService
             'name' => $data['name'],
             'subject' => $data['subject'] ?? null,
             'body' => $data['body'] ?? null,
-            'sort_order' => $this->nextSortOrder($parentId),
-            'created_by_user_id' => $by?->id,
-            'updated_by_user_id' => $by?->id,
+            'sort_order' => $this->nextSortOrder($parentId, $ownerId),
+            'owner_user_id' => $ownerId,
+            'created_by_user_id' => $ownerId,
+            'updated_by_user_id' => $ownerId,
         ]);
     }
 
@@ -66,7 +71,7 @@ class LetterTemplateService
             return; // новый родитель находится внутри перемещаемого поддерева
         }
         $node->parent_id = $newParentId;
-        $node->sort_order = $this->nextSortOrder($newParentId);
+        $node->sort_order = $this->nextSortOrder($newParentId, $node->owner_user_id);
         $node->save();
     }
 
@@ -104,13 +109,16 @@ class LetterTemplateService
     }
 
     /**
-     * Всё дерево от корней (с рекурсивно подгруженными детьми).
+     * Личное дерево владельца от корней (с рекурсивно подгруженными детьми).
+     * Поддеревья однородны по владельцу (создаются всегда в своём дереве),
+     * поэтому фильтра по owner на корнях достаточно.
      *
      * @return Collection<int, LetterTemplate>
      */
-    public function tree(): Collection
+    public function tree(int $ownerId): Collection
     {
         return LetterTemplate::roots()
+            ->ownedBy($ownerId)
             ->with('childrenRecursive')
             ->orderByDesc('is_folder')
             ->orderBy('sort_order')
@@ -118,9 +126,10 @@ class LetterTemplateService
             ->get();
     }
 
-    private function nextSortOrder(?int $parentId): int
+    private function nextSortOrder(?int $parentId, ?int $ownerId): int
     {
         $max = LetterTemplate::query()
+            ->when($ownerId !== null, fn ($q) => $q->where('owner_user_id', $ownerId))
             ->when($parentId === null,
                 fn ($q) => $q->whereNull('parent_id'),
                 fn ($q) => $q->where('parent_id', $parentId),

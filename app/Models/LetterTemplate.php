@@ -24,6 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property ?string $subject
  * @property ?string $body
  * @property int $sort_order
+ * @property ?int $owner_user_id
  * @property ?int $created_by_user_id
  * @property ?int $updated_by_user_id
  */
@@ -38,6 +39,7 @@ class LetterTemplate extends Model
         'subject',
         'body',
         'sort_order',
+        'owner_user_id',
         'created_by_user_id',
         'updated_by_user_id',
     ];
@@ -74,6 +76,11 @@ class LetterTemplate extends Model
         return $this->children()->with('childrenRecursive');
     }
 
+    public function owner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'owner_user_id');
+    }
+
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
@@ -88,6 +95,12 @@ class LetterTemplate extends Model
     public function scopeRoots(Builder $query): Builder
     {
         return $query->whereNull('parent_id');
+    }
+
+    /** Узлы конкретного владельца (личная библиотека). */
+    public function scopeOwnedBy(Builder $query, int $ownerId): Builder
+    {
+        return $query->where('owner_user_id', $ownerId);
     }
 
     public function scopeFolders(Builder $query): Builder
