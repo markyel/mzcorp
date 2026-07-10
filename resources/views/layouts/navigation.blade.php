@@ -59,6 +59,10 @@
         // «Каталог» вынесен в левый rail (resources/views/components/left-rail.blade.php),
         // в горизонтальный топбар не дублируется.
     }
+    // «Шаблоны писем» — общая библиотека для переписки (менеджеры/РОП/директор/админ).
+    if ($user?->hasAnyRole(['manager', 'head_of_sales', 'director', 'admin'])) {
+        $navLinks[] = ['route' => 'letter-templates.index', 'label' => 'Шаблоны писем', 'pattern' => 'letter-templates.*'];
+    }
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'mail-rules.index', 'label' => 'Правила почты', 'pattern' => 'mail-rules.*'];
         $navLinks[] = ['route' => 'sender-blocklist.index', 'label' => 'Стоп-лист', 'pattern' => 'sender-blocklist.*'];

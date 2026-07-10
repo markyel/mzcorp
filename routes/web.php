@@ -249,6 +249,12 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/procurement/missing-codes', function () {
             return view('procurement.missing-codes');
         })->name('procurement.missing-codes');
+
+        // Шаблоны писем — общая библиотека для вкладки «Переписка».
+        // Управляют менеджеры/РОП/директор/админ (gate в компоненте).
+        Route::get('/dashboard/letter-templates', function () {
+            return view('admin.letter-templates.index');
+        })->name('letter-templates.index');
     });
 
     // Mail routing rules — управление правилами для РОП и директора.

@@ -6,8 +6,10 @@ use App\Enums\MailDirection;
 use App\Enums\Role as RoleEnum;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
+use App\Models\LetterTemplate;
 use App\Models\Request as RequestModel;
 use App\Services\Mail\EmailDraftService;
+use App\Services\Mail\LetterTemplateService;
 use App\Services\Mail\OutgoingMailSender;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -218,6 +220,69 @@ class ComposeForm extends Component
         // Подпись и quote оригинала рисуются ниже отдельным preview-блоком.
         $this->bodyText = (string) $draft->body_plain;
         $this->resetErrorBag();
+    }
+
+    /**
+     * Вставить шаблон письма в тело (append в конец через пустую строку).
+     * Диспатчится из TemplatePicker. Тело — plain-text (как и $bodyText);
+     * подпись/цитата приклеиваются при отправке, поэтому шаблон их не несёт.
+     * Тема подставляется только если она сейчас пуста — не затираем ввод.
+     */
+    #[On('insert-template')]
+    public function insertTemplate(string $body, EmailDraftService $drafts, ?string $subject = null, ?int $requestId = null): void
+    {
+        if ($requestId !== null && $requestId !== $this->requestId) {
+            return;
+        }
+        $body = trim($body);
+        if ($body === '') {
+            return;
+        }
+        $this->bodyText = trim($this->bodyText) === ''
+            ? $body
+            : rtrim($this->bodyText) . "\n\n" . $body;
+
+        if ($subject !== null && trim($subject) !== '' && trim($this->subject) === '') {
+            $this->subject = mb_substr($subject, 0, 998);
+        }
+
+        $this->autoSave($drafts); // сразу сохранить в черновик
+    }
+
+    /**
+     * Сохранить текущее письмо как шаблон (общая библиотека).
+     * $parentId — папка назначения (null = корень).
+     */
+    public function saveAsTemplate(string $name, ?int $parentId, LetterTemplateService $templates): void
+    {
+        $name = trim($name);
+        if ($name === '') {
+            $this->addError('bodyText', 'Укажите название шаблона.');
+            return;
+        }
+        if (trim($this->bodyText) === '') {
+            $this->addError('bodyText', 'Нельзя сохранить пустой шаблон.');
+            return;
+        }
+        $templates->saveFromLetter(
+            name: $name,
+            body: $this->bodyText,
+            parentId: $parentId,
+            subject: trim($this->subject) !== '' ? $this->subject : null,
+            by: auth()->user(),
+        );
+        session()->flash('status', 'Шаблон сохранён.');
+    }
+
+    /**
+     * Папки для выбора при «Сохранить как шаблон».
+     *
+     * @return \Illuminate\Support\Collection<int, LetterTemplate>
+     */
+    #[Computed]
+    public function templateFolders()
+    {
+        return LetterTemplate::folders()->orderBy('name')->get(['id', 'name']);
     }
 
     public function close(): void
