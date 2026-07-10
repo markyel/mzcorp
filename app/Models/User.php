@@ -57,6 +57,13 @@ class User extends Authenticatable
         'avatar_neutral_path',
         'avatar_won_path',
         'avatar_lost_path',
+        // Персональные тексты письма поставщику (таб «Поставщики»): вступительный
+        // и завершающий, отдельно рус./англ. NULL = используется системный дефолт.
+        // См. App\Livewire\Requests\SupplierDispatchPanel::savePersonalText / mount.
+        'supplier_intro_ru',
+        'supplier_intro_en',
+        'supplier_closing_ru',
+        'supplier_closing_en',
     ];
 
     /**

@@ -80,6 +80,25 @@ class SupplierDispatchPanel extends Component
     public function mount(RequestModel $request): void
     {
         $this->requestId = $request->id;
+
+        // Персональные тексты письма поставщику: если менеджер их сохранял —
+        // подставляем вместо системного дефолта (NULL = дефолт остаётся).
+        $user = auth()->user();
+        if ($user !== null) {
+            if (filled($user->supplier_intro_ru)) {
+                $this->intro = $user->supplier_intro_ru;
+            }
+            if (filled($user->supplier_intro_en)) {
+                $this->introEn = $user->supplier_intro_en;
+            }
+            if (filled($user->supplier_closing_ru)) {
+                $this->closing = $user->supplier_closing_ru;
+            }
+            if (filled($user->supplier_closing_en)) {
+                $this->closingEn = $user->supplier_closing_en;
+            }
+        }
+
         // По умолчанию: выбираем позиции с НЕАКТУАЛЬНОЙ ценой (основной кейс
         // refresh) + заполняем редактируемые названия (каталог/клиент).
         foreach ($this->items() as $it) {
@@ -92,6 +111,44 @@ class SupplierDispatchPanel extends Component
             $this->editedQty[$it['id']] = (string) ($it['qty'] ?? '');
             $this->editedQtyEn[$it['id']] = (string) ($it['qty_en'] ?? '');
         }
+    }
+
+    /**
+     * Сохранить текущий вступительный/завершающий текст как персональный
+     * дефолт менеджера. В следующий раз он подставится в mount() вместо
+     * системного. Пустое значение сбрасывает персональный (вернёт дефолт).
+     *
+     * @param  'intro'|'closing'  $which
+     * @param  'ru'|'en'  $lang
+     */
+    public function savePersonalText(string $which, string $lang): void
+    {
+        $user = auth()->user();
+        if ($user === null) {
+            return;
+        }
+        $lang = $lang === 'en' ? 'en' : 'ru';
+
+        $map = [
+            'intro' => [
+                'prop' => $lang === 'en' ? 'introEn' : 'intro',
+                'col' => $lang === 'en' ? 'supplier_intro_en' : 'supplier_intro_ru',
+            ],
+            'closing' => [
+                'prop' => $lang === 'en' ? 'closingEn' : 'closing',
+                'col' => $lang === 'en' ? 'supplier_closing_en' : 'supplier_closing_ru',
+            ],
+        ];
+        if (! isset($map[$which])) {
+            return;
+        }
+
+        $value = trim((string) $this->{$map[$which]['prop']});
+        $user->update([$map[$which]['col'] => $value === '' ? null : $value]);
+
+        $this->dispatch('toast', message: $value === ''
+            ? 'Текст сброшен к системному по умолчанию'
+            : 'Сохранено как ваш текст по умолчанию', type: 'success');
     }
 
     /* ----------------------- Уже отправленные запросы --------------------- */
