@@ -146,8 +146,70 @@
 
                 {{-- Body: тянется на всю свободную высоту окна (подпись и цитата
                      автоматически добавятся при отправке, см.
-                     OutgoingMailMimeBuilder::composeFinalBody). --}}
-                <div style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 150px;">
+                     OutgoingMailMimeBuilder::composeFinalBody). Кнопка «Шаблоны» —
+                     плавающее меню в правом верхнем углу поля (в стиле Gmail). --}}
+                <div style="position: relative; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 150px;">
+                    {{-- Меню «Шаблоны»: вставить / сохранить как / управление. --}}
+                    <div x-data="{ open: false, saving: false, tplName: '', tplParent: '' }"
+                         @click.outside="open = false; saving = false"
+                         style="position: absolute; top: 6px; right: 6px; z-index: 6;">
+                        <button type="button"
+                                x-on:click="open = !open; saving = false"
+                                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-surface text-[12px] text-fg-2 hover:text-fg-1 hover:border-border-strong shadow-sm"
+                                title="Шаблоны писем">
+                            📄 Шаблоны <span class="text-[10px]">▾</span>
+                        </button>
+
+                        <div x-show="open" x-cloak x-transition
+                             style="position: absolute; top: calc(100% + 4px); right: 0; z-index: 8;
+                                    width: 300px; background: var(--bg-surface); border: 1px solid var(--border-strong);
+                                    border-radius: 8px; box-shadow: 0 12px 32px rgba(15,23,42,0.25); padding: 6px;">
+                            {{-- Основное меню. --}}
+                            <div x-show="!saving">
+                                <button type="button"
+                                        wire:click="$dispatch('open-template-picker', { requestId: {{ $requestId }} })"
+                                        x-on:click="open = false"
+                                        class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded hover:bg-surface-2 text-[13px] text-fg-1">
+                                    <span>↧</span> Вставить шаблон
+                                </button>
+                                <button type="button"
+                                        x-on:click="saving = true"
+                                        class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded hover:bg-surface-2 text-[13px] text-fg-1">
+                                    <span>☆</span> Сохранить как шаблон
+                                </button>
+                                <div class="my-1 border-t border-border-subtle"></div>
+                                <a href="{{ route('letter-templates.index') }}" target="_blank" rel="noopener"
+                                   class="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded hover:bg-surface-2 text-[13px] text-[var(--sky-700)]"
+                                   title="Открыть управление библиотекой шаблонов в новой вкладке">
+                                    <span>⚙</span> Управление шаблонами →
+                                </a>
+                            </div>
+
+                            {{-- Подпанель «Сохранить как шаблон». --}}
+                            <div x-show="saving" x-cloak>
+                                <div class="flex items-center gap-2 px-1 pb-2">
+                                    <button type="button" x-on:click="saving = false" class="text-fg-3 hover:text-fg-1 text-[15px] leading-none" title="Назад">‹</button>
+                                    <span class="text-[12px] text-fg-3 uppercase tracking-wider font-semibold">Сохранить как шаблон</span>
+                                </div>
+                                <input type="text" x-model="tplName"
+                                       placeholder="Название, напр.: Отказ по гарантии"
+                                       class="w-full h-[32px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)] mb-2" />
+                                <select x-model="tplParent"
+                                        class="w-full h-[32px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)] mb-2">
+                                    <option value="">— в корень —</option>
+                                    @foreach($this->templateFolders as $folder)
+                                        <option value="{{ $folder->id }}">{{ $folder->name }}</option>
+                                    @endforeach
+                                </select>
+                                <div class="flex items-center gap-2">
+                                    <button type="button" class="btn btn-primary btn-sm"
+                                            x-on:click="$wire.saveAsTemplate(tplName, tplParent === '' ? null : parseInt(tplParent)); open = false; saving = false; tplName = ''; tplParent = '';">Сохранить</button>
+                                    <button type="button" class="btn btn-sm" x-on:click="saving = false">Отмена</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <textarea wire:model.live.debounce.1500ms="bodyText"
                               placeholder="Напишите ответ клиенту обычным текстом…"
                               class="w-full px-3 py-2 border border-border-strong rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)]"
@@ -286,45 +348,6 @@
                 </button>
                 <button type="button" wire:click="discard" class="btn"
                         wire:confirm="Удалить черновик?">Удалить черновик</button>
-
-                <span style="width: 1px; height: 20px; background: var(--border-subtle);"></span>
-
-                {{-- Шаблоны писем: вставить из библиотеки / сохранить текущее. --}}
-                <button type="button" class="btn btn-sm"
-                        wire:click="$dispatch('open-template-picker', { requestId: {{ $requestId }} })"
-                        title="Вставить шаблон из библиотеки">↧ Вставить шаблон</button>
-
-                <div x-data="{ saving: false, tplName: '', tplParent: '' }" class="relative">
-                    <button type="button" class="btn btn-sm"
-                            x-on:click="saving = !saving"
-                            title="Сохранить это письмо как шаблон">☆ Сохранить как шаблон</button>
-                    <div x-show="saving" x-cloak x-transition
-                         @click.outside="saving = false"
-                         style="position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 70;
-                                width: 320px; background: var(--bg-surface); border: 1px solid var(--border-strong);
-                                border-radius: 8px; box-shadow: 0 12px 32px rgba(15,23,42,0.25); padding: 12px;">
-                        <div class="text-[12px] text-fg-3 uppercase tracking-wider font-semibold mb-1">Название шаблона</div>
-                        <input type="text" x-model="tplName"
-                               placeholder="Например: Отказ по гарантии"
-                               class="w-full h-[32px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)] mb-2" />
-                        <div class="text-[12px] text-fg-3 uppercase tracking-wider font-semibold mb-1">Папка</div>
-                        <select x-model="tplParent"
-                                class="w-full h-[32px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)] mb-3">
-                            <option value="">— в корень —</option>
-                            @foreach($this->templateFolders as $folder)
-                                <option value="{{ $folder->id }}">{{ $folder->name }}</option>
-                            @endforeach
-                        </select>
-                        <div class="flex items-center gap-2">
-                            <button type="button" class="btn btn-primary btn-sm"
-                                    x-on:click="$wire.saveAsTemplate(tplName, tplParent === '' ? null : parseInt(tplParent)); saving = false; tplName = ''; tplParent = '';">Сохранить</button>
-                            <button type="button" class="btn btn-sm" x-on:click="saving = false">Отмена</button>
-                            <a href="{{ route('letter-templates.index') }}" target="_blank" rel="noopener"
-                               class="ml-auto text-[12px] text-[var(--sky-700)] hover:underline"
-                               title="Открыть управление библиотекой шаблонов в новой вкладке">Управление шаблонами →</a>
-                        </div>
-                    </div>
-                </div>
 
                 <span class="text-fg-3 text-[12px] ml-auto">
                     Автосохранение
