@@ -24,6 +24,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property ?string $snapshot_photo_url
  * @property float $qty
  * @property string $unit
+ * @property ?float $piece_length
+ * @property ?string $piece_length_unit
+ * @property bool $bill_by_length
  * @property ?float $discount_percent
  * @property float $final_unit_price
  * @property float $line_total
@@ -52,6 +55,9 @@ class QuotationItem extends Model
         'snapshot_photo_url',
         'qty',
         'unit',
+        'piece_length',
+        'piece_length_unit',
+        'bill_by_length',
         'discount_percent',
         'final_unit_price',
         'line_total',
@@ -70,6 +76,8 @@ class QuotationItem extends Model
             'catalog_in_stock' => 'boolean',
             'catalog_stock_available' => 'integer',
             'qty' => 'decimal:3',
+            'piece_length' => 'decimal:3',
+            'bill_by_length' => 'boolean',
             'discount_percent' => 'decimal:2',
             'final_unit_price' => 'decimal:2',
             'line_total' => 'decimal:2',
@@ -90,6 +98,32 @@ class QuotationItem extends Model
     public function catalogItem(): BelongsTo
     {
         return $this->belongsTo(CatalogItem::class);
+    }
+
+    /**
+     * Двумерная позиция — есть снапшот второй размерности (напр. «6 шт × 55 м»).
+     * qty при этом остаётся в штуках, piece_length — длина одного куска.
+     */
+    public function isMeasured(): bool
+    {
+        return $this->piece_length !== null && (float) $this->piece_length > 0;
+    }
+
+    /**
+     * Количество для расчёта суммы:
+     *   - bill_by_length (цена за метр) → qty × piece_length (6 × 55 = 330);
+     *   - иначе (цена за штуку/бухту)   → просто qty (6).
+     * Отображаемое qty («6 шт») и множитель метража хранятся раздельно —
+     * это и отличает от прежнего бага, где метраж терялся или схлопывал qty.
+     */
+    public function billableQty(): float
+    {
+        $qty = (float) $this->qty;
+        if ($this->bill_by_length && $this->isMeasured()) {
+            return $qty * (float) $this->piece_length;
+        }
+
+        return $qty;
     }
 
     /**
@@ -162,8 +196,10 @@ class QuotationItem extends Model
         }
 
         // Частично: наличие + остаток под заказ (две строки под одним номером).
-        $unitPrice = (float) $this->final_unit_price;
-        $sub1Total = round($stock * $unitPrice, 2);
+        // Долю суммы делим пропорционально ШТУКАМ (stock / qty) — корректно и для
+        // мерных позиций, где line_total = цена × qty × piece_length (метраж уже
+        // зашит в line_total, поэтому per-piece доля = line_total × stock/qty).
+        $sub1Total = $qty > 0.0 ? round($lineTotal * ($stock / $qty), 2) : 0.0;
         $sub1Vat = $lineTotal > 0.0 ? round($vat * ($sub1Total / $lineTotal), 2) : 0.0;
 
         return [

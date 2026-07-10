@@ -165,7 +165,11 @@ class QuotationService
                 $item->catalog_price_min !== null ? (float) $item->catalog_price_min : null,
                 $effectiveDiscount,
             );
-            $lineTotal = round($finalUnitPrice * (float) $item->qty, 2);
+            // billableQty учитывает метраж мерных позиций: цена за метр →
+            // qty × piece_length; цена за штуку → qty. final_unit_price — цена за
+            // единицу (за метр или за штуку), поэтому line_total = цена × billableQty.
+            $billableQty = $item->billableQty();
+            $lineTotal = round($finalUnitPrice * $billableQty, 2);
             // НДС в т.ч. — line_total включает НДС, выделяем.
             $itemVat = $vatRate > 0
                 ? round($lineTotal - ($lineTotal / (1 + $vatRate / 100)), 2)
@@ -177,7 +181,7 @@ class QuotationService
                 'vat_amount' => $itemVat,
             ])->save();
 
-            $subtotal += (float) $item->catalog_unit_price * (float) $item->qty;
+            $subtotal += (float) $item->catalog_unit_price * $billableQty;
             $total += $lineTotal;
             $vatTotal += $itemVat;
         }
@@ -325,6 +329,16 @@ class QuotationService
                 continue;
             }
             $position++;
+            // qty остаётся в ШТУКАХ (parsed_qty), а вторую размерность (метраж)
+            // снапшотим отдельно. bill_by_length = как менеджер выставил единицу
+            // цены в карточке позиции (billing_unit): если effectiveUnit совпадает
+            // с parsed_length_unit — цена за метр, сумму умножаем на длину. Так КП
+            // показывает «6 шт × 55 м» и не теряет метраж (см. QuotationItem::billableQty).
+            $isMeasured = $reqItem->isMeasured();
+            $billByLength = $isMeasured
+                && mb_strtolower(trim((string) $reqItem->effectiveUnit()))
+                    === mb_strtolower(trim((string) $reqItem->parsed_length_unit));
+
             $item = new QuotationItem([
                 'quotation_id' => $quotation->id,
                 'position' => $position,
@@ -332,6 +346,9 @@ class QuotationService
                 'catalog_item_id' => $cat->id,
                 'qty' => (float) ($reqItem->parsed_qty ?: 1),
                 'unit' => $reqItem->parsed_unit ?: 'шт',
+                'piece_length' => $isMeasured ? (float) $reqItem->parsed_length : null,
+                'piece_length_unit' => $isMeasured ? $reqItem->parsed_length_unit : null,
+                'bill_by_length' => $billByLength,
             ]);
             $this->fillSnapshotFromCatalog($item, $cat);
             $item->save();

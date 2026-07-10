@@ -538,25 +538,28 @@ class Editor extends Component
         }
         $position = ($q->items->max('position') ?? 0) + 1;
 
-        // Используем существующий механизм RequestItem::effectiveQty() /
-        // effectiveUnit() — он уже учитывает menager-controlled поле
-        // `billing_unit`. Если менеджер в карточке позиции переключил
-        // billing_unit на parsed_length_unit (например «звено» для M00839),
-        // effectiveQty вернёт parsed_qty × parsed_length; иначе — обычное
-        // parsed_qty. Та же формула что в _item-row.blade.php / _position-card —
-        // теперь и КП считает единообразно. См. M-2026-1478 (M00839: после
-        // выбора «цена за звено» qty в КП = 1 × 125 = 125).
-        $effQty = $reqItem->effectiveQty();
-        $billingQty = $effQty > 0 ? $effQty : ((float) ($reqItem->parsed_qty ?: 1));
-        $billingUnit = $reqItem->effectiveUnit() ?: 'шт';
+        // qty остаётся в ШТУКАХ (parsed_qty), метраж снапшотится отдельно в
+        // piece_length. bill_by_length = как менеджер выставил единицу цены в
+        // карточке позиции (billing_unit): если effectiveUnit совпадает с
+        // parsed_length_unit — цена за метр, сумму умножаем на длину. КП тогда
+        // показывает «6 шт × 55 м», не схлопывая штуки в метраж. Симметрично
+        // QuotationService::autoFillItemsFromRequest. См. M-2026-7784 (раньше
+        // qty схлопывался в 330 и терялось «6 кусков»); M-2026-1478 (цена за звено).
+        $isMeasured = $reqItem->isMeasured();
+        $billByLength = $isMeasured
+            && mb_strtolower(trim((string) $reqItem->effectiveUnit()))
+                === mb_strtolower(trim((string) $reqItem->parsed_length_unit));
 
         $item = new \App\Models\QuotationItem([
             'quotation_id' => $q->id,
             'position' => $position,
             'request_item_id' => $reqItem->id,
             'catalog_item_id' => $cat->id,
-            'qty' => $billingQty,
-            'unit' => $billingUnit,
+            'qty' => (float) ($reqItem->parsed_qty ?: 1),
+            'unit' => $reqItem->parsed_unit ?: 'шт',
+            'piece_length' => $isMeasured ? (float) $reqItem->parsed_length : null,
+            'piece_length_unit' => $isMeasured ? $reqItem->parsed_length_unit : null,
+            'bill_by_length' => $billByLength,
             'catalog_unit_price' => (float) ($cat->price ?: 0),
             'catalog_price_min' => $cat->price_min !== null ? (float) $cat->price_min : null,
             'catalog_lead_time_days' => $cat->lead_time_days,

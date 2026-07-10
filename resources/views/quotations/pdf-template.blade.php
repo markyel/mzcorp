@@ -255,11 +255,11 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
           </td>
           @endif
           <td class="term">{{ $drow['term'] }}</td>
-          <td class="qty">{{ rtrim(rtrim((string) $drow['qty'], '0'), '.') }} <small>{{ $item->unit }}</small></td>
+          <td class="qty">{{ rtrim(rtrim((string) $drow['qty'], '0'), '.') }} <small>{{ $item->unit }}</small>@if($item->isMeasured())<small> × {{ rtrim(rtrim(number_format((float) $item->piece_length, 3, '.', ''), '0'), '.') }} {{ $item->piece_length_unit }}</small>@endif</td>
           {{-- Цена со скидкой — на КАЖДОЙ строке (она одна для позиции, но раз
                кол-во и сумма дробятся, цена тоже должна стоять напротив каждой). --}}
           <td class="pricebox">
-            <span class="now">{{ number_format((float) $item->final_unit_price, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></span>
+            <span class="now">{{ number_format((float) $item->final_unit_price, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span>@if($item->bill_by_length)<small>/{{ $item->piece_length_unit }}</small>@endif</span>
             @if($showWasDisc)
               <span class="wasline"><span class="was">{{ number_format((float) $item->catalog_unit_price, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></span> <span class="disc"><span class="rub">−</span>{{ rtrim(rtrim(number_format($realDisc, 2, ',', ''), '0'), ',') }}%</span></span>
             @endif

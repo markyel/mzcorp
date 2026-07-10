@@ -230,9 +230,15 @@
                                            wire:blur="updateItemField({{ $item->id }}, 'qty', $event.target.value)"
                                            class="w-20 mono text-right px-2 py-1 border border-border rounded">
                                     <span class="text-[11px] text-fg-3 ml-0.5">{{ $item->unit }}</span>
+                                    @if($item->isMeasured())
+                                        {{-- Вторая размерность мерной позиции: «× 55 м» (метраж каждого куска). --}}
+                                        <div class="text-[10.5px] text-fg-3 mono mt-0.5" title="метраж каждого куска (вторая размерность)">
+                                            × {{ rtrim(rtrim(number_format((float)$item->piece_length, 3, '.', ''), '0'), '.') }} {{ $item->piece_length_unit }}
+                                        </div>
+                                    @endif
                                 </td>
                                 <td class="px-2 py-1.5 mono text-right text-fg-2 align-top">
-                                    {{ number_format((float)$item->catalog_unit_price, 2, '.', ' ') }}
+                                    {{ number_format((float)$item->catalog_unit_price, 2, '.', ' ') }}@if($item->bill_by_length)<span class="text-fg-3"> / {{ $item->piece_length_unit }}</span>@endif
                                     @if($item->catalog_price_min !== null)
                                         <div class="text-[10px] text-fg-3">min {{ number_format((float)$item->catalog_price_min, 2, '.', ' ') }}</div>
                                     @endif
