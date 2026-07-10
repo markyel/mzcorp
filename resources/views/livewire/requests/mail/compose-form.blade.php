@@ -276,7 +276,7 @@
 
             {{-- Footer --}}
             <div x-show="!min"
-                 style="flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+                 style="flex: 0 0 auto; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
                         padding: 10px 14px; background: var(--bg-surface-2);
                         border-top: 1px solid var(--border-subtle);">
                 <button type="button" wire:click="send" class="btn btn-primary"
@@ -287,15 +287,17 @@
                 <button type="button" wire:click="discard" class="btn"
                         wire:confirm="Удалить черновик?">Удалить черновик</button>
 
+                <span style="width: 1px; height: 20px; background: var(--border-subtle);"></span>
+
                 {{-- Шаблоны писем: вставить из библиотеки / сохранить текущее. --}}
-                <button type="button" class="btn"
+                <button type="button" class="btn btn-sm"
                         wire:click="$dispatch('open-template-picker', { requestId: {{ $requestId }} })"
-                        title="Вставить шаблон из библиотеки">Шаблон…</button>
+                        title="Вставить шаблон из библиотеки">↧ Вставить шаблон</button>
 
                 <div x-data="{ saving: false, tplName: '', tplParent: '' }" class="relative">
-                    <button type="button" class="btn"
+                    <button type="button" class="btn btn-sm"
                             x-on:click="saving = !saving"
-                            title="Сохранить это письмо как шаблон">Сохранить как шаблон</button>
+                            title="Сохранить это письмо как шаблон">☆ Сохранить как шаблон</button>
                     <div x-show="saving" x-cloak x-transition
                          @click.outside="saving = false"
                          style="position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 70;
@@ -317,6 +319,9 @@
                             <button type="button" class="btn btn-primary btn-sm"
                                     x-on:click="$wire.saveAsTemplate(tplName, tplParent === '' ? null : parseInt(tplParent)); saving = false; tplName = ''; tplParent = '';">Сохранить</button>
                             <button type="button" class="btn btn-sm" x-on:click="saving = false">Отмена</button>
+                            <a href="{{ route('letter-templates.index') }}" target="_blank" rel="noopener"
+                               class="ml-auto text-[12px] text-[var(--sky-700)] hover:underline"
+                               title="Открыть управление библиотекой шаблонов в новой вкладке">Управление шаблонами →</a>
                         </div>
                     </div>
                 </div>

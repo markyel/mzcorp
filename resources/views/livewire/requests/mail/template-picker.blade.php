@@ -25,6 +25,12 @@
                         @endforeach
                     </div>
                 @endif
+
+                <div class="flex items-center pt-3 mt-3 border-t border-border-subtle">
+                    <a href="{{ route('letter-templates.index') }}" target="_blank" rel="noopener"
+                       class="text-[12px] text-[var(--sky-700)] hover:underline"
+                       title="Открыть управление библиотекой шаблонов в новой вкладке">Управление шаблонами →</a>
+                </div>
             </div>
         </div>
     @endif
