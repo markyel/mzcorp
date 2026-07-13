@@ -15,9 +15,11 @@ use Throwable;
  *
  * Алгоритм:
  *  1. Кандидаты по грубой категории.
- *  2. 0 кандидатов → null. 1 кандидат → возвращаем без LLM.
- *  3. Детерминированный матчинг по синонимам.
- *  4. LLM-классификация с порогом confidence ≥ 0.6.
+ *  2. 0 кандидатов → fallback-синоним по всем активным (без LLM).
+ *  3. 1 кандидат → возвращаем без LLM (тривиально верно).
+ *  4. >1 кандидат → LLM-классификация — ОСНОВНОЙ путь (confidence ≥ 0.6).
+ *     Низкая уверенность → null (ручной разбор), синонимом НЕ угадываем.
+ *  5. Жёсткий сбой LLM (сеть/квота) → деградация на синоним-матч (CLAUDE.md).
  */
 class CategoryRefinementService
 {
@@ -77,18 +79,36 @@ class CategoryRefinementService
             ];
         }
 
-        // Детерминированный матчинг по синонимам в рамках кандидатов грубой
-        $matchedBySynonym = $this->matchBySynonym($item, $candidates);
-        if ($matchedBySynonym) {
-            return [
-                'category' => $matchedBySynonym,
-                'confidence' => 0.9,
-                'method' => 'matched_by_synonym',
-            ];
+        // >1 кандидат: детальную категорию определяет LLM — это основной и
+        // точный путь («на уровне специалиста»). Синоним-матч как ПЕРВИЧНОЕ
+        // решение ненадёжен: короткое общее слово из названия линейки продукта
+        // («Drive» в «Wittur ECO + Drive») ловится как синоним и даёт ложную
+        // категорию (M-2026-7676). Поэтому синоним оставлен ТОЛЬКО как резервная
+        // деградация на случай жёсткого сбоя LLM (сеть/квота/невалидный ответ) —
+        // CLAUDE.md: «AI-сбой — fallback на rule-based, не ронять pipeline».
+        try {
+            $llmResult = $this->refineWithLlm($item, $candidates, $brandId, $extractedParameters);
+        } catch (Throwable $e) {
+            Log::warning('CategoryRefinementService: LLM failed, degrading to synonym', [
+                'item_id' => $item->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            $matchedBySynonym = $this->matchBySynonym($item, $candidates);
+            if ($matchedBySynonym) {
+                return [
+                    'category' => $matchedBySynonym,
+                    'confidence' => 0.6,
+                    'method' => 'synonym_fallback_llm_failed',
+                ];
+            }
+            return null;
         }
 
-        // LLM-классификация
-        return $this->refineWithLlm($item, $candidates, $brandId, $extractedParameters);
+        // LLM ответил валидно (confidence ≥ порога) → берём его результат.
+        // Низкая уверенность / нет подходящей категории → null: отдаём на
+        // ручной разбор, синонимом НЕ угадываем.
+        return $llmResult;
     }
 
     private function matchBySynonym(RequestItem $item, $candidates): ?EquipmentCategory
@@ -151,51 +171,48 @@ class CategoryRefinementService
         return $bestCat;
     }
 
+    /**
+     * Вызов LLM. При жёстком сбое (сеть/квота/API) бросает исключение —
+     * ловится в refine() для деградации на синоним. Низкая уверенность или
+     * невалидный ответ → null (ручной разбор, без синоним-угадывания).
+     */
     private function refineWithLlm(
         RequestItem $item,
         $candidates,
         ?int $brandId,
         array $extractedParameters
     ): ?array {
-        try {
-            $brandName = $brandId ? ManufacturerBrand::find($brandId)?->name : null;
-            $messages = CategoryRefinementPrompt::build($item, $candidates, $brandName, $extractedParameters);
+        $brandName = $brandId ? ManufacturerBrand::find($brandId)?->name : null;
+        $messages = CategoryRefinementPrompt::build($item, $candidates, $brandName, $extractedParameters);
 
-            $response = $this->openai->chat($messages, self::LLM_MODEL, [
-                'response_format' => ['type' => 'json_object'],
-                'temperature' => self::LLM_TEMPERATURE,
-                'max_tokens' => self::LLM_MAX_TOKENS,
-            ]);
+        $response = $this->openai->chat($messages, self::LLM_MODEL, [
+            'response_format' => ['type' => 'json_object'],
+            'temperature' => self::LLM_TEMPERATURE,
+            'max_tokens' => self::LLM_MAX_TOKENS,
+        ]);
 
-            $content = (string) ($response['content'] ?? '');
-            $parsed = json_decode($content, true);
-            if (!is_array($parsed)) {
-                return null;
-            }
-
-            $slug = $parsed['category_slug'] ?? null;
-            $confidence = isset($parsed['confidence']) ? (float) $parsed['confidence'] : 0.0;
-
-            if (!is_string($slug) || $slug === '' || $confidence < self::CONFIDENCE_THRESHOLD) {
-                return null;
-            }
-
-            $matched = $candidates->firstWhere('slug', $slug);
-            if (!$matched) {
-                return null;
-            }
-
-            return [
-                'category' => $matched,
-                'confidence' => $confidence,
-                'method' => 'matched_by_llm',
-            ];
-        } catch (Throwable $e) {
-            Log::warning('CategoryRefinementService: LLM call failed', [
-                'item_id' => $item->id,
-                'error' => $e->getMessage(),
-            ]);
+        $content = (string) ($response['content'] ?? '');
+        $parsed = json_decode($content, true);
+        if (!is_array($parsed)) {
             return null;
         }
+
+        $slug = $parsed['category_slug'] ?? null;
+        $confidence = isset($parsed['confidence']) ? (float) $parsed['confidence'] : 0.0;
+
+        if (!is_string($slug) || $slug === '' || $confidence < self::CONFIDENCE_THRESHOLD) {
+            return null;
+        }
+
+        $matched = $candidates->firstWhere('slug', $slug);
+        if (!$matched) {
+            return null;
+        }
+
+        return [
+            'category' => $matched,
+            'confidence' => $confidence,
+            'method' => 'matched_by_llm',
+        ];
     }
 }
