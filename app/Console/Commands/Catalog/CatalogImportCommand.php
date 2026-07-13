@@ -63,8 +63,10 @@ class CatalogImportCommand extends Command
         'Вес' => 'weight',
         'Цена' => 'price',
         'ЦенаМин' => 'price_min',
+        'ЦенаЗакупки' => 'purchase_price',
         'Актуальность' => 'is_price_actual_raw',
         'СвободныйОстаток' => 'stock_available',
+        'СвободноВПути' => 'stock_in_transit_raw',
         'СрокПоставки' => 'lead_time_days',
         'Фото' => 'photo_url',
         'Комментарий' => 'comment',
@@ -73,7 +75,7 @@ class CatalogImportCommand extends Command
 
     /** @var array<string> Скалярные numeric поля: русская запятая (12,5) → точка, удаление NBSP/пробелов */
     private const NUMERIC_KEYS = [
-        'weight', 'price', 'price_min',
+        'weight', 'price', 'price_min', 'purchase_price',
     ];
 
     /** @var array<string> Целочисленные поля: только удаление пробелов/NBSP */

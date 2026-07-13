@@ -318,6 +318,13 @@
                                     {{ $cat->price_min !== null ? number_format((float) $cat->price_min, 2, ',', ' ') . ' ₽' : '—' }}
                                 </div>
                             </div>
+                            {{-- Себестоимость (закупочная цена) — ВНУТРЕННЕЕ поле, не для клиента. --}}
+                            <div class="flex justify-between items-baseline px-3.5 py-2 border-b border-border-subtle text-[12.5px]" title="Закупочная цена. Внутренняя информация — не для клиента.">
+                                <div class="text-fg-3 text-[12px] font-medium">Себестоимость</div>
+                                <div class="mono text-[13px] text-fg-1" style="font-feature-settings: 'tnum';">
+                                    {{ $cat->purchase_price !== null ? number_format((float) $cat->purchase_price, 2, ',', ' ') . ' ₽' : '—' }}
+                                </div>
+                            </div>
                             @if($cat->is_price_actual === false)
                                 <div class="flex justify-between items-baseline px-3.5 py-2 border-b border-border-subtle text-[12.5px]">
                                     <div class="text-fg-3 text-[12px] font-medium">Актуальность цены</div>
@@ -334,6 +341,20 @@
                                 <div class="text-fg-3 text-[12px] font-medium">Срок поставки</div>
                                 <div class="mono text-[13px] text-fg-1">{{ $cat->lead_time_days !== null ? $cat->lead_time_days . ' дн' : '—' }}</div>
                             </div>
+                            {{-- «Свободно в пути» — партии в пути с датами прихода. --}}
+                            @if(!empty($cat->stock_in_transit))
+                                <div class="flex justify-between items-start gap-3 px-3.5 py-2 border-b border-border-subtle text-[12.5px]" title="Свободный остаток в пути с датами прихода">
+                                    <div class="text-fg-3 text-[12px] font-medium shrink-0">В пути</div>
+                                    <div class="text-[12.5px] text-right space-y-0.5">
+                                        @foreach($cat->stock_in_transit as $lot)
+                                            <div class="whitespace-nowrap">
+                                                <span class="font-semibold text-sky-700">{{ $lot['qty'] }} шт</span>
+                                                <span class="text-fg-3">к {{ \Illuminate\Support\Carbon::parse($lot['date'])->format('d.m.Y') }}</span>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                </div>
+                            @endif
 
                             {{-- Динамика цены: подорожал / подешевел по последнему
                                  зафиксированному изменению (catalog_price_changes). --}}

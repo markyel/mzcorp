@@ -370,9 +370,14 @@ class CatalogImportService
             'weight' => $this->decimalOrNull($row['weight'] ?? null),
             'price' => $this->decimalOrNull($row['price'] ?? null),
             'price_min' => $this->decimalOrNull($row['price_min'] ?? null),
+            // «ЦенаЗакупки» — себестоимость (внутреннее поле, не для клиента).
+            'purchase_price' => $this->decimalOrNull($row['purchase_price'] ?? null),
             'is_price_actual' => $isPriceActual,
             'stock_available' => $this->intOrNull($row['stock_available'] ?? null),
             'lead_time_days' => $this->intOrNull($row['lead_time_days'] ?? null),
+            // «СвободноВПути» → jsonb [{qty, date}]. Принимает массив (JSON-клиент)
+            // или сырую строку «1:21.07.2026;8:28.07.2026» (CSV из MDB).
+            'stock_in_transit' => $this->parseInTransit($row['stock_in_transit'] ?? null, $row['stock_in_transit_raw'] ?? null),
             'photo_url' => $this->trimOrNull($row['photo_url'] ?? null, 500),
             'description' => $this->textOrNull($row['description'] ?? null),
             'comment' => $this->textOrNull($row['comment'] ?? null),
@@ -557,6 +562,95 @@ class CatalogImportService
     }
 
     /**
+     * «СвободноВПути» → jsonb-строка `[{"qty":int,"date":"Y-m-d"}]` (или null).
+     *
+     * Принимает:
+     *   - готовый массив (JSON-клиент): каждый элемент — [qty, date] или {qty,date};
+     *   - сырую строку из MDB-CSV: «1:21.07.2026;8:28.07.2026»
+     *     (пары `кол-во:дата`, дата DD.MM.YYYY, разделитель `;`).
+     *
+     * Пары с нулевым/невалидным qty или неразобранной датой отбрасываем.
+     * Результат сортируется по дате прихода (ближайшая — первой), чтобы UI
+     * мог просто взять head. Пустой результат → null (детерминизм для hash).
+     *
+     * @return string|null JSON или null
+     */
+    private function parseInTransit(mixed $array, mixed $raw): ?string
+    {
+        $pairs = [];
+
+        if (is_array($array)) {
+            foreach ($array as $entry) {
+                if (is_array($entry)) {
+                    $qty = $entry['qty'] ?? $entry[0] ?? null;
+                    $date = $entry['date'] ?? $entry[1] ?? null;
+                    $pairs[] = [$qty, $date];
+                }
+            }
+        } else {
+            $rawStr = $raw === null ? '' : trim((string) $raw);
+            if ($rawStr === '') {
+                return null;
+            }
+            foreach (explode(';', $rawStr) as $chunk) {
+                $chunk = trim($chunk);
+                if ($chunk === '') {
+                    continue;
+                }
+                // Ровно один `:` разделяет qty и дату; дата содержит точки, но не `:`.
+                $sep = strpos($chunk, ':');
+                if ($sep === false) {
+                    continue;
+                }
+                $pairs[] = [substr($chunk, 0, $sep), substr($chunk, $sep + 1)];
+            }
+        }
+
+        $out = [];
+        foreach ($pairs as [$rawQty, $rawDate]) {
+            $qty = $this->intOrNull(is_string($rawQty) ? trim($rawQty) : $rawQty);
+            $date = $this->normalizeTransitDate($rawDate);
+            if ($qty === null || $qty <= 0 || $date === null) {
+                continue;
+            }
+            $out[] = ['qty' => $qty, 'date' => $date];
+        }
+
+        if (empty($out)) {
+            return null;
+        }
+
+        usort($out, static fn (array $a, array $b): int => strcmp($a['date'], $b['date']));
+
+        return json_encode($out, JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * Нормализовать дату прихода к `Y-m-d`. Принимает DD.MM.YYYY (MDB),
+     * либо уже готовый Y-m-d (JSON-клиент). Иначе null.
+     */
+    private function normalizeTransitDate(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $s = trim((string) $value);
+        if ($s === '') {
+            return null;
+        }
+        if (preg_match('/^(\d{2})\.(\d{2})\.(\d{4})$/', $s, $m) === 1) {
+            $iso = "{$m[3]}-{$m[2]}-{$m[1]}";
+
+            return checkdate((int) $m[2], (int) $m[1], (int) $m[3]) ? $iso : null;
+        }
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $s, $m) === 1) {
+            return checkdate((int) $m[2], (int) $m[3], (int) $m[1]) ? $s : null;
+        }
+
+        return null;
+    }
+
+    /**
      * trim + null-empty, без обрезания длины (для TEXT-полей description/comment).
      */
     private function textOrNull(mixed $v): ?string
@@ -681,8 +775,8 @@ class CatalogImportService
             'part_type', 'brand', 'brand_article',
             'brands', 'articles', 'form_factor',
             'size_a', 'size_b', 'size_c', 'size_d', 'size_e', 'size_f',
-            'weight', 'price', 'price_min', 'is_price_actual',
-            'stock_available', 'lead_time_days',
+            'weight', 'price', 'price_min', 'purchase_price', 'is_price_actual',
+            'stock_available', 'lead_time_days', 'stock_in_transit',
             'photo_url', 'description', 'comment',
         ];
         $parts = [];

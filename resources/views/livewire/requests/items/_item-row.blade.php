@@ -326,6 +326,12 @@
                        title="срок поставки под заказ">{{ $ci->lead_time_days }} дн</small>
             @endif
         @endif
+        {{-- «Свободно в пути»: ближайшая партия с датой прихода. --}}
+        @if(!empty($ci?->stock_in_transit))
+            @php $lot = $ci->stock_in_transit[0]; @endphp
+            <small class="block text-sky-700 text-[10.5px] mt-0.5"
+                   title="свободный остаток в пути (ближайшая партия)">в пути {{ $lot['qty'] }} шт к {{ \Illuminate\Support\Carbon::parse($lot['date'])->format('d.m.Y') }}</small>
+        @endif
     </span>
 
     <span class="mono text-[12px] {{ $total !== null ? 'text-fg-1' : 'text-fg-3' }} text-right">

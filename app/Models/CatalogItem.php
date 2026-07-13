@@ -51,11 +51,16 @@ class CatalogItem extends Model
         'price',
         // «ЦенаМин» — минимальная отпускная (со скидкой).
         'price_min',
+        // «ЦенаЗакупки» — закупочная (себестоимость). ВНУТРЕННЕЕ поле,
+        // не транслируется клиенту (см. миграцию add_purchase_price...).
+        'purchase_price',
         // «Актуальность» из MDB: можно ли транслировать цену клиенту.
         'is_price_actual',
         'stock_available',
         // «СрокПоставки» в днях.
         'lead_time_days',
+        // «СвободноВПути» → [{qty:int, date:'Y-m-d'}] (кол-во + дата прихода).
+        'stock_in_transit',
         'photo_url',
         'description',
         'comment',
@@ -83,8 +88,10 @@ class CatalogItem extends Model
             'weight' => 'decimal:3',
             'price' => 'decimal:2',
             'price_min' => 'decimal:2',
+            'purchase_price' => 'decimal:2',
             'stock_available' => 'integer',
             'lead_time_days' => 'integer',
+            'stock_in_transit' => 'array',
         ];
     }
 
