@@ -101,6 +101,18 @@ class CategoryRefinementService
             return null;
         }
 
+        // Выбираем категорию по САМОМУ ДЛИННОМУ (специфичному) совпавшему
+        // синониму, а не по первому в порядке кандидатов из БД.
+        //
+        // MyLift fix (M-2026-7676): раньше метод возвращал первую категорию,
+        // у которой матчился ЛЮБОЙ синоним. Короткий общий синоним «drive»
+        // (Частотный преобразователь) перебивал специфичный «плата привода»
+        // (Плата управления) только потому, что frequency_converter шёл раньше
+        // по id. «Плата привода лифта Wittur ECO + Drive» уезжала в частотники.
+        // Теперь длина совпадения решает: «плата привода» (13) > «drive» (5).
+        $bestCat = null;
+        $bestLen = 0;
+
         foreach ($candidates as $cat) {
             $synonyms = $cat->synonyms ?? [];
             if (!is_array($synonyms)) {
@@ -112,10 +124,10 @@ class CategoryRefinementService
                 }
                 $synLower = mb_strtolower(trim($syn));
 
-                // MyLift fix (Phase 2.0): голый mb_strpos ловит ложные матчи
-                // на коротких аббревиатурах. Пример: synonym «ОС» (Ограничитель
-                // Скорости) → ос → substring найден в «п<ос>т» (слово «пост»),
-                // и «Пост вызывной LOP2 OTIS» уезжал в speed_governor.
+                // Голый mb_strpos ловит ложные матчи на коротких аббревиатурах.
+                // Пример: synonym «ОС» (Ограничитель Скорости) → ос → substring
+                // найден в «п<ос>т» (слово «пост»), и «Пост вызывной LOP2 OTIS»
+                // уезжал в speed_governor.
                 //
                 // PHP `\b` даже с /u флагом не всегда классифицирует кириллицу
                 // как word-character (зависит от PCRE/UCP режима — у нас в сборке
@@ -125,12 +137,18 @@ class CategoryRefinementService
                     . preg_quote($synLower, '/')
                     . '(?![\p{L}\p{N}_])/u';
                 if (preg_match($pattern, $itemText) === 1) {
-                    return $cat;
+                    $len = mb_strlen($synLower);
+                    // Строгое `>`: при равной длине выигрывает первый кандидат
+                    // (стабильность прежнего поведения).
+                    if ($len > $bestLen) {
+                        $bestLen = $len;
+                        $bestCat = $cat;
+                    }
                 }
             }
         }
 
-        return null;
+        return $bestCat;
     }
 
     private function refineWithLlm(

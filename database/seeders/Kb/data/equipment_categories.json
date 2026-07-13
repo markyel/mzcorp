@@ -20,7 +20,7 @@
     "name": "Частотный преобразователь",
     "compatible_equipment": ["lift", "escalator"],
     "is_industry_specific": false,
-    "synonyms": ["частотник", "частотный преобразователь", "ЧП", "ПЧ", "VFD", "frequency converter", "inverter", "drive"],
+    "synonyms": ["частотник", "частотный преобразователь", "ЧП", "ПЧ", "VFD", "frequency converter", "inverter"],
     "description": "Частотные преобразователи для управления приводом главным/дверным. Производители: Vacon, Fuji, Yaskawa, Schneider, Schindler (Variodyn), KEB."
   },
   {
