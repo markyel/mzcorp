@@ -561,6 +561,18 @@ return [
     ],
 
     /*
+    | Ценообразование. Спец-режим «Себестоимость + наценка» для отдельных
+    | покупателей (Organization::pricing_mode = cost_plus). Цена = закупочная
+    | (catalog purchase_price) × (1 + markup/100), БЕЗ пола price_min.
+    | См. QuotationService::recalcTotals и App\Enums\OrganizationPricingMode.
+    */
+    'pricing' => [
+        // Глобальная наценка (%) для режима cost_plus. Фиксированная, одна на всех
+        // cost_plus-покупателей. Меняем через env без правки кода.
+        'cost_plus_markup' => (float) env('PRICING_COST_PLUS_MARKUP', 15),
+    ],
+
+    /*
     | Распределение заявок. См. AssignmentService::pickWeightedLeastLoadedManager.
     | РОП может переопределить через UI «Настройки» — DB-override.
     */

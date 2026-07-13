@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\OrganizationPricingMode;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -16,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property ?string $address
  * @property ?string $requisites_text
  * @property float $discount_percent
+ * @property OrganizationPricingMode $pricing_mode
  */
 class Organization extends Model
 {
@@ -26,6 +28,8 @@ class Organization extends Model
         'address',
         'requisites_text',
         'discount_percent',
+        // Режим расчёта цены: standard | cost_plus (см. OrganizationPricingMode).
+        'pricing_mode',
         'notes',
     ];
 
@@ -33,7 +37,14 @@ class Organization extends Model
     {
         return [
             'discount_percent' => 'decimal:2',
+            'pricing_mode' => OrganizationPricingMode::class,
         ];
+    }
+
+    /** Спец-режим «Себестоимость + наценка»? */
+    public function isCostPlus(): bool
+    {
+        return $this->pricing_mode === OrganizationPricingMode::CostPlus;
     }
 
     public function contacts(): BelongsToMany

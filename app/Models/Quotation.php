@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\OrganizationPricingMode;
 use App\Enums\QuotationStatus;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -22,6 +23,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property ?int $responsible_user_id
  * @property int $valid_days
  * @property float $discount_percent
+ * @property OrganizationPricingMode $pricing_mode
+ * @property ?float $cost_markup_percent
  * @property float $subtotal
  * @property float $discount_amount
  * @property float $total
@@ -53,6 +56,10 @@ class Quotation extends Model
         'responsible_user_id',
         'valid_days',
         'discount_percent',
+        // Снапшот режима цены (standard | cost_plus) на момент формирования КП.
+        'pricing_mode',
+        // Наценка cost_plus (%), зафиксированная на момент расчёта. NULL для standard.
+        'cost_markup_percent',
         'subtotal',
         'discount_amount',
         'total',
@@ -77,6 +84,8 @@ class Quotation extends Model
             'version' => 'integer',
             'valid_days' => 'integer',
             'discount_percent' => 'decimal:2',
+            'pricing_mode' => OrganizationPricingMode::class,
+            'cost_markup_percent' => 'decimal:2',
             'subtotal' => 'decimal:2',
             'discount_amount' => 'decimal:2',
             'total' => 'decimal:2',
@@ -88,6 +97,12 @@ class Quotation extends Model
             'cancelled_at' => 'datetime',
             'snapshot_company' => 'array',
         ];
+    }
+
+    /** Спец-режим «Себестоимость + наценка»? */
+    public function isCostPlus(): bool
+    {
+        return $this->pricing_mode === OrganizationPricingMode::CostPlus;
     }
 
     public function request(): BelongsTo

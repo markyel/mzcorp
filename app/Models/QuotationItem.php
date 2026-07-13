@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property ?int $catalog_item_id
  * @property float $catalog_unit_price
  * @property ?float $catalog_price_min
+ * @property ?float $catalog_purchase_price
  * @property ?int $catalog_lead_time_days
  * @property bool $catalog_in_stock
  * @property ?int $catalog_stock_available
@@ -45,6 +46,8 @@ class QuotationItem extends Model
         'catalog_item_id',
         'catalog_unit_price',
         'catalog_price_min',
+        // Снапшот закупочной (себестоимости) — для режима cost_plus. Внутреннее.
+        'catalog_purchase_price',
         'catalog_lead_time_days',
         'catalog_in_stock',
         'catalog_stock_available',
@@ -72,6 +75,7 @@ class QuotationItem extends Model
             'position' => 'integer',
             'catalog_unit_price' => 'decimal:2',
             'catalog_price_min' => 'decimal:2',
+            'catalog_purchase_price' => 'decimal:2',
             'catalog_lead_time_days' => 'integer',
             'catalog_in_stock' => 'boolean',
             'catalog_stock_available' => 'integer',

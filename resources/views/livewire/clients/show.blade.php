@@ -5,7 +5,9 @@
     <div class="flex items-center gap-3 flex-wrap">
         <a href="{{ route('clients.index') }}" wire:navigate class="text-[12px] text-sky-700 hover:underline">← Клиенты</a>
         <h2 class="text-[16px] font-semibold text-fg-1">{{ $organization->name }}</h2>
-        @if($organization->discount_percent > 0)
+        @if($organization->isCostPlus())
+            <span class="chip chip-sky text-[11px]">спеццена: себестоимость + {{ $this->costPlusMarkup }}%</span>
+        @elseif($organization->discount_percent > 0)
             <span class="chip chip-neutral text-[11px]">скидка {{ rtrim(rtrim(number_format($organization->discount_percent, 2, '.', ''), '0'), '.') }}%</span>
         @endif
     </div>
@@ -38,6 +40,18 @@
                     <div>
                         <label class="block text-[11.5px] text-fg-3 mb-1">Адрес</label>
                         <input type="text" wire:model="address" class="{{ $inputCls }}">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-[11.5px] text-fg-3 mb-1">Режим цены</label>
+                        <select wire:model="pricing_mode" class="{{ $inputCls }}">
+                            @foreach($this->pricingModes as $mode)
+                                <option value="{{ $mode->value }}">{{ $mode->label() }}</option>
+                            @endforeach
+                        </select>
+                        @error('pricing_mode') <div class="text-[11px] text-red-600 mt-0.5">{{ $message }}</div> @enderror
+                        <div class="text-[11px] text-fg-4 mt-0.5">
+                            «Себестоимость + наценка»: цена = закупочная × (1 + {{ $this->costPlusMarkup }}%), без минималки и без скидки. Скидка выше игнорируется.
+                        </div>
                     </div>
                 </div>
                 <div>

@@ -4,6 +4,7 @@ namespace App\Livewire\Clients;
 
 use App\Enums\ClientNotificationType;
 use App\Enums\InvoiceStatus;
+use App\Enums\OrganizationPricingMode;
 use App\Enums\RequestStatus;
 use App\Models\ClientContact;
 use App\Models\Invoice;
@@ -32,6 +33,8 @@ class Show extends Component
     public string $address = '';
     public string $requisites_text = '';
     public string $discount_percent = '0';
+    // Режим цены: standard | cost_plus (см. OrganizationPricingMode).
+    public string $pricing_mode = 'standard';
     public string $notes = '';
 
     /* --- Добавление контакта --- */
@@ -65,6 +68,7 @@ class Show extends Component
         $this->address = (string) ($o->address ?? '');
         $this->requisites_text = (string) ($o->requisites_text ?? '');
         $this->discount_percent = rtrim(rtrim((string) ($o->discount_percent ?? '0'), '0'), '.') ?: '0';
+        $this->pricing_mode = ($o->pricing_mode ?? OrganizationPricingMode::Standard)->value;
         $this->notes = (string) ($o->notes ?? '');
     }
 
@@ -77,12 +81,14 @@ class Show extends Component
             'address' => 'nullable|string|max:1000',
             'requisites_text' => 'nullable|string|max:5000',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
+            'pricing_mode' => 'required|in:' . implode(',', OrganizationPricingMode::values()),
             'notes' => 'nullable|string|max:5000',
         ], [], [
             'name' => 'название',
             'inn' => 'ИНН',
             'kpp' => 'КПП',
             'discount_percent' => 'скидка',
+            'pricing_mode' => 'режим цены',
         ]);
 
         $this->organization->update([
@@ -92,6 +98,7 @@ class Show extends Component
             'address' => trim($this->address) !== '' ? trim($this->address) : null,
             'requisites_text' => trim($this->requisites_text) !== '' ? trim($this->requisites_text) : null,
             'discount_percent' => (float) ($this->discount_percent !== '' ? $this->discount_percent : 0),
+            'pricing_mode' => $this->pricing_mode,
             'notes' => trim($this->notes) !== '' ? trim($this->notes) : null,
         ]);
 
@@ -201,6 +208,22 @@ class Show extends Component
     public function contacts()
     {
         return $this->organization->contacts()->get();
+    }
+
+    /** Режимы цены для селектора. @return array<int, OrganizationPricingMode> */
+    #[Computed]
+    public function pricingModes(): array
+    {
+        return OrganizationPricingMode::cases();
+    }
+
+    /** Глобальная наценка cost_plus (%) — для подписи в UI. */
+    #[Computed]
+    public function costPlusMarkup(): string
+    {
+        $markup = (float) config('services.pricing.cost_plus_markup', 15);
+
+        return rtrim(rtrim(number_format($markup, 2, '.', ''), '0'), '.');
     }
 
     /* ------------- Персональные настройки автоуведомлений (по e-mail) -------- */

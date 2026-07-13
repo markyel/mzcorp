@@ -85,7 +85,7 @@
                                     @php $sel = ($o->inn && $q->recipient_inn === $o->inn) || (trim((string)$q->recipient_name) !== '' && $q->recipient_name === $o->name); @endphp
                                     <button type="button" wire:click="applyOrganization({{ $o->id }})" wire:key="qorg-{{ $o->id }}"
                                             class="px-2 py-0.5 rounded border text-[11.5px] {{ $sel ? 'border-sky-500 bg-sky-50 text-sky-800 font-medium' : 'border-border bg-surface text-fg-2 hover:bg-surface-2' }}">
-                                        {{ \Illuminate\Support\Str::limit($o->name, 30) }}@if($o->discount_percent > 0) <span class="text-emerald-700">·{{ rtrim(rtrim(number_format($o->discount_percent,2,'.',''),'0'),'.') }}%</span>@endif
+                                        {{ \Illuminate\Support\Str::limit($o->name, 30) }}@if($o->isCostPlus()) <span class="text-sky-700">·спеццена</span>@elseif($o->discount_percent > 0) <span class="text-emerald-700">·{{ rtrim(rtrim(number_format($o->discount_percent,2,'.',''),'0'),'.') }}%</span>@endif
                                     </button>
                                 @endforeach
                             </div>
@@ -98,7 +98,7 @@
                                 @foreach($this->searchedOrganizations as $o)
                                     <button type="button" wire:click="applyOrganization({{ $o->id }})" wire:key="qorgs-{{ $o->id }}"
                                             class="w-full text-left px-2 py-1 hover:bg-hover text-[12px]">
-                                        {{ $o->name }}@if($o->inn) <span class="mono text-fg-4">· {{ $o->inn }}</span>@endif@if($o->discount_percent > 0) <span class="text-emerald-700">· {{ rtrim(rtrim(number_format($o->discount_percent,2,'.',''),'0'),'.') }}%</span>@endif
+                                        {{ $o->name }}@if($o->inn) <span class="mono text-fg-4">· {{ $o->inn }}</span>@endif@if($o->isCostPlus()) <span class="text-sky-700">· спеццена</span>@elseif($o->discount_percent > 0) <span class="text-emerald-700">· {{ rtrim(rtrim(number_format($o->discount_percent,2,'.',''),'0'),'.') }}%</span>@endif
                                     </button>
                                 @endforeach
                             </div>
@@ -152,6 +152,15 @@
                 </div>
             </div>
 
+            @if($q->isCostPlus())
+                {{-- ───────── Спец-режим цены (себестоимость + наценка) ─────────
+                     Скидка не применяется — цена фиксированная. --}}
+                @php $markup = rtrim(rtrim(number_format((float)($q->cost_markup_percent ?? config('services.pricing.cost_plus_markup', 15)), 2, '.', ''), '0'), '.'); @endphp
+                <div class="mb-3 flex items-center gap-2 text-[12px] flex-wrap rounded border border-sky-200 bg-sky-50 px-3 py-2">
+                    <span class="chip chip-sky text-[11px]">спеццена</span>
+                    <span class="text-sky-900">Себестоимость + {{ $markup }}% · без минималки, скидки не применяются.</span>
+                </div>
+            @else
             {{-- ───────── Бар «общая скидка» с пресетами ─────────
                  Доступные варианты по требованию заказчика:
                    — (без скидки) / 5 / 10 / 15 / 17 / 20 %.
@@ -175,6 +184,7 @@
                 <span class="flex-1"></span>
                 <span class="text-[11.5px] text-fg-3">defence: цена ≥ price_min из каталога</span>
             </div>
+            @endif
 
             {{-- ───────── Таблица позиций ───────── --}}
             <div class="overflow-x-auto border border-border rounded">

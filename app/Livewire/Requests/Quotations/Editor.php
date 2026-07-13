@@ -431,8 +431,10 @@ class Editor extends Component
 
     /**
      * Подставить получателя КП из организации: реквизиты (наименование/ИНН/
-     * адрес/банк) + НАЗНАЧЕННАЯ скидка организации (учитывается в ценах через
-     * recalcTotals; реальную скидку показывает realDiscountPercent).
+     * адрес/банк) + режим цены. Для standard-организации применяется НАЗНАЧЕННАЯ
+     * скидка (через recalcTotals; реальную скидку показывает realDiscountPercent).
+     * Для cost_plus-организации скидка обнуляется, а цена = себестоимость +
+     * наценка (наценку фиксируем на КП). См. QuotationService::recalcTotals.
      */
     public function applyOrganization(int $orgId, QuotationService $svc): void
     {
@@ -446,21 +448,34 @@ class Editor extends Component
             return;
         }
 
-        $discount = max(0.0, min(100.0, (float) ($org->discount_percent ?? 0)));
+        $isCostPlus = $org->isCostPlus();
+        // cost_plus: скидка не применяется (цена фиксированная = себест. + наценка).
+        $discount = $isCostPlus ? 0.0 : max(0.0, min(100.0, (float) ($org->discount_percent ?? 0)));
         $q->forceFill([
             'recipient_name' => $org->name,
             'recipient_inn' => $org->inn,
             'recipient_address' => $org->address,
             'recipient_card_text' => $org->requisites_text,
             'discount_percent' => $discount,
+            'pricing_mode' => $org->pricing_mode->value,
+            'cost_markup_percent' => $isCostPlus
+                ? (float) config('services.pricing.cost_plus_markup', 15)
+                : null,
         ])->save();
         $svc->recalcTotals($q->fresh('items'));
 
         $this->organizationSearch = '';
         unset($this->versions, $this->activeQuotation);
-        $this->dispatch('toast', message: 'Получатель: ' . $org->name
-            . ($discount > 0 ? ', скидка ' . rtrim(rtrim(number_format($discount, 2, '.', ''), '0'), '.') . '% применена' : ''),
-            type: 'success');
+
+        if ($isCostPlus) {
+            $markup = rtrim(rtrim(number_format((float) config('services.pricing.cost_plus_markup', 15), 2, '.', ''), '0'), '.');
+            $note = ', спеццена (себестоимость + ' . $markup . '%)';
+        } else {
+            $note = $discount > 0
+                ? ', скидка ' . rtrim(rtrim(number_format($discount, 2, '.', ''), '0'), '.') . '% применена'
+                : '';
+        }
+        $this->dispatch('toast', message: 'Получатель: ' . $org->name . $note, type: 'success');
     }
 
     /**

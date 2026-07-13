@@ -2,6 +2,7 @@
 
 namespace App\Services\Quotations;
 
+use App\Enums\OrganizationPricingMode;
 use App\Enums\QuotationStatus;
 use App\Models\CatalogItem;
 use App\Models\Quotation;
@@ -40,6 +41,13 @@ class QuotationService
     public function createDraft(Request $request, User $byUser): Quotation
     {
         return DB::transaction(function () use ($request, $byUser) {
+            // Режим цены наследуется от организации-заказчика (если привязана).
+            // cost_plus → цена = себестоимость + наценка, скидка обнуляется
+            // (см. recalcTotals). Наценку фиксируем на КП для immutability.
+            $org = $request->organization;
+            $pricingMode = $org?->pricing_mode ?? OrganizationPricingMode::Standard;
+            $isCostPlus = $pricingMode === OrganizationPricingMode::CostPlus;
+
             $quotation = new Quotation([
                 'request_id' => $request->id,
                 'internal_code' => $this->generateInternalCode(),
@@ -49,6 +57,10 @@ class QuotationService
                 'responsible_user_id' => $request->assigned_user_id ?: $byUser->id,
                 'valid_days' => 5,
                 'discount_percent' => 0,
+                'pricing_mode' => $pricingMode->value,
+                'cost_markup_percent' => $isCostPlus
+                    ? (float) config('services.pricing.cost_plus_markup', 15)
+                    : null,
                 'vat_rate' => (float) app_setting('tax.vat_percent', config('services.tax.vat_percent', 22)),
                 'created_by_user_id' => $byUser->id,
             ]);
@@ -151,20 +163,38 @@ class QuotationService
         $vatRate = (float) $quotation->vat_rate;
         $generalDiscount = (float) $quotation->discount_percent;
 
+        // Спец-режим «Себестоимость + наценка» (Organization::pricing_mode).
+        // Цена = закупочная × (1 + наценка), БЕЗ пола price_min и БЕЗ скидок.
+        // Наценка зафиксирована на КП (cost_markup_percent) для immutability.
+        $isCostPlus = $quotation->isCostPlus();
+        $markup = (float) ($quotation->cost_markup_percent
+            ?? config('services.pricing.cost_plus_markup', 15));
+
         $subtotal = 0.0;
         $total = 0.0;
         $vatTotal = 0.0;
 
         foreach ($quotation->items as $item) {
-            $effectiveDiscount = $item->discount_percent !== null
-                ? (float) $item->discount_percent
-                : $generalDiscount;
+            if ($isCostPlus) {
+                $purchase = $item->catalog_purchase_price !== null
+                    ? (float) $item->catalog_purchase_price
+                    : null;
+                // Нет себестоимости в снапшоте — fallback на каталожную цену
+                // (не даём уронить позицию в 0). Такие позиции печатаются без скидки.
+                $finalUnitPrice = $purchase !== null && $purchase > 0
+                    ? round($purchase * (1 + $markup / 100), 2)
+                    : (float) $item->catalog_unit_price;
+            } else {
+                $effectiveDiscount = $item->discount_percent !== null
+                    ? (float) $item->discount_percent
+                    : $generalDiscount;
 
-            $finalUnitPrice = $this->computeFinalUnitPrice(
-                (float) $item->catalog_unit_price,
-                $item->catalog_price_min !== null ? (float) $item->catalog_price_min : null,
-                $effectiveDiscount,
-            );
+                $finalUnitPrice = $this->computeFinalUnitPrice(
+                    (float) $item->catalog_unit_price,
+                    $item->catalog_price_min !== null ? (float) $item->catalog_price_min : null,
+                    $effectiveDiscount,
+                );
+            }
             // billableQty учитывает метраж мерных позиций: цена за метр →
             // qty × piece_length; цена за штуку → qty. final_unit_price — цена за
             // единицу (за метр или за штуку), поэтому line_total = цена × billableQty.
@@ -181,7 +211,14 @@ class QuotationService
                 'vat_amount' => $itemVat,
             ])->save();
 
-            $subtotal += (float) $item->catalog_unit_price * $billableQty;
+            // База «до скидки» для subtotal: обычно каталожная цена. В cost_plus,
+            // если наценённая себестоимость ВЫШЕ каталожной, берём её же (max),
+            // чтобы discount_amount не ушёл в минус (в PDF это «чистая цена без скидки»).
+            $wasBase = $isCostPlus
+                ? max((float) $item->catalog_unit_price, $finalUnitPrice)
+                : (float) $item->catalog_unit_price;
+
+            $subtotal += $wasBase * $billableQty;
             $total += $lineTotal;
             $vatTotal += $itemVat;
         }
@@ -242,12 +279,12 @@ class QuotationService
                 continue;
             }
             $before = [
-                $item->catalog_unit_price, $item->catalog_price_min,
+                $item->catalog_unit_price, $item->catalog_price_min, $item->catalog_purchase_price,
                 $item->catalog_lead_time_days, $item->catalog_in_stock,
             ];
             $this->fillSnapshotFromCatalog($item, $cat);
             $after = [
-                $item->catalog_unit_price, $item->catalog_price_min,
+                $item->catalog_unit_price, $item->catalog_price_min, $item->catalog_purchase_price,
                 $item->catalog_lead_time_days, $item->catalog_in_stock,
             ];
             if ($before !== $after) {
@@ -363,6 +400,8 @@ class QuotationService
     {
         $item->catalog_unit_price = (float) ($cat->price ?: 0);
         $item->catalog_price_min = $cat->price_min !== null ? (float) $cat->price_min : null;
+        // Себестоимость (внутренняя) — база для режима cost_plus. Снапшотим всегда.
+        $item->catalog_purchase_price = $cat->purchase_price !== null ? (float) $cat->purchase_price : null;
         $item->catalog_lead_time_days = $cat->lead_time_days;
         $item->catalog_in_stock = ((int) ($cat->stock_available ?? 0)) > 0;
         $item->catalog_stock_available = $cat->stock_available;
