@@ -561,6 +561,36 @@ Supervisor (все 4 воркера): `--queue=mail-sync,default,catalog-resolve
 
 ## Журнал сессий
 
+### Сессия 2026-07-13 — Ценовой режим «Себестоимость + наценка» (cost_plus) + разбивка срока поставки с остатками в пути
+
+**Контекст:** две независимые фичи для КП. (1) Для конкретной организации-байера (Liftway) цена в КП должна считаться от закупочной себестоимости × наценка, БЕЗ пола `price_min`. (2) При формировании КП количество позиции распределяется по источникам поставки (наличие / приходы в пути по датам / под заказ). Обе задеплоены на прод.
+
+#### Что задеплоено
+
+| Модуль | Что | Коммит |
+|---|---|---|
+| **cost_plus ценообразование** | Режим цены у организации: `standard` (каталог − скидка) \| `cost_plus` (себестоимость × (1+наценка), без `price_min`). Enum `OrganizationPricingMode`. Наценка — глобальная в конфиге `services.pricing.cost_plus_markup` (env `PRICING_COST_PLUS_MARKUP`, дефолт 15), НЕ per-org. Снапшотится в `quotations.pricing_mode` + `cost_markup_percent` на момент формирования. `quotation_items.catalog_purchase_price` — снапшот себестоимости. В КП/PDF cost_plus показывается «как скидка от каталожной» (зачёркнутая каталожная + «Скидка N%» через существующий `realDiscountPercent()`). Доп.скидка менеджера/орг в cost_plus режиме = 0. | `db66292` |
+| **Разбивка срока поставки (остатки в пути)** | `quotation_items.catalog_stock_in_transit` (jsonb, снапшот приходов). `QuotationItem::deliveryRows()` распределяет qty: наличие «Со склада» (`catalog_stock_available`) → приходы «Поставка к DD.MM.YYYY» (`catalog_stock_in_transit`, по датам) → остаток «Под заказ ≈ N нед» (lead_time). Суммы делятся пропорционально штукам, последняя строка добирает остаток (итог = line_total). PDF-шаблон уже рендерил N под-строк через rowspan — правок не потребовалось. | `e2e1477` |
+
+#### Заметки
+
+- **`OrganizationPricingMode`** (`app/Enums/`) — enum `standard`/`cost_plus`, методы `label()`/`isCostPlus()`/`values()`. Каст на `Organization.pricing_mode` и `Quotation.pricing_mode`. Хелпер `isCostPlus()` на обеих моделях.
+- **Наценка cost_plus — только в конфиге** (`config('services.pricing.cost_plus_markup', 15)`), НЕ хардкод, НЕ per-org поле. При добавлении нового конфиг-ключа на проде ОБЯЗАТЕЛЕН `php artisan config:cache` (иначе ключ = null/0, конфиг закеширован) + повторный `queue:restart`. На этой сессии первый verify показал markup=0 именно из-за stale config cache.
+- **Вся ценовая логика — в `QuotationService`**: `fillSnapshotFromCatalog` (снапшот `catalog_purchase_price`, `catalog_stock_available`, `catalog_stock_in_transit`), `recalcTotals` (ветка cost_plus: final = purchase×(1+markup/100), fallback на `catalog_unit_price` если purchase null; `$wasBase = max(catalog_unit_price, final)` для subtotal, чтобы discount_amount ≥ 0), `createDraft` резолвит режим из `request->organization`, `refreshPrices` before/after-tuple включает новые снапшот-поля.
+- **`delivery_text` авто-префилл УБРАН** из `fillSnapshotFromCatalog`. Раньше он ставил «Под заказ N нед» для не-складских позиций, а ручной `delivery_text` — абсолютный override в `deliveryRows()` (схлопывает разбивку в одну строку). Теперь срок целиком считает `deliveryRows()`; `delivery_text` = только явный ручной override менеджера.
+- **`deliveryRows()` быстрые пути:** ручной `delivery_text` → одна строка как есть; `catalog_stock_available === null` (legacy КП без снапшота) → одна строка по флагу `catalog_in_stock`; один источник → одна строка (деньги целиком). Термин прихода: «Поставка к DD.MM.YYYY» (нормализация даты через `strtotime`→`date('d.m.Y')`, сортировка по возрастанию). Термин под-заказа: «Под заказ ≈ N нед» если есть lead_time, иначе «Под заказ (срок уточняется)».
+- **Верификация на проде (M03163, qty=2):** наличие 1 + в пути `[20.08.2026:1, 19.09.2026:1]` → `1 Со склада` + `1 Поставка к 20.08.2026` ✓. Без транзита (stock=1) → `1 Со склада` + `1 Под заказ ≈ N нед` ✓. Пусто (stock=0) → `2 Под заказ` одной строкой ✓. cost_plus: rolled-back транзакция подтвердила final=purchase×1.15, discount_amount≥0.
+
+#### Открытый хвост (для следующей сессии)
+
+- **Переключить `pricing_mode = cost_plus`** на нужной организации Liftway через карточку клиента (UI: `/dashboard/clients/{org}` → селектор «Режим цены»). Кандидаты — org #464 «Liftway.ru — Запросы поставщикам» или #469 «Liftway.ru — [ЗАКУПКИ]»; какую именно — НЕ угадывал, подтвердить с пользователем/по факту.
+- **Термин «Поставка к DD.MM.YYYY»** — пользователь наблюдает, при необходимости смены формулировки напишет (менять в `QuotationItem::deliveryRows()`).
+- Постов в «Обновлениях» по этим фичам НЕ публиковали.
+
+#### Файлы
+
+Создано: `app/Enums/OrganizationPricingMode.php`; миграции `2026_07_13_130000_add_pricing_mode_to_organizations_table`, `_130100_add_pricing_mode_to_quotations_table` (pricing_mode + cost_markup_percent), `_130200_add_catalog_purchase_price_to_quotation_items_table`, `2026_07_13_140000_add_catalog_stock_in_transit_to_quotation_items_table`. Правлено: `config/services.php` (блок `pricing`), `Organization.php`, `Quotation.php`, `QuotationItem.php` (fillable/casts + переписан `deliveryRows()` + новый `transitLots()`), `QuotationService.php`, `App\Livewire\Requests\Quotations\Editor.php` (`applyOrganization`), `App\Livewire\Clients\Show.php`, views `clients/show.blade.php`, `requests/quotations/editor.blade.php`.
+
 ### Сессия 2026-07-10 — Шаблоны писем «Переписки» (Gmail-меню + персонализация) + персональный текст письма поставщику
 
 **Контекст:** доводка фичи «шаблоны писем» в табе «Переписка» до Gmail-подобного UX и перевод библиотеки в ЛИЧНУЮ; отдельная мелкая фича — персональный дефолт intro/closing письма поставщику в табе «Поставщики». Всё задеплоено на прод, опубликованы 2 поста в «Обновлениях».
