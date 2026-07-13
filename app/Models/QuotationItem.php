@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property ?int $catalog_lead_time_days
  * @property bool $catalog_in_stock
  * @property ?int $catalog_stock_available
+ * @property ?array $catalog_stock_in_transit
  * @property string $snapshot_name
  * @property ?string $snapshot_sku
  * @property ?string $snapshot_brand
@@ -51,6 +52,8 @@ class QuotationItem extends Model
         'catalog_lead_time_days',
         'catalog_in_stock',
         'catalog_stock_available',
+        // Снапшот свободных остатков в пути: [{qty:int, date:'Y-m-d'}].
+        'catalog_stock_in_transit',
         'snapshot_name',
         'snapshot_sku',
         'snapshot_brand',
@@ -79,6 +82,7 @@ class QuotationItem extends Model
             'catalog_lead_time_days' => 'integer',
             'catalog_in_stock' => 'boolean',
             'catalog_stock_available' => 'integer',
+            'catalog_stock_in_transit' => 'array',
             'qty' => 'decimal:3',
             'piece_length' => 'decimal:3',
             'bill_by_length' => 'boolean',
@@ -150,13 +154,16 @@ class QuotationItem extends Model
     }
 
     /**
-     * Строки срока поставки для КП. Обычно одна; при ЧАСТИЧНОМ наличии
-     * (0 < свободный остаток < кол-во) — ДВЕ строки: «Со склада» (из наличия)
-     * + «Под заказ ≈ N нед» (остаток). Номер позиции при этом ОДИН (название и
-     * цена общие через rowspan в шаблоне), дробится только кол-во/срок/сумма.
-     * Суммы делятся пропорционально (вторая строка добирает остаток после
-     * округления), так что итог по позиции = сумма строк. Ручной delivery_text
-     * — абсолютный override (одна строка как есть, без разбивки).
+     * Строки срока поставки для КП. Обычно одна; при нехватке наличия объём
+     * дробится по источникам (под одним номером позиции, rowspan в шаблоне):
+     *   1) «Со склада»              — из свободного остатка (catalog_stock_available);
+     *   2) «Поставка к DD.MM.YYYY»  — из свободных остатков в пути по датам прихода
+     *                                 (раньше — выше), каждый приход = своя строка;
+     *   3) «Под заказ ≈ N нед»      — остаток, которого нет ни в наличии, ни в пути.
+     * Дробятся только кол-во/срок/сумма; название и цена общие. Суммы делятся
+     * пропорционально ШТУКАМ, последняя строка добирает остаток после округления
+     * (итог по позиции = сумма строк). Ручной delivery_text — абсолютный override
+     * (одна строка как есть, без разбивки).
      *
      * @return array<int, array{qty: float, term: string, line_total: float, vat_amount: float}>
      */
@@ -192,33 +199,97 @@ class QuotationItem extends Model
         }
         $stock = max(0, (int) $stock);
 
-        if ($stock <= 0) {
-            return $single($orderTerm); // на складе нет — весь объём под заказ
-        }
-        if ($stock >= $qty) {
-            return $single('Со склада'); // наличия хватает на всё кол-во
+        // Аллокация кол-ва по источникам: наличие → приходы в пути (по датам) →
+        // остаток под заказ. Каждый источник даёт под-строку (qty + term).
+        $alloc = []; // array<int, array{qty: float, term: string}>
+        $remaining = $qty;
+
+        if ($stock > 0 && $remaining > 0) {
+            $take = min((float) $stock, $remaining);
+            $alloc[] = ['qty' => $take, 'term' => 'Со склада'];
+            $remaining -= $take;
         }
 
-        // Частично: наличие + остаток под заказ (две строки под одним номером).
-        // Долю суммы делим пропорционально ШТУКАМ (stock / qty) — корректно и для
-        // мерных позиций, где line_total = цена × qty × piece_length (метраж уже
-        // зашит в line_total, поэтому per-piece доля = line_total × stock/qty).
-        $sub1Total = $qty > 0.0 ? round($lineTotal * ($stock / $qty), 2) : 0.0;
-        $sub1Vat = $lineTotal > 0.0 ? round($vat * ($sub1Total / $lineTotal), 2) : 0.0;
+        foreach ($this->transitLots() as $lot) {
+            if ($remaining <= 0) {
+                break;
+            }
+            $take = min((float) $lot['qty'], $remaining);
+            $alloc[] = ['qty' => $take, 'term' => 'Поставка к ' . $lot['date']];
+            $remaining -= $take;
+        }
 
-        return [
-            [
-                'qty' => (float) $stock,
-                'term' => 'Со склада',
-                'line_total' => $sub1Total,
-                'vat_amount' => $sub1Vat,
-            ],
-            [
-                'qty' => $qty - $stock,
-                'term' => $orderTerm,
-                'line_total' => round($lineTotal - $sub1Total, 2),
-                'vat_amount' => round($vat - $sub1Vat, 2),
-            ],
-        ];
+        // Остаток (или вся позиция, если нет ни наличия, ни прихода) — под заказ.
+        if ($remaining > 0 || $alloc === []) {
+            $alloc[] = ['qty' => $remaining > 0 ? $remaining : $qty, 'term' => $orderTerm];
+        }
+
+        // Одна строка — деньги целиком (быстрый путь, без округлений).
+        if (count($alloc) === 1) {
+            return $single($alloc[0]['term']);
+        }
+
+        // Пропорциональное деление денег по ШТУКАМ (корректно и для мерных
+        // позиций: метраж уже зашит в line_total, per-piece доля = line_total × qty_i/qty).
+        // Последняя строка добирает остаток, чтобы сумма совпала с line_total.
+        $rows = [];
+        $accTotal = 0.0;
+        $accVat = 0.0;
+        $last = count($alloc) - 1;
+        foreach ($alloc as $i => $a) {
+            if ($i === $last) {
+                $rowTotal = round($lineTotal - $accTotal, 2);
+                $rowVat = round($vat - $accVat, 2);
+            } else {
+                $rowTotal = $qty > 0.0 ? round($lineTotal * ($a['qty'] / $qty), 2) : 0.0;
+                $rowVat = $lineTotal > 0.0 ? round($vat * ($rowTotal / $lineTotal), 2) : 0.0;
+                $accTotal += $rowTotal;
+                $accVat += $rowVat;
+            }
+            $rows[] = [
+                'qty' => $a['qty'],
+                'term' => $a['term'],
+                'line_total' => $rowTotal,
+                'vat_amount' => $rowVat,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Свободные остатки в пути (снапшот catalog_stock_in_transit) — нормализованный
+     * список приходов, отсортированный по дате (раньше — выше). Пустой массив,
+     * если снапшота нет (legacy КП) или он пуст.
+     *
+     * @return array<int, array{qty: int, date: string}>  date в формате DD.MM.YYYY
+     */
+    private function transitLots(): array
+    {
+        $raw = $this->catalog_stock_in_transit;
+        if (! is_array($raw) || $raw === []) {
+            return [];
+        }
+
+        $lots = [];
+        foreach ($raw as $lot) {
+            if (! is_array($lot)) {
+                continue;
+            }
+            $qty = (int) ($lot['qty'] ?? 0);
+            $date = trim((string) ($lot['date'] ?? ''));
+            if ($qty <= 0 || $date === '') {
+                continue;
+            }
+            $ts = strtotime($date);
+            $lots[] = [
+                'qty' => $qty,
+                'date' => $ts ? date('d.m.Y', $ts) : $date,
+                '_sort' => $ts ?: PHP_INT_MAX,
+            ];
+        }
+        usort($lots, fn ($a, $b) => $a['_sort'] <=> $b['_sort']);
+
+        return array_map(fn ($l) => ['qty' => $l['qty'], 'date' => $l['date']], $lots);
     }
 }

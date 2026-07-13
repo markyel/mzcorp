@@ -281,11 +281,13 @@ class QuotationService
             $before = [
                 $item->catalog_unit_price, $item->catalog_price_min, $item->catalog_purchase_price,
                 $item->catalog_lead_time_days, $item->catalog_in_stock,
+                $item->catalog_stock_available, $item->catalog_stock_in_transit,
             ];
             $this->fillSnapshotFromCatalog($item, $cat);
             $after = [
                 $item->catalog_unit_price, $item->catalog_price_min, $item->catalog_purchase_price,
                 $item->catalog_lead_time_days, $item->catalog_in_stock,
+                $item->catalog_stock_available, $item->catalog_stock_in_transit,
             ];
             if ($before !== $after) {
                 $item->save();
@@ -405,16 +407,17 @@ class QuotationService
         $item->catalog_lead_time_days = $cat->lead_time_days;
         $item->catalog_in_stock = ((int) ($cat->stock_available ?? 0)) > 0;
         $item->catalog_stock_available = $cat->stock_available;
+        // Снапшот свободных остатков в пути — для разбивки срока поставки в КП
+        // (наличие → приходы по датам → под заказ). См. QuotationItem::deliveryRows().
+        $item->catalog_stock_in_transit = $cat->stock_in_transit;
         $item->snapshot_name = (string) $cat->name;
         $item->snapshot_sku = $cat->sku;
         $item->snapshot_brand = $cat->brand;
         $item->snapshot_brand_article = $cat->brand_article;
         $item->snapshot_photo_url = $cat->photo_url;
-        // Default delivery_text если позиция не на складе.
-        if (! $item->delivery_text && ! $item->catalog_in_stock && $cat->lead_time_days) {
-            $weeks = (int) ceil($cat->lead_time_days / 7);
-            $item->delivery_text = "Под заказ {$weeks} нед";
-        }
+        // Срок поставки НЕ префиллим в delivery_text: deliveryRows() сам считает
+        // разбивку (наличие/приходы/под-заказ) из снапшотов. Ручной delivery_text —
+        // только явный override менеджера (иначе он схлопнул бы разбивку в одну строку).
     }
 
     /**
