@@ -462,7 +462,15 @@ class ComposeForm extends Component
         // Если в draft.detected_artifacts есть marker `clarification_batch`,
         // помечаем batch как sent + переводим Request в
         // awaiting_client_clarification.
-        $this->applyPostSendHooks($result['draft'] ?? $draft);
+        $sent = $result['draft'] ?? $draft;
+        $handledByHooks = $this->applyPostSendHooks($sent);
+
+        // Send-time детект приложенных документов (счёт/КП файлом). Запускаем
+        // только если письмо НЕ прошло через внутренний builder (КП/уточнения
+        // уже self-transition'ят хуками выше) — иначе не дублируем.
+        if (! $handledByHooks) {
+            $this->detectOutboundDocuments($sent);
+        }
 
         session()->flash('status', 'Письмо отправлено.');
         $this->open = false;
@@ -653,21 +661,74 @@ class ComposeForm extends Component
      *   - помечаем ClarificationBatch::sent
      *   - переводим Request в awaiting_client_clarification
      *   - audit в request_state_changes (event=clarification_sent)
+     *
+     * @return bool  true, если хотя бы один known-marker обработан (КП/уточнение
+     *               уже сами сменили статус — send-time детект не нужен).
      */
-    private function applyPostSendHooks(\App\Models\EmailMessage $sent): void
+    private function applyPostSendHooks(\App\Models\EmailMessage $sent): bool
     {
         $artifacts = is_array($sent->detected_artifacts ?? null) ? $sent->detected_artifacts : [];
 
+        $handledAny = false;
         // Обрабатываем все markers (порядок: clarification → quotation).
         foreach ($artifacts as $marker) {
             if (! is_array($marker)) {
                 continue;
             }
-            match ($marker['type'] ?? null) {
-                'clarification_batch' => $this->handleClarificationBatchHook($sent, $marker),
-                'quotation_sent'      => $this->handleQuotationSentHook($sent, $marker),
-                default               => null, // unknown marker — ignore
-            };
+            switch ($marker['type'] ?? null) {
+                case 'clarification_batch':
+                    $this->handleClarificationBatchHook($sent, $marker);
+                    $handledAny = true;
+                    break;
+                case 'quotation_sent':
+                    $this->handleQuotationSentHook($sent, $marker);
+                    $handledAny = true;
+                    break;
+                default:
+                    // unknown marker — ignore
+                    break;
+            }
+        }
+
+        return $handledAny;
+    }
+
+    /**
+     * Send-time детект исходящих документов, приложенных файлом через вкладку
+     * «Переписка» (счёт/КП без внутреннего builder'а). Запускает ту же
+     * идемпотентную процедуру, что и синк и почасовой self-heal
+     * quotes:detect-missed-outbound (rule-based → LLM → recordSuggestion
+     * → auto-apply статуса → ParseOutboundQuoteJob), но СРАЗУ, а не через
+     * 2–60 мин. Раньше письмо из композера синк дедупил по Message-ID и
+     * детектор его пропускал → статус (Счёт выставлен / КП отправлено) менял
+     * только почасовой крон с задержкой до часа (кейс M-2026-8222).
+     *
+     * Гарды: только письма с вложением, привязанные к заявке (пустой ответ
+     * здесь не тратит LLM — его при необходимости добьёт синк по body).
+     * runOutboundDocumentDetection сам обёрнут в try/catch (non-fatal) и
+     * идемпотентен; дополнительный try/catch тут — чтобы сбой детекта ни при
+     * каких условиях не сломал уже успешную отправку/редирект.
+     */
+    private function detectOutboundDocuments(\App\Models\EmailMessage $sent): void
+    {
+        try {
+            if ($sent->related_request_id === null || $sent->attachments()->count() === 0) {
+                return;
+            }
+            $request = \App\Models\Request::find($sent->related_request_id);
+            if ($request === null) {
+                return;
+            }
+            app(\App\Services\Mail\MailRouter::class)->runOutboundDocumentDetection($sent, $request);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning(
+                'ComposeForm: send-time outbound detection failed (non-fatal)',
+                [
+                    'email_message_id' => $sent->id,
+                    'request_id' => $sent->related_request_id,
+                    'error' => $e->getMessage(),
+                ],
+            );
         }
     }
 
