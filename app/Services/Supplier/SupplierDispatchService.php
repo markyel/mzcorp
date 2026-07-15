@@ -110,9 +110,15 @@ class SupplierDispatchService
                 $personalGreeting = $this->personalGreeting($greetingTpl, $supplier, $lang);
                 $intro = trim((string) ($lang === 'en' ? ($edits['intro_en'] ?? '') : ($edits['intro_ru'] ?? '')));
                 $closing = trim((string) ($lang === 'en' ? ($edits['closing_en'] ?? '') : ($edits['closing_ru'] ?? '')));
+                // Тема несёт код заявки MZC, а при наличии — и номер запроса 1С
+                // (onec_number), чтобы поставщик/менеджер видели оба в переписке:
+                // «Price request — [M-2026-XXXX] / [360989]».
+                $onecSuffix = filled($request->onec_number)
+                    ? ' / [' . trim((string) $request->onec_number) . ']'
+                    : '';
                 $subject = $lang === 'en'
-                    ? 'Price request — [' . $request->internal_code . ']'
-                    : 'Запрос расценки — [' . $request->internal_code . ']';
+                    ? 'Price request — [' . $request->internal_code . ']' . $onecSuffix
+                    : 'Запрос расценки — [' . $request->internal_code . ']' . $onecSuffix;
                 $bodyHtml = view('emails.supplier-rfq', [
                     'request' => $request,
                     'supplier' => $supplier,

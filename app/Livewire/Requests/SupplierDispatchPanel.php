@@ -625,9 +625,14 @@ class SupplierDispatchPanel extends Component
         ];
         $rows = $svc->itemRows($items, $lang, $edits);
         $greeting = $svc->personalGreeting($lang === 'en' ? $this->greetingEn : $this->greeting, $supplier, $lang);
+        // Держим формат темы в синхроне с SupplierDispatchService::dispatch():
+        // код заявки MZC + номер запроса 1С (onec_number), если он внесён.
+        $onecSuffix = filled($req->onec_number)
+            ? ' / [' . trim((string) $req->onec_number) . ']'
+            : '';
         $subject = $lang === 'en'
-            ? 'Price request — [' . $req->internal_code . ']'
-            : 'Запрос расценки — [' . $req->internal_code . ']';
+            ? 'Price request — [' . $req->internal_code . ']' . $onecSuffix
+            : 'Запрос расценки — [' . $req->internal_code . ']' . $onecSuffix;
         $html = view('emails.supplier-rfq', [
             'request' => $req,
             'supplier' => $supplier,
