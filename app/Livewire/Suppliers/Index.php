@@ -129,6 +129,23 @@ class Index extends Component
      * подмешиваются позиция-центричные RFQ из «Снабжения» (supplier_inquiry_items
      * по catalog_item_id без request_item_id) — по тому же ключу c{catalog_item_id}.
      */
+    /**
+     * Единая валюта среди quoted-офферов позиции (пустая у оффера → ₽).
+     * null — офферы в РАЗНЫХ валютах: единый числовой диапазон по ним
+     * некорректен, поэтому диапазон в UI не показываем.
+     *
+     * @param  \Illuminate\Support\Collection<int, \App\Models\SupplierOffer>  $quoted
+     */
+    private function quotedCurrency(\Illuminate\Support\Collection $quoted): ?string
+    {
+        $currencies = $quoted
+            ->map(fn ($o) => trim((string) $o->currency) !== '' ? trim((string) $o->currency) : '₽')
+            ->unique()
+            ->values();
+
+        return $currencies->count() === 1 ? (string) $currencies->first() : null;
+    }
+
     #[Computed]
     public function positions()
     {
@@ -181,6 +198,7 @@ class Index extends Component
                     'min' => $quoted->min('price'),
                     'max' => $quoted->max('price'),
                     'quoted_count' => $quoted->count(),
+                    'currency' => $this->quotedCurrency($quoted),
                 ];
             });
 
@@ -208,6 +226,7 @@ class Index extends Component
                 $existing['min'] = $quoted->min('price');
                 $existing['max'] = $quoted->max('price');
                 $existing['quoted_count'] = $quoted->count();
+                $existing['currency'] = $this->quotedCurrency($quoted);
                 $groups->put($key, $existing);
 
                 continue;
@@ -226,6 +245,7 @@ class Index extends Component
                 'min' => $quoted->min('price'),
                 'max' => $quoted->max('price'),
                 'quoted_count' => $quoted->count(),
+                'currency' => $this->quotedCurrency($quoted),
             ]);
         }
 

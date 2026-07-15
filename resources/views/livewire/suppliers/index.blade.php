@@ -50,7 +50,11 @@
                                 </div>
                             </div>
                             @if($pos['quoted_count'] > 0)
-                                <span class="chip chip-ok text-[10.5px]">{{ $pos['min'] == $pos['max'] ? number_format((float)$pos['min'],2,'.',' ') : number_format((float)$pos['min'],2,'.',' ').'–'.number_format((float)$pos['max'],2,'.',' ') }} ₽ · предложений: {{ $pos['quoted_count'] }}</span>
+                                @if(($pos['currency'] ?? null) !== null)
+                                    <span class="chip chip-ok text-[10.5px]">{{ $pos['min'] == $pos['max'] ? number_format((float)$pos['min'],2,'.',' ') : number_format((float)$pos['min'],2,'.',' ').'–'.number_format((float)$pos['max'],2,'.',' ') }} {{ $pos['currency'] }} · предложений: {{ $pos['quoted_count'] }}</span>
+                                @else
+                                    <span class="chip chip-ok text-[10.5px]">предложений: {{ $pos['quoted_count'] }} · разные валюты</span>
+                                @endif
                             @else
                                 <span class="chip chip-sky text-[10.5px]">ждём предложений</span>
                             @endif
