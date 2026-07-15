@@ -162,11 +162,18 @@ class SupplierDispatchService
                     'status' => 'open',
                     'created_by_user_id' => $by->id,
                 ]);
+                // item_name сохраняем ТАКИМ ЖЕ, как ушло в письмо (правка
+                // менеджера / каталожное имя), а не сырой $item->parsed_name.
+                // Иначе SupplierOfferParser сравнивает ответ поставщика со
+                // стухшей формулировкой и не матчит: кейс inquiry 1095 —
+                // письмо «Трансформатор … KM89794G02», хранилось «Катушка
+                // питания платы» → ответ поставщика ушёл в skipped/refused.
+                $rowNames = $lang === 'en' ? ($edits['names_en'] ?? []) : ($edits['names_ru'] ?? []);
                 foreach ($items as $item) {
                     SupplierInquiryItem::create([
                         'supplier_inquiry_id' => $inquiry->id,
                         'request_item_id' => $item->id,
-                        'item_name' => $item->parsed_name,
+                        'item_name' => $this->itemName($item, $rowNames, $lang),
                         'status' => 'pending',
                     ]);
                 }
