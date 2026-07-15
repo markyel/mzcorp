@@ -118,8 +118,24 @@ class PostSaleFulfillmentDetector
                 return null;
             }
         }
+        if ($this->looksLikeInvoiceRequest($haystack)) {
+            return null;
+        }
 
         return "документооборот по сделке («{$matched}»), без запроса цены/КП — постпродажное письмо";
+    }
+
+    /**
+     * Запрос ВЫСТАВИТЬ / ПРИСЛАТЬ счёт на оплату или на количество товара —
+     * инициируется продажа, это НОВАЯ заявка, а не отгрузка/документооборот
+     * уже оформленного заказа. Ловит «пришлите счёт на 12 …», «счёт на оплату»,
+     * «выставите счёт на …». НЕ матчит «счёт-фактуру» (закрывающий документ по
+     * состоявшейся сделке — там после «сч[её]т» идёт дефис, а не « на »).
+     * Кейс: esc@interlift.su «Пришлите счет на 12 демпферов … Прошу отгрузить».
+     */
+    private function looksLikeInvoiceRequest(string $haystack): bool
+    {
+        return preg_match('/сч[её]т\s+на\s+(оплат|\d)/u', $haystack) === 1;
     }
 
     /**
@@ -161,6 +177,9 @@ class PostSaleFulfillmentDetector
             if (str_contains($haystack, $marker)) {
                 return null;
             }
+        }
+        if ($this->looksLikeInvoiceRequest($haystack)) {
+            return null;
         }
 
         return $matchedSignal . ' уже оформленного заказа, без запроса цены/КП — постпродажное письмо, не новая заявка';
