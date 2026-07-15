@@ -71,6 +71,11 @@ class SupplierOfferParser
         if ($text === '') {
             $text = trim(strip_tags((string) $reply->body_html));
         }
+        // Разбираем ТОЛЬКО новый текст ответа поставщика — цитату нашего же
+        // письма (и предыдущей переписки) срезаем. Иначе LLM цепляется за
+        // содержимое цитаты: путает обсуждение артикулов/«альтернатива» в
+        // истории с отказом (кейсы inquiry 1143 «M02690/M13261», 1231).
+        $text = $this->stripQuotedReply($text);
 
         // Вложения-прайсы: текст (PDF/Excel/Word) + изображения (фото/скан) для Vision.
         [$attachmentText, $images] = $this->extractAttachments($reply);
@@ -155,6 +160,48 @@ class SupplierOfferParser
         Log::info('SupplierOfferParser: parsed reply', ['inquiry_id' => $inquiry->id, 'message_id' => $reply->id] + $counts);
 
         return $counts;
+    }
+
+    /**
+     * Срезать цитируемую историю из ответа поставщика — оставить только новый
+     * текст (обычно top-posting). Режем всё, начиная с САМОГО РАННЕГО маркера
+     * начала цитаты/пересылки. Маркеры покрывают RU/EN/CN клиентов, включая
+     * Foxmail («发件人：» = «От:»), которым пользуются азиатские поставщики.
+     *
+     * Гард против bottom-posting: если осмысленного текста ДО маркера почти
+     * нет (< 30 симв), вероятно ответ написан ПОД цитатой — тогда не режем,
+     * отдаём как есть (лучше лишний контекст, чем потерять сам ответ).
+     */
+    private function stripQuotedReply(string $text): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+
+        $markers = [
+            '/^\s*发件人\s*[：:]/mu',                                                   // From (Foxmail/CN)
+            '/^\s*(?:From|От(?:правитель)?)\s*:\s*\S.*$/mu',                          // From:/От: заголовок цитаты (в т.ч. Foxmail «From:Name» без пробела)
+            '/^\s*-{2,}\s*(?:Original Message|Пересланное сообщение)\s*-{2,}/imu',
+            '/^\s*[-_]{10,}\s*$/mu',                                                   // Outlook/Foxmail-разделитель (длинная линия)
+            '/^.*\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}.*(?:пишет|написал(?:а)?|wrote)\s*[:：]\s*$/imu', // «15.07.2026 …, X пишет:»
+            '/^\s*On\b.{0,160}\bwrote:\s*$/imu',                                      // «On … wrote:»
+            '/^\s*>\s?/mu',                                                            // >-цитата
+        ];
+
+        $cut = mb_strlen($text);
+        foreach ($markers as $re) {
+            if (preg_match($re, $text, $m, PREG_OFFSET_CAPTURE)) {
+                $charPos = mb_strlen(substr($text, 0, $m[0][1]));
+                $cut = min($cut, $charPos);
+            }
+        }
+
+        if ($cut < 30) {
+            return $text; // bottom-posting или цитата с самого верха — не режем
+        }
+
+        return trim(mb_substr($text, 0, $cut));
     }
 
     /**
