@@ -351,6 +351,30 @@ class RequestStateService
             $this->activity->touch($request, \App\Enums\RequestActivityType::Reanimated);
         });
 
+        // Реанимированная заявка могла остаться за менеджером, который сейчас
+        // в отпуске/болезни. delegateActiveRequests снимал снимок в момент ухода
+        // — тогда эта заявка была closed_lost и в делегирование НЕ попала, а
+        // reassessAssignmentOnReanimate отпускника намеренно не переподчиняет.
+        // Итог: активная заявка «зависает» на недоступном без acting-доступа.
+        // Делегируем ОДНУ заявку так же, как AssignmentService::autoAssign для
+        // новых писем на отпускника (без гейта по auto_delegate — заявка активна
+        // сейчас, кто-то должен её вести). Non-fatal.
+        $assigneeId = $request->fresh()?->assigned_user_id;
+        if ($assigneeId !== null) {
+            $assignee = User::find($assigneeId);
+            if ($assignee !== null && $assignee->isUnavailable()) {
+                try {
+                    app(ManagerUnavailabilityService::class)->delegateOne($request, $assignee, $author);
+                } catch (\Throwable $e) {
+                    Log::warning('RequestStateService: reanimate auto-delegate failed (non-fatal)', [
+                        'request_id' => $request->id,
+                        'assignee_id' => $assigneeId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        }
+
         Log::info('RequestStateService: reanimated', [
             'request_id' => $request->id,
             'previous_count' => $snapshot['closed_at'] !== null ? $request->reanimated_count - 1 : 0,
