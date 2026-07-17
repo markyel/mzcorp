@@ -35,6 +35,14 @@ class MergeDialog extends Component
     public ?int $selectedLoserId = null;
     public string $search = '';
 
+    /**
+     * Режим «другой e-mail отправителя» — тот же реальный клиент пишет с
+     * другого ящика (кейс M-2026-8787 → M-2026-8762). Включается ОТДЕЛЬНОЙ
+     * кнопкой и только привилегированными (см. canCrossClient). По умолчанию
+     * выключен — обычный список кандидатов не меняется.
+     */
+    public bool $crossClient = false;
+
     private const ACTIVE_STATUSES = [
         RequestStatus::New,
         RequestStatus::Assigned,
@@ -57,6 +65,7 @@ class MergeDialog extends Component
     {
         $this->selectedLoserId = null;
         $this->search = '';
+        $this->crossClient = false;
         $this->resetErrorBag();
         $this->open = true;
     }
@@ -65,11 +74,48 @@ class MergeDialog extends Component
     {
         $this->open = false;
         $this->selectedLoserId = null;
+        $this->crossClient = false;
     }
 
     public function selectLoser(int $id): void
     {
         $this->selectedLoserId = $id;
+    }
+
+    /**
+     * Кросс-почтовое слияние доступно только РОП/директору/админу — риск
+     * склеить двух разных заказчиков слишком высок для рядового менеджера
+     * (решение заказчика 2026-07-17). Дублируется в RequestMergeService::validate.
+     */
+    #[Computed]
+    public function canCrossClient(): bool
+    {
+        $u = auth()->user();
+
+        return $u !== null && $u->hasAnyRole([
+            \App\Enums\Role::HeadOfSales->value,
+            \App\Enums\Role::Director->value,
+            \App\Enums\Role::Admin->value,
+        ]);
+    }
+
+    /** E-mail клиента текущей заявки — для предупреждения о расхождении. */
+    #[Computed]
+    public function winnerEmail(): string
+    {
+        return (string) ($this->winner()?->client_email ?? '');
+    }
+
+    public function toggleCrossClient(): void
+    {
+        if (! $this->canCrossClient) {
+            return;
+        }
+        $this->crossClient = ! $this->crossClient;
+        $this->selectedLoserId = null;
+        $this->search = '';
+        $this->resetErrorBag();
+        unset($this->candidates);
     }
 
     /**
@@ -117,11 +163,19 @@ class MergeDialog extends Component
     public function candidates()
     {
         $winner = $this->winner();
-        if ($winner === null || $winner->client_email === '') {
+        if ($winner === null) {
             return collect();
         }
 
         $activeValues = array_map(fn (RequestStatus $s) => $s->value, self::ACTIVE_STATUSES);
+
+        if ($this->crossClient && $this->canCrossClient) {
+            return $this->crossClientCandidates($winner, $activeValues);
+        }
+
+        if ($winner->client_email === '') {
+            return collect();
+        }
 
         $q = RequestModel::query()
             ->where('id', '!=', $winner->id)
@@ -195,7 +249,57 @@ class MergeDialog extends Component
     }
 
     /**
-     * @return array{items_to_add: int, items_to_skip: int, emails_to_move: int, batches_to_move: int, conflicts: array<int, string>}|null
+     * Кандидаты в режиме «другой e-mail отправителя»: ищем по НОМЕРУ заявки /
+     * теме / почте среди ВСЕХ заявок (любой client_email) + подмешиваем заявки
+     * той же организации, что и winner. Статусы — активные + closed_lost:
+     * дубль часто уже закрыт (авто-закрытие или руками), его и надо вложить.
+     *
+     * Без строки поиска и без организации у winner — пусто: иначе это был бы
+     * список «все заявки системы».
+     *
+     * @param  array<int, string>  $activeValues
+     * @return \Illuminate\Support\Collection<int, RequestModel>
+     */
+    private function crossClientCandidates(RequestModel $winner, array $activeValues)
+    {
+        $search = trim($this->search);
+        $orgId = $winner->organization_id;
+        if ($search === '' && $orgId === null) {
+            return collect();
+        }
+
+        $statuses = array_merge($activeValues, [RequestStatus::ClosedLost->value]);
+
+        return RequestModel::query()
+            ->where('id', '!=', $winner->id)
+            ->whereIn('status', $statuses)
+            ->where(function ($w) use ($search, $orgId) {
+                if ($orgId !== null) {
+                    $w->orWhere('organization_id', $orgId);
+                }
+                if ($search !== '') {
+                    $needle = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
+                    $w->orWhere('internal_code', 'ilike', $needle)
+                        ->orWhere('subject', 'ilike', $needle)
+                        ->orWhere('client_email', 'ilike', $needle);
+                }
+            })
+            ->withCount(['items' => fn ($q) => $q->where('is_active', true)])
+            ->with([
+                'assignedUser:id,name',
+                'items' => fn ($q) => $q
+                    ->where('is_active', true)
+                    ->orderBy('position')
+                    ->limit(5)
+                    ->select(['id', 'request_id', 'position', 'parsed_name', 'parsed_brand', 'parsed_article', 'parsed_qty']),
+            ])
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get(['id', 'internal_code', 'subject', 'status', 'assigned_user_id', 'created_at', 'client_email', 'organization_id']);
+    }
+
+    /**
+     * @return array{items_to_add: int, items_to_skip: int, emails_to_move: int, batches_to_move: int, conflicts: array<int, string>, cross_client: bool}|null
      */
     #[Computed]
     public function previewStats(): ?array
@@ -209,7 +313,7 @@ class MergeDialog extends Component
             return null;
         }
 
-        return app(RequestMergeService::class)->preview($winner, $loser);
+        return app(RequestMergeService::class)->preview($winner, $loser, $this->crossClient && $this->canCrossClient);
     }
 
     public function confirmMerge(RequestMergeService $service): void
@@ -223,7 +327,7 @@ class MergeDialog extends Component
         }
 
         try {
-            $stats = $service->merge($winner, $loser, auth()->user());
+            $stats = $service->merge($winner, $loser, auth()->user(), $this->crossClient && $this->canCrossClient);
         } catch (\Throwable $e) {
             $this->addError('selectedLoserId', $e->getMessage());
 

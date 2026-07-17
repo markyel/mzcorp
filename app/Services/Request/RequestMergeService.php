@@ -30,11 +30,15 @@ use Illuminate\Support\Facades\Log;
  *     поле merged_into_id указывает на winner, merged_at = now.
  *   - state_changes в обеих заявках для audit (`merge_from` / `merged_into`).
  *
- * Сливаем ТОЛЬКО когда обе заявки active (Foundation 2026-05-22 решение):
- *   - active = не Paused/ClosedWon/ClosedLost/Pending/Paid
- *   - оба client_email совпадают (case-insensitive)
- *   - $by — owner/acting winner-а ИЛИ privileged
- *   - $by — owner/acting loser-а ИЛИ privileged
+ * Правила слияния:
+ *   - winner живой: не Paused/ClosedWon/ClosedLost/Pending/Paid;
+ *   - loser: closed_lost МОЖНО (типовой дубль уже закрыт), нельзя
+ *     Paused/ClosedWon/Pending/Paid;
+ *   - client_email совпадают (case-insensitive) — ЛИБО режим
+ *     $allowCrossClient («другой e-mail отправителя»: тот же клиент пишет
+ *     с другого ящика), который доступен ТОЛЬКО РОП/директору/админу;
+ *   - $by — owner/acting winner-а ИЛИ privileged;
+ *   - $by — owner/acting loser-а ИЛИ privileged.
  *
  * Не перемещаются: subject, client_email, assigned_user_id (winner сохраняет
  * свой). История state_changes loser-а остаётся в loser-е (как audit).
@@ -47,10 +51,28 @@ class RequestMergeService
     ) {
     }
 
-    private const SILENT_STATUSES = [
+    /**
+     * Winner должен быть живым: сливать В закрытую/оплаченную/замороженную
+     * заявку нечего.
+     */
+    private const WINNER_SILENT_STATUSES = [
         RequestStatus::Paused,
         RequestStatus::ClosedWon,
         RequestStatus::ClosedLost,
+        RequestStatus::Pending,
+        RequestStatus::Paid,
+    ];
+
+    /**
+     * Loser: `closed_lost` РАЗРЕШЁН — типовой дубль часто уже закрыт
+     * (авто-закрытие или менеджер закрыл руками), и его как раз надо свернуть
+     * в основную заявку (кейс M-2026-8787 → M-2026-8762). `closed_won` и
+     * `paid` остаются под запретом: там состоявшаяся сделка и деньги — прятать
+     * её внутрь другой заявки нельзя.
+     */
+    private const LOSER_SILENT_STATUSES = [
+        RequestStatus::Paused,
+        RequestStatus::ClosedWon,
         RequestStatus::Pending,
         RequestStatus::Paid,
     ];
@@ -60,9 +82,9 @@ class RequestMergeService
      *
      * @return array{items_added: int, items_skipped: int, emails_moved: int, batches_moved: int}
      */
-    public function merge(Request $winner, Request $loser, User $by): array
+    public function merge(Request $winner, Request $loser, User $by, bool $allowCrossClient = false): array
     {
-        $this->validate($winner, $loser, $by);
+        $this->validate($winner, $loser, $by, $allowCrossClient);
 
         return DB::transaction(function () use ($winner, $loser, $by) {
             // 1. Перенос email_messages.
@@ -141,9 +163,9 @@ class RequestMergeService
     /**
      * Превью слияния — что будет перенесено. Не меняет БД.
      *
-     * @return array{items_to_add: int, items_to_skip: int, emails_to_move: int, batches_to_move: int, conflicts: array<int, string>}
+     * @return array{items_to_add: int, items_to_skip: int, emails_to_move: int, batches_to_move: int, conflicts: array<int, string>, cross_client: bool}
      */
-    public function preview(Request $winner, Request $loser): array
+    public function preview(Request $winner, Request $loser, bool $allowCrossClient = false): array
     {
         $loserItems = RequestItem::query()
             ->where('request_id', $loser->id)
@@ -170,37 +192,55 @@ class RequestMergeService
             'items_to_skip' => $toSkip,
             'emails_to_move' => $emailsCount,
             'batches_to_move' => $batchesCount,
-            'conflicts' => $this->checkConflicts($winner, $loser),
+            'conflicts' => $this->checkConflicts($winner, $loser, $allowCrossClient),
+            'cross_client' => $this->isCrossClient($winner, $loser),
         ];
     }
 
     /**
+     * Заявки разных отправителей — тот же реальный клиент пишет с другого
+     * ящика (кейс: счёт запросили с почты А, обновить его просят с почты Б).
+     */
+    public function isCrossClient(Request $winner, Request $loser): bool
+    {
+        $w = mb_strtolower(trim((string) $winner->client_email));
+        $l = mb_strtolower(trim((string) $loser->client_email));
+
+        return $w !== '' && $l !== '' && $w !== $l;
+    }
+
+    /**
+     * @param  bool  $allowCrossClient  разрешить разные client_email (режим
+     *                                  «другой e-mail отправителя»; доступен
+     *                                  только РОП/директору/админу — см. validate)
      * @return array<int, string>  Список нарушенных правил.
      */
-    private function checkConflicts(Request $winner, Request $loser): array
+    private function checkConflicts(Request $winner, Request $loser, bool $allowCrossClient = false): array
     {
         $errors = [];
         if ($winner->id === $loser->id) {
             $errors[] = 'Нельзя слить заявку саму с собой.';
         }
-        if ($this->isSilent($winner)) {
-            $errors[] = sprintf('Winner %s в статусе %s — не active.', $winner->internal_code, $winner->status->label());
+        if (in_array($winner->status, self::WINNER_SILENT_STATUSES, true)) {
+            $errors[] = sprintf('Заявка %s в статусе «%s» — в неё нельзя сливать.', $winner->internal_code, $winner->status->label());
         }
-        if ($this->isSilent($loser)) {
-            $errors[] = sprintf('Loser %s в статусе %s — не active.', $loser->internal_code, $loser->status->label());
+        if (in_array($loser->status, self::LOSER_SILENT_STATUSES, true)) {
+            $errors[] = sprintf('Заявку %s в статусе «%s» нельзя вложить.', $loser->internal_code, $loser->status->label());
         }
         $w = mb_strtolower(trim((string) $winner->client_email));
         $l = mb_strtolower(trim((string) $loser->client_email));
-        if ($w === '' || $l === '' || $w !== $l) {
+        if ($w === '' || $l === '') {
+            $errors[] = 'У одной из заявок не указан e-mail клиента.';
+        } elseif ($w !== $l && ! $allowCrossClient) {
             $errors[] = 'Слияние доступно только для заявок одного клиента (client_email должны совпадать).';
         }
 
         return $errors;
     }
 
-    private function validate(Request $winner, Request $loser, User $by): void
+    private function validate(Request $winner, Request $loser, User $by, bool $allowCrossClient = false): void
     {
-        $errors = $this->checkConflicts($winner, $loser);
+        $errors = $this->checkConflicts($winner, $loser, $allowCrossClient);
         if ($errors !== []) {
             throw new \DomainException(implode(' ', $errors));
         }
@@ -210,6 +250,15 @@ class RequestMergeService
             RoleEnum::Director->value,
             RoleEnum::Admin->value,
         ]);
+
+        // Кросс-почтовое слияние — риск склеить двух РАЗНЫХ заказчиков, поэтому
+        // доступно только РОП/директору/админу (решение заказчика 2026-07-17).
+        if ($this->isCrossClient($winner, $loser) && ! $privileged) {
+            throw new \DomainException(
+                'Слить заявки с разными e-mail клиента может только РОП, директор или администратор.'
+            );
+        }
+
         if ($privileged) {
             return;
         }
@@ -222,11 +271,6 @@ class RequestMergeService
         if (! $loser->isAccessibleBy($by)) {
             throw new \DomainException(sprintf('Loser %s не доступна вам.', $loser->internal_code));
         }
-    }
-
-    private function isSilent(Request $r): bool
-    {
-        return in_array($r->status, self::SILENT_STATUSES, true);
     }
 
     /**

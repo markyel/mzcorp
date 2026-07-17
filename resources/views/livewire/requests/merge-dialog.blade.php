@@ -2,6 +2,10 @@
     $candidates = $this->candidates;
     $stats = $this->previewStats;
     $winnerCodes = $this->winnerCodes;
+    $canCross = $this->canCrossClient;
+    $winnerEmail = $this->winnerEmail;
+    $selected = $selectedLoserId ? $candidates->firstWhere('id', $selectedLoserId) : null;
+    $sameEmail = fn ($a, $b) => mb_strtolower(trim((string) $a)) === mb_strtolower(trim((string) $b));
 @endphp
 
 <div class="flex-1">
@@ -21,7 +25,32 @@
                     заявка закроется (объединена). Одинаковые позиции пропускаются.
                 </div>
 
-                @if(! empty($winnerCodes))
+                {{-- Режим «другой e-mail отправителя»: тот же клиент пишет с другого
+                     ящика. Только РОП/директор/админ — риск склеить двух заказчиков. --}}
+                @if($canCross)
+                    <div class="mb-3">
+                        @if(! $crossClient)
+                            <button type="button" wire:click="toggleCrossClient" class="btn btn-sm">
+                                ✉ Другой e-mail отправителя
+                            </button>
+                            <span class="text-[11px] text-fg-4 ml-1.5">— если тот же клиент писал с другого ящика</span>
+                        @else
+                            <div class="p-2.5 rounded bg-amber-50">
+                                <div class="text-[12px] text-amber-800 font-semibold mb-0.5">Режим: другой e-mail отправителя</div>
+                                <div class="text-[11.5px] text-amber-700">
+                                    Ищем среди <b>всех</b> заявок по номеру / теме / почте (плюс заявки той же
+                                    организации), включая <b>закрытые</b>. Убедитесь, что это тот же клиент —
+                                    заявки разных заказчиков склеивать нельзя.
+                                </div>
+                                <button type="button" wire:click="toggleCrossClient" class="btn btn-sm mt-1.5">
+                                    ← Обычный режим
+                                </button>
+                            </div>
+                        @endif
+                    </div>
+                @endif
+
+                @if(! empty($winnerCodes) && ! $crossClient)
                     <div class="text-[11.5px] text-fg-3 mb-3 flex items-center gap-1.5 flex-wrap">
                         <span class="uppercase tracking-wider font-semibold text-[10.5px]">Фильтр по общему маркеру:</span>
                         @foreach($winnerCodes as $code)
@@ -32,7 +61,9 @@
 
                 @if($candidates->isEmpty())
                     <div class="text-amber-700 text-[12px] mb-4">
-                        @if(! empty($winnerCodes))
+                        @if($crossClient)
+                            Введите номер заявки (например M-2026-8787), тему или почту отправителя.
+                        @elseif(! empty($winnerCodes))
                             Не нашлось других active-заявок с тем же external-маркером.
                             Если хотите слить заявку с другим маркером — поищите вручную:
                         @else
@@ -44,7 +75,7 @@
                 <div class="mb-3">
                     <input type="search"
                            wire:model.live.debounce.300ms="search"
-                           placeholder="Поиск по коду / теме…"
+                           placeholder="{{ $crossClient ? 'Номер заявки (M-2026-…), тема или почта…' : 'Поиск по коду / теме…' }}"
                            class="w-full h-[30px] px-2.5 border border-border rounded-md text-[12.5px] outline-none focus:border-[var(--sky-500)]">
                 </div>
 
@@ -108,7 +139,11 @@
                                         <span>менеджер: {{ $c->assignedUser->name }}</span>
                                         <span>·</span>
                                     @endif
-                                    <span class="mono">{{ $c->client_email }}</span>
+                                    @if($crossClient && $winnerEmail !== '' && ! $sameEmail($c->client_email, $winnerEmail))
+                                        <span class="mono text-amber-700 font-semibold">✉ {{ $c->client_email }} — другой e-mail</span>
+                                    @else
+                                        <span class="mono">{{ $c->client_email }}</span>
+                                    @endif
                                 </div>
                             </button>
                         @endforeach
@@ -123,6 +158,14 @@
                             @endforeach
                         </div>
                     @else
+                        @if(! empty($stats['cross_client']))
+                            <div class="p-2.5 rounded bg-amber-50 mb-3 text-[11.5px] text-amber-800">
+                                ⚠ <b>Разные e-mail клиента.</b>
+                                Эта заявка — <span class="mono">{{ $winnerEmail }}</span>,
+                                вкладываемая — <span class="mono">{{ $selected?->client_email }}</span>.
+                                Объединяйте, только если это один и тот же заказчик.
+                            </div>
+                        @endif
                         <div class="ds-card p-3 text-[12px] bg-[var(--neutral-50)] mb-3 space-y-0.5">
                             <div class="font-semibold text-fg-2 mb-1 text-[11px] uppercase tracking-wider">Что будет перенесено</div>
                             <div class="flex items-center justify-between">
