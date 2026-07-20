@@ -43,6 +43,23 @@ enum Role: string
     }
 
     /**
+     * Название во множественном числе — для вкладок-фильтров в списке
+     * пользователей («Менеджеры», «Секретари»). Отдельно от label(), т.к.
+     * там единственное число (подпись роли в карточке).
+     */
+    public function pluralLabel(): string
+    {
+        return match ($this) {
+            self::Manager => 'Менеджеры',
+            self::HeadOfSales => 'РОП',
+            self::Secretary => 'Секретари',
+            self::Director => 'Директорат',
+            self::Procurement => 'Снабжение',
+            self::Admin => 'Админы',
+        };
+    }
+
+    /**
      * Все роли в виде массива значений (строк).
      *
      * @return array<int, string>
@@ -50,6 +67,25 @@ enum Role: string
     public static function values(): array
     {
         return array_map(fn (self $r) => $r->value, self::cases());
+    }
+
+    /**
+     * Роли, по которым в админке есть вкладка-фильтр списка пользователей.
+     * Админы не выделены отдельной вкладкой (их видит только другой админ,
+     * см. Admin\Managers\Index::users).
+     *
+     * ЕДИНСТВЕННЫЙ источник набора вкладок и счётчиков — раньше список был
+     * захардкожен и в blade, и в counters(), из-за чего роль «Снабжение»
+     * не появилась ни там, ни там. См. [[duplicated-source-of-truth]].
+     *
+     * @return array<int, self>
+     */
+    public static function userTabRoles(): array
+    {
+        return array_values(array_filter(
+            self::cases(),
+            static fn (self $r): bool => $r !== self::Admin,
+        ));
     }
 
     /**

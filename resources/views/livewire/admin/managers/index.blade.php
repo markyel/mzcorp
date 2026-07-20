@@ -2,16 +2,10 @@
     use Illuminate\Support\Str;
 
     $users = $this->users;
-    $counters = $this->counters;
-
-    $filterChips = [
-        ['key' => 'manager',       'label' => 'Менеджеры',    'count' => $counters['manager']],
-        ['key' => 'head_of_sales', 'label' => 'РОП',          'count' => $counters['head_of_sales']],
-        ['key' => 'secretary',     'label' => 'Секретари',    'count' => $counters['secretary']],
-        ['key' => 'director',      'label' => 'Директорат',   'count' => $counters['director']],
-        ['key' => 'all',           'label' => 'Все активные', 'count' => null],
-        ['key' => 'archived',      'label' => 'Архив',        'count' => $counters['archived']],
-    ];
+    // Набор вкладок и счётчики собираются в компоненте из RoleEnum
+    // (Index::filterChips) — здесь список НЕ дублируем, иначе новая роль
+    // снова не появится во вкладках.
+    $filterChips = $this->filterChips;
 @endphp
 
 <div>
@@ -58,13 +52,13 @@
                 @forelse($users as $u)
                     @php
                         $roleNames = $u->roles->pluck('name')->all();
-                        $roleLabel = match (true) {
-                            in_array('head_of_sales', $roleNames, true) => 'РОП',
-                            in_array('director', $roleNames, true) => 'Директорат',
-                            in_array('secretary', $roleNames, true) => 'Секретарь',
-                            in_array('manager', $roleNames, true) => 'Менеджер',
-                            default => '—',
-                        };
+                        // Подпись роли — из RoleEnum::label(), без ручного match:
+                        // он молча давал «—» для ролей, добавленных позже (кейс
+                        // «Снабжение»).
+                        $roleLabel = collect($roleNames)
+                            ->map(fn ($n) => \App\Enums\Role::tryFrom($n)?->label())
+                            ->filter()
+                            ->implode(', ') ?: '—';
                         $personal = $u->ownedMailboxes->first();
                         // Личный ящик подключается только для ролей-исполнителей
                         // (manager / head_of_sales). У director / secretary /

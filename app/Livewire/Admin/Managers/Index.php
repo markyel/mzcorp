@@ -152,17 +152,48 @@ class Index extends Component
             ->paginate(25);
     }
 
+    /**
+     * Счётчики вкладок. Набор ролей — из RoleEnum::userTabRoles(), НЕ списком
+     * здесь: раньше роли были перечислены вручную и тут, и в blade, поэтому
+     * «Снабжение» не появилось ни во вкладках, ни в счётчиках.
+     *
+     * @return array<string, int>  ключи = role enum value + 'archived'
+     */
     #[Computed]
     public function counters(): array
     {
-        // Ключи совпадают с role enum value + 'archived'.
-        return [
-            'manager' => User::role(RoleEnum::Manager->value)->active()->count(),
-            'head_of_sales' => User::role(RoleEnum::HeadOfSales->value)->active()->count(),
-            'secretary' => User::role(RoleEnum::Secretary->value)->active()->count(),
-            'director' => User::role(RoleEnum::Director->value)->active()->count(),
-            'archived' => User::archived()->count(),
-        ];
+        $counters = [];
+        foreach (RoleEnum::userTabRoles() as $role) {
+            $counters[$role->value] = User::role($role->value)->active()->count();
+        }
+        $counters['archived'] = User::archived()->count();
+
+        return $counters;
+    }
+
+    /**
+     * Вкладки-фильтры: роли из enum + «Все активные» и «Архив».
+     *
+     * @return array<int, array{key: string, label: string, count: ?int}>
+     */
+    #[Computed]
+    public function filterChips(): array
+    {
+        $counters = $this->counters;
+
+        $chips = array_map(
+            static fn (RoleEnum $r): array => [
+                'key' => $r->value,
+                'label' => $r->pluralLabel(),
+                'count' => $counters[$r->value] ?? 0,
+            ],
+            RoleEnum::userTabRoles(),
+        );
+
+        $chips[] = ['key' => 'all', 'label' => 'Все активные', 'count' => null];
+        $chips[] = ['key' => 'archived', 'label' => 'Архив', 'count' => $counters['archived']];
+
+        return $chips;
     }
 
     public function render()
