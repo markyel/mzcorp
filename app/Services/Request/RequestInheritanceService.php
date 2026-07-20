@@ -432,4 +432,77 @@ class RequestInheritanceService
 
         return (string) preg_replace('/[\s\-_.\/]/', '', mb_strtoupper(trim($article)));
     }
+
+    /**
+     * Может ли родитель быть реанимирован ВМЕСТО усыновления child'а:
+     * закрыт «по тишине» (нет ответа) и недавно. Проверка номенклатуры сюда
+     * НЕ входит — её делает вызывающий (в zero-items пути новой номенклатуры
+     * нет по определению; в CheckInheritanceJob сверяются артикулы).
+     */
+    public function parentQualifiesForReanimate(Request $parent): bool
+    {
+        if ($parent->status !== \App\Enums\RequestStatus::ClosedLost) {
+            return false;
+        }
+        $noResponse = in_array($parent->closed_lost_reason, [
+            \App\Enums\ClosedLostReason::NoClientResponseToQuote->value,
+            \App\Enums\ClosedLostReason::NoClientResponseToClarification->value,
+        ], true);
+        $maxDays = (int) config('services.inheritance.reanimate_max_days', 45);
+        $recent = $parent->closed_at !== null
+            && $parent->closed_at->gt(now()->subDays(max(1, $maxDays)));
+
+        return $noResponse && $recent;
+    }
+
+    /**
+     * Реанимировать родителя под тем же номером и свернуть свежесозданный
+     * дубль: письма дубля → родителю, его клиентские авто-уведомления удаляем
+     * (без FK, иначе осиротеют), реанимируем родителя, удаляем дубль (каскад
+     * чистит items/state/assignments/views/ai_decisions). Одна транзакция.
+     *
+     * Общий код для ДВУХ путей, которые раньше расходились:
+     *   - `CheckInheritanceJob` (ответ С позициями, сверка по артикулам + LLM);
+     *   - `ParseRequestItemsJob::tryAdoptFromInheritanceCandidate` (ответ БЕЗ
+     *     номенклатуры — до CheckInheritanceJob дело вообще не доходит, т.к.
+     *     тот диспатчится из RequestItemPersister, а при 0 позиций Persister
+     *     не вызывается).
+     */
+    public function reanimateParentAbsorbingChild(
+        Request $parent,
+        Request $child,
+        ?\App\Models\EmailMessage $inbound,
+        string $event,
+        string $comment,
+    ): void {
+        $childId = $child->id;
+        $childCode = $child->internal_code;
+
+        DB::transaction(function () use ($parent, $child, $inbound, $event, $comment) {
+            \App\Models\EmailMessage::query()
+                ->where('related_request_id', $child->id)
+                ->update(['related_request_id' => $parent->id]);
+
+            DB::table('client_notifications_sent')->where('request_id', $child->id)->delete();
+
+            app(RequestStateService::class)->reanimate(
+                $parent,
+                null,
+                $inbound,
+                reassessAssignee: $inbound !== null,
+                event: $event,
+                comment: $comment,
+            );
+
+            $child->delete();
+        });
+
+        Log::info('RequestInheritanceService: reanimated parent, absorbed fresh duplicate', [
+            'parent_request_id' => $parent->id,
+            'parent_code' => $parent->internal_code,
+            'deleted_child_request_id' => $childId,
+            'deleted_child_code' => $childCode,
+            'event' => $event,
+        ]);
+    }
 }

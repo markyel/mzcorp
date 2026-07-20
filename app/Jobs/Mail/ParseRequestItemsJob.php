@@ -485,8 +485,51 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
             return false;
         }
 
+        $inheritance = app(\App\Services\Request\RequestInheritanceService::class);
+
+        // Ответ БЕЗ номенклатуры (мы здесь ровно потому, что парсер вернул 0
+        // позиций) в тред заявки, закрытой «по тишине» недавно, — это
+        // продолжение СТАРОЙ заявки, а не новая. Реанимируем родителя и
+        // сворачиваем свежий дубль, вместо усыновления с клонированием позиций.
+        //
+        // Почему проверка живёт ЗДЕСЬ, а не только в CheckInheritanceJob: тот
+        // диспатчится из RequestItemPersister, а при 0 позиций Persister не
+        // вызывается — до его развилки reanimate-vs-inherit такой ответ НИКОГДА
+        // не доходит (кейсы M-2026-7976→8874, M-2026-7986→8915: клиент отвечал
+        // на наше же напоминание о КП, получал дубль с клонированной позицией,
+        // а КП и № 1С оставались на исходной заявке).
+        //
+        // Постпродажный ответ (реквизиты/УПД/отгрузка) исключаем — для него
+        // отдельный маршрут, реанимировать проигранную заявку под него нельзя.
+        if ($inheritance->parentQualifiesForReanimate($parent)
+            && app(\App\Services\Mail\PostSaleFulfillmentDetector::class)->detectDocsOrFulfillment($message) === null
+        ) {
+            try {
+                $inheritance->reanimateParentAbsorbingChild(
+                    $parent,
+                    $child,
+                    $message,
+                    event: 'reanimate_from_reply',
+                    comment: sprintf(
+                        'Клиент ответил в закрытый тред без новой номенклатуры — реанимация (свёрнут дубль %s).',
+                        $child->internal_code,
+                    ),
+                );
+
+                return true;
+            } catch (\Throwable $e) {
+                // Реанимация не удалась — откат внутри транзакции, данные целы.
+                // Падаем в безопасное усыновление ниже.
+                Log::error('ParseRequestItemsJob: reanimate-in-place failed, falling back to adopt', [
+                    'email_message_id' => $message->id,
+                    'child_request_id' => $child->id,
+                    'parent_request_id' => $parent->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         try {
-            $inheritance = app(\App\Services\Request\RequestInheritanceService::class);
             $inheritance->adoptFromParent($child, $parent, linkedBy: 'system_reminder_fallback');
         } catch (\Throwable $e) {
             Log::warning('ParseRequestItemsJob: adoptFromParent failed', [

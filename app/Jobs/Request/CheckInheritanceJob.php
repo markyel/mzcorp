@@ -342,40 +342,22 @@ class CheckInheritanceJob implements ShouldQueue, ShouldBeUnique
         RequestStateService $stateService,
         array $llmResult,
     ): void {
-        $newId = $newRequest->id;
         $newCode = $newRequest->internal_code;
 
-        DB::transaction(function () use ($candidate, $newRequest, $inbound, $stateService, $newCode) {
-            // 1. Письма новой заявки → на старую (email_messages без FK на requests).
-            EmailMessage::query()
-                ->where('related_request_id', $newRequest->id)
-                ->update(['related_request_id' => $candidate->id]);
-
-            // 2. Клиентские авто-уведомления новой (order_received и пр.) — без FK,
-            //    иначе осиротеют + конфликт unique при слиянии. Просто удаляем.
-            DB::table('client_notifications_sent')->where('request_id', $newRequest->id)->delete();
-
-            // 3. Реанимируем старую (closed_lost → in_progress, реассесс
-            //    ответственного по входящему письму).
-            $stateService->reanimate(
+        // Сама операция — общая с zero-items путём в ParseRequestItemsJob
+        // (см. RequestInheritanceService::reanimateParentAbsorbingChild).
+        app(\App\Services\Request\RequestInheritanceService::class)
+            ->reanimateParentAbsorbingChild(
                 $candidate,
-                null,
+                $newRequest,
                 $inbound,
-                reassessAssignee: true,
                 event: 'reanimate_from_reply',
                 comment: "Клиент ответил в закрытый тред теми же позициями — реанимация (свёрнут дубль {$newCode}).",
             );
 
-            // 4. Удаляем свежесозданную новую (каскад чистит зависимые строки;
-            //    письма уже перевешены на старую — не осиротеют).
-            $newRequest->delete();
-        });
-
         Log::info('CheckInheritanceJob: reanimated parent in-place, absorbed fresh duplicate', [
             'parent_request_id' => $candidate->id,
             'parent_code' => $candidate->internal_code,
-            'deleted_new_request_id' => $newId,
-            'deleted_new_code' => $newCode,
             'confidence' => $llmResult['confidence'] ?? null,
         ]);
     }
