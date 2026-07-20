@@ -269,8 +269,9 @@ class CheckInheritanceJob implements ShouldQueue, ShouldBeUnique
      * ветка деструктивная (удаляет свежесозданную новую заявку):
      *   - старая именно closed_lost (closed_won = сделка состоялась → новая ок);
      *   - причина закрытия — «нет ответа» (тихое закрытие), в окне N дней;
-     *   - ВСЕ активные позиции новой заявки совпали по АРТИКУЛУ (source
-     *     auto_article) со старой — т.е. нет новой номенклатуры;
+     *   - новой номенклатуры нет: либо у новой заявки ВСЕ активные позиции
+     *     совпали по АРТИКУЛУ (source auto_article) со старой, либо позиций
+     *     нет вовсе (ответ-текст в старый тред, клиент ничего не добавил);
      *   - у новой ещё нет downstream-артефактов (КП/счёт) — она свежая.
      *
      * @param  array<int, array{child_item_id:int, parent_item_id:int, source?:string, confidence?:float}>  $itemMappings
@@ -293,17 +294,29 @@ class CheckInheritanceJob implements ShouldQueue, ShouldBeUnique
         }
 
         // Ровно те же позиции: каждая активная позиция новой совпала по артикулу.
+        //
+        // НОЛЬ позиций — тоже основание реанимировать, а не блокировать. Клиент
+        // просто написал текст в старый тред («когда отгрузите?», «аварийная
+        // ситуация, нужно быстрее»), новой номенклатуры нет вообще — это
+        // сильнейший сигнал продолжения. Раньше здесь стоял `return false`, и
+        // такой ответ плодил дубль-наследника с клонированными позициями, уводя
+        // живой диалог с исходной заявки: кейс M-2026-7976 → M-2026-8874 (ответ
+        // на НАШЕ же напоминание о КП, через 3 часа после авто-закрытия «нет
+        // ответа»; КП 360908 и номер 1С остались на старой, переписка ушла на новую).
+        // Продолжение к этому моменту подтверждено дважды: тред сматчен по
+        // in_reply_to к терминальной заявке (жёсткий заголовочный матч) + LLM
+        // is_continuation ≥ threshold в handle(). Пост-продажный кейс отсечён
+        // раньше в rerouteAsPostSale().
         $newActive = (int) $newRequest->items()->where('is_active', true)->count();
-        if ($newActive === 0) {
-            return false;
-        }
-        $exactArticleMapped = collect($itemMappings)
-            ->where('source', 'auto_article')
-            ->pluck('child_item_id')
-            ->unique()
-            ->count();
-        if ($exactArticleMapped !== $newActive) {
-            return false;
+        if ($newActive > 0) {
+            $exactArticleMapped = collect($itemMappings)
+                ->where('source', 'auto_article')
+                ->pluck('child_item_id')
+                ->unique()
+                ->count();
+            if ($exactArticleMapped !== $newActive) {
+                return false;
+            }
         }
 
         // Новая заявка ещё «пустая» downstream — иначе не сворачиваем.
