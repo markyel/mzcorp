@@ -67,11 +67,17 @@ class RequestsAutoCloseInactiveCommand extends Command
         $clarDays = (int) $settings->get('auto_close.clarification_days', 4);
         $quoteDays = (int) $settings->get('auto_close.quote_days', 5);
         $invoiceDays = (int) $settings->get('auto_close.invoice_days', 5);
+        // Пауза после НАШЕГО напоминания клиенту: мы только что попросили
+        // ответить — надо дать время. 0 = выкл.
+        $graceDays = (int) $settings->get('auto_close.reminder_grace_days', 3);
 
         if ($dryRun) {
             $this->info('DRY-RUN: ничего не закрывается.');
         }
-        $this->info(sprintf('Пороги (раб. дн., 0=выкл): уточнение=%d · КП=%d · счёт=%d', $clarDays, $quoteDays, $invoiceDays));
+        $this->info(sprintf(
+            'Пороги (раб. дн., 0=выкл): уточнение=%d · КП=%d · счёт=%d · пауза после напоминания=%d',
+            $clarDays, $quoteDays, $invoiceDays, $graceDays,
+        ));
 
         $closed = 0;
         $stats = ['clarification' => 0, 'quote' => 0, 'invoice' => 0];
@@ -108,7 +114,8 @@ class RequestsAutoCloseInactiveCommand extends Command
                     continue;
                 }
                 if (! $this->dueBusiness($cal, $batch->sent_at, $clarDays)
-                    || $this->clientEngagedRecently($cal, $req, $clarDays)) {
+                    || $this->clientEngagedRecently($cal, $req, $clarDays)
+                    || $this->reminderGraceActive($cal, $req, [\App\Enums\ClientNotificationType::ClarificationReminder->value], $graceDays)) {
                     continue;
                 }
                 $close($req, ClosedLostReason::NoClientResponseToClarification,
@@ -143,7 +150,8 @@ class RequestsAutoCloseInactiveCommand extends Command
                     continue;
                 }
                 if (! $this->dueBusiness($cal, $req->last_activity_at ?? $req->updated_at, $clarDays)
-                    || $this->clientEngagedRecently($cal, $req, $clarDays)) {
+                    || $this->clientEngagedRecently($cal, $req, $clarDays)
+                    || $this->reminderGraceActive($cal, $req, [\App\Enums\ClientNotificationType::ClarificationReminder->value], $graceDays)) {
                     continue;
                 }
                 $close($req, ClosedLostReason::NoClientResponseToClarification,
@@ -166,7 +174,8 @@ class RequestsAutoCloseInactiveCommand extends Command
                     continue;
                 }
                 if (! $this->dueBusiness($cal, $req->last_activity_at ?? $req->updated_at, $quoteDays)
-                    || $this->clientEngagedRecently($cal, $req, $quoteDays)) {
+                    || $this->clientEngagedRecently($cal, $req, $quoteDays)
+                    || $this->reminderGraceActive($cal, $req, [\App\Enums\ClientNotificationType::QuoteFollowupReminder->value], $graceDays)) {
                     continue;
                 }
                 $close($req, ClosedLostReason::NoClientResponseToQuote,
@@ -202,7 +211,11 @@ class RequestsAutoCloseInactiveCommand extends Command
                     continue;
                 }
                 if (! $this->dueBusiness($cal, $inv->issued_at, $invoiceDays)
-                    || $this->clientEngagedRecently($cal, $req, $invoiceDays)) {
+                    || $this->clientEngagedRecently($cal, $req, $invoiceDays)
+                    || $this->reminderGraceActive($cal, $req, [
+                        \App\Enums\ClientNotificationType::InvoiceExpiringSoon->value,
+                        \App\Enums\ClientNotificationType::InvoiceExpired->value,
+                    ], $graceDays)) {
                     continue;
                 }
                 $close($req, ClosedLostReason::InvoiceUnpaid,
@@ -272,6 +285,41 @@ class RequestsAutoCloseInactiveCommand extends Command
         }
 
         return now()->greaterThanOrEqualTo($cal->addBusinessDays($anchor, $days));
+    }
+
+    /**
+     * Действует ли пауза после НАШЕГО напоминания клиенту: если ремайндер
+     * ушёл недавно, дедлайн тишины продлевается на $graceDays рабочих дней
+     * от даты напоминания.
+     *
+     * Кейс M-2026-7976: ремайндер по КП ушёл в воскресенье 19.07 14:00,
+     * авто-закрытие сработало в понедельник 08:00 (порог 5 раб. дн. от КП
+     * истёк ровно тогда), а клиент ответил в 10:50 — в первое рабочее утро
+     * после нашего же письма, но заявку уже закрыли. Просить ответ и закрывать
+     * до того, как клиент успел его дать, нельзя.
+     *
+     * @param  array<int, string>  $types  типы ремайндеров, релевантные ветке
+     */
+    private function reminderGraceActive(
+        RussianWorkingDayService $cal,
+        Request $req,
+        array $types,
+        int $graceDays,
+    ): bool {
+        if ($graceDays <= 0 || $types === []) {
+            return false;
+        }
+
+        $lastReminder = \Illuminate\Support\Facades\DB::table('client_notifications_sent')
+            ->where('request_id', $req->id)
+            ->whereIn('type', $types)
+            ->max('sent_at');
+
+        if ($lastReminder === null) {
+            return false;
+        }
+
+        return now()->lessThan($cal->addBusinessDays(Carbon::parse($lastReminder), $graceDays));
     }
 
     /**

@@ -17,6 +17,7 @@ use App\Models\Invoice;
 use App\Models\OutboundQuote;
 use App\Models\Quotation;
 use App\Models\Request;
+use App\Services\Calendar\RussianWorkingDayService;
 use App\Services\Mail\ClientNotificationService;
 use App\Services\Settings\SettingsService;
 use Illuminate\Console\Command;
@@ -48,16 +49,34 @@ class NotificationsDispatchClientCommand extends Command
 {
     protected $signature = 'notifications:dispatch-client
         {--type= : Один конкретный тип (clarification_reminder | quote_followup_reminder | invoice_expiring_soon | invoice_expired)}
-        {--dry-run : Только показать кандидатов, не отправлять}';
+        {--dry-run : Только показать кандидатов, не отправлять}
+        {--force : Отправлять даже в выходной/праздник (обычно рассылка пропускается)}';
 
     protected $description = 'Cron-рассылка автоматических уведомлений клиенту (4 типа).';
 
     public function handle(
         ClientNotificationService $notifier,
         SettingsService $settings,
+        RussianWorkingDayService $cal,
     ): int {
         $onlyType = $this->option('type');
         $dryRun = (bool) $this->option('dry-run');
+
+        // В выходные и праздники клиенту не пишем: письмо «ответьте по КП»
+        // в субботу смысла не имеет — адресат его увидит только в понедельник,
+        // зато счётчик тишины успевает истечь и заявка закрывается до того, как
+        // человек вышел на работу (кейс M-2026-7976: ремайндер в воскресенье
+        // 14:00 → авто-закрытие в понедельник 08:00 → ответ клиента в 10:50).
+        // Крон ежечасный — рассылка сама возобновится в первый рабочий день.
+        // --force для ручного прогона.
+        if (! $this->option('force') && ! $cal->isBusinessDay(now())) {
+            $this->info(sprintf(
+                'Сегодня (%s) не рабочий день — клиентские рассылки пропущены. --force чтобы отправить.',
+                now()->format('d.m.Y'),
+            ));
+
+            return self::SUCCESS;
+        }
 
         $stats = [
             ClientNotificationType::ClarificationReminder->value => 0,
