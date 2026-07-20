@@ -53,6 +53,12 @@
         $rail[] = ['icon' => '⛏', 'label' => 'Снабжение', 'href' => route('procurement.index'), 'key' => 'procurement'];
     }
 
+    // «Честный знак» — коды маркировки из PDF в файл поставки.
+    // Директорат / РОП / секретарь / админ (гейт продублирован на роуте).
+    if ($railUser?->hasAnyRole(['head_of_sales', 'director', 'secretary', 'admin'])) {
+        $rail[] = ['icon' => '⧉', 'label' => 'Честный знак', 'href' => route('honest-sign.index'), 'key' => 'honest-sign'];
+    }
+
     // Phase 2 placeholder'ы — disabled (без href), показываются для
     // структуры UI.
     $railDisabled = [

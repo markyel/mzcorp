@@ -55,6 +55,15 @@ Route::middleware('auth')->group(function () {
     // Питает раздел «Использование системы» (admin/director).
     Route::post('/heartbeat', HeartbeatController::class)->name('heartbeat.ping');
 
+    // «Честный знак» — разбор PDF с кодами маркировки (DataMatrix, одна
+    // страница = один код) и заполнение файла поставки (GTIN/КИЗ по MZ-ID).
+    // Директорат, РОП, секретарь, админ.
+    Route::middleware('role:head_of_sales,director,secretary,admin')->group(function () {
+        Route::get('/dashboard/honest-sign', function () {
+            return view('honest-sign.index');
+        })->name('honest-sign.index');
+    });
+
     // «Использование системы» — статистика активности менеджеров
     // (время в системе, отправленные письма, сопоставления каталогу,
     // уточняющие вопросы). Только директорат и админ.
