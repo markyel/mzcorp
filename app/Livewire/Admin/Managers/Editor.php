@@ -30,7 +30,16 @@ class Editor extends Component
     public string $password = '';
     public string $passwordConfirmation = '';
 
-    #[Validate('required|in:manager,head_of_sales,secretary,director,admin')]
+    /**
+     * Роль. Допустимые значения проверяются в save() против availableRoles()
+     * (то есть против RoleEnum), а НЕ списком в атрибуте: раньше тут стоял
+     * хардкод `in:manager,head_of_sales,secretary,director,admin`, в который
+     * забыли добавить `procurement` при вводе роли «Снабжение». В выпадающем
+     * списке роль была (availableRoles() честно отдаёт все case'ы enum), но
+     * сохранение молча падало на валидации — директор не мог создать
+     * пользователя-снабженца. Держим один источник правды.
+     */
+    #[Validate('required|string')]
     public string $role = 'manager';
 
     /**
@@ -90,6 +99,15 @@ class Editor extends Component
         // Запрет назначать admin не-админом (на случай обхода UI).
         if ($this->role === RoleEnum::Admin->value && ! $this->currentIsAdmin()) {
             $this->addError('role', 'Роль «Админ» может назначить только админ.');
+            return null;
+        }
+
+        // Роль должна быть из доступных текущему пользователю (RoleEnum + гейт
+        // админа выше). Единственная проверка допустимых значений — здесь,
+        // поэтому новая роль в enum автоматически становится назначаемой.
+        $allowedRoles = array_map(static fn (RoleEnum $r): string => $r->value, $this->availableRoles());
+        if (! in_array($this->role, $allowedRoles, true)) {
+            $this->addError('role', 'Выберите роль из списка.');
             return null;
         }
         // Запрет править admin-учётку не-админом.

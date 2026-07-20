@@ -57,8 +57,8 @@ Route::middleware('auth')->group(function () {
 
     // «Честный знак» — разбор PDF с кодами маркировки (DataMatrix, одна
     // страница = один код) и заполнение файла поставки (GTIN/КИЗ по MZ-ID).
-    // Директорат, РОП, секретарь, админ.
-    Route::middleware('role:head_of_sales,director,secretary,admin')->group(function () {
+    // Директорат, РОП, секретарь, снабжение, админ.
+    Route::middleware('role:head_of_sales,director,secretary,procurement,admin')->group(function () {
         Route::get('/dashboard/honest-sign', function () {
             return view('honest-sign.index');
         })->name('honest-sign.index');
