@@ -48,10 +48,10 @@ class Editor extends Component
      * для secretary / director / admin поле скрыто, значение хранится но игнорируется
      * в AssignmentService (они не попадают в available()).
      */
-    // Нижняя граница 10 — как в DB-констрейнте users_load_weight_range_chk
-    // (load_weight BETWEEN 10 AND 500). Раньше валидация допускала 1..9 →
-    // проходила Livewire, но БД отвергала значение check-констрейнтом → 500.
-    #[Validate('required|integer|between:10,500')]
+    // 1..500 — согласовано с DB-констрейнтом users_load_weight_range_chk
+    // (ослаблен до BETWEEN 1 AND 500 миграцией 2026_07_21). Расчёт нагрузки
+    // сам клампит вес max(1, …), поэтому 1% безопасно (нет деления на ноль).
+    #[Validate('required|integer|between:1,500')]
     public int $loadWeight = 100;
 
     public function mount(?User $user = null): void
