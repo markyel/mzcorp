@@ -212,14 +212,31 @@ class NotificationsDispatchClientCommand extends Command
      */
     private function collectQuoteFollowupReminders(ClientNotificationTemplate $tmpl, SettingsService $settings): array
     {
-        $thresholdHours = $tmpl->threshold_hours
-            ?? ((int) $settings->get('attention.quoted_first_followup_days', 3) * 24);
-        $cutoff = now()->subHours($thresholdHours);
+        $quotedCutoff = now()->subHours(
+            $tmpl->threshold_hours
+            ?? ((int) $settings->get('attention.quoted_first_followup_days', 3) * 24)
+        );
+        // UnderReview («На согласовании») — тот же тип напоминания (КП уже у
+        // клиента, ждём решение), но со своим порогом under_review_days. Пустой
+        // scope_key + uniq(request_id, type) означают: если напоминание уже
+        // ушло в статусе Quoted, при переходе в UnderReview повторно НЕ шлём —
+        // клиент уже нагнан, не спамим.
+        $underReviewCutoff = now()->subHours(
+            (int) $settings->get('attention.under_review_days', 3) * 24
+        );
 
-        // Заявки в Quoted без перехода в AwaitingInvoice/Invoiced/Paid + давно.
+        // Заявки в Quoted / UnderReview (КП отправлено, решения нет) + давно,
+        // каждый статус — со своим порогом тишины.
         $candidates = Request::with(['emailMessage'])
-            ->where('status', RequestStatus::Quoted->value)
-            ->where('updated_at', '<', $cutoff)
+            ->where(function ($q) use ($quotedCutoff, $underReviewCutoff) {
+                $q->where(function ($x) use ($quotedCutoff) {
+                    $x->where('status', RequestStatus::Quoted->value)
+                        ->where('updated_at', '<', $quotedCutoff);
+                })->orWhere(function ($x) use ($underReviewCutoff) {
+                    $x->where('status', RequestStatus::UnderReview->value)
+                        ->where('updated_at', '<', $underReviewCutoff);
+                });
+            })
             ->get();
 
         $result = [];

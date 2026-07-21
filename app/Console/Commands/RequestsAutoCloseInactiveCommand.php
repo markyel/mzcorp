@@ -66,6 +66,11 @@ class RequestsAutoCloseInactiveCommand extends Command
 
         $clarDays = (int) $settings->get('auto_close.clarification_days', 4);
         $quoteDays = (int) $settings->get('auto_close.quote_days', 5);
+        // «На согласовании» (UnderReview) — отдельный порог: клиент сказал что
+        // рассматривает КП, ему обычно дают больше времени, чем молчащему после
+        // отправки КП. Дефолт 0 = выкл (правило вводится позже опциональной
+        // настройкой РОПа). Reason тот же — молчание по нашему КП.
+        $underReviewDays = (int) $settings->get('auto_close.under_review_days', 0);
         $invoiceDays = (int) $settings->get('auto_close.invoice_days', 5);
         // Пауза после НАШЕГО напоминания клиенту: мы только что попросили
         // ответить — надо дать время. 0 = выкл.
@@ -75,12 +80,12 @@ class RequestsAutoCloseInactiveCommand extends Command
             $this->info('DRY-RUN: ничего не закрывается.');
         }
         $this->info(sprintf(
-            'Пороги (раб. дн., 0=выкл): уточнение=%d · КП=%d · счёт=%d · пауза после напоминания=%d',
-            $clarDays, $quoteDays, $invoiceDays, $graceDays,
+            'Пороги (раб. дн., 0=выкл): уточнение=%d · КП=%d · согласование=%d · счёт=%d · пауза после напоминания=%d',
+            $clarDays, $quoteDays, $underReviewDays, $invoiceDays, $graceDays,
         ));
 
         $closed = 0;
-        $stats = ['clarification' => 0, 'quote' => 0, 'invoice' => 0];
+        $stats = ['clarification' => 0, 'quote' => 0, 'under_review' => 0, 'invoice' => 0];
 
         $reachedLimit = fn (): bool => $limit > 0 && $closed >= $limit;
 
@@ -183,6 +188,33 @@ class RequestsAutoCloseInactiveCommand extends Command
             }
         }
 
+        // (b2) Молчание на согласовании (UnderReview). Клиент подтвердил, что
+        // рассматривает КП, но затем замолчал. Та же политика/reason, что и (b),
+        // отдельный порог under_review_days (обычно длиннее). Grace-гард — по
+        // тому же напоминанию quote_followup_reminder (оно теперь шлётся и в
+        // UnderReview). Anchor тишины — last_activity_at.
+        if ($underReviewDays > 0 && ! $reachedLimit()) {
+            $reqs = Request::query()
+                ->where('status', RequestStatus::UnderReview->value)
+                ->whereRaw('COALESCE(last_activity_at, updated_at) < ?', [now()->subDays($underReviewDays)])
+                ->get();
+            foreach ($reqs as $req) {
+                if ($reachedLimit()) {
+                    break;
+                }
+                if (! $this->isClosable($req)) {
+                    continue;
+                }
+                if (! $this->dueBusiness($cal, $req->last_activity_at ?? $req->updated_at, $underReviewDays)
+                    || $this->clientEngagedRecently($cal, $req, $underReviewDays)
+                    || $this->reminderGraceActive($cal, $req, [\App\Enums\ClientNotificationType::QuoteFollowupReminder->value], $graceDays)) {
+                    continue;
+                }
+                $close($req, ClosedLostReason::NoClientResponseToQuote,
+                    sprintf('Клиент молчит на согласовании КП более %d раб. дн.', $underReviewDays), 'under_review');
+            }
+        }
+
         // (c) Счёт не оплачен N раб. дней с выставления.
         if ($invoiceDays > 0 && ! $reachedLimit()) {
             $invoices = Invoice::query()
@@ -258,8 +290,8 @@ class RequestsAutoCloseInactiveCommand extends Command
         }
 
         $this->info(sprintf(
-            'Закрыто: уточнение=%d · КП=%d · счёт=%d (всего %d)%s',
-            $stats['clarification'], $stats['quote'], $stats['invoice'], $closed,
+            'Закрыто: уточнение=%d · КП=%d · согласование=%d · счёт=%d (всего %d)%s',
+            $stats['clarification'], $stats['quote'], $stats['under_review'], $stats['invoice'], $closed,
             $dryRun ? ' [DRY-RUN]' : '',
         ));
 
