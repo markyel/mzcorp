@@ -33,8 +33,15 @@ class ClassifyClientResponsePrompt
      */
     public function build(EmailMessage $message, Request $request): array
     {
+        // Классифицируем ТОЛЬКО новый текст ответа клиента — процитированную
+        // историю срезаем. Иначе LLM приписывает текущему письму намерение из
+        // цитаты: клиент пишет «поменяйте доставку», а в цитате его же
+        // первичное «Прошу выставить счёт» — и интент уходит в invoice_request
+        // (кейс M-2026-4607). cleanInboundReferenceText тут бессилен: body_plain
+        // из HTML часто без переносов, а он режет по началам строк.
         $body = (string) ($message->body_plain ?: strip_tags((string) $message->body_html));
-        $body = mb_substr(trim($body), 0, self::MAX_BODY_CHARS);
+        $body = $this->stripQuotedTail(trim($body));
+        $body = mb_substr($body, 0, self::MAX_BODY_CHARS);
 
         $subject = (string) ($message->subject ?? '(без темы)');
         $fromEmail = (string) ($message->from_email ?? '');
@@ -81,6 +88,48 @@ class ClassifyClientResponsePrompt
             ['role' => 'system', 'content' => $this->systemPrompt($request->status)],
             ['role' => 'user', 'content' => $userPrompt],
         ];
+    }
+
+    /**
+     * Срезать процитированную историю письма, оставив только новый текст ответа
+     * клиента. Работает ПОСТРОЧНО-НЕЗАВИСИМО (маркеры ищутся внутри строки):
+     * body_plain из HTML часто идёт одной строкой без переносов, поэтому
+     * line-based EmailTextCleanerService::cleanInboundReferenceText не срабатывает.
+     *
+     * Гард против bottom-posting: если до самого раннего маркера почти нет
+     * текста (< 12 симв) — вероятно цитата с самого верха / ответ под ней,
+     * тогда не режем.
+     */
+    private function stripQuotedTail(string $text): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+
+        $markers = [
+            '/-{10,}/u',                                                      // длинный разделитель ----
+            '/\d{1,2}\.\d{2}\.\d{4}[ ,][^:]{0,60}?(?:пишет|написал(?:а)?|wrote)\s*:/iu', // «16.06.2026 11:46, X пишет:»
+            '/\d{1,2}\.\d{2}\.\d{4},\s*\d{1,2}:\d{2},/u',                     // Yandex «16.06.2026, 13:53,»
+            '/\bКому\s*:/u',                                                  // Yandex-forward «Кому:»
+            '/\b(?:From|От\s+кого)\s*:/u',
+            '/\bНачало\s+пересланного\s+сообщения\b/iu',
+            '/^\s*>\s?/mu',                                                   // >-цитата
+        ];
+
+        $cut = mb_strlen($text);
+        foreach ($markers as $re) {
+            if (preg_match($re, $text, $m, PREG_OFFSET_CAPTURE)) {
+                $charPos = mb_strlen(substr($text, 0, $m[0][1]));
+                $cut = min($cut, $charPos);
+            }
+        }
+
+        if ($cut < 12) {
+            return $text;
+        }
+
+        return trim(mb_substr($text, 0, $cut));
     }
 
     private function systemPrompt(RequestStatus $currentStatus): string
