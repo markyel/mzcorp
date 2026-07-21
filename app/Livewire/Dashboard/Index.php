@@ -569,7 +569,9 @@ class Index extends Component
     #[Computed]
     public function mailboxes()
     {
-        return Mailbox::orderBy('id')->get();
+        // Только активные — отключённые/архивные ящики не засоряют виджет
+        // дашборда (их видно в разделе управления ящиками).
+        return Mailbox::where('is_active', true)->orderBy('id')->get();
     }
 
     /**

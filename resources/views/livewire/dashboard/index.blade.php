@@ -207,18 +207,23 @@
                         </div>
                         <div class="w-16 text-right mono tnum text-fg-1 font-semibold">{{ $f['quoted'] }}</div>
                     </div>
-                    {{-- Won / Lost — две полосы рядом --}}
+                    {{-- Won / Lost — две полосы рядом, значения на самой шкале,
+                         справа — ВСЕГО закрыто (won+lost). --}}
                     <div class="flex items-center gap-3">
                         <div class="w-28 shrink-0 text-fg-2 uppercase text-[10.5px] tracking-wider">Закрыто</div>
                         <div class="flex-1 h-7 rounded bg-neutral-100 relative overflow-hidden flex">
-                            <div class="h-full bg-emerald-500" style="width: {{ $w($f['won']) }}%" title="Закрыто-выиграно"></div>
-                            <div class="h-full bg-red-400" style="width: {{ $w($f['lost']) }}%" title="Закрыто-проиграно"></div>
+                            <div class="h-full bg-emerald-500 flex items-center justify-center overflow-hidden" style="width: {{ $w($f['won']) }}%" title="Закрыто-выиграно: {{ $f['won'] }}">
+                                @if($f['won'] > 0)
+                                    <span class="mono tnum text-[10.5px] font-semibold text-white" style="text-shadow:0 1px 1.5px rgba(0,0,0,.4)">{{ $f['won'] }}</span>
+                                @endif
+                            </div>
+                            <div class="h-full bg-red-400 flex items-center justify-center overflow-hidden" style="width: {{ $w($f['lost']) }}%" title="Закрыто-проиграно: {{ $f['lost'] }}">
+                                @if($f['lost'] > 0)
+                                    <span class="mono tnum text-[10.5px] font-semibold text-white" style="text-shadow:0 1px 1.5px rgba(0,0,0,.4)">{{ $f['lost'] }}</span>
+                                @endif
+                            </div>
                         </div>
-                        <div class="w-16 text-right mono tnum text-fg-1 font-semibold">
-                            <span class="text-emerald-700">{{ $f['won'] }}</span>
-                            <span class="text-fg-3">/</span>
-                            <span class="text-red-700">{{ $f['lost'] }}</span>
-                        </div>
+                        <div class="w-16 text-right mono tnum text-fg-1 font-semibold" title="Всего закрыто (выиграно + проиграно)">{{ $f['won'] + $f['lost'] }}</div>
                     </div>
                 </div>
                 <div class="text-[10.5px] text-fg-4 mt-3">
@@ -556,8 +561,8 @@
                     <div class="ds-card-header">
                         <h3>AI-категории писем</h3>
                         <span class="flex-1"></span>
-                        <span class="text-[11.5px] text-fg-3">
-                            покрытие 30 дн: <span class="mono tnum text-fg-2">{{ $coverage['classified'] }} / {{ $coverage['total'] }}</span>
+                        <span class="text-[11.5px] text-fg-3" title="Сколько ВХОДЯЩИХ ПИСЕМ (не заявок) за 30 дней получили AI-категорию">
+                            категоризовано писем 30 дн: <span class="mono tnum text-fg-2">{{ $coverage['classified'] }} / {{ $coverage['total'] }}</span>
                             · <span class="mono tnum text-fg-1 font-semibold">{{ $coverage['percent'] }}%</span>
                         </span>
                     </div>
@@ -578,6 +583,9 @@
                                 @endforeach
                             </div>
                         @endif
+                        <div class="text-[10.5px] text-fg-4 mt-3">
+                            Считаются ВХОДЯЩИЕ ПИСЬМА за 30 дней, а не заявки. Одна заявка — это тред из нескольких писем, плюс сюда входят ответы в переписке, ответы поставщиков, постпродажные письма и нерелевантное (спам/рассылки). Поэтому число писем в разы больше числа заявок.
+                        </div>
                     </div>
                 </div>
 
