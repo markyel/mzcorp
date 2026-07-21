@@ -207,8 +207,19 @@ class Pool extends Component
      * Assigned → InProgress заявка пропадала из старого URL-фильтра
      * (?status=assigned).
      */
-    /** Query-параметры фильтров пула (для URL-детекта и хранения в сессии). */
-    private const FILTER_KEYS = ['q', 'scope', 'status', 'bucket', 'mgr', 'sort', 'onec', 'unassigned', 'delegated'];
+    /**
+     * Query-параметры фильтров пула (для URL-детекта и хранения в сессии).
+     *
+     * `q` (строка поиска) СОЗНАТЕЛЬНО НЕ входит: поиск — разовое действие в
+     * топбаре (GET-форма в layouts/navigation.blade.php), его инпут отображает
+     * `request()->query('q')`, а не состояние компонента. Если персистить q в
+     * сессии — при возврате на голый /requests результаты фильтруются по
+     * старому запросу, а поле поиска пустое (рассинхрон). Поэтому поиск всегда
+     * сбрасывается при уходе, а сохранённые фильтры-дропдауны — нет. Заодно
+     * приход через топбар (?q=foo без прочих параметров) НЕ считается
+     * «URL-фильтрами» → сохранённые фильтры восстановятся, поиск ляжет поверх.
+     */
+    private const FILTER_KEYS = ['scope', 'status', 'bucket', 'mgr', 'sort', 'onec', 'unassigned', 'delegated'];
 
     public function mount(): void
     {
@@ -249,7 +260,7 @@ class Pool extends Component
         if (! is_array($f)) {
             return false;
         }
-        $this->search = (string) ($f['q'] ?? $this->search);
+        // q (поиск) намеренно не восстанавливаем — см. FILTER_KEYS docblock.
         $this->scope = (string) ($f['scope'] ?? $this->scope);
         $this->status = (string) ($f['status'] ?? $this->status);
         $this->bucket = (string) ($f['bucket'] ?? $this->bucket);
@@ -269,7 +280,7 @@ class Pool extends Component
     private function persistFilters(): void
     {
         session()->put('pool.filters', [
-            'q' => $this->search,
+            // q (поиск) не сохраняем — см. FILTER_KEYS docblock.
             'scope' => $this->scope,
             'status' => $this->status,
             'bucket' => $this->bucket,
