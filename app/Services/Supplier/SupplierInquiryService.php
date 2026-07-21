@@ -189,6 +189,58 @@ class SupplierInquiryService
     }
 
     /**
+     * Похоже ли письмо на ответ на НАШ запрос расценки — по ТЕМЕ.
+     *
+     * Нужно, когда тред разорван на уровне заголовков: поставщик пересылает наш
+     * RFQ внутри себя («Re: Fw: …»), In-Reply-To пуст, а References указывают на
+     * его собственный домен, а не на наш message_id — matchInbound по цепочке не
+     * срабатывает. Единственная ниточка к RFQ остаётся в теме.
+     *
+     * Гард строгий: тема должна содержать И префикс нашего RFQ
+     * («Price request» / «Запрос расценки»), И наш внутренний код заявки
+     * (M-YYYY-NNNN). Клиентское письмо так выглядеть не может — код заявки
+     * знаем только мы, и он попадает наружу лишь в исходящем RFQ поставщику.
+     */
+    public function looksLikeRfqReply(EmailMessage $message): bool
+    {
+        if ($message->direction !== MailDirection::Inbound) {
+            return false;
+        }
+        $subject = (string) $message->subject;
+
+        return preg_match('/(price request|запрос расценки)/iu', $subject) === 1
+            && preg_match('/\bM-\d{4}-\d+/u', $subject) === 1;
+    }
+
+    /**
+     * Найти запрос поставщику по ТЕМЕ ответа (fallback к matchInbound, когда
+     * тред разорван). Матч по паре «почта поставщика = отправитель» + «код
+     * заявки из темы присутствует в теме инквайри». Возвращает последний
+     * подходящий инквайри или null (в т.ч. если инквайри ещё не зарегистрирован).
+     */
+    public function matchInboundBySubject(EmailMessage $message): ?SupplierInquiry
+    {
+        if (! $this->looksLikeRfqReply($message)) {
+            return null;
+        }
+        if (! preg_match('/\bM-\d{4}-\d+/u', (string) $message->subject, $m)) {
+            return null;
+        }
+        $code = $m[0];
+        $from = mb_strtolower(trim((string) $message->from_email));
+        if ($from === '') {
+            return null;
+        }
+        $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $code) . '%';
+
+        return SupplierInquiry::query()
+            ->whereRaw('LOWER(supplier_email) = ?', [$from])
+            ->where('subject', 'ilike', $like)
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    /**
      * Прицепить письмо к запросу поставщику: проставить supplier_inquiry_id +
      * для входящих category=supplier_reply (чтобы не уходило в client-pipeline
      * и mail-review). Идемпотентно.

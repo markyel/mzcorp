@@ -288,6 +288,49 @@ class MailRouter
             ]);
         }
 
+        // Fallback по ТЕМЕ: ответ на НАШ RFQ, но тред разорван (поставщик
+        // переслал наш запрос внутри себя — «Re: Fw: …», In-Reply-To пуст,
+        // References на его домен), поэтому matchInbound по цепочке не связал.
+        // Тема несёт код клиентской заявки (мы зашиваем его в RFQ), и без этого
+        // гарда reply-linker цепляет ответ к клиентской заявке и плодит фантом
+        // (кейс M-2026-9028: ответ поставщика → заявка M-2026-9028). Ответ на
+        // наш RFQ клиентской заявкой быть НЕ может — гасим до linker'а.
+        if ($message->direction === \App\Enums\MailDirection::Inbound
+            && $this->supplierInquiries->looksLikeRfqReply($message)) {
+            try {
+                $bySubject = $this->supplierInquiries->matchInboundBySubject($message);
+                if ($bySubject !== null) {
+                    $this->supplierInquiries->attachMessage($bySubject, $message);
+                    Log::info('MailRouter: supplier reply matched by RFQ subject (broken thread) — attached, no request', [
+                        'email_message_id' => $message->id,
+                        'supplier_inquiry_id' => $bySubject->id,
+                        'from_email' => $message->from_email,
+                    ]);
+
+                    return;
+                }
+                // Инквайри ещё не зарегистрирован (гонка отправки/синка) — всё
+                // равно НЕ создаём клиентскую заявку. Помечаем как переписку
+                // поставщика; привяжется, когда инквайри появится.
+                $message->forceFill([
+                    'category' => \App\Enums\EmailCategory::SupplierReply->value,
+                    'categorized_at' => now(),
+                ])->save();
+                Log::info('MailRouter: RFQ-subject reply, inquiry not registered yet — client request suppressed', [
+                    'email_message_id' => $message->id,
+                    'from_email' => $message->from_email,
+                    'subject' => $message->subject,
+                ]);
+
+                return;
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: RFQ-subject supplier fallback failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         // Phase 1.8c: категоризация (LazyLift drop-in). Заполняет
         // email_messages.category — для дальнейших шагов (linker уровня 4
         // использует это как сигнал, парсер позиций — как gate).
