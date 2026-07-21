@@ -207,12 +207,23 @@ class Pool extends Component
      * Assigned → InProgress заявка пропадала из старого URL-фильтра
      * (?status=assigned).
      */
+    /** Query-параметры фильтров пула (для URL-детекта и хранения в сессии). */
+    private const FILTER_KEYS = ['q', 'scope', 'status', 'bucket', 'mgr', 'sort', 'onec', 'unassigned', 'delegated'];
+
     public function mount(): void
     {
+        // Восстановление фильтров между заходами: если открыт ГОЛЫЙ
+        // /dashboard/requests без фильтров в URL (пункт рейла «Заявки», кнопка
+        // «← К списку» с пустым referrer, закладка), поднимаем последний набор
+        // фильтров из сессии. Менеджер/директор, зайдя в заявку и вернувшись,
+        // попадает в тот же отфильтрованный список (жалоба: фильтры сбрасываются).
+        $hasUrlFilters = collect(self::FILTER_KEYS)->contains(fn ($k) => request()->query($k) !== null);
+        $restored = $hasUrlFilters ? false : $this->restoreFiltersFromSession();
+
         // Default scope = 'mine' (свои заявки). Но Director / Secretary НЕ
         // обрабатывают заявки сами (нет ни одной с assigned_user_id=them),
-        // поэтому им бессмысленно открывать пустой «Мои». Если scope не
-        // задан явно в URL → переключаем на 'all' для этих ролей.
+        // поэтому им бессмысленно открывать пустой «Мои». Если scope не задан
+        // ни в URL, ни в восстановленной сессии → переключаем на 'all'.
         $user = auth()->user();
         $isViewerOnly = $user?->hasAnyRole([
             Role::Director->value,
@@ -220,13 +231,54 @@ class Pool extends Component
             Role::Admin->value,
         ]) && ! $user->hasRole(Role::HeadOfSales->value)
             && ! $user->hasRole(Role::Manager->value);
-        if ($isViewerOnly && request()->query('scope') === null) {
+        if ($isViewerOnly && request()->query('scope') === null && ! $restored) {
             $this->scope = 'all';
         }
 
         if ($this->status !== '' && ! in_array($this->status, $this->statusesForBucket(), true)) {
             $this->status = '';
         }
+    }
+
+    /**
+     * Восстановить фильтры из сессии. true — если восстановили.
+     */
+    private function restoreFiltersFromSession(): bool
+    {
+        $f = session('pool.filters');
+        if (! is_array($f)) {
+            return false;
+        }
+        $this->search = (string) ($f['q'] ?? $this->search);
+        $this->scope = (string) ($f['scope'] ?? $this->scope);
+        $this->status = (string) ($f['status'] ?? $this->status);
+        $this->bucket = (string) ($f['bucket'] ?? $this->bucket);
+        $this->assignedUserId = isset($f['mgr']) ? ($f['mgr'] !== null ? (int) $f['mgr'] : null) : $this->assignedUserId;
+        $this->sort = (string) ($f['sort'] ?? $this->sort);
+        $this->oneCFilter = (string) ($f['onec'] ?? $this->oneCFilter);
+        $this->unassignedOnly = (bool) ($f['unassigned'] ?? $this->unassignedOnly);
+        $this->delegatedOnly = (bool) ($f['delegated'] ?? $this->delegatedOnly);
+
+        return true;
+    }
+
+    /**
+     * Запомнить текущий набор фильтров. Зовётся из render() — ловит ЛЮБОЙ
+     * способ смены (wire:model, action-кнопки bucket/manager, URL).
+     */
+    private function persistFilters(): void
+    {
+        session()->put('pool.filters', [
+            'q' => $this->search,
+            'scope' => $this->scope,
+            'status' => $this->status,
+            'bucket' => $this->bucket,
+            'mgr' => $this->assignedUserId,
+            'sort' => $this->sort,
+            'onec' => $this->oneCFilter,
+            'unassigned' => $this->unassignedOnly,
+            'delegated' => $this->delegatedOnly,
+        ]);
     }
 
     public function setBucket(string $bucket): void
@@ -381,6 +433,10 @@ class Pool extends Component
 
     public function render()
     {
+        // Сохраняем текущий набор фильтров на каждый рендер — чтобы возврат к
+        // списку (даже на голый URL) поднял их из сессии (см. mount).
+        $this->persistFilters();
+
         $query = Request::query()
             ->with([
                 'assignedUser:id,name,avatar_neutral_path,avatar_won_path,avatar_lost_path',
