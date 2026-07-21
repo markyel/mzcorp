@@ -623,8 +623,8 @@ class Index extends Component
     private function categoryOutcomeNote(EmailCategory $c): string
     {
         return match ($c) {
-            EmailCategory::ClientRequest => 'запрос запчастей / КП → из них формируются заявки',
-            EmailCategory::ThreadReply => 'ответ клиента → прикрепляется к заявке',
+            EmailCategory::ClientRequest => 'есть товарные позиции → парсятся в заявку',
+            EmailCategory::ThreadReply => 'ответ БЕЗ новых позиций (вопрос / подтверждение / счёт)',
             EmailCategory::SupplierReply => 'ответ поставщика → в тред закупки',
             EmailCategory::PostSale => 'по закрытой сделке → без новой заявки',
             EmailCategory::Irrelevant => 'спам / авто / наши → отсеивается',

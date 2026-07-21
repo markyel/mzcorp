@@ -611,7 +611,7 @@
                                                 <div class="w-40 shrink-0">└ разбивка</div>
                                                 <div class="flex-1">
                                                     <span class="mono tnum text-fg-2">{{ $mail['opened_new'] }}</span> открыли новую заявку
-                                                    · <span class="mono tnum text-fg-2">{{ $mail['added_existing'] }}</span> дополнили существующую
+                                                    · <span class="mono tnum text-fg-2">{{ $mail['added_existing'] }}</span> дополнили существующую (новые позиции)
                                                 </div>
                                             </div>
                                         @endif
