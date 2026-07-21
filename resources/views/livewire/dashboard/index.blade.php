@@ -568,18 +568,15 @@
                         </span>
                     </div>
                     <div class="ds-card-body space-y-3">
-                        {{-- Два опорных числа: письма (вход) и заявки (выход) --}}
-                        <div class="grid grid-cols-2 gap-2 text-center">
-                            <div class="p-2.5 rounded-md border border-border bg-app">
-                                <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Проанализировано писем</div>
-                                <div class="text-[20px] font-bold mono tnum text-fg-1">{{ $mail['analyzed'] }}</div>
-                                <div class="text-[10.5px] text-fg-4 mt-0.5">входящих за период</div>
-                            </div>
-                            <div class="p-2.5 rounded-md border border-sky-200 bg-sky-50">
-                                <div class="text-[10.5px] uppercase tracking-wider text-sky-700 font-semibold mb-1">Создано заявок</div>
-                                <div class="text-[20px] font-bold mono tnum text-sky-800">{{ $mail['requests_created'] }}</div>
-                                <div class="text-[10.5px] text-fg-4 mt-0.5">= «Получено» в воронке</div>
-                            </div>
+                        {{-- ВХОД: сколько писем разобрал AI. Заявки НЕ здесь —
+                             они показаны суммой ниже, чтобы 3366 не выглядело
+                             соперником 3898 (оно его слагаемое). --}}
+                        <div class="flex items-center justify-between p-2.5 rounded-md border border-border bg-app">
+                            <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold">Проанализировано входящих писем</span>
+                            <span class="whitespace-nowrap">
+                                <span class="text-[20px] font-bold mono tnum text-fg-1">{{ $mail['analyzed'] }}</span>
+                                <span class="text-[10.5px] text-fg-4 ml-1">покрытие AI {{ $mail['percent'] }}%</span>
+                            </span>
                         </div>
 
                         {{-- Разбивка ПИСЕМ по категориям + что с ними делаем --}}
@@ -620,9 +617,27 @@
                             @endif
                         </div>
 
+                        {{-- ВЫХОД: заявки — как ЯВНАЯ СУММА слагаемых, чтобы
+                             3366 читалось частью 3898, а не конфликтом. --}}
+                        <div class="rounded-md border border-sky-200 bg-sky-50 p-2.5">
+                            <div class="text-[10.5px] uppercase tracking-wider text-sky-700 font-semibold mb-1.5">Как из писем получаются заявки</div>
+                            <div class="space-y-1 text-[12px]">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-fg-2">из писем-запросов · открыли новую</span>
+                                    <span class="mono tnum text-fg-1">{{ $mail['opened_new'] }}</span>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-fg-2">из ответов в переписке и пр. · дописали позицию в старый тред → новая заявка</span>
+                                    <span class="mono tnum text-fg-1">+ {{ $mail['other_created'] }}</span>
+                                </div>
+                                <div class="flex items-center justify-between border-t border-sky-200 pt-1 mt-1">
+                                    <span class="text-sky-800 font-semibold">Создано заявок · = «Получено» в воронке</span>
+                                    <span class="mono tnum text-sky-800 font-semibold text-[14px]">{{ $mail['requests_created'] }}</span>
+                                </div>
+                            </div>
+                        </div>
                         <div class="text-[10.5px] text-fg-4">
-                            Письма ≠ заявки, вычитать их друг из друга нельзя. Из {{ $mail['request_emails'] }} писем-запросов {{ $mail['opened_new'] }} открыли новую заявку, а {{ $mail['added_existing'] }} легли в уже существующую (клиент дополняет заказ в том же треде).
-                            «Создано заявок» ({{ $mail['requests_created'] }}) = {{ $mail['opened_new'] }} из писем-запросов + {{ $mail['other_created'] }} открыты из писем других категорий (напр. клиент дописал новую позицию в старый тред → новая заявка). Это число совпадает с «Получено» в воронке.
+                            Ещё {{ $mail['added_existing'] }} писем-запросов легли в уже существующие заявки (клиент дополняет заказ в том же треде) — новых заявок они не создают, поэтому в сумму выше не входят.
                         </div>
                     </div>
                 </div>
