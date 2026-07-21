@@ -65,6 +65,26 @@ class InboundIntentClassifier
 
     private const CONFIDENCE_FLOOR = 0.6;
 
+    /**
+     * Потолок confidence для invoice_request БЕЗ слова «счёт» в письме: ниже
+     * порога auto-apply (detector.confidence_threshold=0.85), выше floor(0.6) —
+     * решение остаётся подсказкой, заявку в «ждёт счёт» авто не переводит.
+     */
+    private const INVOICE_NO_TOKEN_CONF_CAP = 0.7;
+
+    /** Токены явного запроса счёта в тексте письма клиента. */
+    private const INVOICE_TOKENS_RE = '/сч[её]т|на\s+оплат|invoice|инвойс/iu';
+
+    /** Маркеры начала процитированной истории — режем перед проверкой токена. */
+    private const QUOTE_MARKERS_RE = [
+        '/-{10,}/u',
+        '/\d{1,2}\.\d{2}\.\d{4}[ ,][^:]{0,60}?(?:пишет|написал(?:а)?|wrote)\s*:/iu',
+        '/\d{1,2}\.\d{2}\.\d{4},\s*\d{1,2}:\d{2},/u',
+        '/\bКому\s*:/u',
+        '/\b(?:From|От\s+кого)\s*:/u',
+        '/^\s*>\s?/mu',
+    ];
+
     public function __construct(
         private readonly OpenAIChatService $openai,
         private readonly ClassifyClientResponsePrompt $prompt,
@@ -150,6 +170,21 @@ class InboundIntentClassifier
             $type = DetectorType::InboundUnclear;
         }
 
+        // Детерминированный гард авто-счёта: invoice_request авто-переводит
+        // заявку в awaiting_invoice («ждёт счёт»). Но модель охотно принимает
+        // любое подтверждение («Да», «да, такой нужен», «верно», «вы же уже
+        // выставляли КП») за согласие на счёт. Если в НОВОМ тексте письма
+        // (без цитаты) нет явного упоминания счёта/оплаты — НЕ авто-применяем:
+        // роняем confidence ниже порога auto-apply, решение остаётся подсказкой
+        // менеджеру. Кейсы M-2026-4607/5074/5978/5857. Промптом это не лечится —
+        // у модели сильный прайор «подтверждение после КП = счёт».
+        if ($type === DetectorType::InboundInvoiceRequest
+            && ! $this->mentionsInvoiceToken($message)
+            && $confidence > self::INVOICE_NO_TOKEN_CONF_CAP
+        ) {
+            $confidence = self::INVOICE_NO_TOKEN_CONF_CAP;
+        }
+
         // В ранних статусах (до квотирования) автоприменяем ТОЛЬКО decline
         // (явная отмена/отказ). Остальные интенты (счёт/доп.позиции/согласование/
         // отложить) на ранней стадии преждевременны — downgrade в unclear,
@@ -194,6 +229,33 @@ class InboundIntentClassifier
             'confidence' => $confidence,
             'payload' => $payload,
         ];
+    }
+
+    /**
+     * Есть ли в НОВОМ тексте письма клиента (без процитированной истории)
+     * явное упоминание счёта/оплаты. Цитату режем — иначе «счёт» из нашего же
+     * КП/предыдущего письма в цитате даст ложное срабатывание.
+     */
+    private function mentionsInvoiceToken(EmailMessage $message): bool
+    {
+        $text = trim((string) ($message->body_plain ?: strip_tags((string) $message->body_html)));
+        if ($text === '') {
+            return false;
+        }
+
+        // Срезать цитату по самому раннему маркеру (построчно-независимо).
+        $cut = mb_strlen($text);
+        foreach (self::QUOTE_MARKERS_RE as $re) {
+            if (preg_match($re, $text, $m, PREG_OFFSET_CAPTURE)) {
+                $charPos = mb_strlen(substr($text, 0, $m[0][1]));
+                $cut = min($cut, $charPos);
+            }
+        }
+        if ($cut >= 12) {
+            $text = mb_substr($text, 0, $cut);
+        }
+
+        return preg_match(self::INVOICE_TOKENS_RE, $text) === 1;
     }
 
     private function intentToDetectorType(string $intent, RequestStatus $currentStatus): ?DetectorType
