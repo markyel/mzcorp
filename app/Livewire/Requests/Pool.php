@@ -555,8 +555,13 @@ class Pool extends Component
 
         // «Наш отказ» — closed_lost по нашей инициативе (не наша тематика /
         // не можем предложить), в отличие от потерь по вине клиента.
+        // Только активные (не архивные) владельцы — ровно как фильтр менеджеров
+        // (User::active()): исторические заявки на архивных seed/плейсхолдер-
+        // аккаунтах в этот аналитический бакет не тянем, иначе «Все» ≠ сумме по
+        // менеджерам (их нельзя выбрать в фильтре).
         if ($this->bucket === 'refused') {
-            $query->whereIn('closed_lost_reason', ClosedLostReason::ourInitiativeValues());
+            $query->whereIn('closed_lost_reason', ClosedLostReason::ourInitiativeValues())
+                ->whereHas('assignedUser', fn ($q) => $q->active());
         }
 
         // Уточняющий status-фильтр внутри bucket'а — только если значение
@@ -714,10 +719,12 @@ class Pool extends Component
                     RequestStatus::ClosedLost->value,
                 ])
                 ->count(),
-            // «Наш отказ» — closed_lost по нашей инициативе (подмножество closed).
+            // «Наш отказ» — closed_lost по нашей инициативе, только активные
+            // (не архивные) владельцы — чтобы «Все» = сумме по менеджерам.
             'refused' => (clone $countsBase)
                 ->where('status', RequestStatus::ClosedLost->value)
                 ->whereIn('closed_lost_reason', ClosedLostReason::ourInitiativeValues())
+                ->whereHas('assignedUser', fn ($q) => $q->active())
                 ->count(),
             // Постпродажа: заказы со счётом/оплатой/успехом и непрочитанным
             // постпродажным письмом.
