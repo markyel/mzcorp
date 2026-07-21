@@ -1,7 +1,7 @@
 @php
     $counts = $this->requestCounts;
-    $coverage = $this->categoryCoverage;
-    $breakdown = $this->categoryBreakdown;
+    $mail = $this->emailProcessing;
+    $breakdown = $mail['breakdown'];
     $maxBreakdown = !empty($breakdown) ? max(array_column($breakdown, 'count')) : 0;
     $periodDays = $this->periodDays;
 @endphp
@@ -556,35 +556,60 @@
                     </div>
                 </div>
 
-                {{-- AI-категории писем --}}
+                {{-- AI-обработка входящей почты. Числа стыкуются со страницей:
+                     «Создано заявок» = funnel['received'] (тот же период и запрос
+                     Request::created). Категории — про ПИСЬМА, явно отделены. --}}
                 <div class="ds-card">
                     <div class="ds-card-header">
-                        <h3>AI-категории писем</h3>
+                        <h3>AI-обработка входящей почты · {{ $this->periodLabel }}</h3>
                         <span class="flex-1"></span>
-                        <span class="text-[11.5px] text-fg-3" title="Сколько ВХОДЯЩИХ ПИСЕМ (не заявок) за 30 дней получили AI-категорию">
-                            категоризовано писем 30 дн: <span class="mono tnum text-fg-2">{{ $coverage['classified'] }} / {{ $coverage['total'] }}</span>
-                            · <span class="mono tnum text-fg-1 font-semibold">{{ $coverage['percent'] }}%</span>
+                        <span class="text-[11.5px] text-fg-3" title="Доля входящих писем, которым AI проставил категорию">
+                            покрытие AI <span class="mono tnum text-fg-1 font-semibold">{{ $mail['percent'] }}%</span>
                         </span>
                     </div>
-                    <div class="ds-card-body">
-                        @if(empty($breakdown))
-                            <div class="text-sm text-fg-3">Нет данных за последние 30 дней.</div>
-                        @else
-                            <div class="space-y-1.5">
-                                @foreach($breakdown as $row)
-                                    <div class="flex items-center gap-3 text-[12.5px]">
-                                        <div class="w-32 shrink-0 text-fg-2">{{ $row['label'] }}</div>
-                                        <div class="flex-1 h-2.5 rounded-full bg-neutral-100 overflow-hidden">
-                                            <div class="h-full bg-sky-500"
-                                                 style="width: {{ $maxBreakdown > 0 ? round($row['count'] * 100 / $maxBreakdown) : 0 }}%"></div>
-                                        </div>
-                                        <div class="w-12 text-right text-fg-1 mono tnum">{{ $row['count'] }}</div>
-                                    </div>
-                                @endforeach
+                    <div class="ds-card-body space-y-3">
+                        {{-- Два опорных числа: письма (вход) и заявки (выход) --}}
+                        <div class="grid grid-cols-2 gap-2 text-center">
+                            <div class="p-2.5 rounded-md border border-border bg-app">
+                                <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Проанализировано писем</div>
+                                <div class="text-[20px] font-bold mono tnum text-fg-1">{{ $mail['analyzed'] }}</div>
+                                <div class="text-[10.5px] text-fg-4 mt-0.5">входящих за период</div>
                             </div>
-                        @endif
-                        <div class="text-[10.5px] text-fg-4 mt-3">
-                            Считаются ВХОДЯЩИЕ ПИСЬМА за 30 дней, а не заявки. Одна заявка — это тред из нескольких писем, плюс сюда входят ответы в переписке, ответы поставщиков, постпродажные письма и нерелевантное (спам/рассылки). Поэтому число писем в разы больше числа заявок.
+                            <div class="p-2.5 rounded-md border border-sky-200 bg-sky-50">
+                                <div class="text-[10.5px] uppercase tracking-wider text-sky-700 font-semibold mb-1">Создано заявок</div>
+                                <div class="text-[20px] font-bold mono tnum text-sky-800">{{ $mail['requests_created'] }}</div>
+                                <div class="text-[10.5px] text-fg-4 mt-0.5">= «Получено» в воронке</div>
+                            </div>
+                        </div>
+
+                        {{-- Разбивка ПИСЕМ по категориям + что с ними делаем --}}
+                        <div>
+                            <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">
+                                Что AI распознал в письмах
+                            </div>
+                            @if(empty($breakdown))
+                                <div class="text-sm text-fg-3">Нет писем за период.</div>
+                            @else
+                                <div class="space-y-1.5">
+                                    @foreach($breakdown as $row)
+                                        <div class="flex items-center gap-3 text-[12.5px]">
+                                            <div class="w-40 shrink-0">
+                                                <div class="text-fg-2 truncate">{{ $row['label'] }}</div>
+                                                <div class="text-[10.5px] text-fg-4 truncate">{{ $row['note'] }}</div>
+                                            </div>
+                                            <div class="flex-1 h-2.5 rounded-full bg-neutral-100 overflow-hidden">
+                                                <div class="h-full bg-sky-500"
+                                                     style="width: {{ $maxBreakdown > 0 ? round($row['count'] * 100 / $maxBreakdown) : 0 }}%"></div>
+                                            </div>
+                                            <div class="w-14 text-right text-fg-1 mono tnum">{{ $row['count'] }}</div>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @endif
+                        </div>
+
+                        <div class="text-[10.5px] text-fg-4">
+                            Разбивка считает ПИСЬМА. Заявка ≠ письмо: по одной заявке клиент обычно шлёт несколько писем-запросов, поэтому «заявок клиентов» (писем) больше, чем «Создано заявок». Заявки создаются только из категории «Заявка клиента»; их итог ({{ $mail['requests_created'] }}) совпадает с «Получено» в воронке.
                         </div>
                     </div>
                 </div>

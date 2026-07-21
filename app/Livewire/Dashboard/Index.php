@@ -515,52 +515,77 @@ class Index extends Component
     }
 
     /**
-     * Распределение писем по EmailCategory за последние 30 дней.
+     * Сводка AI-обработки входящей почты ЗА ВЫБРАННЫЙ ПЕРИОД (то же окно, что
+     * воронка — periodRange). Собрана так, чтобы числа стыковались с остальной
+     * страницей и не путали «письма» с «заявками»:
      *
-     * @return array<int, array{class: string, label: string, count: int}>
+     *   analyzed         — входящих писем за период (сколько AI разобрал);
+     *   classified/%     — покрытие классификатора (у скольких проставлена категория);
+     *   requests_created — заявок создано за период = РОВНО funnel['received']
+     *                      (один и тот же запрос Request::whereBetween(created_at)),
+     *                      поэтому в UI совпадает с «Получено» в воронке;
+     *   breakdown        — распределение ПИСЕМ по категориям + подпись-исход
+     *                      («что с письмом делаем»).
+     *
+     * Ключевой смысл: письмо ≠ заявка. По одной заявке клиент шлёт несколько
+     * писем-запросов (client_request), плюс поток содержит ответы в тредах,
+     * поставщиков, постпродажу, нерелевантное — они заявок не создают.
+     *
+     * @return array{analyzed:int, classified:int, percent:int, requests_created:int,
+     *               breakdown: array<int, array{class:string, label:string, note:string, count:int}>}
      */
     #[Computed]
-    public function categoryBreakdown(): array
+    public function emailProcessing(): array
     {
-        $rows = EmailMessage::query()
-            ->where('direction', 'inbound')
+        [$from, $to] = $this->periodRange();
+
+        $inbound = fn () => EmailMessage::where('direction', 'inbound')
+            ->whereBetween('created_at', [$from, $to]);
+
+        $analyzed = $inbound()->count();
+        $classified = $inbound()->whereNotNull('categorized_at')->count();
+        $requestsCreated = Request::whereBetween('created_at', [$from, $to])->count();
+
+        $rows = $inbound()
             ->whereNotNull('category')
-            ->where('categorized_at', '>=', now()->subDays(30))
             ->groupBy('category')
             ->selectRaw('category AS class, COUNT(*) AS c')
             ->orderByDesc('c')
             ->get();
 
-        return $rows->map(function ($r) {
+        $breakdown = $rows->map(function ($r) {
             $enum = EmailCategory::tryFrom($r->class);
 
             return [
                 'class' => $r->class,
                 'label' => $enum?->label() ?? $r->class,
+                'note' => $enum ? $this->categoryOutcomeNote($enum) : '',
                 'count' => (int) $r->c,
             ];
         })->all();
+
+        return [
+            'analyzed' => $analyzed,
+            'classified' => $classified,
+            'percent' => $analyzed > 0 ? (int) round($classified * 100 / $analyzed) : 0,
+            'requests_created' => $requestsCreated,
+            'breakdown' => $breakdown,
+        ];
     }
 
     /**
-     * Какой % писем за 30 дней успешно категоризирован.
+     * Короткая подпись «что система делает с письмом этой категории» — для
+     * интуитивности блока AI-обработки. Не бизнес-логика, только UI-текст.
      */
-    #[Computed]
-    public function categoryCoverage(): array
+    private function categoryOutcomeNote(EmailCategory $c): string
     {
-        $total = EmailMessage::where('direction', 'inbound')
-            ->where('created_at', '>=', now()->subDays(30))
-            ->count();
-        $classified = EmailMessage::where('direction', 'inbound')
-            ->where('created_at', '>=', now()->subDays(30))
-            ->whereNotNull('categorized_at')
-            ->count();
-
-        return [
-            'total' => $total,
-            'classified' => $classified,
-            'percent' => $total > 0 ? round($classified * 100 / $total) : 0,
-        ];
+        return match ($c) {
+            EmailCategory::ClientRequest => 'запрос запчастей / КП → заявки',
+            EmailCategory::ThreadReply => 'ответ клиента → прикрепляется к заявке',
+            EmailCategory::SupplierReply => 'ответ поставщика → в тред закупки',
+            EmailCategory::PostSale => 'по закрытой сделке → без новой заявки',
+            EmailCategory::Irrelevant => 'спам / авто / наши → отсеивается',
+        };
     }
 
     /**
