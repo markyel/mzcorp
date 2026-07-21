@@ -42,7 +42,7 @@
                     </label>
                     <div class="flex items-center gap-2">
                         <input type="number" wire:model="loadWeight"
-                               min="1" max="500" step="1"
+                               min="10" max="500" step="1"
                                class="w-[110px] h-[34px] px-3 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)] mono text-right">
                         <span class="text-[13px] text-fg-2">%</span>
                         <span class="text-[11.5px] text-fg-3">
