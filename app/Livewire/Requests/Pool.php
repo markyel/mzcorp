@@ -518,12 +518,18 @@ class Pool extends Component
             // Номер 1С хранится без ведущих нулей — ищем и по введённой форме,
             // и по форме без нулей («000327068» находит «327068»), и по чистой
             // цифровой части («КП 000327068» из буфера 1С тоже находит).
+            // Числовые fallback'и (без нулей / чистые цифры) — ТОЛЬКО для поиска
+            // по номеру 1С. Если пользователь ввёл наш внутренний код заявки
+            // (M-2026-9129 / М-2026-9129), их не применяем: иначе из кода
+            // извлекается ГОД «2026» и onec_number ilike '%2026%' ловит почти
+            // все заявки (кейс: «M-2026-9129» находил M-2026-8165 по году).
+            $isInternalCode = preg_match('/[МM]-?\d{4}-\d+/iu', trim($this->search)) === 1;
             $searchNoZeros = trim((string) preg_replace('/(?<!\d)0+(?=\d)/', '', $this->search));
-            $likeNoZeros = $searchNoZeros !== '' && $searchNoZeros !== $this->search
+            $likeNoZeros = ! $isInternalCode && $searchNoZeros !== '' && $searchNoZeros !== $this->search
                 ? '%'.$searchNoZeros.'%'
                 : null;
             $digits = preg_match('/(\d{4,})/', $searchNoZeros, $dm) === 1 ? $dm[1] : null;
-            $likeDigits = $digits !== null && $digits !== $searchNoZeros && $digits !== $this->search
+            $likeDigits = ! $isInternalCode && $digits !== null && $digits !== $searchNoZeros && $digits !== $this->search
                 ? '%'.$digits.'%'
                 : null;
             $query->where(function ($q) use ($like, $likeNoZeros, $likeDigits) {
