@@ -624,7 +624,7 @@ class Index extends Component
     {
         return match ($c) {
             EmailCategory::ClientRequest => 'есть товарные позиции → парсятся в заявку',
-            EmailCategory::ThreadReply => 'ответ БЕЗ новых позиций (вопрос / подтверждение / счёт)',
+            EmailCategory::ThreadReply => 'ответ без новых позиций (вопрос / счёт)',
             EmailCategory::SupplierReply => 'ответ поставщика → в тред закупки',
             EmailCategory::PostSale => 'по закрытой сделке → без новой заявки',
             EmailCategory::Irrelevant => 'спам / авто / наши → отсеивается',

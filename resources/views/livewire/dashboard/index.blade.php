@@ -590,9 +590,9 @@
                                 <div class="space-y-1.5">
                                     @foreach($breakdown as $row)
                                         <div class="flex items-center gap-3 text-[12.5px]">
-                                            <div class="w-40 shrink-0">
-                                                <div class="text-fg-2 truncate">{{ $row['label'] }}</div>
-                                                <div class="text-[10.5px] text-fg-4 truncate">{{ $row['note'] }}</div>
+                                            <div class="shrink-0" style="width:17rem">
+                                                <div class="text-fg-2" title="{{ $row['label'] }}">{{ $row['label'] }}</div>
+                                                <div class="text-[10.5px] text-fg-4" title="{{ $row['note'] }}">{{ $row['note'] }}</div>
                                             </div>
                                             <div class="flex-1 h-2.5 rounded-full bg-neutral-100 overflow-hidden">
                                                 <div class="h-full bg-sky-500"
@@ -604,12 +604,9 @@
                                              существующую (сумма = число писем-запросов). Отвечает
                                              на «а куда делись остальные письма». --}}
                                         @if($row['class'] === 'client_request')
-                                            <div class="flex items-start gap-3 text-[11px] text-fg-4 pl-3 -mt-0.5">
-                                                <div class="w-40 shrink-0">└ разбивка</div>
-                                                <div class="flex-1">
-                                                    <span class="mono tnum text-fg-2">{{ $mail['opened_new'] }}</span> открыли новую заявку
-                                                    · <span class="mono tnum text-fg-2">{{ $mail['added_existing'] }}</span> дополнили существующую (новые позиции)
-                                                </div>
+                                            <div class="text-[11px] text-fg-4 -mt-0.5" style="padding-left:1rem">
+                                                └ <span class="mono tnum text-fg-2">{{ $mail['opened_new'] }}</span> открыли новую заявку
+                                                · <span class="mono tnum text-fg-2">{{ $mail['added_existing'] }}</span> дополнили существующую (новые позиции)
                                             </div>
                                         @endif
                                     @endforeach
