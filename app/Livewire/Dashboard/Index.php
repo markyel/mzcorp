@@ -558,19 +558,44 @@ class Index extends Component
 
             return [
                 'class' => $r->class,
-                'label' => $enum?->label() ?? $r->class,
+                // Подпись — «письменная», НЕ enum->label() («Заявка клиента»):
+                // в этом блоке считаются ПИСЬМА, и слово «заявка» должно
+                // относиться только к числу заявок (иначе 6453 писем читается
+                // как 6453 заявки и не сходится с «Получено 3898»).
+                'label' => $enum ? $this->categoryMailLabel($enum) : $r->class,
                 'note' => $enum ? $this->categoryOutcomeNote($enum) : '',
                 'count' => (int) $r->c,
             ];
         })->all();
 
+        // Явное число писем-запросов (client_request) — для сноски «писем
+        // больше, чем заявок»; не зависим от порядка $breakdown.
+        $requestEmails = (int) ($rows->firstWhere('class', EmailCategory::ClientRequest->value)->c ?? 0);
+
         return [
             'analyzed' => $analyzed,
             'classified' => $classified,
             'percent' => $analyzed > 0 ? (int) round($classified * 100 / $analyzed) : 0,
+            'request_emails' => $requestEmails,
             'requests_created' => $requestsCreated,
             'breakdown' => $breakdown,
         ];
+    }
+
+    /**
+     * «Письменная» подпись категории для блока AI-обработки: считаются ПИСЬМА,
+     * поэтому названия про письма, а не про сделки (enum->label() = «Заявка
+     * клиента» путал с числом заявок «Получено»). Только UI-текст.
+     */
+    private function categoryMailLabel(EmailCategory $c): string
+    {
+        return match ($c) {
+            EmailCategory::ClientRequest => 'Письма-запросы',
+            EmailCategory::ThreadReply => 'Ответы клиентов в переписке',
+            EmailCategory::SupplierReply => 'Письма от поставщиков',
+            EmailCategory::PostSale => 'Постпродажные письма',
+            EmailCategory::Irrelevant => 'Нерелевантные / спам',
+        };
     }
 
     /**
@@ -580,7 +605,7 @@ class Index extends Component
     private function categoryOutcomeNote(EmailCategory $c): string
     {
         return match ($c) {
-            EmailCategory::ClientRequest => 'запрос запчастей / КП → заявки',
+            EmailCategory::ClientRequest => 'запрос запчастей / КП → из них формируются заявки',
             EmailCategory::ThreadReply => 'ответ клиента → прикрепляется к заявке',
             EmailCategory::SupplierReply => 'ответ поставщика → в тред закупки',
             EmailCategory::PostSale => 'по закрытой сделке → без новой заявки',
