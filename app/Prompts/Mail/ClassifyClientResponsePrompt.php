@@ -69,19 +69,12 @@ class ClassifyClientResponsePrompt
             $positionsBlock = "(позиций нет)\n";
         }
 
-        // Наше последнее исходящее письмо клиенту ДО этого ответа — контекст
-        // «на что отвечает клиент». Без него короткие ответы неотличимы:
-        // «Да» на «оформить счёт?» = invoice_request, а «Да» на «такой башмак
-        // нужен?» = подтверждение позиции (кейсы M-2026-5074/5978).
-        $ourLetterBlock = $this->lastOutboundBlock($request, $message);
-
         $userPrompt = "## КОНТЕКСТ ЗАЯВКИ\n"
             . "Internal code: {$request->internal_code}\n"
             . "Текущий статус: {$request->status->value} ({$request->status->label()})\n"
             . "Клиент: " . ($request->client_name ?: $request->client_email) . "\n"
             . "Тема заявки: " . ((string) ($request->subject ?? '')) . "\n"
             . "Позиции в этой заявке:\n{$positionsBlock}"
-            . $ourLetterBlock
             . "\n"
             . "## ВХОДЯЩЕЕ ПИСЬМО\n"
             . "From: {$fromName} <{$fromEmail}>\n"
@@ -95,31 +88,6 @@ class ClassifyClientResponsePrompt
             ['role' => 'system', 'content' => $this->systemPrompt($request->status)],
             ['role' => 'user', 'content' => $userPrompt],
         ];
-    }
-
-    /**
-     * Блок «наше предыдущее письмо клиенту» для контекста классификации.
-     * Берём последнее исходящее по заявке ДО текущего ответа, срезаем цитату/
-     * подпись, ограничиваем длину. Пусто, если исходящего нет.
-     */
-    private function lastOutboundBlock(Request $request, EmailMessage $message): string
-    {
-        $last = EmailMessage::query()
-            ->where('related_request_id', $request->id)
-            ->where('direction', \App\Enums\MailDirection::Outbound->value)
-            ->where('sent_at', '<', $message->sent_at ?? now())
-            ->orderByDesc('sent_at')
-            ->first();
-        if ($last === null) {
-            return '';
-        }
-        $text = $this->stripQuotedTail(trim((string) ($last->body_plain ?: strip_tags((string) $last->body_html))));
-        $text = trim(mb_substr($text, 0, 1200));
-        if ($text === '') {
-            return '';
-        }
-
-        return "\n## НАШЕ ПРЕДЫДУЩЕЕ ПИСЬМО КЛИЕНТУ (клиент отвечает ИМЕННО на него)\n" . $text . "\n";
     }
 
     /**
@@ -224,15 +192,10 @@ class ClassifyClientResponsePrompt
    invoice_request.
 
    ЖЁСТКОЕ ПРАВИЛО: если письмо состоит ТОЛЬКО из короткого согласия — «Да»,
-   «Да, верно», «Подтверждаю», «Согласен», «Ок», «Именно так» — толкуй его В
-   КОНТЕКСТЕ блока «НАШЕ ПРЕДЫДУЩЕЕ ПИСЬМО КЛИЕНТУ»:
-   • мы спросили «такой нужен? / это верная позиция? / правильно опознали?» →
-     «Да» = подтверждение позиции → clarification_response (если статус
-     awaiting_client_clarification) ИЛИ unclear;
-   • мы спросили «оформляем счёт? / выставить счёт?» → «Да» = invoice_request;
-   • нашего письма нет или вопрос про счёт не звучал → «Да» само по себе
-     invoice_request НЕ образует, ставь unclear.
-   Голое «Да» без явного «счёт» и без нашего вопроса про счёт счётом не считается.
+   «Да, верно», «Подтверждаю», «Согласен», «Ок», «Именно так» — и в нём НЕТ
+   слова «счёт», это НЕ invoice_request. Непонятно, что клиент подтвердил
+   (позицию? характеристики? готовность? получение?), — ставь unclear, пусть
+   менеджер посмотрит, на что был ответ. Голое «Да» счётом не считается.
 
 4. decline_with_reason — клиент ОКОНЧАТЕЛЬНО отказывается от заявки,
    БЕЗ интереса к альтернативе. Это терминальное действие — закрываем
