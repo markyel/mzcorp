@@ -417,6 +417,7 @@
                     'overdue'  => ['label' => 'Просрочено',  'count' => $bucketCounts['overdue'] ?? 0],
                     'paused'   => ['label' => 'На паузе',    'count' => $bucketCounts['paused']],
                     'closed'   => ['label' => 'Закрытые',    'count' => $bucketCounts['closed']],
+                    'refused'  => ['label' => '🚫 Наш отказ', 'count' => $bucketCounts['refused'] ?? 0],
                     'postsale' => ['label' => '🛒 Постпродажа', 'count' => $bucketCounts['postsale'] ?? 0],
                     'all'      => ['label' => 'Все',         'count' => $bucketCounts['all']],
                 ];
@@ -448,7 +449,7 @@
                  bucket=postsale не показываем — статус всегда closed_won,
                  а statusCounts считал бы ВСЕ закрытые-success (не только
                  с постпродажным письмом), что вводит в заблуждение. --}}
-            @if($bucket !== 'postsale')
+            @if(! in_array($bucket, ['postsale', 'refused'], true))
             <span class="text-[var(--fg-4)] mx-1">·</span>
 
             <button wire:click="$set('status', '')"

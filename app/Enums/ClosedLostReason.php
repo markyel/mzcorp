@@ -70,4 +70,30 @@ enum ClosedLostReason: string
             self::ManualOther,
         ], true);
     }
+
+    /**
+     * Закрытие по НАШЕЙ инициативе (мы отказались вести заявку), а не потеря
+     * по вине клиента / системная. «Не наша тематика» + «Не можем предложить».
+     * Единый источник для фильтра пула «Наш отказ».
+     */
+    public function isOurInitiative(): bool
+    {
+        return in_array($this, self::ourInitiativeCases(), true);
+    }
+
+    /**
+     * @return array<int, self>
+     */
+    public static function ourInitiativeCases(): array
+    {
+        return [self::OffTopic, self::WeCantOffer];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public static function ourInitiativeValues(): array
+    {
+        return array_map(static fn (self $r): string => $r->value, self::ourInitiativeCases());
+    }
 }

@@ -294,7 +294,7 @@ class Pool extends Component
 
     public function setBucket(string $bucket): void
     {
-        $allowed = ['active', 'overdue', 'paused', 'closed', 'postsale', 'all'];
+        $allowed = ['active', 'overdue', 'paused', 'closed', 'refused', 'postsale', 'all'];
         $this->bucket = in_array($bucket, $allowed, true) ? $bucket : 'active';
         $this->status = '';
         $this->delegatedOnly = false;
@@ -328,6 +328,9 @@ class Pool extends Component
         return match ($this->bucket) {
             'paused' => [RequestStatus::Paused->value],
             'closed' => [RequestStatus::ClosedWon->value, RequestStatus::ClosedLost->value],
+            // «Наш отказ» — только closed_lost; доп. фильтр по причине (наша
+            // инициатива) навешивается в buildQuery.
+            'refused' => [RequestStatus::ClosedLost->value],
             // Постпродажа: заказы в статусах «счёт/оплата/успех», на которые
             // пришло постпродажное письмо (платёжка / отгрузка / документы).
             // Доп. фильтр attention_reason=post_sale + attention_required_at
@@ -550,6 +553,12 @@ class Pool extends Component
                 ->whereNotNull('attention_required_at');
         }
 
+        // «Наш отказ» — closed_lost по нашей инициативе (не наша тематика /
+        // не можем предложить), в отличие от потерь по вине клиента.
+        if ($this->bucket === 'refused') {
+            $query->whereIn('closed_lost_reason', ClosedLostReason::ourInitiativeValues());
+        }
+
         // Уточняющий status-фильтр внутри bucket'а — только если значение
         // принадлежит текущему bucket'у (защита от рассинхронизации URL).
         $validStatus = $this->status !== '' && in_array($this->status, $bucketStatuses, true);
@@ -704,6 +713,11 @@ class Pool extends Component
                     RequestStatus::ClosedWon->value,
                     RequestStatus::ClosedLost->value,
                 ])
+                ->count(),
+            // «Наш отказ» — closed_lost по нашей инициативе (подмножество closed).
+            'refused' => (clone $countsBase)
+                ->where('status', RequestStatus::ClosedLost->value)
+                ->whereIn('closed_lost_reason', ClosedLostReason::ourInitiativeValues())
                 ->count(),
             // Постпродажа: заказы со счётом/оплатой/успехом и непрочитанным
             // постпродажным письмом.
