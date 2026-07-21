@@ -9,19 +9,30 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
  * Заполнение файла поставки кодами «Честного знака».
  *
  * Работает по ЗАГОЛОВКАМ, а не по фиксированным буквам колонок: шапка у файлов
- * поставки съезжает (в эталоне заказчика она на 5-й строке, столбцы C/E/F).
- * Ищем строку, где встречаются заголовки «MZ-ID» + «GTIN» + «КИЗ», от неё и
- * пляшем. Строка товара находится по MZ-ID = артикул из PDF.
+ * поставки съезжает (в эталоне заказчика она на 5-й строке, в файлах BUENO — на
+ * 8-й). Ищем строку с «GTIN» + «КИЗ» и источником артикула, от неё и пляшем.
+ *
+ * Артикул (MZ-ID) строки берётся из двух возможных источников:
+ *  1. явная колонка «MZ-ID» (приоритет), ЛИБО
+ *  2. начало строки колонки «…ТОРГ-12» до первой запятой — там артикул зашит в
+ *     наименование: «M00722, Датчик Lichtschranke…» → M00722.
+ * Если в файле есть обе — используется явный MZ-ID, а ТОРГ-12 подхватывается
+ * построчно только там, где ячейка MZ-ID пуста. Это делает инструмент
+ * универсальным: работает и со старым форматом (колонка MZ-ID), и с BUENO
+ * (артикул внутри «Наименование ТОРГ-12»).
  *
  * Трогаем ТОЛЬКО две ячейки (GTIN и КИЗ) — остальные колонки (вес, цены,
  * формулы, итоги) остаются как были, файл возвращается тем же .xlsx.
  */
 class HonestSignExcelFiller
 {
-    /** Заголовки, по которым опознаём шапку (нормализованные). */
+    /** Заголовки, по которым опознаём шапку (нормализованные, точное совпадение). */
     private const H_ARTICLE = ['mz-id', 'mzid', 'mz id'];
     private const H_GTIN = ['gtin'];
     private const H_KIZ = ['киз', 'kiz'];
+
+    /** Колонка-наименование с зашитым артикулом — по вхождению «торг-12». */
+    private const H_TORG12_MARKER = 'торг-12';
 
     /** Docк колонок шапки. */
     private const MAX_HEADER_SCAN_ROWS = 30;
@@ -51,7 +62,8 @@ class HonestSignExcelFiller
         $header = $this->locateHeader($sheet);
         if ($header === null) {
             throw new \DomainException(
-                'В файле не найдена строка заголовков со столбцами «MZ-ID», «GTIN» и «КИЗ». '
+                'В файле не найдена строка заголовков со столбцами «GTIN», «КИЗ» и '
+                . '«MZ-ID» (или «Наименование ТОРГ-12» с артикулом в начале строки). '
                 . 'Проверьте, что загружен правильный файл поставки.'
             );
         }
@@ -99,7 +111,10 @@ class HonestSignExcelFiller
     /**
      * Найти строку шапки и буквы нужных колонок.
      *
-     * @return array{row: int, article: string, gtin: string, kiz: string}|null
+     * Шапка валидна, если есть GTIN + КИЗ И хотя бы один источник артикула:
+     * явная колонка «MZ-ID» и/или колонка «…ТОРГ-12».
+     *
+     * @return array{row: int, article: ?string, torg12: ?string, gtin: string, kiz: string}|null
      */
     private function locateHeader(Worksheet $sheet): ?array
     {
@@ -107,7 +122,7 @@ class HonestSignExcelFiller
         $maxCol = $sheet->getHighestDataColumn();
 
         for ($row = 1; $row <= $maxRow; $row++) {
-            $article = $gtin = $kiz = null;
+            $article = $torg12 = $gtin = $kiz = null;
 
             foreach ($sheet->getRowIterator($row, $row) as $rowIt) {
                 $cells = $rowIt->getCellIterator('A', $maxCol);
@@ -120,6 +135,8 @@ class HonestSignExcelFiller
                     $col = $cell->getColumn();
                     if ($article === null && in_array($v, self::H_ARTICLE, true)) {
                         $article = $col;
+                    } elseif ($torg12 === null && str_contains($v, self::H_TORG12_MARKER)) {
+                        $torg12 = $col;
                     } elseif ($gtin === null && in_array($v, self::H_GTIN, true)) {
                         $gtin = $col;
                     } elseif ($kiz === null && in_array($v, self::H_KIZ, true)) {
@@ -128,8 +145,8 @@ class HonestSignExcelFiller
                 }
             }
 
-            if ($article !== null && $gtin !== null && $kiz !== null) {
-                return ['row' => $row, 'article' => $article, 'gtin' => $gtin, 'kiz' => $kiz];
+            if ($gtin !== null && $kiz !== null && ($article !== null || $torg12 !== null)) {
+                return ['row' => $row, 'article' => $article, 'torg12' => $torg12, 'gtin' => $gtin, 'kiz' => $kiz];
             }
         }
 
@@ -139,7 +156,7 @@ class HonestSignExcelFiller
     /**
      * MZ-ID → номер строки (первое вхождение).
      *
-     * @param  array{row: int, article: string, gtin: string, kiz: string}  $header
+     * @param  array{row: int, article: ?string, torg12: ?string, gtin: string, kiz: string}  $header
      * @return array<string, int>
      */
     private function indexArticleRows(Worksheet $sheet, array $header): array
@@ -148,14 +165,37 @@ class HonestSignExcelFiller
         $last = $sheet->getHighestDataRow();
 
         for ($row = $header['row'] + 1; $row <= $last; $row++) {
-            $raw = (string) $sheet->getCell($header['article'] . $row)->getValue();
-            $key = $this->normalizeArticle($raw);
+            $key = $this->articleForRow($sheet, $header, $row);
             if ($key !== '' && ! isset($map[$key])) {
                 $map[$key] = $row;
             }
         }
 
         return $map;
+    }
+
+    /**
+     * Артикул строки: приоритет — явная колонка MZ-ID; если её нет или ячейка
+     * пуста — из начала «…ТОРГ-12» до первой запятой («M00722, Датчик…» → M00722).
+     *
+     * @param  array{row: int, article: ?string, torg12: ?string, gtin: string, kiz: string}  $header
+     */
+    private function articleForRow(Worksheet $sheet, array $header, int $row): string
+    {
+        if ($header['article'] !== null) {
+            $key = $this->normalizeArticle((string) $sheet->getCell($header['article'] . $row)->getValue());
+            if ($key !== '') {
+                return $key;
+            }
+        }
+        if ($header['torg12'] !== null) {
+            $raw = (string) $sheet->getCell($header['torg12'] . $row)->getValue();
+            $beforeComma = explode(',', $raw, 2)[0];
+
+            return $this->normalizeArticle($beforeComma);
+        }
+
+        return '';
     }
 
     private function normalizeHeader(string $v): string
