@@ -568,15 +568,33 @@ class Index extends Component
             ];
         })->all();
 
-        // Явное число писем-запросов (client_request) — для сноски «писем
-        // больше, чем заявок»; не зависим от порядка $breakdown.
+        // Явное число писем-запросов (client_request) — не зависим от порядка.
         $requestEmails = (int) ($rows->firstWhere('class', EmailCategory::ClientRequest->value)->c ?? 0);
+
+        // Куда идут письма-запросы (честный расклад, суммируется в
+        // $requestEmails): часть открывает новую заявку (является origin-письмом
+        // заявки за период), часть ложится в уже существующую заявку (клиент
+        // дополняет заказ в том же треде). Иначе 6453 писем читается как «минус
+        // 3898 = потерянные 2555», хотя это разные знаменатели.
+        $openedNew = Request::query()
+            ->join('email_messages', 'requests.email_message_id', '=', 'email_messages.id')
+            ->where('email_messages.direction', 'inbound')
+            ->where('email_messages.category', EmailCategory::ClientRequest->value)
+            ->whereBetween('email_messages.created_at', [$from, $to])
+            ->count();
+        $addedExisting = max(0, $requestEmails - $openedNew);
+        // Заявки, открытые НЕ из писем-запросов (ответ в треде стал новой
+        // заявкой — новая номенклатура/оживление, пересланное и пр.).
+        $otherCreated = max(0, $requestsCreated - $openedNew);
 
         return [
             'analyzed' => $analyzed,
             'classified' => $classified,
             'percent' => $analyzed > 0 ? (int) round($classified * 100 / $analyzed) : 0,
             'request_emails' => $requestEmails,
+            'opened_new' => $openedNew,
+            'added_existing' => $addedExisting,
+            'other_created' => $otherCreated,
             'requests_created' => $requestsCreated,
             'breakdown' => $breakdown,
         ];

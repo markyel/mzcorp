@@ -601,20 +601,28 @@
                                                 <div class="h-full bg-sky-500"
                                                      style="width: {{ $maxBreakdown > 0 ? round($row['count'] * 100 / $maxBreakdown) : 0 }}%"></div>
                                             </div>
-                                            <div class="w-28 text-right mono tnum">
-                                                <span class="text-fg-1">{{ $row['count'] }}</span>
-                                                @if($row['class'] === 'client_request')
-                                                    <span class="text-fg-4 text-[11px]"> → {{ $mail['requests_created'] }} заявок</span>
-                                                @endif
-                                            </div>
+                                            <div class="w-14 text-right text-fg-1 mono tnum">{{ $row['count'] }}</div>
                                         </div>
+                                        {{-- Куда идут письма-запросы: открыли новую vs дополнили
+                                             существующую (сумма = число писем-запросов). Отвечает
+                                             на «а куда делись остальные письма». --}}
+                                        @if($row['class'] === 'client_request')
+                                            <div class="flex items-start gap-3 text-[11px] text-fg-4 pl-3 -mt-0.5">
+                                                <div class="w-40 shrink-0">└ разбивка</div>
+                                                <div class="flex-1">
+                                                    <span class="mono tnum text-fg-2">{{ $mail['opened_new'] }}</span> открыли новую заявку
+                                                    · <span class="mono tnum text-fg-2">{{ $mail['added_existing'] }}</span> дополнили существующую
+                                                </div>
+                                            </div>
+                                        @endif
                                     @endforeach
                                 </div>
                             @endif
                         </div>
 
                         <div class="text-[10.5px] text-fg-4">
-                            Разбивка считает ПИСЬМА, а не заявки. По одной заявке клиент обычно шлёт несколько «писем-запросов» (первичный запрос + «добавьте ещё» + правки), поэтому писем-запросов ({{ $mail['request_emails'] }}) больше, чем заявок. Из них система формирует {{ $mail['requests_created'] }} заявок — это и есть «Получено» в воронке.
+                            Письма ≠ заявки, вычитать их друг из друга нельзя. Из {{ $mail['request_emails'] }} писем-запросов {{ $mail['opened_new'] }} открыли новую заявку, а {{ $mail['added_existing'] }} легли в уже существующую (клиент дополняет заказ в том же треде).
+                            «Создано заявок» ({{ $mail['requests_created'] }}) = {{ $mail['opened_new'] }} из писем-запросов + {{ $mail['other_created'] }} открыты из писем других категорий (напр. клиент дописал новую позицию в старый тред → новая заявка). Это число совпадает с «Получено» в воронке.
                         </div>
                     </div>
                 </div>
