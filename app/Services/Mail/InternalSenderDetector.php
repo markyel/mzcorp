@@ -54,45 +54,53 @@ class InternalSenderDetector
     }
 
     /**
-     * Внутренняя ли ПЕРЕПИСКА целиком: отправитель И все получатели (to+cc) —
-     * наши. Такое письмо — общение сотрудников про заявку, оно НЕ должно
-     * влиять на статус/позиции заявки (влияют только письма, где хотя бы на
-     * одной стороне заказчик). Кейс M-2026-6071: письмо руководителя менеджеру
-     * (оба @myzip.ru) авто-переводило статус в «На согласовании».
+     * Должно ли inbound-письмо влиять на статус/позиции заявки. Правило
+     * (по требованию заказчика): влияют только письма, где заказчик на одной
+     * из сторон (отправитель ИЛИ получатель). Внутренняя переписка сотрудников
+     * — нет, даже если в CC стоит личный внешний адрес коллеги.
      *
-     * Пустой список получателей → НЕ считаем internal-only (нечего проверить,
-     * безопаснее пропустить дальше по обычному пути).
+     *   - Отправитель ВНЕШНИЙ → влияет (это заказчик или его коллега).
+     *   - Отправитель НАШ (сотрудник) → влияет ТОЛЬКО если заказчик заявки
+     *     (clientEmail) явно среди получателей to/cc. Иначе это внутреннее
+     *     общение про заявку — не трогаем.
+     *
+     * Кейс M-2026-6071: письмо руководителя менеджеру (from/to @myzip.ru, в CC
+     * личный markyellow@yandex.ru — не заказчик) авто-переводило «КП отправлено»
+     * → «На согласовании». clientEmail пуст → false (не можем подтвердить
+     * заказчика при нашем отправителе → безопаснее не трогать статус).
      */
-    public function isInternalOnly(EmailMessage $message): bool
+    public function affectsRequestStatus(EmailMessage $message, ?string $clientEmail): bool
     {
-        $from = mb_strtolower(trim((string) $message->from_email));
-        if ($from === '' || $this->internalReason($from) === null) {
-            return false; // отправитель внешний → письмо касается внешней стороны
+        // Внешний отправитель — вероятно заказчик (или его коллега/альт-адрес).
+        if ($this->detect($message) === null) {
+            return true;
         }
 
-        $recipients = [];
-        foreach ([$message->to_recipients, $message->cc_recipients] as $bag) {
-            foreach ((array) $bag as $r) {
-                $email = is_array($r) ? ($r['email'] ?? '') : $r;
-                $email = mb_strtolower(trim((string) $email));
-                if ($email !== '') {
-                    $recipients[] = $email;
-                }
-            }
-        }
-        if ($recipients === []) {
+        // Отправитель наш → влияет только если заказчик среди получателей.
+        $client = mb_strtolower(trim((string) $clientEmail));
+        if ($client === '') {
             return false;
         }
 
-        foreach ($recipients as $email) {
-            // Хоть один внешний получатель (в т.ч. allowlist — order@ и пр.,
-            // который представляет клиента) → письмо касается внешней стороны.
-            if ($this->inAllowlist($email) || $this->internalReason($email) === null) {
-                return false;
+        return in_array($client, $this->recipientEmails($message), true);
+    }
+
+    /**
+     * @return array<int, string> lowercased to+cc адреса
+     */
+    private function recipientEmails(EmailMessage $message): array
+    {
+        $out = [];
+        foreach ([$message->to_recipients, $message->cc_recipients] as $bag) {
+            foreach ((array) $bag as $r) {
+                $email = mb_strtolower(trim((string) (is_array($r) ? ($r['email'] ?? '') : $r)));
+                if ($email !== '') {
+                    $out[] = $email;
+                }
             }
         }
 
-        return true;
+        return $out;
     }
 
     private function inAllowlist(string $email): bool

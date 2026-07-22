@@ -428,15 +428,15 @@ class MailRouter
                 ]);
             }
 
-            // Внутренняя переписка (отправитель И все получатели наши —
-            // напр. руководитель ↔ менеджер) НЕ влияет на заявку: ни статус,
-            // ни attention «клиент ответил», ни автопарсинг позиций. Письмо
-            // остаётся в треде (видно + доставляется), но эффектов не даёт.
-            // Кейс M-2026-6071. Гейт статуса продублирован в самом
-            // InboundIntentClassifier::classify (покрывает и крон self-heal).
-            $internalOnly = $this->internalDetector->isInternalOnly($message);
+            // Внутренняя переписка сотрудников (наш отправитель, заказчика нет
+            // среди получателей — напр. руководитель→менеджер с личным CC) НЕ
+            // влияет на заявку: ни статус, ни attention «клиент ответил», ни
+            // автопарсинг позиций. Письмо остаётся в треде (видно + доставляется),
+            // но эффектов не даёт. Кейс M-2026-6071. Гейт статуса продублирован
+            // в InboundIntentClassifier::classify (покрывает и крон self-heal).
+            $internalOnly = ! $this->internalDetector->affectsRequestStatus($message, $linkedRequest->client_email);
             if ($internalOnly) {
-                Log::info('MailRouter: internal-only reply — no status/parse effects', [
+                Log::info('MailRouter: internal correspondence (no client on any side) — no status/parse effects', [
                     'email_message_id' => $message->id,
                     'request_id' => $linkedRequest->id,
                     'from' => $message->from_email,
