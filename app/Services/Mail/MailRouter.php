@@ -54,6 +54,7 @@ class MailRouter
         private readonly \App\Services\Supplier\SupplierInquiryService $supplierInquiries,
         private readonly \App\Services\Supplier\SupplierRegistry $supplierRegistry,
         private readonly \App\Services\Supplier\SupplierRfqClassifier $supplierRfqClassifier,
+        private readonly InternalSenderDetector $internalDetector = new InternalSenderDetector(),
     ) {
     }
 
@@ -427,6 +428,21 @@ class MailRouter
                 ]);
             }
 
+            // Внутренняя переписка (отправитель И все получатели наши —
+            // напр. руководитель ↔ менеджер) НЕ влияет на заявку: ни статус,
+            // ни attention «клиент ответил», ни автопарсинг позиций. Письмо
+            // остаётся в треде (видно + доставляется), но эффектов не даёт.
+            // Кейс M-2026-6071. Гейт статуса продублирован в самом
+            // InboundIntentClassifier::classify (покрывает и крон self-heal).
+            $internalOnly = $this->internalDetector->isInternalOnly($message);
+            if ($internalOnly) {
+                Log::info('MailRouter: internal-only reply — no status/parse effects', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $linkedRequest->id,
+                    'from' => $message->from_email,
+                ]);
+            }
+
             $shouldParse = true;
             try {
                 $shouldParse = app(\App\Services\Mail\ReplyParseGate::class)
@@ -444,7 +460,7 @@ class MailRouter
             // позиции в текущую. Результат переиспользуем ниже для
             // recordSuggestion (повторного LLM-вызова нет).
             $intentResult = null;
-            if ($this->inboundClassifier->isApplicable($linkedRequest)) {
+            if (! $internalOnly && $this->inboundClassifier->isApplicable($linkedRequest)) {
                 try {
                     $intentResult = $this->inboundClassifier->classify($message->fresh(), $linkedRequest);
                 } catch (\Throwable $e) {
@@ -514,7 +530,7 @@ class MailRouter
                 }
             }
 
-            if ($shouldParse) {
+            if ($shouldParse && ! $internalOnly) {
                 \App\Jobs\Mail\ParseRequestItemsJob::dispatch($message->id, true);
             }
 
@@ -566,7 +582,9 @@ class MailRouter
             // null. Если intent не auto-apply'нулся — ClientReplied остаётся
             // до Detail::mount менеджера (onManagerOpened).
             try {
-                $this->attention->onClientReplied($linkedRequest);
+                if (! $internalOnly) {
+                    $this->attention->onClientReplied($linkedRequest);
+                }
             } catch (\Throwable $e) {
                 Log::warning('MailRouter: attention onClientReplied failed (non-fatal)', [
                     'email_message_id' => $message->id,

@@ -88,6 +88,7 @@ class InboundIntentClassifier
     public function __construct(
         private readonly OpenAIChatService $openai,
         private readonly ClassifyClientResponsePrompt $prompt,
+        private readonly \App\Services\Mail\InternalSenderDetector $internal = new \App\Services\Mail\InternalSenderDetector(),
     ) {}
 
     public function isApplicable(Request $request): bool
@@ -103,6 +104,24 @@ class InboundIntentClassifier
     public function classify(EmailMessage $message, Request $request): ?array
     {
         if (! $this->isApplicable($request)) {
+            return null;
+        }
+
+        // Внутренняя переписка (отправитель И все получатели — наши) НЕ влияет
+        // на статус заявки: это общение сотрудников, а не реакция заказчика.
+        // Влияют только письма, где хотя бы на одной стороне внешняя сторона
+        // (заказчик). Кейс M-2026-6071: письмо руководителя менеджеру (оба
+        // @myzip.ru) авто-переводило «КП отправлено» → «На согласовании».
+        // Помечаем intent_classified_at, чтобы догоняющий крон не перебирал
+        // письмо снова.
+        if ($this->internal->isInternalOnly($message)) {
+            EmailMessage::query()->whereKey($message->id)->update(['intent_classified_at' => now()]);
+            Log::info('InboundIntentClassifier: internal-only email — status not affected', [
+                'email_message_id' => $message->id,
+                'request_id' => $request->id,
+                'from' => $message->from_email,
+            ]);
+
             return null;
         }
 
