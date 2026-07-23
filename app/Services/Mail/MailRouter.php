@@ -108,18 +108,6 @@ class MailRouter
                 $this->backfillCrossMailboxCopies($message, $linkedRequest->id);
             }
 
-            // Phase 4 (Foundation §7.1): outbound document detector.
-            // Сработает только если linker уже привязал письмо к Request —
-            // иначе непонятно к чему относится «КП» (общая переписка с
-            // клиентом по другим заявкам, маркетинг и т.п.). Логика вынесена в
-            // runOutboundDocumentDetection() для переиспользования командой
-            // quotes:detect-missed-outbound — она добивает письма, привязанные
-            // к заявке ПОСЛЕ синка (гонка «КП ушёл раньше создания заявки»: в
-            // момент синка linkedRequest был null → детектор пропускал письмо).
-            if ($linkedRequest !== null) {
-                $this->runOutboundDocumentDetection($message, $linkedRequest);
-            }
-
             // Запрос расценки поставщику (модуль поставщиков, send-time): если
             // наше исходящее ушло получателю из реестра поставщиков И LLM
             // подтвердил, что это RFQ (мы просим цены на номенклатуру, а не
@@ -127,6 +115,16 @@ class MailRouter
             // (thread_root_id = message_id). Ответ поставщика (In-Reply-To на
             // него) поймает matchInbound и не создаст фейковую заявку. Ловим и
             // письма из почтового клиента (синкаются из Sent). Идемпотентно.
+            //
+            // ВАЖНО: детектим RFQ ДО outbound document detector. RFQ поставщику
+            // обычно несёт в теме код клиентской заявки ([M-2026-9298]) для
+            // трассировки, поэтому outgoingLinker привязывает его к клиентской
+            // заявке. Если прогнать такой RFQ через клиентский документ-детектор,
+            // он классифицируется как КП/уточнение КЛИЕНТУ и ломает статус
+            // заявки (кейс M-2026-9298: RFQ → outbound_clarification → «Жду
+            // клиента»). createFromOutbound ставит письму supplier_inquiry_id,
+            // и клиентская вкладка «Переписка» его прячет (Detail::thread).
+            $isSupplierRfq = false;
             try {
                 if ($message->message_id) {
                     $toSupplier = collect((array) ($message->to_recipients ?? []))
@@ -141,6 +139,7 @@ class MailRouter
                                 $message->related_request_id,
                                 null,
                             );
+                            $isSupplierRfq = true;
                             Log::info('MailRouter: outbound supplier RFQ — inquiry registered', [
                                 'email_message_id' => $message->id,
                                 'supplier_inquiry_id' => $inquiry?->id,
@@ -154,6 +153,17 @@ class MailRouter
                     'email_message_id' => $message->id,
                     'error' => $e->getMessage(),
                 ]);
+            }
+
+            // Phase 4 (Foundation §7.1): outbound document detector.
+            // Сработает только если linker уже привязал письмо к Request —
+            // иначе непонятно к чему относится «КП» (общая переписка с
+            // клиентом по другим заявкам, маркетинг и т.п.). Логика вынесена в
+            // runOutboundDocumentDetection() для переиспользования командой
+            // quotes:detect-missed-outbound. НЕ запускаем для RFQ поставщику —
+            // это не клиентский документ (см. выше).
+            if ($linkedRequest !== null && ! $isSupplierRfq) {
+                $this->runOutboundDocumentDetection($message, $linkedRequest);
             }
 
             return;

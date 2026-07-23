@@ -160,6 +160,11 @@ class Detail extends Component
             // (detected_artifacts.cross_mailbox_copy_of). Показываем
             // только оригинал, чтобы в треде не дублировалось.
             ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
+            // Переписка с ПОСТАВЩИКОМ (RFQ и ответы, supplier_inquiry_id != null)
+            // не смешивается с клиентской «Перепиской» — она в табе «Поставщики».
+            // RFQ обычно несёт код заявки в теме и линкуется к related_request_id,
+            // но это не клиентский тред (кейс M-2026-9298).
+            ->whereNull('supplier_inquiry_id')
             ->visibleTo($user)
             ->with([
                 'attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline',
