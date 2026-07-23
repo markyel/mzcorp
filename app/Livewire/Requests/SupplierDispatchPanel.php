@@ -245,7 +245,7 @@ class SupplierDispatchPanel extends Component
         $requested = $this->requestedItemIds;
         $items = RequestItem::query()
             ->where('request_id', $this->requestId)->where('is_active', true)
-            ->with(['brand:id,name', 'catalogItem:id,name,name_en,is_price_actual,photo_url'])
+            ->with(['brand:id,name', 'catalogItem:id,name,name_en,is_price_actual'])
             ->orderBy('position')->get();
 
         $svc = app(SupplierDispatchService::class);
@@ -266,10 +266,6 @@ class SupplierDispatchPanel extends Component
                 'qty' => $svc->itemQty($it, [], 'ru'),
                 'qty_en' => $svc->itemQty($it, [], 'en'),
                 'has_catalog' => (bool) $it->catalog_item_id,
-                // Есть ли у сматченной каталожной позиции фото — тогда покажем
-                // галочку «📷 прикрепить фото» у позиции.
-                'photo' => (bool) ($it->catalog_item_id && $it->catalogItem?->photo_url),
-                'catalog_item_id' => $it->catalog_item_id,
                 'price_stale' => $it->catalog_item_id ? ($it->catalogItem && ! $it->catalogItem->is_price_actual) : false,
                 'requested' => in_array($it->id, $requested, true),
                 'watched' => (bool) $it->price_refresh_watched,
@@ -460,6 +456,39 @@ class SupplierDispatchPanel extends Component
         $req = RequestModel::with('emailMessage.attachments:id,email_message_id,filename,mime_type,size_bytes')->find($this->requestId);
 
         return $req?->emailMessage?->attachments ?? collect();
+    }
+
+    /**
+     * Каталожные фото ВЫБРАННЫХ позиций — для второго ряда превью в блоке
+     * вложений (менеджер отмечает, какие фото прикрепить к RFQ). thumb — через
+     * прокси catalog.photo (то же фото, что в каталоге). Обновляется live при
+     * смене набора позиций.
+     *
+     * @return array<int, array{item_id:int, name:string, thumb:string, full:string}>
+     */
+    #[Computed]
+    public function selectedCatalogPhotos(): array
+    {
+        $selIds = array_values(array_map('intval', array_keys(array_filter($this->selectedItems))));
+        if ($selIds === []) {
+            return [];
+        }
+
+        return RequestItem::query()
+            ->whereIn('id', $selIds)
+            ->whereNotNull('catalog_item_id')
+            ->with('catalogItem:id,name,photo_url')
+            ->orderBy('position')
+            ->get()
+            ->filter(fn (RequestItem $ri) => (bool) $ri->catalogItem?->photo_url)
+            ->map(fn (RequestItem $ri) => [
+                'item_id' => $ri->id,
+                'name' => (string) ($ri->catalogItem?->name ?: $ri->parsed_name ?: '—'),
+                'thumb' => route('catalog.photo', $ri->catalog_item_id),
+                'full' => (string) $ri->catalogItem?->photo_url,
+            ])
+            ->values()
+            ->all();
     }
 
     public function removeNewFile(int $idx): void

@@ -120,12 +120,6 @@
                                     @if($it['discontinued'])<span class="chip chip-warn text-[10px] ml-1" title="Все ответы поставщиков — отказ">🚫 возможно не поставляется</span>@endif
                                 </div>
                                 @if($it['client_name'])<div class="text-[11px] text-fg-4">клиент: {{ \Illuminate\Support\Str::limit($it['client_name'], 60) }}</div>@endif
-                                @if($it['photo'])
-                                    <label class="inline-flex items-center gap-1 text-[10.5px] text-fg-3 mt-0.5 cursor-pointer"
-                                           title="Прикрепить к письму поставщику полноразмерное фото этой позиции из каталога">
-                                        <input type="checkbox" wire:model.live="attachPhoto.{{ $it['id'] }}"> 📷 фото поставщику
-                                    </label>
-                                @endif
                                 @if($it['watched'])
                                     <button type="button" wire:click="toggleDiscontinued({{ $it['id'] }})"
                                             class="text-[10.5px] text-sky-700 hover:underline mt-0.5">
@@ -348,6 +342,31 @@
                                 <label class="flex items-center gap-1 px-1.5 py-1 cursor-pointer border-t border-border-subtle">
                                     <input type="checkbox" wire:model.live="selectedAttachments.{{ $a->id }}">
                                     <span class="text-[10.5px] text-fg-2 truncate" title="{{ $a->filename }}">{{ \Illuminate\Support\Str::limit($a->filename, 12) }}</span>
+                                </label>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
+
+            {{-- Второй ряд: фото из КАТАЛОГА по выбранным позициям. Отмеченные
+                 прикрепляются к RFQ каждому поставщику (attachPhoto). --}}
+            @php $catPhotos = $this->selectedCatalogPhotos; @endphp
+            @if(! empty($catPhotos))
+                <div>
+                    <label class="block text-[11.5px] text-fg-3 mb-1">Фото из каталога <span class="text-fg-4">(по выбранным позициям)</span></label>
+                    <div class="flex flex-wrap gap-2">
+                        @foreach($catPhotos as $ph)
+                            <div wire:key="catphoto-{{ $ph['item_id'] }}"
+                                 class="border border-border rounded-md overflow-hidden {{ ($attachPhoto[$ph['item_id']] ?? false) ? 'ring-1 ring-sky-400' : '' }} bg-surface" style="width:116px">
+                                <a href="{{ $ph['full'] }}" target="_blank" rel="noopener noreferrer" class="block"
+                                   title="Открыть полноразмерное: {{ $ph['name'] }}" style="width:116px">
+                                    <img src="{{ $ph['thumb'] }}" alt="{{ $ph['name'] }}" loading="lazy"
+                                         style="width:116px;height:80px;object-fit:cover;display:block">
+                                </a>
+                                <label class="flex items-center gap-1 px-1.5 py-1 cursor-pointer border-t border-border-subtle">
+                                    <input type="checkbox" wire:model.live="attachPhoto.{{ $ph['item_id'] }}">
+                                    <span class="text-[10.5px] text-fg-2 truncate" title="{{ $ph['name'] }}">{{ \Illuminate\Support\Str::limit($ph['name'], 12) }}</span>
                                 </label>
                             </div>
                         @endforeach
