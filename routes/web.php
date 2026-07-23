@@ -41,6 +41,8 @@ Route::get('/arcade/avatar/{user}/{variant}', [LoginArcadeController::class, 'av
 // расписанию. См. LiftwayFeedController / LiftwayFeedService.
 Route::get('/feeds/liftway/prices.yml', [LiftwayFeedController::class, 'prices'])
     ->name('feeds.liftway.prices');
+Route::get('/feeds/liftway/in-transit.yml', [LiftwayFeedController::class, 'inTransit'])
+    ->name('feeds.liftway.in_transit');
 
 Route::get('/dashboard', function () {
     return view('dashboard');
