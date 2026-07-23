@@ -4,6 +4,7 @@ use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\CatalogPhotoProxyController;
 use App\Http\Controllers\DocsController;
 use App\Http\Controllers\HeartbeatController;
+use App\Http\Controllers\LiftwayFeedController;
 use App\Http\Controllers\LoginArcadeController;
 use App\Http\Controllers\OAuthYandexController;
 use App\Http\Controllers\ProfileController;
@@ -34,6 +35,12 @@ Route::get('/arcade/roster', [LoginArcadeController::class, 'roster'])->name('ar
 Route::get('/arcade/avatar/{user}/{variant}', [LoginArcadeController::class, 'avatar'])
     ->where('variant', 'neutral|won|lost')
     ->name('arcade.avatar');
+
+// Публичный YML-фид «Цены и наличие» для площадки LazyLift/Liftway
+// (MyLift как поставщик). БЕЗ auth — pull-интеграция опрашивает URL по
+// расписанию. См. LiftwayFeedController / LiftwayFeedService.
+Route::get('/feeds/liftway/prices.yml', [LiftwayFeedController::class, 'prices'])
+    ->name('feeds.liftway.prices');
 
 Route::get('/dashboard', function () {
     return view('dashboard');
