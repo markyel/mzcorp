@@ -2,9 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\CatalogItem;
+use App\Services\Catalog\CatalogPhotoCache;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
@@ -28,74 +27,26 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  */
 class CatalogPhotoProxyController extends Controller
 {
-    /** Поддиректория в storage/app/public/. */
-    private const CACHE_DIR = 'catalog-photos';
-
     /** TTL кэша браузера в секундах (30 дней). */
     private const BROWSER_TTL = 30 * 24 * 3600;
 
-    /** Таймауты HTTP-запроса к внешнему серверу. */
-    private const FETCH_TIMEOUT = 8;
-    private const FETCH_CONNECT_TIMEOUT = 3;
+    public function __construct(private readonly CatalogPhotoCache $cache)
+    {
+    }
 
     public function show(int $id): Response|BinaryFileResponse
     {
-        // Файл уже закэширован — отдаём с диска.
-        $relPath = self::CACHE_DIR . '/' . $id . '.bin';
-        $relMeta = self::CACHE_DIR . '/' . $id . '.meta';
-
-        if (Storage::disk('public')->exists($relPath)) {
-            return $this->serveFromDisk($relPath, $relMeta);
-        }
-
-        // Не закэшировано — пробуем скачать.
-        $cat = CatalogItem::query()
-            ->where('id', $id)
-            ->whereNotNull('photo_url')
-            ->where('photo_url', '!=', '')
-            ->first(['id', 'photo_url']);
-
-        if (! $cat) {
+        // Кэш фото (скачивание + сохранение на public-диск) — в CatalogPhotoCache
+        // (единый источник, переиспользуется рассылкой RFQ поставщику).
+        $cached = $this->cache->ensure($id);
+        if ($cached === null) {
             return $this->placeholder404();
         }
 
-        try {
-            $response = Http::timeout(self::FETCH_TIMEOUT)
-                ->connectTimeout(self::FETCH_CONNECT_TIMEOUT)
-                ->withHeaders([
-                    'User-Agent' => 'MyLift-Image-Proxy/1.0',
-                ])
-                ->get((string) $cat->photo_url);
-
-            if (! $response->successful()) {
-                return $this->placeholder404();
-            }
-
-            $bytes = $response->body();
-            $contentType = $response->header('Content-Type') ?: 'image/jpeg';
-
-            // Сохраняем атомарно (через tmp + rename), чтобы конкурентные
-            // запросы не получили полу-записанный файл.
-            Storage::disk('public')->put($relPath, $bytes);
-            Storage::disk('public')->put($relMeta, $contentType);
-        } catch (\Throwable $e) {
-            // Внешний сервис недоступен — отдаём placeholder, не валим UI.
-            return $this->placeholder404();
-        }
-
-        return $this->serveFromDisk($relPath, $relMeta);
-    }
-
-    private function serveFromDisk(string $relPath, string $relMeta): BinaryFileResponse
-    {
-        $absPath = Storage::disk('public')->path($relPath);
-        $contentType = 'image/jpeg';
-        if (Storage::disk('public')->exists($relMeta)) {
-            $contentType = trim(Storage::disk('public')->get($relMeta)) ?: 'image/jpeg';
-        }
+        $absPath = Storage::disk('public')->path($cached['rel']);
 
         return response()->file($absPath, [
-            'Content-Type' => $contentType,
+            'Content-Type' => $cached['mime'],
             'Cache-Control' => 'public, max-age=' . self::BROWSER_TTL . ', immutable',
         ]);
     }

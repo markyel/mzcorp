@@ -30,6 +30,9 @@ class SupplierDispatchPanel extends Component
     /** item_id => bool — позиции для запроса. */
     public array $selectedItems = [];
 
+    /** request_item_id => bool — прикрепить фото каталожной позиции к RFQ. */
+    public array $attachPhoto = [];
+
     /** supplier_id => bool — кому слать. */
     public array $selectedSuppliers = [];
 
@@ -242,7 +245,7 @@ class SupplierDispatchPanel extends Component
         $requested = $this->requestedItemIds;
         $items = RequestItem::query()
             ->where('request_id', $this->requestId)->where('is_active', true)
-            ->with(['brand:id,name', 'catalogItem:id,name,name_en,is_price_actual'])
+            ->with(['brand:id,name', 'catalogItem:id,name,name_en,is_price_actual,photo_url'])
             ->orderBy('position')->get();
 
         $svc = app(SupplierDispatchService::class);
@@ -263,6 +266,10 @@ class SupplierDispatchPanel extends Component
                 'qty' => $svc->itemQty($it, [], 'ru'),
                 'qty_en' => $svc->itemQty($it, [], 'en'),
                 'has_catalog' => (bool) $it->catalog_item_id,
+                // Есть ли у сматченной каталожной позиции фото — тогда покажем
+                // галочку «📷 прикрепить фото» у позиции.
+                'photo' => (bool) ($it->catalog_item_id && $it->catalogItem?->photo_url),
+                'catalog_item_id' => $it->catalog_item_id,
                 'price_stale' => $it->catalog_item_id ? ($it->catalogItem && ! $it->catalogItem->is_price_actual) : false,
                 'requested' => in_array($it->id, $requested, true),
                 'watched' => (bool) $it->price_refresh_watched,
@@ -498,6 +505,40 @@ class SupplierDispatchPanel extends Component
             $path = sprintf('mail/dispatch-staging/%d/%s', $this->requestId, Str::random(10) . '_' . $name);
             Storage::disk('local')->put($path, $tmp->get());
             $extraFiles[] = ['path' => $path, 'name' => $name, 'mime' => $tmp->getMimeType() ?: 'application/octet-stream', 'size' => $tmp->getSize() ?: 0];
+        }
+
+        // Опционально: фото каталожной позиции (галочка «📷» у позиции). Берём
+        // то же полноразмерное фото, что и в каталоге (CatalogPhotoCache), кладём
+        // в local-staging — attachToDraft скопирует его в черновик каждого
+        // поставщика. Недоступное/без фото — тихо пропускаем.
+        $photoItemIds = array_values(array_filter($itemIds, fn ($id) => ! empty($this->attachPhoto[$id])));
+        if ($photoItemIds !== []) {
+            $cache = app(\App\Services\Catalog\CatalogPhotoCache::class);
+            $rows = RequestItem::query()
+                ->whereIn('id', $photoItemIds)
+                ->whereNotNull('catalog_item_id')
+                ->with('catalogItem:id,name,photo_url')
+                ->get();
+            foreach ($rows as $ri) {
+                $ci = $ri->catalogItem;
+                if ($ci === null || ! $ci->photo_url) {
+                    continue;
+                }
+                $cached = $cache->ensure((int) $ci->id);
+                if ($cached === null) {
+                    continue;
+                }
+                $bytes = Storage::disk('public')->get($cached['rel']);
+                if ($bytes === null || $bytes === '') {
+                    continue;
+                }
+                $ext = str_contains($cached['mime'], 'png') ? 'png' : (str_contains($cached['mime'], 'webp') ? 'webp' : 'jpg');
+                $base = Str::slug(mb_substr((string) ($ci->name ?: 'foto'), 0, 40)) ?: 'foto';
+                $name = 'foto_' . $base . '.' . $ext;
+                $path = sprintf('mail/dispatch-staging/%d/%s', $this->requestId, Str::random(10) . '_' . $name);
+                Storage::disk('local')->put($path, $bytes);
+                $extraFiles[] = ['path' => $path, 'name' => $name, 'mime' => $cached['mime'], 'size' => strlen($bytes)];
+            }
         }
 
         $reqAttIds = array_values(array_map('intval', array_keys(array_filter($this->selectedAttachments))));
