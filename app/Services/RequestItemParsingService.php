@@ -736,7 +736,12 @@ PROMPT;
 
         $rawBody = $plain;
         $useHtml = trim($html) !== '' && (
-            $this->cleaner->bodyPlainLooksBroken($plain)
+            // HTML-only письмо: text/plain части нет вовсе, body_plain пуст, а
+            // весь запрос («Прошу КП: 1. M00613 - 2 шт») лежит в body_html.
+            // Без этого парсер читал пустоту → 0 позиций → заявка навсегда
+            // в pending и не назначалась. Кейс M-2026-9508.
+            trim($plain) === ''
+            || $this->cleaner->bodyPlainLooksBroken($plain)
             || $this->cleaner->htmlHasStructuredTable($html)
         );
         if ($useHtml) {
