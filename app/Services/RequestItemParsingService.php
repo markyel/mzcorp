@@ -994,7 +994,21 @@ PROMPT;
                         ),
                     ]);
 
-                    return $this->dedupeWithinList($unifiedItems);
+                    if (! empty($unifiedItems)) {
+                        return $this->dedupeWithinList($unifiedItems);
+                    }
+
+                    // unified-vision вернул 0 позиций — НЕ сдаёмся: проваливаемся
+                    // в split-путь ниже, где текст парсится отдельным вызовом.
+                    // Кейс M-2026-9794: явная текстовая позиция «Защелка
+                    // аварийного тормоза GO509 P2 шт 5», но приложенное фото
+                    // детали увело unified в пустую выдачу. Дублей text-vs-photo
+                    // тут не будет — раз unified пуст, дублировать нечего.
+                    Log::warning('parseItemsFromInboundContent: unified empty → split fallback', [
+                        'source' => $sourceTag,
+                        'images_count' => $imageAttachments->count(),
+                        'extended_body_chars' => mb_strlen($extendedBody),
+                    ]);
                 }
             } catch (\Throwable $e) {
                 // Не валим парсинг: fallback на split pipeline (он сам обработает
