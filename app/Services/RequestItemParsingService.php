@@ -1163,6 +1163,19 @@ PROMPT;
                 if ($content === null) {
                     continue;
                 }
+                // Пустые/однотонные картинки (белые листы, битые Outlook-встройки
+                // image00N.jpg) НЕ отдаём Vision — он по ним ГАЛЛЮЦИНИРУЕТ позиции
+                // (кейс M-2026-9943: 6 пустых jpg → 6 выдуманных «плат»
+                // KONE/OTIS/… с фейковым артикулом WL.12345).
+                if ($this->isNearBlankImage($content)) {
+                    Log::info('loadImageDataUris: skip near-blank image (vision hallucination guard)', [
+                        'source' => $sourceTag,
+                        'attachment_id' => $att->id,
+                        'filename' => $att->filename,
+                        'bytes' => strlen($content),
+                    ]);
+                    continue;
+                }
                 $mime = $att->mime_type ?: 'image/jpeg';
                 // Фото-вложения ужимаем до 2048px/JPEG перед Vision (гард 413).
                 $images[] = VisionImageDownscaler::dataUri($content, $mime, (int) $att->id);
@@ -1176,6 +1189,49 @@ PROMPT;
             }
         }
         return [$images, $attachmentIds];
+    }
+
+    /** std яркости ниже этого — картинка почти однотонная (пустой/белый лист). */
+    private const VISION_BLANK_STDDEV_MAX = 4.0;
+
+    /**
+     * Почти пустая/однотонная картинка (белый лист, битая Outlook-встройка)?
+     * Такие НЕЛЬЗЯ отдавать Vision — он галлюцинирует по ним позиции
+     * (кейс M-2026-9943). Детект: сэмплим сетку 6×6, если разброс яркости
+     * near-zero — считаем пустой. Порог низкий (std<4) — реальное фото детали
+     * даёт разброс в десятки, так что ложных срабатываний по фото нет.
+     * GD недоступен / не декодировалось → false (не рискуем, пропускаем дальше).
+     */
+    private function isNearBlankImage(string $content): bool
+    {
+        if (! function_exists('imagecreatefromstring')) {
+            return false;
+        }
+        $img = @imagecreatefromstring($content);
+        if ($img === false) {
+            return false;
+        }
+        $w = imagesx($img);
+        $h = imagesy($img);
+        if ($w < 3 || $h < 3) {
+            imagedestroy($img);
+
+            return true; // микро-иконка — точно не фото товара
+        }
+
+        $lum = [];
+        for ($i = 1; $i <= 6; $i++) {
+            for ($j = 1; $j <= 6; $j++) {
+                $c = imagecolorsforindex($img, imagecolorat($img, (int) ($w * $i / 7), (int) ($h * $j / 7)));
+                $lum[] = ($c['red'] + $c['green'] + $c['blue']) / 3;
+            }
+        }
+        imagedestroy($img);
+
+        $mean = array_sum($lum) / count($lum);
+        $var = array_sum(array_map(static fn ($v) => ($v - $mean) ** 2, $lum)) / count($lum);
+
+        return sqrt($var) < self::VISION_BLANK_STDDEV_MAX;
     }
 
     /**
