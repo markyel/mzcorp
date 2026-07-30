@@ -42,7 +42,7 @@ class SupplierProcurementDispatchService
 
         $items = CatalogItem::query()
             ->whereIn('id', array_values(array_unique(array_map('intval', $catalogItemIds))))
-            ->get(['id', 'sku', 'name', 'name_en', 'brand', 'brand_article']);
+            ->get(['id', 'sku', 'name', 'name_en', 'brand', 'brand_article', 'articles']);
         if ($items->isEmpty()) {
             return $zero;
         }
@@ -162,16 +162,37 @@ class SupplierProcurementDispatchService
         return (string) ($ci->name ?: $ci->sku);
     }
 
-    /** Артикул/OEM: правка > brand_article каталога. */
+    /**
+     * Артикул/OEM для письма поставщику: правка менеджера > OEM каталога (без
+     * нашего M-артикула). oemForExternal() уже пропускает M-код, даже если он
+     * первый в brand_article/articles[]. Итог дополнительно санитизируем —
+     * наш M-артикул не уходит поставщику ни при каких условиях (в т.ч. если
+     * менеджер вставил его вручную).
+     */
     private function itemOem(CatalogItem $ci, array $overrides): ?string
     {
-        if (isset($overrides[$ci->id])) {
-            $v = trim((string) $overrides[$ci->id]);
+        $raw = isset($overrides[$ci->id])
+            ? trim((string) $overrides[$ci->id])
+            : (string) ($ci->oemForExternal() ?? '');
 
-            return $v !== '' ? $v : null;
+        return $this->stripInternalCodes($raw !== '' ? $raw : null, $ci->sku);
+    }
+
+    /**
+     * Убрать из строки OEM токены-M-артикулы (наш внутренний код). Строка может
+     * содержать несколько артикулов через запятую (быстрое добавление из превью).
+     */
+    private function stripInternalCodes(?string $oem, ?string $sku): ?string
+    {
+        if ($oem === null) {
+            return null;
         }
+        $parts = array_values(array_filter(
+            array_map('trim', explode(',', $oem)),
+            fn ($p) => $p !== '' && ! CatalogItem::isInternalCode($p, $sku),
+        ));
 
-        return $ci->brand_article ?: null;
+        return $parts === [] ? null : implode(', ', $parts);
     }
 
     /** Количество: правка менеджера; у каталожной позиции своего кол-ва нет. */

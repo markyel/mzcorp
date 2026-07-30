@@ -3,6 +3,7 @@
 namespace App\Services\Supplier;
 
 use App\Enums\RequestActivityType;
+use App\Models\CatalogItem;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\Request as RequestModel;
@@ -295,13 +296,22 @@ class SupplierDispatchService
      */
     public function itemOem(RequestItem $it, array $oemOverrides = []): ?string
     {
-        if (isset($oemOverrides[$it->id])) {
-            $v = trim((string) $oemOverrides[$it->id]);
+        $raw = isset($oemOverrides[$it->id])
+            ? trim((string) $oemOverrides[$it->id])
+            : (string) ($it->parsed_article ?? '');
 
-            return $v !== '' ? $v : null;
+        // Наш внутренний M-артикул не уходит поставщику, даже если клиент прислал
+        // его в parsed_article (use-case A матчит именно M-код) или менеджер
+        // вставил вручную. isInternalCode ловит паттерн M#### / МЗ- без sku.
+        if ($raw === '') {
+            return null;
         }
+        $parts = array_values(array_filter(
+            array_map('trim', explode(',', $raw)),
+            fn ($p) => $p !== '' && ! CatalogItem::isInternalCode($p, null),
+        ));
 
-        return $it->parsed_article ?: null;
+        return $parts === [] ? null : implode(', ', $parts);
     }
 
     /**

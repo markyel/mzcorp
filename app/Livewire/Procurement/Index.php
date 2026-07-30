@@ -217,11 +217,13 @@ class Index extends Component
             return;
         }
         $items = CatalogItem::query()->whereIn('id', $missing)
-            ->get(['id', 'name', 'name_en', 'brand_article']);
+            ->get(['id', 'sku', 'name', 'name_en', 'brand_article', 'articles']);
         foreach ($items as $ci) {
             $this->editedNames[$ci->id] = (string) ($ci->name ?? '');
             $this->editedNamesEn[$ci->id] ??= (string) ($ci->name_en ?: $ci->name ?? '');
-            $this->editedOem[$ci->id] ??= (string) ($ci->brand_article ?? '');
+            // Дефолт артикула — OEM без нашего M-кода (oemForExternal пропускает
+            // M-артикул, даже если он первый в brand_article/articles[]).
+            $this->editedOem[$ci->id] ??= (string) ($ci->oemForExternal() ?? '');
             $this->editedQty[$ci->id] ??= '';
             $this->editedQtyEn[$ci->id] ??= '';
         }
