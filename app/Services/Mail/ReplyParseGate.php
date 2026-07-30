@@ -32,6 +32,18 @@ class ReplyParseGate
      */
     public function shouldParse(EmailMessage $message): bool
     {
+        // Структурированный документ во вложении (pdf/xls/xlsx/docx/csv) почти
+        // всегда несёт перечень позиций: спека клиента ИЛИ наше КП/Предложение,
+        // которое клиент форварднул «хочу это». Парсим независимо от текста
+        // reply'я — иначе позиции из вложения теряются (кейс M-2026-9340: Fwd с
+        // «Предложение МЗ-355979.pdf», текст-cover без сигналов → skip → КВШ не
+        // подтянулся). Служебные (счёт/договор/сертификат) отсеет downstream
+        // relevance-гейт парсера. Осторожность gate'а касалась ФОТО (Vision
+        // плодил ложные позиции, M-2026-0759) — документы этого не делают.
+        if ($this->hasStructuredDocAttachment($message)) {
+            return true;
+        }
+
         $cleaned = $this->extractCleanedText($message);
 
         // Удаляем известные external-маркеры (LZ-REQ-NNNN и т.п.) — это
@@ -56,6 +68,32 @@ class ReplyParseGate
         }
 
         $this->logSkip($message, 'no item signals', $cleaned);
+
+        return false;
+    }
+
+    /**
+     * Есть ли во вложениях структурированный документ (pdf/excel/word/csv) —
+     * такой почти всегда несёт перечень позиций. ФОТО сюда НЕ входят (по ним
+     * gate остаётся осторожным — Vision плодил ложные позиции, M-2026-0759).
+     */
+    private function hasStructuredDocAttachment(EmailMessage $message): bool
+    {
+        $docExt = ['pdf', 'xls', 'xlsx', 'xlsm', 'xlsb', 'docx', 'doc', 'csv', 'tsv', 'ods'];
+        foreach ($message->attachments as $a) {
+            $ext = strtolower(pathinfo((string) $a->filename, PATHINFO_EXTENSION));
+            $mime = strtolower((string) $a->mime_type);
+            if (in_array($ext, $docExt, true)
+                || str_contains($mime, 'pdf')
+                || str_contains($mime, 'spreadsheet')
+                || str_contains($mime, 'excel')
+                || str_contains($mime, 'msword')
+                || str_contains($mime, 'wordprocessing')
+                || str_contains($mime, 'csv')
+            ) {
+                return true;
+            }
+        }
 
         return false;
     }
