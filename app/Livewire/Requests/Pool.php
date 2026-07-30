@@ -294,7 +294,7 @@ class Pool extends Component
 
     public function setBucket(string $bucket): void
     {
-        $allowed = ['active', 'overdue', 'paused', 'closed', 'refused', 'postsale', 'all'];
+        $allowed = ['active', 'overdue', 'silence', 'paused', 'closed', 'refused', 'postsale', 'all'];
         $this->bucket = in_array($bucket, $allowed, true) ? $bucket : 'active';
         $this->status = '';
         $this->delegatedOnly = false;
@@ -347,12 +347,23 @@ class Pool extends Component
                 ),
             ),
             // overdue делит пространство статусов с active (только open),
-            // дополнительный фильтр attention_level=1 — в render().
+            // дополнительный фильтр attention_level=1 + reason=sla_breach — в render().
             'overdue' => array_map(
                 fn (RequestStatus $s) => $s->value,
                 array_filter(
                     RequestStatus::cases(),
                     fn (RequestStatus $s) => $s->isOpenForAssignment()
+                        && ($this->canSeeAll || $s->isVisibleToManager()),
+                ),
+            ),
+            // «Клиент молчит» — истёкший дедлайн в статусах «мяч у клиента»
+            // (после КП / уточнения / счёта). Доп. фильтр attention_level=1 +
+            // reason=awaiting_client — в render().
+            'silence' => array_map(
+                fn (RequestStatus $s) => $s->value,
+                array_filter(
+                    RequestStatus::cases(),
+                    fn (RequestStatus $s) => $s->isWaitingOnClient()
                         && ($this->canSeeAll || $s->isVisibleToManager()),
                 ),
             ),
@@ -478,7 +489,7 @@ class Pool extends Component
         match ($effectiveSort) {
             'created_desc' => $query->orderByDesc('created_at')->orderByDesc('id'),
             'created_asc' => $query->orderBy('created_at')->orderBy('id'),
-            default => in_array($this->bucket, ['active', 'overdue'], true)
+            default => in_array($this->bucket, ['active', 'overdue', 'silence'], true)
                 ? $query->orderByDesc('attention_level')
                     ->orderByRaw('last_activity_at DESC NULLS LAST')
                     ->orderByDesc('id')
@@ -542,6 +553,14 @@ class Pool extends Component
         if ($this->bucket === 'overdue') {
             $query->where('attention_level', 1)
                 ->where('attention_reason', AttentionReason::SlaBreach->value);
+        }
+
+        // «Клиент молчит» — просрочка не по вине менеджера: мяч у клиента после
+        // КП / уточнения / счёта, напоминания идут автоматически. Разнесено с
+        // overdue (наш долг) по attention_reason.
+        if ($this->bucket === 'silence') {
+            $query->where('attention_level', 1)
+                ->where('attention_reason', AttentionReason::AwaitingClient->value);
         }
 
         // Постпродажа: closed_won заявки с непрочитанным постпродажным письмом.
@@ -709,6 +728,11 @@ class Pool extends Component
                     $openValues,
                     fn ($v) => $this->canSeeAll || $v !== RequestStatus::Pending->value,
                 ))
+                ->count(),
+            // «Клиент молчит» — истёкший дедлайн в статусах «мяч у клиента».
+            'silence' => (clone $countsBase)
+                ->where('attention_level', 1)
+                ->where('attention_reason', AttentionReason::AwaitingClient->value)
                 ->count(),
             'paused' => (clone $countsBase)
                 ->where('status', RequestStatus::Paused->value)

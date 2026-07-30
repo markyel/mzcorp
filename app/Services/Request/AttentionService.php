@@ -424,7 +424,7 @@ class AttentionService
         $anchor = $this->statusEnteredAt($request) ?? $request->updated_at ?? now();
         $anchor = CarbonImmutable::instance($anchor);
 
-        return match ($status) {
+        [$deadline, $reason] = match ($status) {
             RequestStatus::New => [
                 $this->addBusinessHours($anchor, $this->cfgInt('new_hours', 1)),
                 AttentionReason::SlaBreach,
@@ -468,6 +468,17 @@ class AttentionService
             ],
             default => [null, null],
         };
+
+        // Разнесение просрочки: в статусах «мяч на стороне клиента» (после КП /
+        // уточнения / счёта) истёкший дедлайн — не вина менеджера, а «клиент
+        // молчит». Причина SlaBreach → AwaitingClient, чтобы директорский бакет
+        // «Просрочено» (фильтр sla_breach) остался только про наш долг, а такие
+        // заявки ушли в бакет «Клиент молчит». Дедлайн/сроки не меняем.
+        if ($reason === AttentionReason::SlaBreach && $status->isWaitingOnClient()) {
+            $reason = AttentionReason::AwaitingClient;
+        }
+
+        return [$deadline, $reason];
     }
 
     /**

@@ -138,6 +138,28 @@ enum RequestStatus: string
     }
 
     /**
+     * «Мяч на стороне клиента»: мы своё действие уже сделали (выслали КП /
+     * задали уточняющий вопрос / выставили счёт), дальше ждём реакции клиента.
+     * Истёкший дедлайн в этих статусах — НЕ вина менеджера (напоминания клиенту
+     * идут автоматически), поэтому такая просрочка идёт причиной
+     * `AttentionReason::AwaitingClient` («Клиент молчит»), а НЕ `SlaBreach`.
+     * Единый источник правды для AttentionService и бакетов пула.
+     *
+     * Anti-«мяч на нашей стороне»: New/Assigned/InProgress (нет КП),
+     * AwaitingInvoice (не выставили счёт) — там истёкший дедлайн = наш долг
+     * (`SlaBreach`, бакет «Просрочено»).
+     */
+    public function isWaitingOnClient(): bool
+    {
+        return in_array($this, [
+            self::Quoted,
+            self::UnderReview,
+            self::AwaitingClientClarification,
+            self::Invoiced,
+        ], true);
+    }
+
+    /**
      * Порядковый номер в lifecycle для peak_status / display.
      *
      * Семантика: peak_status трекает только РЕАЛЬНЫЕ ВЕХИ (Quoted+) — после

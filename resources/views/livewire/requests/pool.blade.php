@@ -415,6 +415,7 @@
                 $bucketChips = [
                     'active'   => ['label' => 'Активные',    'count' => $bucketCounts['active']],
                     'overdue'  => ['label' => 'Просрочено',  'count' => $bucketCounts['overdue'] ?? 0],
+                    'silence'  => ['label' => '🤫 Клиент молчит', 'count' => $bucketCounts['silence'] ?? 0],
                     'paused'   => ['label' => 'На паузе',    'count' => $bucketCounts['paused']],
                     'closed'   => ['label' => 'Закрытые',    'count' => $bucketCounts['closed']],
                     'refused'  => ['label' => '🚫 Наш отказ', 'count' => $bucketCounts['refused'] ?? 0],
@@ -425,9 +426,9 @@
             @foreach($bucketChips as $key => $meta)
                 @php
                     $on = $bucket === $key;
-                    // overdue → red highlight, postsale → amber highlight when >0.
+                    // overdue → red highlight, postsale/silence → amber highlight when >0.
                     $isOverdueChip = $key === 'overdue';
-                    $isPostSaleChip = $key === 'postsale';
+                    $isPostSaleChip = $key === 'postsale' || $key === 'silence';
                     $overdueAttn = $isOverdueChip && $meta['count'] > 0;
                     $postSaleAttn = $isPostSaleChip && $meta['count'] > 0;
                 @endphp
@@ -634,10 +635,16 @@
                             $isSupplierReplied = $attnReason === \App\Enums\AttentionReason::SupplierReplied;
                             $isPricesActualized = $attnReason === \App\Enums\AttentionReason::PricesActualized;
                             $isAllSuppliersRefused = $attnReason === \App\Enums\AttentionReason::AllSuppliersRefused;
-                            // info-флаги — это «есть новости» / «новая» / «🚩 пометка»,
-                            // НЕ просрочка по SLA. Красным фоном не подсвечиваем,
-                            // «просрочено N» текстом не пишем.
-                            $isInfoFlag = $isClientReplied || $isFreshAssignment || $isManualFlag || $isSupplierReplied || $isPricesActualized || $isAllSuppliersRefused;
+                            // «Клиент молчит» — просрочка не по вине менеджера (мяч
+                            // у клиента после КП / уточнения / счёта). Янтарная
+                            // пометка ТОЛЬКО когда дедлайн истёк (level=1); до этого
+                            // (level=0, «через N») строка нейтральна, как раньше.
+                            $isClientSilence = $attnReason === \App\Enums\AttentionReason::AwaitingClient
+                                && $req->attention_level === 1;
+                            // info-флаги — это «есть новости» / «новая» / «🚩 пометка»
+                            // / «клиент молчит», НЕ просрочка по нашей вине. Красным
+                            // фоном не подсвечиваем, «просрочено N» текстом не пишем.
+                            $isInfoFlag = $isClientReplied || $isFreshAssignment || $isManualFlag || $isSupplierReplied || $isPricesActualized || $isAllSuppliersRefused || $isClientSilence;
                             $isOverdueAlarm = $req->attention_level === 1 && ! $isInfoFlag;
                             $attnText = null;
                             if ($isClientReplied) {
@@ -658,8 +665,10 @@
                                 $unit = $absSecs < 3600 ? (int) max(1, floor($absSecs / 60)) . 'м'
                                     : ($absSecs < 86400 ? (int) max(1, floor($absSecs / 3600)) . 'ч'
                                     : (int) max(1, floor($absSecs / 86400)) . 'д');
+                                // «Клиент молчит» — вместо «просрочено» пишем «молчит N»
+                                // (акцент на бездействии клиента, не менеджера).
                                 $attnText = $diffSecs < 0
-                                    ? 'просрочено ' . $unit
+                                    ? ($isClientSilence ? '🤫 молчит ' . $unit : 'просрочено ' . $unit)
                                     : 'через ' . $unit;
                             }
 
