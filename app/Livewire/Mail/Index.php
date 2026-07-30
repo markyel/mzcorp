@@ -51,6 +51,14 @@ class Index extends Component
     public string $linkage = 'all';
 
     /**
+     * Полнотекстовый поиск по письмам (в рамках выбранных фильтров): адрес
+     * отправителя/получателя (или часть), имя, тема, тело письма и имена
+     * файлов-вложений.
+     */
+    #[Url(as: 'q', except: '')]
+    public string $search = '';
+
+    /**
      * Фильтр по категории gpt-4o классификатора:
      *   '' = все
      *   'client_request' / 'thread_reply' / 'irrelevant' — конкретная категория
@@ -119,6 +127,11 @@ class Index extends Component
     }
 
     public function updatingMailboxId(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatingSearch(): void
     {
         $this->resetPage();
     }
@@ -320,6 +333,23 @@ class Index extends Component
             $q->whereNull('category');
         } elseif (in_array($this->category, EmailCategory::values(), true)) {
             $q->where('category', $this->category);
+        }
+
+        // Поиск в рамках уже наложенных фильтров: адрес/имя отправителя и
+        // получателей (jsonb → text), тема, тело (plain + html), имя вложения.
+        $s = trim($this->search);
+        if ($s !== '') {
+            $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $s).'%';
+            $q->where(function (Builder $w) use ($like) {
+                $w->where('subject', 'ilike', $like)
+                    ->orWhere('from_email', 'ilike', $like)
+                    ->orWhere('from_name', 'ilike', $like)
+                    ->orWhere('body_plain', 'ilike', $like)
+                    ->orWhere('body_html', 'ilike', $like)
+                    ->orWhereRaw('to_recipients::text ilike ?', [$like])
+                    ->orWhereRaw('cc_recipients::text ilike ?', [$like])
+                    ->orWhereHas('attachments', fn (Builder $a) => $a->where('filename', 'ilike', $like));
+            });
         }
 
         return $q;

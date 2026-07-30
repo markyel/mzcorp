@@ -14,6 +14,27 @@
             <span class="text-[11.5px] text-fg-3 mono">{{ $this->emails->total() }} писем за период</span>
         </div>
 
+        {{-- Поиск по письмам (в рамках выбранных ниже фильтров): адрес/имя,
+             тема, тело письма, имя файла-вложения. --}}
+        <div class="px-4 pb-2">
+            <div class="relative max-w-[560px]">
+                <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-4 text-[13px]">🔎</span>
+                <input type="search" wire:model.live.debounce.400ms="search"
+                       placeholder="Поиск: e-mail, тема, текст письма, имя вложения…"
+                       class="h-[30px] w-full pl-8 pr-8 border border-border rounded-md bg-surface text-fg-1 text-[12.5px] outline-none focus:border-[var(--sky-500)]">
+                @if(trim($search) !== '')
+                    <button type="button" wire:click="$set('search', '')"
+                            class="absolute right-2 top-1/2 -translate-y-1/2 text-fg-4 hover:text-fg-1 text-[13px]"
+                            title="Очистить поиск">✕</button>
+                @endif
+            </div>
+            @if(trim($search) !== '')
+                <div class="mt-1 text-[11px] text-fg-4">
+                    Найдено писем: <span class="mono text-fg-2">{{ $this->emails->total() }}</span> — по запросу «{{ $search }}» в рамках фильтров ниже
+                </div>
+            @endif
+        </div>
+
         {{-- Компактный фильтр-row: chip-кнопки сгруппированы в segmented-control
              (border-rounded box, кнопки бок-о-бок без gap'ов между ними).
              Подписи групп убраны — это съедало 100+px без пользы. На
