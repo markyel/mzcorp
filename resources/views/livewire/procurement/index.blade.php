@@ -186,17 +186,60 @@
                 @endforelse
             </table>
         </div>
-        <div class="px-4 py-3">{{ $this->positions->links() }}</div>
+        {{-- Авторолистывание: sentinel догружает следующую порцию при попадании
+             в зону видимости (с упреждением 300px), сохраняя scrollTop. Паттерн
+             из App\Livewire\Requests\Pool. --}}
+        <div class="px-4 py-3 flex items-center gap-3 text-[11.5px] text-fg-3">
+            <span>Показано {{ count($this->positions->items()) }} из {{ $this->positions->total() }}</span>
+            @if($this->positions->hasMorePages())
+                <span class="text-border-strong">·</span>
+                <div wire:key="proc-load-more"
+                     x-data="{
+                         keepScrollLoadMore() {
+                             let s = this.$el.parentElement;
+                             while (s && !((['auto','scroll'].includes(getComputedStyle(s).overflowY)) && s.scrollHeight > s.clientHeight)) s = s.parentElement;
+                             s = s || document.scrollingElement || document.documentElement;
+                             const y = s.scrollTop;
+                             this.$wire.loadMore().then(() => requestAnimationFrame(() => { s.scrollTop = y; }));
+                         }
+                     }"
+                     x-intersect.margin.300px="keepScrollLoadMore()"
+                     class="flex items-center gap-2">
+                    <span wire:loading.remove wire:target="loadMore" class="text-fg-4">прокрутите вниз — загрузится ещё</span>
+                    <span wire:loading wire:target="loadMore" class="flex items-center gap-2">
+                        <span class="inline-block w-3.5 h-3.5 border-2 border-fg-4 border-t-transparent rounded-full animate-spin"></span>
+                        Загрузка…
+                    </span>
+                </div>
+            @endif
+        </div>
     </div>
 
-    {{-- Панель запроса поставщикам (по выбранным позициям) --}}
+    {{-- Панель запроса поставщикам (по выбранным позициям) — модальное окно,
+         закреплённое внизу экрана. Стили позиционирования — инлайн, чтобы не
+         зависеть от пересборки Tailwind на деплое (см. память tailwind-arbitrary). --}}
     @php $selPos = $this->selectedPositions; @endphp
     @if($selPos->isNotEmpty())
+        {{-- Спейсер: резервируем место под закреплённую панель, чтобы sentinel и
+             последние строки списка не оставались под ней. --}}
+        <div aria-hidden="true" style="height:40vh"></div>
+
         {{-- @focus.window: карточку поставщика правят через ✎ в соседней вкладке —
              при возврате сюда молча перечитываем подбор (имя/язык/матрица). --}}
-        <div class="ds-card" x-data @focus.window.debounce.500ms="$wire.refreshSupplierOptions()">
-            <div class="ds-card-header"><h3>Запрос поставщикам</h3><span class="text-[12px] text-fg-3 ml-2">выбрано позиций: {{ $selPos->count() }}</span></div>
-            <div class="ds-card-body space-y-3">
+        <div wire:key="proc-rfq-panel" x-data="{ min: false }"
+             style="position:fixed;left:0;right:0;bottom:0;z-index:40;pointer-events:none;padding:0 12px 12px">
+            <div class="ds-card" @focus.window.debounce.500ms="$wire.refreshSupplierOptions()"
+                 style="pointer-events:auto;max-width:1200px;margin:0 auto;box-shadow:0 -8px 30px rgba(0,0,0,.18);border-top-left-radius:12px;border-top-right-radius:12px;overflow:hidden">
+                <div class="ds-card-header cursor-pointer select-none" @click="min = !min">
+                    <h3>Запрос поставщикам</h3>
+                    <span class="text-[12px] text-fg-3 ml-2">выбрано позиций: {{ $selPos->count() }}</span>
+                    <span class="flex-1"></span>
+                    <button type="button" @click.stop="min = !min" class="btn btn-sm"
+                            x-text="min ? '▴ развернуть' : '▾ свернуть'"></button>
+                    <button type="button" wire:click="clearSelection" @click.stop class="btn btn-sm ml-1"
+                            title="Очистить весь выбор позиций">✕ очистить</button>
+                </div>
+            <div class="ds-card-body space-y-3" x-show="!min" style="max-height:58vh;overflow-y:auto">
                 {{-- Поставщики --}}
                 <div>
                     <label class="block text-[11.5px] text-fg-3 mb-1">Поставщики <span class="text-fg-4">— подобраны по матрице под выбранные позиции; ✎ — карточка поставщика (правки подтянутся при возврате)</span></label>
@@ -271,23 +314,57 @@
 
                         <div class="flex items-center gap-2 text-[10px] uppercase tracking-wider text-fg-4 px-1 mb-1">
                             <span style="width:18px"></span>
+                            <span style="width:18px"></span>
                             <span class="flex-1">Наименование</span>
                             <span style="width:150px">Артикул / OEM</span>
                             <span style="width:96px">Кол-во</span>
+                            <span style="width:78px" title="M-артикул каталога — не вставляется в письмо">M-арт.</span>
                         </div>
                         <div class="space-y-1.5">
                             @foreach($rows as $i => $r)
-                                <div class="flex items-center gap-2" wire:key="prev-{{ $blk['lang'] }}-{{ $r['cid'] }}">
-                                    <span class="text-[11px] text-fg-4 text-right" style="width:18px">{{ $i + 1 }}.</span>
-                                    <input type="text" wire:model.lazy="{{ $r['name_model'] }}.{{ $r['cid'] }}"
-                                           class="flex-1 px-2 h-[28px] border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500 {{ $r['cyrillic'] ? 'border-amber-400' : 'border-border' }}">
-                                    @if($r['cyrillic'])
-                                        <span class="chip chip-warn text-[10px]" title="Похоже на русское название — переведите для англоязычного поставщика">⚠ рус.</span>
-                                    @endif
-                                    <input type="text" wire:model.lazy="editedOem.{{ $r['cid'] }}" placeholder="—"
-                                           class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] mono outline-none focus:border-sky-500" style="width:150px">
-                                    <input type="text" wire:model.lazy="{{ $r['qty_model'] }}.{{ $r['cid'] }}" placeholder="—"
-                                           class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] outline-none focus:border-sky-500" style="width:96px">
+                                @php $oem = $this->oemOptions[$r['cid']] ?? ['sku' => '', 'name' => '', 'options' => []]; @endphp
+                                <div wire:key="prev-{{ $blk['lang'] }}-{{ $r['cid'] }}" x-data="{ oem: false }">
+                                    <div class="flex items-center gap-2">
+                                        <button type="button" wire:click="removePosition({{ $r['cid'] }})"
+                                                class="text-fg-4 hover:text-red-600 text-[13px] leading-none text-center"
+                                                style="width:18px" title="Убрать позицию из запроса">🗑</button>
+                                        <span class="text-[11px] text-fg-4 text-right" style="width:18px">{{ $i + 1 }}.</span>
+                                        <input type="text" wire:model.lazy="{{ $r['name_model'] }}.{{ $r['cid'] }}"
+                                               class="flex-1 px-2 h-[28px] border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500 {{ $r['cyrillic'] ? 'border-amber-400' : 'border-border' }}">
+                                        @if($r['cyrillic'])
+                                            <span class="chip chip-warn text-[10px]" title="Похоже на русское название — переведите для англоязычного поставщика">⚠ рус.</span>
+                                        @endif
+                                        <input type="text" wire:model.lazy="editedOem.{{ $r['cid'] }}" placeholder="—"
+                                               class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] mono outline-none focus:border-sky-500" style="width:150px">
+                                        <input type="text" wire:model.lazy="{{ $r['qty_model'] }}.{{ $r['cid'] }}" placeholder="—"
+                                               class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] outline-none focus:border-sky-500" style="width:96px">
+                                        {{-- M-артикул: показываем рядом, НЕ вставляем в письмо; клик — попап OEM --}}
+                                        <button type="button" @click="oem = !oem" style="width:78px"
+                                                class="chip chip-neutral mono text-[10px] truncate"
+                                                title="M-артикул каталога (не идёт в письмо) — показать OEM-артикулы">{{ $oem['sku'] ?: '—' }}</button>
+                                    </div>
+                                    {{-- Превью позиции: название + все OEM-артикулы каталога с быстрым
+                                         добавлением в поле «Артикул/OEM» письма. --}}
+                                    <div x-show="oem" x-cloak class="mt-1 mb-1 p-2 rounded-md bg-surface border border-border-subtle"
+                                         style="margin-left:44px">
+                                        <div class="text-[11px] text-fg-2 font-medium mb-1.5">{{ $oem['name'] ?: '—' }}</div>
+                                        @if(!empty($oem['options']))
+                                            <div class="text-[10px] uppercase tracking-wider text-fg-4 mb-1">OEM-артикулы каталога — клик добавляет в поле «Артикул/OEM»</div>
+                                            <div class="flex flex-wrap gap-1.5">
+                                                @foreach($oem['options'] as $opt)
+                                                    <button type="button" wire:click="addOem({{ $r['cid'] }}, @js($opt['article']))"
+                                                            class="inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-surface-2 hover:bg-hover text-[11.5px]"
+                                                            title="Добавить {{ $opt['article'] }} в поле артикула позиции">
+                                                        <span class="text-sky-700 font-semibold">＋</span>
+                                                        <span class="mono">{{ $opt['article'] }}</span>
+                                                        @if($opt['brand'] !== '')<span class="text-fg-4 text-[10.5px]">· {{ $opt['brand'] }}</span>@endif
+                                                    </button>
+                                                @endforeach
+                                            </div>
+                                        @else
+                                            <div class="text-[11.5px] text-fg-4">В каталоге нет отдельных OEM-артикулов для этой позиции.</div>
+                                        @endif
+                                    </div>
                                 </div>
                             @endforeach
                         </div>
@@ -319,6 +396,7 @@
                     </button>
                     <span class="text-[11.5px] text-fg-3">по M-артикулу; цена обновится в каталоге → заявки получат сигнал «💰»</span>
                 </div>
+            </div>
             </div>
         </div>
     @endif

@@ -37,6 +37,9 @@ class Index extends Component
     /** Допустимые периоды (дней) для режима «за период». */
     public const PERIOD_DAYS = [7, 14, 30, 60, 90];
 
+    /** Начальный размер окна infinite-scroll (строк). */
+    public const PER_PAGE = 25;
+
     #[Url(as: 'q', except: '')]
     public string $search = '';
 
@@ -55,6 +58,13 @@ class Index extends Component
     /** Фильтр запросов поставщикам: '' — все, 'sent' — уже запрошены (контроль ответов), 'none' — ещё не запрошены. */
     #[Url(as: 'rfq', except: '')]
     public string $rfqFilter = '';
+
+    /**
+     * Окно infinite-scroll: сколько строк списка показывать. Растёт по loadMore()
+     * при долистывании; любой сброс фильтра (resetPage override ниже) возвращает
+     * в PER_PAGE. Заимствован паттерн из App\Livewire\Requests\Pool.
+     */
+    public int $perPage = self::PER_PAGE;
 
     /** cid => bool — выбранные позиции для запроса. */
     public array $selected = [];
@@ -107,6 +117,23 @@ class Index extends Component
             ]),
             403,
         );
+    }
+
+    /** Догрузить следующую порцию списка (вызывается x-intersect sentinel'ом). */
+    public function loadMore(): void
+    {
+        $this->perPage += self::PER_PAGE;
+    }
+
+    /**
+     * Override WithPagination::resetPage — при любой смене фильтра (все
+     * updating*-хуки зовут resetPage) окно infinite-scroll возвращается в
+     * PER_PAGE, чтобы список не оставался «раздутым» после смены выборки.
+     */
+    public function resetPage($pageName = 'page'): void
+    {
+        parent::resetPage($pageName);
+        $this->perPage = self::PER_PAGE;
     }
 
     public function updatingSearch(): void
@@ -349,7 +376,89 @@ class Index extends Component
         }
 
         return CatalogItem::query()->whereIn('id', $cids)
-            ->orderBy('sku')->get(['id', 'sku', 'name', 'brand', 'brand_article']);
+            ->orderBy('sku')->get(['id', 'sku', 'name', 'brand', 'brand_article', 'brands', 'articles']);
+    }
+
+    /**
+     * Превью M-артикула для каждой выбранной позиции: sku + список доступных
+     * OEM-артикулов каталога (brand_article + articles[], без наших M-кодов),
+     * с брендом по параллельному индексу. Для попапа «показать OEM» с быстрым
+     * добавлением в поле «Артикул/OEM» письма (editedOem).
+     *
+     * @return array<int, array{sku:string, name:string, options:array<int, array{article:string, brand:string}>}>
+     */
+    #[Computed]
+    public function oemOptions(): array
+    {
+        $out = [];
+        foreach ($this->selectedPositions as $ci) {
+            $articles = array_merge([$ci->brand_article], (array) ($ci->articles ?? []));
+            $brands = array_merge([$ci->brand], (array) ($ci->brands ?? []));
+            $seen = [];
+            $list = [];
+            foreach ($articles as $idx => $art) {
+                $art = trim((string) $art);
+                if ($art === '' || CatalogItem::isInternalCode($art, $ci->sku)) {
+                    continue;
+                }
+                $key = mb_strtolower($art);
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $list[] = ['article' => $art, 'brand' => trim((string) ($brands[$idx] ?? ''))];
+            }
+            $out[$ci->id] = ['sku' => (string) $ci->sku, 'name' => (string) $ci->name, 'options' => $list];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Убрать позицию из запроса (иконка корзины в превью письма) — эквивалент
+     * отжатия чекбокса в списке вверху. Чистим и редактируемые поля позиции.
+     */
+    public function removePosition(int $cid): void
+    {
+        unset(
+            $this->selected[$cid],
+            $this->editedNames[$cid],
+            $this->editedNamesEn[$cid],
+            $this->editedOem[$cid],
+            $this->editedQty[$cid],
+            $this->editedQtyEn[$cid],
+        );
+        unset($this->selectedPositions, $this->oemOptions, $this->supplierOptions, $this->previewLanguages);
+    }
+
+    /**
+     * Быстро добавить OEM-артикул из каталога в поле «Артикул/OEM» письма
+     * (editedOem) для позиции. Идемпотентно: дубликаты не добавляем, копим через
+     * запятую.
+     */
+    public function addOem(int $cid, string $article): void
+    {
+        $article = trim($article);
+        if ($article === '') {
+            return;
+        }
+        $current = trim((string) ($this->editedOem[$cid] ?? ''));
+        $parts = array_values(array_filter(array_map('trim', explode(',', $current)), fn ($p) => $p !== ''));
+        foreach ($parts as $p) {
+            if (mb_strtolower($p) === mb_strtolower($article)) {
+                return;
+            }
+        }
+        $parts[] = $article;
+        $this->editedOem[$cid] = implode(', ', $parts);
+    }
+
+    /** Очистить весь выбор (крестик в шапке модалки запроса). */
+    public function clearSelection(): void
+    {
+        $this->reset(['selected', 'selectedSuppliers', 'addedSupplierIds', 'supplierSearch', 'note',
+            'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn']);
+        unset($this->supplierOptions, $this->selectedPositions, $this->oemOptions, $this->previewLanguages);
     }
 
     /**
@@ -494,7 +603,7 @@ class Index extends Component
         // Сброс выбора.
         $this->reset(['selected', 'selectedSuppliers', 'addedSupplierIds', 'supplierSearch', 'note',
             'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn']);
-        unset($this->positions, $this->supplierOptions, $this->iqotByCatalogId, $this->selectedPositions, $this->previewLanguages);
+        unset($this->positions, $this->supplierOptions, $this->iqotByCatalogId, $this->selectedPositions, $this->oemOptions, $this->previewLanguages);
     }
 
     /** Базовый запрос блокеров (сматченные stale-позиции в до-КП заявках). */
@@ -575,9 +684,12 @@ class Index extends Component
             ->orderBy('catalog_items.sku')
             ->get();
 
-        $perPage = 25;
-        $page = Paginator::resolveCurrentPage();
-        $slice = $rows->slice(($page - 1) * $perPage, $perPage)->values();
+        // Infinite-scroll: показываем первые perPage строк (окно растёт по loadMore),
+        // всегда от начала списка. LengthAwarePaginator на странице 1 сохраняет
+        // корректный hasMorePages()/total() для sentinel'а и футера.
+        $perPage = $this->perPage;
+        $page = 1;
+        $slice = $rows->slice(0, $perPage)->values();
         $cids = $slice->pluck('cid')->all();
 
         // Коды заблокированных заявок по позиции (первые несколько).
