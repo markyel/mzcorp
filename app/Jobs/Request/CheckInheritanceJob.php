@@ -312,9 +312,29 @@ class CheckInheritanceJob implements ShouldQueue, ShouldBeUnique
             $exactArticleMapped = collect($itemMappings)
                 ->where('source', 'auto_article')
                 ->pluck('child_item_id')
-                ->unique()
-                ->count();
-            if ($exactArticleMapped !== $newActive) {
+                ->unique();
+
+            // Совпадение по тому же catalog_item — тоже полное совпадение позиции,
+            // даже если артикул не распарсился. Кейс M-2026-8786→10286: клиент
+            // ФОРВАРДНУЛ НАШЕ ЖЕ КП, позиция «Устройство привода дверей» без
+            // чистого артикула, но привязана к catalog_item 19223 = как у
+            // родителя. Артикульный матч не ловил → плодил child вместо
+            // реанимации. Форвард нашего КП с теми же catalog-позициями —
+            // сильнейший сигнал возврата к ТОЙ ЖЕ заявке.
+            $parentCatalogIds = $candidate->items()
+                ->where('is_active', true)
+                ->whereNotNull('catalog_item_id')
+                ->pluck('catalog_item_id')
+                ->unique();
+            $catalogMatchedChildIds = $newRequest->items()
+                ->where('is_active', true)
+                ->whereNotNull('catalog_item_id')
+                ->whereIn('catalog_item_id', $parentCatalogIds)
+                ->pluck('id')
+                ->unique();
+
+            $matchedChildIds = $exactArticleMapped->merge($catalogMatchedChildIds)->unique();
+            if ($matchedChildIds->count() !== $newActive) {
                 return false;
             }
         }
