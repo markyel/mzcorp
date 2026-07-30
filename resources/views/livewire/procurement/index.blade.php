@@ -222,7 +222,7 @@
     @if($selPos->isNotEmpty())
         {{-- Спейсер: резервируем место под закреплённую панель, чтобы sentinel и
              последние строки списка не оставались под ней. --}}
-        <div aria-hidden="true" style="height:40vh"></div>
+        <div aria-hidden="true" style="height:48vh"></div>
 
         {{-- @focus.window: карточку поставщика правят через ✎ в соседней вкладке —
              при возврате сюда молча перечитываем подбор (имя/язык/матрица). --}}
@@ -239,7 +239,7 @@
                     <button type="button" wire:click="clearSelection" @click.stop class="btn btn-sm ml-1"
                             title="Очистить весь выбор позиций">✕ очистить</button>
                 </div>
-            <div class="ds-card-body space-y-3" x-show="!min" style="max-height:58vh;overflow-y:auto">
+            <div class="ds-card-body space-y-3" x-show="!min" style="max-height:40vh;overflow-y:auto">
                 {{-- Поставщики --}}
                 <div>
                     <label class="block text-[11.5px] text-fg-3 mb-1">Поставщики <span class="text-fg-4">— подобраны по матрице под выбранные позиции; ✎ — карточка поставщика (правки подтянутся при возврате)</span></label>
