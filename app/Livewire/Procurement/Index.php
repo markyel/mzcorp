@@ -129,10 +129,15 @@ class Index extends Component
      * Override WithPagination::resetPage — при любой смене фильтра (все
      * updating*-хуки зовут resetPage) окно infinite-scroll возвращается в
      * PER_PAGE, чтобы список не оставался «раздутым» после смены выборки.
+     *
+     * НЕ зовём parent::resetPage() — метод приходит из трейта WithPagination,
+     * а не из родителя (Livewire\Component), поэтому parent:: его не находит и
+     * падает BadMethodCall, 500. Реальная пагинация не используется (positions()
+     * жёстко берёт page=1, окно = perPage), так что сброса ?page= не требуется —
+     * как в App\Livewire\Requests\Pool.
      */
     public function resetPage($pageName = 'page'): void
     {
-        parent::resetPage($pageName);
         $this->perPage = self::PER_PAGE;
     }
 
