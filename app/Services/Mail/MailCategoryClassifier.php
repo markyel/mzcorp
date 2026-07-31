@@ -266,6 +266,24 @@ class MailCategoryClassifier
             ? mb_substr(trim($parsed['reasoning']), 0, 1000)
             : null;
 
+        // Пост-LLM гард: клиент ЯВНО просит счёт на оплату → это продажа (новая
+        // заявка), а не постпродажа, что бы ни решил gpt-4o. Модель систематически
+        // цепляется за «поставить на комплектацию / подойти забрать» и ставит
+        // post_sale, теряя главный сигнал — запрос счёта. Кейс M00965 (ЗИПИС):
+        // «Прошу прислать счёт на оплату и поставить на комплектацию…».
+        if ($category === EmailCategory::PostSale
+            && $this->postSaleFulfillment->requestsInvoiceToPay($message)) {
+            $reasoning = 'Override post_sale→client_request: клиент просит счёт на оплату (запрос счёта = продажа). Ответ LLM: '
+                . ($reasoning ?? '—');
+            $category = EmailCategory::ClientRequest;
+            $confidence = 1.0;
+            $intent = null;
+            Log::info('MailCategoryClassifier: invoice-request override post_sale→client_request', [
+                'email_message_id' => $message->id,
+                'from_email' => $message->from_email,
+            ]);
+        }
+
         $message->forceFill([
             'category' => $category->value,
             'category_confidence' => $confidence,
