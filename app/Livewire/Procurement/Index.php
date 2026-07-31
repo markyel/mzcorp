@@ -621,6 +621,7 @@ class Index extends Component
             ->join('requests', 'requests.id', '=', 'request_items.request_id')
             ->where('request_items.is_active', true)
             ->whereNotNull('request_items.catalog_item_id')
+            ->where('catalog_items.is_active', true)
             ->where('catalog_items.is_price_actual', false)
             ->whereNull('requests.merged_into_id');
         $this->applyRequestScope($q);

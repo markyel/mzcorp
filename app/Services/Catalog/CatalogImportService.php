@@ -4,6 +4,7 @@ namespace App\Services\Catalog;
 
 use App\Models\CatalogImport;
 use App\Models\CatalogItem;
+use App\Models\CatalogSkuBlacklist;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -130,6 +131,23 @@ class CatalogImportService
             }
             $skuSeen[$norm['sku']] = true;
             $normalized[] = $norm;
+        }
+
+        // Чёрный список: выкидываем blacklisted SKU из снапшота ДО апсёрта —
+        // их не создаём и не обновляем, is_active НЕ переставляется в true.
+        // Так позиции-дубли остаются исключёнными (is_active=false) при любом
+        // повторном импорте. См. CatalogSkuBlacklist + команду catalog:blacklist-skus.
+        $blacklist = CatalogSkuBlacklist::skuSet();
+        if ($blacklist !== []) {
+            $before = count($normalized);
+            $normalized = array_values(array_filter(
+                $normalized,
+                fn ($n) => ! isset($blacklist[mb_strtoupper(trim((string) $n['sku']))]),
+            ));
+            $skippedBlacklisted = $before - count($normalized);
+            if ($skippedBlacklisted > 0) {
+                $errors[] = ['code' => 'blacklisted_skipped', 'count' => $skippedBlacklisted];
+            }
         }
 
         if (empty($normalized)) {
