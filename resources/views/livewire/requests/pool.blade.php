@@ -860,6 +860,20 @@
                                         {{ $req->closed_at->format('d.m.Y H:i') }}
                                     </div>
                                 @endif
+                                {{-- Успех по оплате: отметка + дата оплаты (по оплаченному
+                                     счёту). Показываем только для closed_won с оплатой. --}}
+                                @if($req->status === RequestStatus::ClosedWon)
+                                    @php
+                                        $paidInv = $req->invoices->first();
+                                        $paidAt = $paidInv?->paid_at ?? $paidInv?->partially_paid_at;
+                                    @endphp
+                                    @if($paidAt)
+                                        <div class="text-[11px] mt-0.5 text-emerald-700 font-medium tnum"
+                                             title="Оплата по счёту{{ $paidInv->status->value === 'partially_paid' ? ' · частичная' : '' }}">
+                                            💰 Оплачено {{ $paidAt->format('d.m.Y') }}{{ $paidInv->status->value === 'partially_paid' ? ' (частично)' : '' }}
+                                        </div>
+                                    @endif
+                                @endif
                                 {{-- Не рендерим activity-строку если она дублирует
                                      статус-чип (например status=Invoiced +
                                      activity=InvoiceSent → оба «Счёт отправлен»).

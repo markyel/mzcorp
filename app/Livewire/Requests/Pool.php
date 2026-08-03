@@ -478,6 +478,11 @@ class Pool extends Component
                 // и «↺ → {acting}» (РОПу/владельцу — кому делегирована).
                 'activeDelegations' => fn ($q) => $q->select(['id', 'request_id', 'original_user_id', 'acting_user_id', 'started_at'])
                     ->with(['originalUser:id,name', 'actingUser:id,name']),
+                // Оплаченные счета — для отметки «💰 Оплачено ДД.ММ» у закрытых
+                // успехом заявок (последний по дате оплаты).
+                'invoices' => fn ($q) => $q->whereIn('status', ['paid', 'partially_paid'])
+                    ->select(['id', 'request_id', 'status', 'paid_at', 'partially_paid_at'])
+                    ->orderByDesc('paid_at')->orderByDesc('id'),
             ])
             ->withCount('items');
 
