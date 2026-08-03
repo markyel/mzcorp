@@ -1603,6 +1603,43 @@ class Detail extends Component
         $this->reloadRequest();
     }
 
+    /**
+     * Быстрая ручная привязка позиции к каталогу по введённому M-артикулу
+     * (поле вставки в карточке позиции). Находит CatalogItem по sku и линкует
+     * через RequestItemEditor::linkToCatalog (с обучением алиасов). Ошибки —
+     * тостом, без падения.
+     */
+    public function linkItemCatalogBySku(int $itemId, string $sku, RequestItemEditor $editor): void
+    {
+        $sku = mb_strtoupper(trim($sku));
+        if ($sku === '') {
+            return;
+        }
+        $item = $this->loadItemOrFail($itemId);
+        $catalog = \App\Models\CatalogItem::query()
+            ->whereRaw('UPPER(sku) = ?', [$sku])
+            ->first();
+        if ($catalog === null) {
+            $this->dispatch('toast', message: "M-артикул {$sku} не найден в каталоге.", type: 'error');
+
+            return;
+        }
+        if (! $catalog->is_active) {
+            $this->dispatch('toast', message: "{$catalog->sku} исключён из каталога (неактивен) — привязка отклонена.", type: 'error');
+
+            return;
+        }
+        try {
+            $editor->linkToCatalog($item, $catalog, auth()->user());
+        } catch (\Throwable $e) {
+            $this->dispatch('toast', message: 'Не удалось привязать: ' . $e->getMessage(), type: 'error');
+
+            return;
+        }
+        $this->reloadRequest();
+        $this->dispatch('toast', message: "Позиция привязана к {$catalog->sku}.", type: 'success');
+    }
+
     public function refreshItemCatalog(int $itemId, RequestItemEditor $editor): void
     {
         $item = $this->loadItemOrFail($itemId);

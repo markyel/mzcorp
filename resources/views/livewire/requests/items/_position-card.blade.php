@@ -340,19 +340,44 @@
              Раньше тут был «—» / 💡N — выбросили в пользу полезной инфы.
              Title бренда / категории / артикула — в Title-колонке слева. --}}
         <div class="flex items-center gap-1 flex-wrap text-[11.5px] min-w-0">
-            @if($mylinkSku)
-                <a href="https://www.mylift.ru/index.php?code={{ urlencode($mylinkSku) }}&fn=view"
-                   target="_blank" rel="noopener noreferrer"
-                   class="mono text-sky-700 hover:text-sky-900 hover:underline truncate"
-                   title="Открыть на mylift.ru — каталог MyLift{{ $ci ? ' · обн. ' . ($ci->last_imported_at?->format('d.m.Y') ?? '—') : '' }}">{{ $mylinkSku }} ↗</a>
-                <x-copy-button :value="$mylinkSku" />
+            @if($item->catalog_item_id)
+                {{-- Привязано к каталогу: SKU + копия + быстрая отвязка (×) --}}
+                @if($mylinkSku)
+                    <a href="https://www.mylift.ru/index.php?code={{ urlencode($mylinkSku) }}&fn=view"
+                       target="_blank" rel="noopener noreferrer"
+                       class="mono text-sky-700 hover:text-sky-900 hover:underline truncate"
+                       title="Открыть на mylift.ru — каталог MyLift{{ $ci ? ' · обн. ' . ($ci->last_imported_at?->format('d.m.Y') ?? '—') : '' }}">{{ $mylinkSku }} ↗</a>
+                    <x-copy-button :value="$mylinkSku" />
+                @else
+                    <span class="mono text-fg-3" title="каталожная позиция неактивна/не загружена">#{{ $item->catalog_item_id }}</span>
+                @endif
+                @if($canEditItems ?? false)
+                    <button type="button" wire:click="unbindItemCatalog({{ $item->id }})"
+                            wire:target="unbindItemCatalog({{ $item->id }})" wire:loading.attr="disabled"
+                            class="text-fg-4 hover:text-red-600 leading-none px-1 text-[13px]"
+                            title="Отвязать от каталога (ошибочный матч)">✕</button>
+                @endif
+            @elseif($canEditItems ?? false)
+                {{-- Не привязано / отвязано: быстрая ручная привязка по M-артикулу.
+                     Поле предзаполнено извлечённым sku (internal_pending), если есть. --}}
+                <div x-data="{ sku: @js($mylinkSku ?? '') }" class="inline-flex items-center gap-0.5">
+                    <input type="text" x-model.trim="sku"
+                           @keydown.enter.prevent="if(sku){ $wire.linkItemCatalogBySku({{ $item->id }}, sku) }"
+                           placeholder="M-артикул" style="width:92px"
+                           class="h-[22px] px-1.5 border border-border rounded bg-surface text-[11px] mono outline-none focus:border-sky-500">
+                    <button type="button" @click="if(sku){ $wire.linkItemCatalogBySku({{ $item->id }}, sku) }"
+                            class="text-sky-700 hover:text-sky-900 leading-none px-1 text-[13px]"
+                            title="Привязать к каталогу по M-артикулу">🔗</button>
+                </div>
+            @elseif($mylinkSku)
+                <span class="mono text-fg-2">{{ $mylinkSku }}</span>
+            @else
+                <span class="text-[11px] text-fg-3">—</span>
             @endif
+
             @if($pendingSuggCount > 0)
                 <span class="inline-flex items-center px-1 rounded-sm bg-amber-50 text-amber-800 text-[10px] font-semibold"
                       title="предложений обогащения к применению">💡{{ $pendingSuggCount }}</span>
-            @endif
-            @if(! $mylinkSku && $pendingSuggCount === 0)
-                <span class="text-[11px] text-fg-3">—</span>
             @endif
         </div>
 
