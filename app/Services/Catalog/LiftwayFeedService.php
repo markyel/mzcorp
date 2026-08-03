@@ -8,10 +8,18 @@ use XMLWriter;
 /**
  * Генератор YML-фида «Цены и наличие» для площадки LazyLift/Liftway
  * (см. docs интеграции поставщиков Liftway). MyLift выступает поставщиком:
- * отдаём номенклатуру, по которой есть АКТУАЛЬНАЯ цена (is_price_actual).
+ * отдаём всю номенклатуру, которую продаём (is_active + есть закупочная цена).
  *
- * Формат минимальный (их парсер читает только offer id/price/count/available):
+ * Позиции с АКТУАЛЬНОЙ ценой (is_price_actual=true) — как обычно:
  *   <offer id="{sku}" available="true"><price>…</price><count>{stock}</count></offer>
+ * Позиции с НЕАКТУАЛЬНОЙ ценой НЕ выкидываем из фида (иначе Liftway не отличит
+ * «цена протухла» от «нет в прайсе» и продаёт по старой цене), а помечаем:
+ *   <offer id="{sku}" available="false">
+ *     <price>{последняя известная}</price><count>0</count>
+ *     <param name="ЦенаАктуальна">нет</param>
+ *   </offer>
+ * Когда цена снова актуальна — флаг исчезает, позиция продаётся как обычно
+ * (отсутствие флага = цена актуальна, обратная совместимость).
  *
  * Цена = закупка × наценка (config services.liftway_feed.markup, дефолт 1.15).
  * Ключ сопоставления = sku (M-артикул) — он же «Ваш код» в прайсе Liftway.
@@ -38,30 +46,53 @@ class LiftwayFeedService
         $w->startElement('offers');
 
         $count = 0;
+        // Отдаём ВСЕ позиции, которые Liftway у нас продаёт (is_active + есть
+        // закупочная цена), включая те, у которых цена сейчас НЕ актуальна.
+        // Раньше неактуальные просто выпадали из фида — Liftway не мог отличить
+        // «цена протухла» от «позиции нет в прайсе» (фид = подмножество каталога)
+        // и продолжал продавать по старой цене. Теперь неактуальные приходят с
+        // явным флагом (available=false + param «ЦенаАктуальна»=нет), а когда
+        // цена снова актуальна — как обычно (available=true, без флага).
         CatalogItem::query()
             ->where('is_active', true)
-            ->where('is_price_actual', true)
             ->where('purchase_price', '>', 0)
             ->whereNotNull('sku')
             ->where('sku', '!=', '')
             ->orderBy('id')
-            ->select(['id', 'sku', 'purchase_price', 'stock_available'])
+            ->select(['id', 'sku', 'purchase_price', 'stock_available', 'is_price_actual'])
             ->chunkById(1000, function ($items) use ($w, $markup, &$count) {
                 foreach ($items as $it) {
+                    // Последняя известная цена = закупка × наценка (для
+                    // неактуальных — тоже она, как «last known»).
                     $price = round(((float) $it->purchase_price) * $markup, 2);
                     if ($price <= 0) {
                         continue;
                     }
-                    $stock = max(0, (int) $it->stock_available);
+                    $priceActual = (bool) $it->is_price_actual;
 
                     $w->startElement('offer');
                     $w->writeAttribute('id', (string) $it->sku);
-                    // Все позиции с актуальной ценой мы можем поставить (в наличии
-                    // либо под заказ), поэтому available=true; фактический остаток
-                    // передаём в <count> (0 = под заказ).
-                    $w->writeAttribute('available', 'true');
-                    $w->writeElement('price', number_format($price, 2, '.', ''));
-                    $w->writeElement('count', (string) $stock);
+
+                    if ($priceActual) {
+                        // Актуальная цена: продаём. В наличии либо под заказ →
+                        // available=true, фактический остаток в <count> (0 = под заказ).
+                        $w->writeAttribute('available', 'true');
+                        $w->writeElement('price', number_format($price, 2, '.', ''));
+                        $w->writeElement('count', (string) max(0, (int) $it->stock_available));
+                    } else {
+                        // Цена НЕ актуальна: позиция остаётся в фиде, но снята с
+                        // продажи до обновления цены. Liftway читает флаг
+                        // «ЦенаАктуальна=нет» (Вариант A) и не продаёт по старой
+                        // цене; count=0. Цену отдаём последнюю известную (справочно).
+                        $w->writeAttribute('available', 'false');
+                        $w->writeElement('price', number_format($price, 2, '.', ''));
+                        $w->writeElement('count', '0');
+                        $w->startElement('param');
+                        $w->writeAttribute('name', 'ЦенаАктуальна');
+                        $w->text('нет');
+                        $w->endElement(); // param
+                    }
+
                     $w->endElement(); // offer
                     $count++;
                 }
