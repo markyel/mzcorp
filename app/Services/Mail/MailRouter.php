@@ -55,6 +55,7 @@ class MailRouter
         private readonly \App\Services\Supplier\SupplierRegistry $supplierRegistry,
         private readonly \App\Services\Supplier\SupplierRfqClassifier $supplierRfqClassifier,
         private readonly InternalSenderDetector $internalDetector = new InternalSenderDetector(),
+        private readonly CitedOutboundQuoteRouter $citedQuoteRouter = new CitedOutboundQuoteRouter(),
     ) {
     }
 
@@ -370,6 +371,26 @@ class MailRouter
                 'email_message_id' => $message->id,
                 'error' => $e->getMessage(),
             ]);
+        }
+
+        // Клиент цитирует наш КП/счёт (номером в теме/теле или приложив наш КП
+        // файлом) — маршрутизируем письмо на заявку этого КП и ставим «ждёт счёт»,
+        // не создавая новую. Только если thread-линковки нет (прямой ответ в тред
+        // надёжнее и уже привязал бы к той же заявке). Не важно, на какой e-mail
+        // был выдан КП — матч по номеру документа.
+        if ($linkedRequest === null
+            && in_array($message->category, [EmailCategory::ClientRequest->value, EmailCategory::ThreadReply->value], true)) {
+            try {
+                $cited = $this->citedQuoteRouter->detect($message);
+                if ($cited !== null) {
+                    $linkedRequest = $this->applyCitedInvoiceRequest($message, $cited);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: cited-quote routing failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         // Постпродажная переписка по уже оформленному заказу (отгрузка /
@@ -897,6 +918,83 @@ class MailRouter
      * null = подходящего заказа нет — заявку создавать не нужно, письмо
      * остаётся в общем ящике.
      */
+    /**
+     * Применить маршрут «клиент процитировал наш КП → запрос счёта»: привязать
+     * письмо к заявке КП, реанимировать её если закрыта потерей, перевести в
+     * «ждёт счёт» (AwaitingInvoice), записать аудит. Идемпотентно.
+     *
+     * @param  array{request: \App\Models\Request, document_number: string, total: float, source: string}  $cited
+     */
+    private function applyCitedInvoiceRequest(EmailMessage $message, array $cited): \App\Models\Request
+    {
+        $request = $cited['request'];
+        $docNo = $cited['document_number'];
+
+        if ($message->related_request_id !== $request->id) {
+            $message->forceFill(['related_request_id' => $request->id])->save();
+        }
+
+        // Заявка закрыта потерей (клиент молчал, теперь вернулся за счётом) →
+        // реанимируем. reanimate() работает только из closed_lost.
+        if ($request->status === \App\Enums\RequestStatus::ClosedLost) {
+            try {
+                $request = app(\App\Services\Request\RequestStateService::class)->reanimate(
+                    $request,
+                    null,
+                    $message,
+                    true,
+                    'reanimate_from_cited_quote',
+                    sprintf('Клиент прислал запрос счёта по КП %s — реанимация', $docNo),
+                );
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: cited-quote reanimate failed (non-fatal)', [
+                    'request_id' => $request->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Перевод в «ждёт счёт» — если уже не на этой/более поздней вехе.
+        $skip = [
+            \App\Enums\RequestStatus::AwaitingInvoice,
+            \App\Enums\RequestStatus::Invoiced,
+            \App\Enums\RequestStatus::Paid,
+            \App\Enums\RequestStatus::ClosedWon,
+        ];
+        if (! in_array($request->status, $skip, true)) {
+            $from = $request->status->value;
+            $request->status = \App\Enums\RequestStatus::AwaitingInvoice;
+            $request->save();
+            \App\Models\RequestStateChange::create([
+                'request_id' => $request->id,
+                'from_status' => $from,
+                'to_status' => \App\Enums\RequestStatus::AwaitingInvoice->value,
+                'by_user_id' => null,
+                'event' => 'invoice_requested_cited_quote',
+                'comment' => sprintf('Клиент процитировал КП %s и запросил счёт (маршрут по номеру КП, %s)', $docNo, $cited['source']),
+                'payload' => [
+                    'document_number' => $docNo,
+                    'source' => $cited['source'],
+                    'email_message_id' => $message->id,
+                ],
+            ]);
+            try {
+                $this->attention->recompute($request->fresh());
+            } catch (\Throwable $e) {
+                // non-fatal
+            }
+        }
+
+        Log::info('MailRouter: cited-quote invoice-request routed', [
+            'email_message_id' => $message->id,
+            'request_id' => $request->id,
+            'document_number' => $docNo,
+            'source' => $cited['source'],
+        ]);
+
+        return $request->fresh();
+    }
+
     private function resolvePostSaleRequest(?\App\Models\Request $linkedRequest): ?\App\Models\Request
     {
         // Привязываем post_sale письмо к заказу ТОЛЬКО при надёжном совпадении
