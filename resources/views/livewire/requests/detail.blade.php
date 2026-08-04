@@ -2571,19 +2571,25 @@
                     @endif
 
                     {{-- Priority 1: модалки ручных действий с позициями.
-                         Single-instance, слушают $dispatch события от строк.
-                         lazy — те же резоны что у других диалогов (Phase perf).
+                         Single-instance, слушают $wire.dispatch события от строк.
+                         НЕ lazy: диалоги открываются по событию из меню «⋮».
+                         С lazy их слушатель #[On(...)] регистрируется только
+                         после подгрузки по вьюпорту (IntersectionObserver) — до
+                         этого open-событие терялось: на Mac/Safari модалка не
+                         открывалась или открывалась с большой задержкой (кейс
+                         M-2026-10119). Закрытый диалог рендерит пустой <div> —
+                         eager-загрузка практически бесплатна.
                     --}}
                     @if($canEditItems)
                         <livewire:requests.items.item-edit-dialog
                             :request-id="$req->id"
-                            wire:key="item-edit-{{ $req->id }}" lazy />
+                            wire:key="item-edit-{{ $req->id }}" />
                         <livewire:requests.items.item-catalog-link-dialog
                             :request-id="$req->id"
-                            wire:key="item-catalog-link-{{ $req->id }}" lazy />
+                            wire:key="item-catalog-link-{{ $req->id }}" />
                         <livewire:requests.items.item-photo-rebind-dialog
                             :request-id="$req->id"
-                            wire:key="item-photo-rebind-{{ $req->id }}" lazy />
+                            wire:key="item-photo-rebind-{{ $req->id }}" />
                     @endif
 
                     {{-- Foundation §6.2: панель уточняющих вопросов клиенту.
