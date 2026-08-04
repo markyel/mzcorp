@@ -229,6 +229,52 @@ class AiDecisionService
             }
         }
 
+        // Промоут Pending → Assigned перед outbound-документом (кейс M-2026-6195).
+        //
+        // Заявка ещё висит в Pending (не разведена роутингом / не назначена), но
+        // менеджер уже отправил КП/счёт. Переход Pending→Quoted/Invoiced запрещён
+        // стейт-машиной (Pending → [New, Assigned, ClosedLost]) → apply отклонялся
+        // как «Запрещённый переход: pending → quoted», статус «КП отправлено»
+        // терялся, заявка застревала. Промоутим её до Assigned (owner уже есть),
+        // после чего Assigned→Quoted/Invoiced проходит штатно. Симметрично блоку
+        // auto-reanimate для closed_lost выше. Если назначенца нет — переход
+        // Pending→Assigned упадёт, ловим и падаем на общий путь (останется
+        // dismissed, без регрессии: заявку без владельца в Quoted не выводим).
+        $shouldPromotePending = $request->status === RequestStatus::Pending
+            && in_array($type, [
+                DetectorType::OutboundQuotationFull,
+                DetectorType::OutboundQuotationPartial,
+                DetectorType::OutboundInvoice,
+                DetectorType::OutboundClarification,
+            ], true);
+        if ($shouldPromotePending) {
+            try {
+                $this->stateService->transitionTo(
+                    $request,
+                    RequestStatus::Assigned,
+                    $author,
+                    [
+                        'event' => 'auto_promote_pending_for_outbound',
+                        'comment' => 'Авто-промоут Pending→Assigned: менеджер прислал ' . $type->label(),
+                        'payload' => ['ai_decision_id' => $decision->id, 'detector_type' => $type->value],
+                    ],
+                    systemTransition: $isSystemActor,
+                );
+                $request = $request->fresh();
+                $context['payload']['auto_promoted_pending_for_outbound'] = $type->value;
+                Log::info('AiDecisionService: promoted pending→assigned before outbound document', [
+                    'decision_id' => $decision->id,
+                    'request_id' => $request->id,
+                    'detector_type' => $type->value,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('AiDecisionService: promote pending→assigned before outbound failed (continue with transitionTo)', [
+                    'decision_id' => $decision->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         DB::transaction(function () use ($decision, $request, $target, $author, $context, $isAuto, $isSystemActor) {
             try {
                 $this->stateService->transitionTo(
