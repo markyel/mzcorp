@@ -319,6 +319,37 @@ class Pool extends Component
     }
 
     /**
+     * Исключить из выборки заявки, по которым КП/счёт де-факто был отправлен
+     * (привязанное ИСХОДЯЩЕЕ письмо с КП/счёт-вложением по имени файла) —
+     * даже если детектор его не зарегистрировал (peak_status остался NULL).
+     * Такие заявки НЕ «заброшенные»: мы отреагировали. Кейс M-2026-2568 — КП
+     * ушёл из личного ящика и заявку закрыли раньше, чем догоняющий детект мог
+     * сработать (он терминальные пропускает). Токены имени файла — канонические
+     * из OutboundDocumentDetector (единый источник).
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<Request>  $query
+     */
+    private function excludeSentQuoteOrInvoice($query): void
+    {
+        $query->whereNotExists(function ($q) {
+            $q->select(DB::raw(1))
+                ->from('email_messages as em')
+                ->whereColumn('em.related_request_id', 'requests.id')
+                ->where('em.direction', 'outbound')
+                ->whereExists(function ($q2) {
+                    $q2->select(DB::raw(1))
+                        ->from('email_attachments as ea')
+                        ->whereColumn('ea.email_message_id', 'em.id')
+                        ->where(function ($w) {
+                            foreach (\App\Services\DocumentDetector\OutboundDocumentDetector::QUOTE_INVOICE_FILENAME_ILIKE as $tok) {
+                                $w->orWhereRaw('LOWER(ea.filename) LIKE ?', ['%'.$tok.'%']);
+                            }
+                        });
+                });
+        });
+    }
+
+    /**
      * Список enum-значений для текущего bucket.
      *
      * @return array<int, string>
@@ -600,6 +631,7 @@ class Pool extends Component
             $query->where(fn ($q) => $q->where('closed_lost_reason', 'manual_other')->orWhereNull('closed_lost_reason'))
                 ->whereNull('peak_status')
                 ->whereHas('assignedUser', fn ($q) => $q->active());
+            $this->excludeSentQuoteOrInvoice($query);
         }
 
         // Уточняющий status-фильтр внутри bucket'а — только если значение
@@ -774,6 +806,7 @@ class Pool extends Component
                 ->where(fn ($q) => $q->where('closed_lost_reason', 'manual_other')->orWhereNull('closed_lost_reason'))
                 ->whereNull('peak_status')
                 ->whereHas('assignedUser', fn ($q) => $q->active())
+                ->tap(fn ($q) => $this->excludeSentQuoteOrInvoice($q))
                 ->count(),
             // Постпродажа: заказы со счётом/оплатой/успехом и непрочитанным
             // постпродажным письмом.

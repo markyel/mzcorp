@@ -153,6 +153,22 @@ class OutboundDocumentDetector
     private const RELEVANT_EXTENSIONS = ['pdf', 'xlsx', 'xls', 'docx', 'doc'];
 
     /**
+     * Огрублённое SQL-зеркало *_FILENAME_RE: токены имени файла, по которым в
+     * запросах (без прогонки классификатора построчно) можно отсечь письма с
+     * КП/счёт-вложением. Держим рядом с regex-паттернами, чтобы знание об именах
+     * файлов жило в одном месте (см. classifyAttachmentByFilename). Используется
+     * Pool: «Заброшенные» исключают заявки, по которым КП/счёт де-факто ушёл, но
+     * детектор его не зарегистрировал (личный ящик + закрытие раньше догоняющего
+     * детекта — он терминальные пропускает). Кейс M-2026-2568.
+     *
+     * @var list<string>
+     */
+    public const QUOTE_INVOICE_FILENAME_ILIKE = [
+        'предложен', 'коммерческ', 'quotation', 'quote',
+        'счет', 'счёт', 'счт', 'invoice', 'bill',
+    ];
+
+    /**
      * @return ?array{type: DetectorType, confidence: float, signals: array<string, mixed>}
      */
     public function analyze(EmailMessage $message, Request $request): ?array
