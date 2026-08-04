@@ -294,7 +294,7 @@ class Pool extends Component
 
     public function setBucket(string $bucket): void
     {
-        $allowed = ['active', 'overdue', 'silence', 'paused', 'closed', 'refused', 'postsale', 'all'];
+        $allowed = ['active', 'overdue', 'silence', 'paused', 'closed', 'refused', 'abandoned', 'postsale', 'all'];
         $this->bucket = in_array($bucket, $allowed, true) ? $bucket : 'active';
         $this->status = '';
         $this->delegatedOnly = false;
@@ -331,6 +331,9 @@ class Pool extends Component
             // «Наш отказ» — только closed_lost; доп. фильтр по причине (наша
             // инициатива) навешивается в buildQuery.
             'refused' => [RequestStatus::ClosedLost->value],
+            // «Заброшенные» — закрыты потерей, пока мяч был у нас, без нашей
+            // реакции. Доп. фильтр (manual_other/пусто + peak_status null) в render.
+            'abandoned' => [RequestStatus::ClosedLost->value],
             // Постпродажа: заказы в статусах «счёт/оплата/успех», на которые
             // пришло постпродажное письмо (платёжка / отгрузка / документы).
             // Доп. фильтр attention_reason=post_sale + attention_required_at
@@ -588,6 +591,17 @@ class Pool extends Component
                 ->whereHas('assignedUser', fn ($q) => $q->active());
         }
 
+        // «Заброшенные нами»: закрыты потерей вручную «прочее» (или без причины),
+        // пока мяч был на нашей стороне — и мы даже не выдали КП (peak_status
+        // null = не дошли до «КП отправлено»). Это заявки, которые закрыли, не
+        // отработав. Активный владелец — как в «Наш отказ» (атрибуция + без
+        // архивных seed).
+        if ($this->bucket === 'abandoned') {
+            $query->where(fn ($q) => $q->where('closed_lost_reason', 'manual_other')->orWhereNull('closed_lost_reason'))
+                ->whereNull('peak_status')
+                ->whereHas('assignedUser', fn ($q) => $q->active());
+        }
+
         // Уточняющий status-фильтр внутри bucket'а — только если значение
         // принадлежит текущему bucket'у (защита от рассинхронизации URL).
         $validStatus = $this->status !== '' && in_array($this->status, $bucketStatuses, true);
@@ -753,6 +767,12 @@ class Pool extends Component
             'refused' => (clone $countsBase)
                 ->where('status', RequestStatus::ClosedLost->value)
                 ->whereIn('closed_lost_reason', ClosedLostReason::ourInitiativeValues())
+                ->whereHas('assignedUser', fn ($q) => $q->active())
+                ->count(),
+            'abandoned' => (clone $countsBase)
+                ->where('status', RequestStatus::ClosedLost->value)
+                ->where(fn ($q) => $q->where('closed_lost_reason', 'manual_other')->orWhereNull('closed_lost_reason'))
+                ->whereNull('peak_status')
                 ->whereHas('assignedUser', fn ($q) => $q->active())
                 ->count(),
             // Постпродажа: заказы со счётом/оплатой/успехом и непрочитанным
