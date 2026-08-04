@@ -148,8 +148,11 @@ class PostSaleFulfillmentDetector
         return $this->looksLikeInvoiceRequest($haystack);
     }
 
-    /** Лексика «статус доставки/отгрузки уже размещённого заказа». */
-    private const DELIVERY_STATUS_RE = '/отправили\s+(ли\s+)?(нам\s+)?(заказ|товар|посылк)|отгрузили\s+ли|дат\w*\s+поступлени|статус\s+(заказа|отгрузк\w+|поставк\w+)|заказ\s+готов|готов\s+ли\s+заказ|получен\w*\s+(ли\s+)?оплат/iu';
+    /** Лексика «статус/отгрузка/самовывоз/возврат уже размещённого заказа». */
+    private const DELIVERY_STATUS_RE = '/отправили\s+(ли\s+)?(нам\s+)?(заказ|товар|посылк)|отгрузили\s+ли|дат\w*\s+поступлени|статус\s+(заказа|отгрузк\w+|поставк\w+|доставк\w+)|заказ\s+готов|готов\s+ли\s+заказ|получен\w*\s+(ли\s+)?оплат|возможн\w+\s+забрать|забрать\s+(товар|заказ|со\s+склад)|возврат\s+(по\s+)?(сч[её]т|заказ)/iu';
+
+    /** Reply-контекст: вопрос о сроках/доставке уже размещённого заказа. */
+    private const REPLY_DELIVERY_RE = '/срок\w*\s+поставк|когда\s+(будет|поставите|отгруз\w+|отправ\w+|привез\w+|прид[её]т|приход\w+)/iu';
 
     /**
      * Клиент спрашивает про СТАТУС уже размещённого заказа (отправили ли, дата
@@ -162,16 +165,30 @@ class PostSaleFulfillmentDetector
     public function deliveryStatusInquiry(EmailMessage $message): bool
     {
         $haystack = mb_strtolower((string) $message->subject . "\n" . $this->freshText($message));
-        if (preg_match(self::DELIVERY_STATUS_RE, $haystack) !== 1) {
-            return false;
-        }
+
+        // Гард нового заказа: просят просчитать/цену/КП → это новый запрос, не
+        // статус (проверяем первым, чтобы не спутать).
         foreach (['посчита', 'просчита', 'рассчита', 'прайс', 'стоимост', 'коммерческое предложение', 'пришлите кп', 'нужно кп', 'нужна кп'] as $marker) {
             if (str_contains($haystack, $marker)) {
-                return false; // просят просчитать/КП → это новый запрос, не статус
+                return false;
             }
         }
 
-        return true;
+        // Явные постпродажные сигналы (статус/отгрузка/самовывоз/возврат).
+        if (preg_match(self::DELIVERY_STATUS_RE, $haystack) === 1) {
+            return true;
+        }
+
+        // Reply-контекст: «срок поставки / когда отгрузите» в ОТВЕТЕ (Re:/Fwd:
+        // или in_reply_to) про уже размещённый заказ. В первичном письме такая
+        // фраза может быть пресейлом, поэтому только в ответах.
+        $isReply = ! empty($message->in_reply_to)
+            || preg_match('/^\s*(re|fwd|fw|ответ)\b/iu', (string) $message->subject) === 1;
+        if ($isReply && preg_match(self::REPLY_DELIVERY_RE, $haystack) === 1) {
+            return true;
+        }
+
+        return false;
     }
 
     /** Свежий текст письма без хвоста цитаты. Fail-soft. */
