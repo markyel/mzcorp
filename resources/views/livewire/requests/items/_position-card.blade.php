@@ -458,7 +458,7 @@
                      class="absolute right-0 top-full mt-1 z-30 w-[220px] py-1 bg-surface border border-border rounded-md shadow-lg text-left text-[12.5px]">
                     @if($item->parsed_name)
                         <button type="button"
-                                @click="open = false; $dispatch('open-item-edit', { itemId: {{ $item->id }} })"
+                                @click="open = false; $wire.dispatch('open-item-edit', { itemId: {{ $item->id }} })"
                                 class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">📝 Редактировать…</button>
                     @endif
                     @if($item->parsed_name || $item->parsed_article)
@@ -473,14 +473,14 @@
                     @endif
                     @if($item->parsed_name || $item->parsed_article)
                         <button type="button"
-                                @click="open = false; $dispatch('open-catalog-similar', { itemId: {{ $item->id }} })"
+                                @click="open = false; $wire.dispatch('open-catalog-similar', { itemId: {{ $item->id }} })"
                                 class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">🔍 Похожие из каталога…</button>
                     @endif
                     <button type="button"
-                            @click="open = false; $dispatch('open-catalog-link', { itemId: {{ $item->id }} })"
+                            @click="open = false; $wire.dispatch('open-catalog-link', { itemId: {{ $item->id }} })"
                             class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">🔗 Привязать вручную…</button>
                     <button type="button"
-                            @click="open = false; $dispatch('open-photo-rebind', { itemId: {{ $item->id }} })"
+                            @click="open = false; $wire.dispatch('open-photo-rebind', { itemId: {{ $item->id }} })"
                             class="block w-full text-left px-3 py-1.5 hover:bg-surface-2 text-fg-1">📷 Сменить фото…</button>
                     @if($qaStatus === 'internal_catalog_pending')
                         <button type="button"
