@@ -262,22 +262,64 @@
                             <span class="flex-1">Наименование</span>
                             <span style="width:150px">Артикул / OEM</span>
                             <span style="width:96px">Кол-во</span>
+                            <span style="width:78px" title="M-артикул каталога — не вставляется в письмо">M-арт.</span>
                         </div>
 
-                        {{-- Номенклатура — название (по языку) + артикул + кол-во, всё редактируемое --}}
+                        {{-- Номенклатура — название (по языку) + артикул + кол-во, всё редактируемое.
+                             M-арт. → попап с OEM-артикулами каталога (клик добавляет/убирает в поле). --}}
                         <div class="space-y-1.5">
                             @foreach($rows as $i => $r)
-                                <div class="flex items-center gap-2" wire:key="prev-{{ $blk['lang'] }}-{{ $r['id'] }}">
-                                    <span class="text-[11px] text-fg-4 text-right" style="width:18px">{{ $i + 1 }}.</span>
-                                    <input type="text" wire:model.lazy="{{ $r['name_model'] }}.{{ $r['id'] }}"
-                                           class="flex-1 px-2 h-[28px] border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500 {{ $r['cyrillic'] ? 'border-amber-400' : 'border-border' }}">
-                                    @if($r['cyrillic'])
-                                        <span class="chip chip-warn text-[10px]" title="Похоже на русское название — переведите для англоязычного поставщика">⚠ рус.</span>
-                                    @endif
-                                    <input type="text" wire:model.lazy="editedOem.{{ $r['id'] }}" placeholder="—"
-                                           class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] mono outline-none focus:border-sky-500" style="width:150px">
-                                    <input type="text" wire:model.lazy="{{ $r['qty_model'] }}.{{ $r['id'] }}" placeholder="—"
-                                           class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] outline-none focus:border-sky-500" style="width:96px">
+                                @php
+                                    $oem = $this->oemOptions[$r['id']] ?? ['sku' => '', 'name' => '', 'options' => []];
+                                    $addedOem = collect(explode(',', (string) ($this->editedOem[$r['id']] ?? '')))
+                                        ->map(fn ($p) => mb_strtolower(trim($p)))->filter()->values()->all();
+                                @endphp
+                                <div wire:key="prev-{{ $blk['lang'] }}-{{ $r['id'] }}" x-data="{ oem: false }">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-[11px] text-fg-4 text-right" style="width:18px">{{ $i + 1 }}.</span>
+                                        <input type="text" wire:model.lazy="{{ $r['name_model'] }}.{{ $r['id'] }}"
+                                               class="flex-1 px-2 h-[28px] border rounded bg-surface text-[12.5px] outline-none focus:border-sky-500 {{ $r['cyrillic'] ? 'border-amber-400' : 'border-border' }}">
+                                        @if($r['cyrillic'])
+                                            <span class="chip chip-warn text-[10px]" title="Похоже на русское название — переведите для англоязычного поставщика">⚠ рус.</span>
+                                        @endif
+                                        {{-- Компактное поле артикула; в режиме выбора OEM прячем — ниже широкое --}}
+                                        <input type="text" wire:model.lazy="editedOem.{{ $r['id'] }}" placeholder="—" x-show="!oem"
+                                               class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] mono outline-none focus:border-sky-500" style="width:150px">
+                                        <input type="text" wire:model.lazy="{{ $r['qty_model'] }}.{{ $r['id'] }}" placeholder="—"
+                                               class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] outline-none focus:border-sky-500" style="width:96px">
+                                        {{-- M-артикул: показываем рядом, НЕ вставляем в письмо; клик — попап OEM --}}
+                                        <button type="button" @click="oem = !oem" style="width:78px"
+                                                class="chip mono text-[10px] truncate" :class="oem ? 'chip-sky' : 'chip-neutral'"
+                                                title="M-артикул каталога (не идёт в письмо) — показать OEM-артикулы">{{ $oem['sku'] ?: '—' }}</button>
+                                    </div>
+                                    {{-- Попап: широкое поле «Артикул/OEM» на всю строку (видно все выбранные)
+                                         + чипы OEM каталога с подсветкой уже добавленных. --}}
+                                    <div x-show="oem" x-cloak class="mt-1 mb-1 p-2 rounded-md bg-surface border border-border-subtle" style="margin-left:26px">
+                                        <div class="text-[11px] text-fg-2 font-medium mb-1.5">{{ $oem['name'] ?: '—' }}</div>
+                                        <div class="flex items-center gap-1.5 mb-2">
+                                            <span class="text-[10px] uppercase tracking-wider text-fg-4 shrink-0">Артикул / OEM</span>
+                                            <input type="text" wire:model.lazy="editedOem.{{ $r['id'] }}" placeholder="—"
+                                                   class="flex-1 px-2 h-[28px] border border-border rounded bg-surface text-[12px] mono outline-none focus:border-sky-500">
+                                        </div>
+                                        @if(!empty($oem['options']))
+                                            <div class="text-[10px] uppercase tracking-wider text-fg-4 mb-1">OEM-артикулы каталога — клик добавляет / убирает</div>
+                                            <div class="flex flex-wrap gap-1.5">
+                                                @foreach($oem['options'] as $opt)
+                                                    @php $isAdded = in_array(mb_strtolower($opt['article']), $addedOem, true); @endphp
+                                                    <button type="button" wire:click="toggleOem({{ $r['id'] }}, @js($opt['article']))"
+                                                            class="inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-surface-2 hover:bg-hover text-[11.5px]"
+                                                            @style(['border-color:#10b981;background:#ecfdf5;color:#065f46' => $isAdded])
+                                                            title="{{ $isAdded ? 'Убрать' : 'Добавить' }} {{ $opt['article'] }}">
+                                                        <span class="font-semibold" @style(['color:#059669' => $isAdded, 'color:#0369a1' => !$isAdded])>{{ $isAdded ? '✓' : '＋' }}</span>
+                                                        <span class="mono">{{ $opt['article'] }}</span>
+                                                        @if($opt['brand'] !== '')<span class="text-fg-4 text-[10.5px]">· {{ $opt['brand'] }}</span>@endif
+                                                    </button>
+                                                @endforeach
+                                            </div>
+                                        @else
+                                            <div class="text-[11.5px] text-fg-4">В каталоге нет отдельных OEM-артикулов для этой позиции.</div>
+                                        @endif
+                                    </div>
                                 </div>
                             @endforeach
                         </div>

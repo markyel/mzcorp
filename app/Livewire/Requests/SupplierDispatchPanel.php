@@ -3,6 +3,7 @@
 namespace App\Livewire\Requests;
 
 use App\Enums\Role;
+use App\Models\CatalogItem;
 use App\Models\Request as RequestModel;
 use App\Models\RequestItem;
 use App\Models\Supplier;
@@ -245,7 +246,7 @@ class SupplierDispatchPanel extends Component
         $requested = $this->requestedItemIds;
         $items = RequestItem::query()
             ->where('request_id', $this->requestId)->where('is_active', true)
-            ->with(['brand:id,name', 'catalogItem:id,name,name_en,is_price_actual'])
+            ->with(['brand:id,name', 'catalogItem:id,sku,name,name_en,is_price_actual,brand,brand_article,articles,brands'])
             ->orderBy('position')->get();
 
         $svc = app(SupplierDispatchService::class);
@@ -261,7 +262,11 @@ class SupplierDispatchPanel extends Component
                 // (менеджер переведёт в превью English).
                 'en_name' => (string) ($catNameEn ?: $it->parsed_name ?: '—'),
                 'client_name' => $catName && $catName !== $it->parsed_name ? $it->parsed_name : null,
-                'oem' => $svc->itemOem($it),
+                // Артикул для письма: сначала распознанный у клиента (parsed_article),
+                // а если его нет — берём OEM из каталога (первый внешний, не M-код).
+                // Кейс M-2026-10844: OEM «есть в каталоге», но клиент его не прислал —
+                // раньше поле оставалось пустым, теперь подтягивается автоматически.
+                'oem' => $svc->itemOem($it) ?: $it->catalogItem?->oemForExternal(),
                 'brand' => ($it->brand?->name ?: $it->parsed_brand) ?: null,
                 'qty' => $svc->itemQty($it, [], 'ru'),
                 'qty_en' => $svc->itemQty($it, [], 'en'),
@@ -272,6 +277,78 @@ class SupplierDispatchPanel extends Component
                 'discontinued' => (bool) $it->possibly_discontinued,
             ];
         })->all();
+    }
+
+    /**
+     * OEM-артикулы каталога по каждой ВЫБРАННОЙ позиции — для попапа быстрого
+     * добавления в поле «Артикул/OEM» письма поставщику. Ключ — request_item_id.
+     * Внутренние M-коды (M####, МЗ-, = sku) исключаем — поставщику не нужны.
+     * Зеркалит Procurement\Index::oemOptions (тот же UX добавления множества OEM).
+     *
+     * @return array<int, array{sku: string, name: string, options: array<int, array{article: string, brand: string}>}>
+     */
+    #[Computed]
+    public function oemOptions(): array
+    {
+        $ids = array_keys(array_filter($this->selectedItems));
+        if ($ids === []) {
+            return [];
+        }
+
+        $items = RequestItem::query()->whereIn('id', $ids)
+            ->with(['catalogItem:id,sku,name,brand,brand_article,articles,brands'])
+            ->get();
+
+        $out = [];
+        foreach ($items as $it) {
+            $ci = $it->catalogItem;
+            if ($ci === null) {
+                $out[$it->id] = ['sku' => '', 'name' => '', 'options' => []];
+
+                continue;
+            }
+            $articles = array_merge([$ci->brand_article], (array) ($ci->articles ?? []));
+            $brands = array_merge([$ci->brand], (array) ($ci->brands ?? []));
+            $seen = [];
+            $list = [];
+            foreach ($articles as $idx => $art) {
+                $art = trim((string) $art);
+                if ($art === '' || CatalogItem::isInternalCode($art, $ci->sku)) {
+                    continue;
+                }
+                $key = mb_strtolower($art);
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $list[] = ['article' => $art, 'brand' => trim((string) ($brands[$idx] ?? ''))];
+            }
+            $out[$it->id] = ['sku' => (string) $ci->sku, 'name' => (string) $ci->name, 'options' => $list];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Клик по OEM-чипу в попапе: добавить артикул в поле «Артикул/OEM» позиции
+     * либо убрать, если уже добавлен (идемпотентный тумблер — под подсветку чипа).
+     * Множественное добавление: артикулы копятся через запятую.
+     */
+    public function toggleOem(int $itemId, string $article): void
+    {
+        $article = trim($article);
+        if ($article === '') {
+            return;
+        }
+        $current = trim((string) ($this->editedOem[$itemId] ?? ''));
+        $parts = array_values(array_filter(array_map('trim', explode(',', $current)), fn ($p) => $p !== ''));
+        $lower = mb_strtolower($article);
+        $without = array_values(array_filter($parts, fn ($p) => mb_strtolower($p) !== $lower));
+
+        // Уже был в списке → убираем (тумблер). Иначе — добавляем в конец.
+        $this->editedOem[$itemId] = count($without) !== count($parts)
+            ? implode(', ', $without)
+            : implode(', ', [...$parts, $article]);
     }
 
     /**
