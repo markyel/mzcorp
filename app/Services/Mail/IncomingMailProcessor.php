@@ -280,12 +280,19 @@ class IncomingMailProcessor
         // вообще пуст. Раньше guard смотрел только в body и резал такие
         // письма. Кейсы M-2026-1815 (MAA250AY301 1 штука), M-2026-1816
         // (GAA737AA1 6 штук).
-        $combined = (string) $message->subject."\n".$plain;
+        //
+        // НО в ОТВЕТАХ (Re:/Fwd:) тема унаследована от исходной заявки и
+        // содержит её артикул — поэтому «спасибо»-ответ на товарный тред
+        // ложно проходил как заявка (кейсы «Re: Schmersal AZ02» + пустое тело).
+        // Для ответов артикул ищем ТОЛЬКО в свежем теле; тема не в счёт.
+        $isReply = ! empty($message->in_reply_to)
+            || preg_match('/^\s*(re|fwd|fw|ответ)\b/iu', (string) $message->subject) === 1;
+        $articleHaystack = $isReply ? $plain : ((string) $message->subject . "\n" . $plain);
 
         // M-артикул — внутренний SKU MyZip, сильнейший сигнал
         // товарной заявки. Кейс M-2026 (Liftway): subject=«Счёт»,
         // body=«M04990 - 1шт.» (12 симв) — реальная заявка на счёт.
-        if (preg_match('/\bM\d{4,}\b/u', $combined)) {
+        if (preg_match('/\bM\d{4,}\b/u', $articleHaystack)) {
             return false;
         }
 
@@ -294,7 +301,7 @@ class IncomingMailProcessor
         // KM713857G01), стандартные подшипники (6308-2RS1 — нет, тут
         // нет uppercase letters, OK), и пр. Cyrillic буквы не попадают
         // (паттерн ASCII-only), русский текст не триггерит false-positive.
-        if (preg_match('/\b[A-Z]{1,4}\d{2,}[A-Z0-9]*\b/u', $combined)) {
+        if (preg_match('/\b[A-Z]{1,4}\d{2,}[A-Z0-9]*\b/u', $articleHaystack)) {
             return false;
         }
 
