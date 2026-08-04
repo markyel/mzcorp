@@ -511,10 +511,26 @@ class InboundReplyLinker
             return null;
         }
 
+        // ВСЕ активные не-терминальные статусы, а не только ранние
+        // (Pending/New/Assigned). Кейс M-2026-6860: клиент ответил в живом
+        // треде заявки, которая была уже в `quoted` (КП отправлен, шло
+        // согласование). Ранее продвинутые статусы в кандидаты НЕ попадали →
+        // ответ не привязывался к своей заявке и создавался ДУБЛЬ-фрагмент.
+        // При нескольких кандидатах ниже дизамбигуирует LLM-clarifier по
+        // теме/тексту; при одном — прямая привязка. Терминальные (closed_*)
+        // сюда НЕ входят — они идут отдельным closedCandidates-пулом
+        // (наследование), Paused намеренно исключён (заморожен менеджером).
         $openStatuses = [
             RequestStatus::Pending->value,
             RequestStatus::New->value,
             RequestStatus::Assigned->value,
+            RequestStatus::InProgress->value,
+            RequestStatus::AwaitingClientClarification->value,
+            RequestStatus::Quoted->value,
+            RequestStatus::UnderReview->value,
+            RequestStatus::PostponedUntil->value,
+            RequestStatus::AwaitingInvoice->value,
+            RequestStatus::Invoiced->value,
         ];
 
         $openCandidates = Request::query()
