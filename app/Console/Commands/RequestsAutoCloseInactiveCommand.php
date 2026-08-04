@@ -133,12 +133,12 @@ class RequestsAutoCloseInactiveCommand extends Command
         // менеджера (или менеджер вручную) — ClarificationBatch при этом не
         // создаётся, и ветка (a) таких заявок не видит. Кейс M-2026-5102:
         // 322 заявки висели «в уточнении» в среднем 18 дней, автозакрытие
-        // находило 0 кандидатов. Якорь тишины — last_activity_at (таймер
-        // сбрасывается ответом клиента / действием менеджера, как в ветке b).
+        // находило 0 кандидатов. Якорь — clientSilenceAnchor (молчание КЛИЕНТА:
+        // последнее входящее / переход в статус; наши действия его НЕ двигают).
         if ($clarDays > 0 && ! $reachedLimit()) {
             $reqs = Request::query()
                 ->where('status', RequestStatus::AwaitingClientClarification->value)
-                ->whereRaw('COALESCE(last_activity_at, updated_at) < ?', [now()->subDays($clarDays)])
+                ->where('created_at', '<', now()->subDays($clarDays))
                 ->whereNotExists(function ($q) {
                     $q->selectRaw('1')
                         ->from('clarification_batches')
@@ -154,7 +154,7 @@ class RequestsAutoCloseInactiveCommand extends Command
                 if (! $this->isClosable($req)) {
                     continue;
                 }
-                if (! $this->dueBusiness($cal, $req->last_activity_at ?? $req->updated_at, $clarDays)
+                if (! $this->dueBusiness($cal, $this->clientSilenceAnchor($req), $clarDays)
                     || $this->clientEngagedRecently($cal, $req, $clarDays)
                     || $this->reminderGraceActive($cal, $req, [\App\Enums\ClientNotificationType::ClarificationReminder->value], $graceDays)) {
                     continue;
@@ -164,12 +164,12 @@ class RequestsAutoCloseInactiveCommand extends Command
             }
         }
 
-        // (b) Молчание после КП. Anchor — last_activity_at (таймер тишины:
-        // сбрасывается при ответе клиента / действии менеджера).
+        // (b) Молчание после КП. Якорь — clientSilenceAnchor (молчание КЛИЕНТА;
+        // наши действия/смена статуса-самоперехода таймер НЕ сбрасывают).
         if ($quoteDays > 0 && ! $reachedLimit()) {
             $reqs = Request::query()
                 ->where('status', RequestStatus::Quoted->value)
-                ->whereRaw('COALESCE(last_activity_at, updated_at) < ?', [now()->subDays($quoteDays)])
+                ->where('created_at', '<', now()->subDays($quoteDays))
                 ->get();
             foreach ($reqs as $req) {
                 if ($reachedLimit()) {
@@ -178,7 +178,7 @@ class RequestsAutoCloseInactiveCommand extends Command
                 if (! $this->isClosable($req)) {
                     continue;
                 }
-                if (! $this->dueBusiness($cal, $req->last_activity_at ?? $req->updated_at, $quoteDays)
+                if (! $this->dueBusiness($cal, $this->clientSilenceAnchor($req), $quoteDays)
                     || $this->clientEngagedRecently($cal, $req, $quoteDays)
                     || $this->reminderGraceActive($cal, $req, [\App\Enums\ClientNotificationType::QuoteFollowupReminder->value], $graceDays)) {
                     continue;
@@ -192,11 +192,11 @@ class RequestsAutoCloseInactiveCommand extends Command
         // рассматривает КП, но затем замолчал. Та же политика/reason, что и (b),
         // отдельный порог under_review_days (обычно длиннее). Grace-гард — по
         // тому же напоминанию quote_followup_reminder (оно теперь шлётся и в
-        // UnderReview). Anchor тишины — last_activity_at.
+        // UnderReview). Якорь — clientSilenceAnchor (молчание КЛИЕНТА).
         if ($underReviewDays > 0 && ! $reachedLimit()) {
             $reqs = Request::query()
                 ->where('status', RequestStatus::UnderReview->value)
-                ->whereRaw('COALESCE(last_activity_at, updated_at) < ?', [now()->subDays($underReviewDays)])
+                ->where('created_at', '<', now()->subDays($underReviewDays))
                 ->get();
             foreach ($reqs as $req) {
                 if ($reachedLimit()) {
@@ -205,7 +205,7 @@ class RequestsAutoCloseInactiveCommand extends Command
                 if (! $this->isClosable($req)) {
                     continue;
                 }
-                if (! $this->dueBusiness($cal, $req->last_activity_at ?? $req->updated_at, $underReviewDays)
+                if (! $this->dueBusiness($cal, $this->clientSilenceAnchor($req), $underReviewDays)
                     || $this->clientEngagedRecently($cal, $req, $underReviewDays)
                     || $this->reminderGraceActive($cal, $req, [\App\Enums\ClientNotificationType::QuoteFollowupReminder->value], $graceDays)) {
                     continue;
@@ -261,11 +261,11 @@ class RequestsAutoCloseInactiveCommand extends Command
         // заявке) либо Invoice вовсе не создан (детектор поднял статус, а
         // создание счёта отсёк гард). Ветка (c) таких не видит — она идёт
         // от pending/expired счетов. Закрываем по той же политике при полной
-        // тишине клиента; якорь — last_activity_at.
+        // тишине клиента; якорь — clientSilenceAnchor (молчание КЛИЕНТА).
         if ($invoiceDays > 0 && ! $reachedLimit()) {
             $reqs = Request::query()
                 ->where('status', RequestStatus::Invoiced->value)
-                ->whereRaw('COALESCE(last_activity_at, updated_at) < ?', [now()->subDays($invoiceDays)])
+                ->where('created_at', '<', now()->subDays($invoiceDays))
                 ->whereNotExists(function ($q) {
                     $q->selectRaw('1')
                         ->from('invoices')
@@ -280,7 +280,7 @@ class RequestsAutoCloseInactiveCommand extends Command
                 if (! $this->isClosable($req)) {
                     continue;
                 }
-                if (! $this->dueBusiness($cal, $req->last_activity_at ?? $req->updated_at, $invoiceDays)
+                if (! $this->dueBusiness($cal, $this->clientSilenceAnchor($req), $invoiceDays)
                     || $this->clientEngagedRecently($cal, $req, $invoiceDays)) {
                     continue;
                 }
@@ -372,6 +372,52 @@ class RequestsAutoCloseInactiveCommand extends Command
         }
 
         return now()->lessThan($cal->addBusinessDays(Carbon::parse($lastInbound), $days));
+    }
+
+    /**
+     * Якорь МОЛЧАНИЯ КЛИЕНТА — момент, с которого «мяч на стороне клиента».
+     * Считаем таймер авто-закрытия НЕ от last_activity_at (он бампается любой
+     * активностью, в т.ч. НАШЕЙ: смена статуса, делегация, номер 1С, открытие
+     * заявки), а от НАИБОЛЕЕ ПОЗДНЕГО из:
+     *   - последнее ВХОДЯЩЕЕ письмо клиента (без cross-mailbox дублей);
+     *   - реальный переход В текущий статус (from != to) — когда мы отправили
+     *     КП/уточнение/счёт и передали ход клиенту.
+     * Наши админ-действия и self-transition (from == to, напр. onec_number_set)
+     * якорь НЕ двигают → таймер отражает именно молчание клиента.
+     * Фидбэк заказчика (кейс M-2026-6838): «считаем сколько молчит клиент, а не
+     * как давно мы заглядывали в заявку». Fallback — created_at.
+     */
+    private function clientSilenceAnchor(Request $req): CarbonInterface
+    {
+        $lastInbound = EmailMessage::query()
+            ->where('related_request_id', $req->id)
+            ->where('direction', MailDirection::Inbound->value)
+            ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
+            ->max('sent_at');
+
+        $statusEntry = \Illuminate\Support\Facades\DB::table('request_state_changes')
+            ->where('request_id', $req->id)
+            ->where('to_status', $req->status->value)
+            ->whereColumn('from_status', '!=', 'to_status')
+            ->max('created_at');
+
+        $candidates = array_values(array_filter([
+            $lastInbound !== null ? Carbon::parse($lastInbound) : null,
+            $statusEntry !== null ? Carbon::parse($statusEntry) : null,
+        ]));
+
+        if ($candidates === []) {
+            return $req->created_at ?? now();
+        }
+
+        $anchor = $candidates[0];
+        foreach ($candidates as $c) {
+            if ($c->greaterThan($anchor)) {
+                $anchor = $c;
+            }
+        }
+
+        return $anchor;
     }
 
     private function notifyClosed(Request $req): void
