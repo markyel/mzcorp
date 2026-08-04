@@ -132,7 +132,17 @@ class MailRouter
                         ->map(fn ($r) => is_array($r) ? ($r['email'] ?? null) : $r)
                         ->filter()
                         ->first(fn ($e) => $this->supplierRegistry->isSupplier((string) $e));
-                    if ($toSupplier !== null) {
+                    // Гард: получатель — КЛИЕНТ привязанной заявки → это ответ
+                    // клиенту, а НЕ запрос поставщику, даже если его e-mail по
+                    // ошибке попал в реестр suppliers (клиент может быть занесён
+                    // в поставщики вручную при закрытии заявки, или домен-матч).
+                    // Кейс M-2026-10891: Джалал Абасов — крупный клиент (433
+                    // заявки), ошибочно в suppliers → ответ ему стал «RFQ».
+                    $recipientIsClient = $toSupplier !== null
+                        && $linkedRequest !== null
+                        && filled($linkedRequest->client_email)
+                        && mb_strtolower(trim((string) $toSupplier)) === mb_strtolower(trim((string) $linkedRequest->client_email));
+                    if ($toSupplier !== null && ! $recipientIsClient) {
                         $rfq = $this->supplierRfqClassifier->classify($message);
                         if ($rfq['is_rfq']) {
                             $inquiry = $this->supplierInquiries->createFromOutbound(
