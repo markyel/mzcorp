@@ -419,7 +419,7 @@
                     'paused'   => ['label' => 'На паузе',    'count' => $bucketCounts['paused']],
                     'closed'   => ['label' => 'Закрытые',    'count' => $bucketCounts['closed']],
                     'refused'  => ['label' => '🚫 Наш отказ', 'count' => $bucketCounts['refused'] ?? 0],
-                    'abandoned'=> ['label' => '🕳 Заброшенные', 'count' => $bucketCounts['abandoned'] ?? 0],
+                    'abandoned'=> ['label' => '🕳 Заброшенные', 'count' => $bucketCounts['abandoned'] ?? 0, 'title' => 'Где МЫ перестали отвечать клиенту, а мяч был на нашей стороне: открытые (клиент ответил последним, молчим >5 дн.) + закрытые, которые закрыли не ответив клиенту'],
                     'postsale' => ['label' => '🛒 Постпродажа', 'count' => $bucketCounts['postsale'] ?? 0],
                     'all'      => ['label' => 'Все',         'count' => $bucketCounts['all']],
                 ];
@@ -434,6 +434,7 @@
                     $postSaleAttn = $isPostSaleChip && $meta['count'] > 0;
                 @endphp
                 <button wire:click="setBucket('{{ $key }}')"
+                        @if(!empty($meta['title'])) title="{{ $meta['title'] }}" @endif
                         class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap font-medium
                                {{ $on
                                   ? ($overdueAttn ? 'bg-[var(--red-600)] text-white' : ($postSaleAttn ? 'bg-[var(--amber-600)] text-white' : 'bg-[var(--accent)] text-fg-on-accent'))

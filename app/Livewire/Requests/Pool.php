@@ -4,6 +4,8 @@ namespace App\Livewire\Requests;
 
 use App\Enums\AttentionReason;
 use App\Enums\ClosedLostReason;
+use App\Enums\MailDirection;
+use App\Enums\RequestActivityType;
 use App\Enums\RequestStatus;
 use App\Enums\Role;
 use App\Models\Request;
@@ -221,6 +223,12 @@ class Pool extends Component
      */
     private const FILTER_KEYS = ['scope', 'status', 'bucket', 'mgr', 'sort', 'onec', 'unassigned', 'delegated'];
 
+    /**
+     * «Заброшенные»: сколько дней НАШЕГО молчания (мяч у нас — последнее событие
+     * = ответ клиента) считаем брошенной заявкой. Порог по фидбэку заказчика.
+     */
+    private const ABANDONED_SILENCE_DAYS = 5;
+
     public function mount(): void
     {
         // Восстановление фильтров между заходами: если открыт ГОЛЫЙ
@@ -329,24 +337,52 @@ class Pool extends Component
      *
      * @param  \Illuminate\Database\Eloquent\Builder<Request>  $query
      */
-    private function excludeSentQuoteOrInvoice($query): void
+    /**
+     * Фильтр «Заброшенные» = где МЫ перестали отвечать клиенту при мяче на нашей
+     * стороне. Две части через OR:
+     *   1) ОТКРЫТЫЕ: последнее событие по заявке — ответ клиента
+     *      (last_activity_type=client_replied → мяч у нас, точнее статуса: ловит
+     *      и quoted/invoiced, где клиент ответил после КП/счёта), и мы молчим
+     *      дольше ABANDONED_SILENCE_DAYS. Не paused/postponed (намеренные паузы).
+     *   2) ЗАКРЫТЫЕ: closed_lost «прочее / без причины», где ПОСЛЕДНЕЕ письмо
+     *      треда — входящее (мы закрыли, не ответив на письмо клиента).
+     * Активный владелец — атрибуция без архивных seed (как в «Наш отказ»).
+     * Сигнал last_activity_type переживает простое ОТКРЫТИЕ карточки (attention-
+     * флаг снимается, а тип активности — только реальным нашим ответом), поэтому
+     * ловит и «посмотрел и не ответил». Кейс: фидбэк заказчика по «Заброшенным».
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<Request>  $query
+     */
+    private function applyAbandonedFilter($query): void
     {
-        $query->whereNotExists(function ($q) {
-            $q->select(DB::raw(1))
-                ->from('email_messages as em')
-                ->whereColumn('em.related_request_id', 'requests.id')
-                ->where('em.direction', 'outbound')
-                ->whereExists(function ($q2) {
-                    $q2->select(DB::raw(1))
-                        ->from('email_attachments as ea')
-                        ->whereColumn('ea.email_message_id', 'em.id')
-                        ->where(function ($w) {
-                            foreach (\App\Services\DocumentDetector\OutboundDocumentDetector::QUOTE_INVOICE_FILENAME_ILIKE as $tok) {
-                                $w->orWhereRaw('LOWER(ea.filename) LIKE ?', ['%'.$tok.'%']);
-                            }
+        $terminalOrPaused = [
+            RequestStatus::ClosedWon->value,
+            RequestStatus::ClosedLost->value,
+            RequestStatus::Paused->value,
+            RequestStatus::PostponedUntil->value,
+        ];
+
+        $query->where(function ($outer) use ($terminalOrPaused) {
+            // 1) Открытые — мяч у нас, молчим дольше порога.
+            $outer->where(function ($q) use ($terminalOrPaused) {
+                $q->whereNotIn('status', $terminalOrPaused)
+                    ->where('last_activity_type', RequestActivityType::ClientReplied->value)
+                    ->where('last_activity_at', '<', now()->subDays(self::ABANDONED_SILENCE_DAYS));
+            })
+                // 2) Закрытые — закрыли, не ответив на последнее письмо клиента.
+                ->orWhere(function ($q) {
+                    $q->where('status', RequestStatus::ClosedLost->value)
+                        ->where(fn ($r) => $r->where('closed_lost_reason', 'manual_other')->orWhereNull('closed_lost_reason'))
+                        ->whereExists(function ($sub) {
+                            $sub->select(DB::raw(1))
+                                ->from('email_messages as em')
+                                ->whereColumn('em.related_request_id', 'requests.id')
+                                ->where('em.direction', MailDirection::Inbound->value)
+                                ->whereRaw('em.id = (select max(em2.id) from email_messages as em2 where em2.related_request_id = requests.id)');
                         });
                 });
-        });
+        })
+            ->whereHas('assignedUser', fn ($q) => $q->active());
     }
 
     /**
@@ -362,9 +398,19 @@ class Pool extends Component
             // «Наш отказ» — только closed_lost; доп. фильтр по причине (наша
             // инициатива) навешивается в buildQuery.
             'refused' => [RequestStatus::ClosedLost->value],
-            // «Заброшенные» — закрыты потерей, пока мяч был у нас, без нашей
-            // реакции. Доп. фильтр (manual_other/пусто + peak_status null) в render.
-            'abandoned' => [RequestStatus::ClosedLost->value],
+            // «Заброшенные» = где мы перестали отвечать клиенту при мяче у нас.
+            // Охватывает открытые (последнее событие — ответ клиента, молчим >N
+            // дней) И закрытые (closed_lost, где закрыли не ответив). Поэтому
+            // базовый whereIn — широкий суперсет, точную OR-логику навешивает
+            // applyAbandonedFilter в render/counts.
+            'abandoned' => array_map(
+                fn (RequestStatus $s) => $s->value,
+                array_filter(
+                    RequestStatus::cases(),
+                    fn (RequestStatus $s) => $s !== RequestStatus::Pending
+                        && ($this->canSeeAll || $s->isVisibleToManager()),
+                ),
+            ),
             // Постпродажа: заказы в статусах «счёт/оплата/успех», на которые
             // пришло постпродажное письмо (платёжка / отгрузка / документы).
             // Доп. фильтр attention_reason=post_sale + attention_required_at
@@ -528,12 +574,20 @@ class Pool extends Component
         match ($effectiveSort) {
             'created_desc' => $query->orderByDesc('created_at')->orderByDesc('id'),
             'created_asc' => $query->orderBy('created_at')->orderBy('id'),
-            default => in_array($this->bucket, ['active', 'overdue', 'silence'], true)
-                ? $query->orderByDesc('attention_level')
+            default => match (true) {
+                in_array($this->bucket, ['active', 'overdue', 'silence'], true) => $query
+                    ->orderByDesc('attention_level')
                     ->orderByRaw('last_activity_at DESC NULLS LAST')
-                    ->orderByDesc('id')
-                : $query->orderByRaw('last_activity_at DESC NULLS LAST')
                     ->orderByDesc('id'),
+                // «Заброшенные» — дольше всех молчим сверху (самая старая
+                // активность первой).
+                $this->bucket === 'abandoned' => $query
+                    ->orderByRaw('last_activity_at ASC NULLS LAST')
+                    ->orderByDesc('id'),
+                default => $query
+                    ->orderByRaw('last_activity_at DESC NULLS LAST')
+                    ->orderByDesc('id'),
+            },
         };
 
         // Менеджер по умолчанию видит свои; РОП/директор — все.
@@ -622,16 +676,10 @@ class Pool extends Component
                 ->whereHas('assignedUser', fn ($q) => $q->active());
         }
 
-        // «Заброшенные нами»: закрыты потерей вручную «прочее» (или без причины),
-        // пока мяч был на нашей стороне — и мы даже не выдали КП (peak_status
-        // null = не дошли до «КП отправлено»). Это заявки, которые закрыли, не
-        // отработав. Активный владелец — как в «Наш отказ» (атрибуция + без
-        // архивных seed).
+        // «Заброшенные» — где МЫ перестали отвечать клиенту при мяче у нас
+        // (открытые: мяч у нас, молчим >N дней; закрытые: закрыли не ответив).
         if ($this->bucket === 'abandoned') {
-            $query->where(fn ($q) => $q->where('closed_lost_reason', 'manual_other')->orWhereNull('closed_lost_reason'))
-                ->whereNull('peak_status')
-                ->whereHas('assignedUser', fn ($q) => $q->active());
-            $this->excludeSentQuoteOrInvoice($query);
+            $this->applyAbandonedFilter($query);
         }
 
         // Уточняющий status-фильтр внутри bucket'а — только если значение
@@ -802,11 +850,7 @@ class Pool extends Component
                 ->whereHas('assignedUser', fn ($q) => $q->active())
                 ->count(),
             'abandoned' => (clone $countsBase)
-                ->where('status', RequestStatus::ClosedLost->value)
-                ->where(fn ($q) => $q->where('closed_lost_reason', 'manual_other')->orWhereNull('closed_lost_reason'))
-                ->whereNull('peak_status')
-                ->whereHas('assignedUser', fn ($q) => $q->active())
-                ->tap(fn ($q) => $this->excludeSentQuoteOrInvoice($q))
+                ->tap(fn ($q) => $this->applyAbandonedFilter($q))
                 ->count(),
             // Постпродажа: заказы со счётом/оплатой/успехом и непрочитанным
             // постпродажным письмом.
