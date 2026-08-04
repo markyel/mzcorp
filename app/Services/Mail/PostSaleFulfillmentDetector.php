@@ -137,9 +137,52 @@ class PostSaleFulfillmentDetector
      */
     public function requestsInvoiceToPay(EmailMessage $message): bool
     {
-        $haystack = mb_strtolower((string) $message->subject . "\n" . (string) $message->body_plain);
+        // Только СВЕЖИЙ текст письма (без цитаты старой переписки): «выставить/
+        // прислать счёт» из ЦИТАТЫ прошлого письма НЕ означает, что клиент просит
+        // счёт СЕЙЧАС. Кейс M-2026-10660: новое письмо «Отправили нам заказ?»
+        // (постпродажа), а «счёт» был в цитате → override ложно флипал в
+        // client_request.
+        $fresh = $this->freshText($message);
+        $haystack = mb_strtolower((string) $message->subject . "\n" . $fresh);
 
         return $this->looksLikeInvoiceRequest($haystack);
+    }
+
+    /** Лексика «статус доставки/отгрузки уже размещённого заказа». */
+    private const DELIVERY_STATUS_RE = '/отправили\s+(ли\s+)?(нам\s+)?(заказ|товар|посылк)|отгрузили\s+ли|дат\w*\s+поступлени|статус\s+(заказа|отгрузк\w+|поставк\w+)|заказ\s+готов|готов\s+ли\s+заказ|получен\w*\s+(ли\s+)?оплат/iu';
+
+    /**
+     * Клиент спрашивает про СТАТУС уже размещённого заказа (отправили ли, дата
+     * поступления, статус отгрузки) — это ПОСТПРОДАЖА, а не новая заявка. По
+     * СВЕЖЕМУ тексту (без цитаты). Гард от нового заказа: если просят цену/КП —
+     * не считаем (это уже новый запрос).
+     * Кейсы: liftway «уточнить дату поступления по Счёт 3228» (M-2026-10799),
+     * import-lift «Отправили нам заказ?» (M-2026-10660).
+     */
+    public function deliveryStatusInquiry(EmailMessage $message): bool
+    {
+        $haystack = mb_strtolower((string) $message->subject . "\n" . $this->freshText($message));
+        if (preg_match(self::DELIVERY_STATUS_RE, $haystack) !== 1) {
+            return false;
+        }
+        foreach (['посчита', 'просчита', 'рассчита', 'прайс', 'стоимост', 'коммерческое предложение', 'пришлите кп', 'нужно кп', 'нужна кп'] as $marker) {
+            if (str_contains($haystack, $marker)) {
+                return false; // просят просчитать/КП → это новый запрос, не статус
+            }
+        }
+
+        return true;
+    }
+
+    /** Свежий текст письма без хвоста цитаты. Fail-soft. */
+    private function freshText(EmailMessage $message): string
+    {
+        $body = (string) $message->body_plain;
+        try {
+            return app(EmailTextCleanerService::class)->cutOwnQuotedTail($body);
+        } catch (\Throwable $e) {
+            return $body;
+        }
     }
 
     /**
@@ -167,6 +210,13 @@ class PostSaleFulfillmentDetector
      */
     public function detect(EmailMessage $message): ?string
     {
+        // Запрос статуса уже размещённого заказа (отправили ли / дата поступления
+        // / статус отгрузки) — постпродажа, не новая заявка. Считаем по свежему
+        // тексту, с гардом от нового заказа (см. deliveryStatusInquiry).
+        if ($this->deliveryStatusInquiry($message)) {
+            return 'запрос статуса доставки/отгрузки уже размещённого заказа — постпродажа';
+        }
+
         $subject = mb_strtolower((string) $message->subject);
         $body = mb_strtolower((string) $message->body_plain);
         $haystack = $subject . "\n" . $body;

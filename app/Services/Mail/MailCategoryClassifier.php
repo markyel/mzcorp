@@ -92,6 +92,16 @@ class MailCategoryClassifier
         if ($override !== null) {
             $category = $override['category'];
             $reasoning = 'Trusted partner override: ' . $override['partner'];
+            // …но если партнёр спрашивает про СТАТУС уже размещённого заказа
+            // (отправили ли / дата поступления / статус отгрузки) — это
+            // ПОСТПРОДАЖА, а не новый заказ. Иначе плодятся заявки-фантомы,
+            // которые потом закрываются вручную (кейс M-2026-10799: liftway
+            // «уточнить дату поступления по Счёт 3228»).
+            if ($category === EmailCategory::ClientRequest
+                && $this->postSaleFulfillment->deliveryStatusInquiry($message)) {
+                $category = EmailCategory::PostSale;
+                $reasoning = 'Trusted partner (' . $override['partner'] . '), но запрос статуса заказа → постпродажа';
+            }
             $message->forceFill([
                 'category' => $category->value,
                 'category_confidence' => 1.0,
