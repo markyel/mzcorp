@@ -107,6 +107,30 @@ class InboundIntentClassifier
             return null;
         }
 
+        // Породившее (первое) письмо заявки НЕ классифицируем как reply/intent:
+        // его содержимое УЖЕ определило заявку и её позиции при создании — это
+        // не ответ клиента на нашу реакцию. Признак: письмо заингестилось РАНЬШЕ
+        // создания заявки (заявку создают ИЗ него) → created_at письма < created_at
+        // заявки. Настоящий ответ клиента всегда приходит ПОСЛЕ создания заявки.
+        // Кейс M-2026-6860: заявка создана из письма «нужен арт IPEH-002021»;
+        // из-за гонки КП успел увести в Quoted, после чего intent на ТОМ ЖЕ
+        // первом письме классифицировался как additional_items → откат
+        // Quoted→InProgress, и заявка застряла (InProgress авто-закрытием не
+        // покрыт). Гард покрывает и старые тредовые письма, привязанные
+        // reply-linker'ом задним числом (они тоже предшествуют заявке).
+        if ($message->created_at !== null && $request->created_at !== null
+            && $message->created_at->lessThan($request->created_at)) {
+            EmailMessage::query()->whereKey($message->id)->update(['intent_classified_at' => now()]);
+            Log::info('InboundIntentClassifier: originating/pre-request email — intent not applied', [
+                'email_message_id' => $message->id,
+                'request_id' => $request->id,
+                'message_created_at' => (string) $message->created_at,
+                'request_created_at' => (string) $request->created_at,
+            ]);
+
+            return null;
+        }
+
         // Внутренняя переписка сотрудников НЕ влияет на статус заявки: влияют
         // только письма, где заказчик на одной из сторон (отправитель или
         // получатель). Кейс M-2026-6071: письмо руководителя менеджеру (наш
