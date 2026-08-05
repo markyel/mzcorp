@@ -173,6 +173,17 @@ class Editor extends Component
         $q = $svc->createDraft($this->request, auth()->user());
         $this->viewQuotationId = $q->id;
         unset($this->versions, $this->activeQuotation);
+
+        // Если у заказчика РОВНО одна организация — подставляем её получателем
+        // сразу (реквизиты + спеццена/скидка), чтобы менеджер не выбирал руками.
+        // applyOrganization сам сохранит КП, пересчитает и даст toast «Получатель…».
+        $orgs = $this->clientOrganizations();
+        if ($orgs->count() === 1) {
+            $this->applyOrganization((int) $orgs->first()->id, $svc);
+
+            return;
+        }
+
         $this->dispatch('toast', message: "Создан черновик {$q->internal_code}", type: 'success');
     }
 
