@@ -238,7 +238,11 @@
             {{-- Строка 3: сматченный товар каталога MyLift (полное название). --}}
             @if($ci?->name)
                 <div class="text-[11.5px] text-fg-2 mt-0.5 flex items-baseline gap-1.5 flex-wrap">
-                    <span title="Название из каталога MyLift">📦 «{{ $ci->name }}»</span>
+                    <button type="button"
+                            wire:click="$dispatch('open-catalog-item', { catalogItemId: {{ $item->catalog_item_id }} })"
+                            class="text-left hover:text-sky-700"
+                            style="text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; text-decoration-color: var(--border-strong);"
+                            title="Полная карточка товара из каталога — открыть">📦 «{{ $ci->name }}»</button>
                 </div>
             @endif
 
