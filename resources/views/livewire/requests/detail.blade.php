@@ -2592,11 +2592,6 @@
                             wire:key="item-photo-rebind-{{ $req->id }}" />
                     @endif
 
-                    {{-- Модалка полной карточки товара каталога (клик по каталожному
-                         названию сматченной позиции). Доступна всем ролям (read-only). --}}
-                    <livewire:requests.items.catalog-item-dialog
-                        wire:key="catalog-item-dialog-{{ $req->id }}" />
-
                     {{-- Foundation §6.2: панель уточняющих вопросов клиенту.
                          Доступна и read-only ролям (но они увидят disabled).
                          Кнопка «Сформировать письмо» откроет draft в табе

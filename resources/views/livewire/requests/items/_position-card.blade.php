@@ -109,6 +109,7 @@
 @endphp
 
 <div wire:key="position-card-{{ $item->id }}"
+     x-data="{ catOpen: false }"
      class="border {{ $cardTone }} {{ $cardBg }} rounded-md mb-1.5 {{ $item->is_active ? '' : 'opacity-50' }}">
 
     {{-- HEADER --}}
@@ -239,10 +240,13 @@
             @if($ci?->name)
                 <div class="text-[11.5px] text-fg-2 mt-0.5 flex items-baseline gap-1.5 flex-wrap">
                     <button type="button"
-                            wire:click="$dispatch('open-catalog-item', { catalogItemId: {{ $item->catalog_item_id }} })"
-                            class="text-left hover:text-sky-700"
+                            @click="catOpen = !catOpen"
+                            class="text-left hover:text-sky-700 inline-flex items-baseline gap-1"
                             style="text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; text-decoration-color: var(--border-strong);"
-                            title="Полная карточка товара из каталога — открыть">📦 «{{ $ci->name }}»</button>
+                            title="Полная карточка товара из каталога — развернуть под позицией">
+                        📦 «{{ $ci->name }}»
+                        <span class="text-fg-3 text-[10px]" x-text="catOpen ? '▴' : '▾'"></span>
+                    </button>
                 </div>
             @endif
 
@@ -671,4 +675,20 @@
          (detail.blade.php). --}}
 
     @endif {{-- /EXPANDED-ONLY CONTENT --}}
+
+    {{-- Раскрываемая полная карточка товара каталога (как в разделе «Каталог»).
+         Toggle — клик по «📦 «название»» выше. Full-width под позицией. --}}
+    @if($ci)
+        <div x-show="catOpen" x-cloak
+             class="border-t border-border-subtle px-3 pb-3 pt-1"
+             style="background: var(--bg-selected); box-shadow: inset 3px 0 0 var(--sky-500); overflow-x: auto;">
+            @include('livewire.catalog._catalog-item-detail', [
+                'cat' => $ci,
+                'pc' => $this->catalogPriceChangeByCatalogId->get($ci->id),
+                'iqp' => $this->canIqotCatalog ? $this->catalogIqotByCatalogId->get($ci->id) : null,
+                'canIqot' => $this->canIqotCatalog,
+                'allowIqotAnalyze' => false,
+            ])
+        </div>
+    @endif
 </div>

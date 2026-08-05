@@ -108,7 +108,10 @@ class Detail extends Component
             'items.brand:id,name',
             'items.kbCategory:id,slug,name',
             'items.imageAttachment:id,email_message_id,filename,mime_type,disk,file_path,size_bytes',
-            'items.catalogItem:id,sku,name,brand,brand_article,price,stock_available,is_active,last_imported_at',
+            // Полный catalogItem — для раскрываемой карточки товара под позицией
+            // (партиал _catalog-item-detail нужен все поля: name_en, price_min,
+            // purchase_price, размеры, articles/brands, description и т.д.).
+            'items.catalogItem',
             // Foundation §6.2 — UI-история вопросов клиенту per item.
             'items.clarificationQuestions' => fn ($q) => $q->orderByDesc('id'),
             'items.clarificationQuestions.batch:id,status,sent_at,answered_at,created_by_user_id',
@@ -435,7 +438,10 @@ class Detail extends Component
                 'items.brand:id,name',
                 'items.kbCategory:id,slug,name',
                 'items.imageAttachment:id,email_message_id,filename,mime_type,disk,file_path,size_bytes',
-                'items.catalogItem:id,sku,name,brand,brand_article,price,stock_available,is_active,last_imported_at',
+                // Полный catalogItem — для раскрываемой карточки товара под позицией
+            // (партиал _catalog-item-detail нужен все поля: name_en, price_min,
+            // purchase_price, размеры, articles/brands, description и т.д.).
+            'items.catalogItem',
                 'items.clarificationQuestions' => fn ($q) => $q->orderByDesc('id'),
                 'items.clarificationQuestions.batch:id,status,sent_at,answered_at,created_by_user_id',
                 'items.clarificationQuestions.batch.createdBy:id,name',
@@ -741,6 +747,52 @@ class Detail extends Component
             ]);
             $this->dispatch('toast', message: 'Не удалось отвязать: ' . $e->getMessage(), type: 'error');
         }
+    }
+
+    /** Показывать ли IQOT-блок в раскрываемой карточке товара. */
+    #[Computed]
+    public function canIqotCatalog(): bool
+    {
+        return auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'admin']) ?? false;
+    }
+
+    /**
+     * Карта catalog_item_id → последнее изменение цены — для раскрываемой
+     * карточки товара под сматченной позицией (партиал _catalog-item-detail).
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\CatalogPriceChange>
+     */
+    #[Computed]
+    public function catalogPriceChangeByCatalogId(): \Illuminate\Support\Collection
+    {
+        $ids = $this->request->items->pluck('catalog_item_id')->filter()->unique()->all();
+        if ($ids === []) {
+            return collect();
+        }
+
+        return \App\Models\CatalogPriceChange::query()
+            ->whereIn('catalog_item_id', $ids)
+            ->orderByDesc('changed_at')->orderByDesc('id')
+            ->get()->unique('catalog_item_id')->keyBy('catalog_item_id');
+    }
+
+    /**
+     * Карта catalog_item_id → IqotPosition (свежий анализ цен конкурентов).
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\IqotPosition>
+     */
+    #[Computed]
+    public function catalogIqotByCatalogId(): \Illuminate\Support\Collection
+    {
+        if (! $this->canIqotCatalog) {
+            return collect();
+        }
+        $ids = $this->request->items->pluck('catalog_item_id')->filter()->unique()->all();
+        if ($ids === []) {
+            return collect();
+        }
+
+        return \App\Models\IqotPosition::whereIn('catalog_item_id', $ids)->get()->keyBy('catalog_item_id');
     }
 
     /**
