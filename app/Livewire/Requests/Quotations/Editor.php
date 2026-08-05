@@ -235,6 +235,44 @@ class Editor extends Component
     }
 
     /**
+     * Полное удаление НЕотправленной версии КП (черновик / отменённый, никогда
+     * не уходивший клиенту). Отправленные (sent/accepted/rejected или с sent_at)
+     * не трогаем — это история переписки с клиентом. Позиции каскадятся
+     * (quotation_items.cascadeOnDelete). Кейс: чистка кучи черновиков-версий.
+     */
+    public function deleteQuotation(int $quotationId): void
+    {
+        $this->ensureCanEdit();
+
+        $q = $this->request->quotations()->whereKey($quotationId)->first();
+        if (! $q) {
+            $this->dispatch('toast', message: 'КП не найдена.', type: 'error');
+
+            return;
+        }
+
+        $wasSent = $q->sent_at !== null || in_array($q->status, [
+            \App\Enums\QuotationStatus::Sent,
+            \App\Enums\QuotationStatus::Accepted,
+            \App\Enums\QuotationStatus::Rejected,
+        ], true);
+        if ($wasSent) {
+            $this->dispatch('toast', message: 'Отправленную КП удалить нельзя — только неотправленные версии.', type: 'error');
+
+            return;
+        }
+
+        $code = $q->internal_code;
+        if ($this->viewQuotationId === $q->id) {
+            $this->viewQuotationId = null;
+        }
+        $q->delete();
+        unset($this->versions, $this->activeQuotation);
+
+        $this->dispatch('toast', message: "Версия {$code} удалена", type: 'success');
+    }
+
+    /**
      * Phase 4: «📨 Отправить КП клиенту».
      *
      * Что делает:

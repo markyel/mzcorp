@@ -34,12 +34,24 @@
             <div class="mb-3 flex items-center gap-1 flex-wrap text-[11.5px]">
                 <span class="text-fg-3 uppercase tracking-wider mr-1">Версии:</span>
                 @foreach($versions as $v)
-                    @php [$vlbl, $vcls] = $statusToneMap[$v->status->value] ?? ['?', 'bg-neutral-100 text-fg-3']; @endphp
-                    <button type="button" wire:click="switchToVersion({{ $v->id }})"
-                            class="inline-flex items-center px-2 py-0.5 rounded border {{ $vcls }} {{ $q?->id === $v->id ? 'ring-2 ring-sky-400' : 'opacity-80 hover:opacity-100' }}"
-                            title="{{ $v->internal_code }} · {{ $vlbl }} · {{ number_format((float)$v->total, 0, '.', ' ') }} ₽">
-                        v{{ $v->version }}
-                    </button>
+                    @php
+                        [$vlbl, $vcls] = $statusToneMap[$v->status->value] ?? ['?', 'bg-neutral-100 text-fg-3'];
+                        $vDeletable = $v->sent_at === null && in_array($v->status->value, ['draft', 'cancelled'], true);
+                    @endphp
+                    <span class="inline-flex items-center rounded border {{ $vcls }} {{ $q?->id === $v->id ? 'ring-2 ring-sky-400' : 'opacity-80 hover:opacity-100' }}">
+                        <button type="button" wire:click="switchToVersion({{ $v->id }})"
+                                class="px-2 py-0.5"
+                                title="{{ $v->internal_code }} · {{ $vlbl }} · {{ number_format((float)$v->total, 0, '.', ' ') }} ₽">
+                            v{{ $v->version }}
+                        </button>
+                        @if($vDeletable && $canEdit)
+                            <button type="button" wire:click="deleteQuotation({{ $v->id }})"
+                                    wire:confirm="Удалить неотправленную версию {{ $v->internal_code }}? Действие необратимо."
+                                    class="px-1 leading-none text-red-600 hover:text-red-800"
+                                    style="border-left:1px solid rgba(0,0,0,0.12);"
+                                    title="Удалить неотправленную версию (не уходила клиенту)">✕</button>
+                        @endif
+                    </span>
                 @endforeach
             </div>
         @endif
