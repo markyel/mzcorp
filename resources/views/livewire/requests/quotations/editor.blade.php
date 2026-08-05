@@ -213,6 +213,12 @@
                                         @if($item->snapshot_brand) <span class="text-fg-2">{{ $item->snapshot_brand }}</span> @endif
                                         @if($item->snapshot_brand_article) <span>{{ $item->snapshot_brand_article }}</span> @endif
                                         @if(!$item->catalog_in_stock) <span class="text-amber-700">нет на складе</span> @endif
+                                        @php $staleP = $item->catalog_item_id && in_array($item->catalog_item_id, $this->stalePriceCatalogIds, true); @endphp
+                                        @if($staleP)
+                                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold normal-case"
+                                                  style="background:#fffbeb; border:1px solid #fcd34d; color:#92400e;"
+                                                  title="Каталожная цена помечена НЕ актуальной — требует обновления перед выдачей КП">⏳ цена не актуальна</span>
+                                        @endif
                                         @php $iqp = $item->catalog_item_id ? $this->iqotByCatalogId->get($item->catalog_item_id) : null; @endphp
                                         @if($iqp)
                                             <a href="{{ route('iqot.index') }}" wire:navigate
@@ -247,8 +253,8 @@
                                         </div>
                                     @endif
                                 </td>
-                                <td class="px-2 py-1.5 mono text-right text-fg-2 align-top">
-                                    {{ number_format((float)$item->catalog_unit_price, 2, '.', ' ') }}@if($item->bill_by_length)<span class="text-fg-3"> / {{ $item->piece_length_unit }}</span>@endif
+                                <td class="px-2 py-1.5 mono text-right text-fg-2 align-top" @if(!empty($staleP)) style="background:#fffbeb;" title="Цена не актуальна" @endif>
+                                    <span @if(!empty($staleP)) style="color:#92400e; font-weight:600;" @endif>{{ number_format((float)$item->catalog_unit_price, 2, '.', ' ') }}</span>@if($item->bill_by_length)<span class="text-fg-3"> / {{ $item->piece_length_unit }}</span>@endif
                                     @if($item->catalog_price_min !== null)
                                         <div class="text-[10px] text-fg-3">min {{ number_format((float)$item->catalog_price_min, 2, '.', ' ') }}</div>
                                     @endif

@@ -370,16 +370,7 @@ class Editor extends Component
      */
     private function stalePriceItemsFor(Quotation $q): array
     {
-        $q->loadMissing('items');
-        $catIds = $q->items->pluck('catalog_item_id')->filter()->unique()->all();
-        if ($catIds === []) {
-            return [];
-        }
-        $staleCatIds = \App\Models\CatalogItem::query()
-            ->whereIn('id', $catIds)
-            ->where('is_price_actual', false)
-            ->pluck('id')
-            ->all();
+        $staleCatIds = $this->stalePriceCatalogIdSet($q);
         if ($staleCatIds === []) {
             return [];
         }
@@ -392,6 +383,41 @@ class Editor extends Component
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * catalog_item_id позиций КП с НЕактуальной ценой (is_price_actual=false).
+     * Единый источник для гейта отправки и подсветки строк.
+     *
+     * @return array<int, int>
+     */
+    private function stalePriceCatalogIdSet(Quotation $q): array
+    {
+        $q->loadMissing('items');
+        $catIds = $q->items->pluck('catalog_item_id')->filter()->unique()->all();
+        if ($catIds === []) {
+            return [];
+        }
+
+        return \App\Models\CatalogItem::query()
+            ->whereIn('id', $catIds)
+            ->where('is_price_actual', false)
+            ->pluck('id')
+            ->all();
+    }
+
+    /**
+     * Множество catalog_item_id с неактуальной ценой для ОТОБРАЖАЕМОЙ КП —
+     * для алерта на строках позиций в редакторе.
+     *
+     * @return array<int, int>
+     */
+    #[Computed]
+    public function stalePriceCatalogIds(): array
+    {
+        $q = $this->activeQuotation;
+
+        return $q ? $this->stalePriceCatalogIdSet($q) : [];
     }
 
     /** Отмена отправки из модалки предупреждения о неактуальных ценах. */
