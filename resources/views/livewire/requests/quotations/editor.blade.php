@@ -376,4 +376,39 @@
             </div>
         @endif
     </div>
+
+    {{-- Гейт неактуальных цен: подтверждение перед выдачей КП с позициями,
+         у которых каталожная цена помечена НЕ актуальной. Кейс M-2026-10727. --}}
+    @if(!empty($stalePriceItems) && $stalePriceAckQuotationId)
+        <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 24px;"
+             wire:click.self="cancelStalePrice">
+            <div class="ds-card p-5 w-full max-w-[560px]" wire:click.stop>
+                <h3 class="text-[15px] font-semibold text-fg-1 mb-1">⚠ Неактуальные цены в КП</h3>
+                <p class="text-[12.5px] text-fg-3 mb-3">
+                    По {{ count($stalePriceItems) }}
+                    {{ \Illuminate\Support\Str::plural('позиции', count($stalePriceItems)) }}
+                    каталожная цена помечена <b>не актуальной</b> (требует обновления).
+                    Если выдать КП сейчас — клиент получит потенциально устаревшую цену.
+                </p>
+                <div class="rounded-md mb-4 max-h-[240px] overflow-y-auto" style="border:1px solid #fcd34d; background:#fffbeb;">
+                    @foreach($stalePriceItems as $sp)
+                        <div class="flex items-center gap-2 px-3 py-1.5 text-[12px]" style="border-top:1px solid #fde68a;">
+                            <span class="chip chip-warn text-[10px] mono shrink-0">{{ $sp['sku'] }}</span>
+                            <span class="text-fg-2 truncate">{{ $sp['name'] }}</span>
+                        </div>
+                    @endforeach
+                </div>
+                <div class="flex items-center justify-end gap-2">
+                    <button type="button" wire:click="cancelStalePrice" class="btn btn-sm">Отмена</button>
+                    <button type="button"
+                            wire:click="sendQuotation({{ $stalePriceAckQuotationId }})"
+                            wire:loading.attr="disabled" wire:target="sendQuotation"
+                            class="btn btn-primary btn-sm"
+                            title="Подтвердить, что цены неактуальны, и всё равно подготовить КП">
+                        Всё равно выдать КП
+                    </button>
+                </div>
+            </div>
+        </div>
+    @endif
 </div>

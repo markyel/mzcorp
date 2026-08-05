@@ -51,6 +51,19 @@ class Editor extends Component
     /** Поиск организации-получателя (если нужной нет среди привязанных к клиенту). */
     public string $organizationSearch = '';
 
+    /**
+     * Гейт неактуальных цен: позиции КП, у которых каталожная цена помечена
+     * НЕ актуальной (`catalog_items.is_price_actual=false`). Заполняется при
+     * первом клике «Отправить КП» — показываем модалку подтверждения; при
+     * повторном клике (тот же id) отправка проходит.
+     *
+     * @var array<int, array{sku: string, name: string}>
+     */
+    public array $stalePriceItems = [];
+
+    /** id КП, для которой уже показали предупреждение о неактуальных ценах. */
+    public ?int $stalePriceAckQuotationId = null;
+
     #[Computed]
     public function request(): RequestModel
     {
@@ -254,6 +267,22 @@ class Editor extends Component
             return;
         }
 
+        // Гейт неактуальных цен: если в КП есть позиции с каталожной ценой,
+        // помеченной НЕ актуальной, при ПЕРВОМ клике показываем модалку со
+        // списком и требуем осознанного подтверждения. Повторный клик по той же
+        // КП (stalePriceAckQuotationId совпал) = «да, знаю, всё равно выдать» —
+        // пропускаем дальше. Кейс M-2026-10727.
+        $stale = $this->stalePriceItemsFor($q);
+        if ($stale !== [] && $this->stalePriceAckQuotationId !== $q->id) {
+            $this->stalePriceItems = $stale;
+            $this->stalePriceAckQuotationId = $q->id;
+
+            return;
+        }
+        // подтверждено (или неактуальных нет) — сбрасываем гейт и продолжаем.
+        $this->stalePriceItems = [];
+        $this->stalePriceAckQuotationId = null;
+
         // 1. PDF binary → storage.
         try {
             $pdfBinary = $pdfSvc->render($q, isolated: true);
@@ -332,6 +361,44 @@ class Editor extends Component
         // 6. Открыть draft в Compose-табе (через Detail listener).
         $this->dispatch('quotation-send-ready', draftId: $draft->id, requestId: $this->request->id);
         $this->dispatch('toast', message: "Черновик готов: {$q->internal_code} v{$q->version}. Проверьте и отправьте.", type: 'success');
+    }
+
+    /**
+     * Позиции КП с НЕактуальной каталожной ценой (is_price_actual=false).
+     *
+     * @return array<int, array{sku: string, name: string}>
+     */
+    private function stalePriceItemsFor(Quotation $q): array
+    {
+        $q->loadMissing('items');
+        $catIds = $q->items->pluck('catalog_item_id')->filter()->unique()->all();
+        if ($catIds === []) {
+            return [];
+        }
+        $staleCatIds = \App\Models\CatalogItem::query()
+            ->whereIn('id', $catIds)
+            ->where('is_price_actual', false)
+            ->pluck('id')
+            ->all();
+        if ($staleCatIds === []) {
+            return [];
+        }
+
+        return $q->items
+            ->filter(fn ($qi) => in_array($qi->catalog_item_id, $staleCatIds, true))
+            ->map(fn ($qi) => [
+                'sku' => (string) ($qi->snapshot_sku ?: '—'),
+                'name' => (string) ($qi->snapshot_name ?: '—'),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /** Отмена отправки из модалки предупреждения о неактуальных ценах. */
+    public function cancelStalePrice(): void
+    {
+        $this->stalePriceItems = [];
+        $this->stalePriceAckQuotationId = null;
     }
 
     public function switchToVersion(int $quotationId): void
