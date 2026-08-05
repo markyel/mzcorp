@@ -179,11 +179,9 @@ class CatalogImportCommand extends Command
             }
         }
 
-        $touched = $import->rows_created + $import->rows_updated + $import->rows_soft_deleted;
-        if ($touched > 0) {
-            ResolvePendingFromCatalogJob::dispatch();
-            $this->info('ResolvePendingFromCatalogJob поставлен в очередь — после прогона позиции с internal_catalog_pending должны переключиться в sufficient.');
-        }
+        // Ре-резолв pending теперь диспатчит САМ CatalogImportService — точечно,
+        // только по изменённым МАТЧИНГ-полям (новые/переименованные SKU), а не
+        // весь бэклог на каждый ценовой/стоковый апдейт (кейс нагрузки 2026-08-05).
 
         return self::SUCCESS;
     }

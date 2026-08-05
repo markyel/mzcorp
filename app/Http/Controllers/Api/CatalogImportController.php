@@ -93,12 +93,10 @@ class CatalogImportController extends Controller
         // защищает от двойного запуска при retry скрипта.
         $touched = $import->rows_created + $import->rows_updated + $import->rows_soft_deleted;
         if ($touched > 0) {
-            // Phase 2 use-case C: сначала эмбеддинги (для новых/изменённых строк),
-            // потом резолв позиций — чтобы matchByName видел свежий index.
-            // ResolvePending пройдёт по всем несматченным позициям, в том числе
-            // переиндексирует через C-step против обновлённых embeddings.
+            // Эмбеддинги новых/изменённых строк (для vector-поиска). Сам ре-резолв
+            // pending теперь диспатчит CatalogImportService — точечно, только по
+            // изменённым матчинг-полям (не весь бэклог). Кейс нагрузки 2026-08-05.
             EmbedCatalogChangesJob::dispatch();
-            ResolvePendingFromCatalogJob::dispatch();
         }
 
         return response()->json([

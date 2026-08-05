@@ -164,15 +164,21 @@ class CatalogImportService
         // (false → true) — драйвят цикл обновления цен (Фаза 3.5).
         $becameActual = [];
 
-        DB::transaction(function () use ($normalized, $import, &$counts, &$becameActual) {
+        // SKU позиций, изменившихся по МАТЧИНГ-полям (созданы / name / name_en /
+        // brand_article) — для ТОЧЕЧНОГО ре-резолва pending (не всего бэклога).
+        $resolveSkus = [];
+
+        DB::transaction(function () use ($normalized, $import, &$counts, &$becameActual, &$resolveSkus) {
             // Шаг A: достаём существующие записи по sku одним запросом.
             $skus = array_column($normalized, 'sku');
             $existing = CatalogItem::query()
                 ->whereIn('sku', $skus)
                 // price/price_min — чтобы зафиксировать «было → стало» в
                 // catalog_price_changes при изменении цены; is_price_actual —
-                // для детекта перехода «неактуальна → актуальна».
-                ->get(['id', 'sku', 'source_hash', 'is_active', 'price', 'price_min', 'is_price_actual'])
+                // для детекта перехода «неактуальна → актуальна»; name/name_en/
+                // brand_article — детект МАТЧИНГ-изменений для точечного
+                // ре-резолва (цена/сток матчинг не меняют).
+                ->get(['id', 'sku', 'source_hash', 'is_active', 'price', 'price_min', 'is_price_actual', 'name', 'name_en', 'brand_article'])
                 ->keyBy('sku');
 
             $now = Carbon::now();
@@ -191,6 +197,7 @@ class CatalogImportService
                     $row['updated_at'] = $now;
                     $toInsert[] = $row;
                     $counts['created']++;
+                    $resolveSkus[] = $row['sku']; // новая позиция → влияет на матчинг
                     continue;
                 }
 
@@ -228,6 +235,16 @@ class CatalogImportService
                 // Переход «цена неактуальна → актуальна» (1С обновила цену).
                 if (($row['is_price_actual'] ?? false) === true && ! $existingRow->is_price_actual) {
                     $becameActual[] = $existingRow->id;
+                }
+
+                // Изменение МАТЧИНГ-полей (имя/EN-имя/артикул) → позицию нужно
+                // учесть в точечном ре-резолве. Ценовые/стоковые апдейты сюда
+                // НЕ попадают (source_hash изменился, но матчинг тот же).
+                if ((string) $existingRow->name !== (string) ($row['name'] ?? '')
+                    || (string) $existingRow->name_en !== (string) ($row['name_en'] ?? '')
+                    || (string) $existingRow->brand_article !== (string) ($row['brand_article'] ?? '')
+                ) {
+                    $resolveSkus[] = $row['sku'];
                 }
 
                 $row['is_active'] = true;
@@ -307,6 +324,20 @@ class CatalogImportService
         $becameActual = array_values(array_unique($becameActual));
         if ($becameActual !== []) {
             \App\Jobs\Suppliers\ReconcilePriceRefreshJob::dispatch($becameActual);
+        }
+
+        // ТОЧЕЧНЫЙ ре-резолв pending: только если реально менялись матчинг-поля
+        // (новые/переименованные SKU). Ценовые/стоковые-only импорты матчинг не
+        // меняют → ре-резолв не запускаем вовсе. Гоняем только pending-позиции,
+        // чьи артикулы совпадают с изменёнными SKU (а не весь бэклог 6000+ →
+        // раньше это грузило БД на часы). Кейс 2026-08-05.
+        $resolveSkus = array_values(array_unique(array_filter($resolveSkus)));
+        if ($resolveSkus !== []) {
+            \App\Jobs\Catalog\ResolvePendingFromCatalogJob::dispatch($resolveSkus);
+            Log::info('CatalogImportService: scoped resolve dispatched', [
+                'import_id' => $import->id,
+                'changed_skus' => count($resolveSkus),
+            ]);
         }
 
         return $import->refresh();
