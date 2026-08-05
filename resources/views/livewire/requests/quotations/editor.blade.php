@@ -37,12 +37,13 @@
                     @php
                         [$vlbl, $vcls] = $statusToneMap[$v->status->value] ?? ['?', 'bg-neutral-100 text-fg-3'];
                         $vDeletable = $v->sent_at === null && in_array($v->status->value, ['draft', 'cancelled'], true);
+                        $vNum = \Illuminate\Support\Str::afterLast($v->internal_code, '-');
                     @endphp
                     <span class="inline-flex items-center rounded border {{ $vcls }} {{ $q?->id === $v->id ? 'ring-2 ring-sky-400' : 'opacity-80 hover:opacity-100' }}">
                         <button type="button" wire:click="switchToVersion({{ $v->id }})"
-                                class="px-2 py-0.5"
+                                class="px-2 py-0.5 mono"
                                 title="{{ $v->internal_code }} · {{ $vlbl }} · {{ number_format((float)$v->total, 0, '.', ' ') }} ₽">
-                            v{{ $v->version }}
+                            №{{ $vNum }}<span class="text-fg-3"> · v{{ $v->version }}</span>
                         </button>
                         @if($vDeletable && $canEdit)
                             <button type="button" wire:click="deleteQuotation({{ $v->id }})"
