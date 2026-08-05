@@ -141,8 +141,9 @@ class EmailSignatureService
 
         // ЭДО внизу — нужно бухгалтерии для счетов, не глаз клиенту.
         if (! empty($company['edo_id'])) {
+            $operator = trim((string) ($company['edo_operator'] ?? ''));
             $lines[] = '';
-            $lines[] = 'ЭДО (Диадок): '.(string) $company['edo_id'];
+            $lines[] = 'ЭДО'.($operator !== '' ? ' ('.$operator.')' : '').': '.(string) $company['edo_id'];
         }
 
         return "\n".implode("\n", $lines);
@@ -174,6 +175,7 @@ class EmailSignatureService
         $taglineEn = (string) ($sig['tagline_en'] ?? '');
         $legalName = (string) ($company['legal_name'] ?? '');
         $edoId = (string) ($company['edo_id'] ?? '');
+        $edoOperator = trim((string) ($company['edo_operator'] ?? ''));
         $logoUrl = $this->logoPublicUrl();
         $websites = is_array($sig['websites'] ?? null) ? $sig['websites'] : [];
 
@@ -237,7 +239,7 @@ class EmailSignatureService
         if ($edoId !== '') {
             $edoBlock = '<div style="margin-top:10px;padding:6px 10px;background:#fafbfc;border:1px solid #e3e6eb;border-radius:4px;'
                 .'font:400 10.5px/1.4 -apple-system,Segoe UI,Arial,sans-serif;color:#5c6470">'
-                .'<span style="color:#0f1419;font-weight:600">ЭДО (Диадок)</span> <span style="color:#9aa0a8">идентификатор:</span> '
+                .'<span style="color:#0f1419;font-weight:600">ЭДО'.($edoOperator !== '' ? ' ('.$e($edoOperator).')' : '').'</span> <span style="color:#9aa0a8">идентификатор:</span> '
                 .'<span style="font-family:Consolas,Courier New,monospace;color:#222;word-break:break-all">'.$e($edoId).'</span>'
                 .'</div>';
         }
