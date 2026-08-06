@@ -46,6 +46,8 @@ class CatalogMatchEvalCommand extends Command
 
         $stats = ['correct' => 0, 'same_wrong' => 0, 'other_wrong' => 0, 'pending' => 0];
         $byMethod = [];
+        /** @var array<string, array<string, int>> метод × категория */
+        $methodByCat = [];
         $samples = ['correct' => [], 'same_wrong' => [], 'other_wrong' => [], 'pending' => []];
         $show = max(0, (int) $this->option('show'));
         $bar = $this->output->createProgressBar(count($labeled));
@@ -90,6 +92,7 @@ class CatalogMatchEvalCommand extends Command
             $stats[$cat]++;
             if ($cat !== 'pending' && $method !== null) {
                 $byMethod[$method] = ($byMethod[$method] ?? 0) + 1;
+                $methodByCat[$method][$cat] = ($methodByCat[$method][$cat] ?? 0) + 1;
             }
             if (count($samples[$cat]) < $show) {
                 $samples[$cat][] = sprintf('%s | %s → пред:%s (было sys:%s, истина КП:%s)',
@@ -110,10 +113,14 @@ class CatalogMatchEvalCommand extends Command
         $this->line(sprintf('  ❌ same_wrong (прежний неверный):  %d (%s%%)', $stats['same_wrong'], $pct($stats['same_wrong'])));
         $this->line(sprintf('  ❌ other_wrong (третий, тоже != КП): %d (%s%%)', $stats['other_wrong'], $pct($stats['other_wrong'])));
 
-        if ($byMethod !== []) {
-            arsort($byMethod);
+        if ($methodByCat !== []) {
             $this->newLine();
-            $this->line('Метод матча у сматченных: '.collect($byMethod)->map(fn ($v, $k) => "$k=$v")->implode(', '));
+            $this->line('По методу матча (correct / same_wrong / other_wrong):');
+            foreach ($methodByCat as $m => $c) {
+                $hint = str_starts_with($m, 'C_') ? '  ← тюнируемое (по названию)' : '  (по артикулу — вероятно легит-замена)';
+                $this->line(sprintf('  %-16s ✅%d / ❌%d / ❌%d%s',
+                    $m, $c['correct'] ?? 0, $c['same_wrong'] ?? 0, $c['other_wrong'] ?? 0, $hint));
+            }
         }
 
         foreach (['same_wrong', 'other_wrong', 'correct', 'pending'] as $cat) {
