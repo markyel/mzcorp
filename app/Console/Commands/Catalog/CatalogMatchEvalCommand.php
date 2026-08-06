@@ -229,6 +229,9 @@ class CatalogMatchEvalCommand extends Command
               AND ri.catalog_item_id = oqi.matched_catalog_item_id
               AND ri.is_active = true AND oqi.is_analog = false
               AND (ri.parsed_article IS NULL OR ri.parsed_article = '')
+              -- только матчи, реально выданные путём C (не ручные/артикульные),
+              -- иначе матчер их не воспроизведёт и контроль ложно «нестабилен».
+              AND ri.quality_assessment_payload->'catalog_match'->>'method' = 'C_name_vector'
             ORDER BY ri.id DESC
         ";
         if ($n > 0) {
