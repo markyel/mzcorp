@@ -283,6 +283,12 @@ Route::middleware('auth')->group(function () {
             return view('iqot.index');
         })->name('iqot.index');
 
+        // «Аудит матчинга» — расхождения авто-матча позиций с каталогом,
+        // указанным менеджером в отправленном КП (кандидаты в ложные матчи).
+        Route::get('/dashboard/catalog/match-audit', function () {
+            return view('catalog.match-audit');
+        })->name('catalog.match-audit');
+
         Route::get('/dashboard/mail-rules', function () {
             return view('admin.mail-rules.index');
         })->name('mail-rules.index');

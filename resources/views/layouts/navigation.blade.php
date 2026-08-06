@@ -78,6 +78,7 @@
     // «IQOT» — анализ цен конкурентов (РОП / директорат / админ).
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'iqot.index', 'label' => 'IQOT', 'pattern' => 'iqot.*'];
+        $navLinks[] = ['route' => 'catalog.match-audit', 'label' => 'Аудит матчинга', 'pattern' => 'catalog.match-audit'];
     }
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];
