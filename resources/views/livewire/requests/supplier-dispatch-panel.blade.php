@@ -261,7 +261,7 @@
                             <span style="width:18px"></span>
                             <span class="flex-1">Наименование</span>
                             <span style="width:150px">Артикул / OEM</span>
-                            <span style="width:96px">Кол-во</span>
+                            <span style="width:96px" title="Необязательно: по умолчанию количество в запрос поставщику не идёт; впишите, только если нужно">Кол-во (опц.)</span>
                             <span style="width:78px" title="M-артикул каталога — не вставляется в письмо">M-арт.</span>
                         </div>
 

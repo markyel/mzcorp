@@ -112,8 +112,12 @@ class SupplierDispatchPanel extends Component
             $this->editedNames[$it['id']] = $it['name'];
             $this->editedNamesEn[$it['id']] = $it['en_name'];
             $this->editedOem[$it['id']] = (string) ($it['oem'] ?? '');
-            $this->editedQty[$it['id']] = (string) ($it['qty'] ?? '');
-            $this->editedQtyEn[$it['id']] = (string) ($it['qty_en'] ?? '');
+            // Количество по умолчанию НЕ подставляем из заявки — RFQ поставщику
+            // просит цену/наличие без привязки к количеству. Пустая строка =
+            // override в «пусто» → itemQty вернёт null (в письме кол-ва нет).
+            // Менеджер при желании впишет количество вручную. (Фидбэк 2026-08.)
+            $this->editedQty[$it['id']] = '';
+            $this->editedQtyEn[$it['id']] = '';
         }
     }
 
