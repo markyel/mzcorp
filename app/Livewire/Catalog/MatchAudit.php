@@ -62,7 +62,23 @@ class MatchAudit extends Component
             ->whereNotNull('ri.catalog_item_id')
             ->whereNotNull('oqi.matched_catalog_item_id')
             ->whereColumn('ri.catalog_item_id', '<>', 'oqi.matched_catalog_item_id')
-            ->where('ri.is_active', true);
+            ->where('ri.is_active', true)
+            // НЕ считать расхождением, если СИСТЕМНЫЙ каталог позиции подтверждён
+            // ДРУГОЙ строкой того же КП: значит система сматчила верно, а «диф» —
+            // от мис-привязки другой строки КП к этой же позиции (одна позиция
+            // заявки ← много строк КП). Кейс M-2026-9753 поз.1: система M00021
+            // подтверждена строкой КП M00021, а этажные кнопки M03135+ — чужие
+            // строки, приписанные к поз.1 по похожему названию.
+            ->whereNotExists(function ($sub) {
+                $sub->selectRaw('1')->from('outbound_quote_items as o2')
+                    ->whereColumn('o2.outbound_quote_id', 'oqi.outbound_quote_id')
+                    ->whereColumn('o2.matched_catalog_item_id', 'ri.catalog_item_id');
+            })
+            // Дедуп дублей строк КП: одна строка на (позиция, каталог-в-КП, КП).
+            ->whereRaw('oqi.id = (select min(o3.id) from outbound_quote_items o3
+                where o3.matched_request_item_id = oqi.matched_request_item_id
+                  and o3.matched_catalog_item_id = oqi.matched_catalog_item_id
+                  and o3.outbound_quote_id = oqi.outbound_quote_id)');
 
         if ($this->hideSubstitutions) {
             $q->where('oqi.is_analog', false)
