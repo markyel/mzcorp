@@ -1217,12 +1217,22 @@ class CatalogEmbeddingService
         // Pre-filter всех кандидатов: threshold + brand_safe + article_safe.
         // Тех, что не прошли — отбрасываем (это «жёсткие» инварианты,
         // LLM-у нет смысла их предлагать). Остаются 0+ кандидатов.
+        //
+        // brand_safe как ЖЁСТКИЙ пре-фильтр переусердствует: parsed_brand часто
+        // мис-парс (тип/модель принят за бренд) или дистрибьютор, а в каталоге
+        // OEM → ложное несовпадение выбрасывает ВЕРНЫЙ каталог (замерено: 21/97
+        // name-path ошибок). Флаг снимает жёсткость — бренд остаётся мягким
+        // сигналом у LLM-реранка (он видит бренды и знает семьи). default true.
+        $brandHardFilter = (bool) app_setting(
+            'catalog.name_match.brand_hard_filter',
+            config('services.catalog_name_match.brand_hard_filter', true),
+        );
         $safe = [];
         foreach ($allCandidates as $c) {
             if ((float) $c['similarity'] < $threshold) {
                 continue;
             }
-            if (! $this->isBrandSafe($item, $c['catalog'])) {
+            if ($brandHardFilter && ! $this->isBrandSafe($item, $c['catalog'])) {
                 continue;
             }
             if (! $this->isArticleSafe($item->parsed_article, $c['catalog']->brand_article, $c['catalog']->name)) {
