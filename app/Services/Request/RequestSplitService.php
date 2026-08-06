@@ -221,13 +221,16 @@ class RequestSplitService
      */
     public function validate(Request $source, array $emailIds, array $itemIds, User $by): void
     {
-        $allowed = $by->hasAnyRole([
+        // Привилегированные (админ/директор/РОП) — любую заявку; менеджер —
+        // только свою (доступную) заявку. Зеркалит SplitDialog::ensureAuthorized.
+        $privileged = $by->hasAnyRole([
             RoleEnum::Admin->value,
             RoleEnum::Director->value,
             RoleEnum::HeadOfSales->value,
         ]);
-        if (! $allowed) {
-            throw new \DomainException('Разъединение доступно только администратору, директору или РОПу.');
+        $managerOwn = $by->hasRole(RoleEnum::Manager->value) && $source->isAccessibleBy($by);
+        if (! $privileged && ! $managerOwn) {
+            throw new \DomainException('Разъединение доступно администратору, директору, РОПу — или менеджеру по своей заявке.');
         }
 
         if ($source->status->isTerminal()) {
