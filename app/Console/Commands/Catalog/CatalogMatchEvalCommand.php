@@ -39,6 +39,7 @@ class CatalogMatchEvalCommand extends Command
         {--gate= : Переопределить ambiguity_gate_margin ТОЛЬКО на этот прогон (A/B без правки настроек). Напр. 0.05.}
         {--rawname= : Переопределить raw_name_retrieval на прогон: 1=вкл, 0=выкл. Для A/B retrieval-фикса.}
         {--nocat : Не подавать авто-категорию в LLM-реранк (A/B rerank_use_category=false).}
+        {--nameonly : Эталон только name-path (parsed_article пуст) — чистый замер C-тюнинга без артикульных подмен.}
         {--show=10 : Сколько примеров каждой категории показать}';
 
     protected $description = 'Регресс-харнес матчера каталога на эталоне «система vs КП» (read-only, отработанные заявки не меняет).';
@@ -63,8 +64,8 @@ class CatalogMatchEvalCommand extends Command
             $this->warn('rerank_use_category=OFF — авто-категория не подаётся в реранк (только этот прогон)');
         }
 
-        $labeled = $this->labeledSet((int) $this->option('limit'));
-        $this->info('Эталон (система≠КП, КП=истина): '.count($labeled).' позиций. Прогоняю матчер read-only…');
+        $labeled = $this->labeledSet((int) $this->option('limit'), (bool) $this->option('nameonly'));
+        $this->info('Эталон (система≠КП, КП=истина'.($this->option('nameonly') ? ', ТОЛЬКО name-path' : '').'): '.count($labeled).' позиций. Прогоняю матчер read-only…');
 
         $stats = ['correct' => 0, 'same_wrong' => 0, 'other_wrong' => 0, 'pending' => 0];
         $byMethod = [];
@@ -268,8 +269,9 @@ class CatalogMatchEvalCommand extends Command
      *
      * @return array<int, object>
      */
-    private function labeledSet(int $limit): array
+    private function labeledSet(int $limit, bool $nameOnly = false): array
     {
+        $nameFilter = $nameOnly ? " AND (ri.parsed_article IS NULL OR ri.parsed_article = '')" : '';
         $sql = "
             SELECT oqi.matched_request_item_id AS request_item_id,
                    ri.catalog_item_id AS sys_catalog_id,
@@ -285,6 +287,7 @@ class CatalogMatchEvalCommand extends Command
               AND ri.catalog_item_id <> oqi.matched_catalog_item_id AND ri.is_active = true
               AND oqi.is_analog = false
               AND (sysc.name IS NULL OR sysc.name NOT ILIKE '%ЗАМЕНЕНО%')
+              {$nameFilter}
               AND NOT EXISTS (SELECT 1 FROM outbound_quote_items o2
                     JOIN outbound_quotes oq2 ON oq2.id = o2.outbound_quote_id
                     WHERE oq2.request_id = oq.request_id
