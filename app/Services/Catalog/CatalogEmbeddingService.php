@@ -83,7 +83,7 @@ class CatalogEmbeddingService
             $parts[] = 'Бренд: ' . $brand;
         }
         $category = $item->kbCategory?->name;
-        if ($category) {
+        if ($category && $this->categoryHeadNounConsistent($item)) {
             $parts[] = 'Тип запчасти: ' . $category;
         }
         // Локальные коды поставщика (LW-..., см. LocalSupplierCodePattern)
@@ -100,6 +100,56 @@ class CatalogEmbeddingService
         }
 
         return implode("\n", $parts);
+    }
+
+    /**
+     * Гейт согласованности категории: головное существительное названия
+     * клиента должно присутствовать в названии/синонимах резолвнутой
+     * категории. Иначе категория описывает КВАЛИФИКАТОР, а не сам предмет
+     * (кейс «Шкив ограничителя скорости» → категория «Ограничитель скорости»:
+     * голова «Шкив» отсутствует → категория неверна → её лучше НЕ подавать в
+     * retrieval/rerank, т.к. неверная категория активно ведёт к неверному
+     * каталогу, а пустая — нейтральна). За флагом (default off).
+     *
+     * @return bool true — категорию можно использовать; false — обнулить.
+     */
+    private function categoryHeadNounConsistent(RequestItem $item): bool
+    {
+        $enabled = (bool) app_setting(
+            'catalog.name_match.category_headnoun_gate',
+            config('services.catalog_name_match.category_headnoun_gate', false),
+        );
+        if (! $enabled) {
+            return true;
+        }
+        $cat = $item->kbCategory;
+        if ($cat === null) {
+            return true;
+        }
+        $name = mb_strtolower(trim((string) $item->parsed_name));
+        if ($name === '') {
+            return true;
+        }
+        // Головное существительное — первый значимый токен названия, пропуская
+        // предлоги и упаковочные слова («комплект/набор/блок»), которые не
+        // называют сам предмет.
+        static $skip = ['для', 'под', 'из', 'комплект', 'кт', 'к-т', 'набор',
+            'блок', 'узел', 'сборе', 'сборка', 'запчасть', 'деталь', 'шт'];
+        $head = null;
+        foreach (preg_split('/[^\p{L}\p{N}]+/u', $name, -1, PREG_SPLIT_NO_EMPTY) as $tok) {
+            if (mb_strlen($tok) < 4 || in_array($tok, $skip, true)) {
+                continue;
+            }
+            $head = $tok;
+            break;
+        }
+        if ($head === null) {
+            return true; // голову не выделили — не гейтим
+        }
+        $stem = mb_substr($head, 0, 5);
+        $hay = mb_strtolower($cat->name . ' ' . implode(' ', (array) ($cat->synonyms ?? [])));
+
+        return mb_strpos($hay, $stem) !== false;
     }
 
     public function hashText(string $text): string
@@ -1649,7 +1699,7 @@ class CatalogEmbeddingService
     private function requestCategoryText(RequestItem $item): ?string
     {
         $name = $item->kbCategory?->name;
-        if (is_string($name) && trim($name) !== '') {
+        if (is_string($name) && trim($name) !== '' && $this->categoryHeadNounConsistent($item)) {
             return $name;
         }
         $dc = $item->quality_assessment_payload['detailed_category']['name'] ?? null;

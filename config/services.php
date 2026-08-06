@@ -296,6 +296,11 @@ return [
         // позиций категория неверна и уводит выбор LLM к неверному кандидату.
         // false → реранк судит по названию+артикулу.
         'rerank_use_category' => (bool) env('CATALOG_NAME_MATCH_RERANK_USE_CATEGORY', true),
+        // Гейт согласованности категории: подавлять категорию в retrieval/rerank,
+        // если головное существительное названия клиента не встречается в
+        // названии/синонимах категории (неверная категория активно вредит,
+        // пустая — нейтральна). Прототип за флагом.
+        'category_headnoun_gate' => (bool) env('CATALOG_NAME_MATCH_CATEGORY_HEADNOUN_GATE', false),
     ],
 
     /*

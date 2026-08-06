@@ -40,6 +40,7 @@ class CatalogMatchEvalCommand extends Command
         {--rawname= : Переопределить raw_name_retrieval на прогон: 1=вкл, 0=выкл. Для A/B retrieval-фикса.}
         {--nocat : Не подавать авто-категорию в LLM-реранк (A/B rerank_use_category=false).}
         {--nameonly : Эталон только name-path (parsed_article пуст) — чистый замер C-тюнинга без артикульных подмен.}
+        {--catgate : Включить category_headnoun_gate на прогон (гейт согласованности категории).}
         {--show=10 : Сколько примеров каждой категории показать}';
 
     protected $description = 'Регресс-харнес матчера каталога на эталоне «система vs КП» (read-only, отработанные заявки не меняет).';
@@ -62,6 +63,10 @@ class CatalogMatchEvalCommand extends Command
         if ($this->option('nocat')) {
             config(['services.catalog_name_match.rerank_use_category' => false]);
             $this->warn('rerank_use_category=OFF — авто-категория не подаётся в реранк (только этот прогон)');
+        }
+        if ($this->option('catgate')) {
+            config(['services.catalog_name_match.category_headnoun_gate' => true]);
+            $this->warn('category_headnoun_gate=ON — категория подавляется при несовпадении головного слова (только этот прогон)');
         }
 
         $labeled = $this->labeledSet((int) $this->option('limit'), (bool) $this->option('nameonly'));
