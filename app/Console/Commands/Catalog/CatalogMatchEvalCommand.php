@@ -36,12 +36,22 @@ class CatalogMatchEvalCommand extends Command
     protected $signature = 'catalog:match-eval
         {--limit=50 : Сколько позиций-РАСХОЖДЕНИЙ прогнать (0 = все). LLM C-tier стоит денег — начинай с малого.}
         {--control=0 : Сколько позиций-КОНТРОЛЯ (C-матч сейчас = КП, истина) прогнать для замера РЕГРЕССИЙ. 0 = не мерить.}
+        {--gate= : Переопределить ambiguity_gate_margin ТОЛЬКО на этот прогон (A/B без правки настроек). Напр. 0.05.}
         {--show=10 : Сколько примеров каждой категории показать}';
 
     protected $description = 'Регресс-харнес матчера каталога на эталоне «система vs КП» (read-only, отработанные заявки не меняет).';
 
     public function handle(CatalogResolutionService $service): int
     {
+        // A/B ambiguity-gate: переопределяем дефолт config ТОЛЬКО в этом
+        // процессе. app_setting() при отсутствии DB-строки вернёт этот config
+        // → гейт активен на прогон, прод-настройки не трогаем.
+        if ($this->option('gate') !== null) {
+            $g = (float) $this->option('gate');
+            config(['services.catalog_name_match.ambiguity_gate_margin' => $g]);
+            $this->warn("ambiguity_gate_margin переопределён на {$g} (только этот прогон)");
+        }
+
         $labeled = $this->labeledSet((int) $this->option('limit'));
         $this->info('Эталон (система≠КП, КП=истина): '.count($labeled).' позиций. Прогоняю матчер read-only…');
 

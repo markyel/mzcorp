@@ -283,6 +283,11 @@ return [
         //                        не доверяем; precision приоритет;
         //   'accept'           — принимаем match без проверки; recall приоритет.
         'llm_fail_action' => env('CATALOG_NAME_MATCH_LLM_FAIL_ACTION', 'reject'),
+        // Ambiguity gate: если top-1 и top-2 кандидата по blended score
+        // расходятся меньше чем на это значение — матч «монетка» между
+        // близкими вариантами → уводим в ручную (pending) вместо угадывания.
+        // 0.0 = выключено. Управляется через app_setting того же ключа.
+        'ambiguity_gate_margin' => (float) env('CATALOG_NAME_MATCH_AMBIGUITY_GATE_MARGIN', 0.0),
     ],
 
     /*

@@ -1201,6 +1201,33 @@ class CatalogEmbeddingService
             }
         }
 
+        // Ambiguity gate: если top-1 и top-2 по blended score практически
+        // неразличимы (< margin) — это «монетка» между близкими каталожными
+        // вариантами. LLM-реранк на таких нестабилен (~1/6 self-flip при
+        // temperature=0). Вместо уверенно-неверного матча уводим в ручную
+        // (pending) — безопаснее. margin=0 → гейт выключен (поведение как было).
+        $gateMargin = (float) app_setting(
+            'catalog.name_match.ambiguity_gate_margin',
+            config('services.catalog_name_match.ambiguity_gate_margin', 0.0),
+        );
+        if ($gateMargin > 0.0) {
+            $s0 = (float) $safe[0]['similarity'];
+            $s1 = isset($safe[1]) ? (float) $safe[1]['similarity'] : 0.0;
+            if (($s0 - $s1) < $gateMargin) {
+                Log::info('CatalogEmbeddingService: ambiguity gate → manual (bunched candidates)', [
+                    'request_item_id' => $item->id,
+                    'top1_sku' => $safe[0]['catalog']->sku,
+                    'top1_score' => $s0,
+                    'top2_sku' => $safe[1]['catalog']->sku ?? null,
+                    'top2_score' => $s1,
+                    'margin' => $gateMargin,
+                    'candidates' => count($safe),
+                ]);
+
+                return null;
+            }
+        }
+
         // LLM rerank или fallback к top-1 если LLM выключен.
         if (! $llmEnabled) {
             return $this->buildMatchResult(
