@@ -133,7 +133,7 @@ class InboundReplyLinker
             // привязываемся к ней. Для personal-ящика — только Request в
             // scope менеджера (см. resolveOwnerScopeUserId).
             $matched = $parents
-                ->first(function (EmailMessage $p) use ($ownerScopeUserId): bool {
+                ->first(function (EmailMessage $p) use ($ownerScopeUserId, $message): bool {
                     if ($p->related_request_id === null) {
                         return false;
                     }
@@ -141,7 +141,16 @@ class InboundReplyLinker
                     if (! $req || $req->status->isTerminal()) {
                         return false;
                     }
-                    if ($ownerScopeUserId !== null && ! $this->isRequestInScope($req, $ownerScopeUserId)) {
+                    // Scope-check личного ящика — НЕ отвергаем, если parent пришёл
+                    // в ТОТ ЖЕ ящик (это физически тот же тред). Иначе реплай
+                    // отваливается в НОВУЮ заявку, когда исходная была переназначена
+                    // (напр. владелец ящика недоступен → заявка ушла доступному
+                    // менеджеру, assigned != owner ящика). Кейс M-2026-11194:
+                    // #68904 и reply #68936 — один ящик #13, но заявка переназначена.
+                    $sameMailbox = $p->mailbox_id !== null && $p->mailbox_id === $message->mailbox_id;
+                    if ($ownerScopeUserId !== null
+                        && ! $sameMailbox
+                        && ! $this->isRequestInScope($req, $ownerScopeUserId)) {
                         return false;
                     }
                     return true;
