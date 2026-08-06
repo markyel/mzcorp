@@ -160,7 +160,8 @@ class CatalogMatchEvalCommand extends Command
               AND oqi.is_analog = false
               AND (sysc.name IS NULL OR sysc.name NOT ILIKE '%ЗАМЕНЕНО%')
               AND NOT EXISTS (SELECT 1 FROM outbound_quote_items o2
-                    WHERE o2.outbound_quote_id = oqi.outbound_quote_id
+                    JOIN outbound_quotes oq2 ON oq2.id = o2.outbound_quote_id
+                    WHERE oq2.request_id = oq.request_id
                       AND o2.matched_catalog_item_id = ri.catalog_item_id)
               AND oqi.id = (SELECT min(o3.id) FROM outbound_quote_items o3
                     WHERE o3.matched_request_item_id = oqi.matched_request_item_id
