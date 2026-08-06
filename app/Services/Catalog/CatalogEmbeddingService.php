@@ -1515,6 +1515,17 @@ class CatalogEmbeddingService
             $clientArticle = null;
         }
 
+        // Категория запроса — авто-резолв из KB, и на части позиций она НЕВЕРНА
+        // (кейс «Шкив ограничителя скорости» → категория «Ограничитель
+        // скорости»: голова названия — ШКИВ, а категория поймала квалификатор).
+        // Промпт трактует категорию как сильный сигнал → LLM берёт неверного
+        // кандидата. Флаг позволяет НЕ подавать авто-категорию в реранк, чтобы
+        // LLM судил по названию+артикулу (реальная идентичность детали).
+        $rerankCategory = (bool) app_setting(
+            'catalog.name_match.rerank_use_category',
+            config('services.catalog_name_match.rerank_use_category', true),
+        ) ? $this->requestCategoryText($item) : null;
+
         try {
             $result = $this->chat->chat(
                 [
@@ -1524,7 +1535,7 @@ class CatalogEmbeddingService
                         $item->parsed_name,
                         $clientArticle,
                         $payload,
-                        $this->requestCategoryText($item),
+                        $rerankCategory,
                     )],
                 ],
                 $rerankModel,
