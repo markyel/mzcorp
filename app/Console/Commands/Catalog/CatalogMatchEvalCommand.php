@@ -37,6 +37,7 @@ class CatalogMatchEvalCommand extends Command
         {--limit=50 : Сколько позиций-РАСХОЖДЕНИЙ прогнать (0 = все). LLM C-tier стоит денег — начинай с малого.}
         {--control=0 : Сколько позиций-КОНТРОЛЯ (C-матч сейчас = КП, истина) прогнать для замера РЕГРЕССИЙ. 0 = не мерить.}
         {--gate= : Переопределить ambiguity_gate_margin ТОЛЬКО на этот прогон (A/B без правки настроек). Напр. 0.05.}
+        {--rawname= : Переопределить raw_name_retrieval на прогон: 1=вкл, 0=выкл. Для A/B retrieval-фикса.}
         {--show=10 : Сколько примеров каждой категории показать}';
 
     protected $description = 'Регресс-харнес матчера каталога на эталоне «система vs КП» (read-only, отработанные заявки не меняет).';
@@ -50,6 +51,11 @@ class CatalogMatchEvalCommand extends Command
             $g = (float) $this->option('gate');
             config(['services.catalog_name_match.ambiguity_gate_margin' => $g]);
             $this->warn("ambiguity_gate_margin переопределён на {$g} (только этот прогон)");
+        }
+        if ($this->option('rawname') !== null) {
+            $on = (bool) (int) $this->option('rawname');
+            config(['services.catalog_name_match.raw_name_retrieval' => $on]);
+            $this->warn('raw_name_retrieval переопределён на '.($on ? 'ON' : 'OFF').' (только этот прогон)');
         }
 
         $labeled = $this->labeledSet((int) $this->option('limit'));

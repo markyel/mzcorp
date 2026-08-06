@@ -288,6 +288,10 @@ return [
         // близкими вариантами → уводим в ручную (pending) вместо угадывания.
         // 0.0 = выключено. Управляется через app_setting того же ключа.
         'ambiguity_gate_margin' => (float) env('CATALOG_NAME_MATCH_AMBIGUITY_GATE_MARGIN', 0.0),
+        // Raw-name retrieval: доп. trigram-проход по голому parsed_name (без
+        // бренд/категория-префикса). Возвращает верный каталог, вытесненный
+        // из пула отравленным префиксом при неверной KB-категории. Аддитивно.
+        'raw_name_retrieval' => (bool) env('CATALOG_NAME_MATCH_RAW_NAME_RETRIEVAL', true),
     ],
 
     /*

@@ -190,7 +190,7 @@ class CatalogEmbeddingService
      *
      * @return array<int, array{catalog: CatalogItem, similarity: float}>
      */
-    public function topNByQueryText(string $queryText, int $n = 10, ?int $requestItemId = null): array
+    public function topNByQueryText(string $queryText, int $n = 10, ?int $requestItemId = null, ?string $nameOnly = null): array
     {
         $queryText = trim($queryText);
         if (mb_strlen($queryText) < 2) {
@@ -278,6 +278,26 @@ class CatalogEmbeddingService
             $cid = (int) $r['catalog_id'];
             $merged[$cid] ??= ['catalog_id' => $cid, 'code' => null, 'trgm' => null, 'vector' => null];
             $merged[$cid]['vector'] = (float) $r['similarity'];
+        }
+
+        // Raw-name retrieval: buildQueryText подмешивает бренд+категорию из KB,
+        // и при НЕВЕРНОЙ категории (кейс «Тип: Ограничитель» для позиции «Шкив
+        // ограничителя») префикс вытесняет верный каталог из trgm/vector-пула
+        // полностью. Доп. trigram-проход по ГОЛОМУ имени клиента возвращает его
+        // (кейс M10163: полный запрос — нигде, чистое имя — trgm #9 score 0.958).
+        // Аддитивно: только ДОБАВЛЯЕт кандидатов (max по trgm), ничего не
+        // удаляет; финальный скоринг+LLM решают. Флаг — killswitch.
+        $rawNameEnabled = (bool) app_setting(
+            'catalog.name_match.raw_name_retrieval',
+            config('services.catalog_name_match.raw_name_retrieval', true),
+        );
+        $nameOnly = $nameOnly !== null ? trim($nameOnly) : null;
+        if ($rawNameEnabled && $nameOnly !== null && mb_strlen($nameOnly) >= 3 && $nameOnly !== $queryText) {
+            foreach ($this->trigramTopN($nameOnly, $poolLimit) as $r) {
+                $cid = (int) $r['catalog_id'];
+                $merged[$cid] ??= ['catalog_id' => $cid, 'code' => null, 'trgm' => null, 'vector' => null];
+                $merged[$cid]['trgm'] = max((float) $r['similarity'], (float) ($merged[$cid]['trgm'] ?? 0));
+            }
         }
 
         // Vector backfill: items в code/trgm пуле, не попавшие в vector top-N
@@ -1139,7 +1159,7 @@ class CatalogEmbeddingService
         $topN = (int) app_setting('catalog.name_match.rerank_top_n', 10);
         $topN = max(1, min(15, $topN));
 
-        $allCandidates = $this->topNByQueryText($queryText, $topN, $item->id);
+        $allCandidates = $this->topNByQueryText($queryText, $topN, $item->id, $item->parsed_name);
         if ($allCandidates === []) {
             return null;
         }
