@@ -26,6 +26,16 @@ class MatchAudit extends Component
     #[Url(as: 'hidesub')]
     public bool $hideSubstitutions = true;
 
+    // Полное сравнение 2 каталогов (система vs КП) по позиции — переиспользует
+    // CatalogComparisonService (как «Похожее из каталога»).
+    public ?int $compareRequestItemId = null;
+
+    public ?int $compareSysCatId = null;
+
+    public ?int $compareKpCatId = null;
+
+    public bool $comparing = false;
+
     private const PER_PAGE = 40;
 
     public function updatedSearch(): void
@@ -87,6 +97,7 @@ class MatchAudit extends Component
                 'oqi.id as oqi_id',
                 'oqi.matched_request_item_id as request_item_id',
                 'oqi.matched_catalog_item_id as kp_catalog_id',
+                'ri.catalog_item_id as sys_catalog_id',
                 'oqi.is_analog',
                 'oqi.raw_name as kp_raw_name',
                 'oqi.raw_article as kp_raw_article',
@@ -134,6 +145,53 @@ class MatchAudit extends Component
 
         unset($this->rows, $this->total);
         $this->dispatch('toast', message: "Позиция привязана к {$cat->sku} (как в КП).", type: 'success');
+    }
+
+    // ───────── Полное сравнение (система vs КП) ─────────
+
+    public function openCompare(int $requestItemId, int $sysCatId, int $kpCatId): void
+    {
+        $this->compareRequestItemId = $requestItemId;
+        $this->compareSysCatId = $sysCatId;
+        $this->compareKpCatId = $kpCatId;
+        $this->comparing = true;
+    }
+
+    public function closeCompare(): void
+    {
+        $this->comparing = false;
+        $this->compareRequestItemId = null;
+        $this->compareSysCatId = null;
+        $this->compareKpCatId = null;
+    }
+
+    #[Computed]
+    public function compareSubject(): ?\App\Models\RequestItem
+    {
+        return $this->compareRequestItemId
+            ? \App\Models\RequestItem::with(['brand', 'kbCategory'])->find($this->compareRequestItemId)
+            : null;
+    }
+
+    /**
+     * Данные compare-таблицы: позиция заявки vs [система, КП]. Тот же сервис,
+     * что и в диалоге «Похожее из каталога».
+     */
+    #[Computed]
+    public function comparisonData(): ?array
+    {
+        if (! $this->comparing || $this->compareSubject === null) {
+            return null;
+        }
+        $sys = \App\Models\CatalogItem::find($this->compareSysCatId);
+        $kp = \App\Models\CatalogItem::find($this->compareKpCatId);
+        $candidates = collect(array_values(array_filter([$sys, $kp])));
+        if ($candidates->isEmpty()) {
+            return null;
+        }
+
+        return app(\App\Services\Catalog\CatalogComparisonService::class)
+            ->compare($this->compareSubject, $candidates);
     }
 
     public function render()
