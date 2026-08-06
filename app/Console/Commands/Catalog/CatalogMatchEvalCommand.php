@@ -42,6 +42,7 @@ class CatalogMatchEvalCommand extends Command
         {--nameonly : Эталон только name-path (parsed_article пуст) — чистый замер C-тюнинга без артикульных подмен.}
         {--catgate : Включить category_headnoun_gate на прогон (гейт согласованности категории).}
         {--nobrand : Снять жёсткий пре-фильтр по бренду (brand_hard_filter=false) — бренд только мягкий сигнал у LLM.}
+        {--brandgate : Включить brand_relevance_gate — не использовать бренд клиента (query+фильтр), если он ненадёжен.}
         {--show=10 : Сколько примеров каждой категории показать}';
 
     protected $description = 'Регресс-харнес матчера каталога на эталоне «система vs КП» (read-only, отработанные заявки не меняет).';
@@ -72,6 +73,10 @@ class CatalogMatchEvalCommand extends Command
         if ($this->option('nobrand')) {
             config(['services.catalog_name_match.brand_hard_filter' => false]);
             $this->warn('brand_hard_filter=OFF — жёсткий пре-фильтр по бренду снят (только этот прогон)');
+        }
+        if ($this->option('brandgate')) {
+            config(['services.catalog_name_match.brand_relevance_gate' => true]);
+            $this->warn('brand_relevance_gate=ON — ненадёжный бренд клиента не используется (только этот прогон)');
         }
 
         $labeled = $this->labeledSet((int) $this->option('limit'), (bool) $this->option('nameonly'));

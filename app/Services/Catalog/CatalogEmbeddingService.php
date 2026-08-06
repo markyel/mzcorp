@@ -79,7 +79,11 @@ class CatalogEmbeddingService
     {
         $parts = [];
         $brand = $item->brand?->name ?: $item->parsed_brand;
-        if ($brand) {
+        $brandGate = (bool) app_setting(
+            'catalog.name_match.brand_relevance_gate',
+            config('services.catalog_name_match.brand_relevance_gate', false),
+        );
+        if ($brand && (! $brandGate || $this->brandIsReliable($item))) {
             $parts[] = 'Бренд: ' . $brand;
         }
         $category = $item->kbCategory?->name;
@@ -1227,12 +1231,19 @@ class CatalogEmbeddingService
             'catalog.name_match.brand_hard_filter',
             config('services.catalog_name_match.brand_hard_filter', true),
         );
+        // brand-relevance гейт: если бренд клиента ненадёжен (нет в каталоге /
+        // в названии), НЕ фильтруем по нему — деталь ищем по имени+спеке.
+        $brandGate = (bool) app_setting(
+            'catalog.name_match.brand_relevance_gate',
+            config('services.catalog_name_match.brand_relevance_gate', false),
+        );
+        $applyBrandFilter = $brandHardFilter && (! $brandGate || $this->brandIsReliable($item));
         $safe = [];
         foreach ($allCandidates as $c) {
             if ((float) $c['similarity'] < $threshold) {
                 continue;
             }
-            if ($brandHardFilter && ! $this->isBrandSafe($item, $c['catalog'])) {
+            if ($applyBrandFilter && ! $this->isBrandSafe($item, $c['catalog'])) {
                 continue;
             }
             if (! $this->isArticleSafe($item->parsed_article, $c['catalog']->brand_article, $c['catalog']->name)) {
@@ -1915,6 +1926,60 @@ class CatalogEmbeddingService
      *
      * @return list<string>
      */
+    /**
+     * Надёжен ли бренд клиента как сигнал для матчинга ЭТОЙ детали.
+     * Ненадёжен (→ не подавать ни в query, ни в фильтр), если:
+     *   - бренд встречается в самом названии (это токен названия / бренд ЛИФТА,
+     *     а не производитель детали): «Фотоэлемент OTIS», «Фотобарьер ЩЛЗ»;
+     *   - бренда нет в брендовом пространстве каталога (мы его не стокуем —
+     *     клиент назвал иностранный OEM / дистрибьютора / бренд лифта): «Gustav
+     *     Wolf», «DONATI», «HAS Asansor». Менеджер котирует ту же деталь другого
+     *     бренда (МЕЧЕЛ, ЩЛЗ) — бренд клиента только сбивает матчер.
+     */
+    private function brandIsReliable(RequestItem $item): bool
+    {
+        $brand = $item->brand?->name ?: $item->parsed_brand;
+        $tokens = $this->normalizeBrandTokens($brand);
+        if ($tokens === []) {
+            return false;
+        }
+        $name = mb_strtolower((string) $item->parsed_name);
+        if ($name !== '' && mb_stripos($name, trim((string) $brand)) !== false) {
+            return false; // бренд-в-названии
+        }
+        $catalogBrands = $this->catalogBrandTokenSet();
+        foreach ($tokens as $t) {
+            if (isset($catalogBrands[$t])) {
+                return true; // бренд есть в каталоге — используем
+            }
+        }
+
+        return false; // не стокуем этот бренд
+    }
+
+    /**
+     * Множество нормализованных брендовых токенов, реально встречающихся в
+     * активном каталоге (кэш на процесс).
+     *
+     * @return array<string, true>
+     */
+    private function catalogBrandTokenSet(): array
+    {
+        static $set = null;
+        if ($set !== null) {
+            return $set;
+        }
+        $set = [];
+        foreach (DB::table('catalog_items')->where('is_active', true)
+            ->whereNotNull('brand')->where('brand', '<>', '')->distinct()->pluck('brand') as $b) {
+            foreach ($this->normalizeBrandTokens($b) as $t) {
+                $set[$t] = true;
+            }
+        }
+
+        return $set;
+    }
+
     private function normalizeBrandTokens(?string $b): array
     {
         if ($b === null || trim($b) === '') {

@@ -306,6 +306,11 @@ return [
         // брендах — выбрасывает верный каталог. false → бренд только мягкий
         // сигнал у LLM-реранка.
         'brand_hard_filter' => (bool) env('CATALOG_NAME_MATCH_BRAND_HARD_FILTER', true),
+        // brand-relevance гейт: не подавать бренд клиента ни в query, ни в
+        // фильтр, если он ненадёжен (нет в брендовом пространстве каталога или
+        // встречается в названии — бренд лифта/дистрибьютора, не производитель
+        // детали). Деталь матчится по имени+спеке.
+        'brand_relevance_gate' => (bool) env('CATALOG_NAME_MATCH_BRAND_RELEVANCE_GATE', false),
     ],
 
     /*
