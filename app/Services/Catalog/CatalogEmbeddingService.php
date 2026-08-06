@@ -33,6 +33,9 @@ use Illuminate\Support\Facades\Log;
  */
 class CatalogEmbeddingService
 {
+    /** Fixed seed для воспроизводимости LLM-реранка/валидации (детерминизм C-пути). */
+    private const LLM_SEED = 20260806;
+
     public function __construct(
         private readonly OpenAIEmbeddingService $embedder,
         private readonly OpenAIChatService $chat,
@@ -1505,7 +1508,10 @@ class CatalogEmbeddingService
                     )],
                 ],
                 $rerankModel,
-                ['response_format' => ['type' => 'json_object'], 'temperature' => 0, 'max_tokens' => 300],
+                // seed — воспроизводимость: без него gpt-4o-mini при temp=0
+                // всё равно ~1/6 self-flip на близких кандидатах (замерено
+                // харнесом). Fixed seed делает реранк детерминированным.
+                ['response_format' => ['type' => 'json_object'], 'temperature' => 0, 'max_tokens' => 300, 'seed' => self::LLM_SEED],
             );
         } catch (\Throwable $e) {
             Log::warning('CatalogEmbeddingService: rerank LLM call failed (non-fatal)', [
@@ -1574,7 +1580,7 @@ class CatalogEmbeddingService
                     )],
                 ],
                 config('services.openai.clarification_model', 'gpt-4o-mini'),
-                ['response_format' => ['type' => 'json_object'], 'temperature' => 0, 'max_tokens' => 200],
+                ['response_format' => ['type' => 'json_object'], 'temperature' => 0, 'max_tokens' => 200, 'seed' => self::LLM_SEED],
             );
         } catch (\Throwable $e) {
             Log::warning('CatalogEmbeddingService: LLM validation call failed (non-fatal)', [
