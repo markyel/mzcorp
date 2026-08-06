@@ -120,14 +120,23 @@ class SplitDialog extends Component
     private function ensureAuthorized(): void
     {
         $user = auth()->user();
-        $allowed = $user && $user->hasAnyRole([
+        if ($user === null) {
+            abort(403);
+        }
+        // Привилегированные (РОП / директор / админ) — любую заявку.
+        if ($user->hasAnyRole([
             RoleEnum::Admin->value,
             RoleEnum::Director->value,
             RoleEnum::HeadOfSales->value,
-        ]);
-        if (! $allowed) {
-            abort(403);
+        ])) {
+            return;
         }
+        // Менеджер — разъединять может ТОЛЬКО свою (доступную) заявку
+        // (владелец или активная делегация). Доступ строго через isAccessibleBy.
+        if ($user->hasRole(RoleEnum::Manager->value) && $this->request()->isAccessibleBy($user)) {
+            return;
+        }
+        abort(403);
     }
 
     /**

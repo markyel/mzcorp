@@ -639,9 +639,11 @@
             $canReply = $isOwner || $isDelegate
                 || $authUser?->hasAnyRole(['head_of_sales', 'director', 'admin']);
             $canReassign = $authUser?->hasAnyRole(['head_of_sales', 'director', 'secretary', 'admin']);
-            // Разъединение заявки (split / un-merge) — только admin/director/РОП
-            // (секретарь не разъединяет, у него read-only по операциям).
-            $canSplit = $authUser?->hasAnyRole(['head_of_sales', 'director', 'admin']);
+            // Разъединение заявки (split / un-merge): привилегированные — любую;
+            // менеджер — свою (страница detail и так гейтится isAccessibleBy, а
+            // серверный SplitDialog::ensureAuthorized проверяет доступ повторно).
+            // Секретарь НЕ разъединяет — у него read-only по операциям.
+            $canSplit = $authUser?->hasAnyRole(['head_of_sales', 'director', 'admin', 'manager']);
             // Якорь для «✉ Ответить» — последнее входящее ОТ КЛИЕНТА.
             // Внутренние письма коллег (@myzip.ru, пересылки «Заявка mzcorp…»)
             // пропускаем: якорение на них давало «Re: <внутренняя тема>» и
