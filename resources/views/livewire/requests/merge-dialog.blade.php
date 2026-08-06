@@ -150,6 +150,28 @@
                     </div>
                 @endif
 
+                {{-- Направление слияния: какая заявка закроется, какая останется. --}}
+                @if($selected)
+                    @php $curCode = $this->currentCode(); @endphp
+                    <div class="mb-3">
+                        <div class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">Направление слияния</div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <button type="button" wire:click="$set('mergeCurrentIntoSelected', true)"
+                                    class="text-left p-2.5 rounded-md border {{ $mergeCurrentIntoSelected ? 'border-sky-400' : 'border-border hover:bg-surface-2' }}"
+                                    @style(['background:#eff6ff' => $mergeCurrentIntoSelected])>
+                                <div class="text-[12px] text-fg-1"><b class="mono">{{ $curCode }}</b> → влить в <b class="mono">{{ $selected->internal_code }}</b></div>
+                                <div class="text-[11px] text-fg-3 mt-0.5">Текущая <span class="text-red-600 font-medium">закроется</span>, {{ $selected->internal_code }} останется в работе.</div>
+                            </button>
+                            <button type="button" wire:click="$set('mergeCurrentIntoSelected', false)"
+                                    class="text-left p-2.5 rounded-md border {{ ! $mergeCurrentIntoSelected ? 'border-sky-400' : 'border-border hover:bg-surface-2' }}"
+                                    @style(['background:#eff6ff' => ! $mergeCurrentIntoSelected])>
+                                <div class="text-[12px] text-fg-1"><b class="mono">{{ $selected->internal_code }}</b> → влить в <b class="mono">{{ $curCode }}</b></div>
+                                <div class="text-[11px] text-fg-3 mt-0.5">{{ $selected->internal_code }} <span class="text-red-600 font-medium">закроется</span>, текущая останется.</div>
+                            </button>
+                        </div>
+                    </div>
+                @endif
+
                 @if($stats !== null)
                     @if(!empty($stats['conflicts']))
                         <div class="text-red-700 text-[12px] mb-3 space-y-1">
@@ -191,9 +213,14 @@
                 @error('selectedLoserId') <div class="text-red-700 text-[12px] mb-2">{{ $message }}</div> @enderror
 
                 <div class="flex items-center gap-2 pt-2 border-t border-border-subtle">
+                    @php
+                        $closingCode = $selected
+                            ? ($mergeCurrentIntoSelected ? $this->currentCode() : $selected->internal_code)
+                            : 'выбранная';
+                    @endphp
                     <button type="button"
                             wire:click="confirmMerge"
-                            wire:confirm="Объединить заявки? Выбранная заявка будет закрыта, отменить нельзя."
+                            wire:confirm="Объединить заявки? Заявка {{ $closingCode }} будет закрыта, отменить нельзя."
                             class="btn btn-primary"
                             @disabled($selectedLoserId === null || ($stats && !empty($stats['conflicts'])))>
                         ⊌ Объединить

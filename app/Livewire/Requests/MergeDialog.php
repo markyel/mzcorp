@@ -36,6 +36,13 @@ class MergeDialog extends Component
     public string $search = '';
 
     /**
+     * Направление слияния. true (по умолчанию) = ТЕКУЩУЮ заявку влить в
+     * ВЫБРАННУЮ (текущая закроется, выбранная выживет). false = наоборот
+     * (выбранная закроется, текущая выживет).
+     */
+    public bool $mergeCurrentIntoSelected = true;
+
+    /**
      * Режим «другой e-mail отправителя» — тот же реальный клиент пишет с
      * другого ящика (кейс M-2026-8787 → M-2026-8762). Включается ОТДЕЛЬНОЙ
      * кнопкой и только привилегированными (см. canCrossClient). По умолчанию
@@ -66,6 +73,7 @@ class MergeDialog extends Component
         $this->selectedLoserId = null;
         $this->search = '';
         $this->crossClient = false;
+        $this->mergeCurrentIntoSelected = true; // дефолт: текущую влить в выбранную
         $this->resetErrorBag();
         $this->open = true;
     }
@@ -307,8 +315,7 @@ class MergeDialog extends Component
         if ($this->selectedLoserId === null) {
             return null;
         }
-        $loser = RequestModel::find($this->selectedLoserId);
-        $winner = $this->winner();
+        [$winner, $loser] = $this->resolveDirection();
         if ($loser === null || $winner === null) {
             return null;
         }
@@ -318,13 +325,14 @@ class MergeDialog extends Component
 
     public function confirmMerge(RequestMergeService $service): void
     {
-        $winner = $this->winner();
-        $loser = $this->selectedLoserId ? RequestModel::find($this->selectedLoserId) : null;
+        [$winner, $loser] = $this->resolveDirection();
         if ($winner === null || $loser === null) {
             $this->addError('selectedLoserId', 'Выберите заявку для слияния.');
 
             return;
         }
+
+        $currentIsLoser = $loser->id === $this->requestId;
 
         try {
             $stats = $service->merge($winner, $loser, auth()->user(), $this->crossClient && $this->canCrossClient);
@@ -335,8 +343,9 @@ class MergeDialog extends Component
         }
 
         session()->flash('status', sprintf(
-            'Заявка %s объединена с этой. Перенесено: позиций +%d (пропущено %d), писем %d, уточнений %d.',
+            'Заявка %s объединена в %s. Перенесено: позиций +%d (пропущено %d), писем %d, уточнений %d.',
             $loser->internal_code,
+            $winner->internal_code,
             $stats['items_added'],
             $stats['items_skipped'],
             $stats['emails_moved'],
@@ -345,12 +354,50 @@ class MergeDialog extends Component
 
         $this->open = false;
         $this->selectedLoserId = null;
+
+        // Если закрылась ТЕКУЩАЯ заявка — уводим менеджера на выжившую, иначе он
+        // остался бы на закрытой-дубле.
+        if ($currentIsLoser) {
+            $this->redirect(route('requests.show', $winner->id), navigate: true);
+
+            return;
+        }
+
         $this->dispatch('request-state-changed');
     }
 
+    /**
+     * Заявка-«якорь» (текущая) — по ней ищем кандидатов (тот же клиент/коды).
+     * НЕ обязательно winner: направление слияния задаёт mergeCurrentIntoSelected.
+     */
     private function winner(): ?RequestModel
     {
         return RequestModel::find($this->requestId);
+    }
+
+    /** internal_code текущей заявки — для меток направления слияния в UI. */
+    public function currentCode(): string
+    {
+        return (string) ($this->winner()?->internal_code ?? 'эта');
+    }
+
+    /**
+     * Разрешить направление в пару [winner (выживет), loser (закроется)]
+     * по флагу mergeCurrentIntoSelected.
+     *
+     * @return array{0: ?RequestModel, 1: ?RequestModel}
+     */
+    private function resolveDirection(): array
+    {
+        $current = RequestModel::find($this->requestId);
+        $selected = $this->selectedLoserId ? RequestModel::find($this->selectedLoserId) : null;
+        if ($current === null || $selected === null) {
+            return [null, null];
+        }
+
+        return $this->mergeCurrentIntoSelected
+            ? [$selected, $current]   // текущую влить в выбранную (текущая закроется)
+            : [$current, $selected];  // выбранную влить в текущую (выбранная закроется)
     }
 
     public function render()
