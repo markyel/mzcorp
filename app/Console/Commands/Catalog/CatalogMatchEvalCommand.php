@@ -34,7 +34,8 @@ use Illuminate\Support\Facades\DB;
 class CatalogMatchEvalCommand extends Command
 {
     protected $signature = 'catalog:match-eval
-        {--limit=50 : Сколько позиций прогнать (0 = все). LLM C-tier стоит денег — начинай с малого.}
+        {--limit=50 : Сколько позиций-РАСХОЖДЕНИЙ прогнать (0 = все). LLM C-tier стоит денег — начинай с малого.}
+        {--control=0 : Сколько позиций-КОНТРОЛЯ (C-матч сейчас = КП, истина) прогнать для замера РЕГРЕССИЙ. 0 = не мерить.}
         {--show=10 : Сколько примеров каждой категории показать}';
 
     protected $description = 'Регресс-харнес матчера каталога на эталоне «система vs КП» (read-only, отработанные заявки не меняет).';
@@ -59,28 +60,8 @@ class CatalogMatchEvalCommand extends Command
 
                 continue;
             }
-            $originalCatalog = $item->catalog_item_id;
-
-            $predicted = null;
-            $method = null;
-            DB::beginTransaction();
-            try {
-                // Сброс к «не сматчено», чтобы матчер отработал с нуля.
-                $item->catalog_item_id = null;
-                $item->quality_assessment_status = 'internal_catalog_pending';
-                $service->matchOrResolve($item);
-                $predicted = $item->catalog_item_id;
-                $method = is_array($item->quality_assessment_payload['catalog_match'] ?? null)
-                    ? ($item->quality_assessment_payload['catalog_match']['method'] ?? '?')
-                    : null;
-            } catch (\Throwable $e) {
-                // eval-сбой одной позиции не валит прогон.
-            } finally {
-                DB::rollBack();
-            }
-
-            // Гарантия read-only: значение в БД не изменилось.
-            if ((int) (RequestItem::whereKey($lab->request_item_id)->value('catalog_item_id')) !== (int) $originalCatalog) {
+            [$predicted, $method, $readonlyOk] = $this->predict($item, $service);
+            if (! $readonlyOk) {
                 $this->error("НАРУШЕНА read-only гарантия на ri#{$lab->request_item_id} — прерываю.");
 
                 return self::FAILURE;
@@ -133,7 +114,128 @@ class CatalogMatchEvalCommand extends Command
             }
         }
 
+        $this->runControl($service, (int) $this->option('control'), $show);
+
         return self::SUCCESS;
+    }
+
+    /**
+     * Контрольный прогон: позиции, где C-матч СЕЙЧАС совпал с КП (истина).
+     * После изменения ранкера здесь не должно расти число «сломано» — это
+     * защита от регрессий (харнес расхождений видит только выигрыш).
+     */
+    private function runControl(CatalogResolutionService $service, int $n, int $show): void
+    {
+        if ($n <= 0) {
+            return;
+        }
+        $control = $this->controlSet($n);
+        $this->newLine(2);
+        $this->info('КОНТРОЛЬ (C-матч сейчас = КП): '.count($control).' позиций. Проверяю, не ломает ли матчер верное…');
+
+        $held = $regressed = $nowPending = $errors = 0;
+        $broken = [];
+        $bar = $this->output->createProgressBar(count($control));
+        foreach ($control as $lab) {
+            $item = RequestItem::find($lab->request_item_id);
+            if ($item === null) {
+                $bar->advance();
+
+                continue;
+            }
+            [$predicted, , $readonlyOk] = $this->predict($item, $service);
+            if (! $readonlyOk) {
+                $errors++;
+                $bar->advance();
+
+                continue;
+            }
+            if ($predicted === null) {
+                $nowPending++;
+            } elseif ((int) $predicted === (int) $lab->kp_catalog_id) {
+                $held++;
+            } else {
+                $regressed++;
+                if (count($broken) < $show) {
+                    $broken[] = sprintf('%s | %s: было верно %s → стало %s',
+                        $lab->internal_code, mb_substr((string) $lab->parsed_name, 0, 30), $lab->kp_sku, $predicted);
+                }
+            }
+            $bar->advance();
+        }
+        $bar->finish();
+        $this->newLine(2);
+
+        $tot = max(1, $held + $regressed + $nowPending);
+        $this->info('КОНТРОЛЬ (регрессии) — '.($held + $regressed + $nowPending).':');
+        $this->line(sprintf('  ✅ держит верное:        %d (%.1f%%)', $held, $held / $tot * 100));
+        $this->line(sprintf('  🟡 стало pending (в ручную): %d (%.1f%%)', $nowPending, $nowPending / $tot * 100));
+        $this->line(sprintf('  ❌ СЛОМАНО (было верно → неверно): %d (%.1f%%)', $regressed, $regressed / $tot * 100));
+        foreach ($broken as $b) {
+            $this->line('  '.$b);
+        }
+    }
+
+    /**
+     * Один прогон матчера read-only (txn + rollback). Возвращает
+     * [predicted catalog_item_id|null, method|null, read-only не нарушен?].
+     *
+     * @return array{0: ?int, 1: ?string, 2: bool}
+     */
+    private function predict(RequestItem $item, CatalogResolutionService $service): array
+    {
+        $originalCatalog = $item->catalog_item_id;
+        $predicted = null;
+        $method = null;
+        DB::beginTransaction();
+        try {
+            $item->catalog_item_id = null;
+            $item->quality_assessment_status = 'internal_catalog_pending';
+            $service->matchOrResolve($item);
+            $predicted = $item->catalog_item_id;
+            $method = is_array($item->quality_assessment_payload['catalog_match'] ?? null)
+                ? ($item->quality_assessment_payload['catalog_match']['method'] ?? '?')
+                : null;
+        } catch (\Throwable $e) {
+            // eval-сбой одной позиции не валит прогон.
+        } finally {
+            DB::rollBack();
+        }
+
+        $readonlyOk = (int) (RequestItem::whereKey($item->id)->value('catalog_item_id')) === (int) $originalCatalog;
+
+        return [$predicted, $method, $readonlyOk];
+    }
+
+    /**
+     * Контрольный набор: C-матчи, совпавшие с КП (parsed_article пуст → шли
+     * путём C; matched_catalog = ri.catalog = истина). Дедуп по позиции.
+     *
+     * @return array<int, object>
+     */
+    private function controlSet(int $n): array
+    {
+        $sql = "
+            SELECT DISTINCT ON (ri.id)
+                   ri.id AS request_item_id,
+                   ri.catalog_item_id AS kp_catalog_id,
+                   r.internal_code, ri.parsed_name, kpc.sku AS kp_sku
+            FROM outbound_quote_items oqi
+            JOIN outbound_quotes oq ON oq.id = oqi.outbound_quote_id
+            JOIN request_items ri ON ri.id = oqi.matched_request_item_id
+            JOIN requests r ON r.id = oq.request_id
+            LEFT JOIN catalog_items kpc ON kpc.id = ri.catalog_item_id
+            WHERE ri.catalog_item_id IS NOT NULL
+              AND ri.catalog_item_id = oqi.matched_catalog_item_id
+              AND ri.is_active = true AND oqi.is_analog = false
+              AND (ri.parsed_article IS NULL OR ri.parsed_article = '')
+            ORDER BY ri.id DESC
+        ";
+        if ($n > 0) {
+            $sql .= ' LIMIT '.$n;
+        }
+
+        return DB::select($sql);
     }
 
     /**
