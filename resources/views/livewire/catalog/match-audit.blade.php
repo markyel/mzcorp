@@ -146,7 +146,7 @@
                                         @if(!empty($s['sub']))<small class="block text-[10px] text-fg-3 italic mt-0.5">{{ $s['sub'] }}</small>@endif
                                     </div>
                                     @foreach($row['cells'] as $cell)
-                                        @php $cls = match($cell['status']){'match'=>'text-fg-1','diff'=>'text-amber-700','bad'=>'text-red-700','empty'=>'text-fg-3 italic','default'=>'text-fg-1'}; $isMatch = $cell['status']==='match'; @endphp
+                                        @php $cls = match($cell['status'] ?? ''){'diff'=>'text-amber-700','bad'=>'text-red-700','empty'=>'text-fg-3 italic',default=>'text-fg-1'}; $isMatch = ($cell['status'] ?? '')==='match'; @endphp
                                         <div class="px-3 py-2 border-b border-r border-border bg-surface text-[12px] relative">
                                             @if($isMatch)<span class="absolute left-1 top-2 text-emerald-700 font-bold text-[11px]">✓</span>@endif
                                             <span class="{{ $cls }} {{ !empty($cell['mono'])?'mono':'' }} {{ !empty($cell['bold'])?'font-semibold':'' }} {{ $isMatch ? 'ml-3' : '' }}">{{ $cell['value'] }}</span>

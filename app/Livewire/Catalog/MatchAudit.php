@@ -190,8 +190,19 @@ class MatchAudit extends Component
             return null;
         }
 
-        return app(\App\Services\Catalog\CatalogComparisonService::class)
-            ->compare($this->compareSubject, $candidates);
+        try {
+            return app(\App\Services\Catalog\CatalogComparisonService::class)
+                ->compare($this->compareSubject, $candidates);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('MatchAudit: compare failed', [
+                'request_item_id' => $this->compareRequestItemId,
+                'sys' => $this->compareSysCatId,
+                'kp' => $this->compareKpCatId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     public function render()
