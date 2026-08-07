@@ -198,6 +198,18 @@ Schedule::command('requests:auto-close-inactive')
     ->onOneServer()
     ->runInBackground();
 
+// Еженедельные персональные отчёты менеджеров: генерация за ПРОШЛУЮ неделю
+// (пн–вс) + рассылка на почту менеджеров. Понедельник 08:00 МСК. Отчёт —
+// замороженный снимок метрик (weekly_reports.data), доступен в
+// /dashboard/reports/weekly (менеджер — свои, РОП/директор — все).
+// См. GenerateWeeklyReportsCommand + WeeklyManagerReportService.
+Schedule::command('reports:weekly-generate --send')
+    ->weeklyOn(1, '08:00')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Высвобождение хранилища: обнуление raw_source (сырой RFC822, ~464 КБ/письмо)
 // у писем ЗАКРЫТЫХ заявок и не-заявок (irrelevant) старше 3 дней. raw_source
 // открытых заявок сохраняется. email_messages раздувалась до 16 ГБ (94% БД) —

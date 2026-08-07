@@ -261,6 +261,13 @@ Route::middleware('auth')->group(function () {
             return view('procurement.index');
         })->name('procurement.index');
 
+        // Еженедельные персональные отчёты менеджеров. Менеджер видит свои
+        // (вкл. прошлые), РОП/директор/админ — все (фильтр по менеджеру внутри
+        // компонента). См. App\Livewire\Reports\Weekly.
+        Route::get('/dashboard/reports/weekly', function () {
+            return view('reports.weekly-page');
+        })->name('reports.weekly');
+
         // «Не найдено в каталоге» — топ повторяющихся OEM-кодов из заявок без
         // совпадения в каталоге: пробелы базы синонимов + кандидаты на
         // расширение ассортимента.
