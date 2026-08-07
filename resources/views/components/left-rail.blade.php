@@ -53,6 +53,12 @@
         $rail[] = ['icon' => '⛏', 'label' => 'Снабжение', 'href' => route('procurement.index'), 'key' => 'procurement'];
     }
 
+    // «Отчёты» — еженедельные персональные отчёты. Менеджер — свои, РОП/директор/
+    // админ — все (гейт продублирован на роуте и в компоненте).
+    if ($railUser?->hasAnyRole(['manager', 'head_of_sales', 'director', 'admin'])) {
+        $rail[] = ['icon' => '▤', 'label' => 'Отчёты', 'href' => route('reports.weekly'), 'key' => 'reports'];
+    }
+
     // «Честный знак» — коды маркировки из PDF в файл поставки.
     // Директорат / РОП / секретарь / снабжение / админ (гейт продублирован на роуте).
     if ($railUser?->hasAnyRole(['head_of_sales', 'director', 'secretary', 'procurement', 'admin'])) {
