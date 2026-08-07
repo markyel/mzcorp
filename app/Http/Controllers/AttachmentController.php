@@ -52,9 +52,17 @@ class AttachmentController extends Controller
     {
         $contentId = trim(rawurldecode($contentId), "<> \t");
 
+        // OR оборачиваем в замыкание — иначе orWhere вырывается из scope
+        // email_message_id (base-констрейнт relation'а) и матчит вложение с
+        // таким content_id в ЛЮБОМ письме. При повторяющемся content_id
+        // (цепочки пересылок, копии в разных ящиках) возвращалось чужое
+        // вложение → 403/битая inline-картинка. Кейс: одно тест-письмо в 3
+        // ящиках с одним cid — inline брал копию без related_request.
         $attachment = $emailMessage->attachments()
-            ->where('content_id', $contentId)
-            ->orWhere('content_id', '<'.$contentId.'>')
+            ->where(function ($q) use ($contentId) {
+                $q->where('content_id', $contentId)
+                    ->orWhere('content_id', '<'.$contentId.'>');
+            })
             ->first();
 
         if (! $attachment) {
