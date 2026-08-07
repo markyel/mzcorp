@@ -282,16 +282,29 @@ class SupplierInquiryService
             return null;
         }
 
+        // Домен отправителя: RFQ часто уходит на один контакт поставщика
+        // (sales@/amy@), а отвечает другой (ella@) того же домена. Точный e-mail
+        // не совпадёт — матчим и по домену. Домен = один поставщик, а код
+        // разводит внутри (один M-код мог уйти нескольким поставщикам — их
+        // домены разные).
+        $domain = mb_strtolower(trim((string) substr((string) strrchr($from, '@'), 1)));
+
         foreach ($codes as $code) {
             $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $code).'%';
-            $hit = SupplierInquiry::query()
-                ->whereRaw('LOWER(supplier_email) = ?', [$from])
+            $base = fn () => SupplierInquiry::query()
                 ->where('subject', 'ilike', $like)
                 ->orderByRaw("case when status = 'open' then 0 else 1 end")
-                ->orderByDesc('id')
-                ->first();
+                ->orderByDesc('id');
+
+            $hit = (clone $base())->whereRaw('LOWER(supplier_email) = ?', [$from])->first();
             if ($hit !== null) {
                 return $hit;
+            }
+            if ($domain !== '') {
+                $hit = (clone $base())->whereRaw("split_part(lower(supplier_email), '@', 2) = ?", [$domain])->first();
+                if ($hit !== null) {
+                    return $hit;
+                }
             }
         }
 
