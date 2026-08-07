@@ -53,7 +53,12 @@ class RerouteSupplierRepliesCommand extends Command
                         mb_substr((string) $msg->subject, 0, 42), $msg->supplier_inquiry_id, $target->id);
                 }
                 if ($this->option('apply')) {
+                    $from = (int) $msg->supplier_inquiry_id;
                     DB::transaction(fn () => $msg->forceFill(['supplier_inquiry_id' => $target->id])->save());
+                    \Illuminate\Support\Facades\Log::info('RerouteSupplierReplies: moved', [
+                        'email_message_id' => $msg->id, 'from_inquiry' => $from, 'to_inquiry' => $target->id,
+                        'subject' => mb_substr((string) $msg->subject, 0, 120),
+                    ]);
                 }
             }
         }, 'id');
