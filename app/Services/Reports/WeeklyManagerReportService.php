@@ -28,7 +28,8 @@ class WeeklyManagerReportService
     /** Сгенерировать/обновить отчёты всех менеджеров за неделю [from..to]. */
     public function generateForWeek(Carbon $from, Carbon $to): int
     {
-        $managers = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['manager', 'head_of_sales']))->get();
+        $managers = User::active()
+            ->whereHas('roles', fn ($q) => $q->whereIn('name', ['manager', 'head_of_sales']))->get();
         $n = 0;
         foreach ($managers as $m) {
             $data = $this->computeData($m, $from, $to);
