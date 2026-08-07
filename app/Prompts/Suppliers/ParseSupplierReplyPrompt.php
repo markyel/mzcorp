@@ -79,8 +79,18 @@ class ParseSupplierReplyPrompt
 - НЕ выдумывай цены и сроки — бери только из ответа/прайса.
 - Если по позиции непонятно — "skipped".
 
+Дополнительно определи ИНТЕНТ письма в целом (reply_intent):
+- "question_to_us"    — поставщик задал НАМ встречный вопрос и ждёт нашего ответа
+                        (просит фото/чертёж, номер лифта, модель, уточнить позицию:
+                        «Do you have a photo?», «which model?», «нет номера лифта?»,
+                        «подскажите…?»). Мяч на НАШЕЙ стороне.
+- "awaiting_supplier" — принял в работу / уточняет у своего поставщика / ещё считает
+                        («we are checking», «will keep you posted», «уточняем цену и
+                        наличие», «in progress»). Мяч у поставщика.
+- "none"              — есть офферы/отказы, или обычный ответ без встречного вопроса.
+
 Верни СТРОГО JSON:
-{"offers":[{"index":1,"outcome":"quoted|refused|skipped","price":12345.67,"currency":"руб","valid_until_text":"...","refusal_reason":"...","quote":"..."}]}
+{"reply_intent":"question_to_us|awaiting_supplier|none","offers":[{"index":1,"outcome":"quoted|refused|skipped","price":12345.67,"currency":"руб","valid_until_text":"...","refusal_reason":"...","quote":"..."}]}
 По каждой позиции из списка — ровно один объект с её index.
 SYS;
 

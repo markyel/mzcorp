@@ -38,6 +38,8 @@ class SupplierInquiry extends Model
         // Авто-напоминания (Фаза 3.5).
         'reminders_sent',
         'last_reminder_at',
+        // Интент последнего ответа без оффера: question_to_us | awaiting_supplier.
+        'reply_state',
     ];
 
     protected function casts(): array

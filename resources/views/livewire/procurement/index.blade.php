@@ -36,7 +36,13 @@
                         <div class="flex items-center gap-2 flex-wrap text-[13px]">
                             <span class="font-medium text-fg-1">{{ $inq->supplier_name ?: $inq->supplier_email }}</span>
                             @if($inq->inbound_count > 0)
-                                <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)"><span class="dot"></span>ответил без оффера</span>
+                                @if($inq->reply_state === 'question_to_us')
+                                    <span class="chip text-[10.5px]" style="background:var(--red-50);color:var(--red-700)"><span class="dot"></span>задал вопрос — ответьте</span>
+                                @elseif($inq->reply_state === 'awaiting_supplier')
+                                    <span class="chip text-[10.5px]" style="background:var(--neutral-100);color:var(--fg-3)"><span class="dot"></span>поставщик уточняет / ещё считает</span>
+                                @else
+                                    <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)"><span class="dot"></span>ответил без оффера</span>
+                                @endif
                             @else
                                 <span class="chip text-[10.5px]" style="background:var(--neutral-100);color:var(--fg-3)"><span class="dot"></span>тишина · напоминаний: {{ $inq->reminders_sent }}</span>
                             @endif

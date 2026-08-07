@@ -155,6 +155,17 @@ class SupplierOfferParser
                 }
                 $counts[$outcome]++;
             }
+
+            // Интент письма: когда конкретного ответа по позициям нет (0 офферов),
+            // фиксируем — задал ли поставщик встречный вопрос НАМ или просто
+            // принял/уточняет. Отражает ПОСЛЕДНИЙ обработанный ответ; появление
+            // оффера позже сбрасывает.
+            $intent = (string) ($parsed['reply_intent'] ?? 'none');
+            $hasConcrete = $counts['quoted'] > 0 || $counts['refused'] > 0;
+            $inquiry->forceFill([
+                'reply_state' => (! $hasConcrete && in_array($intent, ['question_to_us', 'awaiting_supplier'], true))
+                    ? $intent : null,
+            ])->save();
         });
 
         Log::info('SupplierOfferParser: parsed reply', ['inquiry_id' => $inquiry->id, 'message_id' => $reply->id] + $counts);
