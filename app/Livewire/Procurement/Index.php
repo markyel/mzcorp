@@ -7,6 +7,7 @@ use App\Models\CatalogItem;
 use App\Models\IqotPosition;
 use App\Models\Supplier;
 use App\Models\SupplierInquiry;
+use App\Models\User;
 use App\Services\Supplier\SupplierInquiryLifecycleService;
 use App\Services\Supplier\SupplierItemTranslator;
 use App\Services\Supplier\SupplierMatchService;
@@ -874,9 +875,68 @@ class Index extends Component
     #[Url(as: 'rfq_view', except: 'stuck')]
     public string $rfqView = 'stuck';
 
+    /**
+     * «Глазами какого менеджера» — только для admin/РОП/директора. 0 = все
+     * менеджеры. Менеджер/снабженец всегда видит свои (это поле игнорируется).
+     */
+    #[Url(as: 'as_user', except: 0)]
+    public int $viewAsUserId = 0;
+
     public function updatingRfqView(): void
     {
         $this->resetPage();
+    }
+
+    public function updatingViewAsUserId(): void
+    {
+        unset($this->myInquiries);
+    }
+
+    /** Может ли пользователь смотреть RFQ «глазами» другого менеджера. */
+    private function isPrivilegedViewer(): bool
+    {
+        return (bool) auth()->user()?->hasAnyRole([
+            Role::HeadOfSales->value, Role::Director->value, Role::Admin->value,
+        ]);
+    }
+
+    /**
+     * Чьи RFQ показывать: привилегированный — выбранного менеджера (или всех,
+     * если 0/не выбран); остальные — строго свои.
+     */
+    private function effectiveCreatorId(): ?int
+    {
+        if ($this->isPrivilegedViewer()) {
+            return $this->viewAsUserId > 0 ? $this->viewAsUserId : null;
+        }
+
+        return (int) auth()->id();
+    }
+
+    /**
+     * Менеджеры для селектора (только у кого есть RFQ) — привилегированным.
+     *
+     * @return array<int, array{id:int, name:string}>
+     */
+    #[Computed]
+    public function managerOptions(): array
+    {
+        if (! $this->isPrivilegedViewer()) {
+            return [];
+        }
+        $ids = SupplierInquiry::query()
+            ->whereNotNull('created_by_user_id')
+            ->distinct()
+            ->pluck('created_by_user_id')
+            ->all();
+        if ($ids === []) {
+            return [];
+        }
+
+        return User::query()->whereIn('id', $ids)->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn (User $u) => ['id' => $u->id, 'name' => $u->name])
+            ->all();
     }
 
     /**
@@ -889,15 +949,16 @@ class Index extends Component
     #[Computed]
     public function myInquiries(): Collection
     {
+        $creatorId = $this->effectiveCreatorId();
         $q = SupplierInquiry::query()
-            ->where('created_by_user_id', auth()->id())
+            ->when($creatorId !== null, fn ($w) => $w->where('created_by_user_id', $creatorId))
             ->has('items')
             ->withCount([
                 'inboundMessages as inbound_count',
                 'items as items_count',
                 'offers as offers_count',
             ])
-            ->with(['items:id,supplier_inquiry_id,catalog_item_id,status', 'items.catalogItem:id,sku,name', 'relatedRequest:id,internal_code'])
+            ->with(['items:id,supplier_inquiry_id,catalog_item_id,status', 'items.catalogItem:id,sku,name', 'relatedRequest:id,internal_code', 'createdBy:id,name'])
             ->orderByDesc('id');
 
         if ($this->rfqView === 'stuck') {

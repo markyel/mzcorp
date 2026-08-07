@@ -7,10 +7,21 @@
          авто-напоминания уже не идут) с действиями закрыть/вернуть/запросить. --}}
     @php $myRfq = $this->myInquiries; @endphp
     <div class="ds-card">
+        @php $mgrOptions = $this->managerOptions; $privileged = ! empty($mgrOptions); @endphp
         <div class="ds-card-header">
-            <h3 class="text-[15px] font-semibold text-fg-1">📮 Мои запросы поставщикам</h3>
+            <h3 class="text-[15px] font-semibold text-fg-1">📮 {{ $privileged ? 'Запросы поставщикам' : 'Мои запросы поставщикам' }}</h3>
             <span class="text-[12px] text-fg-3 ml-2">{{ $rfqView === 'stuck' ? 'застрявшие — без ответа и без напоминаний' : 'все открытые' }}</span>
             <span class="flex-1"></span>
+            @if($privileged)
+                <select wire:model.live="viewAsUserId"
+                        class="h-[30px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"
+                        title="Смотреть запросы глазами менеджера">
+                    <option value="0">👥 Все менеджеры</option>
+                    @foreach($mgrOptions as $m)
+                        <option value="{{ $m['id'] }}">{{ $m['name'] }}</option>
+                    @endforeach
+                </select>
+            @endif
             <select wire:model.live="rfqView"
                     class="h-[30px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
                 <option value="stuck">⚠ Застрявшие</option>
@@ -32,6 +43,9 @@
                             @if($inq->relatedRequest)
                                 <a href="{{ route('requests.show', $inq->relatedRequest->id) }}" wire:navigate
                                    class="mono text-[11.5px] text-sky-700 hover:underline">{{ $inq->relatedRequest->internal_code }}</a>
+                            @endif
+                            @if($privileged && $inq->createdBy)
+                                <span class="text-[10.5px] text-fg-4">👤 {{ $inq->createdBy->name }}</span>
                             @endif
                         </div>
                         <div class="text-[11.5px] text-fg-3 mt-1">
@@ -58,7 +72,7 @@
                 </div>
             @empty
                 <div class="text-[13px] text-fg-3 py-4 text-center">
-                    {{ $rfqView === 'stuck' ? 'Нет застрявших запросов — по всем идут напоминания или получены ответы.' : 'У вас нет открытых запросов поставщикам.' }}
+                    {{ $rfqView === 'stuck' ? 'Нет застрявших запросов — по всем идут напоминания или получены ответы.' : 'Нет открытых запросов поставщикам.' }}
                 </div>
             @endforelse
         </div>
