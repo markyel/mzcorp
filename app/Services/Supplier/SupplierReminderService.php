@@ -2,9 +2,6 @@
 
 namespace App\Services\Supplier;
 
-use App\Enums\MailDirection;
-use App\Models\EmailMessage;
-use App\Models\Mailbox;
 use App\Models\Supplier;
 use App\Models\SupplierInquiry;
 use App\Models\User;
@@ -12,7 +9,6 @@ use App\Services\Mail\EmailDraftService;
 use App\Services\Mail\OutgoingMailSender;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 /**
  * Авто-напоминания поставщикам по открытым запросам расценки без ответа
@@ -25,6 +21,7 @@ class SupplierReminderService
     public function __construct(
         private readonly EmailDraftService $drafts,
         private readonly OutgoingMailSender $sender,
+        private readonly SupplierThreadDraftFactory $draftFactory,
     ) {
     }
 
@@ -86,7 +83,7 @@ class SupplierReminderService
         try {
             $draft = $request !== null
                 ? $this->drafts->createCompose($request, $author)
-                : $this->createStandaloneDraft($inquiry, $orig, $author);
+                : $this->draftFactory->standaloneDraft($inquiry, $orig, $author);
             if ($draft === null) {
                 Log::warning('SupplierReminder: no mailbox for standalone reminder', ['inquiry_id' => $inquiry->id]);
 
@@ -140,51 +137,6 @@ class SupplierReminderService
 
             return false;
         }
-    }
-
-    /**
-     * Черновик напоминания для позиция-центричного RFQ (без заявки — createCompose
-     * неприменим). Ящик: откуда ушёл исходный RFQ → личный ящик автора → общий.
-     * Тема/получатель/тело проставит общий поток через drafts->update().
-     */
-    private function createStandaloneDraft(SupplierInquiry $inquiry, ?EmailMessage $orig, User $author): ?EmailMessage
-    {
-        $mailbox = null;
-        if ($orig !== null && $orig->mailbox_id !== null) {
-            $candidate = Mailbox::find($orig->mailbox_id);
-            if ($candidate !== null && $candidate->is_active && $candidate->canSendOutbound()) {
-                $mailbox = $candidate;
-            }
-        }
-        $mailbox ??= $author->primaryOutboundMailbox();
-        if ($mailbox === null) {
-            $sharedEmail = (string) config('services.mail_outbound.shared_email', 'mail@myzip.ru');
-            $mailbox = Mailbox::query()
-                ->whereRaw('LOWER(email) = ?', [mb_strtolower($sharedEmail)])
-                ->where('is_active', true)
-                ->first();
-        }
-        if ($mailbox === null || ! $mailbox->canSendOutbound()) {
-            return null;
-        }
-
-        return EmailMessage::create([
-            'mailbox_id' => $mailbox->id,
-            'folder' => 'Sent',
-            'direction' => MailDirection::Outbound,
-            'message_id' => 'draft.'.Str::uuid()->toString().'@mzcorp.ru',
-            'subject' => '',
-            'from_email' => $mailbox->email,
-            'from_name' => $author->name,
-            'to_recipients' => [['email' => $inquiry->supplier_email, 'name' => $inquiry->supplier_name ?: '']],
-            'body_plain' => '',
-            'body_html' => '',
-            'headers' => ['X-MyLift-Author-User-Id' => (string) $author->id],
-            'related_request_id' => null,
-            'is_draft' => true,
-            'draft_author_user_id' => $author->id,
-            'last_edited_at' => now(),
-        ]);
     }
 
     private function reminderSubject(?string $base, string $lang): string

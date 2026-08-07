@@ -132,6 +132,32 @@
             </button>
         </div>
         <div class="ds-card-body space-y-3">
+            {{-- Ответ поставщику --}}
+            @if($this->canReply)
+                @if($inquiry->status === 'closed')
+                    <div class="rounded-md border border-border-subtle bg-surface-2 px-3 py-2.5 text-[12px] text-fg-3">
+                        Запрос закрыт. Чтобы ответить поставщику — откройте его.
+                    </div>
+                @else
+                    <div class="rounded-md border border-border-subtle bg-surface-2 p-3">
+                        @if($inquiry->reply_state === 'question_to_us')
+                            <div class="text-[12px] mb-2" style="color:var(--red-700)">Поставщик задал вопрос — ответьте, чтобы он продолжил расчёт.</div>
+                        @else
+                            <div class="text-[12px] text-fg-3 mb-2">Ответ уйдёт поставщику в этом же треде, от того же ящика, что и запрос.</div>
+                        @endif
+                        <textarea wire:model="replyBody" rows="3" placeholder="Текст ответа поставщику…"
+                            class="w-full px-2.5 py-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500 resize-y"></textarea>
+                        @error('replyBody')<div class="text-[11.5px] mt-1" style="color:var(--red-700)">{{ $message }}</div>@enderror
+                        <div class="flex items-center gap-2 mt-2">
+                            <button type="button" wire:click="sendReply" wire:loading.attr="disabled" wire:target="sendReply"
+                                class="btn btn-sm btn-primary">
+                                <span wire:loading.remove wire:target="sendReply">Отправить</span>
+                                <span wire:loading wire:target="sendReply">Отправка…</span>
+                            </button>
+                        </div>
+                    </div>
+                @endif
+            @endif
             @forelse($this->messages as $m)
                 @php
                     $isInbound = $m->direction === \App\Enums\MailDirection::Inbound;

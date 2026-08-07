@@ -2,8 +2,10 @@
 
 namespace App\Livewire\Suppliers;
 
+use App\Enums\Role;
 use App\Livewire\Concerns\RendersEmailBody;
 use App\Models\SupplierInquiry;
+use App\Services\Supplier\SupplierReplyService;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -24,6 +26,9 @@ class Show extends Component
 
     /** Порядок треда: asc — сначала старые, desc — сначала новые (per-user). */
     public string $threadSort = 'asc';
+
+    /** Текст ответа поставщику. */
+    public string $replyBody = '';
 
     public function mount(SupplierInquiry $inquiry): void
     {
@@ -80,6 +85,54 @@ class Show extends Component
             message: $ok ? 'Напоминание отправлено поставщику.' : 'Не удалось отправить напоминание (см. лог).',
             type: $ok ? 'success' : 'error',
         );
+    }
+
+    /**
+     * Кто может отвечать поставщику из системы: автор запроса или
+     * привилегированный (РОП/директор/админ). Остальным — переписка read-only.
+     */
+    #[Computed]
+    public function canReply(): bool
+    {
+        $user = auth()->user();
+        if ($user === null) {
+            return false;
+        }
+        if ((int) $this->inquiry->created_by_user_id === (int) $user->id) {
+            return true;
+        }
+
+        return (bool) $user->hasAnyRole([
+            Role::HeadOfSales->value, Role::Director->value, Role::Admin->value,
+        ]);
+    }
+
+    /** Ответ менеджера поставщику в треде запроса. */
+    public function sendReply(SupplierReplyService $replies): void
+    {
+        if (! $this->canReply()) {
+            abort(403);
+        }
+        if ($this->inquiry->status === 'closed') {
+            $this->dispatch('toast', message: 'Запрос закрыт — сначала откройте его.', type: 'error');
+
+            return;
+        }
+        $this->validate(
+            ['replyBody' => 'required|string|max:20000'],
+            ['replyBody.required' => 'Введите текст ответа.'],
+            ['replyBody' => 'текст ответа'],
+        );
+
+        $result = $replies->reply($this->inquiry, auth()->user(), $this->replyBody);
+        if ($result['success'] ?? false) {
+            $this->replyBody = '';
+            $this->inquiry->refresh();
+            unset($this->messages);
+            $this->dispatch('toast', message: 'Ответ отправлен поставщику.', type: 'success');
+        } else {
+            $this->dispatch('toast', message: $result['error'] ?? 'Не удалось отправить ответ.', type: 'error');
+        }
     }
 
     public function deleteInquiry()
