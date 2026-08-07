@@ -314,6 +314,16 @@ return [
     ],
 
     /*
+    | Ящик rfq@mzcorp.ru — копии ВНЕШНЕЙ переписки с поставщиками. Входящие на
+    | него не создают клиентских заявок: по номеру M-YYYY-NNNN в теме/теле
+    | письмо привязывается к заявке (category=supplier_reply) и ответственному
+    | менеджеру уходит уведомление С ЭТОГО ЖЕ ящика. См. SupplierCcInboxService.
+    */
+    'supplier_cc' => [
+        'inbox_email' => env('RFQ_INBOX_EMAIL', 'rfq@mzcorp.ru'),
+    ],
+
+    /*
     | Phase 1.9: UI-переписка. Конфиг для исходящих писем из карточки заявки.
     | См. app/Services/Mail/OutgoingMailboxResolver.php и OutgoingMailSender.
     */

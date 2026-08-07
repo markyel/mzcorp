@@ -54,6 +54,7 @@ class MailRouter
         private readonly \App\Services\Supplier\SupplierInquiryService $supplierInquiries,
         private readonly \App\Services\Supplier\SupplierRegistry $supplierRegistry,
         private readonly \App\Services\Supplier\SupplierRfqClassifier $supplierRfqClassifier,
+        private readonly SupplierCcInboxService $supplierCcInbox,
         private readonly InternalSenderDetector $internalDetector = new InternalSenderDetector(),
         private readonly CitedOutboundQuoteRouter $citedQuoteRouter = new CitedOutboundQuoteRouter(),
     ) {
@@ -77,6 +78,16 @@ class MailRouter
                     'classified_at' => now(),
                 ])->save();
             }
+
+            return;
+        }
+
+        // Ящик rfq@mzcorp.ru — копии ВНЕШНЕЙ переписки с поставщиками. Не
+        // создаём клиентских заявок: по номеру M-YYYY-NNNN в теме/теле
+        // привязываем письмо к заявке и уведомляем менеджера. См.
+        // SupplierCcInboxService. Ранний выход — минуя весь клиентский пайплайн.
+        if ($this->supplierCcInbox->isRfqInboxMessage($message)) {
+            $this->supplierCcInbox->ingest($message);
 
             return;
         }
