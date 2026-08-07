@@ -136,8 +136,8 @@ class WeeklyManagerReportService
     /** @return array<string, int|float> */
     private function result(int $id, Carbon $from, Carbon $to): array
     {
-        $won = DB::table('requests')->where('assigned_user_id', $id)->where('status', 'closed_won')
-            ->whereBetween('updated_at', [$from, $to]);
+        $won = DB::table('requests')->where('requests.assigned_user_id', $id)->where('requests.status', 'closed_won')
+            ->whereBetween('requests.updated_at', [$from, $to]);
         $count = (clone $won)->count();
         $sum = (float) (clone $won)->leftJoin('invoices as i', 'i.request_id', '=', 'requests.id')
             ->sum('i.amount_snapshot');
