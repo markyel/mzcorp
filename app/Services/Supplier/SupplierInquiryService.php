@@ -131,7 +131,12 @@ class SupplierInquiryService
      */
     public function ingestSupplierMessage(EmailMessage $message): SupplierInquiry
     {
-        $inquiry = $this->matchInbound($message);
+        // 1) строгий тред-матч; 2) по номеру заявки/док-номеру из ТЕМЫ (поставщик
+        //    часто рвёт In-Reply-To, но сохраняет тему с нашим кодом) — иначе
+        //    ответ по одной позиции валился в «последний инквайри по e-mail» и
+        //    портил другой запрос (кейс es-escalatorpart: цена на M-2026-11154
+        //    села в инквайри по M-2026-11295). 3) фолбэк по e-mail.
+        $inquiry = $this->matchInbound($message) ?? $this->matchInboundByAnyCode($message);
         if ($inquiry === null) {
             $email = mb_strtolower(trim((string) $message->from_email));
             $inquiry = SupplierInquiry::query()
@@ -238,6 +243,59 @@ class SupplierInquiryService
             ->where('subject', 'ilike', $like)
             ->orderByDesc('id')
             ->first();
+    }
+
+    /**
+     * Найти запрос поставщику по ЛЮБОМУ коду в теме ответа: наш внутренний код
+     * заявки (M-YYYY-NNNN) ИЛИ док-номер (6–9 цифр, напр. 363530 / 000363395).
+     * Поставщик рвёт In-Reply-To, но сохраняет тему; код в теме — надёжная
+     * ниточка к правильному инквайри. Без гарда на фразу «price request»: этот
+     * матч зовём там, где отправитель УЖЕ известен как поставщик (blocklist).
+     * Матч строго по паре «почта поставщика = отправитель» + «код есть в теме
+     * инквайри». M-код приоритетнее док-номера; среди совпадений — открытый и
+     * последний.
+     */
+    public function matchInboundByAnyCode(EmailMessage $message): ?SupplierInquiry
+    {
+        if ($message->direction !== MailDirection::Inbound) {
+            return null;
+        }
+        $subject = (string) $message->subject;
+        $from = mb_strtolower(trim((string) $message->from_email));
+        if ($from === '') {
+            return null;
+        }
+
+        $codes = [];
+        // M-код заявки (приоритетнее — уникальнее), затем док-номера 6–9 цифр
+        // (наши RFQ несут [363530] / 000363395).
+        preg_match_all('/\bM-\d{4}-\d+/u', $subject, $m);
+        foreach ($m[0] ?? [] as $c) {
+            $codes[] = $c;
+        }
+        preg_match_all('/\b\d{6,9}\b/u', $subject, $m2);
+        foreach ($m2[0] ?? [] as $c) {
+            $codes[] = $c;
+        }
+        $codes = array_values(array_unique($codes));
+        if ($codes === []) {
+            return null;
+        }
+
+        foreach ($codes as $code) {
+            $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $code).'%';
+            $hit = SupplierInquiry::query()
+                ->whereRaw('LOWER(supplier_email) = ?', [$from])
+                ->where('subject', 'ilike', $like)
+                ->orderByRaw("case when status = 'open' then 0 else 1 end")
+                ->orderByDesc('id')
+                ->first();
+            if ($hit !== null) {
+                return $hit;
+            }
+        }
+
+        return null;
     }
 
     /**
