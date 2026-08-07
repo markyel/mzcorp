@@ -950,29 +950,37 @@ class Index extends Component
     public function myInquiries(): Collection
     {
         $creatorId = $this->effectiveCreatorId();
+        $max = (int) config('services.suppliers.reminder.max', 2);
+
         $q = SupplierInquiry::query()
             ->when($creatorId !== null, fn ($w) => $w->where('created_by_user_id', $creatorId))
-            ->has('items')
-            ->withCount([
-                'inboundMessages as inbound_count',
-                'items as items_count',
-                'offers as offers_count',
-            ])
-            ->with(['items:id,supplier_inquiry_id,catalog_item_id,status', 'items.catalogItem:id,sku,name', 'relatedRequest:id,internal_code', 'createdBy:id,name'])
-            ->orderByDesc('id');
+            ->has('items');
 
         if ($this->rfqView === 'stuck') {
+            // Фильтр застрявших в SQL (иначе грузили 200 + PHP-фильтр):
+            // open И (лимит напоминаний исчерпан при тишине ИЛИ ответ без оффера).
+            $q->where('status', 'open')->where(function ($w) use ($max) {
+                $w->where(fn ($a) => $a->where('reminders_sent', '>=', $max)->whereDoesntHave('inboundMessages'))
+                    ->orWhere(fn ($b) => $b->whereHas('inboundMessages')->whereDoesntHave('offers'));
+            });
+        } else {
             $q->where('status', 'open');
         }
 
-        $rows = $q->limit(200)->get();
+        $rows = $q
+            ->withCount(['inboundMessages as inbound_count', 'items as items_count', 'offers as offers_count'])
+            ->with([
+                'items:id,supplier_inquiry_id,catalog_item_id,item_name,status',
+                'items.catalogItem:id,sku,name',
+                'relatedRequest:id,internal_code',
+                'createdBy:id,name',
+            ])
+            ->orderByDesc('id')
+            ->limit(200)
+            ->get();
 
-        $max = (int) config('services.suppliers.reminder.max', 2);
         foreach ($rows as $inq) {
             $inq->is_stuck = $this->isStuckInquiry($inq, $max);
-        }
-        if ($this->rfqView === 'stuck') {
-            $rows = $rows->filter(fn (SupplierInquiry $inq) => $inq->is_stuck)->values();
         }
 
         return $rows;

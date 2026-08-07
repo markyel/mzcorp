@@ -48,16 +48,18 @@
                                 <span class="text-[10.5px] text-fg-4">👤 {{ $inq->createdBy->name }}</span>
                             @endif
                         </div>
-                        <div class="text-[11.5px] text-fg-3 mt-1">
-                            {{ $inq->items_count }} поз.:
+                        <div class="text-[11.5px] text-fg-2 mt-1">
+                            <span class="text-fg-4">{{ $inq->items_count }} поз.:</span>
                             @foreach($inq->items->take(4) as $it)
-                                <span class="mono text-fg-4">{{ $it->catalogItem?->sku }}</span> {{ \Illuminate\Support\Str::limit($it->catalogItem?->name, 28) }}@if(! $loop->last); @endif
+                                @if($it->catalogItem)<span class="mono text-fg-4">{{ $it->catalogItem->sku }}</span> @endif<span>{{ \Illuminate\Support\Str::limit($it->catalogItem?->name ?: $it->item_name, 34) ?: '—' }}</span>@if(! $loop->last)<span class="text-fg-4">;</span> @endif
                             @endforeach
                             @if($inq->items_count > 4)<span class="text-fg-4">+{{ $inq->items_count - 4 }}</span>@endif
                         </div>
                     </div>
-                    @if($inq->is_stuck)
-                        <div class="flex items-center gap-1.5">
+                    <div class="flex items-center gap-1.5 flex-wrap justify-end">
+                        <a href="{{ route('suppliers.show', $inq->id) }}" wire:navigate
+                           class="btn btn-sm" title="Открыть переписку с поставщиком">💬 Переписка</a>
+                        @if($inq->is_stuck)
                             <button type="button" wire:click="resumeRemind({{ $inq->id }})"
                                     wire:confirm="Вернуть в работу и отправить напоминание поставщику?"
                                     class="btn btn-sm" title="Сбросить счётчик и напомнить сейчас">↻ Вернуть в работу</button>
@@ -67,8 +69,8 @@
                             <button type="button" wire:click="closeDeclined({{ $inq->id }})"
                                     wire:confirm="Закрыть запрос как отказ поставщика?"
                                     class="btn btn-sm text-red-700" title="Пометить как отказ и закрыть">✕ Отказ</button>
-                        </div>
-                    @endif
+                        @endif
+                    </div>
                 </div>
             @empty
                 <div class="text-[13px] text-fg-3 py-4 text-center">
