@@ -6,6 +6,8 @@ use App\Enums\Role;
 use App\Models\CatalogItem;
 use App\Models\IqotPosition;
 use App\Models\Supplier;
+use App\Models\SupplierInquiry;
+use App\Services\Supplier\SupplierInquiryLifecycleService;
 use App\Services\Supplier\SupplierItemTranslator;
 use App\Services\Supplier\SupplierMatchService;
 use App\Services\Supplier\SupplierProcurementDispatchService;
@@ -864,6 +866,142 @@ class Index extends Component
         }
 
         return $out;
+    }
+
+    // ───────── «Мои запросы поставщикам» (менеджерский раздел) ─────────
+
+    /** Вид списка RFQ: stuck — только застрявшие (фокус), all — все открытые. */
+    #[Url(as: 'rfq_view', except: 'stuck')]
+    public string $rfqView = 'stuck';
+
+    public function updatingRfqView(): void
+    {
+        $this->resetPage();
+    }
+
+    /**
+     * Запросы поставщикам, СОЗДАННЫЕ текущим пользователем. rfqView=stuck →
+     * только «застрявшие»: open + (напоминания исчерпаны при тишине ИЛИ
+     * поставщик ответил, но без оффера/отказа). См. isStuckInquiry().
+     *
+     * @return Collection<int, SupplierInquiry>
+     */
+    #[Computed]
+    public function myInquiries(): Collection
+    {
+        $q = SupplierInquiry::query()
+            ->where('created_by_user_id', auth()->id())
+            ->has('items')
+            ->withCount([
+                'inboundMessages as inbound_count',
+                'items as items_count',
+                'offers as offers_count',
+            ])
+            ->with(['items:id,supplier_inquiry_id,catalog_item_id,status', 'items.catalogItem:id,sku,name', 'relatedRequest:id,internal_code'])
+            ->orderByDesc('id');
+
+        if ($this->rfqView === 'stuck') {
+            $q->where('status', 'open');
+        }
+
+        $rows = $q->limit(200)->get();
+
+        $max = (int) config('services.suppliers.reminder.max', 2);
+        foreach ($rows as $inq) {
+            $inq->is_stuck = $this->isStuckInquiry($inq, $max);
+        }
+        if ($this->rfqView === 'stuck') {
+            $rows = $rows->filter(fn (SupplierInquiry $inq) => $inq->is_stuck)->values();
+        }
+
+        return $rows;
+    }
+
+    /**
+     * «Застрял» = open, есть позиции, и напоминания больше не идут:
+     *   - тишина (0 входящих) И лимит напоминаний исчерпан, ЛИБО
+     *   - поставщик ответил (≥1 входящее) но не дал ни оффера, ни отказа
+     *     (0 записанных offers).
+     */
+    private function isStuckInquiry(SupplierInquiry $inq, int $max): bool
+    {
+        if ($inq->status !== 'open') {
+            return false;
+        }
+        $inbound = (int) ($inq->inbound_count ?? 0);
+        $offers = (int) ($inq->offers_count ?? 0);
+        if ($inbound === 0) {
+            return (int) $inq->reminders_sent >= $max;
+        }
+
+        return $offers === 0;
+    }
+
+    public function closeDeclined(int $inquiryId, SupplierInquiryLifecycleService $svc): void
+    {
+        $inq = $this->ownedInquiry($inquiryId);
+        if (! $inq) {
+            return;
+        }
+        $svc->closeAsDeclined($inq, auth()->user());
+        unset($this->myInquiries);
+        $this->dispatch('toast', message: 'Запрос закрыт как отказ поставщика.', type: 'success');
+    }
+
+    public function resumeRemind(int $inquiryId, SupplierInquiryLifecycleService $svc): void
+    {
+        $inq = $this->ownedInquiry($inquiryId);
+        if (! $inq) {
+            return;
+        }
+        $sent = $svc->resumeAndRemind($inq, auth()->user());
+        unset($this->myInquiries);
+        $this->dispatch('toast',
+            message: $sent ? 'Возвращён в работу — напоминание отправлено.' : 'Возвращён в работу, но напоминание не ушло (проверьте почтовый ящик).',
+            type: $sent ? 'success' : 'error');
+    }
+
+    public function reRequestInquiry(int $inquiryId, SupplierInquiryLifecycleService $svc): void
+    {
+        $inq = $this->ownedInquiry($inquiryId);
+        if (! $inq) {
+            return;
+        }
+        $res = $svc->reRequest($inq, auth()->user());
+        unset($this->myInquiries);
+        if ($res['ok']) {
+            $this->dispatch('toast', message: "Запрос отправлен заново (позиций: {$res['sent']}).", type: 'success');
+
+            return;
+        }
+        $errs = [
+            'supplier_not_in_registry' => 'поставщик не в реестре — заведите его в реестре поставщиков',
+            'no_catalog_items' => 'в запросе нет каталожных позиций',
+            'no_mailbox' => 'нет доступного ящика для отправки',
+            'dispatch_failed' => 'отправка не удалась',
+        ];
+        $this->dispatch('toast', message: 'Не удалось запросить заново: '.($errs[$res['error']] ?? (string) $res['error']), type: 'error');
+    }
+
+    /** Инквайри с проверкой владельца (создатель ИЛИ привилегированная роль). */
+    private function ownedInquiry(int $id): ?SupplierInquiry
+    {
+        $inq = SupplierInquiry::find($id);
+        if (! $inq) {
+            $this->dispatch('toast', message: 'Запрос не найден.', type: 'error');
+
+            return null;
+        }
+        $privileged = (bool) auth()->user()?->hasAnyRole([
+            Role::HeadOfSales->value, Role::Director->value, Role::Admin->value, Role::Procurement->value,
+        ]);
+        if ((int) $inq->created_by_user_id !== (int) auth()->id() && ! $privileged) {
+            $this->dispatch('toast', message: 'Нет доступа к этому запросу.', type: 'error');
+
+            return null;
+        }
+
+        return $inq;
     }
 
     public function render()

@@ -3,6 +3,67 @@
         <div class="ds-card"><div class="ds-card-body text-[13px] text-emerald-700">{{ session('procurement_status') }}</div></div>
     @endif
 
+    {{-- Мои запросы поставщикам: свои RFQ (по умолчанию — застрявшие, по которым
+         авто-напоминания уже не идут) с действиями закрыть/вернуть/запросить. --}}
+    @php $myRfq = $this->myInquiries; @endphp
+    <div class="ds-card">
+        <div class="ds-card-header">
+            <h3 class="text-[15px] font-semibold text-fg-1">📮 Мои запросы поставщикам</h3>
+            <span class="text-[12px] text-fg-3 ml-2">{{ $rfqView === 'stuck' ? 'застрявшие — без ответа и без напоминаний' : 'все открытые' }}</span>
+            <span class="flex-1"></span>
+            <select wire:model.live="rfqView"
+                    class="h-[30px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                <option value="stuck">⚠ Застрявшие</option>
+                <option value="all">Все открытые</option>
+            </select>
+        </div>
+        <div class="ds-card-body">
+            @forelse($myRfq as $inq)
+                <div wire:key="rfq-{{ $inq->id }}"
+                     class="flex flex-wrap items-start gap-3 py-2.5 {{ ! $loop->last ? 'border-b border-border-subtle' : '' }}">
+                    <div class="flex-1 min-w-[240px]">
+                        <div class="flex items-center gap-2 flex-wrap text-[13px]">
+                            <span class="font-medium text-fg-1">{{ $inq->supplier_name ?: $inq->supplier_email }}</span>
+                            @if($inq->inbound_count > 0)
+                                <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)"><span class="dot"></span>ответил без оффера</span>
+                            @else
+                                <span class="chip text-[10.5px]" style="background:var(--neutral-100);color:var(--fg-3)"><span class="dot"></span>тишина · напоминаний: {{ $inq->reminders_sent }}</span>
+                            @endif
+                            @if($inq->relatedRequest)
+                                <a href="{{ route('requests.show', $inq->relatedRequest->id) }}" wire:navigate
+                                   class="mono text-[11.5px] text-sky-700 hover:underline">{{ $inq->relatedRequest->internal_code }}</a>
+                            @endif
+                        </div>
+                        <div class="text-[11.5px] text-fg-3 mt-1">
+                            {{ $inq->items_count }} поз.:
+                            @foreach($inq->items->take(4) as $it)
+                                <span class="mono text-fg-4">{{ $it->catalogItem?->sku }}</span> {{ \Illuminate\Support\Str::limit($it->catalogItem?->name, 28) }}@if(! $loop->last); @endif
+                            @endforeach
+                            @if($inq->items_count > 4)<span class="text-fg-4">+{{ $inq->items_count - 4 }}</span>@endif
+                        </div>
+                    </div>
+                    @if($inq->is_stuck)
+                        <div class="flex items-center gap-1.5">
+                            <button type="button" wire:click="resumeRemind({{ $inq->id }})"
+                                    wire:confirm="Вернуть в работу и отправить напоминание поставщику?"
+                                    class="btn btn-sm" title="Сбросить счётчик и напомнить сейчас">↻ Вернуть в работу</button>
+                            <button type="button" wire:click="reRequestInquiry({{ $inq->id }})"
+                                    wire:confirm="Отправить свежий запрос поставщику по тем же позициям? Текущий будет закрыт."
+                                    class="btn btn-sm" title="Закрыть текущий и отправить новый RFQ">✉ Заново запросить</button>
+                            <button type="button" wire:click="closeDeclined({{ $inq->id }})"
+                                    wire:confirm="Закрыть запрос как отказ поставщика?"
+                                    class="btn btn-sm text-red-700" title="Пометить как отказ и закрыть">✕ Отказ</button>
+                        </div>
+                    @endif
+                </div>
+            @empty
+                <div class="text-[13px] text-fg-3 py-4 text-center">
+                    {{ $rfqView === 'stuck' ? 'Нет застрявших запросов — по всем идут напоминания или получены ответы.' : 'У вас нет открытых запросов поставщикам.' }}
+                </div>
+            @endforelse
+        </div>
+    </div>
+
     {{-- Заголовок + сводка --}}
     <div class="ds-card">
         <div class="ds-card-header">
