@@ -124,22 +124,70 @@
 
     {{-- Переписка --}}
     <div class="ds-card">
-        <div class="ds-card-header"><h3>Переписка с поставщиком</h3></div>
+        <div class="ds-card-header">
+            <h3>Переписка с поставщиком</h3>
+            <span class="flex-1"></span>
+            <button type="button" wire:click="toggleSort" class="btn btn-sm" title="Порядок сообщений">
+                {{ $threadSort === 'desc' ? '↓ сначала новые' : '↑ сначала старые' }}
+            </button>
+        </div>
         <div class="ds-card-body space-y-3">
             @forelse($this->messages as $m)
-                @php $isInbound = $m->direction === \App\Enums\MailDirection::Inbound; @endphp
-                <div wire:key="msg-{{ $m->id }}" class="rounded-md border border-border-subtle p-3 {{ $isInbound ? 'bg-surface' : 'bg-surface-2' }}">
-                    <div class="flex items-center gap-2 text-[11.5px] text-fg-3 mb-1.5 flex-wrap">
+                @php
+                    $isInbound = $m->direction === \App\Enums\MailDirection::Inbound;
+                    $html = $this->bodyHtmlFor($m);
+                @endphp
+                <div wire:key="msg-{{ $m->id }}" class="rounded-md border border-border-subtle overflow-hidden {{ $isInbound ? 'bg-surface' : 'bg-surface-2' }}">
+                    <div class="flex items-center gap-2 text-[11.5px] text-fg-3 px-3 pt-2.5 flex-wrap">
                         <span class="chip {{ $isInbound ? 'chip-info' : 'chip-neutral' }} text-[10px]">{{ $isInbound ? '← от поставщика' : '→ наше' }}</span>
-                        <span class="mono">{{ $m->from_email }}</span>
+                        <span class="mono">{{ $m->from_name ?: $m->from_email }}</span>
                         <span class="flex-1"></span>
                         <span class="mono">{{ $m->sent_at?->format('d.m.Y H:i') ?? '—' }}</span>
                     </div>
-                    @if($m->subject)<div class="text-[12.5px] text-fg-1 font-medium mb-1">{{ $m->subject }}</div>@endif
-                    <div class="text-[12.5px] text-fg-2 whitespace-pre-line">{{ \Illuminate\Support\Str::limit(trim((string) $m->body_plain), 800) }}</div>
+                    @if($m->subject)<div class="text-[12.5px] text-fg-1 font-medium mt-1 px-3">{{ $m->subject }}</div>@endif
+                    @if($html)
+                        <iframe
+                            wire:key="if-{{ $m->id }}"
+                            wire:ignore.self
+                            sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+                            srcdoc="{{ $html }}"
+                            loading="lazy"
+                            class="w-full block border-0 bg-surface mt-2"
+                            style="height: 0"
+                            x-data
+                            x-init="
+                                const fit = () => {
+                                    try {
+                                        const doc = $el.contentDocument;
+                                        if (!doc || !doc.documentElement) return;
+                                        $el.style.height = '8px';
+                                        const h = doc.documentElement.scrollHeight;
+                                        $el.style.height = (h + 4) + 'px';
+                                    } catch (e) {}
+                                };
+                                $el.addEventListener('load', () => {
+                                    try {
+                                        const doc = $el.contentDocument;
+                                        if (!doc) return;
+                                        doc.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+                                        const s = doc.createElement('style');
+                                        s.textContent = 'html,body{margin:0;padding:0}body{padding:8px 12px;font:13px/1.55 system-ui,-apple-system,Segoe UI,Inter,sans-serif;color:#0a0a0a;word-break:break-word}img{max-width:100%;height:auto}';
+                                        (doc.head || doc.documentElement).appendChild(s);
+                                        try { new ResizeObserver(fit).observe(doc.documentElement); } catch (e) {}
+                                        doc.addEventListener('toggle', fit, true);
+                                        fit();
+                                    } catch (e) {}
+                                });
+                            "
+                        ></iframe>
+                    @elseif($m->body_plain)
+                        <pre class="whitespace-pre-wrap font-sans text-[12.5px] text-fg-2 px-3 pt-2 pb-3 m-0">{{ trim((string) $m->body_plain) }}</pre>
+                    @else
+                        <div class="px-3 pt-2 pb-3 text-[12px] text-fg-4">(пустое письмо)</div>
+                    @endif
                 </div>
             @empty
-                <div class="text-sm text-fg-3">Писем нет.</div>
+                <div class="text-sm text-fg-3 px-1 py-2">Писем нет.</div>
             @endforelse
         </div>
     </div>

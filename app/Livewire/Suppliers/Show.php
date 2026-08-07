@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Suppliers;
 
+use App\Livewire\Concerns\RendersEmailBody;
 use App\Models\SupplierInquiry;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -9,13 +10,20 @@ use Livewire\Component;
 /**
  * Карточка запроса поставщику: реквизиты поставщика, статус, связанная
  * клиентская заявка (если есть), заметки и тред переписки. Доступ — все роли.
+ * Переписка рендерится как в заявке — в sandbox-iframe с полным оформлением
+ * письма, свёрнутыми цитатами (RendersEmailBody) и выбором порядка.
  */
 class Show extends Component
 {
+    use RendersEmailBody;
+
     public SupplierInquiry $inquiry;
 
     public string $supplier_name = '';
     public string $notes = '';
+
+    /** Порядок треда: asc — сначала старые, desc — сначала новые (per-user). */
+    public string $threadSort = 'asc';
 
     public function mount(SupplierInquiry $inquiry): void
     {
@@ -23,6 +31,15 @@ class Show extends Component
         $this->inquiry = $inquiry;
         $this->supplier_name = (string) ($inquiry->supplier_name ?? '');
         $this->notes = (string) ($inquiry->notes ?? '');
+        $this->threadSort = in_array(auth()->user()?->thread_sort_order, ['asc', 'desc'], true)
+            ? auth()->user()->thread_sort_order : 'asc';
+    }
+
+    public function toggleSort(): void
+    {
+        $this->threadSort = $this->threadSort === 'asc' ? 'desc' : 'asc';
+        auth()->user()?->forceFill(['thread_sort_order' => $this->threadSort])->save();
+        unset($this->messages);
     }
 
     public function save(): void
@@ -80,8 +97,12 @@ class Show extends Component
     #[Computed]
     public function messages()
     {
+        $dir = $this->threadSort === 'desc' ? 'desc' : 'asc';
+
         return $this->inquiry->messages()
-            ->get(['id', 'direction', 'from_email', 'from_name', 'subject', 'sent_at', 'body_plain', 'related_request_id']);
+            ->reorder('sent_at', $dir)->orderBy('id', $dir)
+            ->with(['attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline'])
+            ->get(['id', 'direction', 'from_email', 'from_name', 'subject', 'sent_at', 'body_html', 'body_plain', 'related_request_id']);
     }
 
     /**
