@@ -213,22 +213,34 @@
                     @endif
 
                     {{-- Вложения (фото деталей, прайсы). Пропускаем встроенные
-                         inline-логотипы (рендерятся в теле письма). --}}
-                    @php $files = $m->attachments->reject(fn ($a) => (bool) $a->is_inline); @endphp
+                         inline-логотипы (рендерятся в теле письма). Фото —
+                         превью с лайтбоксом (как в клиентском треде). --}}
+                    @php
+                        $files = $m->attachments->reject(fn ($a) => (bool) $a->is_inline);
+                        $galleryImgs = $files->filter(fn ($a) => $a->mime_type && \Illuminate\Support\Str::startsWith(strtolower($a->mime_type), 'image/'))->values();
+                        $gallery = $galleryImgs->map(fn ($a) => [
+                            'src' => route('attachments.preview', $a),
+                            'name' => $a->filename,
+                            'dl' => route('attachments.download', $a),
+                        ])->all();
+                        $imgIdx = 0;
+                    @endphp
                     @if($files->isNotEmpty())
-                        <div class="px-3 pb-3 pt-2 flex flex-wrap gap-2 border-t border-border-subtle">
+                        <div class="px-3 pb-3 pt-2 flex flex-wrap gap-2 border-t border-border-subtle" x-data="{ items: @js($gallery) }">
                             @foreach($files as $att)
                                 @php $isImg = $att->mime_type && \Illuminate\Support\Str::startsWith(strtolower($att->mime_type), 'image/'); @endphp
                                 @if($isImg)
-                                    <a href="{{ route('attachments.preview', $att) }}" target="_blank" rel="noopener noreferrer"
-                                       class="block border border-border rounded-md overflow-hidden bg-surface hover:border-border-strong transition-colors" title="{{ $att->filename }}">
+                                    <button type="button"
+                                            x-on:click="$dispatch('open-image', { items: items, index: {{ $imgIdx }} })"
+                                            class="block border border-border rounded-md overflow-hidden bg-surface hover:border-border-strong transition-colors text-left" title="{{ $att->filename }}">
                                         <img src="{{ route('attachments.preview', $att) }}" alt="{{ $att->filename }}" loading="lazy"
                                              class="w-[120px] h-[90px] object-cover block bg-app">
                                         <div class="px-2 py-1 max-w-[120px] text-[10.5px] text-fg-3">
                                             <span class="block truncate text-fg-1">{{ $att->filename }}</span>
                                             @if($att->size_bytes)<span>{{ number_format($att->size_bytes / 1024, 0, '.', ' ') }} KB</span>@endif
                                         </div>
-                                    </a>
+                                    </button>
+                                    @php $imgIdx++; @endphp
                                 @else
                                     <a href="{{ route('attachments.download', $att) }}"
                                        class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover self-start">
@@ -254,4 +266,6 @@
             <button type="button" wire:click="deleteInquiry" wire:confirm="Удалить запрос поставщику? Письма останутся, но открепятся." class="btn btn-sm text-red-600">Удалить запрос</button>
         </div>
     </div>
+
+    @include('partials.image-lightbox')
 </div>
