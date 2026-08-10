@@ -308,6 +308,40 @@ class SupplierInquiryService
             }
         }
 
+        // Фоллбэк по коду БЕЗ совпадения адреса/домена: ответ мог прийти через
+        // постороннего посредника (наш RFQ переслали, отвечает третий адрес
+        // чужого домена — кейс fam-drive через inbox.ru). Наш код в теме
+        // уникален, поэтому привязываем по нему — но ТОЛЬКО «сильные» коды:
+        // M-код заявки и НАШ номер RFQ в скобках [363328]. Голые 6–9-значные
+        // числа сюда НЕ берём (part-номер вроде 714280102 дал бы ложный матч).
+        // Привязываем лишь если код указывает на РОВНО ОДИН инквайри (открытый —
+        // приоритетно); неоднозначность (несколько поставщиков на одну заявку по
+        // M-коду) → пропускаем, там нужен адрес/домен.
+        $strong = [];
+        preg_match_all('/\bM-\d{4}-\d+/u', $subject, $ms);
+        foreach ($ms[0] ?? [] as $c) {
+            $strong[] = $c;
+        }
+        preg_match_all('/\[(\d{6,9})\]/u', $subject, $mb);
+        foreach ($mb[1] ?? [] as $c) {
+            $strong[] = $c;
+        }
+        foreach (array_values(array_unique($strong)) as $code) {
+            $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $code).'%';
+            $cands = SupplierInquiry::query()
+                ->where('subject', 'ilike', $like)
+                ->orderByRaw("case when status = 'open' then 0 else 1 end")
+                ->orderByDesc('id')
+                ->get();
+            $open = $cands->where('status', 'open');
+            if ($open->count() === 1) {
+                return $open->first();
+            }
+            if ($cands->count() === 1) {
+                return $cands->first();
+            }
+        }
+
         return null;
     }
 

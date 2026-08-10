@@ -48,6 +48,20 @@ class SupplierReminderService
             ->where('status', 'open')
             ->has('items')
             ->whereDoesntHave('messages', fn ($q) => $q->where('direction', 'inbound'))
+            // Гард от ложного напоминания: ответ поставщика мог прийти, но не
+            // привязаться (другой адрес/сломанный тред). Если в почте есть
+            // НЕпривязанный входящий supplier_reply с НАШИМ номером RFQ этого
+            // инквайри в теме ([363328]) — значит ответ де-факто получен,
+            // напоминание не шлём (иначе поставщик отвечает второй раз). Матчим
+            // по уникальному коду в скобках, извлечённому из темы инквайри.
+            ->whereRaw("NOT EXISTS (
+                SELECT 1 FROM email_messages em
+                WHERE em.direction = 'inbound'
+                  AND em.supplier_inquiry_id IS NULL
+                  AND em.category = 'supplier_reply'
+                  AND substring(supplier_inquiries.subject from '\\[(\\d{6,9})\\]') IS NOT NULL
+                  AND em.subject ILIKE '%' || substring(supplier_inquiries.subject from '\\[(\\d{6,9})\\]') || '%'
+            )")
             ->where('reminders_sent', '<', $max)
             ->where('created_at', '<', now()->subDays($firstAfter))
             ->where(fn ($q) => $q->whereNull('last_reminder_at')->orWhere('last_reminder_at', '<', now()->subDays($interval)))
