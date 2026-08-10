@@ -199,6 +199,15 @@ class AttachmentController extends Controller
             return;
         }
 
+        // Переписка с поставщиком (supplier_inquiry_id): раздел
+        // /dashboard/suppliers доступен всем внутренним ролям, значит и вложения
+        // этих писем читаемы так же (фото деталей от поставщика и наши в RFQ).
+        // Без этого письма поставщика с related_request_id=null давали 403 →
+        // фото не отображались (кейс M-2026-3573).
+        if ($email && $email->supplier_inquiry_id !== null) {
+            return;
+        }
+
         // Shared-mail («Почта выбывших»): письма без заявки (related_request_id
         // IS NULL). Доступ — у назначенного ответственного (sharedAssignment)
         // и у автора нашего отправленного ответа. См. SharedMailService.

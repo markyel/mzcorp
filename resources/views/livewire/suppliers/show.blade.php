@@ -211,6 +211,35 @@
                     @else
                         <div class="px-3 pt-2 pb-3 text-[12px] text-fg-4">(пустое письмо)</div>
                     @endif
+
+                    {{-- Вложения (фото деталей, прайсы). Пропускаем встроенные
+                         inline-логотипы (рендерятся в теле письма). --}}
+                    @php $files = $m->attachments->reject(fn ($a) => (bool) $a->is_inline); @endphp
+                    @if($files->isNotEmpty())
+                        <div class="px-3 pb-3 pt-2 flex flex-wrap gap-2 border-t border-border-subtle">
+                            @foreach($files as $att)
+                                @php $isImg = $att->mime_type && \Illuminate\Support\Str::startsWith(strtolower($att->mime_type), 'image/'); @endphp
+                                @if($isImg)
+                                    <a href="{{ route('attachments.preview', $att) }}" target="_blank" rel="noopener noreferrer"
+                                       class="block border border-border rounded-md overflow-hidden bg-surface hover:border-border-strong transition-colors" title="{{ $att->filename }}">
+                                        <img src="{{ route('attachments.preview', $att) }}" alt="{{ $att->filename }}" loading="lazy"
+                                             class="w-[120px] h-[90px] object-cover block bg-app">
+                                        <div class="px-2 py-1 max-w-[120px] text-[10.5px] text-fg-3">
+                                            <span class="block truncate text-fg-1">{{ $att->filename }}</span>
+                                            @if($att->size_bytes)<span>{{ number_format($att->size_bytes / 1024, 0, '.', ' ') }} KB</span>@endif
+                                        </div>
+                                    </a>
+                                @else
+                                    <a href="{{ route('attachments.download', $att) }}"
+                                       class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover self-start">
+                                        <span class="inline-block w-4 h-5 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[7px] font-bold text-center leading-5">{{ \Illuminate\Support\Str::upper(\Illuminate\Support\Str::afterLast($att->filename, '.')) ?: 'BIN' }}</span>
+                                        <span class="truncate max-w-[240px]">{{ $att->filename }}</span>
+                                        @if($att->size_bytes)<span class="text-fg-3 text-[11px]">· {{ number_format($att->size_bytes / 1024, 0, '.', ' ') }} KB</span>@endif
+                                    </a>
+                                @endif
+                            @endforeach
+                        </div>
+                    @endif
                 </div>
             @empty
                 <div class="text-sm text-fg-3 px-1 py-2">Писем нет.</div>
