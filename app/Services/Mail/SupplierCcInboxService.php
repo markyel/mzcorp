@@ -58,6 +58,41 @@ class SupplierCcInboxService
      */
     public function ingest(EmailMessage $message): void
     {
+        // Кросс-ящик дедуп: то же самое письмо (тот же Message-ID) могло уже
+        // синкнуться из ящика отправителя/менеджера — сотрудник ставит копию на
+        // rfq@ на СВОЁ ЖЕ письмо поставщику, а его личный ящик его уже поймал.
+        // Не показываем второй раз в треде: помечаем cross_mailbox_copy_of
+        // (UI-тред прячет), наследуем привязку, НЕ уведомляем повторно.
+        // Кейс M-2026-11511 (Илья Курзаев, копии исходящих на rfq@ двоились).
+        if ($message->message_id) {
+            $twin = EmailMessage::query()
+                ->where('message_id', $message->message_id)
+                ->where('id', '!=', $message->id)
+                ->whereNotNull('related_request_id')
+                ->orderBy('id')
+                ->get()
+                ->first(fn (EmailMessage $c): bool => CrossMailboxCopyMatcher::isSamePhysicalMessage($message, $c));
+            if ($twin !== null) {
+                $artifacts = (array) ($message->detected_artifacts ?? []);
+                $artifacts['cross_mailbox_copy_of'] = $twin->id;
+                $message->forceFill([
+                    'related_request_id' => $twin->related_request_id,
+                    'category' => EmailCategory::SupplierReply->value,
+                    'category_reasoning' => 'rfq@: копия уже пойманного письма (msg#'.$twin->id.') — скрыта из треда',
+                    'categorized_at' => now(),
+                    'classified_at' => now(),
+                    'detected_artifacts' => $artifacts,
+                ])->save();
+                Log::info('SupplierCcInbox: cross-mailbox copy — hidden, not re-notified', [
+                    'email_message_id' => $message->id,
+                    'twin_id' => $twin->id,
+                    'message_id' => $message->message_id,
+                ]);
+
+                return;
+            }
+        }
+
         $code = $this->extractCode($message);
         $request = $code !== null
             ? Request::query()->whereRaw('LOWER(internal_code) = ?', [mb_strtolower($code)])->first()
