@@ -53,6 +53,21 @@ class SupplierInquiryService
         return DB::transaction(function () use ($sent, $requestId, $by, $rootId, $supplierEmail, $supplierName) {
             $inquiry = SupplierInquiry::query()->where('thread_root_id', $rootId)->first();
             if ($inquiry === null) {
+                // Дедуп на исходящем пути: письмо могло уйти НОВЫМ тредом
+                // (менеджер ответил поставщику из личной почты → свой message_id,
+                // ссылка не на наш RFQ). Не плодим второй инквайри, если по коду
+                // темы уже есть открытый ТОМУ ЖЕ поставщику по ТОЙ ЖЕ заявке.
+                // Гарды sameParty + совпадение заявки защищают от слияния разных
+                // поставщиков, делящих общий M-код (кейс M-2026-11035 / #2645).
+                $byCode = $this->matchByCodeInSubject((string) $sent->subject, $supplierEmail);
+                if ($byCode !== null
+                    && ($requestId === null || $byCode->related_request_id === null
+                        || (int) $byCode->related_request_id === (int) $requestId)
+                    && $this->sameParty((string) $byCode->supplier_email, $supplierEmail)) {
+                    $inquiry = $byCode;
+                }
+            }
+            if ($inquiry === null) {
                 $inquiry = SupplierInquiry::create([
                     'supplier_email' => $supplierEmail,
                     'supplier_name' => $supplierName !== null && $supplierName !== '' ? $supplierName : null,
@@ -68,6 +83,23 @@ class SupplierInquiryService
 
             return $inquiry;
         });
+    }
+
+    /** Тот же контрагент: точный e-mail или общий домен. */
+    private function sameParty(string $a, string $b): bool
+    {
+        $a = mb_strtolower(trim($a));
+        $b = mb_strtolower(trim($b));
+        if ($a === '' || $b === '') {
+            return false;
+        }
+        if ($a === $b) {
+            return true;
+        }
+        $da = (string) substr((string) strrchr($a, '@'), 1);
+        $db = (string) substr((string) strrchr($b, '@'), 1);
+
+        return $da !== '' && $da === $db;
     }
 
     /**
@@ -260,11 +292,25 @@ class SupplierInquiryService
         if ($message->direction !== MailDirection::Inbound) {
             return null;
         }
-        $subject = (string) $message->subject;
-        $from = mb_strtolower(trim((string) $message->from_email));
-        if ($from === '') {
+
+        return $this->matchByCodeInSubject((string) $message->subject, (string) $message->from_email);
+    }
+
+    /**
+     * Общий матч инквайри по коду в теме (M-код заявки / номер RFQ в скобках)
+     * + адрес контрагента. Единая логика для входящих (matchInboundByAnyCode)
+     * и для отправки (createFromOutbound) — чтобы дубли не плодились ни на
+     * входящем, ни на исходящем пути. $counterpartEmail: для входящих это
+     * from_email, для исходящих — e-mail получателя (поставщика). Пустой адрес
+     * → только фоллбэк по «сильному» коду (уникальный номер RFQ / M-код).
+     */
+    public function matchByCodeInSubject(string $subject, string $counterpartEmail = ''): ?SupplierInquiry
+    {
+        $subject = trim($subject);
+        if ($subject === '') {
             return null;
         }
+        $from = mb_strtolower(trim($counterpartEmail));
 
         $codes = [];
         // M-код заявки (приоритетнее — уникальнее), затем док-номера 6–9 цифр
@@ -287,23 +333,25 @@ class SupplierInquiryService
         // не совпадёт — матчим и по домену. Домен = один поставщик, а код
         // разводит внутри (один M-код мог уйти нескольким поставщикам — их
         // домены разные).
-        $domain = mb_strtolower(trim((string) substr((string) strrchr($from, '@'), 1)));
+        if ($from !== '') {
+            $domain = mb_strtolower(trim((string) substr((string) strrchr($from, '@'), 1)));
 
-        foreach ($codes as $code) {
-            $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $code).'%';
-            $base = fn () => SupplierInquiry::query()
-                ->where('subject', 'ilike', $like)
-                ->orderByRaw("case when status = 'open' then 0 else 1 end")
-                ->orderByDesc('id');
+            foreach ($codes as $code) {
+                $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $code).'%';
+                $base = fn () => SupplierInquiry::query()
+                    ->where('subject', 'ilike', $like)
+                    ->orderByRaw("case when status = 'open' then 0 else 1 end")
+                    ->orderByDesc('id');
 
-            $hit = (clone $base())->whereRaw('LOWER(supplier_email) = ?', [$from])->first();
-            if ($hit !== null) {
-                return $hit;
-            }
-            if ($domain !== '') {
-                $hit = (clone $base())->whereRaw("split_part(lower(supplier_email), '@', 2) = ?", [$domain])->first();
+                $hit = (clone $base())->whereRaw('LOWER(supplier_email) = ?', [$from])->first();
                 if ($hit !== null) {
                     return $hit;
+                }
+                if ($domain !== '') {
+                    $hit = (clone $base())->whereRaw("split_part(lower(supplier_email), '@', 2) = ?", [$domain])->first();
+                    if ($hit !== null) {
+                        return $hit;
+                    }
                 }
             }
         }
