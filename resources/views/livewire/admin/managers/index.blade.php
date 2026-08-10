@@ -65,7 +65,7 @@
                         // admin отсутствие ящика — это норма (Mailbox::scopeSyncable
                         // их исключает, sync не работает), показываем отдельной
                         // меткой чтобы не путать с «забыли подключить».
-                        $canHaveMailbox = $u->hasAnyRole(\App\Enums\Role::requestHandlerRoles());
+                        $canHaveMailbox = $u->hasAnyRole(\App\Enums\Role::mailboxSyncRoles());
                         $personalChip = match (true) {
                             ! $canHaveMailbox && ! $personal => ['не для этой роли', 'text-fg-4'],
                             ! $canHaveMailbox && $personal => ['не должен синкаться', 'text-amber-700'],

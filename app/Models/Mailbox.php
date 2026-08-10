@@ -68,6 +68,26 @@ class Mailbox extends Model
     }
 
     /**
+     * Ящик снабжения: личный ящик, владелец которого — Снабжение и НЕ
+     * request-handler. Вся входящая такого ящика идёт как переписка с
+     * поставщиком (гейт в MailRouter/IncomingMailProcessor), клиентские заявки
+     * из неё НЕ создаются. См. Role::mailboxSyncRoles / requestHandlerRoles.
+     */
+    public function isProcurementMailbox(): bool
+    {
+        if ($this->type !== MailboxType::Personal) {
+            return false;
+        }
+        $owner = $this->relationLoaded('owner') ? $this->owner : $this->owner()->first();
+        if ($owner === null) {
+            return false;
+        }
+
+        return $owner->hasRole(Role::Procurement->value)
+            && ! $owner->hasAnyRole(Role::requestHandlerRoles());
+    }
+
+    /**
      * Ящики, подходящие для IMAP-синка.
      *
      * Правила:
@@ -85,7 +105,7 @@ class Mailbox extends Model
      */
     public function scopeSyncable(Builder $query): Builder
     {
-        $managerial = Role::requestHandlerRoles();
+        $managerial = Role::mailboxSyncRoles();
 
         return $query->where('is_active', true)
             ->where(function (Builder $q) use ($managerial) {

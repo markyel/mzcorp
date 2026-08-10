@@ -47,6 +47,23 @@ class IncomingMailProcessor
 
     public function processIfRequest(EmailMessage $message): ?Request
     {
+        // Defense-in-depth для ящиков снабжения: вся их входящая — переписка с
+        // поставщиком, клиентские заявки НЕ создаём. MailRouter уже отбивает
+        // это ДО категоризации, но cron (mail:create-requests) минует router.
+        $mailbox = $message->mailbox;
+        if ($mailbox !== null && $mailbox->isProcurementMailbox()) {
+            try {
+                $this->supplierInquiries->ingestSupplierMessage($message);
+            } catch (\Throwable $e) {
+                Log::warning('IncomingMailProcessor: procurement mailbox ingest failed', [
+                    'email_message_id' => $message->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            return null;
+        }
+
         // Defense-in-depth для стоп-листа: MailRouter уже отбивает blocked
         // ДО категоризации, но cron-команды `mail:create-requests` /
         // `mail:categorize` могут вызвать processIfRequest напрямую,

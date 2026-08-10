@@ -25,15 +25,25 @@
 
             @if($user->exists)
                 @php
-                    // Личный ящик подключается только для ролей, которые ведут
-                    // заявки (manager / head_of_sales). Директор / секретарь /
-                    // админ — личный ящик НЕ синкается (Mailbox::scopeSyncable
-                    // фильтрует по requestHandlerRoles). Кейс M-2026-1723:
+                    // Личный ящик синкается для mailboxSyncRoles (manager /
+                    // head_of_sales / procurement). Директор / секретарь / админ
+                    // — НЕ синкается (Mailbox::scopeSyncable). Кейс M-2026-1723:
                     // личный ящик директора был активен → закупочная переписка
-                    // с поставщиками попадала как client_request.
-                    $canHaveSyncableMailbox = $user->hasAnyRole(\App\Enums\Role::requestHandlerRoles());
+                    // попадала как client_request. Снабжение синкается, НО их
+                    // входящая — только переписка с поставщиками (гейт в
+                    // MailRouter по Mailbox::isProcurementMailbox), заявки не
+                    // создаёт.
+                    $canHaveSyncableMailbox = $user->hasAnyRole(\App\Enums\Role::mailboxSyncRoles());
+                    $isProcurementOnly = $user->hasRole(\App\Enums\Role::Procurement->value)
+                        && ! $user->hasAnyRole(\App\Enums\Role::requestHandlerRoles());
                 @endphp
                 @if($canHaveSyncableMailbox)
+                    @if($isProcurementOnly)
+                        <div class="ds-card p-4 mt-4 text-[13px] text-fg-2 border-l-2 border-[var(--sky-600)]">
+                            <div class="font-semibold text-fg-1 mb-1">Ящик снабжения — только переписка с поставщиками</div>
+                            Входящая почта этого ящика не создаёт клиентских заявок: ответы поставщиков привязываются к запросам расценки, остальное сохраняется как переписка с поставщиком. Исходящие запросы поставщикам регистрируются автоматически.
+                        </div>
+                    @endif
                     <livewire:admin.managers.mailbox-oauth :user="$user" wire:key="oauth-{{ $user->id }}" />
                 @else
                     <div class="ds-card p-4 mt-4 text-[13px] text-fg-2 border-l-2 border-[var(--amber-600)]">

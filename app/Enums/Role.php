@@ -103,4 +103,16 @@ enum Role: string
     {
         return [self::Manager->value, self::HeadOfSales->value];
     }
+
+    /**
+     * Роли, чей ЛИЧНЫЙ ящик синхронизируется. Шире, чем requestHandlerRoles:
+     * Снабжение тоже ведёт личную переписку (с поставщиками) и должно слать/
+     * получать её из системы — НО их входящая не создаёт клиентских заявок
+     * (гейт в MailRouter/IncomingMailProcessor по Mailbox::isProcurementMailbox).
+     * requestHandlerRoles (пул/автоназначение) Снабжение НЕ включает.
+     */
+    public static function mailboxSyncRoles(): array
+    {
+        return [self::Manager->value, self::HeadOfSales->value, self::Procurement->value];
+    }
 }

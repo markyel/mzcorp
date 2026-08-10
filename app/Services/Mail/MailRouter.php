@@ -204,6 +204,30 @@ class MailRouter
             return;
         }
 
+        // Ящик снабжения: вся входящая — переписка с ПОСТАВЩИКОМ, клиентские
+        // заявки из неё НЕ создаём. ingestSupplierMessage сам сматчит ответ к
+        // нужному RFQ (matchInbound / matchInboundByAnyCode), иначе положит как
+        // читаемую переписку поставщика. Ранний выход — до blocklist/categorize/
+        // reply-linker/создания заявки. См. Mailbox::isProcurementMailbox.
+        $inboundMailbox = $message->mailbox;
+        if ($inboundMailbox !== null && $inboundMailbox->isProcurementMailbox()) {
+            try {
+                $inquiry = $this->supplierInquiries->ingestSupplierMessage($message);
+                Log::info('MailRouter: procurement mailbox — read as supplier correspondence, no request', [
+                    'email_message_id' => $message->id,
+                    'mailbox_id' => $inboundMailbox->id,
+                    'supplier_inquiry_id' => $inquiry->id,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: procurement mailbox ingest failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            return;
+        }
+
         // Стоп-лист отправителей: ДО AI-категоризации (экономим токены) и
         // ДО reply-linker. Две ветки по kind записи:
         //  - supplier → это пул поставщика: НЕ создаём заявку, но письмо
