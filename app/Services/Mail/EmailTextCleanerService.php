@@ -57,11 +57,20 @@ class EmailTextCleanerService
         ['forwarded' => $forwarded, 'original' => $original] = $this->extractForwardedContent($dequoted);
 
         if ($forwarded !== null) {
-            // Forwarded — это, как правило, либо наша же исходящая КП, либо
-            // чужая старая переписка. Для парсера позиций — мусор. Не отдаём AI.
+            // Forwarded в ОТВЕТЕ — это, как правило, наша же исходящая КП или
+            // чужая старая переписка (мусор-дубль, кейс #349): отдаём только
+            // преамбулу (новый текст клиента), forward-блок отбрасываем.
             $cleanOriginal = $this->removeSignature($original);
+            if (mb_strlen(trim($cleanOriginal)) >= 10) {
+                return $cleanOriginal;
+            }
 
-            return $cleanOriginal;
+            // НО если преамбулы нет (чистый форвард без своего текста сверху) —
+            // клиент переслал САМ запрос, и forward-блок = заявка, а не мусор.
+            // Кейс M-2026-11504: «Fwd: (Без темы)», весь запрос («Ролик
+            // направляющий башмака … 8 шт») в блоке «Пересылаемое сообщение»,
+            // преамбула пуста → раньше парсер получал пустоту → 0 позиций.
+            return $this->removeSignature($forwarded);
         }
 
         return $this->removeSignature($dequoted);
