@@ -8,6 +8,7 @@ use App\Models\IqotPosition;
 use App\Models\Supplier;
 use App\Models\SupplierInquiry;
 use App\Models\User;
+use App\Services\Catalog\CatalogSearchService;
 use App\Services\Supplier\SupplierInquiryLifecycleService;
 use App\Services\Supplier\SupplierItemTranslator;
 use App\Services\Supplier\SupplierMatchService;
@@ -71,6 +72,9 @@ class Index extends Component
 
     /** cid => bool — выбранные позиции для запроса. */
     public array $selected = [];
+
+    /** Поиск по каталогу для запроса расценки на ЛЮБУЮ позицию (не только блокеры). */
+    public string $catalogSearch = '';
 
     /** supplier_id => bool — кому слать. */
     public array $selectedSuppliers = [];
@@ -374,6 +378,50 @@ class Index extends Component
     private function selectedCids(): array
     {
         return array_values(array_map('intval', array_keys(array_filter($this->selected))));
+    }
+
+    /**
+     * Поиск по ВСЕМУ каталогу — чтобы снабженец мог запросить расценку на любую
+     * позицию, а не только из списка блокеров. Уже выбранные исключаем.
+     *
+     * @return \Illuminate\Support\Collection<int, CatalogItem>
+     */
+    #[Computed]
+    public function catalogSearchResults()
+    {
+        $q = trim($this->catalogSearch);
+        if (mb_strlen($q) < 2) {
+            return collect();
+        }
+        $selected = $this->selectedCids();
+
+        return app(CatalogSearchService::class)->search($q, 20)
+            ->reject(fn (CatalogItem $ci) => in_array($ci->id, $selected, true))
+            ->take(10)
+            ->values();
+    }
+
+    /** Добавить произвольную позицию каталога в набор для запроса. */
+    public function addCatalogItem(int $cid): void
+    {
+        if ($cid <= 0 || isset($this->selected[$cid])) {
+            return;
+        }
+        if (! CatalogItem::whereKey($cid)->exists()) {
+            return;
+        }
+        $this->selected[$cid] = true;
+        // Программное добавление не триггерит updatedSelected — префилл вручную.
+        $this->prefillSelectedFields();
+        $this->autoTranslateIfEnglish();
+        $this->catalogSearch = '';
+        unset(
+            $this->selectedPositions,
+            $this->oemOptions,
+            $this->supplierOptions,
+            $this->previewLanguages,
+            $this->catalogSearchResults,
+        );
     }
 
     /** Выбранные позиции (для панели запроса). */

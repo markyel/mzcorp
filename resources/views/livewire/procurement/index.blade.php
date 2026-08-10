@@ -144,6 +144,37 @@
         </select>
     </div>
 
+    {{-- Запрос расценки на ЛЮБЫЕ позиции каталога (не только блокеры) --}}
+    <div class="ds-card">
+        <div class="ds-card-header"><h3>🔎 Запросить расценку на позиции каталога</h3></div>
+        <div class="ds-card-body">
+            <p class="text-[12px] text-fg-3 mb-2">Найдите любую позицию каталога и добавьте её в запрос поставщикам — независимо от того, была ли она в КП.</p>
+            <input type="search" wire:model.live.debounce.300ms="catalogSearch"
+                   placeholder="Артикул, название или бренд…"
+                   class="w-full px-3 py-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
+            @if(trim($catalogSearch) !== '')
+                <div class="mt-2 border border-border-subtle rounded-md divide-y divide-border-subtle max-h-72 overflow-y-auto">
+                    @forelse($this->catalogSearchResults as $ci)
+                        <div class="flex items-center gap-2 px-3 py-2 text-[12.5px]" wire:key="csr-{{ $ci->id }}">
+                            <div class="flex-1 min-w-0">
+                                <span class="mono text-fg-3">{{ $ci->sku }}</span>
+                                <span class="text-fg-1">· {{ $ci->name }}</span>
+                                @if($ci->brand)<span class="text-fg-4">· {{ $ci->brand }}</span>@endif
+                            </div>
+                            <button type="button" wire:click="addCatalogItem({{ $ci->id }})"
+                                    class="btn btn-sm btn-primary shrink-0">+ В запрос</button>
+                        </div>
+                    @empty
+                        <div class="px-3 py-2 text-[12px] text-fg-4">Ничего не найдено.</div>
+                    @endforelse
+                </div>
+            @endif
+            @if($this->selectedPositions->count() > 0)
+                <div class="text-[12px] text-emerald-700 mt-2">В запросе позиций: {{ $this->selectedPositions->count() }} — оформите ниже в блоке «Запрос поставщикам».</div>
+            @endif
+        </div>
+    </div>
+
     {{-- Топ позиций-блокеров --}}
     <div class="ds-card">
         <div class="ds-card-header"><h3>{{ $mode === 'period' ? 'Топ позиций с неактуальной ценой по спросу за период' : 'Топ позиций-блокеров' }}</h3></div>
