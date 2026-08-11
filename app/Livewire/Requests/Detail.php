@@ -701,23 +701,24 @@ class Detail extends Component
     }
 
     /**
-     * Клиент-перепродавец: статус на уровне e-mail отправителя (dealer_emails).
-     * Виден во всех заявках этого e-mail.
+     * Клиент-перепродавец: ручная бизнес-классификация на уровне e-mail
+     * отправителя (reseller_emails, НЕ dealer). Виден во всех заявках e-mail.
      */
     #[Computed]
     public function clientIsReseller(): bool
     {
         $email = (string) ($this->request->client_email ?? '');
 
-        return $email !== '' && app(\App\Services\Request\DealerEmailService::class)->isDealer($email);
+        return $email !== '' && app(\App\Services\Request\ResellerEmailService::class)->isReseller($email);
     }
 
     /**
      * Переключить статус «перепродавец» для e-mail клиента. Ставится/снимается
      * на адрес (не на заявку), поэтому применяется ко всем заявкам отправителя.
      * Может любой менеджер в любой заявке (кроме секретаря — только просмотр).
+     * На распределение НЕ влияет (это не «дилер»).
      */
-    public function toggleReseller(\App\Services\Request\DealerEmailService $dealers): void
+    public function toggleReseller(\App\Services\Request\ResellerEmailService $resellers): void
     {
         $user = auth()->user();
         if (! $user) {
@@ -735,11 +736,11 @@ class Detail extends Component
             return;
         }
 
-        if ($dealers->isDealer($email)) {
-            $dealers->unmarkManual($email, $user->id);
+        if ($resellers->isReseller($email)) {
+            $resellers->unmark($email);
             $this->dispatch('toast', message: 'Статус «перепродавец» снят с ' . $email . '.', type: 'success');
         } else {
-            $dealers->markManual($email, $user->id);
+            $resellers->mark($email, $user->id);
             $this->dispatch('toast', message: 'Клиент ' . $email . ' помечен как перепродавец.', type: 'success');
         }
         unset($this->clientIsReseller);
