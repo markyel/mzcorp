@@ -386,6 +386,24 @@ class RequestItemParsingService
     }
 
     /**
+     * Вложение — НАШ ЖЕ исходящий документ (КП/счёт), приложенный клиентом?
+     * Клиент часто прикладывает наш КП обратно (пост-продажа: «пришлите
+     * договор»), и парсер извлекал его позиции как новую заявку (M-2026-11637).
+     * По имени файла: «Предложение МЗ-362628 …», «Счёт … МЗ-…», «МЗ-NNNNN».
+     */
+    private function isOwnOutboundDocument(?string $filename): bool
+    {
+        $f = mb_strtolower(trim((string) $filename));
+        if ($f === '') {
+            return false;
+        }
+
+        return preg_match('/предложение\s*мз[-\s№]*\d{3,}/u', $f) === 1
+            || preg_match('/(сч[её]т|инвойс)\b.*мз[-\s№]*\d{3,}/u', $f) === 1
+            || preg_match('/\bмз-\d{5,}\b/u', $f) === 1;
+    }
+
+    /**
      * Нормализация одной позиции перед возвратом в UI/БД.
      * name ≤ 250 символов — ограничение varchar(255) в БД.
      * Возвращает null если позиция — услуга (доставка/монтаж/упаковка) —
@@ -884,6 +902,22 @@ PROMPT;
         $structuredAttachments = $attachments->filter(function ($a) {
             return preg_match('/\.(pdf|docx|xlsx|xls|doc)$/i', (string) $a->filename) === 1;
         });
+
+        // Отсечь НАШИ ЖЕ исходящие документы (КП/счёт), которые клиент приложил
+        // обратно. Пост-продажа: «пришлите договор» + приложен наш «Предложение
+        // МЗ-362628.pdf» → парсер извлекал ЕГО позиции как НОВУЮ заявку (кейс
+        // M-2026-11637: 4 фейковые позиции из нашего же КП). Их номенклатура —
+        // не запрос клиента.
+        $ownDocs = $structuredAttachments->filter(fn ($a) => $this->isOwnOutboundDocument($a->filename));
+        if ($ownDocs->isNotEmpty()) {
+            $ownIds = $ownDocs->pluck('id')->all();
+            $structuredAttachments = $structuredAttachments->reject(fn ($a) => in_array($a->id, $ownIds, true));
+            Log::info('parseItemsFromInboundContent: dropped OWN outbound documents (КП/счёт)', [
+                'source' => $sourceTag,
+                'dropped' => $ownDocs->map(fn ($a) => $a->filename)->values()->all(),
+            ]);
+        }
+
         $lightweightStructured = $structuredAttachments->filter(function ($a) {
             return preg_match('/\.(doc|docx)$/i', (string) $a->filename) === 1;
         });
