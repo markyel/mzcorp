@@ -21,10 +21,14 @@ class DealerEmail extends Model
         'email',
         'open_count_at_mark',
         'marked_at',
+        'marked_by_user_id',
+        'manual',
     ];
 
     protected $casts = [
         'open_count_at_mark' => 'integer',
         'marked_at' => 'datetime',
+        'marked_by_user_id' => 'integer',
+        'manual' => 'boolean',
     ];
 }

@@ -309,6 +309,16 @@
                 @endif
                 @if($req->client_email)
                     <a href="mailto:{{ $req->client_email }}" class="text-sky-700 hover:underline">{{ $req->client_email }}</a>
+                    {{-- Статус клиента-перепродавца (на уровне e-mail, виден во всех его заявках) --}}
+                    <span class="text-border-strong">·</span>
+                    @if($this->clientIsReseller)
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm bg-amber-50 text-amber-800 text-[11px] font-semibold" title="Клиент помечен как перепродавец — статус на e-mail, виден во всех его заявках">Перепродавец</span>
+                        <button type="button" wire:click="toggleReseller" wire:loading.attr="disabled" wire:target="toggleReseller"
+                                class="text-[11.5px] text-fg-3 hover:text-fg-1 underline decoration-dotted" title="Снять статус перепродавца">снять</button>
+                    @else
+                        <button type="button" wire:click="toggleReseller" wire:loading.attr="disabled" wire:target="toggleReseller"
+                                class="text-[11.5px] text-fg-3 hover:text-sky-700 underline decoration-dotted" title="Пометить клиента (этот e-mail) перепродавцом — во всех его заявках">пометить перепродавцом</button>
+                    @endif
                 @endif
                 @if($email?->mailbox)
                     <span class="text-border-strong">·</span>

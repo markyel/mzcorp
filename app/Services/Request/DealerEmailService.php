@@ -44,9 +44,60 @@ class DealerEmailService
         if (array_key_exists($normalized, $this->cache)) {
             return $this->cache[$normalized];
         }
-        $exists = DealerEmail::query()->where('email', $normalized)->exists();
+        // Дилер, если запись есть И статус не снят вручную (manual=false).
+        // manual: null (авто) | true (вкл вручную) | false (снято вручную).
+        $exists = DealerEmail::query()
+            ->where('email', $normalized)
+            ->where(fn ($q) => $q->whereNull('manual')->orWhere('manual', true))
+            ->exists();
 
         return $this->cache[$normalized] = $exists;
+    }
+
+    /** Пометить e-mail «перепродавцом» вручную (менеджер из карточки заявки). */
+    public function markManual(string $email, ?int $userId): bool
+    {
+        $normalized = $this->normalize($email);
+        if ($normalized === '') {
+            return false;
+        }
+        DealerEmail::query()->updateOrCreate(
+            ['email' => $normalized],
+            [
+                'manual' => true,
+                'marked_by_user_id' => $userId,
+                'marked_at' => Carbon::now(),
+                // open_count_at_mark NOT NULL — для ручной пометки 0.
+                'open_count_at_mark' => 0,
+            ],
+        );
+        unset($this->cache[$normalized]);
+
+        return true;
+    }
+
+    /**
+     * Снять статус «перепродавец» вручную. Оставляем запись с manual=false как
+     * суппресс — авто-пометка по потоку не воскресит снятый вручную статус.
+     */
+    public function unmarkManual(string $email, ?int $userId): bool
+    {
+        $normalized = $this->normalize($email);
+        if ($normalized === '') {
+            return false;
+        }
+        DealerEmail::query()->updateOrCreate(
+            ['email' => $normalized],
+            [
+                'manual' => false,
+                'marked_by_user_id' => $userId,
+                'marked_at' => Carbon::now(),
+                'open_count_at_mark' => 0,
+            ],
+        );
+        unset($this->cache[$normalized]);
+
+        return true;
     }
 
     /**
@@ -61,6 +112,10 @@ class DealerEmailService
             return;
         }
         if ($this->isDealer($normalized)) {
+            return;
+        }
+        // Снято вручную (manual=false) — авто-пометка по потоку не воскрешает.
+        if (DealerEmail::query()->where('email', $normalized)->where('manual', false)->exists()) {
             return;
         }
 

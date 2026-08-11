@@ -701,6 +701,51 @@ class Detail extends Component
     }
 
     /**
+     * Клиент-перепродавец: статус на уровне e-mail отправителя (dealer_emails).
+     * Виден во всех заявках этого e-mail.
+     */
+    #[Computed]
+    public function clientIsReseller(): bool
+    {
+        $email = (string) ($this->request->client_email ?? '');
+
+        return $email !== '' && app(\App\Services\Request\DealerEmailService::class)->isDealer($email);
+    }
+
+    /**
+     * Переключить статус «перепродавец» для e-mail клиента. Ставится/снимается
+     * на адрес (не на заявку), поэтому применяется ко всем заявкам отправителя.
+     * Может любой менеджер в любой заявке (кроме секретаря — только просмотр).
+     */
+    public function toggleReseller(\App\Services\Request\DealerEmailService $dealers): void
+    {
+        $user = auth()->user();
+        if (! $user) {
+            abort(403);
+        }
+        if ($user->hasRole(\App\Enums\Role::Secretary->value)) {
+            $this->dispatch('toast', message: 'Секретарь только просматривает заявки.', type: 'error');
+
+            return;
+        }
+        $email = (string) ($this->request->client_email ?? '');
+        if (trim($email) === '') {
+            $this->dispatch('toast', message: 'У заявки нет e-mail клиента.', type: 'error');
+
+            return;
+        }
+
+        if ($dealers->isDealer($email)) {
+            $dealers->unmarkManual($email, $user->id);
+            $this->dispatch('toast', message: 'Статус «перепродавец» снят с ' . $email . '.', type: 'success');
+        } else {
+            $dealers->markManual($email, $user->id);
+            $this->dispatch('toast', message: 'Клиент ' . $email . ' помечен как перепродавец.', type: 'success');
+        }
+        unset($this->clientIsReseller);
+    }
+
+    /**
      * Phase 2.1 — отвязать наследование (только для child-заявок).
      *
      * Permission: owner / acting (delegation) / privileged
