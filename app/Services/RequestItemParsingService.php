@@ -918,34 +918,34 @@ PROMPT;
             ]);
         }
 
+        // Отсечь НЕ-номенклатурные структурные вложения (банковские реквизиты,
+        // счета на оплату, договоры, сертификаты, КАРТОЧКИ ПРЕДПРИЯТИЯ). Раньше
+        // гейт применялся только к heavy (pdf/xls) → docx-карточка предприятия
+        // его минула, и Vision ВЫДУМЫВАЛ позиции из реквизитов (кейс
+        // M-2026-11637: «Карточка предприятия АРИТ.docx» → 3 фейковые позиции;
+        // + M-2026-4011: «реквизиты АЛЬФА-БАНК.pdf»). Теперь ко ВСЕМ структурным,
+        // ДО split на lightweight/heavy. Fail-soft внутри classify…: при
+        // ошибке/неуверенности файл считается номенклатурным (не теряем позиции).
+        if ($structuredAttachments->isNotEmpty()) {
+            $droppedIrrelevant = $structuredAttachments->reject(
+                fn ($a) => $this->classifyHeavyAttachmentRelevance($a, $sourceTag)
+            );
+            if ($droppedIrrelevant->isNotEmpty()) {
+                $ids = $droppedIrrelevant->pluck('id')->all();
+                $structuredAttachments = $structuredAttachments->reject(fn ($a) => in_array($a->id, $ids, true));
+                Log::info('parseItemsFromInboundContent: dropped non-nomenclature structured attachments', [
+                    'source' => $sourceTag,
+                    'dropped' => $droppedIrrelevant->map(fn ($a) => $a->filename)->values()->all(),
+                ]);
+            }
+        }
+
         $lightweightStructured = $structuredAttachments->filter(function ($a) {
             return preg_match('/\.(doc|docx)$/i', (string) $a->filename) === 1;
         });
         $heavyStructured = $structuredAttachments->filter(function ($a) {
             return preg_match('/\.(pdf|xls|xlsx)$/i', (string) $a->filename) === 1;
         });
-
-        // Часть A: отсечь «не-номенклатурные» тяжёлые вложения (банковские
-        // реквизиты, счета на оплату, договоры, сертификаты). Без этого любой
-        // такой PDF/XLS попадает в $heavyStructured и рубит unified-путь →
-        // split → дубли photo-vs-text. Кейс M-2026-4011: «реквизиты
-        // АЛЬФА-БАНК.pdf» при 4 фото кнопок → split → 11 позиций вместо 6.
-        // Fail-soft внутри classify…: при ошибке/неуверенности файл считается
-        // номенклатурным (не теряем позиции).
-        if ($heavyStructured->isNotEmpty()) {
-            $droppedHeavy = $heavyStructured->reject(
-                fn ($a) => $this->classifyHeavyAttachmentRelevance($a, $sourceTag)
-            );
-            if ($droppedHeavy->isNotEmpty()) {
-                $droppedIds = $droppedHeavy->pluck('id')->all();
-                $heavyStructured = $heavyStructured->reject(fn ($a) => in_array($a->id, $droppedIds, true));
-                $structuredAttachments = $structuredAttachments->reject(fn ($a) => in_array($a->id, $droppedIds, true));
-                Log::info('parseItemsFromInboundContent: dropped non-nomenclature heavy attachments', [
-                    'source' => $sourceTag,
-                    'dropped' => $droppedHeavy->map(fn ($a) => $a->filename)->values()->all(),
-                ]);
-            }
-        }
 
         $canUseUnified = $imageAttachments->count() > 0
             && $imageAttachments->count() <= self::MAX_UNIFIED_IMAGES
