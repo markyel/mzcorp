@@ -71,18 +71,50 @@ class InternalSenderDetector
      */
     public function affectsRequestStatus(EmailMessage $message, ?string $clientEmail): bool
     {
-        // Внешний отправитель — вероятно заказчик (или его коллега/альт-адрес).
+        $from = mb_strtolower(trim((string) $message->from_email));
+        $client = mb_strtolower(trim((string) $clientEmail));
+
+        // Внешний отправитель — обычно заказчик (или его коллега/альт-адрес).
         if ($this->detect($message) === null) {
+            // НО «ответить всем» от ТРЕТЬЕЙ СТОРОНЫ — тоже внешний. Кейс
+            // M-2026-11446: клиент отправил запрос нам И конкуренту
+            // (a.petrishev@nlp-group.ru); конкурент ответил всем «Нет такого у
+            // нас» → детектор прочитал как ОТКАЗ КЛИЕНТА и авто-закрыл заявку.
+            // Признак третьей стороны: отправитель НЕ заказчик (ни email, ни
+            // домен) И заказчик среди ПОЛУЧАТЕЛЕЙ (т.е. отправитель адресует
+            // заказчику, а не является им). Такое письмо статус не трогает.
+            if ($client !== ''
+                && ! $this->isSameParty($from, $client)
+                && in_array($client, $this->recipientEmails($message), true)) {
+                return false;
+            }
+
             return true;
         }
 
         // Отправитель наш → влияет только если заказчик среди получателей.
-        $client = mb_strtolower(trim((string) $clientEmail));
         if ($client === '') {
             return false;
         }
 
         return in_array($client, $this->recipientEmails($message), true);
+    }
+
+    /** Один контрагент: совпадает точный e-mail или домен. */
+    private function isSameParty(string $a, string $b): bool
+    {
+        $a = mb_strtolower(trim($a));
+        $b = mb_strtolower(trim($b));
+        if ($a === '' || $b === '') {
+            return false;
+        }
+        if ($a === $b) {
+            return true;
+        }
+        $da = (string) substr((string) strrchr($a, '@'), 1);
+        $db = (string) substr((string) strrchr($b, '@'), 1);
+
+        return $da !== '' && $da === $db;
     }
 
     /**
