@@ -48,19 +48,33 @@ class SupplierReminderService
             ->where('status', 'open')
             ->has('items')
             ->whereDoesntHave('messages', fn ($q) => $q->where('direction', 'inbound'))
-            // Гард от ложного напоминания: ответ поставщика мог прийти, но не
-            // привязаться (другой адрес/сломанный тред). Если в почте есть
-            // НЕпривязанный входящий supplier_reply с НАШИМ номером RFQ этого
-            // инквайри в теме ([363328]) — значит ответ де-факто получен,
-            // напоминание не шлём (иначе поставщик отвечает второй раз). Матчим
-            // по уникальному коду в скобках, извлечённому из темы инквайри.
+            // Гард от ложного напоминания: тот же поставщик (по ДОМЕНУ) уже
+            // ответил по этой заявке. Ответ мог прийти с ДРУГОГО контакта того же
+            // домена (RFQ на amy@, ответ с ella@ es-escalatorpart.com) и лечь в
+            // соседний инквайри, либо остаться непривязанным. Номер RFQ [NNNNNN]
+            // ОБЩИЙ на заявку (не различает поставщиков) — различаем по домену.
+            // Не шлём повтор, если по этой заявке от нашего домена уже есть
+            // входящий supplier_reply (в любом инквайри заявки ИЛИ непривязанный
+            // с M-кодом заявки в теме). Кейс: 8602/10149/10451/10669/10940.
             ->whereRaw("NOT EXISTS (
                 SELECT 1 FROM email_messages em
-                WHERE em.direction = 'inbound'
-                  AND em.supplier_inquiry_id IS NULL
-                  AND em.category = 'supplier_reply'
-                  AND substring(supplier_inquiries.subject from '\\[(\\d{6,9})\\]') IS NOT NULL
-                  AND em.subject ILIKE '%' || substring(supplier_inquiries.subject from '\\[(\\d{6,9})\\]') || '%'
+                WHERE em.direction = 'inbound' AND em.category = 'supplier_reply'
+                  AND split_part(lower(em.from_email), '@', 2) = split_part(lower(supplier_inquiries.supplier_email), '@', 2)
+                  AND (
+                    em.supplier_inquiry_id IN (
+                        SELECT sib.id FROM supplier_inquiries sib
+                        WHERE sib.related_request_id = supplier_inquiries.related_request_id
+                    )
+                    OR (
+                        em.supplier_inquiry_id IS NULL
+                        AND supplier_inquiries.related_request_id IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1 FROM requests r
+                            WHERE r.id = supplier_inquiries.related_request_id
+                              AND em.subject ILIKE '%' || r.internal_code || '%'
+                        )
+                    )
+                  )
             )")
             ->where('reminders_sent', '<', $max)
             ->where('created_at', '<', now()->subDays($firstAfter))
