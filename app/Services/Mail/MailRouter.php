@@ -327,7 +327,11 @@ class MailRouter
         // (ответ поставщика не должен липнуть к клиентской заявке). Кейс
         // 0028087@mail.ru: ответы поставщика плодили фантомные заявки.
         try {
-            $supplierInquiry = $this->supplierInquiries->matchInbound($message);
+            // Детерминированно по токену RFQ ([RFQ-<token>] в теме) — приоритетно
+            // над тред-матчем. Ловит ответы на прямые RFQ снабжения (тред часто
+            // сломан), прочая переписка поставщика без токена сюда не попадает.
+            $supplierInquiry = $this->supplierInquiries->matchInboundByRfqToken($message)
+                ?? $this->supplierInquiries->matchInbound($message);
             if ($supplierInquiry !== null) {
                 $this->supplierInquiries->attachMessage($supplierInquiry, $message);
                 Log::info('MailRouter: supplier inquiry reply — attached, no request', [

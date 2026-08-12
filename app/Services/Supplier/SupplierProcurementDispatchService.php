@@ -27,6 +27,7 @@ class SupplierProcurementDispatchService
     public function __construct(
         private readonly OutgoingMailSender $sender,
         private readonly SupplierDispatchService $base,
+        private readonly SupplierInquiryService $inquiries,
     ) {}
 
     /**
@@ -95,7 +96,12 @@ class SupplierProcurementDispatchService
                 $personalGreeting = $this->base->personalGreeting($greetingTpl, $supplier, $lang);
                 $intro = trim((string) ($lang === 'en' ? ($edits['intro_en'] ?? '') : ($edits['intro_ru'] ?? '')));
                 $closing = trim((string) ($lang === 'en' ? ($edits['closing_en'] ?? '') : ($edits['closing_ru'] ?? '')));
-                $subject = $lang === 'en' ? 'Price request' : 'Запрос расценки';
+                // Уникальный токен RFQ в теме → детерминированный матч ответа
+                // (позиция-центричный RFQ без заявки, вся прочая переписка
+                // снабжения с поставщиком игнорируется). См. matchInboundByRfqToken.
+                $rfqToken = $this->inquiries->generateRfqToken();
+                $subject = ($lang === 'en' ? 'Price request' : 'Запрос расценки')
+                    . ' ' . $this->inquiries->rfqMarker($rfqToken);
 
                 $html = view('emails.supplier-rfq-catalog', [
                     'rows' => $rows,
@@ -126,6 +132,7 @@ class SupplierProcurementDispatchService
                     'related_request_id' => null,
                     'status' => 'open',
                     'created_by_user_id' => $by->id,
+                    'rfq_token' => $rfqToken,
                 ]);
                 foreach ($askItems as $ci) {
                     SupplierInquiryItem::create([

@@ -117,9 +117,15 @@ class SupplierDispatchService
                 $onecSuffix = filled($request->onec_number)
                     ? ' / [' . trim((string) $request->onec_number) . ']'
                     : '';
-                $subject = $lang === 'en'
+                // Уникальный токен RFQ в теме → детерминированный матч ответа
+                // поставщика (createFromOutbound извлечёт его из темы и сохранит
+                // на инквайри). Устойчив к сломанному треду / общей переписке.
+                $rfqSvc = app(SupplierInquiryService::class);
+                $rfqMarker = ' ' . $rfqSvc->rfqMarker($rfqSvc->generateRfqToken());
+                $subject = ($lang === 'en'
                     ? 'Price request — [' . $request->internal_code . ']' . $onecSuffix
-                    : 'Запрос расценки — [' . $request->internal_code . ']' . $onecSuffix;
+                    : 'Запрос расценки — [' . $request->internal_code . ']' . $onecSuffix)
+                    . $rfqMarker;
                 $bodyHtml = view('emails.supplier-rfq', [
                     'request' => $request,
                     'supplier' => $supplier,

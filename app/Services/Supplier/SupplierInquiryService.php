@@ -76,6 +76,9 @@ class SupplierInquiryService
                     'related_request_id' => $requestId,
                     'status' => 'open',
                     'created_by_user_id' => $by?->id,
+                    // Токен RFQ из темы ([RFQ-<token>]) — для детерминированного
+                    // матча ответа поставщика (SupplierDispatchService его ставит).
+                    'rfq_token' => $this->extractRfqToken($sent->subject),
                 ]);
             }
             $this->attachMessage($inquiry, $sent);
@@ -168,7 +171,11 @@ class SupplierInquiryService
         //    ответ по одной позиции валился в «последний инквайри по e-mail» и
         //    портил другой запрос (кейс es-escalatorpart: цена на M-2026-11154
         //    села в инквайри по M-2026-11295). 3) фолбэк по e-mail.
-        $inquiry = $this->matchInbound($message) ?? $this->matchInboundByAnyCode($message);
+        // 0) ДЕТЕРМИНИРОВАННО по токену RFQ в теме ([RFQ-<token>]) — самый
+        //    надёжный: токен уникален на инквайри, поставщик сохраняет тему.
+        $inquiry = $this->matchInboundByRfqToken($message)
+            ?? $this->matchInbound($message)
+            ?? $this->matchInboundByAnyCode($message);
         if ($inquiry === null) {
             $email = mb_strtolower(trim((string) $message->from_email));
             $inquiry = SupplierInquiry::query()
@@ -287,6 +294,57 @@ class SupplierInquiryService
      * инквайри». M-код приоритетнее док-номера; среди совпадений — открытый и
      * последний.
      */
+    /** Regex токена RFQ в теме: `[RFQ-A3F9K2]`. */
+    private const RFQ_TOKEN_RE = '/\[RFQ-([A-Z0-9]{4,12})\]/i';
+
+    /**
+     * Уникальный токен RFQ для нового инквайри. Ставится маркером в тему,
+     * поставщик сохраняет тему при ответе → детерминированный матч ответа.
+     */
+    public function generateRfqToken(): string
+    {
+        do {
+            $token = \Illuminate\Support\Str::upper(\Illuminate\Support\Str::random(7));
+        } while (SupplierInquiry::query()->where('rfq_token', $token)->exists());
+
+        return $token;
+    }
+
+    /** Маркер токена для добавления в тему письма-запроса. */
+    public function rfqMarker(string $token): string
+    {
+        return '[RFQ-' . mb_strtoupper(trim($token)) . ']';
+    }
+
+    /** Извлечь токен RFQ из темы (для createFromOutbound и матча ответа). */
+    public function extractRfqToken(?string $subject): ?string
+    {
+        if (preg_match(self::RFQ_TOKEN_RE, (string) $subject, $m) === 1) {
+            return mb_strtoupper($m[1]);
+        }
+
+        return null;
+    }
+
+    /**
+     * ДЕТЕРМИНИРОВАННЫЙ матч ответа поставщика по токену RFQ в теме. Самый
+     * надёжный путь: токен уникален на инквайри (заявка/пул × поставщик),
+     * поставщик сохраняет тему. Только inbound. Прочая переписка снабжения
+     * (закупки/отгрузки/рекламации) токена не несёт → не матчится, игнорируется.
+     */
+    public function matchInboundByRfqToken(EmailMessage $message): ?SupplierInquiry
+    {
+        if ($message->direction !== MailDirection::Inbound) {
+            return null;
+        }
+        $token = $this->extractRfqToken($message->subject);
+        if ($token === null) {
+            return null;
+        }
+
+        return SupplierInquiry::query()->where('rfq_token', $token)->first();
+    }
+
     public function matchInboundByAnyCode(EmailMessage $message): ?SupplierInquiry
     {
         if ($message->direction !== MailDirection::Inbound) {

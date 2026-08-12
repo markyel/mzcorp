@@ -35,6 +35,9 @@ class SupplierInquiry extends Model
         'status',
         'created_by_user_id',
         'notes',
+        // Уникальный токен RFQ ([RFQ-<token>] в теме) для детерминированного
+        // матча ответа поставщика к этому инквайри.
+        'rfq_token',
         // Авто-напоминания (Фаза 3.5).
         'reminders_sent',
         'last_reminder_at',
