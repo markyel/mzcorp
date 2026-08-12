@@ -1099,6 +1099,8 @@
             <livewire:requests.postpone-dialog :request="$req" wire:key="postpone-{{ $req->id }}" lazy />
             <livewire:requests.close-lost-dialog :request="$req" wire:key="close-lost-{{ $req->id }}" lazy />
             <livewire:requests.issue-invoice-dialog :request="$req" wire:key="issue-invoice-{{ $req->id }}" lazy />
+            {{-- Отправка клиенту КП/счёта — НЕ lazy: диалог ловит событие open-send-client-document --}}
+            <livewire:requests.send-client-document-dialog :request-id="$req->id" wire:key="send-doc-{{ $req->id }}" />
             {{-- Phase 7: ручной доматчинг строк КП к позициям заявки. --}}
             <livewire:requests.quotes.match-request-item-dialog :request="$req" wire:key="quote-match-{{ $req->id }}" lazy />
         </div>
@@ -2619,6 +2621,11 @@
                  «✓ Оплачен» / «✕ Аннулировать». Перенесено из action-panel
                  в отдельный таб — там распухало sidebar. --}}
             @case('invoices')
+                <div class="mb-3 flex items-center justify-between gap-2 flex-wrap">
+                    <div class="text-[12px] text-fg-3">Отправьте клиенту счёт (из 1С) письмом — ответом в переписке, с обработкой как счёт.</div>
+                    <button type="button" wire:click="$dispatch('open-send-client-document', { focus: 'invoice' })"
+                            class="btn btn-sm btn-primary">✉ Отправить счёт клиенту</button>
+                </div>
                 @php $invList = $this->invoicesForRequest; @endphp
                 @if($invList->isEmpty())
                     <div class="ds-card p-8 text-center text-fg-3">
@@ -2934,6 +2941,11 @@
                  Ниже — snapshot'ы OutboundQuote: исторически уже отправленные клиенту
                  КП/счета, заполнено ParseOutboundQuoteJob после OutboundDocumentDetector. --}}
             @case('quotes')
+                <div class="mb-3 flex items-center justify-between gap-2 flex-wrap">
+                    <div class="text-[12px] text-fg-3">Отправьте клиенту КП (из 1С) письмом — ответом в переписке, с обработкой как КП.</div>
+                    <button type="button" wire:click="$dispatch('open-send-client-document', { focus: 'quote' })"
+                            class="btn btn-sm btn-primary">✉ Отправить КП клиенту</button>
+                </div>
                 <livewire:requests.quotations.editor :request-id="$req->id" :key="'quot-editor-'.$req->id" />
                 @php
                     $quotes = $req->outboundQuotes; // загружены в Detail::mount с items + relations
