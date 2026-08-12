@@ -1,10 +1,9 @@
 <div>
     @if($open)
-        <div class="fixed inset-0 z-[9998] flex items-start justify-center overflow-y-auto p-4"
-             style="background: rgba(0,0,0,0.45)"
+        <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: flex-start; justify-content: center; padding: 24px; overflow-y: auto;"
              wire:key="send-client-doc-modal"
              x-data x-on:keydown.escape.window="$wire.close()">
-            <div class="ds-card w-full max-w-2xl mt-12 shadow-xl" x-on:click.stop>
+            <div class="ds-card shadow-xl" style="width: 100%; max-width: 42rem; margin-top: 3rem;" x-on:click.stop>
                 <div class="ds-card-header">
                     <h3 class="text-[15px] font-semibold text-fg-1">
                         Отправить клиенту {{ $focus === 'invoice' ? 'счёт' : 'КП' }}
