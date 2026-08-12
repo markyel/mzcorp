@@ -145,14 +145,20 @@ class SendClientDocumentDialog extends Component
         // recordSuggestion(confidence=1.0) авто-применит статус (КП→Quoted,
         // счёт→Invoiced), ParseOutboundQuoteJob распарсит вложение по типу.
         // Идемпотентно с последующей sync-детекцией (по email+type / attachment).
+        // ФОРС-применение (не полагаемся на detector.auto_mode): apply()
+        // идемпотентен (isFinal → return), поэтому перевод статуса гарантирован.
+        // При обоих документах КП применяем ПЕРВЫМ, счёт ВТОРЫМ — итог Invoiced
+        // (приоритет счёта). ParseOutboundQuoteJob распарсит вложение по типу.
         if ($kpAttIds !== []) {
-            $decisions->recordSuggestion(DetectorType::OutboundQuotationFull, $req->fresh(), $sent, 1.0, ['source' => 'client_document_dialog']);
+            $d = $decisions->recordSuggestion(DetectorType::OutboundQuotationFull, $req->fresh(), $sent, 1.0, ['source' => 'client_document_dialog']);
+            $decisions->apply($d, $user, ['source' => 'client_document_dialog']);
             foreach ($kpAttIds as $aid) {
                 $this->dispatchParse($aid, DetectorType::OutboundQuotationFull);
             }
         }
         if ($invAttIds !== []) {
-            $decisions->recordSuggestion(DetectorType::OutboundInvoice, $req->fresh(), $sent, 1.0, ['source' => 'client_document_dialog']);
+            $d = $decisions->recordSuggestion(DetectorType::OutboundInvoice, $req->fresh(), $sent, 1.0, ['source' => 'client_document_dialog']);
+            $decisions->apply($d, $user, ['source' => 'client_document_dialog']);
             foreach ($invAttIds as $aid) {
                 $this->dispatchParse($aid, DetectorType::OutboundInvoice);
             }
