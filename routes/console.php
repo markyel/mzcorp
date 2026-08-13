@@ -198,6 +198,17 @@ Schedule::command('requests:auto-close-inactive')
     ->onOneServer()
     ->runInBackground();
 
+// LLM-переоценка застрявших заявок (менеджерские статусы, тишина ≥ N дн): если
+// ход за клиентом — перевод в waiting-on-client → дальше auto-close по таймауту.
+// Раньше auto-close (07:30) — чтобы переоценённые попадали в тот же цикл закрытия.
+// См. RequestsReassessStalledCommand + RequestStatusReassessor.
+Schedule::command('requests:reassess-stalled --apply')
+    ->dailyAt('07:30')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Еженедельные персональные отчёты менеджеров: генерация за ПРОШЛУЮ неделю
 // (пн–вс) + рассылка на почту менеджеров. Понедельник 08:00 МСК. Отчёт —
 // замороженный снимок метрик (weekly_reports.data), доступен в
