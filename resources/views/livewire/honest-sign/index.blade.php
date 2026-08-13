@@ -15,6 +15,10 @@
                 class="px-3 py-1.5 text-[13px] {{ $tab === 'parse' ? 'text-fg-1 font-semibold border-b-2 border-[var(--sky-500)]' : 'text-fg-3' }}">
             Разбор
         </button>
+        <button type="button" wire:click="setTab('names')"
+                class="px-3 py-1.5 text-[13px] {{ $tab === 'names' ? 'text-fg-1 font-semibold border-b-2 border-[var(--sky-500)]' : 'text-fg-3' }}">
+            Названия по каталогу
+        </button>
         <button type="button" wire:click="setTab('journal')"
                 class="px-3 py-1.5 text-[13px] {{ $tab === 'journal' ? 'text-fg-1 font-semibold border-b-2 border-[var(--sky-500)]' : 'text-fg-3' }}">
             Журнал и поиск
@@ -129,6 +133,55 @@
                               rows="{{ min(count($g['codes']) + 1, 8) }}">{{ $g['kiz'] }}</textarea>
                 </div>
             @endforeach
+        @endif
+    @elseif($tab === 'names')
+        {{-- НАЗВАНИЯ ПО КАТАЛОГУ --}}
+        <div class="ds-card p-4 mb-4">
+            <div class="text-[12.5px] text-fg-2 mb-3">
+                Загрузите файл (.xlsx) со столбцом <b>MZ-ID</b> (M-артикул). В результат
+                добавится колонка <b>«Наименование (из каталога)»</b> сразу справа от
+                артикула — русское название товара из каталога по этому M-артикулу.
+                Остальные столбцы, формулы и итоги не меняются.
+            </div>
+
+            <div class="max-w-[520px]">
+                <label class="block text-[11px] uppercase tracking-wider font-semibold text-fg-3 mb-1">
+                    Файл (.xlsx) <span class="text-red-700">*</span>
+                </label>
+                <input type="file" wire:model="namesExcel" accept=".xlsx,.xls"
+                       class="w-full text-[12.5px] border border-border rounded-md p-1.5">
+                @error('namesExcel') <div class="text-red-700 text-[11.5px] mt-1">{{ $message }}</div> @enderror
+            </div>
+
+            <div class="flex items-center gap-2 mt-3">
+                <button type="button" wire:click="processNames" wire:loading.attr="disabled" wire:target="processNames,namesExcel" class="btn btn-primary">
+                    <span wire:loading.remove wire:target="processNames">Добавить названия</span>
+                    <span wire:loading wire:target="processNames">Обрабатываю…</span>
+                </button>
+                @if($namesFilledPath)
+                    <button type="button" wire:click="downloadNames" class="btn">
+                        ↓ Скачать результат
+                    </button>
+                    <span class="text-[11.5px] text-fg-3">{{ $namesFilledName }}</span>
+                @endif
+            </div>
+        </div>
+
+        @if(!empty($namesReport))
+            <div class="ds-card p-3 mb-3 text-[12.5px]">
+                <span class="text-fg-2">Строк с артикулом:</span>
+                <b class="text-fg-1">{{ $namesReport['total'] }}</b>
+                · названий подставлено: <b class="text-emerald-700">{{ $namesReport['matched'] }}</b>
+                @if(!empty($namesReport['unmatched']))
+                    · <b class="text-amber-700">{{ count($namesReport['unmatched']) }}</b> не найдено в каталоге
+                @endif
+            </div>
+            @if(!empty($namesReport['unmatched']))
+                <div class="p-2.5 rounded bg-amber-50 mb-3 text-[11.5px] text-amber-800">
+                    ⚠ <b>Нет в каталоге</b> (ячейка названия осталась пустой):
+                    <span class="mono">{{ implode(', ', array_slice($namesReport['unmatched'], 0, 60)) }}</span>@if(count($namesReport['unmatched']) > 60) … и ещё {{ count($namesReport['unmatched']) - 60 }}@endif
+                </div>
+            @endif
         @endif
     @else
         {{-- ЖУРНАЛ + ПОИСК --}}

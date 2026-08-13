@@ -4,6 +4,7 @@ namespace App\Livewire\HonestSign;
 
 use App\Models\HonestSignBatch;
 use App\Models\HonestSignCode;
+use App\Services\HonestSign\HonestSignCatalogNameFiller;
 use App\Services\HonestSign\HonestSignExcelFiller;
 use App\Services\HonestSign\HonestSignPdfParser;
 use Illuminate\Support\Facades\DB;
@@ -52,9 +53,20 @@ class Index extends Component
 
     public ?string $filledName = null;
 
+    /* --- Инструмент «Названия по каталогу» (вкладка names) --- */
+
+    public $namesExcel = null;
+
+    public ?string $namesFilledPath = null;
+
+    public ?string $namesFilledName = null;
+
+    /** @var array{matched:int, total:int, unmatched:array<int,string>} */
+    public array $namesReport = [];
+
     public function setTab(string $tab): void
     {
-        $this->tab = in_array($tab, ['parse', 'journal'], true) ? $tab : 'parse';
+        $this->tab = in_array($tab, ['parse', 'journal', 'names'], true) ? $tab : 'parse';
         $this->resetPage();
     }
 
@@ -191,6 +203,54 @@ class Index extends Component
         }
 
         return response()->download($this->filledPath, $this->filledName ?: 'supply.xlsx')
+            ->deleteFileAfterSend(true);
+    }
+
+    /**
+     * Инструмент «Названия по каталогу»: xlsx с MZ-ID → тот же файл + колонка
+     * с русским названием из каталога сразу справа от артикула.
+     */
+    public function processNames(HonestSignCatalogNameFiller $filler): void
+    {
+        $this->validate([
+            'namesExcel' => 'required|file|mimes:xlsx,xls|max:25600',
+        ], [], ['namesExcel' => 'файл']);
+
+        $this->reset(['namesReport', 'namesFilledPath', 'namesFilledName']);
+
+        try {
+            $outName = 'Каталог_' . $this->namesExcel->getClientOriginalName();
+            $outPath = storage_path('app/honest-sign/' . Str::random(12) . '.xlsx');
+            if (! is_dir(dirname($outPath))) {
+                mkdir(dirname($outPath), 0775, true);
+            }
+            $report = $filler->fill($this->namesExcel->getRealPath(), $outPath);
+            $this->namesFilledPath = $outPath;
+            $this->namesFilledName = $outName;
+            $this->namesReport = [
+                'matched' => $report['matched'],
+                'total' => $report['total_rows'],
+                'unmatched' => $report['unmatched'],
+            ];
+        } catch (\Throwable $e) {
+            $this->addError('namesExcel', $e->getMessage());
+
+            return;
+        }
+
+        $this->reset(['namesExcel']);
+    }
+
+    /** Отдать файл с названиями и убрать его с диска. */
+    public function downloadNames()
+    {
+        if (! $this->namesFilledPath || ! is_file($this->namesFilledPath)) {
+            $this->addError('namesExcel', 'Файл больше недоступен — обработайте заново.');
+
+            return null;
+        }
+
+        return response()->download($this->namesFilledPath, $this->namesFilledName ?: 'catalog.xlsx')
             ->deleteFileAfterSend(true);
     }
 
