@@ -35,7 +35,11 @@
                     <div class="flex-1 min-w-[240px]">
                         <div class="flex items-center gap-2 flex-wrap text-[13px]">
                             <span class="font-medium text-fg-1">{{ $inq->supplier_name ?: $inq->supplier_email }}</span>
-                            @if($inq->inbound_count > 0)
+                            @if($inq->offers_count > 0)
+                                {{-- Есть оффер(ы) — приоритетно над reply_state (он ставится
+                                     только при ОТСУТСТВИИ оффера; null ≠ «без оффера»). --}}
+                                <span class="chip text-[10.5px]" style="background:var(--emerald-50);color:var(--emerald-700)"><span class="dot"></span>оффер получен · {{ $inq->offers_count }}</span>
+                            @elseif($inq->inbound_count > 0)
                                 @if($inq->reply_state === 'question_to_us')
                                     <span class="chip text-[10.5px]" style="background:var(--red-50);color:var(--red-700)"><span class="dot"></span>задал вопрос — ответьте</span>
                                 @elseif($inq->reply_state === 'awaiting_supplier')
