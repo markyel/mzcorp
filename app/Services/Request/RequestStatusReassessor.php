@@ -90,15 +90,16 @@ class RequestStatusReassessor
             return null;
         }
 
-        // Гард: quoted/invoiced ставим ТОЛЬКО если документ реально есть — иначе
-        // LLM мог принять «стоимость актуализируется» за КП (кейс M-2026-7840).
-        // Без документа понижаем до awaiting_client_clarification (тоже
-        // waiting-on-client, auto-close по таймауту), не выдумывая веху КП/счёта.
+        // Гард: quoted/invoiced ставим ТОЛЬКО если документ реально есть. Без
+        // него target=quoted почти всегда значит, что LLM спутал «получили
+        // запрос / обещали вернуться с КП» (ход за НАМИ) с отправленным КП
+        // (кейсы M-2026-7840/11039/11069). Раньше понижали до awaiting — ошибочно
+        // уводило реальную просрочку менеджера. Теперь ПРОПУСКАЕМ (не трогаем).
         if ($target === RequestStatus::Quoted && ! $this->hasOutboundQuote($request)) {
-            $target = RequestStatus::AwaitingClientClarification;
+            return null;
         }
         if ($target === RequestStatus::Invoiced && ! $this->hasInvoice($request)) {
-            $target = RequestStatus::AwaitingClientClarification;
+            return null;
         }
 
         if ($request->status === $target) {
