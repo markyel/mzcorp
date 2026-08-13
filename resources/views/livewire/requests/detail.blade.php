@@ -857,6 +857,31 @@
                 @endforeach
             @endif
 
+            {{-- Объединение: эта заявка — winner (приняла другие). Показываем при
+                 ЛЮБОМ статусе — симметрично баннеру «Объединена с» на проигравшей
+                 (та видна только в terminal-карточке). Кейс M-2026-8947: из
+                 победителя не было видно, какие заявки в него слиты. --}}
+            @php $mergedLosers = $req->mergedFrom()->orderByDesc('merged_at')->orderByDesc('id')->get(['id', 'internal_code', 'merged_at', 'client_name']); @endphp
+            @if($mergedLosers->isNotEmpty())
+                <div class="ds-card p-3 text-[12.5px] bg-sky-50 border-sky-300">
+                    <div class="font-medium text-fg-1 mb-1.5">⊌ В эту заявку объединены · {{ $mergedLosers->count() }}</div>
+                    <div class="flex flex-col gap-1">
+                        @foreach($mergedLosers as $loser)
+                            <div class="flex items-center gap-2">
+                                <a href="{{ route('requests.show', $loser) }}" wire:navigate
+                                   class="mono text-[var(--accent)] hover:underline">{{ $loser->internal_code }}</a>
+                                @if($loser->client_name)
+                                    <span class="text-fg-3 truncate">{{ $loser->client_name }}</span>
+                                @endif
+                                @if($loser->merged_at)
+                                    <span class="text-fg-4 text-[11px] ml-auto whitespace-nowrap">{{ $loser->merged_at->format('d.m.Y H:i') }}</span>
+                                @endif
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
+
             {{-- Terminal: только информационная плашка. --}}
             @if($req->status->isTerminal())
                 <div class="ds-card p-3 text-[12.5px] {{ $req->status === $RS::ClosedWon ? 'bg-emerald-50 border-emerald-300' : 'bg-red-50 border-red-300' }}">
