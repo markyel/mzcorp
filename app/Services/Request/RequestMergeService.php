@@ -8,6 +8,9 @@ use App\Enums\RequestStatus;
 use App\Enums\Role as RoleEnum;
 use App\Models\ClarificationBatch;
 use App\Models\EmailMessage;
+use App\Models\Invoice;
+use App\Models\OutboundQuote;
+use App\Models\Quotation;
 use App\Models\Request;
 use App\Models\RequestItem;
 use App\Models\RequestStateChange;
@@ -100,12 +103,29 @@ class RequestMergeService
                 ->where('request_id', $loser->id)
                 ->update(['request_id' => $winner->id]);
 
+            // 3b. Перенос распознанных КП/счетов на winner. Без этого КП/счёт,
+            // распознанный ДО слияния, оставался на loser → пропадал из карточки
+            // winner (КП/Счёт-вкладки фильтруют по request_id). Кейс: КП 361648
+            // на M-2026-8953 → слита в M-2026-8947, КП «пропал».
+            $outboundQuotesMoved = OutboundQuote::query()
+                ->where('request_id', $loser->id)
+                ->update(['request_id' => $winner->id]);
+            $quotationsMoved = Quotation::query()
+                ->where('request_id', $loser->id)
+                ->update(['request_id' => $winner->id]);
+            $invoicesMoved = Invoice::query()
+                ->where('request_id', $loser->id)
+                ->update(['request_id' => $winner->id]);
+
             // 4. Audit в обоих.
             $stats = [
                 'items_added' => $itemsAdded,
                 'items_skipped' => $itemsSkipped,
                 'emails_moved' => $emailsMoved,
                 'batches_moved' => $batchesMoved,
+                'outbound_quotes_moved' => $outboundQuotesMoved,
+                'quotations_moved' => $quotationsMoved,
+                'invoices_moved' => $invoicesMoved,
             ];
 
             RequestStateChange::create([
