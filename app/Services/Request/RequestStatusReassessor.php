@@ -89,6 +89,18 @@ class RequestStatusReassessor
         if ($target === null || (float) ($decision['confidence'] ?? 0) < $minConfidence) {
             return null;
         }
+
+        // Гард: quoted/invoiced ставим ТОЛЬКО если документ реально есть — иначе
+        // LLM мог принять «стоимость актуализируется» за КП (кейс M-2026-7840).
+        // Без документа понижаем до awaiting_client_clarification (тоже
+        // waiting-on-client, auto-close по таймауту), не выдумывая веху КП/счёта.
+        if ($target === RequestStatus::Quoted && ! $this->hasOutboundQuote($request)) {
+            $target = RequestStatus::AwaitingClientClarification;
+        }
+        if ($target === RequestStatus::Invoiced && ! $this->hasInvoice($request)) {
+            $target = RequestStatus::AwaitingClientClarification;
+        }
+
         if ($request->status === $target) {
             return null;
         }
@@ -120,6 +132,30 @@ class RequestStatusReassessor
         }
 
         return $target;
+    }
+
+    /** Есть ли реально исходящий КП по заявке (для гарда target=quoted). */
+    private function hasOutboundQuote(Request $request): bool
+    {
+        $hasOq = \App\Models\OutboundQuote::query()
+            ->where('request_id', $request->id)
+            ->where('document_type', 'outbound_quotation_full')
+            ->exists();
+        if ($hasOq) {
+            return true;
+        }
+
+        return method_exists($request, 'quotations')
+            ? $request->quotations()->whereNotIn('status', ['cancelled'])->exists()
+            : false;
+    }
+
+    /** Есть ли реально счёт по заявке (для гарда target=invoiced). */
+    private function hasInvoice(Request $request): bool
+    {
+        return method_exists($request, 'invoices')
+            ? $request->invoices()->exists()
+            : false;
     }
 
     /** Компактная хронология клиентской переписки для LLM. */
