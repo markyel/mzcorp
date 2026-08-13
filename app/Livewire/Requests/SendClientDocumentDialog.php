@@ -3,6 +3,7 @@
 namespace App\Livewire\Requests;
 
 use App\Enums\DetectorType;
+use App\Enums\MailDirection;
 use App\Enums\Role;
 use App\Jobs\Quotes\ParseOutboundQuoteJob;
 use App\Models\EmailAttachment;
@@ -221,15 +222,52 @@ class SendClientDocumentDialog extends Component
         return $ids;
     }
 
+    /**
+     * Якорь для threading — последнее письмо КЛИЕНТА (не любого письма треда!).
+     *
+     * Заявка может нести переписку нескольких сторон под одним related_request_id
+     * с supplier_inquiry_id=NULL (клиент + поставщики + внутренние). Раньше брали
+     * просто последнее письмо треда → якорь съезжал на суб-тред поставщика, и КП
+     * уходил клиенту с чужой темой, вне его цепочки (кейс M-2026-11902: клиент
+     * order@liftway.store, а якорем стала наша переписка с unisystem.si «Request
+     * M-2026-11901»). Теперь строго по клиенту:
+     *   1) последнее ВХОДЯЩЕЕ от самого клиента (его message_id → In-Reply-To →
+     *      письмо ляжет в тред клиента);
+     *   2) иначе (веб-форма/пересылка через релей — клиент не писал напрямую) —
+     *      последнее письмо, где клиент СТОРОНА (from/to/cc);
+     *   3) фолбэк — последнее письмо треда.
+     */
     private function lastClientMessage(RequestModel $req): ?EmailMessage
     {
-        return EmailMessage::query()
+        $clientEmail = mb_strtolower(trim((string) $req->client_email));
+
+        $base = fn () => EmailMessage::query()
             ->where('related_request_id', $req->id)
             ->whereNull('supplier_inquiry_id')
-            ->where('is_draft', false)
-            ->orderByDesc('sent_at')
-            ->orderByDesc('id')
-            ->first();
+            ->where('is_draft', false);
+
+        if ($clientEmail !== '') {
+            $fromClient = $base()
+                ->where('direction', MailDirection::Inbound->value)
+                ->whereRaw('lower(from_email) = ?', [$clientEmail])
+                ->orderByDesc('sent_at')->orderByDesc('id')->first();
+            if ($fromClient !== null) {
+                return $fromClient;
+            }
+
+            $withClient = $base()
+                ->where(function ($q) use ($clientEmail) {
+                    $q->whereRaw('lower(from_email) = ?', [$clientEmail])
+                        ->orWhereRaw("EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(to_recipients, '[]'::jsonb)) e WHERE lower(e->>'email') = ?)", [$clientEmail])
+                        ->orWhereRaw("EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(cc_recipients, '[]'::jsonb)) e WHERE lower(e->>'email') = ?)", [$clientEmail]);
+                })
+                ->orderByDesc('sent_at')->orderByDesc('id')->first();
+            if ($withClient !== null) {
+                return $withClient;
+            }
+        }
+
+        return $base()->orderByDesc('sent_at')->orderByDesc('id')->first();
     }
 
     private function buildSubject(RequestModel $req): string
