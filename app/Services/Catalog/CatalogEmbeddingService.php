@@ -36,6 +36,13 @@ class CatalogEmbeddingService
     /** Fixed seed для воспроизводимости LLM-реранка/валидации (детерминизм C-пути). */
     private const LLM_SEED = 20260806;
 
+    /**
+     * Максимум брендов в embed-строке «Бренд:» каталожной позиции. Кап нужен для
+     * «зонтичных» позиций с десятками брендов в brands[] (до 43) — иначе длинная
+     * строка бренда доминирует над названием/типом в векторе. См. buildBrandLine.
+     */
+    private const MAX_EMBED_BRANDS = 8;
+
     public function __construct(
         private readonly OpenAIEmbeddingService $embedder,
         private readonly OpenAIChatService $chat,
@@ -50,8 +57,17 @@ class CatalogEmbeddingService
     public function buildCatalogText(CatalogItem $item): string
     {
         $parts = [];
-        if ($item->brand) {
-            $parts[] = 'Бренд: ' . $item->brand;
+        // Бренд: ВСЕ бренды позиции (primary `brand` + `brands[]`), а не только
+        // primary. Мотив (кейс M-2026-11722): в 1С primary-бренд часто = ПОСТАВЩИК,
+        // а не производитель товара; реальный бренд лежит в brands[]. Раньше
+        // embed-текст нёс только primary → у записи с primary=поставщик точное
+        // совпадение имени проигрывало в similarity позиции, чей primary случайно
+        // совпал с брендом клиента (BETACONTROL был лишь в brands[], primary=LiftEquip).
+        // buildQueryText кодирует ОДИН бренд клиента — теперь он попадёт в список
+        // каталога независимо от того, primary он там или алиас.
+        $brandLine = $this->buildBrandLine($item);
+        if ($brandLine !== '') {
+            $parts[] = 'Бренд: ' . $brandLine;
         }
         if ($item->unit_name) {
             $parts[] = 'Узел: ' . $item->unit_name;
@@ -68,6 +84,48 @@ class CatalogEmbeddingService
         }
 
         return implode("\n", $parts);
+    }
+
+    /**
+     * Строка «Бренд:» для embed-текста каталога: primary `brand` + все `brands[]`,
+     * дедуп без учёта регистра, порядок сохранён (primary первым — для 169 позиций,
+     * где primary НЕ входит в brands[], это единственный источник). Кап
+     * MAX_EMBED_BRANDS: у части позиций brands[] — «зонтичный» список из десятков
+     * поставщиков/аналогов; длинная строка бренда топит суть (название/тип) в
+     * векторе. См. buildCatalogText.
+     */
+    private function buildBrandLine(CatalogItem $item): string
+    {
+        $seen = [];
+        $out = [];
+        $push = function ($b) use (&$seen, &$out) {
+            if (! is_string($b)) {
+                return;
+            }
+            $b = trim($b);
+            if ($b === '') {
+                return;
+            }
+            $key = mb_strtolower($b);
+            if (isset($seen[$key])) {
+                return;
+            }
+            $seen[$key] = true;
+            $out[] = $b;
+        };
+
+        $push($item->brand);
+        if (is_array($item->brands)) {
+            foreach ($item->brands as $b) {
+                $push($b);
+            }
+        }
+
+        if ($out === []) {
+            return '';
+        }
+
+        return implode(', ', array_slice($out, 0, self::MAX_EMBED_BRANDS));
     }
 
     /**
