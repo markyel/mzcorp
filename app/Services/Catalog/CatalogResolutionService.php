@@ -304,6 +304,53 @@ class CatalogResolutionService
      *
      * Возвращает true если применили апдейт.
      */
+    /**
+     * Fast-path C-step: точное уникальное совпадение по имени.
+     *
+     * Сравнение нормализованное: btrim + lower + схлопывание пробелов (тем же
+     * рецептом с обеих сторон). Матчим ТОЛЬКО если под нормализованное имя
+     * подходит ровно одна активная запись каталога — иначе (0 или ≥2) отдаём
+     * решение обычному эмбеддинг+LLM C-step'у.
+     *
+     * promoteStatus=false: как и остальной C-step, только привязываем
+     * catalog_item_id (цена/наличие/бэдж), не трогаем KB-статус.
+     *
+     * Возвращает true если применили привязку.
+     */
+    private function matchByExactName(RequestItem $item): bool
+    {
+        $name = preg_replace('/\s+/u', ' ', trim((string) ($item->parsed_name ?? ''))) ?? '';
+        // Слишком короткие имена (< 5 симв.) не считаем надёжным идентификатором —
+        // риск коллизии обобщённых имён («Плата», «Реле»). Их подберёт C-step.
+        if ($name === '' || mb_strlen($name) < 5) {
+            return false;
+        }
+
+        $matches = CatalogItem::query()
+            ->where('is_active', true)
+            ->whereRaw("lower(regexp_replace(btrim(name), '\\s+', ' ', 'g')) = ?", [mb_strtolower($name)])
+            ->limit(2)
+            ->get();
+        if ($matches->count() !== 1) {
+            return false;
+        }
+
+        /** @var CatalogItem $catalog */
+        $catalog = $matches->first();
+        $this->applyCatalogToItem($item, $catalog, promoteStatus: false, matchMethod: 'C_exact_name', extraPayload: [
+            'exact_name' => true,
+            'name_match_method' => 'exact_name',
+        ]);
+
+        Log::info('CatalogResolutionService: item matched (C:exact-name)', [
+            'request_item_id' => $item->id,
+            'catalog_item_id' => $catalog->id,
+            'catalog_sku' => $catalog->sku,
+        ]);
+
+        return true;
+    }
+
     public function matchByName(RequestItem $item): bool
     {
         if ($item->catalog_item_id !== null) {
@@ -316,6 +363,21 @@ class CatalogResolutionService
         if ($item->quality_assessment_status === 'internal_catalog_not_found') {
             return false;
         }
+
+        // Fast-path: точное и ОДНОЗНАЧНОЕ совпадение имени позиции с ровно одной
+        // активной каталожной записью → матчим напрямую, минуя эмбеддинг-ретрив
+        // и LLM-rerank. Кейс M-2026-11722: имя «Блок VTA-CAN CPU BETACONTROL»
+        // 1:1 совпадало с каталогом (M15849), но blended-ретрив ранжировал
+        // похожую-но-другую позицию («…VTA-CAN MOT…») ВЫШЕ (её primary-бренд
+        // совпал с брендом клиента, у точной записи primary-бренд другой →
+        // вектор просел), а LLM-rerank в итоге не выбирал никого. Точное
+        // уникальное имя — сигнал сильнее любого fuzzy-скора, ему доверяем.
+        // Гард «ровно одна активная запись» исключает неоднозначность
+        // (одинаковые имена под разными SKU уводим в обычный C-step + LLM).
+        if ($this->matchByExactName($item)) {
+            return true;
+        }
+
         if (! (bool) app_setting('catalog.name_match.enabled', config('services.catalog_name_match.enabled', true))) {
             return false;
         }
