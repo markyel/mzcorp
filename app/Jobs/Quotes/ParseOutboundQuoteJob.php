@@ -353,6 +353,24 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
                 }
             }
 
+            // Клиент прислал НАШЕ КП обратно («обновите/дошлите») → у заявки может
+            // не остаться каталожных позиций (наш КП-PDF и инлайн-спеки в разбор не
+            // идут). Засеваем позиции из матченных строк этого КП (M-коды). Гард
+            // внутри: только если у заявки нет каталожно-сматченных позиций → обычные
+            // заявки (КП сделан ИЗ них) не трогаются. Non-fatal.
+            if ($this->documentType === DetectorType::OutboundQuotationFull->value) {
+                try {
+                    app(\App\Services\Request\OwnQuoteRequestItemSeeder::class)
+                        ->seedForRequest($request->fresh(), $message->id);
+                } catch (\Throwable $e) {
+                    Log::warning('ParseOutboundQuoteJob: seed request_items from own КП failed (non-fatal)', [
+                        'quote_id' => $quote->id,
+                        'request_id' => $request->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
             Log::info('ParseOutboundQuoteJob: success', [
                 'quote_id' => $quote->id,
                 'request_id' => $request->id,

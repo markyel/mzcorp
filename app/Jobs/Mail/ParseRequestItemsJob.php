@@ -370,6 +370,22 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                         'error' => $e->getMessage(),
                     ]);
                 }
+
+                // Клиент прислал НАШЕ КП обратно: если у заявки нет каталожных
+                // позиций, а наш КП уже распарсен (matched), берём позиции из него
+                // (M-коды) и гасим несматченный шум из этого же письма. Гард внутри
+                // сидера → обычные заявки не трогаются. Non-fatal. Симметрично хуку
+                // в ParseOutboundQuoteJob (покрывает обе гонки КП-vs-позиции).
+                try {
+                    app(\App\Services\Request\OwnQuoteRequestItemSeeder::class)
+                        ->seedForRequest($result['request']->fresh(), $message->id);
+                } catch (\Throwable $e) {
+                    Log::warning('ParseRequestItemsJob: seed from own КП failed (non-fatal)', [
+                        'email_message_id' => $message->id,
+                        'request_id' => $result['request']->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
 
             // Reply-routing fallback: письмо-напоминание клиента («прошу
