@@ -228,7 +228,11 @@
                     @if($files->isNotEmpty())
                         <div class="px-3 pb-3 pt-2 flex flex-wrap gap-2 border-t border-border-subtle" x-data="{ items: @js($gallery) }">
                             @foreach($files as $att)
-                                @php $isImg = $att->mime_type && \Illuminate\Support\Str::startsWith(strtolower($att->mime_type), 'image/'); @endphp
+                                @php
+                                    $isImg = $att->mime_type && \Illuminate\Support\Str::startsWith(strtolower($att->mime_type), 'image/');
+                                    $isPdf = ($att->mime_type && \Illuminate\Support\Str::contains(strtolower($att->mime_type), 'pdf'))
+                                        || strtolower(\Illuminate\Support\Str::afterLast($att->filename, '.')) === 'pdf';
+                                @endphp
                                 @if($isImg)
                                     <button type="button"
                                             x-on:click="$dispatch('open-image', { items: items, index: {{ $imgIdx }} })"
@@ -241,6 +245,17 @@
                                         </div>
                                     </button>
                                     @php $imgIdx++; @endphp
+                                @elseif($isPdf)
+                                    {{-- PDF → предпросмотр в модалке (iframe), как фото в лайтбоксе. --}}
+                                    <button type="button"
+                                            x-on:click="$dispatch('open-pdf', { src: @js(route('attachments.preview', $att)), name: @js($att->filename), dl: @js(route('attachments.download', $att)) })"
+                                            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover self-start text-left"
+                                            title="Предпросмотр — {{ $att->filename }}">
+                                        <span class="inline-block w-4 h-5 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[7px] font-bold text-center leading-5">PDF</span>
+                                        <span class="truncate max-w-[210px]">{{ $att->filename }}</span>
+                                        @if($att->size_bytes)<span class="text-fg-3 text-[11px]">· {{ number_format($att->size_bytes / 1024, 0, '.', ' ') }} KB</span>@endif
+                                        <span class="text-sky-700 text-[11px]">👁 просмотр</span>
+                                    </button>
                                 @else
                                     <a href="{{ route('attachments.download', $att) }}"
                                        class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover self-start">
@@ -268,4 +283,5 @@
     </div>
 
     @include('partials.image-lightbox')
+    @include('partials.pdf-preview')
 </div>
