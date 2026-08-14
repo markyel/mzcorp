@@ -224,14 +224,27 @@ class QuotationService
         }
 
         $subtotal = round($subtotal, 2);
-        $total = round($total, 2);
+        $goodsTotal = round($total, 2);   // товары ПОСЛЕ скидки (без доставки)
         $vatTotal = round($vatTotal, 2);
+
+        // Доставка: прибавляется к итогу, скидки на неё НЕ распространяются.
+        // Цена НДС в т.ч. (весь КП «вкл. НДС») — её НДС-долю добавляем в vat_amount,
+        // чтобы «в т. ч. НДС» и «К оплате» оставались согласованными.
+        $deliveryPrice = round(max(0.0, (float) $quotation->delivery_price), 2);
+        $deliveryVat = ($vatRate > 0 && $deliveryPrice > 0)
+            ? round($deliveryPrice - ($deliveryPrice / (1 + $vatRate / 100)), 2)
+            : 0.0;
+
+        // total — ГРАНДТОТАЛ к оплате (товары со скидкой + доставка). subtotal и
+        // discount_amount остаются ТОЛЬКО по товарам, поэтому «Итого со скидкой» в
+        // PDF = subtotal − discount_amount, а «К оплате» = total.
+        $grandTotal = round($goodsTotal + $deliveryPrice, 2);
 
         $quotation->forceFill([
             'subtotal' => $subtotal,
-            'discount_amount' => round($subtotal - $total, 2),
-            'total' => $total,
-            'vat_amount' => $vatTotal,
+            'discount_amount' => round($subtotal - $goodsTotal, 2),
+            'total' => $grandTotal,
+            'vat_amount' => round($vatTotal + $deliveryVat, 2),
         ])->save();
     }
 

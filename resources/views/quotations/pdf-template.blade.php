@@ -283,6 +283,10 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
       <div class="words">
         <div class="lbl">Сумма прописью</div>
         <div class="v">{{ $totalInWords }}</div>
+        @if((float) $q->delivery_price > 0 || trim((string) $q->delivery_text) !== '')
+          <div class="lbl" style="margin-top:2.5mm">Доставка</div>
+          <div class="v">{{ trim((string) $q->delivery_text) !== '' ? $q->delivery_text : 'Доставка' }}@if(trim((string) $q->delivery_term) !== '') · срок: {{ $q->delivery_term }}@endif@if((float) $q->delivery_price > 0) · {{ number_format((float) $q->delivery_price, 2, ',', "\u{00A0}") }} ₽@endif</div>
+        @endif
       </div>
       <div class="right">
         <table>
@@ -292,10 +296,17 @@ body { margin: 0; padding: 9mm 12mm 7mm 12mm; background: #fff; font-family: 'PT
             // РЕАЛЬНЫЙ процент скидки = фактическая сумма скидки / сумма без скидки,
             // чтобы % соответствовал ₽ (минималка price_min могла урезать скидку).
             $realDiscPct = (float) $q->subtotal > 0 ? round((float) $q->discount_amount / (float) $q->subtotal * 100, 2) : 0.0;
+            // Товары после скидки (без доставки). total — грандтотал (товары + доставка),
+            // поэтому «Итого со скидкой» считаем по товарам: subtotal − discount_amount.
+            $goodsAfterDisc = (float) $q->subtotal - (float) $q->discount_amount;
+            $deliveryPrice = (float) $q->delivery_price;
           @endphp
           @if($hasDisc)
             <tr class="disc"><td>Скидка {{ rtrim(rtrim(number_format($realDiscPct, 2, ',', ''), '0'), ',') }} %</td><td><span class="rub">−</span>&nbsp;{{ number_format((float) $q->discount_amount, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></td></tr>
-            <tr><td>Итого со скидкой</td><td>{{ number_format((float) $q->total, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></td></tr>
+            <tr><td>Итого со скидкой</td><td>{{ number_format($goodsAfterDisc, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></td></tr>
+          @endif
+          @if($deliveryPrice > 0)
+            <tr><td>Доставка@if(trim((string) $q->delivery_term) !== '') <span style="font-weight:400">({{ $q->delivery_term }})</span>@endif</td><td><span class="rub">+</span>&nbsp;{{ number_format($deliveryPrice, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></td></tr>
           @endif
           <tr class="vat"><td>в т. ч. НДС {{ rtrim(rtrim(number_format((float) $q->vat_rate, 2, ',', ''), '0'), ',') }} %</td><td>{{ number_format((float) $q->vat_amount, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></td></tr>
           <tr class="grand"><td>К оплате</td><td>{{ number_format((float) $q->total, 2, ',', "\u{00A0}") }}&nbsp;<span class="rub">₽</span></td></tr>

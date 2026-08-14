@@ -329,20 +329,52 @@
 
             {{-- ───────── Итоги ───────── --}}
             <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="text-[12px] text-fg-3">
-                    <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Комментарий к КП <span class="normal-case tracking-normal text-fg-4">(печатается в PDF)</span></div>
-                    <textarea placeholder="Общий комментарий для клиента — условия, сопроводительный текст…" rows="3"
-                              @if(!$editable) disabled @endif
-                              wire:blur="updateQuotationField('client_comment', $event.target.value)"
-                              class="w-full px-2 py-1.5 border border-border rounded text-fg-2">{{ $q->client_comment }}</textarea>
+                <div class="text-[12px] text-fg-3 space-y-3">
+                    <div>
+                        <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Комментарий к КП <span class="normal-case tracking-normal text-fg-4">(печатается в PDF)</span></div>
+                        <textarea placeholder="Общий комментарий для клиента — условия, сопроводительный текст…" rows="3"
+                                  @if(!$editable) disabled @endif
+                                  wire:blur="updateQuotationField('client_comment', $event.target.value)"
+                                  class="w-full px-2 py-1.5 border border-border rounded text-fg-2">{{ $q->client_comment }}</textarea>
+                    </div>
+                    <div>
+                        <div class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Доставка <span class="normal-case tracking-normal text-fg-4">(прибавляется к итогу, скидки не действуют)</span></div>
+                        <div class="space-y-1.5">
+                            <input type="text" placeholder="Текст доставки — напр. «Доставка ТК до терминала г. …»"
+                                   @if(!$editable) disabled @endif
+                                   value="{{ $q->delivery_text }}"
+                                   wire:blur="updateQuotationField('delivery_text', $event.target.value)"
+                                   class="w-full px-2 py-1.5 border border-border rounded text-fg-2">
+                            <div class="flex gap-1.5">
+                                <input type="text" placeholder="Срок (напр. 3–5 раб. дней)"
+                                       @if(!$editable) disabled @endif
+                                       value="{{ $q->delivery_term }}"
+                                       wire:blur="updateQuotationField('delivery_term', $event.target.value)"
+                                       class="flex-1 px-2 py-1.5 border border-border rounded text-fg-2">
+                                <div class="relative w-32">
+                                    <input type="text" inputmode="decimal" placeholder="Цена"
+                                           @if(!$editable) disabled @endif
+                                           value="{{ (float)$q->delivery_price > 0 ? rtrim(rtrim(number_format((float)$q->delivery_price, 2, '.', ''), '0'), '.') : '' }}"
+                                           wire:blur="updateQuotationField('delivery_price', $event.target.value)"
+                                           class="w-full px-2 py-1.5 pr-5 border border-border rounded text-fg-2 mono text-right">
+                                    <span class="absolute right-2 top-1/2 -translate-y-1/2 text-fg-4 text-[11px]">₽</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="border border-border rounded p-3 bg-surface-2">
+                    @php $goodsAfterDisc = (float) $q->subtotal - (float) $q->discount_amount; @endphp
                     <div class="space-y-1 text-[12.5px]">
                         <div class="flex justify-between"><span class="text-fg-3">Итого:</span> <span class="mono">{{ number_format((float)$q->subtotal, 2, '.', ' ') }} ₽</span></div>
                         @if((float)$q->discount_amount > 0)
                             <div class="flex justify-between text-amber-700"><span>Скидка {{ rtrim(rtrim((string)$q->discount_percent, '0'), '.') }}%:</span> <span class="mono">−{{ number_format((float)$q->discount_amount, 2, '.', ' ') }} ₽</span></div>
+                            <div class="flex justify-between"><span class="text-fg-3">Итого со скидкой:</span> <span class="mono">{{ number_format($goodsAfterDisc, 2, '.', ' ') }} ₽</span></div>
                         @endif
-                        <div class="flex justify-between font-semibold text-fg-1"><span>Итого со скидкой:</span> <span class="mono">{{ number_format((float)$q->total, 2, '.', ' ') }} ₽</span></div>
+                        @if((float)$q->delivery_price > 0)
+                            <div class="flex justify-between text-sky-700"><span>Доставка@if($q->delivery_term) ({{ $q->delivery_term }})@endif:</span> <span class="mono">+{{ number_format((float)$q->delivery_price, 2, '.', ' ') }} ₽</span></div>
+                        @endif
+                        <div class="flex justify-between font-semibold text-fg-1 pt-1 border-t border-border-subtle"><span>К оплате:</span> <span class="mono">{{ number_format((float)$q->total, 2, '.', ' ') }} ₽</span></div>
                         <div class="flex justify-between text-fg-3 text-[11.5px]"><span>в т. ч. НДС {{ rtrim(rtrim((string)$q->vat_rate, '0'), '.') }}%:</span> <span class="mono">{{ number_format((float)$q->vat_amount, 2, '.', ' ') }} ₽</span></div>
                     </div>
                 </div>

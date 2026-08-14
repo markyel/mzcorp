@@ -496,7 +496,8 @@ class Editor extends Component
             return;
         }
         $allowed = ['recipient_name', 'recipient_inn', 'recipient_address',
-            'recipient_card_text', 'valid_days', 'discount_percent', 'notes', 'client_comment'];
+            'recipient_card_text', 'valid_days', 'discount_percent', 'notes', 'client_comment',
+            'delivery_text', 'delivery_term', 'delivery_price'];
         if (! in_array($field, $allowed, true)) {
             return;
         }
@@ -507,8 +508,12 @@ class Editor extends Component
         if ($field === 'discount_percent') {
             $value = max(0, min(100, (float) str_replace(',', '.', (string) $value)));
         }
+        if ($field === 'delivery_price') {
+            $value = max(0, (float) str_replace([' ', ','], ['', '.'], (string) $value));
+        }
         $q->forceFill([$field => $value])->save();
-        if ($field === 'discount_percent') {
+        // Доставка по цене и общая скидка влияют на итог → пересчёт.
+        if (in_array($field, ['discount_percent', 'delivery_price'], true)) {
             $svc->recalcTotals($q->fresh('items'));
         }
         unset($this->versions, $this->activeQuotation);

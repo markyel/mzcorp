@@ -74,6 +74,11 @@ class Quotation extends Model
         'notes',
         // Общий клиентский комментарий, печатается в PDF (≠ внутренний notes).
         'client_comment',
+        // Доставка: текст + срок + цена. Цена прибавляется к итогу, скидки на неё
+        // НЕ распространяются (QuotationService::recalcTotals). НДС в т.ч.
+        'delivery_text',
+        'delivery_term',
+        'delivery_price',
         'created_by_user_id',
     ];
 
@@ -91,6 +96,7 @@ class Quotation extends Model
             'total' => 'decimal:2',
             'vat_rate' => 'decimal:2',
             'vat_amount' => 'decimal:2',
+            'delivery_price' => 'decimal:2',
             'sent_at' => 'datetime',
             'accepted_at' => 'datetime',
             'declined_at' => 'datetime',
