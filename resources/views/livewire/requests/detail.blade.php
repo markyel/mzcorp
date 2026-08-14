@@ -21,6 +21,14 @@
         return in_array($ext, $imageExtensions, true);
     };
 
+    // PDF-attachment detection: по mime_type ИЛИ по расширению (часть писем без mime).
+    $isPdfAttachment = function ($a) {
+        if ($a->mime_type && Str::contains(strtolower($a->mime_type), 'pdf')) {
+            return true;
+        }
+        return strtolower(Str::afterLast($a->filename, '.')) === 'pdf';
+    };
+
     // Phase 1.10: chipClass через enum-метод (полный набор статусов из Foundation §5.2).
     // displayedStatusBadge — composite: peak-milestone ИЛИ activity-overlay
     // «ход за нами» (📨 Клиент ответил). Operational status остаётся как
@@ -1635,6 +1643,19 @@
                                                             </div>
                                                         </button>
                                                         @php $msgImgIdx++; @endphp
+                                                    @elseif($isPdfAttachment($att))
+                                                        {{-- PDF → предпросмотр в модалке (iframe), как фото в лайтбоксе. --}}
+                                                        <button type="button"
+                                                                x-on:click="$dispatch('open-pdf', { src: @js($previewUrl), name: @js($att->filename), dl: @js($downloadUrl) })"
+                                                                class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover text-left"
+                                                                title="Открыть предпросмотр — {{ $att->filename }}">
+                                                            <span class="inline-block w-4 h-5 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[7px] font-bold text-center leading-5">PDF</span>
+                                                            <span class="truncate max-w-[240px]">{{ $att->filename }}</span>
+                                                            @if($att->size_bytes)
+                                                                <span class="text-fg-3 text-[11px]">· {{ number_format($att->size_bytes / 1024, 0, '.', ' ') }} KB</span>
+                                                            @endif
+                                                            <span class="text-sky-700 text-[11px]">👁 просмотр</span>
+                                                        </button>
                                                     @else
                                                         <a href="{{ $downloadUrl }}"
                                                            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover">
@@ -3371,6 +3392,11 @@
                                                  loading="lazy"
                                                  class="w-12 h-12 object-cover block">
                                         </button>
+                                    @elseif($isPdfAttachment($att))
+                                        <button type="button"
+                                                x-on:click="$dispatch('open-pdf', { src: @js($previewUrl), name: @js($att->filename), dl: @js($downloadUrl) })"
+                                                class="inline-block w-7 h-9 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[8.5px] font-bold text-center leading-9 shrink-0 hover:bg-red-100 transition-colors"
+                                                title="Предпросмотр — {{ $att->filename }}">{{ $ext }}</button>
                                     @else
                                         <span class="inline-block w-7 h-9 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[8.5px] font-bold text-center leading-9 shrink-0">{{ $ext }}</span>
                                     @endif
@@ -3407,6 +3433,10 @@
                                     @if($isImg)
                                         <button type="button"
                                                 x-on:click="$dispatch('open-image', { items: items, index: {{ $thisImgIdx }} })"
+                                                class="text-sky-700 text-xs hover:underline">просмотр →</button>
+                                    @elseif($isPdfAttachment($att))
+                                        <button type="button"
+                                                x-on:click="$dispatch('open-pdf', { src: @js($previewUrl), name: @js($att->filename), dl: @js($downloadUrl) })"
                                                 class="text-sky-700 text-xs hover:underline">просмотр →</button>
                                     @endif
                                     <a href="{{ $downloadUrl }}" class="text-sky-700 text-xs hover:underline">скачать →</a>
@@ -3521,4 +3551,7 @@
                  x-on:click.stop>
         </div>
     </div>
+
+    {{-- PDF-предпросмотр (модалка) — открывается событием open-pdf из вложений-PDF. --}}
+    @include('partials.pdf-preview')
 </div>
