@@ -916,6 +916,27 @@ PROMPT;
                 'source' => $sourceTag,
                 'dropped' => $ownDocs->map(fn ($a) => $a->filename)->values()->all(),
             ]);
+
+            // Раз в письме присутствует НАШЕ ЖЕ КП/счёт (ownDocs) — оно источник
+            // истины по позициям. Инлайн-картинки такого письма (is_inline) — это
+            // картинки ПРОЦИТИРОВАННОГО КП-треда (спеки производителя, логотипы,
+            // подписи), а НЕ новый фото-запрос клиента. Их Vision-разбор вытаскивает
+            // неверные позиции (OEM-компоненты вместо нашего товара из КП). Кейс
+            // M-2026-12063: клиент прислал наше «Предложение МЗ-344330» со словами
+            // «обновите КП», а парсер разобрал инлайн-спеки Torin Drive в 2
+            // несматченные позиции вместо товара M33232 из самого КП. Отбрасываем
+            // ТОЛЬКО inline-картинки; не-inline фото (клиент реально приложил новое
+            // фото отдельным файлом) остаются — там может быть настоящий запрос.
+            $inlineImgs = $imageAttachments->filter(fn ($a) => (bool) $a->is_inline);
+            if ($inlineImgs->isNotEmpty()) {
+                $inlineIds = $inlineImgs->pluck('id')->all();
+                $imageAttachments = $imageAttachments->reject(fn ($a) => in_array($a->id, $inlineIds, true));
+                Log::info('parseItemsFromInboundContent: dropped INLINE images (own КП present → source is КП, not quoted-thread images)', [
+                    'source' => $sourceTag,
+                    'dropped' => $inlineImgs->map(fn ($a) => $a->filename)->values()->all(),
+                    'kept_non_inline_images' => $imageAttachments->count(),
+                ]);
+            }
         }
 
         // Отсечь НЕ-номенклатурные структурные вложения (банковские реквизиты,
