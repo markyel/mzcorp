@@ -336,7 +336,7 @@ class SupplierOfferParser
      * Внутри — своя цитата нашего RFQ; оставляем только новый текст поставщика
      * (там цена). Webklex парсит raw-строку.
      */
-    private function extractEmlText(EmailAttachment $att): string
+    private function extractEmlText(\App\Models\EmailAttachment $att): string
     {
         $disk = $att->disk ?: 'local';
         $path = (string) $att->file_path;
