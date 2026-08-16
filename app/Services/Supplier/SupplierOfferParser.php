@@ -237,6 +237,21 @@ class SupplierOfferParser
             if (count($images) >= self::MAX_IMAGES) {
                 // изображений уже достаточно — но текст ещё можем добирать
             }
+
+            // Вложенное письмо (.eml / message/rfc822): поставщик приложил свой
+            // ОРИГИНАЛЬНЫЙ ответ (частый кейс «мы же вам высылали» — цена в
+            // приложенном оригинале, а НЕ в новом теле). Разбираем его текст.
+            // Кейс inquiry 2664 (OSS): оффер USD1343 лежал в .eml от 07.08 —
+            // classifyAttachment его не знал, stripQuotedReply в теле его не видел.
+            $extLower = strtolower((string) Str::afterLast((string) $att->filename, '.'));
+            if ($extLower === 'eml' || str_contains(strtolower((string) $att->mime_type), 'message/rfc822')) {
+                $emlText = $this->extractEmlText($att);
+                if ($emlText !== '') {
+                    $textParts[] = '— вложенное письмо ' . $att->filename . ":\n" . $emlText;
+                }
+                continue;
+            }
+
             $type = $this->classifyAttachment((string) $att->filename, (string) $att->mime_type);
             if ($type === null) {
                 continue;
@@ -314,6 +329,42 @@ class SupplierOfferParser
             str_starts_with($mime, 'image/') => 'image',
             default => null,
         };
+    }
+
+    /**
+     * Текст из вложенного .eml (message/rfc822) — поставщик приложил свой оригинал.
+     * Внутри — своя цитата нашего RFQ; оставляем только новый текст поставщика
+     * (там цена). Webklex парсит raw-строку.
+     */
+    private function extractEmlText(EmailAttachment $att): string
+    {
+        $disk = $att->disk ?: 'local';
+        $path = (string) $att->file_path;
+        if ($path === '' || ! Storage::disk($disk)->exists($path)) {
+            return '';
+        }
+        try {
+            $raw = (string) Storage::disk($disk)->get($path);
+            if ($raw === '') {
+                return '';
+            }
+            $msg = \Webklex\PHPIMAP\Message::fromString($raw);
+            $text = trim((string) $msg->getTextBody());
+            if ($text === '') {
+                $html = method_exists($msg, 'getHTMLBody') ? (string) $msg->getHTMLBody() : '';
+                $text = trim(strip_tags($html));
+            }
+            $text = $this->stripQuotedReply($text);
+
+            return mb_substr($text, 0, 4000);
+        } catch (\Throwable $e) {
+            Log::warning('SupplierOfferParser: .eml parse failed', [
+                'attachment_id' => $att->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return '';
+        }
     }
 
     private function str(mixed $v, int $max): ?string
