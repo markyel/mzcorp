@@ -18,9 +18,12 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 use Livewire\WithPagination;
 
 /**
@@ -33,7 +36,14 @@ use Livewire\WithPagination;
  */
 class Index extends Component
 {
+    use WithFileUploads;
     use WithPagination;
+
+    /** @var array загруженные файлы/фото для прикрепления к RFQ */
+    public $rfqFiles = [];
+
+    /** Приложить фото выбранных позиций из каталога (photo_url → CatalogPhotoCache). */
+    public bool $attachCatalogPhotos = false;
 
     /** Статусы «не дошло до КП». */
     public const PRE_QUOTE = ['new', 'assigned', 'in_progress', 'awaiting_client_clarification'];
@@ -515,7 +525,7 @@ class Index extends Component
     public function clearSelection(): void
     {
         $this->reset(['selected', 'selectedSuppliers', 'addedSupplierIds', 'supplierSearch', 'note',
-            'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn']);
+            'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn', 'rfqFiles', 'attachCatalogPhotos']);
         unset($this->supplierOptions, $this->selectedPositions, $this->oemOptions, $this->previewLanguages);
     }
 
@@ -641,7 +651,42 @@ class Index extends Component
             'closing_ru' => $this->closing,
             'closing_en' => $this->closingEn,
         ];
-        $result = $dispatcher->dispatch($cids, $supplierIds, $this->note, $user, $edits);
+        // Вложения: загруженные файлы/фото (staging на local) + опционально фото
+        // выбранных позиций из каталога. Сервис копирует их в черновик каждого
+        // поставщика (как в панели «Поставщики»).
+        $this->validate(['rfqFiles.*' => 'file|max:25600']);
+        $extraFiles = [];
+        foreach ((array) $this->rfqFiles as $tmp) {
+            if ($tmp === null) {
+                continue;
+            }
+            $name = $tmp->getClientOriginalName();
+            $path = sprintf('mail/procurement-staging/%d/%s', $user->id, Str::random(10).'_'.$name);
+            Storage::disk('local')->put($path, $tmp->get());
+            $extraFiles[] = ['path' => $path, 'name' => $name, 'mime' => $tmp->getMimeType() ?: 'application/octet-stream', 'size' => $tmp->getSize() ?: 0];
+        }
+        if ($this->attachCatalogPhotos) {
+            $cache = app(\App\Services\Catalog\CatalogPhotoCache::class);
+            $cats = CatalogItem::query()->whereIn('id', $cids)->whereNotNull('photo_url')->get(['id', 'name', 'photo_url']);
+            foreach ($cats as $ci) {
+                $cached = $cache->ensure((int) $ci->id);
+                if ($cached === null) {
+                    continue;
+                }
+                $bytes = Storage::disk('public')->get($cached['rel']);
+                if ($bytes === null || $bytes === '') {
+                    continue;
+                }
+                $ext = str_contains($cached['mime'], 'png') ? 'png' : (str_contains($cached['mime'], 'webp') ? 'webp' : 'jpg');
+                $base = Str::slug(mb_substr((string) ($ci->name ?: 'foto'), 0, 40)) ?: 'foto';
+                $name = 'foto_'.$base.'.'.$ext;
+                $path = sprintf('mail/procurement-staging/%d/%s', $user->id, Str::random(10).'_'.$name);
+                Storage::disk('local')->put($path, $bytes);
+                $extraFiles[] = ['path' => $path, 'name' => $name, 'mime' => $cached['mime'], 'size' => strlen($bytes)];
+            }
+        }
+
+        $result = $dispatcher->dispatch($cids, $supplierIds, $this->note, $user, $edits, $extraFiles);
 
         if (($result['error'] ?? null) === 'no_mailbox') {
             $this->addError('send', 'Нет ящика для отправки (личный или общий mail@). Обратитесь к РОПу.');
@@ -660,7 +705,7 @@ class Index extends Component
 
         // Сброс выбора.
         $this->reset(['selected', 'selectedSuppliers', 'addedSupplierIds', 'supplierSearch', 'note',
-            'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn']);
+            'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn', 'rfqFiles', 'attachCatalogPhotos']);
         unset($this->positions, $this->supplierOptions, $this->iqotByCatalogId, $this->selectedPositions, $this->oemOptions, $this->previewLanguages);
     }
 

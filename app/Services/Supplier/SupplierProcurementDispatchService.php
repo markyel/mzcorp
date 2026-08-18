@@ -4,6 +4,7 @@ namespace App\Services\Supplier;
 
 use App\Enums\MailDirection;
 use App\Models\CatalogItem;
+use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use App\Models\Supplier;
@@ -12,6 +13,7 @@ use App\Models\SupplierInquiryItem;
 use App\Models\User;
 use App\Services\Mail\OutgoingMailSender;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -37,7 +39,12 @@ class SupplierProcurementDispatchService
      *                                                                                                                                                                                                                                                                                         правки письма по catalog_item: названия/кол-во по языкам + артикул + обращение/вступление/закрытие по языкам
      * @return array{sent:int, failed:int, skipped:int, suppliers:array<int,string>, error:?string}
      */
-    public function dispatch(array $catalogItemIds, array $supplierIds, ?string $note, User $by, array $edits = []): array
+    /**
+     * @param  array<int, array{path:string, name:string, mime:string, size:int}>  $extraFiles
+     *         Загруженные файлы/фото (staging на local) — копируются в черновик
+     *         КАЖДОГО поставщика. Форма как в SupplierDispatchService.
+     */
+    public function dispatch(array $catalogItemIds, array $supplierIds, ?string $note, User $by, array $edits = [], array $extraFiles = []): array
     {
         $zero = ['sent' => 0, 'failed' => 0, 'skipped' => 0, 'suppliers' => [], 'error' => null];
 
@@ -114,6 +121,11 @@ class SupplierProcurementDispatchService
                 $plain = $this->plainBody($personalGreeting, $rows, (string) $note, $lang, $intro, $closing);
 
                 $draft = $this->createDraft($mailbox, $by, $supplier, $subject, $html, $plain);
+
+                // Вложения (фото/файлы) — копия в черновик каждого поставщика.
+                if ($extraFiles !== []) {
+                    $this->attachFiles($draft->fresh(), $extraFiles);
+                }
 
                 $result = $this->sender->sendDraft($draft->id);
                 if (! ($result['success'] ?? false)) {
@@ -239,6 +251,46 @@ class SupplierProcurementDispatchService
             ->whereRaw('LOWER(email) = ?', [mb_strtolower($sharedEmail)])
             ->where('is_active', true)
             ->first();
+    }
+
+    /**
+     * Скопировать staging-файлы (фото/файлы) в черновик поставщика. Форма и
+     * логика — как в SupplierDispatchService::attachToDraft. Non-fatal per file.
+     *
+     * @param  array<int, array{path:string, name:string, mime:string, size:int}>  $extraFiles
+     */
+    private function attachFiles(EmailMessage $draft, array $extraFiles): void
+    {
+        foreach ($extraFiles as $f) {
+            $src = (string) ($f['path'] ?? '');
+            if ($src === '' || ! Storage::disk('local')->exists($src)) {
+                continue;
+            }
+            try {
+                $filename = $this->safeName((string) ($f['name'] ?? 'file'));
+                $newPath = sprintf('mail/%d/drafts/%d/%s', $draft->mailbox_id ?? 0, $draft->id, Str::random(8).'_'.$filename);
+                Storage::disk('local')->put($newPath, Storage::disk('local')->get($src));
+                EmailAttachment::create([
+                    'email_message_id' => $draft->id,
+                    'filename' => mb_substr($filename, 0, 255),
+                    'mime_type' => (string) ($f['mime'] ?? 'application/octet-stream'),
+                    'size_bytes' => (int) ($f['size'] ?? 0),
+                    'content_id' => null,
+                    'file_path' => $newPath,
+                    'disk' => 'local',
+                    'is_inline' => false,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('ProcurementDispatch: attach copy failed', ['draft_id' => $draft->id, 'file' => $f['name'] ?? '?', 'error' => $e->getMessage()]);
+            }
+        }
+    }
+
+    private function safeName(string $name): string
+    {
+        $name = preg_replace('/[^\p{L}\p{N}._\- ]/u', '_', $name) ?? 'file';
+
+        return mb_substr(trim($name), 0, 120) ?: 'file';
     }
 
     private function createDraft(Mailbox $mailbox, User $by, Supplier $supplier, string $subject, string $html, string $plain): EmailMessage

@@ -503,6 +503,21 @@
                     <textarea wire:model="note" rows="2" class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
                 </div>
 
+                <div>
+                    <label class="block text-[11.5px] text-fg-3 mb-1">Фото / файлы <span class="text-fg-4">(необязательно · прикрепятся к запросу каждому поставщику)</span></label>
+                    <input type="file" wire:model="rfqFiles" multiple accept="image/*,.pdf,.xlsx,.xls,.doc,.docx"
+                           class="w-full text-[12px] border border-border rounded-md p-1.5 bg-surface">
+                    @error('rfqFiles.*') <div class="text-[11.5px] text-red-600 mt-1">{{ $message }}</div> @enderror
+                    <div wire:loading wire:target="rfqFiles" class="text-[11px] text-fg-3 mt-1">Загрузка…</div>
+                    @if(count($rfqFiles ?? []))
+                        <div class="text-[11px] text-emerald-700 mt-1">Прикреплено файлов: {{ count($rfqFiles) }}</div>
+                    @endif
+                    <label class="flex items-center gap-1.5 mt-2 text-[11.5px] text-fg-2 cursor-pointer">
+                        <input type="checkbox" wire:model="attachCatalogPhotos">
+                        Приложить фото выбранных позиций из каталога
+                    </label>
+                </div>
+
                 @error('send') <div class="text-[12px] text-red-600">{{ $message }}</div> @enderror
 
                 <div class="flex items-center gap-2 pt-2 border-t border-border-subtle">
