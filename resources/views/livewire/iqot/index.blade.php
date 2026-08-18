@@ -182,6 +182,10 @@
                                     @if($p->status === 'analyzing' && $p->iqot_item_status)
                                         <div class="text-[10px] text-fg-3">{{ $iqotItemLabel[$p->iqot_item_status] ?? $p->iqot_item_status }}</div>
                                     @endif
+                                    @if($p->status === 'analyzing' && $p->last_enqueued_at)
+                                        @php $daysAnalyzing = (int) abs(now()->diffInDays($p->last_enqueued_at)); @endphp
+                                        <div class="text-[10px] {{ $daysAnalyzing >= 2 ? 'text-amber-700' : 'text-fg-4' }}">в анализе {{ $daysAnalyzing }} дн</div>
+                                    @endif
                                     @if($p->status === 'failed' && $p->error_message)
                                         <div class="text-[10px] text-red-600" title="{{ $p->error_message }}">{{ \Illuminate\Support\Str::limit($p->error_message, 40) }}</div>
                                     @endif
@@ -211,6 +215,12 @@
                                         {{-- «Повторить» только если нет свежего отчёта (иначе не пере-отправляем — бережём баланс) --}}
                                         @if($p->status === 'failed' || (in_array($p->status, ['completed', 'no_offers'], true) && ! $fresh))
                                             <button type="button" wire:click="reanalyze({{ $p->id }})" class="btn btn-sm" wire:loading.attr="disabled">Повторить</button>
+                                        @endif
+                                        {{-- Зависшая в анализе (отчёт не пришёл) — переотправить заново. --}}
+                                        @if($p->status === 'analyzing')
+                                            <button type="button" wire:click="resendAnalysis({{ $p->id }})"
+                                                    wire:confirm="Переотправить позицию на анализ в IQOT? Текущая (зависшая) отправка отменяется, позиция уйдёт заново."
+                                                    class="btn btn-sm" wire:loading.attr="disabled">Переотправить</button>
                                         @endif
                                         <button type="button" wire:click="exclude({{ $p->id }})"
                                                 wire:confirm="Исключить позицию из пула? Она больше не будет отправляться в IQOT."

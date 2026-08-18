@@ -177,6 +177,38 @@ class Index extends Component
     }
 
     /**
+     * Переотправить ЗАВИСШУЮ позицию на анализ: вернуть в очередь на отправку,
+     * открепив от застрявшей submission. Нужно для позиций, застрявших в
+     * `analyzing` (отправлены в IQOT, но отчёт так и не пришёл) — обычный
+     * `reanalyze`/`enqueueCatalogItem` их НЕ трогает (гард «не сбрасываем, если
+     * уже отправлена»). Следующий dispatch (крон каждые 2ч или «Отправить
+     * сейчас») отправит заново.
+     */
+    public function resendAnalysis(int $positionId): void
+    {
+        $this->assertManager();
+        $pos = IqotPosition::find($positionId);
+        if (! $pos || ! in_array($pos->status, [
+            IqotPositionStatus::Analyzing->value,
+            IqotPositionStatus::Failed->value,
+        ], true)) {
+            return;
+        }
+        $pos->forceFill([
+            'status' => IqotPositionStatus::Pending->value,
+            'iqot_submission_id' => null,
+            'iqot_item_status' => null,
+            'error_code' => null,
+            'error_message' => null,
+            'source' => IqotPosition::SOURCE_MANUAL,
+            'requested_by_user_id' => auth()->id(),
+            'manual_requested_at' => now(),
+        ])->save();
+        session()->flash('iqot-flash', 'Позиция возвращена в очередь на отправку — уйдёт при ближайшем отправлении (кнопка «Отправить сейчас» или автоотправка).');
+        unset($this->stats, $this->positions);
+    }
+
+    /**
      * Исключить позицию из пула навсегда («не запрашивать никогда»).
      */
     public function exclude(int $positionId): void
