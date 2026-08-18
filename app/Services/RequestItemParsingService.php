@@ -797,57 +797,99 @@ PROMPT;
      */
     private function fetchLinkedUrlsForPrompt(?string $cleanedPlain, ?string $rawHtml, string $sourceTag): ?string
     {
-        if (! config('services.web_fetch.enabled', true)) {
-            return null;
+        // НАШИ собственные storefront-ссылки (mylift.ru/myzip.ru/?code=MXXXXX):
+        // не парсим свой же сайт (живой фетч бывает пуст/медленный → LLM
+        // выдумывает имя на голый код). Берём товар ПРЯМО из каталога по SKU из
+        // URL — детерминированно и точно. Кейс M-2026-12580: пустой фетч →
+        // «Масленка для башмака» на код M00152 (реально Контактный мост 505404).
+        // Работает независимо от web_fetch.enabled — это не фетч, а lookup в БД.
+        $storefrontBlocks = $this->ownStorefrontCatalogBlocks($cleanedPlain, $rawHtml);
+
+        $fetchedBlocks = [];
+        if (config('services.web_fetch.enabled', true)
+            && $this->urlExtractor !== null && $this->urlFetcher !== null) {
+            $maxUrls = (int) config('services.web_fetch.max_urls_per_email', 10);
+            $urls = $this->urlExtractor->extract($cleanedPlain, $rawHtml, $maxUrls);
+            if (! empty($urls)) {
+                try {
+                    $results = $this->urlFetcher->fetchMany($urls);
+                    foreach ($results as $row) {
+                        /** @var InboundUrlFetch $row */
+                        if (! $row->isSuccessful() || $row->extracted_text === null || trim($row->extracted_text) === '') {
+                            continue;
+                        }
+                        // Нашу storefront-страницу уже покрыли каталогом — не дублируем.
+                        if ($this->isOwnStorefrontUrl((string) $row->url)) {
+                            continue;
+                        }
+                        $fetchedBlocks[] = "### {$row->url}\n" . trim($row->extracted_text);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('parseItemsFromInboundMessage: url fetch failed', [
+                        'source' => $sourceTag,
+                        'urls' => count($urls),
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
         }
-        if ($this->urlExtractor === null || $this->urlFetcher === null) {
+
+        $all = array_merge($storefrontBlocks, $fetchedBlocks);
+        if ($all === []) {
             return null;
         }
 
-        $maxUrls = (int) config('services.web_fetch.max_urls_per_email', 10);
-        $urls = $this->urlExtractor->extract($cleanedPlain, $rawHtml, $maxUrls);
-        if (empty($urls)) {
-            return null;
+        Log::info('parseItemsFromInboundMessage: linked urls — ok', [
+            'source' => $sourceTag,
+            'storefront_catalog' => count($storefrontBlocks),
+            'fetched' => count($fetchedBlocks),
+        ]);
+
+        return implode("\n\n", $all);
+    }
+
+    /** Наш storefront-хост со схемой ?code=SKU (наш каталог). */
+    private const OWN_STOREFRONT_RE = '~https?://(?:www\.)?(?:mylift\.ru|myzip\.ru)/[^\s"\'<>]*[?&]code=(M\d{3,})~i';
+
+    private function isOwnStorefrontUrl(string $url): bool
+    {
+        return preg_match(self::OWN_STOREFRONT_RE, $url) === 1;
+    }
+
+    /**
+     * Блоки-описания товаров ИЗ КАТАЛОГА по нашим storefront-ссылкам
+     * (mylift.ru/?code=MXXXXX). Авторитетный источник имени/артикула/бренда для
+     * LLM — вместо парсинга собственного сайта. Возвращает [] если ссылок нет.
+     *
+     * @return array<int, string>
+     */
+    private function ownStorefrontCatalogBlocks(?string $plain, ?string $rawHtml): array
+    {
+        $hay = trim((string) $plain) . "\n" . trim((string) $rawHtml);
+        if ($hay === '' || preg_match_all(self::OWN_STOREFRONT_RE, $hay, $m) === 0) {
+            return [];
         }
-
-        try {
-            $results = $this->urlFetcher->fetchMany($urls);
-        } catch (\Throwable $e) {
-            Log::warning('parseItemsFromInboundMessage: url fetch failed', [
-                'source' => $sourceTag,
-                'urls' => count($urls),
-                'error' => $e->getMessage(),
-            ]);
-
-            return null;
+        $skus = array_values(array_unique(array_map('mb_strtoupper', $m[1])));
+        if ($skus === []) {
+            return [];
         }
 
         $blocks = [];
-        foreach ($results as $row) {
-            /** @var InboundUrlFetch $row */
-            if (! $row->isSuccessful() || $row->extracted_text === null || trim($row->extracted_text) === '') {
-                continue;
+        foreach (\App\Models\CatalogItem::query()
+            ->whereIn('sku', $skus)
+            ->where('is_active', true)
+            ->get(['sku', 'name', 'brand', 'brand_article']) as $c) {
+            $parts = ['Товар из нашего каталога: ' . $c->name, 'Артикул: ' . $c->sku];
+            if (! empty($c->brand)) {
+                $parts[] = 'Бренд: ' . $c->brand;
             }
-            $blocks[] = "### {$row->url}\n" . trim($row->extracted_text);
+            if (! empty($c->brand_article)) {
+                $parts[] = 'OEM/модель: ' . $c->brand_article;
+            }
+            $blocks[] = "### https://mylift.ru/?code={$c->sku}\n" . implode(' · ', $parts);
         }
 
-        if (empty($blocks)) {
-            Log::info('parseItemsFromInboundMessage: url fetch — no usable content', [
-                'source' => $sourceTag,
-                'urls' => count($urls),
-                'statuses' => array_count_values(array_map(fn ($r) => $r->status, $results)),
-            ]);
-
-            return null;
-        }
-
-        Log::info('parseItemsFromInboundMessage: url fetch — ok', [
-            'source' => $sourceTag,
-            'urls' => count($urls),
-            'usable' => count($blocks),
-        ]);
-
-        return implode("\n\n", $blocks);
+        return $blocks;
     }
 
     /**
