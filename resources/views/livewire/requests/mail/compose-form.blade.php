@@ -21,6 +21,28 @@
                 x: null, y: null,
                 w: Math.min(720, window.innerWidth - 32),
                 h: Math.min(640, window.innerHeight - 110),
+                // Восстановить последнее положение/размер окна (localStorage) —
+                // чтобы в НОВОЙ заявке композер открывался там же, где пользователь
+                // его оставил. Клампим в текущий вьюпорт (окно могло уменьшиться),
+                // теми же границами, что drag/resize — иначе окно уедет за экран.
+                init() {
+                    try {
+                        const g = JSON.parse(localStorage.getItem('mylift.composer.geom') || 'null');
+                        if (g && typeof g === 'object') {
+                            if (typeof g.w === 'number') this.w = Math.min(Math.max(360, g.w), window.innerWidth - 8);
+                            if (typeof g.h === 'number') this.h = Math.min(Math.max(300, g.h), window.innerHeight - 8);
+                            if (typeof g.x === 'number' && typeof g.y === 'number') {
+                                this.x = Math.min(Math.max(g.x, 60 - this.w), window.innerWidth - 100);
+                                this.y = Math.min(Math.max(g.y, 0), window.innerHeight - 44);
+                            }
+                        }
+                    } catch (e) { /* приватный режим / битый JSON — игнор */ }
+                },
+                persist() {
+                    try {
+                        localStorage.setItem('mylift.composer.geom', JSON.stringify({ x: this.x, y: this.y, w: this.w, h: this.h }));
+                    } catch (e) { /* игнор */ }
+                },
                 // ВАЖНО: возвращаем ОБЪЕКТ, не строку. Alpine :style со строкой
                 // ЗАМЕНЯЕТ весь атрибут style (стирая position:fixed из статичного
                 // style → окно падало в поток документа, «в подвал»); объектный
@@ -47,6 +69,7 @@
                     const up = () => {
                         window.removeEventListener('pointermove', move);
                         window.removeEventListener('pointerup', up);
+                        this.persist();
                     };
                     window.addEventListener('pointermove', move);
                     window.addEventListener('pointerup', up);
@@ -63,6 +86,7 @@
                     const up = () => {
                         window.removeEventListener('pointermove', move);
                         window.removeEventListener('pointerup', up);
+                        this.persist();
                     };
                     window.addEventListener('pointermove', move);
                     window.addEventListener('pointerup', up);
