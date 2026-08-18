@@ -55,6 +55,14 @@
             <span class="flex-1"></span>
             <button type="button" wire:click="refreshPool" class="btn btn-sm" wire:loading.attr="disabled">Обновить пул</button>
             <button type="button" wire:click="runPoll" class="btn btn-sm" wire:loading.attr="disabled">Обновить статусы</button>
+            @if(($stats['stuck_analyzing'] ?? 0) > 0)
+                <button type="button" wire:click="resendAllStuck"
+                        wire:confirm="Вернуть в очередь все {{ $stats['stuck_analyzing'] }} зависших в анализе позиций (старше {{ $stats['stuck_days'] }} дн)? Отправятся партиями по дневному лимиту."
+                        class="btn btn-sm" wire:loading.attr="disabled"
+                        title="Позиции застряли в «Анализируется» — вернуть на отправку">
+                    Переотправить зависшие ({{ $stats['stuck_analyzing'] }})
+                </button>
+            @endif
             <button type="button" wire:click="runDispatch" class="btn btn-sm btn-primary" wire:loading.attr="disabled"
                     @if(! $stats['enabled'] || ! $stats['configured']) disabled title="Включите IQOT и задайте ключ в Настройках" @endif>
                 Запустить анализ

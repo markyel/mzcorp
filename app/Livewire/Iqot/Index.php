@@ -84,6 +84,12 @@ class Index extends Component
         $attention = IqotPosition::query()->needingPricingAttention()->count();
         $critical = IqotPosition::query()->criticalPricing()->count();
 
+        $stuckCutoff = now()->subDays($this->stuckAnalyzingDays());
+        $stuckAnalyzing = IqotPosition::query()
+            ->where('status', IqotPositionStatus::Analyzing->value)
+            ->where(fn ($q) => $q->whereNull('last_enqueued_at')->orWhere('last_enqueued_at', '<', $stuckCutoff))
+            ->count();
+
         return [
             'enabled' => (bool) app_setting('iqot.enabled', config('services.iqot.enabled', false)),
             'configured' => trim((string) app_setting('iqot.api_key', config('services.iqot.api_key', ''))) !== '',
@@ -92,6 +98,8 @@ class Index extends Component
             'fresh' => $fresh,
             'attention' => $attention,
             'critical' => $critical,
+            'stuck_analyzing' => $stuckAnalyzing,
+            'stuck_days' => $this->stuckAnalyzingDays(),
             'by_status' => $byStatus,
             'total' => array_sum($byStatus),
         ];
@@ -205,6 +213,36 @@ class Index extends Component
             'manual_requested_at' => now(),
         ])->save();
         session()->flash('iqot-flash', 'Позиция возвращена в очередь на отправку — уйдёт при ближайшем отправлении (кнопка «Отправить сейчас» или автоотправка).');
+        unset($this->stats, $this->positions);
+    }
+
+    /** Порог «зависла в анализе» (дней с last_enqueued_at). */
+    private function stuckAnalyzingDays(): int
+    {
+        return (int) app_setting('iqot.stuck_analyzing_days', 2);
+    }
+
+    /**
+     * Массовая переотправка ВСЕХ зависших в анализе позиций (analyzing +
+     * last_enqueued_at старше порога, либо без даты). Возвращает их в очередь
+     * (pending), открепляя от застрявших submission. Кейс: IQOT был на паузе →
+     * сотни позиций осиротели в analyzing. Отправятся партиями по дневному лимиту.
+     */
+    public function resendAllStuck(): void
+    {
+        $this->assertManager();
+        $cutoff = now()->subDays($this->stuckAnalyzingDays());
+        $n = IqotPosition::query()
+            ->where('status', IqotPositionStatus::Analyzing->value)
+            ->where(fn ($q) => $q->whereNull('last_enqueued_at')->orWhere('last_enqueued_at', '<', $cutoff))
+            ->update([
+                'status' => IqotPositionStatus::Pending->value,
+                'iqot_submission_id' => null,
+                'iqot_item_status' => null,
+                'error_code' => null,
+                'error_message' => null,
+            ]);
+        session()->flash('iqot-flash', "Возвращено в очередь зависших позиций: {$n}. Отправятся партиями по дневному лимиту (крон каждые 2ч или «Отправить сейчас»).");
         unset($this->stats, $this->positions);
     }
 
