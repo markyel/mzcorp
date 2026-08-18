@@ -1533,6 +1533,22 @@ class CatalogEmbeddingService
             return true;
         }
 
+        // Бренд клиента может стоять в НАЗВАНИИ каталога (или brand_article), но
+        // отсутствовать в поле brand/brands[] — частый кейс: OEM в имени, а brand =
+        // дистрибьютор / изготовитель платы. Пример: «Блок управления Monarch
+        // MCTC-PES-E1», brand=JF, brands=[Мой ЗиП,GUANGRI,JF,KOYO] — Monarch только
+        // в имени; клиент пишет Monarch → бренд-гейт зря отсекал верный товар
+        // (кейс M-2026-12576). Токен бренда (≥3 симв), встречающийся в названии
+        // или OEM-артикуле, считаем валидным брендом.
+        $nameHay = mb_strtolower(trim((string) $catalog->name . ' ' . (string) ($catalog->brand_article ?? '')));
+        if ($nameHay !== '') {
+            foreach ($itemTokens as $iTok) {
+                if (mb_strlen($iTok) >= 3 && mb_strpos($nameHay, mb_strtolower($iTok)) !== false) {
+                    return true;
+                }
+            }
+        }
+
         $catalogTokens = [];
         if ($catalog->brand !== null && $catalog->brand !== '') {
             foreach ($this->normalizeBrandTokens($catalog->brand) as $t) {
