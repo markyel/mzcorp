@@ -11,7 +11,7 @@
             <h3>Почта</h3>
             <span class="text-[12px] text-fg-3 ml-2">Все письма всех ящиков (read-only)</span>
             <span class="flex-1"></span>
-            <span class="text-[11.5px] text-fg-3 mono">{{ $this->emails->total() }} писем за период</span>
+            <span class="text-[11.5px] text-fg-3 mono">{{ $this->totalCount() }} писем за период</span>
         </div>
 
         {{-- Поиск по письмам (в рамках выбранных ниже фильтров): адрес/имя,
@@ -30,7 +30,7 @@
             </div>
             @if(trim($search) !== '')
                 <div class="mt-1 text-[11px] text-fg-4">
-                    Найдено писем: <span class="mono text-fg-2">{{ $this->emails->total() }}</span> — по запросу «{{ $search }}» в рамках фильтров ниже
+                    Найдено писем: <span class="mono text-fg-2">{{ $this->totalCount() }}</span> — по запросу «{{ $search }}» в рамках фильтров ниже
                 </div>
             @endif
         </div>

@@ -82,6 +82,9 @@ class Index extends Component
     #[Url(as: 'expand')]
     public ?int $expandedId = null;
 
+    /** Кэш общего числа писем под фильтрами (см. totalCount). null = пересчитать. */
+    public ?int $resultTotal = null;
+
     public function mount(): void
     {
         $user = auth()->user();
@@ -94,6 +97,17 @@ class Index extends Component
     }
 
     /* ------------------------------- Filters -------------------------------- */
+
+    /**
+     * Override: любой сброс страницы (все фильтры/поиск зовут resetPage) также
+     * инвалидирует кэш total — чтобы «N писем» пересчитался. Раскрытие письма
+     * resetPage НЕ зовёт → total остаётся кэшированным (нет дорогого COUNT).
+     */
+    public function resetPage(?string $pageName = 'page'): void
+    {
+        $this->setPage(1, $pageName);
+        $this->resultTotal = null;
+    }
 
     public function setDirection(string $d): void
     {
@@ -209,7 +223,31 @@ class Index extends Component
             ])
             ->withCount('attachments')
             ->orderByDesc('id')
-            ->paginate(50);
+            // simplePaginate — без внутреннего COUNT(*). paginate() гонял COUNT
+            // (с OR по body/to/cc/вложениям ≈1.4с) на КАЖДЫЙ Livewire-update, в
+            // т.ч. на раскрытие письма → тормоза 5с. Общее число писем считаем
+            // отдельно (totalCount) и КЭШируем — пересчёт только при смене фильтра.
+            ->simplePaginate(50);
+    }
+
+    /**
+     * Общее число писем под текущими фильтрами. Кэшируется в $resultTotal —
+     * дорогой COUNT (OR по body/to/cc/вложениям) НЕ пересчитывается на раскрытие
+     * письма/пагинацию, только при смене фильтров (сброс в busResultTotal()).
+     */
+    public function totalCount(): int
+    {
+        if ($this->resultTotal === null) {
+            $this->resultTotal = $this->buildQuery()->count();
+        }
+
+        return $this->resultTotal;
+    }
+
+    /** Сбросить кэш total — при любой смене фильтра/поиска. */
+    private function busResultTotal(): void
+    {
+        $this->resultTotal = null;
     }
 
     /**
@@ -353,7 +391,14 @@ class Index extends Component
                     ->orWhere('body_plain', 'ilike', $like)
                     ->orWhereRaw('to_recipients::text ilike ?', [$like])
                     ->orWhereRaw('cc_recipients::text ilike ?', [$like])
-                    ->orWhereHas('attachments', fn (Builder $a) => $a->where('filename', 'ilike', $like));
+                    // Имя вложения: НЕ orWhereHas (коррелированный EXISTS в OR →
+                    // COUNT paginate'а шёл 3с). Некоррелированный semi-join
+                    // id IN (подзапрос) + trgm-индекс на filename → ~в 2× быстрее.
+                    ->orWhereIn('id', function ($sub) use ($like) {
+                        $sub->select('email_message_id')
+                            ->from('email_attachments')
+                            ->where('filename', 'ilike', $like);
+                    });
             });
         }
 
