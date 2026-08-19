@@ -241,6 +241,19 @@ class RequestMergeService
         if ($winner->id === $loser->id) {
             $errors[] = 'Нельзя слить заявку саму с собой.';
         }
+        // Гард против цикла/цепочки слияний: winner должен быть КОНЕЧНОЙ заявкой
+        // (не слитой сам). Если winner уже слит куда-то — слияние loser в него
+        // создало бы цикл (A→B при уже существующем B→A, кейс M-2026-10755↔8001:
+        // КП зависли на дубле, обе заявки указывали друг на друга) или цепочку.
+        // Сливать нужно в конечного победителя.
+        if ($winner->merged_into_id !== null) {
+            $target = Request::find($winner->merged_into_id);
+            $errors[] = sprintf(
+                'Заявка %s сама уже слита в %s — сливать в неё нельзя (иначе цикл/цепочка). Сливайте в конечную заявку.',
+                $winner->internal_code,
+                $target?->internal_code ?? ('#' . $winner->merged_into_id),
+            );
+        }
         if (in_array($winner->status, self::WINNER_SILENT_STATUSES, true)) {
             $errors[] = sprintf('Заявка %s в статусе «%s» — в неё нельзя сливать.', $winner->internal_code, $winner->status->label());
         }
