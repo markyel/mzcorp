@@ -216,7 +216,11 @@
                          inline-логотипы (рендерятся в теле письма). Фото —
                          превью с лайтбоксом (как в клиентском треде). --}}
                     @php
-                        $files = $m->attachments->reject(fn ($a) => (bool) $a->is_inline);
+                        {{-- Прячем только инлайн-КАРТИНКИ (подписи/логотипы). Инлайн
+                             НЕ-картинки (PDF-прайс с Content-ID) — реальные документы,
+                             показываем. Кейс inq 3380: прайс-PDF был inline → пропадал. --}}
+                        $files = $m->attachments->reject(fn ($a) => (bool) $a->is_inline
+                            && \Illuminate\Support\Str::startsWith(strtolower((string) $a->mime_type), 'image/'));
                         $galleryImgs = $files->filter(fn ($a) => $a->mime_type && \Illuminate\Support\Str::startsWith(strtolower($a->mime_type), 'image/'))->values();
                         $gallery = $galleryImgs->map(fn ($a) => [
                             'src' => route('attachments.preview', $a),

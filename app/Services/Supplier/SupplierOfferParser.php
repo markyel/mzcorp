@@ -224,8 +224,17 @@ class SupplierOfferParser
      */
     private function extractAttachments(EmailMessage $reply): array
     {
+        // Инлайн-вложения обычно = подписи/логотипы (мелкие картинки). НО инлайн
+        // НЕ-картинка (PDF/Excel/Word/.eml) — реальный документ: поставщики часто
+        // шлют прайс-PDF с Content-ID (is_inline=true). Их разбираем. Кейс inq 3380
+        // (paulschaab): PDF 1110000200.pdf inline=1 → парсер его пропускал, offer=0.
+        // Инлайн-картинки (подписи) по-прежнему отсекаются image-level гардом ниже.
         $attachments = $reply->attachments()
-            ->where(fn ($q) => $q->whereNull('is_inline')->orWhere('is_inline', false))
+            ->where(function ($q) {
+                $q->whereNull('is_inline')
+                    ->orWhere('is_inline', false)
+                    ->orWhere('mime_type', 'not ilike', 'image/%');
+            })
             ->orderBy('id')
             ->limit(self::MAX_ATTACHMENTS)
             ->get();
