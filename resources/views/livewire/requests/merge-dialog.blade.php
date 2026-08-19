@@ -17,7 +17,7 @@
         <div style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 24px;"
              wire:mousedown.self="close">
             <div class="ds-card p-5 w-full max-w-[640px]" wire:click.stop>
-                <h3 class="text-[15px] font-semibold text-fg-1 mb-1">Объединение заявок</h3>
+                <h3 class="text-[15px] font-semibold text-fg-1 mb-1">{{ $postSaleMode ? 'Завернуть в закрытую сделку' : 'Объединение заявок' }}</h3>
                 <div class="text-[12px] text-fg-3 mb-3">
                     Используйте, когда одна заявка клиента «расплылась» по нескольким письмам
                     и стала отдельными Request. Выберите active-заявку этого же клиента —
@@ -25,9 +25,24 @@
                     заявка закроется (объединена). Одинаковые позиции пропускаются.
                 </div>
 
+                {{-- Режим: слить дубль ИЛИ завернуть в успешно закрытую сделку (пост-продажа). --}}
+                <div class="flex items-center gap-1.5 mb-3">
+                    <button type="button" wire:click="setPostSaleMode(false)"
+                            class="btn btn-sm {{ ! $postSaleMode ? 'btn-primary' : '' }}">Слить дубль</button>
+                    <button type="button" wire:click="setPostSaleMode(true)"
+                            class="btn btn-sm {{ $postSaleMode ? 'btn-primary' : '' }}">🛒 Завернуть в закрытую сделку</button>
+                </div>
+                @if($postSaleMode)
+                    <div class="p-2.5 rounded bg-emerald-50 mb-3 text-[11.5px] text-emerald-800">
+                        <b>Пост-продажа.</b> Эта переписка завернётся в выбранную <b>успешно закрытую</b> сделку клиента
+                        (доставка / документы / уточнения по заказу). Сделка НЕ реанимируется, статус не меняется,
+                        текущий дубль-фантом удаляется. Выберите закрытую сделку ниже.
+                    </div>
+                @endif
+
                 {{-- Режим «другой e-mail отправителя»: тот же клиент пишет с другого
                      ящика. Только РОП/директор/админ — риск склеить двух заказчиков. --}}
-                @if($canCross)
+                @if($canCross && ! $postSaleMode)
                     <div class="mb-3">
                         @if(! $crossClient)
                             <button type="button" wire:click="toggleCrossClient" class="btn btn-sm">
@@ -50,7 +65,7 @@
                     </div>
                 @endif
 
-                @if(! empty($winnerCodes) && ! $crossClient)
+                @if(! empty($winnerCodes) && ! $crossClient && ! $postSaleMode)
                     <div class="text-[11.5px] text-fg-3 mb-3 flex items-center gap-1.5 flex-wrap">
                         <span class="uppercase tracking-wider font-semibold text-[10.5px]">Фильтр по общему маркеру:</span>
                         @foreach($winnerCodes as $code)
@@ -61,7 +76,9 @@
 
                 @if($candidates->isEmpty())
                     <div class="text-amber-700 text-[12px] mb-4">
-                        @if($crossClient)
+                        @if($postSaleMode)
+                            Не нашлось успешно закрытых сделок (закрыта успехом / оплачена) этого клиента. Уточните поиск по номеру/теме.
+                        @elseif($crossClient)
                             Введите номер заявки (например M-2026-8787), тему или почту отправителя.
                         @elseif(! empty($winnerCodes))
                             Не нашлось других active-заявок с тем же external-маркером.
@@ -151,7 +168,7 @@
                 @endif
 
                 {{-- Направление слияния: какая заявка закроется, какая останется. --}}
-                @if($selected)
+                @if($selected && ! $postSaleMode)
                     @php $curCode = $this->currentCode(); @endphp
                     <div class="mb-3">
                         <div class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">Направление слияния</div>
@@ -172,7 +189,7 @@
                     </div>
                 @endif
 
-                @if($stats !== null)
+                @if($stats !== null && ! $postSaleMode)
                     @if(!empty($stats['conflicts']))
                         <div class="text-red-700 text-[12px] mb-3 space-y-1">
                             @foreach($stats['conflicts'] as $err)
@@ -218,13 +235,23 @@
                             ? ($mergeCurrentIntoSelected ? $this->currentCode() : $selected->internal_code)
                             : 'выбранная';
                     @endphp
-                    <button type="button"
-                            wire:click="confirmMerge"
-                            wire:confirm="Объединить заявки? Заявка {{ $closingCode }} будет закрыта, отменить нельзя."
-                            class="btn btn-primary"
-                            @disabled($selectedLoserId === null || ($stats && !empty($stats['conflicts'])))>
-                        ⊌ Объединить
-                    </button>
+                    @if($postSaleMode)
+                        <button type="button"
+                                wire:click="reroutePostSale"
+                                wire:confirm="Завернуть текущую переписку в сделку {{ $selected?->internal_code ?? '' }} как пост-продажу? Текущая заявка-фантом будет удалена, сделка не реанимируется."
+                                class="btn btn-primary"
+                                @disabled($selectedLoserId === null)>
+                            🛒 Завернуть в сделку
+                        </button>
+                    @else
+                        <button type="button"
+                                wire:click="confirmMerge"
+                                wire:confirm="Объединить заявки? Заявка {{ $closingCode }} будет закрыта, отменить нельзя."
+                                class="btn btn-primary"
+                                @disabled($selectedLoserId === null || ($stats && !empty($stats['conflicts'])))>
+                            ⊌ Объединить
+                        </button>
+                    @endif
                     <button type="button" wire:click="close" class="btn">Отмена</button>
                 </div>
             </div>

@@ -50,6 +50,20 @@ class MergeDialog extends Component
      */
     public bool $crossClient = false;
 
+    /**
+     * Режим «пост-продажа»: вместо слияния — завернуть текущую переписку-фантом
+     * в УСПЕШНО закрытую сделку клиента (closed_won/paid) как пост-продажу, без
+     * реанимации и без нового дубля. Кандидаты тогда ищутся среди won/paid, а
+     * действие — PostSaleRerouteService, не merge. См. reroutePostSale.
+     */
+    public bool $postSaleMode = false;
+
+    /** Статусы-цели для режима пост-продажи. */
+    private const POST_SALE_TARGET_STATUSES = [
+        RequestStatus::ClosedWon,
+        RequestStatus::Paid,
+    ];
+
     private const ACTIVE_STATUSES = [
         RequestStatus::New,
         RequestStatus::Assigned,
@@ -74,8 +88,50 @@ class MergeDialog extends Component
         $this->search = '';
         $this->crossClient = false;
         $this->mergeCurrentIntoSelected = true; // дефолт: текущую влить в выбранную
+        $this->postSaleMode = false;
         $this->resetErrorBag();
         $this->open = true;
+    }
+
+    /** Переключить режим «пост-продажа» (завернуть в закрытую сделку). */
+    public function setPostSaleMode(bool $on): void
+    {
+        $this->postSaleMode = $on;
+        $this->selectedLoserId = null;
+        $this->crossClient = false;
+        $this->search = '';
+        $this->resetErrorBag();
+        unset($this->candidates);
+    }
+
+    /**
+     * Завернуть ТЕКУЩУЮ переписку в выбранную успешно закрытую сделку как
+     * пост-продажу (письма → target, входящие post_sale, attention 🛒, фантом
+     * удалён). Реанимации нет. См. PostSaleRerouteService.
+     */
+    public function reroutePostSale(\App\Services\Request\PostSaleRerouteService $service): void
+    {
+        $source = RequestModel::find($this->requestId);
+        $target = $this->selectedLoserId ? RequestModel::find($this->selectedLoserId) : null;
+        if ($source === null || $target === null) {
+            $this->addError('selectedLoserId', 'Выберите успешно закрытую сделку.');
+
+            return;
+        }
+        try {
+            $res = $service->reroute($source, $target, auth()->user());
+        } catch (\Throwable $e) {
+            $this->addError('selectedLoserId', $e->getMessage());
+
+            return;
+        }
+        session()->flash('status', sprintf(
+            'Переписка (%d писем) завёрнута в успешную сделку %s как пост-продажа. Фантом %s удалён.',
+            $res['moved'], $res['target_code'], $res['source_code'],
+        ));
+        $this->open = false;
+        // Текущая заявка удалена → уводим менеджера на сделку.
+        $this->redirect(route('requests.show', $target->id), navigate: true);
     }
 
     public function close(): void
@@ -173,6 +229,11 @@ class MergeDialog extends Component
         $winner = $this->winner();
         if ($winner === null) {
             return collect();
+        }
+
+        // Режим пост-продажи: цели — УСПЕШНО закрытые сделки того же клиента.
+        if ($this->postSaleMode) {
+            return $this->postSaleTargets($winner);
         }
 
         $activeValues = array_map(fn (RequestStatus $s) => $s->value, self::ACTIVE_STATUSES);
@@ -364,6 +425,35 @@ class MergeDialog extends Component
         }
 
         $this->dispatch('request-state-changed');
+    }
+
+    /**
+     * Кандидаты режима пост-продажи: успешно закрытые сделки (closed_won/paid)
+     * того же клиента. С preview кол-ва позиций.
+     *
+     * @return \Illuminate\Support\Collection<int, RequestModel>
+     */
+    private function postSaleTargets(RequestModel $winner)
+    {
+        if (trim((string) $winner->client_email) === '') {
+            return collect();
+        }
+        $statuses = array_map(fn (RequestStatus $s) => $s->value, self::POST_SALE_TARGET_STATUSES);
+        $q = RequestModel::query()
+            ->where('id', '!=', $winner->id)
+            ->whereRaw('LOWER(client_email) = ?', [mb_strtolower(trim($winner->client_email))])
+            ->whereIn('status', $statuses)
+            ->withCount(['items' => fn ($q) => $q->where('is_active', true)])
+            ->with(['assignedUser:id,name'])
+            ->orderByDesc('closed_at')
+            ->orderByDesc('id')
+            ->limit(50);
+        if ($this->search !== '') {
+            $needle = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $this->search).'%';
+            $q->where(fn ($w) => $w->where('internal_code', 'ilike', $needle)->orWhere('subject', 'ilike', $needle));
+        }
+
+        return $q->get(['id', 'internal_code', 'subject', 'status', 'assigned_user_id', 'created_at', 'closed_at', 'client_email']);
     }
 
     /**
