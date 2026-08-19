@@ -185,6 +185,31 @@ class InboundReplyLinker
                     });
                 if ($terminalParent) {
                     $terminalRequest = Request::find($terminalParent->related_request_id);
+
+                    // Прямой ответ в тред УСПЕШНО закрытой (closed_won) сделки —
+                    // пост-продажная переписка (доставка / документы / «подготовка
+                    // поручня»). Заявку НЕ реанимируем (сделка состоялась) и НЕ
+                    // плодим фейковую новую — прицепляем письмо к этой заявке.
+                    // Надёжность связи = заголовочный тред (In-Reply-To/References
+                    // на её сообщение), поэтому категорию LLM не спрашиваем. Статус
+                    // заморозит MailRouter (post-sale). Кейс M-2026-11863→11309.
+                    // closed_lost остаётся на гибриде наследование/реанимация.
+                    if ($terminalRequest && $terminalRequest->status === RequestStatus::ClosedWon) {
+                        $message->forceFill(['related_request_id' => $terminalRequest->id])->save();
+                        $this->activity->touch(
+                            $terminalRequest,
+                            \App\Enums\RequestActivityType::PostSaleMessage,
+                            $message->sent_at ?: now(),
+                        );
+                        Log::info('InboundReplyLinker: post-sale reply threaded to closed_won — attached (no new request)', [
+                            'email_message_id' => $message->id,
+                            'request_id' => $terminalRequest->id,
+                            'internal_code' => $terminalRequest->internal_code,
+                        ]);
+
+                        return $terminalRequest;
+                    }
+
                     $this->rememberInheritanceCandidate(
                         $message,
                         $terminalRequest,
@@ -196,6 +221,7 @@ class InboundReplyLinker
                         'terminal_request_id' => $terminalRequest->id,
                         'terminal_status' => $terminalRequest->status->value,
                     ]);
+
                     return null;
                 }
 

@@ -442,6 +442,23 @@ class MailRouter
             }
         }
 
+        // Письмо привязано (линкером) к УСПЕШНО закрытой сделке (closed_won) —
+        // это пост-продажная переписка (ответ в тред выигранного дела: доставка,
+        // документы, «подготовка поручня»). Статус НЕ трогаем, позиции НЕ парсим,
+        // sticky НЕ переназначаем, новую заявку НЕ плодим — только post-sale
+        // attention + доставка менеджеру. Покрывает и заголовочный тред
+        // (InboundReplyLinker Case 2), и subject/external-code матч, независимо
+        // от исходной категории LLM. Кейс M-2026-11863→11309.
+        if ($linkedRequest !== null
+            && $linkedRequest->status === \App\Enums\RequestStatus::ClosedWon) {
+            if ($message->category !== EmailCategory::PostSale->value) {
+                $message->forceFill(['category' => EmailCategory::PostSale->value])->save();
+            }
+            $this->handlePostSaleMessage($message, $linkedRequest);
+
+            return;
+        }
+
         // Постпродажная переписка по уже оформленному заказу (отгрузка /
         // комплектация / документы). Новую заявку НЕ создаём и менеджера НЕ
         // назначаем.
