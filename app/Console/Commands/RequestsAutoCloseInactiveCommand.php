@@ -361,17 +361,41 @@ class RequestsAutoCloseInactiveCommand extends Command
      */
     private function clientEngagedRecently(RussianWorkingDayService $cal, Request $req, int $days): bool
     {
-        $lastInbound = EmailMessage::query()
-            ->where('related_request_id', $req->id)
-            ->where('direction', MailDirection::Inbound->value)
-            ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
-            ->max('sent_at');
+        $lastInbound = $this->lastClientInboundAt($req);
 
         if ($lastInbound === null) {
             return false;
         }
 
         return now()->lessThan($cal->addBusinessDays(Carbon::parse($lastInbound), $days));
+    }
+
+    /**
+     * Последнее входящее письмо ОТ КЛИЕНТА (а не от коллеги). Исключаем
+     * внутренних отправителей (домены `services.mail.internal_domains`, напр.
+     * @myzip.ru) — их письма не значат «клиент ответил». Кейс M-2026-7487:
+     * внутренние письма alexander.rodenkov@myzip.ru (category=irrelevant)
+     * сбрасывали таймер молчания клиента → invoiced-заявка не авто-закрывалась,
+     * хотя реальный клиент молчал с июля. Также без cross-mailbox дублей.
+     */
+    private function lastClientInboundAt(Request $req): ?string
+    {
+        $internal = array_values(array_filter(array_map(
+            fn ($d) => mb_strtolower(trim((string) $d)),
+            (array) config('services.mail.internal_domains', []),
+        )));
+
+        $q = EmailMessage::query()
+            ->where('related_request_id', $req->id)
+            ->where('direction', MailDirection::Inbound->value)
+            ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL");
+
+        if ($internal !== []) {
+            $placeholders = implode(',', array_fill(0, count($internal), '?'));
+            $q->whereRaw("split_part(lower(from_email), '@', 2) NOT IN ($placeholders)", $internal);
+        }
+
+        return $q->max('sent_at');
     }
 
     /**
@@ -389,11 +413,7 @@ class RequestsAutoCloseInactiveCommand extends Command
      */
     private function clientSilenceAnchor(Request $req): CarbonInterface
     {
-        $lastInbound = EmailMessage::query()
-            ->where('related_request_id', $req->id)
-            ->where('direction', MailDirection::Inbound->value)
-            ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
-            ->max('sent_at');
+        $lastInbound = $this->lastClientInboundAt($req);
 
         $statusEntry = \Illuminate\Support\Facades\DB::table('request_state_changes')
             ->where('request_id', $req->id)
