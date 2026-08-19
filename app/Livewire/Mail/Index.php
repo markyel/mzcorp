@@ -59,15 +59,6 @@ class Index extends Component
     public string $search = '';
 
     /**
-     * Искать также в ТЕЛЕ письма (body_plain/body_html). По умолчанию ВЫКЛ —
-     * ILIKE '%...%' по огромным телам = seq-scan (≈5с vs 0.25с без тела; этот
-     * запрос ещё и пере-выполняется на каждый Livewire-update). Включать точечно,
-     * когда реально ищут по содержимому письма.
-     */
-    #[Url(as: 'body', except: false)]
-    public bool $searchBody = false;
-
-    /**
      * Фильтр по категории gpt-4o классификатора:
      *   '' = все
      *   'client_request' / 'thread_reply' / 'irrelevant' — конкретная категория
@@ -141,11 +132,6 @@ class Index extends Component
     }
 
     public function updatingSearch(): void
-    {
-        $this->resetPage();
-    }
-
-    public function updatedSearchBody(): void
     {
         $this->resetPage();
     }
@@ -354,19 +340,20 @@ class Index extends Component
         $s = trim($this->search);
         if ($s !== '') {
             $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $s).'%';
-            $searchBody = $this->searchBody;
-            $q->where(function (Builder $w) use ($like, $searchBody) {
+            $q->where(function (Builder $w) use ($like) {
                 $w->where('subject', 'ilike', $like)
                     ->orWhere('from_email', 'ilike', $like)
                     ->orWhere('from_name', 'ilike', $like)
+                    // Содержимое письма ищем по body_plain (trgm GIN-индекс
+                    // email_messages_body_plain_trgm → ILIKE по индексу, реальные
+                    // слова ~0.01с). Для писем без text/plain части body_plain
+                    // заполняется html→text (backfill + MessagePersister), поэтому
+                    // покрывает весь контент. body_html (906МБ) отдельно не ищем —
+                    // дубль контента и неиндексируемый объём.
+                    ->orWhere('body_plain', 'ilike', $like)
                     ->orWhereRaw('to_recipients::text ilike ?', [$like])
                     ->orWhereRaw('cc_recipients::text ilike ?', [$like])
                     ->orWhereHas('attachments', fn (Builder $a) => $a->where('filename', 'ilike', $like));
-                // Тело — только по явному запросу (дорого; см. $searchBody).
-                if ($searchBody) {
-                    $w->orWhere('body_plain', 'ilike', $like)
-                        ->orWhere('body_html', 'ilike', $like);
-                }
             });
         }
 

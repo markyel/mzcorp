@@ -96,7 +96,7 @@ class MessagePersister
                 'to_recipients' => $this->extractAddressList($msg, 'to'),
                 'cc_recipients' => $this->extractAddressList($msg, 'cc'),
                 'sent_at' => $this->extractDate($msg),
-                'body_plain' => $this->cleanString((string) $msg->getTextBody()),
+                'body_plain' => $this->bodyPlainWithHtmlFallback($msg),
                 'body_html' => $this->cleanString((string) $msg->getHTMLBody()),
                 'raw_source' => $this->cleanString((string) $msg->getRawBody()),
                 'headers' => $this->extractAllHeaders($msg),
@@ -981,6 +981,29 @@ class MessagePersister
         }
 
         return '';
+    }
+
+    /**
+     * body_plain: text/plain часть письма; если её нет (html-only письмо) —
+     * html→text, чтобы содержимое всё равно попало в body_plain. Нужно для
+     * поиска по телу («Почта», trgm-индекс) и для парсеров, которые читают
+     * body_plain. Раньше body_plain у html-only писем оставался пустым (18% всех).
+     */
+    private function bodyPlainWithHtmlFallback($msg): string
+    {
+        $plain = $this->cleanString((string) $msg->getTextBody());
+        if (trim($plain) !== '') {
+            return $plain;
+        }
+        $html = (string) $msg->getHTMLBody();
+        if (trim($html) === '') {
+            return $plain;
+        }
+        try {
+            return $this->cleanString(app(\App\Services\Mail\EmailTextCleanerService::class)->htmlToText($html));
+        } catch (\Throwable $e) {
+            return $this->cleanString(trim(strip_tags($html)));
+        }
     }
 
     /**

@@ -20,7 +20,7 @@
             <div class="relative max-w-[560px]">
                 <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-4 text-[13px]">🔎</span>
                 <input type="search" wire:model.live.debounce.400ms="search"
-                       placeholder="Поиск: e-mail, тема, имя вложения…"
+                       placeholder="Поиск: e-mail, тема, текст письма, имя вложения…"
                        class="h-[30px] w-full pl-8 pr-8 border border-border rounded-md bg-surface text-fg-1 text-[12.5px] outline-none focus:border-[var(--sky-500)]">
                 @if(trim($search) !== '')
                     <button type="button" wire:click="$set('search', '')"
@@ -28,11 +28,6 @@
                             title="Очистить поиск">✕</button>
                 @endif
             </div>
-            <label class="flex items-center gap-1.5 mt-1.5 text-[11.5px] text-fg-3 cursor-pointer w-fit"
-                   title="Поиск по телу писем медленный (сканирует все тексты) — включайте точечно">
-                <input type="checkbox" wire:model.live="searchBody">
-                искать и в тексте письма <span class="text-fg-4">(медленно)</span>
-            </label>
             @if(trim($search) !== '')
                 <div class="mt-1 text-[11px] text-fg-4">
                     Найдено писем: <span class="mono text-fg-2">{{ $this->emails->total() }}</span> — по запросу «{{ $search }}» в рамках фильтров ниже
