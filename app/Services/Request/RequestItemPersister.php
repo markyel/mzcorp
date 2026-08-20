@@ -542,26 +542,16 @@ class RequestItemPersister
     }
 
     /** Наши house-brand'ы / имена компании — НЕ бренд клиентской позиции. */
-    private const HOUSE_BRANDS = ['мойзип', 'myzip', 'мойлифт', 'mylift', 'ооомойлифт', 'ооомойзип', 'mzcorp'];
-
     /**
-     * Санитизация parsed_brand: если Vision/LLM подставил наш собственный
-     * house-brand (кейс ri#24363: на фото контактного моста бренда нет, Vision
-     * выдумал «Мой ЗиП») — это НЕ OEM-бренд клиентской позиции, обнуляем.
-     * Сравнение нормализованное (lower + без пробелов/точек).
+     * Санитизация parsed_brand: если в бренд просочился наш собственный
+     * house-brand «Мой ЗиП» — это НЕ OEM-бренд клиентской позиции, обнуляем.
+     * Основной источник такого бренда — каталожный матч (см. HouseBrand и
+     * CatalogResolutionService::applyCatalogToItem), здесь — страховка на
+     * входе парсера. Общий фильтр в {@see \App\Support\HouseBrand}.
      */
     private function sanitizeParsedBrand(?string $brand): ?string
     {
-        $brand = trim((string) $brand);
-        if ($brand === '') {
-            return null;
-        }
-        $norm = mb_strtolower(preg_replace('/[\s.\-«»"]+/u', '', $brand) ?? '');
-        if (in_array($norm, self::HOUSE_BRANDS, true)) {
-            return null;
-        }
-
-        return $brand;
+        return \App\Support\HouseBrand::filter($brand);
     }
 
     private function normalizeArticleKey(string $article): string

@@ -556,8 +556,11 @@ class CatalogResolutionService
             $item->parsed_name = mb_substr((string) $catalog->name, 0, 250);
         }
 
-        if (empty($item->parsed_brand) && ! empty($catalog->brand)) {
-            $item->parsed_brand = $catalog->brand;
+        // Бренд из каталога наследуем в пустой parsed_brand — НО не наш
+        // house-brand «Мой ЗиП»: у 752 позиций каталога brand='Мой ЗиП', и без
+        // фильтра клиентская позиция получала бы бренд из ниоткуда (ri#24363).
+        if (empty($item->parsed_brand)) {
+            $item->parsed_brand = \App\Support\HouseBrand::filter($catalog->brand);
         }
 
         $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
