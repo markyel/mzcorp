@@ -100,6 +100,15 @@ class Pool extends Component
     public string $oneCFilter = '';
 
     /**
+     * Фильтр по типу клиента (перепродавец):
+     * '' — все, 'reseller' — перекуп (email в reseller_emails),
+     * 'not_reseller' — не перекуп. Источник — ResellerEmailService
+     * (ручная пометка «перепродавец» на уровне client_email).
+     */
+    #[Url(as: 'reseller', except: '')]
+    public string $resellerFilter = '';
+
+    /**
      * Окно infinite-scroll: сколько строк показывать. Растёт по loadMore() при
      * долистывании вниз. НЕ в URL (эфемерное состояние). Любая смена фильтра
      * сбрасывает его в 25 через override resetPage() ниже.
@@ -174,6 +183,11 @@ class Pool extends Component
         $this->resetPage();
     }
 
+    public function updatingResellerFilter(): void
+    {
+        $this->resetPage();
+    }
+
     public function updatingSort(): void
     {
         $this->resetPage();
@@ -221,7 +235,7 @@ class Pool extends Component
      * приход через топбар (?q=foo без прочих параметров) НЕ считается
      * «URL-фильтрами» → сохранённые фильтры восстановятся, поиск ляжет поверх.
      */
-    private const FILTER_KEYS = ['scope', 'status', 'bucket', 'mgr', 'sort', 'onec', 'unassigned', 'delegated'];
+    private const FILTER_KEYS = ['scope', 'status', 'bucket', 'mgr', 'sort', 'onec', 'reseller', 'unassigned', 'delegated'];
 
     /**
      * «Заброшенные»: сколько дней НАШЕГО молчания (мяч у нас — последнее событие
@@ -275,6 +289,7 @@ class Pool extends Component
         $this->assignedUserId = isset($f['mgr']) ? ($f['mgr'] !== null ? (int) $f['mgr'] : null) : $this->assignedUserId;
         $this->sort = (string) ($f['sort'] ?? $this->sort);
         $this->oneCFilter = (string) ($f['onec'] ?? $this->oneCFilter);
+        $this->resellerFilter = (string) ($f['reseller'] ?? $this->resellerFilter);
         $this->unassignedOnly = (bool) ($f['unassigned'] ?? $this->unassignedOnly);
         $this->delegatedOnly = (bool) ($f['delegated'] ?? $this->delegatedOnly);
 
@@ -295,6 +310,7 @@ class Pool extends Component
             'mgr' => $this->assignedUserId,
             'sort' => $this->sort,
             'onec' => $this->oneCFilter,
+            'reseller' => $this->resellerFilter,
             'unassigned' => $this->unassignedOnly,
             'delegated' => $this->delegatedOnly,
         ]);
@@ -710,6 +726,23 @@ class Pool extends Component
             $query->whereNull('onec_number');
         } elseif ($this->oneCFilter === 'present') {
             $query->whereNotNull('onec_number');
+        }
+
+        // Тип клиента (перекуп): email заявки в reseller_emails или нет.
+        // reseller_emails.email хранится нормализованным (lower+trim),
+        // поэтому сравниваем с lower(trim(client_email)). NotExists ловит
+        // и заявки с NULL client_email (не перекуп).
+        if ($this->resellerFilter !== '') {
+            $resellerExists = function ($sub) {
+                $sub->select(DB::raw(1))
+                    ->from('reseller_emails as re')
+                    ->whereRaw('re.email = lower(btrim(requests.client_email))');
+            };
+            if ($this->resellerFilter === 'reseller') {
+                $query->whereExists($resellerExists);
+            } else {
+                $query->whereNotExists($resellerExists);
+            }
         }
 
         if ($this->search !== '') {

@@ -302,6 +302,9 @@
         {{-- FILTERS BAR --}}
         <div class="px-5 py-2.5 border-b border-[var(--border)] bg-[var(--bg-surface-2)] text-[12.5px] flex items-center gap-2 flex-wrap">
 
+            {{-- Строка 2 (order:2): назначено · менеджер · сортировка · № 1С · тип клиента --}}
+            <div class="w-full flex items-center gap-2 flex-wrap" style="order:2">
+
             {{-- Scope filter (если can see all) --}}
             @if($this->canSeeAll)
                 <span class="inline-flex items-center gap-1.5 h-[26px] px-2.5 border border-[var(--border-strong)] rounded-md bg-[var(--bg-surface)] text-[var(--fg-2)]">
@@ -408,6 +411,19 @@
                     <option value="present">с номером 1С</option>
                 </select>
 
+                {{-- Тип клиента: перекуп (reseller_emails) / не перекуп --}}
+                <select wire:model.live="resellerFilter"
+                        class="h-[26px] pl-2 pr-7 rounded-md border bg-[var(--bg-surface)] text-[var(--fg-2)] {{ $resellerFilter !== '' ? 'border-sky-400 text-sky-800' : 'border-[var(--border-strong)]' }} text-[12px] font-medium outline-none focus:border-sky-500"
+                        title="Фильтр по типу клиента (перепродавец)">
+                    <option value="">Тип клиента: все</option>
+                    <option value="reseller">Перекуп</option>
+                    <option value="not_reseller">Не перекуп</option>
+                </select>
+            </div>{{-- /строка 2 (контролы) --}}
+
+            {{-- Строка 1 (order:1): bucket-chips (группа статусов) --}}
+            <div class="w-full flex items-center gap-2 flex-wrap" style="order:1">
+
             {{-- Phase 1.10: bucket-chips (группа статусов). Phase 1.11
                  добавляет «Просрочено» — flat-list заявок с просроченным
                  attention_required_at; кнопка красная если счётчик > 0. --}}
@@ -447,6 +463,10 @@
                     <span class="font-mono text-[11px] {{ $on ? 'opacity-90' : 'opacity-75' }}">{{ $meta['count'] }}</span>
                 </button>
             @endforeach
+            </div>{{-- /строка 1 (bucket-chips) --}}
+
+            {{-- Строка 3 (order:3): уточняющие статус-chips --}}
+            <div class="w-full flex items-center gap-2 flex-wrap" style="order:3">
 
             {{-- Уточняющие status-chips внутри текущего bucket'а. Для
                  bucket=postsale не показываем — статус всегда closed_won,
@@ -498,6 +518,7 @@
             <span class="text-[11.5px] text-[var(--fg-3)] inline-flex items-center gap-1.5">
                 Сортировка: <b class="font-medium text-[var(--fg-1)]">свежие ↓</b>
             </span>
+            </div>{{-- /строка 3 (статус-chips) --}}
         </div>
 
         {{-- BULK BAR — Phase 2 placeholder. Без selection. --}}
