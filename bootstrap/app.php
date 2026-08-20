@@ -17,6 +17,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => \App\Http\Middleware\EnsureRole::class,
             'catalog.import.token' => \App\Http\Middleware\CatalogImportToken::class,
         ]);
+        // ВРЕМЕННО: диагностика 419 на suppliers.show. Удалить после разбора.
+        $middleware->web(append: [\App\Http\Middleware\DebugLivewirePayload::class]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // ВРЕМЕННО (диагностика 419): логируем детали TokenMismatch, чтобы
