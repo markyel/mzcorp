@@ -1758,48 +1758,72 @@
                         </div>
                         <details class="px-[18px] py-2 text-[12.5px]">
                             <summary class="cursor-pointer text-sky-800 select-none py-1">Показать детали ({{ count($dedupDropped) }})</summary>
-                            <div class="divide-y divide-sky-100 mt-1">
-                                @foreach($dedupDropped as $d)
+                            @php
+                                // Группируем съеденные строки по позиции-победителю —
+                                // одна кнопка «Откатить» расщепляет победителя целиком.
+                                $dedupGroups = collect($dedupDropped)->groupBy(fn($d) => (int) ($d['merged_into_position'] ?? 0));
+                            @endphp
+                            <div class="divide-y divide-sky-200 mt-1">
+                                @foreach($dedupGroups as $winnerPos => $group)
                                     @php
-                                        $mergedPos = $d['merged_into_position'] ?? null;
-                                        $winner = $mergedPos ? $items->firstWhere('position', (int) $mergedPos) : null;
-                                        $qtyEaten = $d['qty'] ?? null;
-                                        $qtyOrigWin = $d['qty_original_winner'] ?? null;
-                                        $qtySummed = $d['qty_summed_into'] ?? null;
+                                        $winner = $winnerPos ? $items->firstWhere('position', (int) $winnerPos) : null;
+                                        $canUndo = $winner && ! empty($winner->parsing_merged_from);
                                     @endphp
-                                    <div class="py-2 flex items-start gap-3 flex-wrap">
-                                        <div class="flex-1 min-w-0">
-                                            <div class="flex items-center gap-2 flex-wrap">
-                                                <span class="text-fg-3 text-[11px]">Съедено:</span>
-                                                <span class="font-medium text-fg-1">{{ \Illuminate\Support\Str::limit($d['name'] ?? '—', 80) }}</span>
-                                                @if(! empty($d['article']))
-                                                    <span class="mono text-[11.5px] text-fg-2">{{ \Illuminate\Support\Str::limit($d['article'], 60) }}</span>
-                                                @endif
-                                                <span class="text-[11px] text-fg-3">× {{ $qtyEaten ?? '?' }}</span>
-                                            </div>
-                                            <div class="mt-1 text-[11px] text-fg-3 flex items-center gap-2 flex-wrap">
-                                                <span>Источник: <span class="mono">{{ $d['source'] ?? '—' }}</span></span>
-                                                <span>·</span>
-                                                <span>Слито в позицию:
-                                                    @if($winner)
-                                                        <span class="mono text-fg-1">#{{ $winner->position }}</span>
-                                                        <span class="text-fg-2">{{ \Illuminate\Support\Str::limit($winner->parsed_name, 50) }}</span>
-                                                    @else
-                                                        <span class="mono">#{{ $mergedPos ?? '?' }}</span>
-                                                    @endif
-                                                </span>
-                                                @if($qtyOrigWin !== null && $qtySummed !== null)
-                                                    <span>·</span>
-                                                    <span class="inline-flex items-center gap-1">
-                                                        <span class="text-fg-3">qty:</span>
-                                                        <span class="mono text-fg-2">{{ $qtyOrigWin }}</span>
-                                                        <span class="text-fg-3">+</span>
-                                                        <span class="mono text-fg-2">{{ $qtyEaten ?? '?' }}</span>
-                                                        <span class="text-fg-3">→</span>
-                                                        <span class="mono font-semibold text-sky-800">{{ $qtySummed }}</span>
-                                                    </span>
-                                                @endif
-                                            </div>
+                                    <div class="py-2.5">
+                                        <div class="flex items-center gap-2 flex-wrap mb-1.5">
+                                            <span class="text-[11px] text-fg-3">Слито в позицию:</span>
+                                            @if($winner)
+                                                <span class="mono text-fg-1">#{{ $winner->position }}</span>
+                                                <span class="text-fg-2">{{ \Illuminate\Support\Str::limit($winner->parsed_name, 50) }}</span>
+                                            @else
+                                                <span class="mono">#{{ $winnerPos ?: '?' }}</span>
+                                            @endif
+                                            <span class="flex-1"></span>
+                                            @if($canUndo)
+                                                <button type="button"
+                                                    wire:click="undoDedup({{ $winner->id }})"
+                                                    wire:confirm="Расщепить позицию #{{ $winner->position }} обратно на {{ $group->count() }} отдельных? qty победителя вернётся к исходному. Восстановленные позиции будут без каталожной привязки."
+                                                    wire:loading.attr="disabled"
+                                                    wire:target="undoDedup({{ $winner->id }})"
+                                                    class="text-[11.5px] font-semibold text-sky-800 border border-sky-300 bg-white hover:bg-sky-50 rounded-md px-2.5 py-1 disabled:opacity-50">
+                                                    ↩ Откатить (расщепить {{ $group->count() }})
+                                                </button>
+                                            @endif
+                                        </div>
+                                        <div class="divide-y divide-sky-100">
+                                            @foreach($group as $d)
+                                                @php
+                                                    $qtyEaten = $d['qty'] ?? null;
+                                                    $qtyOrigWin = $d['qty_original_winner'] ?? null;
+                                                    $qtySummed = $d['qty_summed_into'] ?? null;
+                                                @endphp
+                                                <div class="py-1.5 flex items-start gap-3 flex-wrap">
+                                                    <div class="flex-1 min-w-0">
+                                                        <div class="flex items-center gap-2 flex-wrap">
+                                                            <span class="text-fg-3 text-[11px]">Съедено:</span>
+                                                            <span class="font-medium text-fg-1">{{ \Illuminate\Support\Str::limit($d['name'] ?? '—', 80) }}</span>
+                                                            @if(! empty($d['article']))
+                                                                <span class="mono text-[11.5px] text-fg-2">{{ \Illuminate\Support\Str::limit($d['article'], 60) }}</span>
+                                                            @endif
+                                                            <span class="text-[11px] text-fg-3">× {{ $qtyEaten ?? '?' }}</span>
+                                                        </div>
+                                                        <div class="mt-1 text-[11px] text-fg-3 flex items-center gap-2 flex-wrap">
+                                                            <span>Источник: <span class="mono">{{ $d['source'] ?? '—' }}</span></span>
+                                                            @if($qtyOrigWin !== null && $qtySummed !== null)
+                                                                <span>·</span>
+                                                                <span class="inline-flex items-center gap-1">
+                                                                    <span class="text-fg-3">qty:</span>
+                                                                    <span class="mono text-fg-2">{{ $qtyOrigWin }}</span>
+                                                                    <span class="text-fg-3">+</span>
+                                                                    <span class="mono text-fg-2">{{ $qtyEaten ?? '?' }}</span>
+                                                                    <span class="text-fg-3">→</span>
+                                                                    <span class="mono font-semibold text-sky-800">{{ $qtySummed }}</span>
+                                                                </span>
+                                                            @endif
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            @endforeach
                                         </div>
                                     </div>
                                 @endforeach

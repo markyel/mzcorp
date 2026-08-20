@@ -582,6 +582,126 @@ class RequestItemEditor
     }
 
     /**
+     * Откат авто-дедупа: парсер схлопнул несколько строк исходника в одну
+     * позицию (одинаковый нормализованный артикул + invoice_index) и
+     * просуммировал qty. Иногда это ошибка — клиент завёл РАЗНЫЕ позиции с
+     * совпавшим артикулом (Р1/Р2, средние/конечные этажи). Метод расщепляет
+     * победителя обратно: каждую съеденную строку (`parsing_merged_from`)
+     * восстанавливает отдельной позицией, а qty победителя возвращает к
+     * исходному (до слияния). Восстановленные позиции — без каталожной
+     * привязки (менеджер сам сматчит/поправит имя). Провенанс дедупа снимается
+     * с победителя и из `requests.parsing_meta.dedup_dropped`.
+     *
+     * @return int число восстановленных позиций
+     */
+    public function restoreMergedDuplicates(RequestItem $winner, User $author): int
+    {
+        $this->ensureCanEdit($winner, $author);
+
+        $merged = is_array($winner->parsing_merged_from) ? $winner->parsing_merged_from : [];
+        if ($merged === []) {
+            throw new \DomainException('У позиции нет схлопнутых дублей для отката.');
+        }
+
+        $restored = 0;
+        DB::transaction(function () use ($winner, $author, $merged, &$restored) {
+            $request = $winner->request;
+            $maxPosition = (int) RequestItem::where('request_id', $winner->request_id)->max('position');
+
+            // qty победителя ДО слияния — берём из любой записи (все несут одну
+            // и ту же qty_original_winner). Fallback: текущий qty минус съеденные.
+            $origWinner = null;
+            $eatenSum = 0.0;
+            $restoredKeys = [];
+            foreach ($merged as $entry) {
+                if ($origWinner === null && isset($entry['qty_original_winner'])) {
+                    $origWinner = $this->numQty($entry['qty_original_winner']);
+                }
+                $eatenSum += $this->numQty($entry['qty'] ?? null);
+                $restoredKeys[] = $entry['dedup_key'] ?? null;
+            }
+
+            foreach ($merged as $entry) {
+                $maxPosition++;
+                $newItem = RequestItem::create([
+                    'request_id' => $winner->request_id,
+                    'position' => $maxPosition,
+                    'parsed_name' => trim((string) ($entry['name'] ?? '')) !== ''
+                        ? $entry['name'] : $winner->parsed_name,
+                    // Съеденные строки не несли brand/unit/category — наследуем
+                    // от победителя (это был дубль того же артикула).
+                    'parsed_brand' => $winner->parsed_brand,
+                    'parsed_article' => $entry['article'] ?? $winner->parsed_article,
+                    'parsed_qty' => $this->numQty($entry['qty'] ?? null) ?: 1,
+                    'parsed_unit' => $winner->parsed_unit,
+                    'category' => $winner->category,
+                    'data_source' => $winner->data_source,
+                    'image_attachment_id' => $winner->image_attachment_id,
+                    'status' => 'parsed',
+                    'is_active' => true,
+                    'source_email_message_id' => $winner->source_email_message_id,
+                ]);
+                $this->appendAudit($newItem, [
+                    'action' => 'restored_from_dedup',
+                    'old' => ['merged_into_item_id' => $winner->id, 'winner_position' => $winner->position],
+                    'new' => ['dedup_key' => $entry['dedup_key'] ?? null],
+                ], $author);
+                $newItem->save();
+                $restored++;
+            }
+
+            // qty победителя возвращаем к исходному.
+            $winner->parsed_qty = $origWinner !== null
+                ? $origWinner
+                : (max(0.0, $this->numQty($winner->parsed_qty) - $eatenSum) ?: 1.0);
+            $winner->parsing_merged_from = null;
+            $this->appendAudit($winner, [
+                'action' => 'undo_dedup_split',
+                'old' => ['parsing_merged_from_count' => count($merged)],
+                'new' => ['restored_positions' => $restored, 'qty_reset_to' => $winner->parsed_qty],
+            ], $author);
+            $winner->save();
+
+            // Снимаем записи дедупа этого победителя из parsing_meta.
+            if ($request !== null) {
+                $meta = is_array($request->parsing_meta) ? $request->parsing_meta : [];
+                if (! empty($meta['dedup_dropped'])) {
+                    $winnerPos = (int) $winner->position;
+                    $meta['dedup_dropped'] = array_values(array_filter(
+                        $meta['dedup_dropped'],
+                        static function ($d) use ($winnerPos, $restoredKeys) {
+                            $sameWinner = (int) ($d['merged_into_position'] ?? -1) === $winnerPos;
+                            $key = $d['dedup_key'] ?? null;
+
+                            return ! ($sameWinner && in_array($key, $restoredKeys, true));
+                        },
+                    ));
+                    $request->parsing_meta = $meta;
+                    $request->save();
+                }
+            }
+        });
+
+        Log::info('RequestItemEditor: undo dedup split', [
+            'winner_id' => $winner->id,
+            'restored' => $restored,
+            'by' => $author->id,
+        ]);
+
+        return $restored;
+    }
+
+    /** Нормализация qty из строки («3», «3.0», «3,5») в float. */
+    private function numQty(mixed $v): float
+    {
+        if (is_numeric($v)) {
+            return (float) $v;
+        }
+
+        return (float) str_replace([',', ' '], ['.', ''], (string) $v);
+    }
+
+    /**
      * Тот же normalize что в Detail::articleAlreadyPresent (uppercase + strip separators).
      */
     private function articleAlreadyPresent(string $existing, string $candidate): bool

@@ -1783,6 +1783,29 @@ class Detail extends Component
     }
 
     /**
+     * Откат авто-дедупа: расщепить позицию-победителя обратно на строки,
+     * которые парсер схлопнул как дубли (баннер «Парсер схлопнул дубли»).
+     * qty победителя возвращается к исходному, съеденные строки — отдельными
+     * позициями без каталожной привязки.
+     */
+    public function undoDedup(int $winnerItemId, RequestItemEditor $editor): void
+    {
+        $winner = $this->loadItemOrFail($winnerItemId);
+        try {
+            $n = $editor->restoreMergedDuplicates($winner, auth()->user());
+            session()->flash('status', sprintf(
+                'Откат дедупа: восстановлено %d позиц. — проверьте и при необходимости сматчите с каталогом.',
+                $n,
+            ));
+        } catch (\DomainException $e) {
+            $this->addError('status', $e->getMessage());
+
+            return;
+        }
+        $this->reloadRequest();
+    }
+
+    /**
      * Bulk re-match всех позиций заявки. Сбрасывает catalog_item_id (кроме
      * internal_catalog_not_found) и прогоняет matchOrResolve. Используется
      * после редактирования названий — даёт «применить изменения».
