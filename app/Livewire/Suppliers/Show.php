@@ -6,8 +6,11 @@ use App\Enums\Role;
 use App\Livewire\Concerns\RendersEmailBody;
 use App\Models\SupplierInquiry;
 use App\Services\Supplier\SupplierReplyService;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 
 /**
  * Карточка запроса поставщику: реквизиты поставщика, статус, связанная
@@ -18,6 +21,10 @@ use Livewire\Component;
 class Show extends Component
 {
     use RendersEmailBody;
+    use WithFileUploads;
+
+    /** @var array загруженные фото/файлы для прикрепления к ответу */
+    public $replyFiles = [];
 
     public SupplierInquiry $inquiry;
 
@@ -119,14 +126,31 @@ class Show extends Component
             return;
         }
         $this->validate(
-            ['replyBody' => 'required|string|max:20000'],
-            ['replyBody.required' => 'Введите текст ответа.'],
+            ['replyBody' => 'nullable|string|max:20000', 'replyFiles.*' => 'file|max:25600'],
+            [],
             ['replyBody' => 'текст ответа'],
         );
+        if (trim($this->replyBody) === '' && empty($this->replyFiles)) {
+            $this->addError('replyBody', 'Введите текст ответа или прикрепите файл.');
 
-        $result = $replies->reply($this->inquiry, auth()->user(), $this->replyBody);
+            return;
+        }
+
+        // Загруженные файлы → staging на local; сервис скопирует их в черновик.
+        $extraFiles = [];
+        foreach ((array) $this->replyFiles as $tmp) {
+            if ($tmp === null) {
+                continue;
+            }
+            $name = $tmp->getClientOriginalName();
+            $path = sprintf('mail/supplier-reply-staging/%d/%s', $this->inquiry->id, Str::random(10) . '_' . $name);
+            Storage::disk('local')->put($path, $tmp->get());
+            $extraFiles[] = ['path' => $path, 'name' => $name, 'mime' => $tmp->getMimeType() ?: 'application/octet-stream', 'size' => $tmp->getSize() ?: 0];
+        }
+
+        $result = $replies->reply($this->inquiry, auth()->user(), $this->replyBody, $extraFiles);
         if ($result['success'] ?? false) {
-            $this->replyBody = '';
+            $this->reset(['replyBody', 'replyFiles']);
             $this->inquiry->refresh();
             unset($this->messages);
             $this->dispatch('toast', message: 'Ответ отправлен поставщику.', type: 'success');

@@ -2,11 +2,15 @@
 
 namespace App\Services\Supplier;
 
+use App\Models\EmailAttachment;
+use App\Models\EmailMessage;
 use App\Models\SupplierInquiry;
 use App\Models\User;
 use App\Services\Mail\EmailDraftService;
 use App\Services\Mail\OutgoingMailSender;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 /**
  * Ручной ответ менеджера поставщику в треде запроса расценки. В отличие от
@@ -28,10 +32,14 @@ class SupplierReplyService
     /**
      * @return array{success: bool, error?: string}
      */
-    public function reply(SupplierInquiry $inquiry, User $author, string $plain): array
+    /**
+     * @param  array<int, array{path:string, name:string, mime:string, size:int}>  $extraFiles
+     *         Загруженные фото/файлы (staging на local) — прикрепляются к письму.
+     */
+    public function reply(SupplierInquiry $inquiry, User $author, string $plain, array $extraFiles = []): array
     {
         $plain = trim($plain);
-        if ($plain === '') {
+        if ($plain === '' && $extraFiles === []) {
             return ['success' => false, 'error' => 'Пустой текст ответа.'];
         }
         if (trim((string) $inquiry->supplier_email) === '') {
@@ -71,6 +79,10 @@ class SupplierReplyService
                 'body_plain' => $plain,
             ]);
 
+            if ($extraFiles !== []) {
+                $this->attachFiles($draft->fresh() ?? $draft, $extraFiles);
+            }
+
             $result = $this->sender->sendDraft($draft->id);
             if (! ($result['success'] ?? false)) {
                 Log::warning('SupplierReply: send failed', ['inquiry_id' => $inquiry->id, 'error' => $result['error'] ?? 'unknown']);
@@ -92,6 +104,45 @@ class SupplierReplyService
 
             return ['success' => false, 'error' => 'Внутренняя ошибка: ' . $e->getMessage()];
         }
+    }
+
+    /**
+     * Скопировать staging-файлы (фото/файлы) в черновик ответа. Non-fatal per file.
+     *
+     * @param  array<int, array{path:string, name:string, mime:string, size:int}>  $extraFiles
+     */
+    private function attachFiles(EmailMessage $draft, array $extraFiles): void
+    {
+        foreach ($extraFiles as $f) {
+            $src = (string) ($f['path'] ?? '');
+            if ($src === '' || ! Storage::disk('local')->exists($src)) {
+                continue;
+            }
+            try {
+                $name = $this->safeName((string) ($f['name'] ?? 'file'));
+                $newPath = sprintf('mail/%d/drafts/%d/%s', $draft->mailbox_id ?? 0, $draft->id, Str::random(8) . '_' . $name);
+                Storage::disk('local')->put($newPath, Storage::disk('local')->get($src));
+                EmailAttachment::create([
+                    'email_message_id' => $draft->id,
+                    'filename' => mb_substr($name, 0, 255),
+                    'mime_type' => (string) ($f['mime'] ?? 'application/octet-stream'),
+                    'size_bytes' => (int) ($f['size'] ?? 0),
+                    'content_id' => null,
+                    'file_path' => $newPath,
+                    'disk' => 'local',
+                    'is_inline' => false,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('SupplierReply: attach copy failed', ['draft_id' => $draft->id, 'file' => $f['name'] ?? '?', 'error' => $e->getMessage()]);
+            }
+        }
+    }
+
+    private function safeName(string $name): string
+    {
+        $name = preg_replace('/[^\p{L}\p{N}._\- ]+/u', '_', $name) ?? 'file';
+
+        return mb_substr(trim($name), 0, 120) ?: 'file';
     }
 
     private function subject(?string $base): string
