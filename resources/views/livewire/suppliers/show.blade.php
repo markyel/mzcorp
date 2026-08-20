@@ -149,6 +149,12 @@
                             class="w-full px-2.5 py-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500 resize-y"></textarea>
                         @error('replyBody')<div class="text-[11.5px] mt-1" style="color:var(--red-700)">{{ $message }}</div>@enderror
                         <div class="mt-2">
+                            <label class="block text-[11px] text-fg-3 mb-1">Копия <span class="text-fg-4">(необязательно, через запятую)</span></label>
+                            <input type="text" wire:model.blur="replyCc" placeholder="petrov@firma.ru, Иванов &lt;ivanov@firma.ru&gt;"
+                                   class="w-full px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                            @error('replyCc')<div class="text-[11.5px] mt-1" style="color:var(--red-700)">{{ $message }}</div>@enderror
+                        </div>
+                        <div class="mt-2">
                             <label class="block text-[11px] text-fg-3 mb-1">Фото / файлы <span class="text-fg-4">(необязательно)</span></label>
                             <input type="file" wire:model="replyFiles" multiple accept="image/*,.pdf,.xlsx,.xls,.doc,.docx"
                                    class="w-full text-[12px] border border-border rounded-md p-1.5 bg-surface">

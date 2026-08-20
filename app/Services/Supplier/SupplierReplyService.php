@@ -35,8 +35,10 @@ class SupplierReplyService
     /**
      * @param  array<int, array{path:string, name:string, mime:string, size:int}>  $extraFiles
      *         Загруженные фото/файлы (staging на local) — прикрепляются к письму.
+     * @param  array<int, array{email:string, name?:string}>  $cc
+     *         Адреса в копии письма (CC).
      */
-    public function reply(SupplierInquiry $inquiry, User $author, string $plain, array $extraFiles = []): array
+    public function reply(SupplierInquiry $inquiry, User $author, string $plain, array $extraFiles = [], array $cc = []): array
     {
         $plain = trim($plain);
         if ($plain === '' && $extraFiles === []) {
@@ -74,6 +76,7 @@ class SupplierReplyService
 
             $this->drafts->update($draft, [
                 'to_recipients' => [['email' => $inquiry->supplier_email, 'name' => $inquiry->supplier_name ?: '']],
+                'cc_recipients' => $cc ?: null,
                 'subject' => $subject,
                 'body_html' => $html,
                 'body_plain' => $plain,

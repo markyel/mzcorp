@@ -37,6 +37,9 @@ class Show extends Component
     /** Текст ответа поставщику. */
     public string $replyBody = '';
 
+    /** Копия (CC) — адреса через запятую/точку с запятой. */
+    public string $replyCc = '';
+
     public function mount(SupplierInquiry $inquiry): void
     {
         abort_unless(auth()->check(), 403);
@@ -126,12 +129,21 @@ class Show extends Component
             return;
         }
         $this->validate(
-            ['replyBody' => 'nullable|string|max:20000', 'replyFiles.*' => 'file|max:25600'],
+            ['replyBody' => 'nullable|string|max:20000', 'replyFiles.*' => 'file|max:25600', 'replyCc' => 'nullable|string|max:2000'],
             [],
             ['replyBody' => 'текст ответа'],
         );
         if (trim($this->replyBody) === '' && empty($this->replyFiles)) {
             $this->addError('replyBody', 'Введите текст ответа или прикрепите файл.');
+
+            return;
+        }
+
+        // Копия: парсим адреса, отсекаем невалидные. Если во вводе что-то
+        // есть, но валидных адресов ноль — предупреждаем, а не молчим.
+        $cc = $this->parseCcRecipients($this->replyCc);
+        if (trim($this->replyCc) !== '' && $cc === []) {
+            $this->addError('replyCc', 'Не удалось распознать e-mail в копии. Проверьте адреса.');
 
             return;
         }
@@ -148,15 +160,48 @@ class Show extends Component
             $extraFiles[] = ['path' => $path, 'name' => $name, 'mime' => $tmp->getMimeType() ?: 'application/octet-stream', 'size' => $tmp->getSize() ?: 0];
         }
 
-        $result = $replies->reply($this->inquiry, auth()->user(), $this->replyBody, $extraFiles);
+        $result = $replies->reply($this->inquiry, auth()->user(), $this->replyBody, $extraFiles, $cc);
         if ($result['success'] ?? false) {
-            $this->reset(['replyBody', 'replyFiles']);
+            $this->reset(['replyBody', 'replyFiles', 'replyCc']);
             $this->inquiry->refresh();
             unset($this->threadMessages);
             $this->dispatch('toast', message: 'Ответ отправлен поставщику.', type: 'success');
         } else {
             $this->dispatch('toast', message: $result['error'] ?? 'Не удалось отправить ответ.', type: 'error');
         }
+    }
+
+    /**
+     * Парсинг поля «Копия»: адреса через запятую/точку с запятой/перенос,
+     * поддержка «Имя <mail>». Невалидные — отбрасываются.
+     *
+     * @return array<int, array{email: string, name: string}>
+     */
+    private function parseCcRecipients(string $raw): array
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return [];
+        }
+        $out = [];
+        foreach (preg_split('/[,;\n]+/u', $raw) ?: [] as $item) {
+            $item = trim($item);
+            if ($item === '') {
+                continue;
+            }
+            if (preg_match('/^(.*?)<([^>]+)>$/u', $item, $m)) {
+                $email = trim($m[2]);
+                $name = trim($m[1], " \t\"");
+            } else {
+                $email = $item;
+                $name = '';
+            }
+            if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $out[] = ['email' => $email, 'name' => $name];
+            }
+        }
+
+        return $out;
     }
 
     public function deleteInquiry()
