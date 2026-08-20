@@ -109,6 +109,17 @@ class Pool extends Component
     public string $resellerFilter = '';
 
     /**
+     * Диапазон по дате ПОЯВЛЕНИЯ заявки (requests.created_at, MSK).
+     * Формат 'YYYY-MM-DD'. Пусто — без ограничения. Включительно:
+     * from → начало дня, to → конец дня (в app-tz Europe/Moscow).
+     */
+    #[Url(as: 'df', except: '')]
+    public string $dateFrom = '';
+
+    #[Url(as: 'dt', except: '')]
+    public string $dateTo = '';
+
+    /**
      * Окно infinite-scroll: сколько строк показывать. Растёт по loadMore() при
      * долистывании вниз. НЕ в URL (эфемерное состояние). Любая смена фильтра
      * сбрасывает его в 25 через override resetPage() ниже.
@@ -188,6 +199,24 @@ class Pool extends Component
         $this->resetPage();
     }
 
+    public function updatingDateFrom(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatingDateTo(): void
+    {
+        $this->resetPage();
+    }
+
+    /** Сбросить диапазон дат (compound $set в Livewire 4 не парсится). */
+    public function clearDateRange(): void
+    {
+        $this->dateFrom = '';
+        $this->dateTo = '';
+        $this->resetPage();
+    }
+
     public function updatingSort(): void
     {
         $this->resetPage();
@@ -235,7 +264,7 @@ class Pool extends Component
      * приход через топбар (?q=foo без прочих параметров) НЕ считается
      * «URL-фильтрами» → сохранённые фильтры восстановятся, поиск ляжет поверх.
      */
-    private const FILTER_KEYS = ['scope', 'status', 'bucket', 'mgr', 'sort', 'onec', 'reseller', 'unassigned', 'delegated'];
+    private const FILTER_KEYS = ['scope', 'status', 'bucket', 'mgr', 'sort', 'onec', 'reseller', 'df', 'dt', 'unassigned', 'delegated'];
 
     /**
      * «Заброшенные»: сколько дней НАШЕГО молчания (мяч у нас — последнее событие
@@ -290,6 +319,8 @@ class Pool extends Component
         $this->sort = (string) ($f['sort'] ?? $this->sort);
         $this->oneCFilter = (string) ($f['onec'] ?? $this->oneCFilter);
         $this->resellerFilter = (string) ($f['reseller'] ?? $this->resellerFilter);
+        $this->dateFrom = (string) ($f['df'] ?? $this->dateFrom);
+        $this->dateTo = (string) ($f['dt'] ?? $this->dateTo);
         $this->unassignedOnly = (bool) ($f['unassigned'] ?? $this->unassignedOnly);
         $this->delegatedOnly = (bool) ($f['delegated'] ?? $this->delegatedOnly);
 
@@ -311,6 +342,8 @@ class Pool extends Component
             'sort' => $this->sort,
             'onec' => $this->oneCFilter,
             'reseller' => $this->resellerFilter,
+            'df' => $this->dateFrom,
+            'dt' => $this->dateTo,
             'unassigned' => $this->unassignedOnly,
             'delegated' => $this->delegatedOnly,
         ]);
@@ -742,6 +775,21 @@ class Pool extends Component
                 $query->whereExists($resellerExists);
             } else {
                 $query->whereNotExists($resellerExists);
+            }
+        }
+
+        // Диапазон по дате появления заявки (created_at, MSK). Включительно.
+        // Битую дату молча игнорируем (не роняем список).
+        if ($this->dateFrom !== '') {
+            try {
+                $query->where('created_at', '>=', \Illuminate\Support\Carbon::parse($this->dateFrom)->startOfDay());
+            } catch (\Throwable) {
+            }
+        }
+        if ($this->dateTo !== '') {
+            try {
+                $query->where('created_at', '<=', \Illuminate\Support\Carbon::parse($this->dateTo)->endOfDay());
+            } catch (\Throwable) {
             }
         }
 

@@ -419,6 +419,22 @@
                     <option value="reseller">Перекуп</option>
                     <option value="not_reseller">Не перекуп</option>
                 </select>
+
+                {{-- Диапазон по дате появления заявки (created_at, MSK) --}}
+                <span class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md border {{ ($dateFrom !== '' || $dateTo !== '') ? 'border-sky-400 text-sky-800' : 'border-[var(--border-strong)] text-[var(--fg-2)]' }} bg-[var(--bg-surface)]"
+                      title="Диапазон по дате появления заявки">
+                    <span class="text-[11px] text-[var(--fg-3)]">Появление:</span>
+                    <input type="date" wire:model.live="dateFrom" max="{{ $dateTo ?: '' }}"
+                           class="h-[20px] bg-transparent text-[12px] outline-none border-0 p-0">
+                    <span class="text-[var(--fg-4)]">—</span>
+                    <input type="date" wire:model.live="dateTo" min="{{ $dateFrom ?: '' }}"
+                           class="h-[20px] bg-transparent text-[12px] outline-none border-0 p-0">
+                    @if($dateFrom !== '' || $dateTo !== '')
+                        <button type="button" wire:click="clearDateRange"
+                                class="ml-0.5 inline-flex items-center justify-center w-[16px] h-[16px] rounded-sm text-[var(--fg-3)] hover:text-[var(--red-600)]"
+                                title="Сбросить даты">✕</button>
+                    @endif
+                </span>
             </div>{{-- /строка 2 (контролы) --}}
 
             {{-- Строка 1 (order:1): bucket-chips (группа статусов) --}}
