@@ -58,7 +58,7 @@
             <div class="ds-card-body space-y-2 text-[12.5px]">
                 <div class="flex justify-between gap-2"><span class="text-fg-3">Пометил</span><span class="text-fg-1">{{ $inquiry->createdBy?->name ?? '—' }}</span></div>
                 <div class="flex justify-between gap-2"><span class="text-fg-3">Создан</span><span class="text-fg-2 mono">{{ $inquiry->created_at?->format('d.m.Y H:i') }}</span></div>
-                <div class="flex justify-between gap-2"><span class="text-fg-3">Писем в треде</span><span class="text-fg-2 mono">{{ $this->messages->count() }}</span></div>
+                <div class="flex justify-between gap-2"><span class="text-fg-3">Писем в треде</span><span class="text-fg-2 mono">{{ $this->threadMessages->count() }}</span></div>
                 @php $rs = $inquiry->responseState(); @endphp
                 <div class="flex justify-between gap-2"><span class="text-fg-3">Ответ поставщика</span>
                     <span>
@@ -168,7 +168,7 @@
                     </div>
                 @endif
             @endif
-            @forelse($this->messages as $m)
+            @forelse($this->threadMessages as $m)
                 @php
                     $isInbound = $m->direction === \App\Enums\MailDirection::Inbound;
                     $html = $this->bodyHtmlFor($m);

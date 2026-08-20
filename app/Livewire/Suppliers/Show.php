@@ -51,7 +51,7 @@ class Show extends Component
     {
         $this->threadSort = $this->threadSort === 'asc' ? 'desc' : 'asc';
         auth()->user()?->forceFill(['thread_sort_order' => $this->threadSort])->save();
-        unset($this->messages);
+        unset($this->threadMessages);
     }
 
     public function save(): void
@@ -152,7 +152,7 @@ class Show extends Component
         if ($result['success'] ?? false) {
             $this->reset(['replyBody', 'replyFiles']);
             $this->inquiry->refresh();
-            unset($this->messages);
+            unset($this->threadMessages);
             $this->dispatch('toast', message: 'Ответ отправлен поставщику.', type: 'success');
         } else {
             $this->dispatch('toast', message: $result['error'] ?? 'Не удалось отправить ответ.', type: 'error');
@@ -169,10 +169,16 @@ class Show extends Component
     }
 
     /**
+     * Тред переписки с поставщиком. ВАЖНО: имя НЕ `messages()` — оно
+     * зарезервировано Livewire под кастомные сообщения валидации
+     * (HandlesValidation::getMessages читает $this->messages и делает
+     * array_merge); computed, возвращающий Collection, ронял validate()
+     * TypeError'ом → abort(419) при отправке ответа поставщику.
+     *
      * @return \Illuminate\Support\Collection<int, \App\Models\EmailMessage>
      */
     #[Computed]
-    public function messages()
+    public function threadMessages()
     {
         $dir = $this->threadSort === 'desc' ? 'desc' : 'asc';
 
