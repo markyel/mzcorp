@@ -178,7 +178,7 @@ class RequestItemPersister
                 'request_id' => $existing->id,
                 'position' => $maxPosition,
                 'parsed_name' => $item['name'],
-                'parsed_brand' => $item['brand'] ?? null,
+                'parsed_brand' => $this->sanitizeParsedBrand($item['brand'] ?? null),
                 'parsed_article' => $item['article'] ?? null,
                 'parsed_qty' => $qtyToStore,
                 'parsed_unit' => $item['unit'] ?? 'шт.',
@@ -541,6 +541,29 @@ class RequestItemPersister
         return null;
     }
 
+    /** Наши house-brand'ы / имена компании — НЕ бренд клиентской позиции. */
+    private const HOUSE_BRANDS = ['мойзип', 'myzip', 'мойлифт', 'mylift', 'ооомойлифт', 'ооомойзип', 'mzcorp'];
+
+    /**
+     * Санитизация parsed_brand: если Vision/LLM подставил наш собственный
+     * house-brand (кейс ri#24363: на фото контактного моста бренда нет, Vision
+     * выдумал «Мой ЗиП») — это НЕ OEM-бренд клиентской позиции, обнуляем.
+     * Сравнение нормализованное (lower + без пробелов/точек).
+     */
+    private function sanitizeParsedBrand(?string $brand): ?string
+    {
+        $brand = trim((string) $brand);
+        if ($brand === '') {
+            return null;
+        }
+        $norm = mb_strtolower(preg_replace('/[\s.\-«»"]+/u', '', $brand) ?? '');
+        if (in_array($norm, self::HOUSE_BRANDS, true)) {
+            return null;
+        }
+
+        return $brand;
+    }
+
     private function normalizeArticleKey(string $article): string
     {
         return preg_replace('/[\s\-_.\/]/u', '', mb_strtoupper(trim($article))) ?? '';
@@ -722,7 +745,8 @@ class RequestItemPersister
                 $dirty = true;
             }
         }
-        if (is_string($addBrand) && $addBrand !== '') {
+        $addBrand = $this->sanitizeParsedBrand(is_string($addBrand) ? $addBrand : null) ?? '';
+        if ($addBrand !== '') {
             // Reply от клиента: brand заполняем только если он был пуст
             //   (не затираем то, что менеджер мог уже подтвердить).
             // Reparse того же исходного письма: перезаписываем brand если
