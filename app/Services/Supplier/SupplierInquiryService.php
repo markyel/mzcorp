@@ -282,12 +282,45 @@ class SupplierInquiryService
         }
         $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $code) . '%';
 
-        return SupplierInquiry::query()
+        // 1) Точное совпадение адреса поставщика.
+        $exact = SupplierInquiry::query()
             ->whereRaw('LOWER(supplier_email) = ?', [$from])
             ->where('subject', 'ilike', $like)
             ->orderByDesc('id')
             ->first();
+        if ($exact !== null) {
+            return $exact;
+        }
+
+        // 2) Fallback по ДОМЕНУ: поставщик часто отвечает с ДРУГОГО адреса того
+        // же домена (запрос слали на info@, ответ пришёл с technicalsupport@).
+        // Домен + M-код в теме инквайри — надёжно. НО только для КОРПОРАТИВНЫХ
+        // доменов: у бесплатных почт (mail.ru/gmail/яндекс) домен общий у
+        // разных поставщиков → домен-матч там неверен. Кейс M-2026-12940:
+        // info@lift-lt.ru ↔ ответ technicalsupport@lift-lt.ru.
+        $domain = \Illuminate\Support\Str::after($from, '@');
+        if ($domain === '' || $domain === $from || in_array($domain, self::FREE_MAIL_DOMAINS, true)) {
+            return null;
+        }
+
+        return SupplierInquiry::query()
+            ->whereRaw("LOWER(split_part(supplier_email, '@', 2)) = ?", [$domain])
+            ->where('subject', 'ilike', $like)
+            ->orderByDesc('id')
+            ->first();
     }
+
+    /**
+     * Бесплатные/публичные почтовые домены — для них домен-матч ответа
+     * поставщика НЕ применяем (общий домен у разных контрагентов).
+     */
+    private const FREE_MAIL_DOMAINS = [
+        'mail.ru', 'inbox.ru', 'list.ru', 'bk.ru', 'internet.ru',
+        'gmail.com', 'yandex.ru', 'ya.ru', 'yandex.com',
+        'rambler.ru', 'lenta.ru', 'autorambler.ru', 'myrambler.ru',
+        'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'me.com',
+        'bk.com', 'proton.me', 'protonmail.com', 'gmx.com', 'gmx.de',
+    ];
 
     /**
      * Найти запрос поставщику по ЛЮБОМУ коду в теме ответа: наш внутренний код
