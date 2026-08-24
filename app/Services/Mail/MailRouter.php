@@ -349,6 +349,33 @@ class MailRouter
             ]);
         }
 
+        // Позитивный матч по паре «отправитель = supplier_email инквайри» +
+        // «M-код из темы = в теме инквайри» — БЕЗ гарда на фразу «запрос
+        // расценки». Ловит ответы на запросы с ПРОИЗВОЛЬНОЙ темой: часть
+        // менеджеров шлёт запрос поставщику со своей почты со своей темой
+        // «Запрос M-YYYY-NNNN» (не наш авто-формат «Запрос расценки — […]»,
+        // rfq_token нет), а поставщик пересылает «Fwd: …» (In-Reply-To пуст).
+        // Клиент не значится supplier_email инквайри своей же заявки → ложных
+        // привязок клиентских писем нет. Кейс M-2026-12940 (info@lift-lt.ru).
+        try {
+            $bySupplierPair = $this->supplierInquiries->matchInboundBySubject($message);
+            if ($bySupplierPair !== null) {
+                $this->supplierInquiries->attachMessage($bySupplierPair, $message);
+                Log::info('MailRouter: supplier reply matched by sender+code (free-form subject) — attached, no request', [
+                    'email_message_id' => $message->id,
+                    'supplier_inquiry_id' => $bySupplierPair->id,
+                    'from_email' => $message->from_email,
+                ]);
+
+                return;
+            }
+        } catch (\Throwable $e) {
+            Log::warning('MailRouter: supplier sender+code match failed (non-fatal)', [
+                'email_message_id' => $message->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         // Fallback по ТЕМЕ: ответ на НАШ RFQ, но тред разорван (поставщик
         // переслал наш запрос внутри себя — «Re: Fw: …», In-Reply-To пуст,
         // References на его домен), поэтому matchInbound по цепочке не связал.

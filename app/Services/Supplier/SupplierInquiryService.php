@@ -264,9 +264,14 @@ class SupplierInquiryService
      */
     public function matchInboundBySubject(EmailMessage $message): ?SupplierInquiry
     {
-        if (! $this->looksLikeRfqReply($message)) {
+        if ($message->direction !== MailDirection::Inbound) {
             return null;
         }
+        // Гард по фразе «запрос расценки» НЕ ставим: тема RFQ бывает свободной
+        // (менеджер слал запрос вручную своей темой «Запрос M-…»), а надёжный
+        // дискриминатор — пара «отправитель = supplier_email инквайри» + «M-код
+        // из темы = в теме инквайри» ниже. Клиент не значится supplier_email
+        // инквайри своей же заявки → ложных привязок к клиентским письмам нет.
         if (! preg_match('/\bM-\d{4}-\d+/u', (string) $message->subject, $m)) {
             return null;
         }
