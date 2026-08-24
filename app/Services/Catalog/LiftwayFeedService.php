@@ -10,18 +10,19 @@ use XMLWriter;
  * (см. docs интеграции поставщиков Liftway). MyLift выступает поставщиком:
  * отдаём всю номенклатуру, которую продаём (is_active + есть закупочная цена).
  *
- * Позиции с АКТУАЛЬНОЙ ценой (is_price_actual=true) — как обычно:
- *   <offer id="{sku}" available="true"><price>…</price><count>{stock}</count></offer>
- * Позиции с НЕАКТУАЛЬНОЙ ценой НЕ выкидываем из фида (иначе Liftway не отличит
- * «цена протухла» от «нет в прайсе» и продаёт по старой цене), а помечаем:
- *   <offer id="{sku}" available="false">
- *     <price>{последняя известная}</price><count>0</count>
- *     <param name="ЦенаАктуальна">нет</param>
+ * Позиции с АКТУАЛЬНОЙ ценой (is_price_actual=true):
+ *   <offer id="{sku}" available="true">
+ *     <price>…</price><count>{stock}</count>
+ *     <param name="ЦенаАктуальна">да</param>        (иначе оффер не покажется)
+ *     <param name="СрокПоставки">{lead_time_days}</param>  (если задан, дней)
  *   </offer>
- * Когда цена снова актуальна — флаг исчезает, позиция продаётся как обычно
- * (отсутствие флага = цена актуальна, обратная совместимость).
+ * Позиции с НЕАКТУАЛЬНОЙ ценой НЕ выкидываем из фида (иначе Liftway не отличит
+ * «цена протухла» от «нет в прайсе» и продаёт по старой цене), а помечаем
+ * available="false" + count=0 + <param name="ЦенаАктуальна">нет</param>.
  *
- * Цена = закупка × наценка (config services.liftway_feed.markup, дефолт 1.15).
+ * ЦенаАктуальна теперь ставится ЯВНО (да/нет) — Liftway показывает оффер только
+ * при «да». СрокПоставки (под заказ, дней) — per-item из 1С (lead_time_days),
+ * пишется когда > 0. Цена = закупка × наценка (config liftway_feed.markup, 1.15).
  * Ключ сопоставления = sku (M-артикул) — он же «Ваш код» в прайсе Liftway.
  * Карточку (имя/фото) фид не трогает — она из эталона каталога Liftway.
  */
@@ -59,7 +60,7 @@ class LiftwayFeedService
             ->whereNotNull('sku')
             ->where('sku', '!=', '')
             ->orderBy('id')
-            ->select(['id', 'sku', 'purchase_price', 'stock_available', 'is_price_actual'])
+            ->select(['id', 'sku', 'purchase_price', 'stock_available', 'is_price_actual', 'lead_time_days'])
             ->chunkById(1000, function ($items) use ($w, $markup, &$count) {
                 foreach ($items as $it) {
                     // Последняя известная цена = закупка × наценка (для
@@ -69,27 +70,32 @@ class LiftwayFeedService
                         continue;
                     }
                     $priceActual = (bool) $it->is_price_actual;
+                    // Срок поставки под заказ (дней) — из 1С «СрокПоставки»
+                    // (catalog_items.lead_time_days). 0/NULL = не указан (в наличии).
+                    $leadDays = (int) $it->lead_time_days;
 
                     $w->startElement('offer');
                     $w->writeAttribute('id', (string) $it->sku);
+                    $w->writeAttribute('available', $priceActual ? 'true' : 'false');
+                    $w->writeElement('price', number_format($price, 2, '.', ''));
+                    // Актуальная: фактический остаток (0 = под заказ). Неактуальная:
+                    // снята с продажи до обновления цены → count=0.
+                    $w->writeElement('count', $priceActual ? (string) max(0, (int) $it->stock_available) : '0');
 
-                    if ($priceActual) {
-                        // Актуальная цена: продаём. В наличии либо под заказ →
-                        // available=true, фактический остаток в <count> (0 = под заказ).
-                        $w->writeAttribute('available', 'true');
-                        $w->writeElement('price', number_format($price, 2, '.', ''));
-                        $w->writeElement('count', (string) max(0, (int) $it->stock_available));
-                    } else {
-                        // Цена НЕ актуальна: позиция остаётся в фиде, но снята с
-                        // продажи до обновления цены. Liftway читает флаг
-                        // «ЦенаАктуальна=нет» (Вариант A) и не продаёт по старой
-                        // цене; count=0. Цену отдаём последнюю известную (справочно).
-                        $w->writeAttribute('available', 'false');
-                        $w->writeElement('price', number_format($price, 2, '.', ''));
-                        $w->writeElement('count', '0');
+                    // ЦенаАктуальна — ЯВНО да/нет. Liftway показывает оффер только
+                    // при «да» (иначе не отображается); «нет» = цена протухла,
+                    // не продавать по старой. Раньше у актуальных флаг опускали
+                    // («отсутствие = актуальна») — теперь ставим явно по спеке.
+                    $w->startElement('param');
+                    $w->writeAttribute('name', 'ЦенаАктуальна');
+                    $w->text($priceActual ? 'да' : 'нет');
+                    $w->endElement(); // param
+
+                    // СрокПоставки (дней, под заказ) — per-item, только когда задан.
+                    if ($leadDays > 0) {
                         $w->startElement('param');
-                        $w->writeAttribute('name', 'ЦенаАктуальна');
-                        $w->text('нет');
+                        $w->writeAttribute('name', 'СрокПоставки');
+                        $w->text((string) $leadDays);
                         $w->endElement(); // param
                     }
 
