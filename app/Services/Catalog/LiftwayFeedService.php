@@ -21,8 +21,10 @@ use XMLWriter;
  * available="false" + count=0 + <param name="ЦенаАктуальна">нет</param>.
  *
  * ЦенаАктуальна теперь ставится ЯВНО (да/нет) — Liftway показывает оффер только
- * при «да». СрокПоставки (под заказ, дней) — per-item из 1С (lead_time_days),
- * пишется когда > 0. Цена = закупка × наценка (config liftway_feed.markup, 1.15).
+ * при «да». СрокПоставки (под заказ, РАБОЧИХ дней) — per-item: 1С хранит срок в
+ * календарных днях (lead_time_days, недели×7), конвертируем ×5/7 в рабочие;
+ * актуальным под-заказным (в наличии 0) без срока в 1С ставим дефолт
+ * liftway_feed.default_lead_work_days (50). Цена = закупка × наценка (markup 1.15).
  * Ключ сопоставления = sku (M-артикул) — он же «Ваш код» в прайсе Liftway.
  * Карточку (имя/фото) фид не трогает — она из эталона каталога Liftway.
  */
@@ -34,6 +36,8 @@ class LiftwayFeedService
     public function generatePricesYml(): array
     {
         $markup = (float) config('services.liftway_feed.markup', 1.15);
+        // Дефолтный срок (раб.дней) для актуальных под-заказных без срока в 1С.
+        $defaultLeadWork = (int) config('services.liftway_feed.default_lead_work_days', 50);
         $generatedAt = now()->format('Y-m-d H:i');
 
         $w = new XMLWriter();
@@ -61,7 +65,7 @@ class LiftwayFeedService
             ->where('sku', '!=', '')
             ->orderBy('id')
             ->select(['id', 'sku', 'purchase_price', 'stock_available', 'is_price_actual', 'lead_time_days'])
-            ->chunkById(1000, function ($items) use ($w, $markup, &$count) {
+            ->chunkById(1000, function ($items) use ($w, $markup, $defaultLeadWork, &$count) {
                 foreach ($items as $it) {
                     // Последняя известная цена = закупка × наценка (для
                     // неактуальных — тоже она, как «last known»).
@@ -70,9 +74,21 @@ class LiftwayFeedService
                         continue;
                     }
                     $priceActual = (bool) $it->is_price_actual;
-                    // Срок поставки под заказ (дней) — из 1С «СрокПоставки»
-                    // (catalog_items.lead_time_days). 0/NULL = не указан (в наличии).
-                    $leadDays = (int) $it->lead_time_days;
+                    $stock = max(0, (int) $it->stock_available);
+
+                    // Срок поставки. В 1С «СрокПоставки» (lead_time_days) хранится в
+                    // КАЛЕНДАРНЫХ днях (недели×7: 70=10нед, 84=12нед…), а Liftway
+                    // ждёт РАБОЧИЕ дни → конвертируем ×5/7 (70→50, 14→10). Для
+                    // актуальных под-заказных (в наличии 0) без срока в 1С — дефолт
+                    // default_lead_work_days (раб.дней). Пишем СрокПоставки только >0.
+                    $leadCal = (int) $it->lead_time_days;
+                    if ($leadCal > 0) {
+                        $leadWork = max(1, (int) round($leadCal * 5 / 7));
+                    } elseif ($priceActual && $stock <= 0) {
+                        $leadWork = $defaultLeadWork;
+                    } else {
+                        $leadWork = 0;
+                    }
 
                     $w->startElement('offer');
                     $w->writeAttribute('id', (string) $it->sku);
@@ -80,7 +96,7 @@ class LiftwayFeedService
                     $w->writeElement('price', number_format($price, 2, '.', ''));
                     // Актуальная: фактический остаток (0 = под заказ). Неактуальная:
                     // снята с продажи до обновления цены → count=0.
-                    $w->writeElement('count', $priceActual ? (string) max(0, (int) $it->stock_available) : '0');
+                    $w->writeElement('count', $priceActual ? (string) $stock : '0');
 
                     // ЦенаАктуальна — ЯВНО да/нет. Liftway показывает оффер только
                     // при «да» (иначе не отображается); «нет» = цена протухла,
@@ -91,11 +107,11 @@ class LiftwayFeedService
                     $w->text($priceActual ? 'да' : 'нет');
                     $w->endElement(); // param
 
-                    // СрокПоставки (дней, под заказ) — per-item, только когда задан.
-                    if ($leadDays > 0) {
+                    // СрокПоставки (РАБОЧИХ дней, под заказ) — per-item, только >0.
+                    if ($leadWork > 0) {
                         $w->startElement('param');
                         $w->writeAttribute('name', 'СрокПоставки');
-                        $w->text((string) $leadDays);
+                        $w->text((string) $leadWork);
                         $w->endElement(); // param
                     }
 

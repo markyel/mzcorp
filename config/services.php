@@ -591,6 +591,10 @@ return [
     // Цена фида = purchase_price × markup. Дефолт 1.15 (закупка + 15%).
     'liftway_feed' => [
         'markup' => (float) env('LIFTWAY_FEED_MARKUP', 1.15),
+        // Дефолтный срок поставки (РАБОЧИХ дней) для актуальных под-заказных
+        // позиций (в наличии 0, цена актуальна), у которых в 1С срок не указан.
+        // Отдаётся в фид как <param name="СрокПоставки">.
+        'default_lead_work_days' => (int) env('LIFTWAY_FEED_DEFAULT_LEAD_WORK_DAYS', 50),
     ],
 
     /*
