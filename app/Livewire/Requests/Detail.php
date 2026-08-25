@@ -163,19 +163,15 @@ class Detail extends Component
             // (detected_artifacts.cross_mailbox_copy_of). Показываем
             // только оригинал, чтобы в треде не дублировалось.
             ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
-            // Переписка с ПОСТАВЩИКОМ не смешивается с клиентской «Перепиской»
-            // (она в табе «Поставщики»). Исключаем и по привязке к инквайри
-            // (supplier_inquiry_id), И по category=supplier_reply — часть
-            // супплаерных писем (rfq@mzcorp.ru CC, разорванный тред) линкуется к
-            // related_request_id, но НЕ к инквайри (supplier_inquiry_id=NULL), и
-            // раньше проскакивала в клиентский тред. Хуже того — становилась
-            // reply-якорем, и «Ответить» слал КП ПОСТАВЩИКУ (кейс M-2026-11814).
-            // NULL category (наши исходящие клиенту) — оставляем.
+            // Переписка с ПОСТАВЩИКОМ, ПРИВЯЗАННАЯ к инквайри (supplier_inquiry_id),
+            // живёт в табе «Поставщики» и в клиентский тред не попадает. НО письма
+            // rfq@mzcorp.ru CC / супплаер-реплаи без инквайри (supplier_inquiry_id
+            // =NULL, category=supplier_reply) линкуются к заявке для КОНТЕКСТА и
+            // ДОЛЖНЫ быть видны здесь (менеджер шлёт их на rfq@ и ждёт увидеть —
+            // кейс M-2026-12942). Их НЕ прячем; вместо этого запрещаем отвечать на
+            // них клиентским reply (иначе КП уходит поставщику — кейс M-2026-11814):
+            // $lastInbound (якорь) и inline-кнопки пропускают их, ComposeForm гардит.
             ->whereNull('supplier_inquiry_id')
-            ->where(function ($q) {
-                $q->whereNull('category')
-                    ->orWhere('category', '!=', \App\Enums\EmailCategory::SupplierReply->value);
-            })
             ->visibleTo($user)
             ->with([
                 'attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline',
