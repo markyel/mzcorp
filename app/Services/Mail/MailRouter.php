@@ -478,6 +478,38 @@ class MailRouter
         // от исходной категории LLM. Кейс M-2026-11863→11309.
         if ($linkedRequest !== null
             && $linkedRequest->status === \App\Enums\RequestStatus::ClosedWon) {
+            // Клиент по закрытой-УСПЕХОМ прислал/процитировал наш КП или счёт и
+            // просит новый счёт (напр. «те же позиции, ещё N шт»). Воскрешать
+            // closed_won НЕЛЬЗЯ (в отличие от closed_lost → reanimate). Создаём
+            // ДОЧЕРНЮЮ заявку на счёт (inheritance child, статус AwaitingInvoice,
+            // ТОТ ЖЕ менеджер), родитель не трогаем. Позиции — из процитированного
+            // КП. detect() зовём напрямую (сработает и для category=post_sale).
+            // Кейс M-2026-11741.
+            try {
+                $cited = $this->citedQuoteRouter->detect($message);
+                if ($cited !== null) {
+                    $child = app(\App\Services\Request\CitedInvoiceChildService::class)
+                        ->createFromCitedQuote($message, $linkedRequest, (string) $cited['document_number']);
+                    if ($child !== null) {
+                        Log::info('MailRouter: cited invoice on closed_won → invoice child created', [
+                            'email_message_id' => $message->id,
+                            'parent_request_id' => $linkedRequest->id,
+                            'child_request_id' => $child->id,
+                            'document_number' => $cited['document_number'],
+                        ]);
+
+                        return;
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: cited-invoice child on closed_won failed (non-fatal, fall back to post_sale)', [
+                    'email_message_id' => $message->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            // Иначе — обычная постпродажная переписка (отгрузка/документы):
+            // статус НЕ трогаем, позиции НЕ парсим, новую заявку НЕ плодим.
             if ($message->category !== EmailCategory::PostSale->value) {
                 $message->forceFill(['category' => EmailCategory::PostSale->value])->save();
             }
