@@ -38,10 +38,50 @@ class CitedInvoiceChildService
     }
 
     /**
+     * Уже открытая дочерняя заявка «на счёт» этого родителя (идемпотентность:
+     * повторные письма треда не должны плодить новых детей). Активный
+     * инвойс-цикл = не терминальный статус.
+     */
+    public function findOpenInvoiceChild(Request $parent): ?Request
+    {
+        return Request::query()
+            ->where('inheritance_parent_id', $parent->id)
+            ->whereIn('status', [
+                RequestStatus::AwaitingInvoice->value,
+                RequestStatus::Invoiced->value,
+                RequestStatus::Paid->value,
+            ])
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    /**
      * Создать дочернюю заявку на счёт по процитированному КП/счёту.
      */
     public function createFromCitedQuote(EmailMessage $message, Request $parent, string $docNo): ?Request
     {
+        // Идемпотентность: уже есть открытая дочерняя на счёт — не плодим новую,
+        // прицепляем письмо к ней (продолжение переписки по тому же счёту).
+        $existing = $this->findOpenInvoiceChild($parent);
+        if ($existing !== null) {
+            $message->forceFill([
+                'related_request_id' => $existing->id,
+                'category' => \App\Enums\EmailCategory::ThreadReply->value,
+            ])->save();
+            try {
+                $this->attention->onClientReplied($existing->fresh());
+            } catch (\Throwable $e) {
+                // non-fatal
+            }
+            Log::info('CitedInvoiceChildService: routed to existing invoice child (idempotent)', [
+                'email_message_id' => $message->id,
+                'parent_request_id' => $parent->id,
+                'child_request_id' => $existing->id,
+            ]);
+
+            return $existing->fresh();
+        }
+
         // Процитированный документ в истории (позиции — отсюда).
         $quote = OutboundQuote::query()
             ->where('document_number', $docNo)
