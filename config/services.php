@@ -400,6 +400,23 @@ return [
         )),
 
         /*
+        | Маркеры ВТОРОЙ веб-формы «Вопрос с сайта MyZip»: приходит НЕ с
+        | отдельного relay-ящика, а с info@ (наш общий ящик) с display-name
+        | «Веб сайт» и темой «Вопрос с сайта…». По from_email не отличить (info@
+        | в relay-список добавлять нельзя — вся почта стала бы «веб-формой»),
+        | поэтому детектим по display-name (точное совпадение) + теме. Реальный
+        | клиент — в теле (имя + голый e-mail построчно, без меток).
+        */
+        'web_form_name_markers' => array_filter(array_map(
+            'trim',
+            explode(',', (string) env('MAIL_WEB_FORM_NAME_MARKERS', 'Веб сайт'))
+        )),
+        'web_form_subject_markers' => array_filter(array_map(
+            'trim',
+            explode(',', (string) env('MAIL_WEB_FORM_SUBJECT_MARKERS', 'с сайта MyZip,Вопрос с сайта'))
+        )),
+
+        /*
         | Ящики-форвардеры. С них клиентские заявки ПЕРЕСЫЛАЮТСЯ на info@
         | (вручную/автопереслом), поэтому from_email = технический ящик, а
         | реальный отправитель — в блоке пересылки в теле («От: Имя <e-mail>»).

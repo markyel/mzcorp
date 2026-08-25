@@ -44,8 +44,26 @@ class WebFormSubmissionParser
     public function isWebFormSubmission(EmailMessage $message): bool
     {
         $from = mb_strtolower(trim((string) $message->from_email));
+        if ($from !== '' && in_array($from, $this->relaySenders(), true)) {
+            return true;
+        }
 
-        return $from !== '' && in_array($from, $this->relaySenders(), true);
+        // Вторая форма «Вопрос с сайта MyZip»: приходит с info@ (наш ящик),
+        // отличается display-name «Веб сайт» + темой. По from_email не ловится.
+        $fromName = mb_strtolower(trim((string) $message->from_name));
+        $nameMarkers = array_map('mb_strtolower', (array) config('services.mail.web_form_name_markers', []));
+        if ($fromName !== '' && in_array($fromName, $nameMarkers, true)) {
+            return true;
+        }
+        $subject = mb_strtolower(trim((string) $message->subject));
+        foreach ((array) config('services.mail.web_form_subject_markers', []) as $marker) {
+            $marker = mb_strtolower(trim((string) $marker));
+            if ($marker !== '' && str_contains($subject, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -67,11 +85,22 @@ class WebFormSubmissionParser
             $email = trim($m[1]);
         }
 
-        // Текст без тегов + декод сущностей — для меток поля построчно.
-        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        // <br> → перенос строки ДО strip_tags: формы без block-тегов (вторая
+        // форма «Вопрос с сайта» — item<br><br>имя<br>email) иначе схлопывались
+        // бы в одну строку и построчный разбор/эвристики не работали.
+        $textHtml = preg_replace('/<br\s*\/?>/i', "\n", $html) ?? $html;
+        $text = html_entity_decode(strip_tags($textHtml), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
         if ($email === null) {
             $email = $this->field($text, ['E-?mail', 'Почта', 'Эл\.?\s*почта']);
+        }
+
+        // Вторая форма: e-mail без mailto и без метки — просто голый адрес в
+        // теле. Берём первый ВНЕШНИЙ (не наш домен) e-mail из текста.
+        $emailFromBareLine = false;
+        if ($email === null) {
+            $email = $this->firstExternalEmail($text);
+            $emailFromBareLine = $email !== null;
         }
 
         $email = $email !== null ? mb_strtolower(trim($email)) : null;
@@ -80,13 +109,70 @@ class WebFormSubmissionParser
             return null;
         }
 
+        $name = $this->field($text, ['Контактное лицо', 'Контакт', 'ФИО', 'Имя']);
+        // Вторая форма без меток: имя — непустая строка НЕПОСРЕДСТВЕННО перед
+        // строкой с e-mail (кейс «Виталий\n9161679434@mail.ru»).
+        if ($name === null && $emailFromBareLine) {
+            $name = $this->nameBeforeEmail($text, $email);
+        }
+
         return [
             'email' => $email,
-            'name' => $this->field($text, ['Контактное лицо', 'Контакт', 'ФИО', 'Имя']),
+            'name' => $name,
             'phone' => $this->field($text, ['Телефон', 'Тел\.?', 'Phone']),
             'company' => $this->field($text, ['Организация', 'Компания', 'Заказчик']),
             'address' => $this->field($text, ['Адрес']),
         ];
+    }
+
+    /**
+     * Первый e-mail в тексте, НЕ принадлежащий нашим внутренним доменам
+     * (info@myzip.ru, marketing@myzip.ru в получателях — не клиент).
+     */
+    private function firstExternalEmail(string $text): ?string
+    {
+        if (! preg_match_all('/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/u', $text, $mm)) {
+            return null;
+        }
+        $internal = array_map('mb_strtolower', array_merge(
+            (array) config('services.mail.internal_domains', []),
+            ['mzcorp.ru'],
+        ));
+        foreach ($mm[0] as $candidate) {
+            $domain = mb_strtolower((string) \Illuminate\Support\Str::afterLast($candidate, '@'));
+            if ($domain !== '' && ! in_array($domain, $internal, true)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Имя из строки непосредственно перед строкой с указанным e-mail.
+     */
+    private function nameBeforeEmail(string $text, string $email): ?string
+    {
+        $lines = preg_split('/\r\n|\r|\n/u', $text) ?: [];
+        $emailLc = mb_strtolower($email);
+        $prev = null;
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+            if (mb_strtolower($trimmed) !== '' && str_contains(mb_strtolower($trimmed), $emailLc)) {
+                // предыдущая непустая строка — имя (если это не строка позиций
+                // с двоеточием/цифрами-артикулами — тогда пропускаем).
+                if ($prev !== null && ! str_contains($prev, ':') && mb_strlen($prev) <= 120) {
+                    return mb_substr($prev, 0, 255);
+                }
+
+                return null;
+            }
+            if ($trimmed !== '') {
+                $prev = $trimmed;
+            }
+        }
+
+        return null;
     }
 
     /**
