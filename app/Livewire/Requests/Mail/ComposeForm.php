@@ -146,6 +146,17 @@ class ComposeForm extends Component
             return;
         }
 
+        // Гард: нельзя отвечать КЛИЕНТСКИМ reply на письмо ПОСТАВЩИКА (rfq@mzcorp.ru
+        // CC / category=supplier_reply / привязка к инквайри) — иначе ответ (КП)
+        // уходит поставщику, а не клиенту (кейс M-2026-11814). Отвечать поставщику
+        // — из раздела «Поставщики».
+        if ((string) $replyTo->category === \App\Enums\EmailCategory::SupplierReply->value
+            || $replyTo->supplier_inquiry_id !== null) {
+            session()->flash('error', 'Это письмо от поставщика — ответьте из раздела «Поставщики», а не из переписки с клиентом.');
+
+            return;
+        }
+
         $draft = $drafts->createReply($req, $replyTo, auth()->user(), $replyAll);
         $this->hydrateFromDraft($draft);
         $this->replyToMessageId = $replyTo->id;

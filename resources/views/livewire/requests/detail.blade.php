@@ -672,10 +672,19 @@
                 $dom = mb_strtolower((string) Str::afterLast((string) $m->from_email, '@'));
                 return $dom !== '' && in_array($dom, $internalDomains, true);
             };
+            // Переписка с поставщиком (rfq@mzcorp.ru / category=supplier_reply)
+            // цепляется к заявке для КОНТЕКСТА, но клиентский «Ответить» на неё
+            // якорить НЕЛЬЗЯ — иначе ответ (КП) уходит ПОСТАВЩИКУ, а не клиенту
+            // (кейс M-2026-11814). Отвечать поставщику — только из карточки
+            // /dashboard/suppliers. Здесь такие письма как reply-якорь пропускаем.
+            $isSupplierMsg = fn ($m) => (string) $m->category === \App\Enums\EmailCategory::SupplierReply->value
+                || $m->supplier_inquiry_id !== null;
             $lastInbound = $thread->reverse()
-                ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound && ! $isInternalSender($m))
+                ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound
+                    && ! $isInternalSender($m) && ! $isSupplierMsg($m))
                 ?? $thread->reverse()
-                    ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound);
+                    ->first(fn ($m) => $m->direction === \App\Enums\MailDirection::Inbound
+                        && ! $isSupplierMsg($m));
             $allowed = $req->status->allowedTransitions();
             $allow = fn (\App\Enums\RequestStatus $t) => in_array($t, $allowed, true);
             $RS = \App\Enums\RequestStatus::class;
@@ -1593,7 +1602,7 @@
                                                             class="underline text-red-700 hover:text-red-900">Удалить черновик</button>
                                                 @endif
                                             </div>
-                                        @elseif($canReplyHere && ! $isOutbound)
+                                        @elseif($canReplyHere && ! $isOutbound && ! $isSupplierMsg($msg))
                                             <div class="mt-2 flex gap-2">
                                                 <button type="button"
                                                         wire:click="$dispatch('open-reply', { messageId: {{ $msg->id }}, requestId: {{ $req->id }} })"
@@ -1602,6 +1611,10 @@
                                                         wire:click="$dispatch('open-reply-all', { messageId: {{ $msg->id }}, requestId: {{ $req->id }} })"
                                                         class="btn btn-sm">↩↩ Ответить всем</button>
                                             </div>
+                                        @elseif($canReplyHere && ! $isOutbound && $isSupplierMsg($msg))
+                                            {{-- Супплаерное письмо в треде: клиентский reply запрещён
+                                                 (ушёл бы поставщику). Ответ поставщику — в разделе «Поставщики». --}}
+                                            <div class="mt-2 text-[11px] text-fg-4">↩ Ответ поставщику — в разделе «Поставщики»</div>
                                         @endif
 
                                         @if($msg->attachments->isNotEmpty())

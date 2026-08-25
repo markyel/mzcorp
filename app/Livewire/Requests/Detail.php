@@ -163,11 +163,19 @@ class Detail extends Component
             // (detected_artifacts.cross_mailbox_copy_of). Показываем
             // только оригинал, чтобы в треде не дублировалось.
             ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
-            // Переписка с ПОСТАВЩИКОМ (RFQ и ответы, supplier_inquiry_id != null)
-            // не смешивается с клиентской «Перепиской» — она в табе «Поставщики».
-            // RFQ обычно несёт код заявки в теме и линкуется к related_request_id,
-            // но это не клиентский тред (кейс M-2026-9298).
+            // Переписка с ПОСТАВЩИКОМ не смешивается с клиентской «Перепиской»
+            // (она в табе «Поставщики»). Исключаем и по привязке к инквайри
+            // (supplier_inquiry_id), И по category=supplier_reply — часть
+            // супплаерных писем (rfq@mzcorp.ru CC, разорванный тред) линкуется к
+            // related_request_id, но НЕ к инквайри (supplier_inquiry_id=NULL), и
+            // раньше проскакивала в клиентский тред. Хуже того — становилась
+            // reply-якорем, и «Ответить» слал КП ПОСТАВЩИКУ (кейс M-2026-11814).
+            // NULL category (наши исходящие клиенту) — оставляем.
             ->whereNull('supplier_inquiry_id')
+            ->where(function ($q) {
+                $q->whereNull('category')
+                    ->orWhere('category', '!=', \App\Enums\EmailCategory::SupplierReply->value);
+            })
             ->visibleTo($user)
             ->with([
                 'attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline',
