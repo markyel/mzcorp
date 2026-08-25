@@ -257,7 +257,7 @@
             </div>
 
             {{-- Номер заявки/КП из 1С: обязателен для всех заявок (синхрон с 1С).
-                 Ввод — менеджер; изменение установленного — только РОП/директор. --}}
+                 Ввод и изменение — менеджер заявки или РОП/директор. --}}
             <div class="flex items-center gap-2 mb-1.5 text-[12px] flex-wrap">
                 @if($req->onec_number && ! $editingOneCNumber)
                     <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 mono text-[12px]"
@@ -267,7 +267,7 @@
                     @if($this->canChangeOneCNumber())
                         <button type="button" wire:click="startEditOneCNumber"
                                 class="text-fg-4 hover:text-sky-700 text-[12px]"
-                                title="Изменить номер 1С (только РОП/директор)">✎</button>
+                                title="Изменить номер 1С">✎</button>
                     @endif
                 @else
                     <span class="inline-flex items-center gap-1 text-amber-700 text-[11.5px]"
@@ -284,7 +284,7 @@
                         <button type="button" wire:click="clearOneCNumber"
                                 wire:confirm="Сбросить номер 1С у заявки? Она снова будет помечена «нет № 1С», менеджер сможет ввести номер заново."
                                 class="btn btn-sm text-red-700" style="height:24px; padding:0 8px"
-                                title="Сбросить номер (только РОП/директор)">Сбросить номер</button>
+                                title="Сбросить номер">Сбросить номер</button>
                     @elseif($this->oneCNumberSuggestion)
                         <button type="button" wire:click="applyOneCNumberSuggestion"
                                 class="text-sky-700 hover:underline text-[11.5px]"

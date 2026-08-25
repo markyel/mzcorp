@@ -1329,7 +1329,7 @@ class Detail extends Component
     public function startEditOneCNumber(): void
     {
         if (! $this->canChangeOneCNumber()) {
-            $this->dispatch('toast', message: 'Менять номер 1С может только РОП или директор.', type: 'error');
+            $this->dispatch('toast', message: 'Нет прав менять номер 1С этой заявки.', type: 'error');
 
             return;
         }
@@ -1344,10 +1344,10 @@ class Detail extends Component
     }
 
     /**
-     * Сохранить номер заявки/КП из 1С. Первичный ввод — менеджер заявки
-     * (owner/acting/privileged); ИЗМЕНЕНИЕ уже установленного номера — только
-     * РОП/директор/админ (правило заказчика: менеджер ошибся — исправляет РОП).
-     * Аудит — request_state_changes (event onec_number_set/changed).
+     * Сохранить номер заявки/КП из 1С. И первичный ввод, и ИЗМЕНЕНИЕ доступны
+     * менеджеру заявки (owner/acting) и привилегированным (РОП/директор/админ);
+     * секретарь — нет. См. canChangeOneCNumber. Аудит — request_state_changes
+     * (event onec_number_set/changed).
      */
     public function saveOneCNumber(): void
     {
@@ -1377,7 +1377,7 @@ class Detail extends Component
 
         if ($old !== '') {
             if (! $this->canChangeOneCNumber()) {
-                $this->dispatch('toast', message: 'Номер 1С уже установлен — изменить может только РОП или директор.', type: 'error');
+                $this->dispatch('toast', message: 'Нет прав изменить номер 1С этой заявки.', type: 'error');
 
                 return;
             }
@@ -1426,7 +1426,7 @@ class Detail extends Component
     {
         $user = auth()->user();
         if ($user === null || ! $this->canChangeOneCNumber()) {
-            $this->dispatch('toast', message: 'Сбросить номер 1С может только РОП или директор.', type: 'error');
+            $this->dispatch('toast', message: 'Нет прав сбросить номер 1С этой заявки.', type: 'error');
 
             return;
         }
@@ -1466,11 +1466,25 @@ class Detail extends Component
     /** Менять УЖЕ установленный номер 1С — только РОП/директор/админ. */
     public function canChangeOneCNumber(): bool
     {
-        return auth()->user()?->hasAnyRole([
+        $user = auth()->user();
+        if ($user === null) {
+            return false;
+        }
+        // Привилегированные (РОП/директор/админ) — на любой заявке.
+        if ($user->hasAnyRole([
             \App\Enums\Role::HeadOfSales->value,
             \App\Enums\Role::Director->value,
             \App\Enums\Role::Admin->value,
-        ]) ?? false;
+        ])) {
+            return true;
+        }
+        // Менеджер (владелец / acting-делегат) — на своей доступной заявке.
+        // Секретарь операционно с заявками не работает.
+        if ($user->hasRole(\App\Enums\Role::Secretary->value)) {
+            return false;
+        }
+
+        return $this->request->isAccessibleBy($user);
     }
 
     /**
