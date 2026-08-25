@@ -1602,7 +1602,7 @@
                                                             class="underline text-red-700 hover:text-red-900">Удалить черновик</button>
                                                 @endif
                                             </div>
-                                        @elseif($canReplyHere && ! $isOutbound && ! $isSupplierMsg($msg))
+                                        @elseif($canReplyHere && ! $isOutbound)
                                             <div class="mt-2 flex gap-2">
                                                 <button type="button"
                                                         wire:click="$dispatch('open-reply', { messageId: {{ $msg->id }}, requestId: {{ $req->id }} })"
@@ -1611,10 +1611,6 @@
                                                         wire:click="$dispatch('open-reply-all', { messageId: {{ $msg->id }}, requestId: {{ $req->id }} })"
                                                         class="btn btn-sm">↩↩ Ответить всем</button>
                                             </div>
-                                        @elseif($canReplyHere && ! $isOutbound && $isSupplierMsg($msg))
-                                            {{-- Супплаерное письмо в треде: клиентский reply запрещён
-                                                 (ушёл бы поставщику). Ответ поставщику — в разделе «Поставщики». --}}
-                                            <div class="mt-2 text-[11px] text-fg-4">↩ Ответ поставщику — в разделе «Поставщики»</div>
                                         @endif
 
                                         @if($msg->attachments->isNotEmpty())

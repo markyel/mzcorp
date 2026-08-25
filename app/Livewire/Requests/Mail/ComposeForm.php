@@ -146,13 +146,20 @@ class ComposeForm extends Component
             return;
         }
 
-        // Гард: нельзя отвечать КЛИЕНТСКИМ reply на письмо ПОСТАВЩИКА (rfq@mzcorp.ru
-        // CC / category=supplier_reply / привязка к инквайри) — иначе ответ (КП)
-        // уходит поставщику, а не клиенту (кейс M-2026-11814). Отвечать поставщику
-        // — из раздела «Поставщики».
-        if ((string) $replyTo->category === \App\Enums\EmailCategory::SupplierReply->value
-            || $replyTo->supplier_inquiry_id !== null) {
-            session()->flash('error', 'Это письмо от поставщика — ответьте из раздела «Поставщики», а не из переписки с клиентом.');
+        // Отвечаем ТОЛЬКО клиенту заявки. Если целевое письмо — от ПОСТАВЩИКА
+        // (rfq@mzcorp.ru CC / category=supplier_reply / привязка к инквайри),
+        // reply на него ушёл бы поставщику (кейс M-2026-11814: КП уехал
+        // поставщику). Вместо этого открываем ответ КЛИЕНТУ заявки. Поставщику
+        // отвечают из раздела «Поставщики».
+        $isSupplierMsg = (string) $replyTo->category === \App\Enums\EmailCategory::SupplierReply->value
+            || $replyTo->supplier_inquiry_id !== null;
+        if ($isSupplierMsg) {
+            $draft = $drafts->createCompose($req, auth()->user());
+            $this->hydrateFromDraft($draft);
+            $this->replyToMessageId = null;
+            $this->mode = 'compose';
+            $this->open = true;
+            $this->dispatch('toast', message: 'Это письмо поставщика — ответ адресован клиенту заявки. Поставщику отвечайте из раздела «Поставщики».', type: 'info');
 
             return;
         }
