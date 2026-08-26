@@ -252,16 +252,15 @@ class LiftwayFeedService
             if ($articles !== []) {
                 $this->param($w, 'OEM / кросс-номера', implode(', ', array_slice($articles, 0, 30)));
             }
-            $this->param($w, 'Форм-фактор', $it->form_factor);
             $this->param($w, 'Размещение', $it->placement);
-            $this->param($w, 'Единица', $it->unit_name);
-            $this->param($w, 'Вес, кг', $it->weight);
-            $this->param($w, 'Габарит A', $it->size_a);
-            $this->param($w, 'Габарит B', $it->size_b);
-            $this->param($w, 'Габарит C', $it->size_c);
-            $this->param($w, 'Габарит D', $it->size_d);
-            $this->param($w, 'Габарит E', $it->size_e);
-            $this->param($w, 'Габарит F', $it->size_f);
+            // Числовые характеристики — только ненулевые (0.000 не отдаём).
+            $this->paramNum($w, 'Вес, кг', $it->weight);
+            $this->paramNum($w, 'Габарит A', $it->size_a);
+            $this->paramNum($w, 'Габарит B', $it->size_b);
+            $this->paramNum($w, 'Габарит C', $it->size_c);
+            $this->paramNum($w, 'Габарит D', $it->size_d);
+            $this->paramNum($w, 'Габарит E', $it->size_e);
+            $this->paramNum($w, 'Габарит F', $it->size_f);
             if ($leadWork > 0) {
                 $this->param($w, 'СрокПоставки', (string) $leadWork);
             }
@@ -294,6 +293,17 @@ class LiftwayFeedService
         $w->writeAttribute('name', $name);
         $w->text($value);
         $w->endElement();
+    }
+
+    /** Числовой <param>: пропускаем пустое И нулевое (0 / 0.000). */
+    private function paramNum(XMLWriter $w, string $name, mixed $value): void
+    {
+        if ($value === null || (is_numeric($value) && (float) $value == 0.0)) {
+            return;
+        }
+        // Убираем хвостовые нули: 12.500 → 12.5, 240.000 → 240.
+        $num = (float) $value;
+        $this->param($w, $name, rtrim(rtrim(number_format($num, 3, '.', ''), '0'), '.'));
     }
 
     /**
