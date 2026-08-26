@@ -21,7 +21,7 @@ class DelegatedRequestActivityMail extends Mailable
     public function __construct(
         public int $requestId,
         public string $internalCode,
-        public ?string $subject,
+        public ?string $reqSubject,
         public ?string $clientName,
     ) {
     }
@@ -38,7 +38,7 @@ class DelegatedRequestActivityMail extends Mailable
         $url = route('requests.show', $this->requestId);
         $code = e($this->internalCode);
         $client = e((string) ($this->clientName ?: '—'));
-        $subj = e(Str::limit((string) $this->subject, 140));
+        $subj = e(Str::limit((string) $this->reqSubject, 140));
 
         $html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1f2937;line-height:1.5">'
             . '<p>По <b>делегированной вам</b> заявке <b>' . $code . '</b> новое сообщение от клиента.</p>'

@@ -72,7 +72,7 @@ class DelegatedRequestNotifier
                     $this->mailer->sendMailable($acting->email, new DelegatedRequestActivityMail(
                         requestId: $request->id,
                         internalCode: $request->internal_code,
-                        subject: $request->subject,
+                        reqSubject: $request->subject,
                         clientName: $request->client_name ?: $request->client_email,
                     ));
                 } catch (\Throwable $e) {
