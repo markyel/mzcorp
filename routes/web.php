@@ -43,6 +43,9 @@ Route::get('/feeds/liftway/prices.yml', [LiftwayFeedController::class, 'prices']
     ->name('feeds.liftway.prices');
 Route::get('/feeds/liftway/in-transit.yml', [LiftwayFeedController::class, 'inTransit'])
     ->name('feeds.liftway.in_transit');
+// ТЕСТОВЫЙ фид полной карточки товара (100 позиций, config full_limit).
+Route::get('/feeds/liftway/full.yml', [LiftwayFeedController::class, 'full'])
+    ->name('feeds.liftway.full');
 
 Route::get('/dashboard', function () {
     return view('dashboard');

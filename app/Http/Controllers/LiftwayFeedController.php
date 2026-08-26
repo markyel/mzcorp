@@ -33,6 +33,17 @@ class LiftwayFeedController extends Controller
     }
 
     /**
+     * ТЕСТОВЫЙ YML с ПОЛНОЙ карточкой товара (name/бренды/OEM/категория/фото/
+     * габариты/вес/цена/наличие/срок). Лимит — config liftway_feed.full_limit (100).
+     */
+    public function full(LiftwayFeedService $service): Response
+    {
+        $result = Cache::remember('liftway_feed:full_yml', self::CACHE_TTL, fn () => $service->generateFullYml());
+
+        return $this->yml($result);
+    }
+
+    /**
      * @param  array{xml:string, count:int, generated_at:string}  $result
      */
     private function yml(array $result): Response

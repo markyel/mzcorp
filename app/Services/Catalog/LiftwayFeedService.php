@@ -133,6 +133,195 @@ class LiftwayFeedService
     }
 
     /**
+     * ТЕСТОВЫЙ YML-фид с ПОЛНОЙ карточкой товара (name/бренды/OEM/категория/
+     * фото/габариты/вес/цена/наличие/срок), в отличие от prices.yml (только
+     * sku+price+count). Лимит позиций — config liftway_feed.full_limit (тест=100).
+     * Цена = закупка×markup (как в prices.yml, без себестоимости наружу).
+     * Категории строятся из part_type (YML требует <categories> + categoryId).
+     *
+     * @return array{xml: string, count: int, generated_at: string}
+     */
+    public function generateFullYml(): array
+    {
+        $markup = (float) config('services.liftway_feed.markup', 1.15);
+        $limit = (int) config('services.liftway_feed.full_limit', 100);
+        $generatedAt = now()->format('Y-m-d H:i');
+
+        $items = CatalogItem::query()
+            ->where('is_active', true)
+            ->where('purchase_price', '>', 0)
+            ->whereNotNull('sku')
+            ->where('sku', '!=', '')
+            ->orderBy('id')
+            ->when($limit > 0, fn ($q) => $q->limit($limit))
+            ->get([
+                'id', 'sku', 'name', 'name_en', 'unit_name', 'part_type', 'brand',
+                'brand_article', 'brands', 'articles', 'form_factor', 'placement',
+                'size_a', 'size_b', 'size_c', 'size_d', 'size_e', 'size_f', 'weight',
+                'price', 'purchase_price', 'stock_available', 'is_price_actual',
+                'lead_time_days', 'photo_url', 'description',
+            ]);
+
+        // Категории из уникальных part_type → синтетический id (self-contained).
+        $categoryIds = [];
+        foreach ($items as $it) {
+            $cat = trim((string) $it->part_type);
+            if ($cat !== '' && ! isset($categoryIds[$cat])) {
+                $categoryIds[$cat] = count($categoryIds) + 1;
+            }
+        }
+
+        $w = new XMLWriter();
+        $w->openMemory();
+        $w->startDocument('1.0', 'UTF-8');
+        $w->startElement('yml_catalog');
+        $w->writeAttribute('date', $generatedAt);
+        $w->startElement('shop');
+        $w->writeElement('name', 'MyZip');
+        $w->writeElement('company', 'ООО «Мой Лифт»');
+
+        $w->startElement('currencies');
+        $w->startElement('currency');
+        $w->writeAttribute('id', 'RUR');
+        $w->writeAttribute('rate', '1');
+        $w->endElement(); // currency
+        $w->endElement(); // currencies
+
+        $w->startElement('categories');
+        foreach ($categoryIds as $name => $cid) {
+            $w->startElement('category');
+            $w->writeAttribute('id', (string) $cid);
+            $w->text($name);
+            $w->endElement();
+        }
+        $w->endElement(); // categories
+
+        $w->startElement('offers');
+
+        $count = 0;
+        foreach ($items as $it) {
+            $price = round(((float) $it->purchase_price) * $markup, 2);
+            if ($price <= 0) {
+                continue;
+            }
+            $priceActual = (bool) $it->is_price_actual;
+            $stock = max(0, (int) $it->stock_available);
+            $leadCal = (int) $it->lead_time_days;
+            $leadWork = $leadCal > 0 ? max(1, (int) round($leadCal * 5 / 7)) : 0;
+
+            $brands = $this->decodeList($it->brands);
+            $articles = $this->decodeList($it->articles);
+
+            $w->startElement('offer');
+            $w->writeAttribute('id', (string) $it->sku);
+            $w->writeAttribute('available', $priceActual ? 'true' : 'false');
+
+            $w->writeElement('name', (string) ($it->name ?: $it->sku));
+            if (trim((string) $it->name_en) !== '') {
+                $w->writeElement('name_en', (string) $it->name_en);
+            }
+            if (trim((string) $it->brand) !== '') {
+                $w->writeElement('vendor', (string) $it->brand);
+            }
+            $w->writeElement('vendorCode', (string) $it->sku);
+            if (trim((string) $it->brand_article) !== '') {
+                $w->writeElement('model', (string) $it->brand_article);
+            }
+            $w->writeElement('price', number_format($price, 2, '.', ''));
+            $w->writeElement('currencyId', 'RUR');
+            $cat = trim((string) $it->part_type);
+            if ($cat !== '' && isset($categoryIds[$cat])) {
+                $w->writeElement('categoryId', (string) $categoryIds[$cat]);
+            }
+            if (trim((string) $it->photo_url) !== '') {
+                $w->writeElement('picture', (string) $it->photo_url);
+            }
+            $w->writeElement('count', (string) ($priceActual ? $stock : 0));
+            if (trim((string) $it->description) !== '') {
+                $w->writeElement('description', mb_substr((string) $it->description, 0, 3000));
+            }
+
+            // Полные атрибуты через <param>.
+            $this->param($w, 'Артикул (Ваш код)', $it->sku);
+            $this->param($w, 'Категория', $it->part_type);
+            $this->param($w, 'Бренд', $it->brand);
+            if ($brands !== []) {
+                $this->param($w, 'Бренды (все)', implode(', ', $brands));
+            }
+            $this->param($w, 'Артикул бренда', $it->brand_article);
+            if ($articles !== []) {
+                $this->param($w, 'OEM / кросс-номера', implode(', ', array_slice($articles, 0, 30)));
+            }
+            $this->param($w, 'Форм-фактор', $it->form_factor);
+            $this->param($w, 'Размещение', $it->placement);
+            $this->param($w, 'Единица', $it->unit_name);
+            $this->param($w, 'Вес, кг', $it->weight);
+            $this->param($w, 'Габарит A', $it->size_a);
+            $this->param($w, 'Габарит B', $it->size_b);
+            $this->param($w, 'Габарит C', $it->size_c);
+            $this->param($w, 'Габарит D', $it->size_d);
+            $this->param($w, 'Габарит E', $it->size_e);
+            $this->param($w, 'Габарит F', $it->size_f);
+            if ($leadWork > 0) {
+                $this->param($w, 'СрокПоставки', (string) $leadWork);
+            }
+            $this->param($w, 'ЦенаАктуальна', $priceActual ? 'да' : 'нет');
+
+            $w->endElement(); // offer
+            $count++;
+        }
+
+        $w->endElement(); // offers
+        $w->endElement(); // shop
+        $w->endElement(); // yml_catalog
+        $w->endDocument();
+
+        return [
+            'xml' => $w->outputMemory(),
+            'count' => $count,
+            'generated_at' => $generatedAt,
+        ];
+    }
+
+    /** Написать <param name="…">value</param>, только для непустого значения. */
+    private function param(XMLWriter $w, string $name, mixed $value): void
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return;
+        }
+        $w->startElement('param');
+        $w->writeAttribute('name', $name);
+        $w->text($value);
+        $w->endElement();
+    }
+
+    /**
+     * Декод jsonb-списка (brands/articles) в плоский массив непустых строк.
+     *
+     * @return list<string>
+     */
+    private function decodeList(mixed $value): array
+    {
+        if (is_string($value)) {
+            $value = json_decode($value, true);
+        }
+        if (! is_array($value)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($value as $v) {
+            $v = trim((string) $v);
+            if ($v !== '' && ! in_array($v, $out, true)) {
+                $out[] = $v;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * YML-фид «Поставки в пути»: позиции, которые заказаны и едут
      * (catalog_items.stock_in_transit = [{qty,date}]). На витрине — «В пути ·
      * прибудет ДД.ММ». Снапшот: позиция есть в фиде → в пути; убрали → снялось.
