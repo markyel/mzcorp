@@ -531,12 +531,46 @@ class SupplierDispatchPanel extends Component
 
     /* --------------------------- Вложения --------------------------------- */
 
+    /** Картинки меньше порога — обычно логотипы/иконки подписи, не фото. */
+    private const MIN_PHOTO_BYTES = 8192;
+
+    /**
+     * Вложения из ВСЕЙ входящей переписки с клиентом (не только 1-е письмо):
+     * заказчики часто досылают нужные фото в процессе. Берём вложения всех
+     * inbound-писем заявки (кроме супплаерных). Шум подписей режем: мелкие
+     * картинки (<порога) отсекаем, а повторы одной и той же картинки-подписи
+     * (в каждом письме, но с РАЗНЫМИ хеш-именами) дедупим по mime+размеру.
+     * Документы (не картинки) — любого размера, они бывают нужны поставщику.
+     */
     #[Computed]
     public function requestAttachments()
     {
-        $req = RequestModel::with('emailMessage.attachments:id,email_message_id,filename,mime_type,size_bytes')->find($this->requestId);
+        return \App\Models\EmailAttachment::query()
+            ->whereHas('emailMessage', function ($q) {
+                $q->where('related_request_id', $this->requestId)
+                    ->where('direction', \App\Enums\MailDirection::Inbound->value)
+                    ->whereNull('supplier_inquiry_id');
+            })
+            ->where(function ($q) {
+                // не-картинки — любые; картинки — только от порога.
+                $q->where('mime_type', 'not ilike', 'image/%')
+                    ->orWhereNull('mime_type')
+                    ->orWhere('size_bytes', '>=', self::MIN_PHOTO_BYTES);
+            })
+            ->orderBy('email_message_id')
+            ->orderBy('id')
+            ->get(['id', 'email_message_id', 'filename', 'mime_type', 'size_bytes', 'is_inline'])
+            // Дедуп повторов (подпись в каждом письме): для картинок по mime+size
+            // (имена бывают хешированы), для документов по имени+size.
+            ->unique(function ($a) {
+                $mime = mb_strtolower((string) $a->mime_type);
+                $isImg = str_starts_with($mime, 'image/');
 
-        return $req?->emailMessage?->attachments ?? collect();
+                return $isImg
+                    ? 'img|' . $mime . '|' . (int) $a->size_bytes
+                    : 'doc|' . mb_strtolower(trim((string) $a->filename)) . '|' . (int) $a->size_bytes;
+            })
+            ->values();
     }
 
     /**

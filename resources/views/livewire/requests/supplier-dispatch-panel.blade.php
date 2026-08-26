@@ -363,7 +363,7 @@
                     $imgIdx = 0;
                 @endphp
                 <div>
-                    <label class="block text-[11.5px] text-fg-3 mb-1">Файлы из заявки</label>
+                    <label class="block text-[11.5px] text-fg-3 mb-1">Файлы из переписки с клиентом <span class="text-fg-4">(все письма заказчика)</span></label>
                     <div class="flex flex-wrap gap-2" x-data="{ items: @js($imgGallery) }">
                         @foreach($atts as $a)
                             <div class="border border-border rounded-md overflow-hidden {{ ($selectedAttachments[$a->id] ?? false) ? 'ring-1 ring-sky-400' : '' }} bg-surface" style="width:116px">
