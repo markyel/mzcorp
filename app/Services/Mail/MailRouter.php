@@ -749,6 +749,22 @@ class MailRouter
                 ]);
             }
 
+            // Информирование ACTING-менеджеров о новом событии по ДЕЛЕГИРОВАННОЙ
+            // им заявке (отсутствующего коллеги): колокольчик + email со ссылкой.
+            // Только на реальном письме клиента (не внутренняя переписка).
+            try {
+                if (! $internalOnly) {
+                    app(\App\Services\Request\DelegatedRequestNotifier::class)
+                        ->notifyActingManagers($linkedRequest);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: delegated activity notify failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $linkedRequest->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
             // Phase 4 (Foundation §7.2): записываем suggestion по intent'у,
             // классифицированному ВЫШЕ (до парсинга). type === null — это
             // new_request, не развёрнутый в новую заявку (низкая уверенность
