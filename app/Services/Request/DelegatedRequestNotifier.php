@@ -89,10 +89,12 @@ class DelegatedRequestNotifier
     /** Уже уведомляли этого acting по этой заявке в окне троттлинга? */
     private function throttled(User $user, Request $request): bool
     {
+        // notifications.data — колонка TEXT (не jsonb), поэтому каст к jsonb
+        // перед оператором ->> (иначе «operator does not exist: text ->>»).
         return $user->notifications()
             ->where('created_at', '>', now()->subMinutes(self::THROTTLE_MINUTES))
-            ->whereRaw("data->>'kind' = ?", ['delegated_activity'])
-            ->whereRaw("data->>'request_id' = ?", [(string) $request->id])
+            ->whereRaw("(data::jsonb)->>'kind' = ?", ['delegated_activity'])
+            ->whereRaw("(data::jsonb)->>'request_id' = ?", [(string) $request->id])
             ->exists();
     }
 }
