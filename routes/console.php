@@ -46,6 +46,15 @@ Schedule::command('users:apply-planned-unavailability')
     ->withoutOverlapping()
     ->onOneServer();
 
+// Симметрично: снять делегации у менеджеров, вернувшихся ПО ВРЕМЕНИ
+// (unavailable_until истёк). Раньше делегации закрывались только ручным
+// markAvailable («Сделать доступным») — если дата отсутствия просто прошла,
+// делегации коллегам зависали (кейс Румянцев: 194 висячих). Hourly.
+Schedule::command('users:revoke-returned-delegations')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer();
+
 // Recovery нераспределённых заявок. Если в окне деплоя AssignmentService
 // pipeline persist() упал между сохранением items и autoAssign'ом — Request
 // остаётся Pending+unassigned, в пулах не виден. Hourly прогон находит такие
