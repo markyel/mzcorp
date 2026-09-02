@@ -314,14 +314,27 @@
                         </div>
                         <div class="mbody">
                             @if($html)
-                                <iframe sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-                                        srcdoc="{{ $html }}" loading="lazy" style="height:0"
+                                {{-- loading="lazy" тут НЕЛЬЗЯ: у iframe стартовая высота 0 → нулевая
+                                     площадь, браузер никогда не считает его видимым и не грузит srcdoc;
+                                     load не стреляет → высота остаётся 0, письмо выглядит пустым (тело
+                                     «проявлялось» только при ресайзе окна, который форсит проверку lazy).
+                                     wire:ignore.self — чтобы морф Livewire (отметка прочитанным, флаг,
+                                     события композера) не сбрасывал inline-высоту обратно в 0. --}}
+                                <iframe wire:ignore.self
+                                        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+                                        srcdoc="{{ $html }}" style="height:0"
                                         x-data x-init="
-                                            const fit=()=>{try{const h=$el.contentDocument?.documentElement?.scrollHeight||0;$el.style.height=(h+4)+'px'}catch(e){}};
-                                            $el.addEventListener('load',()=>{try{const d=$el.contentDocument;if(!d)return;
+                                            const fit=()=>{try{const d=$el.contentDocument;if(!d||!d.documentElement)return;
+                                                $el.style.height='8px';$el.style.height=(d.documentElement.scrollHeight+4)+'px'}catch(e){}};
+                                            const boot=()=>{try{const d=$el.contentDocument;if(!d||!d.body)return false;
+                                                if($el._mlBooted)return true;$el._mlBooted=true;
                                                 d.querySelectorAll('a[href]').forEach(a=>{a.target='_blank';a.rel='noopener noreferrer'});
                                                 const s=d.createElement('style');s.textContent='html,body{margin:0;padding:0}body{padding:6px 8px;font:13px/1.55 system-ui,Segoe UI,Inter,sans-serif;color:#0a0a0a;word-break:break-word}img{max-width:100%;height:auto}';
-                                                (d.head||d.documentElement).appendChild(s);try{new ResizeObserver(fit).observe(d.documentElement)}catch(e){}fit()}catch(e){}})
+                                                (d.head||d.documentElement).appendChild(s);
+                                                try{new ResizeObserver(fit).observe(d.documentElement)}catch(e){}
+                                                d.addEventListener('toggle',fit,true);fit();return true}catch(e){return false}};
+                                            $el.addEventListener('load',boot);
+                                            if(!boot()){requestAnimationFrame(boot);setTimeout(boot,300)}
                                         "></iframe>
                             @elseif($msg->body_plain)
                                 <pre>{{ $msg->body_plain }}</pre>
