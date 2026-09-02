@@ -240,7 +240,7 @@
 
     {{-- ══════════ PANE C — чтение ══════════ --}}
     <div class="paneC">
-        @php $anchor = $this->openMessage; @endphp
+        @php $anchor = $this->openAnchor; @endphp
         @if(! $anchor)
             <div class="empty-read">
                 <div class="big">✉</div>
