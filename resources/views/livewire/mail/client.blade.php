@@ -319,9 +319,18 @@
                                 $files  = $msg->attachments->reject(fn($a) => str_starts_with((string) $a->mime_type, 'image/'));
                             @endphp
                             @if($photos->isNotEmpty())
+                                @php
+                                    $photoItems = $photos->values()->map(fn ($a) => [
+                                        'src' => route('attachments.preview', $a->id),
+                                        'name' => $a->filename,
+                                        'dl' => route('attachments.download', $a->id),
+                                    ]);
+                                @endphp
                                 <div class="photos">
-                                    @foreach($photos as $att)
-                                        <a class="photo" href="{{ route('attachments.preview', $att->id) }}" target="_blank" rel="noopener" title="{{ $att->filename }} — открыть">
+                                    @foreach($photos->values() as $i => $att)
+                                        <a class="photo" href="{{ route('attachments.preview', $att->id) }}"
+                                           @click.prevent="$dispatch('open-image', { items: {{ \Illuminate\Support\Js::from($photoItems) }}, index: {{ $i }} })"
+                                           title="{{ $att->filename }}">
                                             <img src="{{ route('attachments.preview', $att->id) }}" loading="lazy" alt="{{ $att->filename }}">
                                         </a>
                                     @endforeach
@@ -364,4 +373,7 @@
 
     {{-- Плавающий композер (Фаза 2) — открывается событиями mail-open-* --}}
     <livewire:mail.composer />
+
+    {{-- Просмотрщик фото (тот же, что в заявках) — событие open-image. --}}
+    @include('partials.image-lightbox')
 </div>
