@@ -218,11 +218,14 @@ class EmailDraftService
                 if ($content === null) {
                     continue;
                 }
-                $newPath = sprintf('mail/%d/drafts/%d/%s', $mailbox?->id ?? 0, $draft->id, Str::random(8).'_'.$att->filename);
+                // Раскрываем MIME encoded-word в имени (иначе в чипах «?»).
+                $name = mb_substr($att->display_filename, 0, 255);
+                $safe = preg_replace('/[^\p{L}\p{N}._\- ]/u', '_', $name) ?? 'file';
+                $newPath = sprintf('mail/%d/drafts/%d/%s', $mailbox?->id ?? 0, $draft->id, Str::random(8).'_'.mb_substr($safe, 0, 80));
                 Storage::disk('local')->put($newPath, $content);
                 EmailAttachment::create([
                     'email_message_id' => $draft->id,
-                    'filename' => $att->filename,
+                    'filename' => $name,
                     'mime_type' => $att->mime_type,
                     'size_bytes' => $att->size_bytes,
                     'content_id' => null,

@@ -45,6 +45,25 @@ class EmailAttachment extends Model
     }
 
     /**
+     * Имя файла для показа/скачивания: раскрываем MIME encoded-word (RFC 2047,
+     * `=?charset?B/Q?...?=`), если парсер сохранил имя закодированным. Иначе
+     * в UI видны «?» (буквы вопросов из самого encoded-word) — кейс пересылки.
+     * Идемпотентно: обычное имя проходит без изменений.
+     */
+    public function getDisplayFilenameAttribute(): string
+    {
+        $name = (string) $this->filename;
+        if (str_contains($name, '=?') && str_contains($name, '?=')) {
+            $decoded = @mb_decode_mimeheader($name);
+            if (is_string($decoded) && trim($decoded) !== '') {
+                return $decoded;
+            }
+        }
+
+        return $name;
+    }
+
+    /**
      * Инлайн-картинка КРУПНЕЕ этого порога — вероятно реальное фото позиции
      * (клиент встроил в тело письма), а не подпись/логотип (те мелкие).
      */

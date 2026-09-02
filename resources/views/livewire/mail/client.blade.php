@@ -333,7 +333,7 @@
                                 @php
                                     $photoItems = $photos->values()->map(fn ($a) => [
                                         'src' => route('attachments.preview', $a->id),
-                                        'name' => $a->filename,
+                                        'name' => $a->display_filename,
                                         'dl' => route('attachments.download', $a->id),
                                     ]);
                                 @endphp
@@ -341,8 +341,8 @@
                                     @foreach($photos->values() as $i => $att)
                                         <a class="photo" href="{{ route('attachments.preview', $att->id) }}"
                                            @click.prevent="$dispatch('open-image', { items: {{ \Illuminate\Support\Js::from($photoItems) }}, index: {{ $i }} })"
-                                           title="{{ $att->filename }}">
-                                            <img src="{{ route('attachments.preview', $att->id) }}" loading="lazy" alt="{{ $att->filename }}">
+                                           title="{{ $att->display_filename }}">
+                                            <img src="{{ route('attachments.preview', $att->id) }}" loading="lazy" alt="{{ $att->display_filename }}">
                                         </a>
                                     @endforeach
                                 </div>
@@ -350,11 +350,11 @@
                             @if($files->isNotEmpty())
                                 <div class="attachments">
                                     @foreach($files as $att)
-                                        @php $ext = strtoupper(pathinfo($att->filename, PATHINFO_EXTENSION) ?: 'FILE'); @endphp
+                                        @php $ext = strtoupper(pathinfo($att->display_filename, PATHINFO_EXTENSION) ?: 'FILE'); @endphp
                                         <a class="att" href="{{ route('attachments.preview', $att->id) }}" target="_blank" rel="noopener" title="Открыть / скачать">
                                             <span class="ico">{{ mb_substr($ext, 0, 4) }}</span>
                                             <span>
-                                                <span class="fn" style="display:block">{{ $att->filename }}</span>
+                                                <span class="fn" style="display:block">{{ $att->display_filename }}</span>
                                                 <span class="sz">{{ $att->size_bytes ? number_format($att->size_bytes/1024, 0, '.', ' ').' КБ' : '' }}</span>
                                             </span>
                                         </a>

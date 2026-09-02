@@ -94,7 +94,7 @@ class AttachmentController extends Controller
             abort(404);
         }
 
-        $safeName = $this->sanitizeForDisposition((string) $attachment->filename);
+        $safeName = $this->sanitizeForDisposition((string) $attachment->display_filename);
         $headers = [
             'Content-Type' => $attachment->mime_type ?: 'application/octet-stream',
             'Content-Disposition' => HeaderUtils::makeDisposition(

@@ -177,7 +177,7 @@
                 <div class="atts">
                     @foreach($this->attachments as $att)
                         <span class="att" wire:key="ca-{{ $att->id }}">
-                            {{ \Illuminate\Support\Str::limit($att->filename, 24) }}
+                            {{ \Illuminate\Support\Str::limit($att->display_filename, 24) }}
                             <button class="x" wire:click="removeAttachment({{ $att->id }})" title="Убрать">×</button>
                         </span>
                     @endforeach
