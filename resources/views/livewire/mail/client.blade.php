@@ -187,15 +187,15 @@
             @endforeach
 
             @if(!empty($groups['shared']) || !empty($groups['delegated']) || !empty($groups['personalOthers']))
-                <div class="fgroup-label">Другие ящики</div>
+                <div class="fgroup-label">Ящики</div>
                 @foreach(array_merge($groups['personalOthers'], $groups['shared']) as $mb)
-                    <button type="button" wire:key="mbx-{{ $mb['id'] }}" wire:click="selectMailbox({{ $mb['id'] }})" class="fitem">
+                    <button type="button" wire:key="mbx-{{ $mb['id'] }}" wire:click="selectMailbox({{ $mb['id'] }})" class="fitem {{ $mb['id'] == $selectedMailboxId ? 'active' : '' }}">
                         <span class="lbl">{{ $mb['kind']==='shared' ? 'Общий · '.$mb['email'] : $mb['name'] }}</span>
                         @if($mb['unread'])<span class="pill">{{ $mb['unread'] }}</span>@endif
                     </button>
                 @endforeach
                 @foreach($groups['delegated'] as $mb)
-                    <button type="button" wire:key="mbx-{{ $mb['id'] }}" wire:click="selectMailbox({{ $mb['id'] }})" class="fitem {{ $mb['error'] ? 'err' : '' }}">
+                    <button type="button" wire:key="mbx-{{ $mb['id'] }}" wire:click="selectMailbox({{ $mb['id'] }})" class="fitem {{ $mb['id'] == $selectedMailboxId ? 'active' : '' }} {{ $mb['error'] ? 'err' : '' }}">
                         <span class="lbl">{{ $mb['name'] }} (делег.)</span>
                         @if($mb['unread'])<span class="pill">{{ $mb['unread'] }}</span>@endif
                     </button>

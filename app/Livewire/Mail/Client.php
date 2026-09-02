@@ -248,11 +248,13 @@ class Client extends Component
         $boxes = $this->mailboxes;
         $selected = $this->selectedMailboxId;
 
+        // Выбранный ящик НЕ исключаем из списков — показываем и подсвечиваем
+        // активным (blade сверяет с selectedMailboxId).
         return [
             'current' => $boxes->firstWhere('id', $selected),
-            'shared' => $boxes->where('kind', 'shared')->where('id', '!=', $selected)->values()->all(),
-            'delegated' => $boxes->where('kind', 'delegated')->where('id', '!=', $selected)->values()->all(),
-            'personalOthers' => $boxes->where('kind', 'personal')->where('id', '!=', $selected)->values()->all(),
+            'shared' => $boxes->where('kind', 'shared')->values()->all(),
+            'delegated' => $boxes->where('kind', 'delegated')->values()->all(),
+            'personalOthers' => $boxes->where('kind', 'personal')->values()->all(),
         ];
     }
 
