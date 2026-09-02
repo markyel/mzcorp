@@ -130,6 +130,11 @@
 .mailapp .mhead .em{font:400 12px/1.3 var(--font-mono);color:var(--fg-3)}
 .mailapp .mhead .tocc{font:400 11.5px/1.4 var(--font-sans);color:var(--fg-3);margin-top:3px}
 .mailapp .mhead .when{font:500 12px/1 var(--font-mono);color:var(--fg-3);flex-shrink:0;white-space:nowrap}
+.mailapp .msg-acts{display:inline-flex;gap:4px;flex-shrink:0;opacity:.5;transition:opacity .12s}
+.mailapp .msg:hover .msg-acts{opacity:1}
+.mailapp .msg-acts button{border:1px solid var(--border);background:var(--bg-surface);border-radius:5px;padding:0 9px;height:24px;cursor:pointer;color:var(--fg-2);font:500 11.5px/1 var(--font-sans);white-space:nowrap}
+.mailapp .msg-acts button:hover{background:var(--bg-hover);color:var(--accent);border-color:var(--accent)}
+.mailapp .cfoot-hint{font-size:11px;color:var(--fg-3);margin-top:8px}
 .mailapp .msg.outbound{background:var(--bg-surface-2);margin:0 -24px;padding:14px 24px 20px}
 .mailapp .mbody iframe{width:100%;display:block;border:0;background:var(--bg-surface);border-radius:var(--r-md)}
 .mailapp .mbody pre{white-space:pre-wrap;font:400 13px/1.55 var(--font-sans);color:var(--fg-1);margin:0}
@@ -294,6 +299,12 @@
                                 @php $to = collect($msg->to_recipients ?? [])->pluck('email')->filter()->take(3)->implode(', '); @endphp
                                 @if($to)<div class="tocc">кому: {{ $to }}</div>@endif
                             </div>
+                            @unless($msg->is_draft)
+                                <span class="msg-acts">
+                                    <button wire:click="$dispatch('mail-open-reply', { messageId: {{ $msg->id }} })" title="Ответить на это письмо">Ответить</button>
+                                    <button wire:click="$dispatch('mail-open-forward', { messageId: {{ $msg->id }} })" title="Переслать это письмо">Переслать</button>
+                                </span>
+                            @endunless
                             <span class="when">{{ $fmtWhen($msg->is_draft ? ($msg->last_edited_at ?? $msg->created_at) : $msg->sent_at) }}</span>
                         </div>
                         <div class="mbody">
@@ -361,12 +372,13 @@
                 @endforeach
             </div>
 
+            @php $lastMsg = $thread->reject(fn ($m) => $m->is_draft)->last() ?? $anchor; @endphp
             <div class="cfoot">
                 <div class="replybtns">
-                    <button class="primary" wire:click="$dispatch('mail-open-reply', { messageId: {{ $anchor->id }} })">Ответить</button>
-                    <button wire:click="$dispatch('mail-open-reply-all', { messageId: {{ $anchor->id }} })">Ответить всем</button>
-                    <button wire:click="$dispatch('mail-open-forward', { messageId: {{ $anchor->id }} })">Переслать</button>
+                    <button class="primary" wire:click="$dispatch('mail-open-reply', { messageId: {{ $lastMsg->id }} })">Ответить</button>
+                    <button wire:click="$dispatch('mail-open-reply-all', { messageId: {{ $lastMsg->id }} })">Ответить всем</button>
                 </div>
+                <div class="cfoot-hint">Переслать конкретное письмо — кнопкой у самого письма выше</div>
             </div>
         @endif
     </div>
