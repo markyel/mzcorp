@@ -46,21 +46,43 @@ class EmailAttachment extends Model
 
     /**
      * Имя файла для показа/скачивания: раскрываем MIME encoded-word (RFC 2047,
-     * `=?charset?B/Q?...?=`), если парсер сохранил имя закодированным. Иначе
+     * `=?charset?B/Q?data?=`), если парсер сохранил имя закодированным. Иначе
      * в UI видны «?» (буквы вопросов из самого encoded-word) — кейс пересылки.
-     * Идемпотентно: обычное имя проходит без изменений.
+     *
+     * НЕ используем mb_decode_mimeheader: часть клиентов помечает charset как
+     * `US-ASCII`, кладя внутрь реально UTF-8-байты (кейс `=?US-ASCII?B?0LjQ…?=`
+     * = «изображение.png») — стандартный декодер тогда режет не-ASCII в «?».
+     * Ручной декодер: если заявлен ASCII/UTF-8 — байты уже UTF-8 (или cp1251);
+     * иначе конвертируем из заявленного charset. Идемпотентно для обычных имён.
      */
     public function getDisplayFilenameAttribute(): string
     {
         $name = (string) $this->filename;
-        if (str_contains($name, '=?') && str_contains($name, '?=')) {
-            $decoded = @mb_decode_mimeheader($name);
-            if (is_string($decoded) && trim($decoded) !== '') {
-                return $decoded;
-            }
+        if (! str_contains($name, '=?') || ! str_contains($name, '?=')) {
+            return $name;
         }
 
-        return $name;
+        $decoded = preg_replace_callback('/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/', function ($m) {
+            $charset = strtoupper($m[1]);
+            $bytes = strtoupper($m[2]) === 'B'
+                ? base64_decode($m[3], true)
+                : quoted_printable_decode(str_replace('_', ' ', $m[3]));
+            if ($bytes === false || $bytes === null || $bytes === '') {
+                return $m[0];
+            }
+            // ASCII/UTF-8-заявленные (в т.ч. малформед US-ASCII с UTF-8 внутри):
+            // считаем байты UTF-8; если не валидно — пробуем cp1251.
+            if (in_array($charset, ['US-ASCII', 'ASCII', 'UTF-8', 'UTF8'], true)) {
+                return mb_check_encoding($bytes, 'UTF-8')
+                    ? $bytes
+                    : (@mb_convert_encoding($bytes, 'UTF-8', 'Windows-1251') ?: $bytes);
+            }
+            $conv = @mb_convert_encoding($bytes, 'UTF-8', $charset);
+
+            return is_string($conv) && $conv !== '' ? $conv : $bytes;
+        }, $name);
+
+        return is_string($decoded) && trim($decoded) !== '' ? $decoded : $name;
     }
 
     /**
