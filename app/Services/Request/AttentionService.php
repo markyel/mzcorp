@@ -97,12 +97,18 @@ class AttentionService
      * вопросы доставки/отгрузки, сертификатов, закрывающих документов.
      *
      * Срабатывает для «оплаченных/закрытых» статусов (awaiting_invoice /
-     * invoiced / paid / closed_won) — именно к ним MailRouter привязывает
-     * post_sale письмо. Поднимает info-флаг PostSale (level=1), чтобы заявка
-     * всплыла в пуле: менеджер должен увидеть «пришла оплата / новости по
-     * заказу». Для paid/closed_won это СОЗНАТЕЛЬНЫЙ обход silentStatuses-гейта
-     * (как раньше для closed_won); invoiced/awaiting_invoice — активные статусы.
-     * reason=PostSale, sticky, снимается onManagerOpened.
+     * invoiced / paid / closed_won / closed_lost) — именно к ним MailRouter
+     * привязывает post_sale письмо. Поднимает info-флаг PostSale (level=1),
+     * чтобы заявка всплыла в пуле: менеджер должен увидеть «пришла оплата /
+     * новости по заказу». Для paid/closed_won это СОЗНАТЕЛЬНЫЙ обход
+     * silentStatuses-гейта (как раньше для closed_won); invoiced/awaiting_invoice
+     * — активные статусы. reason=PostSale, sticky, снимается onManagerOpened.
+     *
+     * closed_lost добавлен для случая «клиент оплатил просроченный счёт»
+     * (PaymentDocumentDetector, M-2026-12878: счёт истёк, крон закрыл заявку
+     * invoice_unpaid, через день пришла платёжка). Шума не добавляет: остальные
+     * вызывающие сюда closed_lost не приводят — MailRouter::resolvePostSaleRequest
+     * и PostSaleRerouteService::validate его отсекают на входе.
      *
      * Не затирает Manual — он сильнее.
      */
@@ -113,6 +119,7 @@ class AttentionService
             RequestStatus::Invoiced,
             RequestStatus::Paid,
             RequestStatus::ClosedWon,
+            RequestStatus::ClosedLost,
         ];
         if (! in_array($request->status, $postSaleStatuses, true)) {
             return;

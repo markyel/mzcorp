@@ -1361,7 +1361,11 @@ PROMPT;
                 null,
                 true,
             );
-            $textHead = mb_substr(trim($this->extractTextFromFile($upload)), 0, 1500);
+            // Полный текст нужен для поиска номера счёта в платёжке (в
+            // назначении платежа он лежит глубже 1500 символов), LLM же
+            // достаточно головы файла.
+            $fullText = trim($this->extractTextFromFile($upload));
+            $textHead = mb_substr($fullText, 0, 1500);
             if ($textHead === '') {
                 return true;
             }
@@ -1391,15 +1395,25 @@ PROMPT;
                 return true;
             }
             $isNomenclature = filter_var($parsed['is_nomenclature'], FILTER_VALIDATE_BOOLEAN);
+            $docType = is_string($parsed['doc_type'] ?? null) ? $parsed['doc_type'] : null;
 
             Log::info('classifyHeavyAttachmentRelevance: classified', [
                 'source' => $sourceTag,
                 'attachment_id' => $att->id,
                 'filename' => $att->filename,
                 'is_nomenclature' => $isNomenclature,
-                'doc_type' => $parsed['doc_type'] ?? null,
+                'doc_type' => $docType,
                 'reason' => $parsed['reason'] ?? null,
             ]);
+
+            // Вердикт «платёжное поручение» раньше уходил только в лог, и письмо
+            // с голой платёжкой без тредовых заголовков порождало заявку-фантом
+            // (M-2026-14395). Сохраняем его в detected_artifacts — ParseRequestItemsJob
+            // на пустых позициях по нему свернёт фантом в постпродажу.
+            // NB: делаем это независимо от is_nomenclature — модель на платёжке
+            // отвечает то false, то true («документ содержит информацию о
+            // товаре, который оплачивается», msg #82705).
+            app(\App\Services\Mail\PaymentDocumentDetector::class)->record($att, $docType, $fullText);
 
             return $isNomenclature;
         } catch (\Throwable $e) {

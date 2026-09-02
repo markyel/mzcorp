@@ -38,6 +38,12 @@ enum ClosedLostReason: string
     // поставщику (SupplierInquiry) → заявка закрывается с этой причиной,
     // переписка ложится в модуль поставщиков. См. SupplierInquiryService.
     case SupplierReply = 'supplier_reply';
+    // Заявка создалась ошибочно из постпродажного письма: клиент прислал
+    // платёжное поручение / квитанцию по УЖЕ выставленному счёту, треда в
+    // заголовках нет (мобильный клиент шлёт голое вложение), позиций парсер
+    // не нашёл. Не потеря — переписка по состоявшейся продаже.
+    // См. PaymentDocumentDetector.
+    case PostSaleCorrespondence = 'post_sale_correspondence';
 
     public function label(): string
     {
@@ -57,6 +63,7 @@ enum ClosedLostReason: string
             self::ParserNoContent => 'Парсер не нашёл позиций (авто)',
             self::Spam => 'Спам — отправитель в стоп-лист',
             self::SupplierReply => 'Не заявка — переписка с поставщиком',
+            self::PostSaleCorrespondence => 'Не заявка — постпродажная переписка',
         };
     }
 

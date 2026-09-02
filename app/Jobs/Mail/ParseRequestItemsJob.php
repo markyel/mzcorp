@@ -234,6 +234,27 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                 }
             }
 
+            // Платёжка вместо заявки: во вложении платёжное поручение /
+            // квитанция (парсер зафиксировал это в detected_artifacts.
+            // payment_document), позиций нет. Это подтверждение оплаты по уже
+            // выставленному счёту, а не новый запрос. Гасим фантом ДО
+            // assignIfStuckPending — иначе autoAssign назначит менеджера и
+            // отправит клиенту «заявка принята» (кейс M-2026-14395).
+            // Нашли счёт по номеру из платёжки — письмо переезжает на его
+            // заявку с алертом 🛒; не нашли — просто постпродажа.
+            if ($message->related_request_id && ! $this->reset) {
+                try {
+                    if (app(\App\Services\Mail\PaymentDocumentDetector::class)->handleEmptyRequest($message)) {
+                        return;
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('ParseRequestItemsJob: PaymentDocumentDetector failed', [
+                        'email_message_id' => $message->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
             // Empty-items fallback (2026-05-26): inheritance candidate
             // отсутствует, парсер вернул []. Для personal mailbox — Level 0
             // sticky direct_mailbox автоматически назначит owner ящика
