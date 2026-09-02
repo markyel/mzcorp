@@ -67,7 +67,7 @@ class Client extends Component
 
     private function canAccess(): bool
     {
-        return $this->user()?->hasAnyRole([Role::Manager->value, Role::Admin->value]) ?? false;
+        return $this->user()?->hasAnyRole([Role::Manager->value, Role::Admin->value, Role::Director->value]) ?? false;
     }
 
     private function user(): ?User
@@ -122,7 +122,7 @@ class Client extends Component
         }
         // Черновик — открываем в композере, а не в панели чтения.
         if ($anchor->is_draft) {
-            $this->dispatch('mail-open-draft', draftId: $id);
+            $this->dispatch('mail-open-draft', draftId: $id)->to(Composer::class);
 
             return;
         }
@@ -177,6 +177,34 @@ class Client extends Component
         app(EmailDraftService::class)->delete($draft);
         unset($this->threads, $this->folders, $this->mailboxes, $this->openThread);
         $this->dispatch('toast', message: 'Черновик удалён.', type: 'success');
+    }
+
+    /* --- Открытие композера: через сервер + ->to(Composer) — гарантированная
+       доставка события во вложенный компонент (клиентский $dispatch в nested
+       мог не доходить). --- */
+    public function reply(int $messageId): void
+    {
+        $this->dispatch('mail-open-reply', messageId: $messageId)->to(Composer::class);
+    }
+
+    public function replyAll(int $messageId): void
+    {
+        $this->dispatch('mail-open-reply-all', messageId: $messageId)->to(Composer::class);
+    }
+
+    public function forward(int $messageId): void
+    {
+        $this->dispatch('mail-open-forward', messageId: $messageId)->to(Composer::class);
+    }
+
+    public function compose(int $mailboxId): void
+    {
+        $this->dispatch('mail-open-compose', mailboxId: $mailboxId)->to(Composer::class);
+    }
+
+    public function continueDraft(int $draftId): void
+    {
+        $this->dispatch('mail-open-draft', draftId: $draftId)->to(Composer::class);
     }
 
     /** Композер отправил/удалил черновик → обновить список и счётчики. */

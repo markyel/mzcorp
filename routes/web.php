@@ -106,7 +106,7 @@ Route::middleware('auth')->group(function () {
         // руководителей). Доступ ограничен: manager + admin.
         Route::get('/dashboard/mail/inbox', function () {
             return view('mail.inbox');
-        })->middleware('role:manager,admin')->name('mail.inbox');
+        })->middleware('role:manager,admin,director')->name('mail.inbox');
 
         // ВАЖНО: статичные роуты должны быть ОБЪЯВЛЕНЫ ДО `{request}`-биндинга,
         // иначе Laravel матчит `auto-closed` как ID модели → invalid integer

@@ -70,7 +70,7 @@ class Composer extends Component
     private function user(): User
     {
         $u = auth()->user();
-        abort_unless($u?->hasAnyRole([Role::Manager->value, Role::Admin->value]), 403);
+        abort_unless($u?->hasAnyRole([Role::Manager->value, Role::Admin->value, Role::Director->value]), 403);
 
         return $u;
     }

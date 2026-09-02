@@ -40,6 +40,17 @@ class MailboxAccessService
             return $this->cache[$key];
         }
 
+        // Привилегированный обзор (админ / директорат): ВСЕ синкаемые ящики
+        // (общие + личные всех менеджеров) с переключением между ними.
+        if ($this->hasFullMailboxAccess($user)) {
+            return $this->cache[$key] = Mailbox::query()
+                ->syncable()
+                ->with('owner:id,name')
+                ->orderByRaw("CASE type WHEN 'shared' THEN 0 ELSE 1 END")
+                ->orderBy('email')
+                ->get();
+        }
+
         $delegatedOwnerIds = $this->delegatedOwnerIds($user);
 
         $all = Mailbox::query()
@@ -77,15 +88,26 @@ class MailboxAccessService
      */
     public function kindOf(Mailbox $mailbox, User $user, ?array $delegatedOwnerIds = null): string
     {
-        if ((int) $mailbox->owner_user_id === (int) $user->id) {
-            return 'personal';
-        }
         if ($mailbox->type === MailboxType::Shared) {
             return 'shared';
         }
+        if ((int) $mailbox->owner_user_id === (int) $user->id) {
+            return 'personal';
+        }
         $delegatedOwnerIds ??= $this->delegatedOwnerIds($user);
+        if (in_array((int) $mailbox->owner_user_id, $delegatedOwnerIds, true)) {
+            return 'delegated';
+        }
 
-        return in_array((int) $mailbox->owner_user_id, $delegatedOwnerIds, true) ? 'delegated' : 'shared';
+        // Личный ящик другого пользователя (привилегированный обзор
+        // админа/директората) — показываем как personal (с именем владельца).
+        return 'personal';
+    }
+
+    /** Роли с обзором всех ящиков (переключалка по всем): админ + директорат. */
+    public function hasFullMailboxAccess(User $user): bool
+    {
+        return $user->hasAnyRole([Role::Admin->value, Role::Director->value]);
     }
 
     /** Есть ли у пользователя доступ к конкретному ящику. */

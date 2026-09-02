@@ -44,6 +44,8 @@
 .mailapp .cur .txt{flex:1;min-width:0}
 .mailapp .cur .nm{font:600 12.5px/1.3 var(--font-sans);color:var(--fg-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mailapp .cur .em{font:400 11px/1.2 var(--font-mono);color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mailapp .paneA-link{display:block;margin-top:8px;font:500 11.5px/1.3 var(--font-sans);color:var(--sky-700);text-decoration:none}
+.mailapp .paneA-link:hover{text-decoration:underline}
 .mailapp .flist{padding:8px}
 .mailapp .fgroup-label{font:600 10px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.06em;padding:12px 8px 6px}
 .mailapp .fitem{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--r-md);font-size:12.5px;color:var(--fg-2);cursor:pointer;border:none;background:none;width:100%;text-align:left}
@@ -167,6 +169,9 @@
                     <div class="em">{{ $cur['email'] ?? '' }}</div>
                 </div>
             </div>
+            @if(auth()->user()?->hasAnyRole(['head_of_sales', 'secretary', 'director', 'admin']))
+                <a href="{{ route('mail.index') }}" wire:navigate class="paneA-link">Вся почта · обзор всех ящиков →</a>
+            @endif
         </div>
 
         <div class="flist">
@@ -206,7 +211,7 @@
                 <div class="bsearch">
                     <input type="text" placeholder="Поиск в этом ящике…" wire:model.live.debounce.400ms="search">
                 </div>
-                <button class="compose" wire:click="$dispatch('mail-open-compose', { mailboxId: {{ (int) $selectedMailboxId }} })">Написать</button>
+                <button class="compose" wire:click="compose({{ (int) $selectedMailboxId }})">Написать</button>
             </div>
             <div class="fhdr">
                 <span>{{ \App\Enums\MailFolder::tryFromOrDefault($folder)->label() }}</span>
@@ -301,8 +306,8 @@
                             </div>
                             @unless($msg->is_draft)
                                 <span class="msg-acts">
-                                    <button wire:click="$dispatch('mail-open-reply', { messageId: {{ $msg->id }} })" title="Ответить на это письмо">Ответить</button>
-                                    <button wire:click="$dispatch('mail-open-forward', { messageId: {{ $msg->id }} })" title="Переслать это письмо">Переслать</button>
+                                    <button wire:click="reply({{ $msg->id }})" title="Ответить на это письмо">Ответить</button>
+                                    <button wire:click="forward({{ $msg->id }})" title="Переслать это письмо">Переслать</button>
                                 </span>
                             @endunless
                             <span class="when">{{ $fmtWhen($msg->is_draft ? ($msg->last_edited_at ?? $msg->created_at) : $msg->sent_at) }}</span>
@@ -364,7 +369,7 @@
                         @endif
                         @if($msg->is_draft)
                             <div class="draft-actions">
-                                <button class="da-primary" wire:click="$dispatch('mail-open-draft', { draftId: {{ $msg->id }} })">Продолжить черновик</button>
+                                <button class="da-primary" wire:click="continueDraft({{ $msg->id }})">Продолжить черновик</button>
                                 <button class="da-del" wire:click="deleteDraft({{ $msg->id }})">Удалить</button>
                             </div>
                         @endif
@@ -375,8 +380,8 @@
             @php $lastMsg = $thread->reject(fn ($m) => $m->is_draft)->last() ?? $anchor; @endphp
             <div class="cfoot">
                 <div class="replybtns">
-                    <button class="primary" wire:click="$dispatch('mail-open-reply', { messageId: {{ $lastMsg->id }} })">Ответить</button>
-                    <button wire:click="$dispatch('mail-open-reply-all', { messageId: {{ $lastMsg->id }} })">Ответить всем</button>
+                    <button class="primary" wire:click="reply({{ $lastMsg->id }})">Ответить</button>
+                    <button wire:click="replyAll({{ $lastMsg->id }})">Ответить всем</button>
                 </div>
                 <div class="cfoot-hint">Переслать конкретное письмо — кнопкой у самого письма выше</div>
             </div>
