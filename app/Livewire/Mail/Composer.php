@@ -9,6 +9,7 @@ use App\Models\Mailbox;
 use App\Models\Request as RequestModel;
 use App\Models\User;
 use App\Services\Mail\EmailDraftService;
+use App\Services\Mail\HtmlSanitizer;
 use App\Services\Mail\MailboxAccessService;
 use App\Services\Mail\OutboundReplyHooks;
 use App\Services\Mail\OutgoingMailSender;
@@ -57,7 +58,10 @@ class Composer extends Component
     #[Validate('nullable|string|max:4000')]
     public string $ccRaw = '';
 
-    #[Validate('required|string|min:1')]
+    /** Богатый HTML из редактора — уходит в body_html письма. */
+    public string $bodyHtml = '';
+
+    /** Производный plain-текст (валидация + plain-альтернатива MIME). */
     public string $bodyText = '';
 
     /** @var array<int, TemporaryUploadedFile> */
@@ -202,6 +206,12 @@ class Composer extends Component
         $this->subject = (string) $draft->subject;
         $this->toRaw = $this->formatRecipients((array) ($draft->to_recipients ?? []));
         $this->ccRaw = $this->formatRecipients((array) ($draft->cc_recipients ?? []));
+        // Богатый редактор: seed HTML из body_html; для пересылки/чернового
+        // plain (body_html пуст, но body_plain есть) — переводим plain→html.
+        $html = trim((string) $draft->body_html);
+        $this->bodyHtml = $html !== ''
+            ? $html
+            : ($draft->body_plain ? nl2br(e((string) $draft->body_plain)) : '');
         $this->bodyText = (string) $draft->body_plain;
         $this->newFiles = [];
         $this->resetErrorBag();
@@ -225,8 +235,10 @@ class Composer extends Component
         $this->autoSave($drafts);
     }
 
-    public function updatedBodyText(EmailDraftService $drafts): void
+    public function updatedBodyHtml(EmailDraftService $drafts): void
     {
+        $this->bodyHtml = app(HtmlSanitizer::class)->sanitize($this->bodyHtml);
+        $this->bodyText = $this->htmlToPlain($this->bodyHtml);
         $this->autoSave($drafts);
     }
 
@@ -241,7 +253,7 @@ class Composer extends Component
             'to_recipients' => $this->parseRecipients($this->toRaw),
             'cc_recipients' => $this->parseRecipients($this->ccRaw),
             'body_plain' => $this->bodyText,
-            'body_html' => '',
+            'body_html' => $this->bodyHtml,
         ]);
     }
 
@@ -333,6 +345,15 @@ class Composer extends Component
     {
         $this->validate();
 
+        // Тело: санитизируем HTML и проверяем, что после вычистки есть текст.
+        $this->bodyHtml = app(HtmlSanitizer::class)->sanitize($this->bodyHtml);
+        $this->bodyText = $this->htmlToPlain($this->bodyHtml);
+        if (trim($this->bodyText) === '') {
+            $this->addError('bodyText', 'Напишите текст письма.');
+
+            return null;
+        }
+
         @set_time_limit(180);
         @ini_set('max_execution_time', '180');
 
@@ -379,7 +400,7 @@ class Composer extends Component
             }
         }
 
-        $this->reset(['draftId', 'relatedRequestId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bodyText', 'newFiles']);
+        $this->reset(['draftId', 'relatedRequestId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bodyText', 'bodyHtml', 'newFiles']);
         $this->open = false;
         $this->dispatch('mail-sent');
         $this->dispatch('toast', message: 'Письмо отправлено.', type: 'success');
@@ -393,7 +414,7 @@ class Composer extends Component
         if ($draft) {
             $drafts->delete($draft);
         }
-        $this->reset(['draftId', 'relatedRequestId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bodyText', 'newFiles']);
+        $this->reset(['draftId', 'relatedRequestId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bodyText', 'bodyHtml', 'newFiles']);
         $this->open = false;
         $this->dispatch('mail-sent'); // обновить список (черновик исчез)
     }
@@ -498,6 +519,18 @@ class Composer extends Component
     private function safeFilename(string $name): string
     {
         return mb_substr(preg_replace('/[^A-Za-z0-9._\-]/', '_', $name) ?? 'file', 0, 80);
+    }
+
+    /** HTML → читаемый plain (для валидации и plain-альтернативы письма). */
+    private function htmlToPlain(string $html): string
+    {
+        $t = preg_replace('#<\s*br\s*/?>#i', "\n", $html) ?? $html;
+        $t = preg_replace('#</\s*(p|div|li|h3|h4|blockquote)\s*>#i', "\n", $t) ?? $t;
+        $t = strip_tags($t);
+        $t = html_entity_decode($t, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $t = preg_replace("/\n{3,}/", "\n\n", $t) ?? $t;
+
+        return trim($t);
     }
 
     private function describeError(string $code): string

@@ -18,7 +18,15 @@
 .mail-composer .crow .from .dot{width:6px;height:6px;border-radius:999px;background:var(--emerald-600)}
 .mail-composer .reqbadge{font:600 10.5px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:2px 7px;border-radius:4px}
 .mail-composer .cbodyarea{flex:1 1 auto;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;min-height:120px}
-.mail-composer textarea{width:100%;flex:1 1 auto;min-height:110px;border:none;outline:none;resize:none;font:400 13.5px/1.6 var(--font-sans);color:var(--fg-1);background:transparent}
+.mail-composer .rte{flex:1 1 auto;display:flex;flex-direction:column;min-height:120px}
+.mail-composer .rte-toolbar{display:flex;align-items:center;gap:2px;padding:0 0 8px;flex:0 0 auto}
+.mail-composer .rte-toolbar button{min-width:28px;height:26px;padding:0 6px;border:1px solid var(--border);background:var(--bg-surface);border-radius:4px;cursor:pointer;color:var(--fg-2);font-size:12px;display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.mail-composer .rte-toolbar button:hover{background:var(--bg-hover);color:var(--fg-1)}
+.mail-composer .rte-toolbar .sep{width:1px;height:16px;background:var(--border);margin:0 4px}
+.mail-composer .rte-ed{flex:1 1 auto;min-height:100px;outline:none;font:400 13.5px/1.6 var(--font-sans);color:var(--fg-1);overflow-y:auto;word-break:break-word}
+.mail-composer .rte-ed:empty:before{content:attr(data-placeholder);color:var(--fg-4)}
+.mail-composer .rte-ed a{color:var(--sky-700)}
+.mail-composer .rte-ed ul,.mail-composer .rte-ed ol{margin:4px 0;padding-left:22px}
 .mail-composer .sig{font:400 12px/1.5 var(--font-sans);color:var(--fg-3);margin-top:12px;padding-top:10px;border-top:1px dashed var(--border-subtle);white-space:pre-line;flex:0 0 auto}
 .mail-composer .atts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;flex:0 0 auto}
 .mail-composer .att{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:999px;background:var(--sky-50);color:var(--sky-700);font:500 11px/1 var(--font-sans)}
@@ -136,7 +144,29 @@
         @error('newFiles.*')<div class="err">{{ $message }}</div>@enderror
 
         <div class="cbodyarea">
-            <textarea wire:model.live.debounce.1200ms="bodyText" placeholder="Ваш ответ…"></textarea>
+            {{-- Богатый редактор: contenteditable под wire:ignore (иначе Livewire
+                 morph сбивал бы курсор), синхронизация HTML в $wire.bodyHtml. --}}
+            <div class="rte" wire:ignore x-data="{
+                    sync() { $wire.set('bodyHtml', $refs.ed.innerHTML) },
+                    cmd(c, v=null) { $refs.ed.focus(); document.execCommand(c, false, v); this.sync(); },
+                    link() { const u = prompt('Ссылка (URL):', 'https://'); if (u) { this.cmd('createLink', u); } },
+                    init() { $refs.ed.innerHTML = ($wire.get('bodyHtml') || ''); }
+                 }">
+                <div class="rte-toolbar">
+                    <button type="button" @click="cmd('bold')" title="Жирный"><b>B</b></button>
+                    <button type="button" @click="cmd('italic')" title="Курсив"><i>I</i></button>
+                    <button type="button" @click="cmd('underline')" title="Подчёркнутый"><u>U</u></button>
+                    <span class="sep"></span>
+                    <button type="button" @click="cmd('insertUnorderedList')" title="Маркированный список">•</button>
+                    <button type="button" @click="cmd('insertOrderedList')" title="Нумерованный список">1.</button>
+                    <span class="sep"></span>
+                    <button type="button" @click="link()" title="Ссылка">🔗</button>
+                    <button type="button" @click="cmd('removeFormat')" title="Убрать форматирование">⌫</button>
+                </div>
+                <div class="rte-ed" x-ref="ed" contenteditable="true"
+                     @input.debounce.900ms="sync()" @blur="sync()"
+                     data-placeholder="Ваш ответ…"></div>
+            </div>
 
             @if($this->attachments->isNotEmpty())
                 <div class="atts">
@@ -162,7 +192,7 @@
             <label class="lbl-file" title="Прикрепить файл">📎<input type="file" multiple wire:model="newFiles"></label>
             <button class="discard" wire:click="discard">Удалить</button>
             <span class="spacer"></span>
-            <span class="save" wire:loading.flex wire:target="updatedBodyText,updatedSubject,updatedToRaw,updatedCcRaw,uploadAttachments"><span class="dot"></span>Сохранение…</span>
+            <span class="save" wire:loading.flex wire:target="updatedBodyHtml,updatedSubject,updatedToRaw,updatedCcRaw,uploadAttachments"><span class="dot"></span>Сохранение…</span>
         </div>
     </div>
 
