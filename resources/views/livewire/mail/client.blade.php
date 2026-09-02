@@ -27,7 +27,12 @@
     };
 @endphp
 
-<div class="mailapp" wire:key="mailapp">
+{{-- wire:poll.60s — почта подтягивается сама: mail:sync крутится раз в 2 минуты
+     (routes/console.php:19), так что минута — разумная сетка. Livewire сам
+     останавливает поллинг, когда вкладка в фоне. Открытое письмо и высоты
+     iframe переживают морф (wire:ignore.self), композер — отдельный компонент,
+     его поллинг не трогает. --}}
+<div class="mailapp" wire:key="mailapp" wire:poll.60s>
 <style>
 /* scoped mail client — на токенах дизайн-системы, без Tailwind-пересборки */
 .mailapp{display:grid;grid-template-columns:240px 400px 1fr;height:calc(100vh - var(--topbar-h, 56px));min-height:520px;

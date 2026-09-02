@@ -291,6 +291,23 @@ class Client extends Component
     public function threads(): Collection
     {
         return $this->folderQuery(MailFolder::tryFromOrDefault($this->folder))
+            // Узкий select: строка списка = шапка + сниппет, тела не нужны.
+            // С `email_messages.*` уезжали body_html/body_plain/raw_source всех
+            // 41 письма по SSL с облачной БД — замер на проде 573 мс против
+            // 27 мс (сама выборка в PG — 30 мс, остальное транспорт+гидрация).
+            ->select([
+                'email_messages.id',
+                'email_messages.subject',
+                'email_messages.from_name',
+                'email_messages.from_email',
+                'email_messages.sent_at',
+                'email_messages.direction',
+                'email_messages.category',
+                'email_messages.related_request_id',
+                'ustate.read_at as my_read_at',
+                'ustate.flagged_at as my_flagged_at',
+            ])
+            ->selectRaw('LEFT(email_messages.body_plain, 200) as body_plain')
             ->with('relatedRequest:id,internal_code,status')
             ->withCount('attachments')
             ->orderByRaw('email_messages.sent_at DESC NULLS LAST')
