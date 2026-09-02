@@ -26,7 +26,12 @@
 .mail-composer .rte-ed{flex:1 1 auto;min-height:100px;outline:none;font:400 13.5px/1.6 var(--font-sans);color:var(--fg-1);overflow-y:auto;word-break:break-word}
 .mail-composer .rte-ed:empty:before{content:attr(data-placeholder);color:var(--fg-4)}
 .mail-composer .rte-ed a{color:var(--sky-700)}
-.mail-composer .rte-ed ul,.mail-composer .rte-ed ol{margin:4px 0;padding-left:22px}
+.mail-composer .rte-ed ul{list-style:disc outside;margin:4px 0;padding-left:24px}
+.mail-composer .rte-ed ol{list-style:decimal outside;margin:4px 0;padding-left:24px}
+.mail-composer .rte-ed li{margin:2px 0}
+.mail-composer .rte-ed blockquote{margin:6px 0;padding-left:12px;border-left:2px solid var(--border-strong);color:var(--fg-2)}
+.mail-composer .rte-ed table{border-collapse:collapse}
+.mail-composer .rte-ed td,.mail-composer .rte-ed th{border:1px solid var(--border);padding:3px 8px}
 .mail-composer .sig{font:400 12px/1.5 var(--font-sans);color:var(--fg-3);margin-top:12px;padding-top:10px;border-top:1px dashed var(--border-subtle);white-space:pre-line;flex:0 0 auto}
 .mail-composer .atts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;flex:0 0 auto}
 .mail-composer .att{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:999px;background:var(--sky-50);color:var(--sky-700);font:500 11px/1 var(--font-sans)}

@@ -167,18 +167,36 @@ class EmailDraftService
     {
         $mailbox = $source->mailbox ?? ($source->mailbox_id ? Mailbox::find($source->mailbox_id) : null);
 
-        $origBody = trim((string) $source->body_plain);
-        if ($origBody === '' && $source->body_html) {
-            $origBody = trim(html_entity_decode(strip_tags($source->body_html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-        }
+        $fromLine = trim(($source->from_name ? $source->from_name.' ' : '').'<'.$source->from_email.'>');
         $to = $this->formatRecipientsInline((array) ($source->to_recipients ?? []));
         $date = $source->sent_at ? $source->sent_at->format('d.m.Y H:i') : '';
-        $header = "\n\n---------- Пересылаемое сообщение ----------\n"
-            .'От: '.trim(($source->from_name ? $source->from_name.' ' : '').'<'.$source->from_email.'>')."\n"
+
+        // HTML: сохраняем ВЁРСТКУ оригинала (таблицы/форматирование), а не
+        // плоский текст. Если html пуст — из plain через nl2br.
+        $origHtml = trim((string) $source->body_html);
+        if ($origHtml === '') {
+            $origHtml = nl2br(e(trim((string) $source->body_plain)));
+        }
+        $e = fn ($s) => e((string) $s);
+        $headerHtml = '<br><div>---------- Пересылаемое сообщение ----------</div>'
+            .'<div>От: '.$e($fromLine).'</div>'
+            .($date !== '' ? '<div>Дата: '.$e($date).'</div>' : '')
+            .($to !== '' ? '<div>Кому: '.$e($to).'</div>' : '')
+            .'<div>Тема: '.$e($source->subject).'</div><br>';
+        $bodyHtml = $headerHtml
+            .'<blockquote style="margin:0;padding-left:12px;border-left:2px solid #d0d0d0">'.$origHtml.'</blockquote>';
+
+        // Plain-версия (для plain-альтернативы MIME + деривации в композере).
+        $origPlain = trim((string) $source->body_plain);
+        if ($origPlain === '' && $source->body_html) {
+            $origPlain = trim(html_entity_decode(strip_tags($source->body_html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        }
+        $bodyPlain = "\n\n---------- Пересылаемое сообщение ----------\n"
+            ."От: {$fromLine}\n"
             .($date !== '' ? "Дата: {$date}\n" : '')
             .($to !== '' ? "Кому: {$to}\n" : '')
             .'Тема: '.(string) $source->subject."\n\n"
-            .$origBody;
+            .$origPlain;
 
         $draft = $this->createDraft([
             'relatedRequestId' => null,
@@ -189,8 +207,8 @@ class EmailDraftService
             'cc' => [],
             'inReplyTo' => null,
             'references' => [],
-            'bodyHtml' => '',
-            'bodyPlain' => $header,
+            'bodyHtml' => $bodyHtml,
+            'bodyPlain' => $bodyPlain,
         ]);
 
         // Перенос вложений оригинала (best-effort копирование файлов).

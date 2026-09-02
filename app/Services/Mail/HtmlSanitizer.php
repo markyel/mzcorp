@@ -16,7 +16,18 @@ class HtmlSanitizer
     /** Разрешённые теги. */
     private const ALLOWED = [
         'p', 'br', 'div', 'span', 'b', 'strong', 'i', 'em', 'u',
-        'a', 'ul', 'ol', 'li', 'blockquote', 'h3', 'h4',
+        'a', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'hr', 'pre', 'code', 'sub', 'sup',
+        // Таблицы — чтобы структура пересланных/вставленных писем не рассыпалась.
+        'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'caption', 'colgroup', 'col',
+    ];
+
+    /** Атрибуты, допустимые на конкретных тегах (кроме a[href]). */
+    private const ATTR_ALLOW = [
+        'td' => ['colspan', 'rowspan'],
+        'th' => ['colspan', 'rowspan'],
+        'col' => ['span'],
+        'colgroup' => ['span'],
     ];
 
     /** Теги, вырезаемые вместе с содержимым. */
@@ -96,9 +107,13 @@ class HtmlSanitizer
 
     private function stripAttributes(\DOMElement $el, string $tag): void
     {
+        $extra = self::ATTR_ALLOW[$tag] ?? [];
         foreach (iterator_to_array($el->attributes ?? []) as $attr) {
             $name = strtolower($attr->name);
             if ($tag === 'a' && $name === 'href' && $this->safeHref($attr->value)) {
+                continue;
+            }
+            if (in_array($name, $extra, true)) {
                 continue;
             }
             $el->removeAttribute($attr->name);
