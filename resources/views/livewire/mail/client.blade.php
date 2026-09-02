@@ -258,7 +258,12 @@
                     <div class="reqlink">
                         <span>Привязано к заявке</span>
                         <span class="code">{{ $req->internal_code }}</span>
-                        <span class="st">· {{ \App\Enums\RequestStatus::tryFrom($req->status)?->label() ?? $req->status }}</span>
+                        @php
+                            $reqStatus = $req->status instanceof \App\Enums\RequestStatus
+                                ? $req->status
+                                : \App\Enums\RequestStatus::tryFrom((string) $req->status);
+                        @endphp
+                        <span class="st">· {{ $reqStatus?->label() ?? $req->status }}</span>
                         <span class="spacer"></span>
                         <a href="{{ route('requests.show', $req->id) }}" wire:navigate>Открыть заявку →</a>
                     </div>
