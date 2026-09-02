@@ -36,7 +36,9 @@ use Webklex\PHPIMAP\IMAP;
  *   - у менеджера нет личного Mailbox с тем же email (нет OAuth);
  *   - `raw_source` пуст (письмо без оригинального .eml — старые
  *     импортированные);
- *   - уже доставляли этому user_id (idempotent re-dispatch).
+ *   - уже доставляли этому user_id (idempotent re-dispatch);
+ *   - письмо лежит в личном ящике ДРУГОГО менеджера — кроме случая, когда тот
+ *     недоступен (отпуск) или архивирован, см. guard ниже.
  */
 class MailDeliverToManagerService
 {
@@ -147,8 +149,24 @@ class MailDeliverToManagerService
             // переподчинение sales-команды), копировался в личный inbox B как
             // «доставка assigned-менеджеру», и оба менеджера видели одно и то же
             // письмо в своих ящиках. См. MEMORY «Большая волна 2026-05-27».
+            //
+            // ИСКЛЮЧЕНИЕ — владелец A недоступен (отпуск/командировка, проставлен
+            // директором) или архивирован. Вся посылка guard'а («A видит письмо у
+            // себя и работает с ним, B хватит треда в UI») в этом случае неверна:
+            // A в отпуске, письмо в его Yandex никто не откроет. При этом
+            // AssignmentService::pickStickyByDirectMailbox намеренно НЕ садит
+            // заявку на недоступного владельца — она уходит доступному коллеге, и
+            // без доставки тот получает заявку без письма-инициатора и не может
+            // ответить клиенту обычным reply из своего ящика.
+            // Проверено 02.09.2026: 63 из 63 заявок из ящиков двух отпускников за
+            // 14 дней ушли назначенным менеджерам без письма (skip_reason
+            // `origin_in_another_personal` в mail_append_audit).
             $originMailbox = $message->mailbox;
+            $originOwner = $originMailbox?->owner;
+            $originOwnerOutOfPlay = $originOwner !== null
+                && ($originOwner->archived_at !== null || $originOwner->isUnavailable());
             if ($originMailbox
+                && ! $originOwnerOutOfPlay
                 && $originMailbox->type === MailboxType::Personal
                 && $originMailbox->owner_user_id
                 && (int) $originMailbox->owner_user_id !== (int) $manager->id) {
