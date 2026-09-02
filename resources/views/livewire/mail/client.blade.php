@@ -114,6 +114,13 @@
 .mailapp .chead .reqlink a{color:var(--violet-700);font-weight:600;text-decoration:none;border-bottom:1px dashed currentColor}
 .mailapp .cbody{flex:1;overflow-y:auto;padding:0 24px}
 .mailapp .msg{border-bottom:1px solid var(--border-subtle);padding:14px 0 20px}
+.mailapp .msg.draft{background:var(--warn-soft, #f6ecd6);margin:0 -24px;padding:14px 24px 16px;border-left:3px solid var(--warn, #9c7420)}
+.mailapp .msg.draft .av{background:var(--warn, #9c7420);color:#fff}
+.mailapp .draft-badge{font:600 10px/1.4 var(--font-mono);letter-spacing:.04em;text-transform:uppercase;color:var(--warn, #9c7420);background:var(--bg-surface);border:1px solid var(--warn, #9c7420);padding:1px 6px;border-radius:4px;margin-left:6px}
+.mailapp .draft-actions{display:flex;gap:8px;margin-top:12px}
+.mailapp .draft-actions button{height:30px;padding:0 14px;border-radius:var(--r-md);font:500 12.5px/1 var(--font-sans);cursor:pointer;border:1px solid var(--border-strong);background:var(--bg-surface);color:var(--fg-1)}
+.mailapp .draft-actions .da-primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.mailapp .draft-actions .da-del{color:var(--crit, #b0432e);border-color:transparent;background:none}
 .mailapp .msg:last-child{border-bottom:none}
 .mailapp .mhead{display:flex;align-items:flex-start;gap:10px;margin-bottom:12px}
 .mailapp .mhead .av{width:36px;height:36px;border-radius:999px;background:var(--neutral-200);color:var(--fg-2);font:600 13px/36px var(--font-sans);text-align:center;flex-shrink:0}
@@ -273,15 +280,15 @@
             <div class="cbody">
                 @foreach($thread as $msg)
                     @php $outbound = $msg->direction?->value === 'outbound'; $html = $this->bodyHtmlFor($msg); @endphp
-                    <div class="msg {{ $outbound ? 'outbound' : '' }}" wire:key="msg-{{ $msg->id }}">
+                    <div class="msg {{ $msg->is_draft ? 'draft' : ($outbound ? 'outbound' : '') }}" wire:key="msg-{{ $msg->id }}">
                         <div class="mhead">
-                            <span class="av">{{ $initials($msg->from_name, $msg->from_email) }}</span>
+                            <span class="av">{{ $msg->is_draft ? '✎' : $initials($msg->from_name, $msg->from_email) }}</span>
                             <div class="who">
-                                <div class="nm">{{ $msg->from_name ?: $msg->from_email }} <span class="em">&lt;{{ $msg->from_email }}&gt;</span></div>
+                                <div class="nm">{{ $msg->from_name ?: $msg->from_email }} <span class="em">&lt;{{ $msg->from_email }}&gt;</span>@if($msg->is_draft)<span class="draft-badge">черновик</span>@endif</div>
                                 @php $to = collect($msg->to_recipients ?? [])->pluck('email')->filter()->take(3)->implode(', '); @endphp
                                 @if($to)<div class="tocc">кому: {{ $to }}</div>@endif
                             </div>
-                            <span class="when">{{ $fmtWhen($msg->sent_at) }}</span>
+                            <span class="when">{{ $fmtWhen($msg->is_draft ? ($msg->last_edited_at ?? $msg->created_at) : $msg->sent_at) }}</span>
                         </div>
                         <div class="mbody">
                             @if($html)
@@ -312,6 +319,12 @@
                                         </span>
                                     </span>
                                 @endforeach
+                            </div>
+                        @endif
+                        @if($msg->is_draft)
+                            <div class="draft-actions">
+                                <button class="da-primary" wire:click="$dispatch('mail-open-draft', { draftId: {{ $msg->id }} })">Продолжить черновик</button>
+                                <button class="da-del" wire:click="deleteDraft({{ $msg->id }})">Удалить</button>
                             </div>
                         @endif
                     </div>

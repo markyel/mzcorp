@@ -8,6 +8,7 @@ use App\Enums\Role;
 use App\Livewire\Concerns\RendersEmailBody;
 use App\Models\EmailMessage;
 use App\Models\User;
+use App\Services\Mail\EmailDraftService;
 use App\Services\Mail\MailboxAccessService;
 use App\Services\Mail\MailReadService;
 use App\Services\Mail\SharedMailService;
@@ -160,6 +161,22 @@ class Client extends Component
         app(MailReadService::class)->markUnread($id, $this->user());
         unset($this->threads, $this->folders, $this->mailboxes);
         $this->dispatch('toast', message: 'Помечено непрочитанным.', type: 'success');
+    }
+
+    /** Удалить свой черновик прямо из треда/папки. */
+    public function deleteDraft(int $id): void
+    {
+        $draft = EmailMessage::query()
+            ->where('is_draft', true)
+            ->where('draft_author_user_id', $this->user()->id)
+            ->whereKey($id)
+            ->first();
+        if (! $draft) {
+            return;
+        }
+        app(EmailDraftService::class)->delete($draft);
+        unset($this->threads, $this->folders, $this->mailboxes, $this->openThread);
+        $this->dispatch('toast', message: 'Черновик удалён.', type: 'success');
     }
 
     /** Композер отправил/удалил черновик → обновить список и счётчики. */
