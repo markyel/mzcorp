@@ -94,20 +94,20 @@ class Composer extends Component
             // Письмо поставщика — отвечаем клиенту заявки (compose), не поставщику.
             if (app(OutboundReplyHooks::class)->isSupplierMessage($anchor)) {
                 $draft = $drafts->createCompose($req, $this->user());
-                $this->hydrate($draft, 'compose', null);
+                $this->fillFromDraft($draft, 'compose', null);
                 $this->dispatch('toast', message: 'Это письмо поставщика — ответ адресован клиенту заявки.', type: 'info');
 
                 return;
             }
             $draft = $drafts->createReply($req, $anchor, $this->user(), $all);
-            $this->hydrate($draft, $all ? 'reply_all' : 'reply', $anchor->id, $req->id);
+            $this->fillFromDraft($draft, $all ? 'reply_all' : 'reply', $anchor->id, $req->id);
 
             return;
         }
 
         // Свободная переписка.
         $draft = $drafts->createReplyFree($anchor, $this->user(), $all);
-        $this->hydrate($draft, $all ? 'reply_all' : 'reply', $anchor->id, null);
+        $this->fillFromDraft($draft, $all ? 'reply_all' : 'reply', $anchor->id, null);
     }
 
     #[On('mail-open-reply-all')]
@@ -129,7 +129,7 @@ class Composer extends Component
             return;
         }
         $draft = $drafts->createComposeFree($mailbox, $this->user());
-        $this->hydrate($draft, 'compose', null, null);
+        $this->fillFromDraft($draft, 'compose', null, null);
     }
 
     #[On('mail-open-draft')]
@@ -143,10 +143,10 @@ class Composer extends Component
         if (! $draft) {
             return;
         }
-        $this->hydrate($draft, $draft->in_reply_to ? 'reply' : 'compose', null, $draft->related_request_id);
+        $this->fillFromDraft($draft, $draft->in_reply_to ? 'reply' : 'compose', null, $draft->related_request_id);
     }
 
-    private function hydrate(EmailMessage $draft, string $mode, ?int $replyToId, ?int $requestId = null): void
+    private function fillFromDraft(EmailMessage $draft, string $mode, ?int $replyToId, ?int $requestId = null): void
     {
         $this->draftId = $draft->id;
         $this->relatedRequestId = $requestId ?? $draft->related_request_id;
