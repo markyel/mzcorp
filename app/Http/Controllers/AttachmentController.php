@@ -7,6 +7,7 @@ use App\Enums\Role;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\Request;
+use App\Services\Mail\MailboxAccessService;
 use Illuminate\Http\Request as HttpRequest;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\HeaderUtils;
@@ -205,6 +206,16 @@ class AttachmentController extends Controller
         // Без этого письма поставщика с related_request_id=null давали 403 →
         // фото не отображались (кейс M-2026-3573).
         if ($email && $email->supplier_inquiry_id !== null) {
+            return;
+        }
+
+        // Почтовый клиент (App\Livewire\Mail\Client): вложения писем в ящиках,
+        // доступных пользователю (личный / общие / делегированные — см.
+        // MailboxAccessService), читаемы — согласовано с видимостью клиента.
+        // Иначе вложения свободной почты (related_request_id IS NULL) давали
+        // менеджеру 403 при просмотре/скачивании.
+        if ($email && $email->mailbox_id !== null
+            && app(MailboxAccessService::class)->canAccessMailbox($user, (int) $email->mailbox_id)) {
             return;
         }
 

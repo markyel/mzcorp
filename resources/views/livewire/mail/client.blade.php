@@ -133,7 +133,13 @@
 .mailapp .msg.outbound{background:var(--bg-surface-2);margin:0 -24px;padding:14px 24px 20px}
 .mailapp .mbody iframe{width:100%;display:block;border:0;background:var(--bg-surface);border-radius:var(--r-md)}
 .mailapp .mbody pre{white-space:pre-wrap;font:400 13px/1.55 var(--font-sans);color:var(--fg-1);margin:0}
+.mailapp .photos{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.mailapp .photo{display:block;width:132px;height:132px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface-2);cursor:zoom-in;transition:border-color .12s}
+.mailapp .photo:hover{border-color:var(--accent)}
+.mailapp .photo img{width:100%;height:100%;object-fit:cover;display:block}
 .mailapp .attachments{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.mailapp .attachments a.att{text-decoration:none;transition:border-color .12s}
+.mailapp .attachments a.att:hover{border-color:var(--accent)}
 .mailapp .att{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-surface);text-decoration:none}
 .mailapp .att .ico{width:28px;height:32px;border-radius:4px;background:var(--red-50);border:1px solid var(--red-300,#fca5a5);color:var(--red-700);display:flex;align-items:center;justify-content:center;font:700 8px/1 var(--font-sans);flex-shrink:0}
 .mailapp .att .ico.img{background:var(--sky-50);color:var(--sky-700)}
@@ -308,18 +314,33 @@
                             @endif
                         </div>
                         @if($msg->attachments->isNotEmpty())
-                            <div class="attachments">
-                                @foreach($msg->attachments as $att)
-                                    @php $img = str_starts_with((string) $att->mime_type, 'image/'); $ext = strtoupper(pathinfo($att->filename, PATHINFO_EXTENSION) ?: 'FILE'); @endphp
-                                    <span class="att">
-                                        <span class="ico {{ $img ? 'img' : '' }}">{{ mb_substr($ext, 0, 4) }}</span>
-                                        <span>
-                                            <span class="fn" style="display:block">{{ $att->filename }}</span>
-                                            <span class="sz">{{ $att->size_bytes ? number_format($att->size_bytes/1024, 0, '.', ' ').' КБ' : '' }}</span>
-                                        </span>
-                                    </span>
-                                @endforeach
-                            </div>
+                            @php
+                                $photos = $msg->attachments->filter(fn($a) => str_starts_with((string) $a->mime_type, 'image/'));
+                                $files  = $msg->attachments->reject(fn($a) => str_starts_with((string) $a->mime_type, 'image/'));
+                            @endphp
+                            @if($photos->isNotEmpty())
+                                <div class="photos">
+                                    @foreach($photos as $att)
+                                        <a class="photo" href="{{ route('attachments.preview', $att->id) }}" target="_blank" rel="noopener" title="{{ $att->filename }} — открыть">
+                                            <img src="{{ route('attachments.preview', $att->id) }}" loading="lazy" alt="{{ $att->filename }}">
+                                        </a>
+                                    @endforeach
+                                </div>
+                            @endif
+                            @if($files->isNotEmpty())
+                                <div class="attachments">
+                                    @foreach($files as $att)
+                                        @php $ext = strtoupper(pathinfo($att->filename, PATHINFO_EXTENSION) ?: 'FILE'); @endphp
+                                        <a class="att" href="{{ route('attachments.preview', $att->id) }}" target="_blank" rel="noopener" title="Открыть / скачать">
+                                            <span class="ico">{{ mb_substr($ext, 0, 4) }}</span>
+                                            <span>
+                                                <span class="fn" style="display:block">{{ $att->filename }}</span>
+                                                <span class="sz">{{ $att->size_bytes ? number_format($att->size_bytes/1024, 0, '.', ' ').' КБ' : '' }}</span>
+                                            </span>
+                                        </a>
+                                    @endforeach
+                                </div>
+                            @endif
                         @endif
                         @if($msg->is_draft)
                             <div class="draft-actions">
