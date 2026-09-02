@@ -93,20 +93,29 @@ class Composer extends Component
             }
             // Письмо поставщика — отвечаем клиенту заявки (compose), не поставщику.
             if (app(OutboundReplyHooks::class)->isSupplierMessage($anchor)) {
-                $draft = $drafts->createCompose($req, $this->user());
+                $draft = $this->createOrToast(fn () => $drafts->createCompose($req, $this->user()));
+                if (! $draft) {
+                    return;
+                }
                 $this->fillFromDraft($draft, 'compose', null);
                 $this->dispatch('toast', message: 'Это письмо поставщика — ответ адресован клиенту заявки.', type: 'info');
 
                 return;
             }
-            $draft = $drafts->createReply($req, $anchor, $this->user(), $all);
+            $draft = $this->createOrToast(fn () => $drafts->createReply($req, $anchor, $this->user(), $all));
+            if (! $draft) {
+                return;
+            }
             $this->fillFromDraft($draft, $all ? 'reply_all' : 'reply', $anchor->id, $req->id);
 
             return;
         }
 
         // Свободная переписка.
-        $draft = $drafts->createReplyFree($anchor, $this->user(), $all);
+        $draft = $this->createOrToast(fn () => $drafts->createReplyFree($anchor, $this->user(), $all));
+        if (! $draft) {
+            return;
+        }
         $this->fillFromDraft($draft, $all ? 'reply_all' : 'reply', $anchor->id, null);
     }
 
@@ -128,8 +137,30 @@ class Composer extends Component
         if (! $mailbox) {
             return;
         }
-        $draft = $drafts->createComposeFree($mailbox, $this->user());
+        $draft = $this->createOrToast(fn () => $drafts->createComposeFree($mailbox, $this->user()));
+        if (! $draft) {
+            return;
+        }
         $this->fillFromDraft($draft, 'compose', null, null);
+    }
+
+    /**
+     * Создать черновик, отловив сбой (напр. резолвер не нашёл ящик отправки →
+     * mailbox_id NOT NULL). Возвращает null + тост при ошибке.
+     */
+    private function createOrToast(\Closure $fn): ?EmailMessage
+    {
+        try {
+            return $fn();
+        } catch (\Throwable $e) {
+            Log::error('Mail\Composer: draft create failed', [
+                'user_id' => auth()->id(),
+                'error' => $e->getMessage(),
+            ]);
+            $this->dispatch('toast', message: 'Не удалось создать черновик — возможно, не назначен ящик для отправки. Обратитесь к РОПу.', type: 'error');
+
+            return null;
+        }
     }
 
     #[On('mail-open-draft')]
