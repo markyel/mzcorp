@@ -396,9 +396,18 @@ class Client extends Component
                 ->visibleTo($user)
                 ->with('relatedRequest:id,internal_code,status')
                 ->where('related_request_id', $anchor->related_request_id)
+                // Не тащить кросс-ящиковые тех.копии (одно письмо в личном INBOX
+                // менеджера + в общем ящике) — иначе тред двоится.
+                ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
                 ->orderByRaw('sent_at ASC NULLS LAST')
                 ->orderBy('id')
-                ->get();
+                ->get()
+                // Дедуп по message_id (Inbox+Sent-копии одного письма), как в
+                // SharedMailService::threadFor; строки без message_id уникальны.
+                ->unique(fn (EmailMessage $m) => ($mid = trim((string) $m->message_id)) !== ''
+                    ? mb_strtolower($mid)
+                    : 'row-'.$m->id)
+                ->values();
         }
 
         return app(SharedMailService::class)->threadFor($anchor);
