@@ -80,7 +80,42 @@ class EmailDraftService
         // приклеиваются в OutgoingMailMimeBuilder при send (чтобы менеджер
         // видел в textarea только своё письмо, а не сырой HTML цитаты).
         return $this->createDraft([
-            'request' => $request,
+            'relatedRequestId' => $request->id,
+            'mailbox' => $mailbox,
+            'author' => $author,
+            'subject' => $this->normalizeReplySubject($replyTo->subject),
+            'to' => $recipients['to'],
+            'cc' => $recipients['cc'],
+            'inReplyTo' => $replyTo->message_id,
+            'references' => $references,
+            'bodyHtml' => '',
+            'bodyPlain' => '',
+        ]);
+    }
+
+    /**
+     * Свободный reply — ответ на письмо БЕЗ привязки к заявке (почтовый
+     * клиент). Ящик-отправитель = ящик, в котором лежит письмо (отвечаем из
+     * того же ящика). related_request_id = null → пайплайн статусов не
+     * запускается (чистая почта). Для писем, привязанных к заявке, вызывающий
+     * код использует createReply() (с гибрид-хуками).
+     */
+    public function createReplyFree(EmailMessage $replyTo, User $author, bool $replyAll = false): EmailMessage
+    {
+        $mailbox = $replyTo->mailbox ?? ($replyTo->mailbox_id ? Mailbox::find($replyTo->mailbox_id) : null);
+        $recipients = $this->computeRecipients($replyTo, $mailbox, $replyAll);
+
+        if (empty($recipients['to']) && $replyTo->from_email) {
+            $recipients['to'] = [['email' => (string) $replyTo->from_email, 'name' => (string) ($replyTo->from_name ?? '')]];
+        }
+
+        $references = $this->mergeReferences(
+            (array) ($replyTo->references_header ?? []),
+            $replyTo->message_id,
+        );
+
+        return $this->createDraft([
+            'relatedRequestId' => null,
             'mailbox' => $mailbox,
             'author' => $author,
             'subject' => $this->normalizeReplySubject($replyTo->subject),
@@ -110,11 +145,31 @@ class EmailDraftService
             : '['.$request->internal_code.']';
 
         return $this->createDraft([
-            'request' => $request,
+            'relatedRequestId' => $request->id,
             'mailbox' => $mailbox,
             'author' => $author,
             'subject' => $subject,
             'to' => $to,
+            'cc' => [],
+            'inReplyTo' => null,
+            'references' => [],
+            'bodyHtml' => '',
+            'bodyPlain' => '',
+        ]);
+    }
+
+    /**
+     * Свободное новое письмо (почтовый клиент) — без заявки, с выбранного
+     * ящика-отправителя. Тема/получатели пустые (заполнит менеджер).
+     */
+    public function createComposeFree(Mailbox $from, User $author): EmailMessage
+    {
+        return $this->createDraft([
+            'relatedRequestId' => null,
+            'mailbox' => $from,
+            'author' => $author,
+            'subject' => '',
+            'to' => [],
             'cc' => [],
             'inReplyTo' => null,
             'references' => [],
@@ -183,7 +238,7 @@ class EmailDraftService
     /* ----------------------- internals ----------------------- */
 
     /**
-     * @param  array{request: Request, mailbox: ?Mailbox, author: User, subject: string, to: array, cc: array, inReplyTo: ?string, references: array, bodyHtml: string, bodyPlain: string}  $params
+     * @param  array{relatedRequestId: ?int, mailbox: ?Mailbox, author: User, subject: string, to: array, cc: array, inReplyTo: ?string, references: array, bodyHtml: string, bodyPlain: string}  $params
      */
     private function createDraft(array $params): EmailMessage
     {
@@ -219,7 +274,7 @@ class EmailDraftService
             'headers' => [
                 'X-MyLift-Author-User-Id' => (string) $params['author']->id,
             ],
-            'related_request_id' => $params['request']->id,
+            'related_request_id' => $params['relatedRequestId'],
             'is_draft' => true,
             'draft_author_user_id' => $params['author']->id,
             'last_edited_at' => now(),

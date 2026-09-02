@@ -2,21 +2,28 @@
 
 namespace App\Livewire\Requests\Mail;
 
-use App\Enums\MailDirection;
-use App\Enums\Role as RoleEnum;
+use App\Enums\EmailCategory;
+use App\Enums\Role;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\LetterTemplate;
+use App\Models\Request;
 use App\Models\Request as RequestModel;
+use App\Models\User;
 use App\Services\Mail\EmailDraftService;
 use App\Services\Mail\LetterTemplateService;
+use App\Services\Mail\MailQuoteBuilder;
+use App\Services\Mail\OutboundReplyHooks;
 use App\Services\Mail\OutgoingMailSender;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
 
 /**
@@ -34,9 +41,13 @@ class ComposeForm extends Component
     use WithFileUploads;
 
     public int $requestId;
+
     public ?int $draftId = null;
+
     public ?int $replyToMessageId = null;
+
     public string $mode = 'reply'; // reply | reply_all | compose
+
     public bool $open = false;
 
     #[Validate('required|string|max:998')]
@@ -55,7 +66,7 @@ class ComposeForm extends Component
     #[Validate('required|string|min:1')]
     public string $bodyText = '';
 
-    /** @var array<int, \Livewire\Features\SupportFileUploads\TemporaryUploadedFile> */
+    /** @var array<int, TemporaryUploadedFile> */
     public array $newFiles = [];
 
     public function mount(int $requestId): void
@@ -84,6 +95,7 @@ class ComposeForm extends Component
     {
         $req = $this->request();
         $user = auth()->user();
+
         return $user !== null && $this->isAuthorizedToSend($req, $user);
     }
 
@@ -98,7 +110,7 @@ class ComposeForm extends Component
      * Request.assigned_user_id — то есть письмо всегда уходит от ящика
      * закреплённого менеджера, независимо от того кто нажал «Отправить».
      */
-    private function isAuthorizedToSend(\App\Models\Request $req, \App\Models\User $user): bool
+    private function isAuthorizedToSend(Request $req, User $user): bool
     {
         if ($req->assigned_user_id === $user->id) {
             return true; // owner
@@ -106,10 +118,11 @@ class ComposeForm extends Component
         if (method_exists($req, 'isDelegatedTo') && $req->isDelegatedTo($user)) {
             return true; // acting
         }
+
         return $user->hasAnyRole([
-            \App\Enums\Role::Admin->value,
-            \App\Enums\Role::HeadOfSales->value,
-            \App\Enums\Role::Director->value,
+            Role::Admin->value,
+            Role::HeadOfSales->value,
+            Role::Director->value,
         ]);
     }
 
@@ -135,6 +148,7 @@ class ComposeForm extends Component
     {
         if (! $this->canReply()) {
             session()->flash('error', 'Отвечать может только назначенный менеджер.');
+
             return;
         }
         $req = $this->request();
@@ -143,6 +157,7 @@ class ComposeForm extends Component
             ->first();
         if (! $replyTo) {
             $this->addError('subject', 'Письмо для ответа не найдено.');
+
             return;
         }
 
@@ -151,7 +166,7 @@ class ComposeForm extends Component
         // reply на него ушёл бы поставщику (кейс M-2026-11814: КП уехал
         // поставщику). Вместо этого открываем ответ КЛИЕНТУ заявки. Поставщику
         // отвечают из раздела «Поставщики».
-        $isSupplierMsg = (string) $replyTo->category === \App\Enums\EmailCategory::SupplierReply->value
+        $isSupplierMsg = (string) $replyTo->category === EmailCategory::SupplierReply->value
             || $replyTo->supplier_inquiry_id !== null;
         if ($isSupplierMsg) {
             $draft = $drafts->createCompose($req, auth()->user());
@@ -183,19 +198,21 @@ class ComposeForm extends Component
         }
         if (! $this->canReply()) {
             session()->flash('error', 'Отвечать может только назначенный менеджер, acting (делегат) или admin/РОП/директорат.');
+
             return;
         }
         $req = $this->request();
         try {
             $draft = $drafts->createCompose($req, auth()->user());
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('ComposeForm::openCompose failed', [
+            Log::error('ComposeForm::openCompose failed', [
                 'request_id' => $req->id,
                 'user_id' => auth()->id(),
                 'error' => $e->getMessage(),
                 'trace' => mb_substr($e->getTraceAsString(), 0, 2000),
             ]);
-            session()->flash('error', 'Не удалось создать черновик: ' . $e->getMessage());
+            session()->flash('error', 'Не удалось создать черновик: '.$e->getMessage());
+
             return;
         }
         $this->hydrateFromDraft($draft);
@@ -258,7 +275,7 @@ class ComposeForm extends Component
         }
         $this->bodyText = trim($this->bodyText) === ''
             ? $body
-            : rtrim($this->bodyText) . "\n\n" . $body;
+            : rtrim($this->bodyText)."\n\n".$body;
 
         if ($subject !== null && trim($subject) !== '' && trim($this->subject) === '') {
             $this->subject = mb_substr($subject, 0, 998);
@@ -276,10 +293,12 @@ class ComposeForm extends Component
         $name = trim($name);
         if ($name === '') {
             $this->addError('bodyText', 'Укажите название шаблона.');
+
             return;
         }
         if (trim($this->bodyText) === '') {
             $this->addError('bodyText', 'Нельзя сохранить пустой шаблон.');
+
             return;
         }
         $templates->saveFromLetter(
@@ -315,7 +334,7 @@ class ComposeForm extends Component
     /**
      * Свои папки для выбора при «Сохранить как шаблон» (личная библиотека).
      *
-     * @return \Illuminate\Support\Collection<int, LetterTemplate>
+     * @return Collection<int, LetterTemplate>
      */
     #[Computed]
     public function templateFolders()
@@ -329,7 +348,7 @@ class ComposeForm extends Component
     /**
      * Личное дерево шаблонов для inline-меню вставки.
      *
-     * @return \Illuminate\Support\Collection<int, LetterTemplate>
+     * @return Collection<int, LetterTemplate>
      */
     #[Computed]
     public function templateTree()
@@ -350,10 +369,25 @@ class ComposeForm extends Component
     /**
      * Auto-save при изменении полей (вызывается через wire:model.live.debounce.1500ms).
      */
-    public function updatedSubject(EmailDraftService $drafts): void { $this->autoSave($drafts); }
-    public function updatedToRaw(EmailDraftService $drafts): void { $this->autoSave($drafts); }
-    public function updatedCcRaw(EmailDraftService $drafts): void { $this->autoSave($drafts); }
-    public function updatedBodyText(EmailDraftService $drafts): void { $this->autoSave($drafts); }
+    public function updatedSubject(EmailDraftService $drafts): void
+    {
+        $this->autoSave($drafts);
+    }
+
+    public function updatedToRaw(EmailDraftService $drafts): void
+    {
+        $this->autoSave($drafts);
+    }
+
+    public function updatedCcRaw(EmailDraftService $drafts): void
+    {
+        $this->autoSave($drafts);
+    }
+
+    public function updatedBodyText(EmailDraftService $drafts): void
+    {
+        $this->autoSave($drafts);
+    }
 
     private function autoSave(EmailDraftService $drafts): void
     {
@@ -413,7 +447,7 @@ class ComposeForm extends Component
                 'mail/%d/drafts/%d/%s',
                 $draft->mailbox_id ?? 0,
                 $draft->id,
-                Str::random(8) . '_' . $this->safeFilename($original),
+                Str::random(8).'_'.$this->safeFilename($original),
             );
             Storage::disk('local')->put($relativePath, $tmp->get());
 
@@ -473,21 +507,18 @@ class ComposeForm extends Component
         $result = $sender->sendDraft($draft->id);
         if (! ($result['success'] ?? false)) {
             $this->addError('subject', $this->describeError((string) ($result['error'] ?? 'unknown')));
+
             return null;
         }
 
-        // Foundation §6.2: post-send hook для clarification batches.
-        // Если в draft.detected_artifacts есть marker `clarification_batch`,
-        // помечаем batch как sent + переводим Request в
-        // awaiting_client_clarification.
+        // Гибрид-пайплайн (вынесено в OutboundReplyHooks — переиспользуется
+        // почтовым клиентом): clarification_batch/quotation_sent markers →
+        // статусы; иначе send-time детект приложенных документов.
         $sent = $result['draft'] ?? $draft;
-        $handledByHooks = $this->applyPostSendHooks($sent);
-
-        // Send-time детект приложенных документов (счёт/КП файлом). Запускаем
-        // только если письмо НЕ прошло через внутренний builder (КП/уточнения
-        // уже self-transition'ят хуками выше) — иначе не дублируем.
+        $hooks = app(OutboundReplyHooks::class);
+        $handledByHooks = $hooks->applyPostSendHooks($sent, auth()->user());
         if (! $handledByHooks) {
-            $this->detectOutboundDocuments($sent);
+            $hooks->detectOutboundDocuments($sent);
         }
 
         session()->flash('status', 'Письмо отправлено.');
@@ -506,6 +537,7 @@ class ComposeForm extends Component
     {
         if (! $this->draftId) {
             $this->open = false;
+
             return;
         }
         $draft = EmailMessage::where('is_draft', true)
@@ -536,7 +568,7 @@ class ComposeForm extends Component
         $isPersonal = $mailbox->owner_user_id === $assignedId;
         $suffix = $isPersonal ? '' : ' (общий)';
 
-        return $mailbox->email . $suffix;
+        return $mailbox->email.$suffix;
     }
 
     #[Computed]
@@ -545,6 +577,7 @@ class ComposeForm extends Component
         if (! $this->draftId) {
             return collect();
         }
+
         return EmailAttachment::where('email_message_id', $this->draftId)->get();
     }
 
@@ -577,14 +610,14 @@ class ComposeForm extends Component
             return null;
         }
 
-        $quote = app(\App\Services\Mail\MailQuoteBuilder::class)->build($replyTo);
+        $quote = app(MailQuoteBuilder::class)->build($replyTo);
 
         // Мини-документ для iframe: базовый шрифт как в письме.
         return '<!DOCTYPE html><html><head><meta charset="utf-8"></head>'
-            . '<body style="margin:8px 10px;font-family:-apple-system,Arial,sans-serif;'
-            . 'font-size:13px;line-height:1.5;color:#374151;word-break:break-word">'
-            . $quote['html']
-            . '</body></html>';
+            .'<body style="margin:8px 10px;font-family:-apple-system,Arial,sans-serif;'
+            .'font-size:13px;line-height:1.5;color:#374151;word-break:break-word">'
+            .$quote['html']
+            .'</body></html>';
     }
 
     /**
@@ -594,6 +627,7 @@ class ComposeForm extends Component
     public function signaturePreview(): ?string
     {
         $sig = trim((string) (auth()->user()?->email_signature ?? ''));
+
         return $sig !== '' ? $sig : null;
     }
 
@@ -617,6 +651,7 @@ class ComposeForm extends Component
         if (! $draft) {
             abort(404);
         }
+
         return $draft;
     }
 
@@ -647,6 +682,7 @@ class ComposeForm extends Component
                 $out[] = ['email' => $email, 'name' => $name];
             }
         }
+
         return $out;
     }
 
@@ -664,223 +700,15 @@ class ComposeForm extends Component
             }
             $out[] = $name !== '' ? "{$name} <{$email}>" : $email;
         }
+
         return implode(', ', $out);
     }
 
     private function safeFilename(string $name): string
     {
         $name = preg_replace('/[^A-Za-z0-9._\-]/', '_', $name) ?? 'file';
+
         return mb_substr($name, 0, 80);
-    }
-
-    /**
-     * Foundation §6.2: пост-обработка отправленного письма.
-     * Если в detected_artifacts есть marker `clarification_batch`:
-     *   - помечаем ClarificationBatch::sent
-     *   - переводим Request в awaiting_client_clarification
-     *   - audit в request_state_changes (event=clarification_sent)
-     *
-     * @return bool  true, если хотя бы один known-marker обработан (КП/уточнение
-     *               уже сами сменили статус — send-time детект не нужен).
-     */
-    private function applyPostSendHooks(\App\Models\EmailMessage $sent): bool
-    {
-        $artifacts = is_array($sent->detected_artifacts ?? null) ? $sent->detected_artifacts : [];
-
-        $handledAny = false;
-        // Обрабатываем все markers (порядок: clarification → quotation).
-        foreach ($artifacts as $marker) {
-            if (! is_array($marker)) {
-                continue;
-            }
-            switch ($marker['type'] ?? null) {
-                case 'clarification_batch':
-                    $this->handleClarificationBatchHook($sent, $marker);
-                    $handledAny = true;
-                    break;
-                case 'quotation_sent':
-                    $this->handleQuotationSentHook($sent, $marker);
-                    $handledAny = true;
-                    break;
-                default:
-                    // unknown marker — ignore
-                    break;
-            }
-        }
-
-        return $handledAny;
-    }
-
-    /**
-     * Send-time детект исходящих документов, приложенных файлом через вкладку
-     * «Переписка» (счёт/КП без внутреннего builder'а). Запускает ту же
-     * идемпотентную процедуру, что и синк и почасовой self-heal
-     * quotes:detect-missed-outbound (rule-based → LLM → recordSuggestion
-     * → auto-apply статуса → ParseOutboundQuoteJob), но СРАЗУ, а не через
-     * 2–60 мин. Раньше письмо из композера синк дедупил по Message-ID и
-     * детектор его пропускал → статус (Счёт выставлен / КП отправлено) менял
-     * только почасовой крон с задержкой до часа (кейс M-2026-8222).
-     *
-     * Гарды: только письма с вложением, привязанные к заявке (пустой ответ
-     * здесь не тратит LLM — его при необходимости добьёт синк по body).
-     * runOutboundDocumentDetection сам обёрнут в try/catch (non-fatal) и
-     * идемпотентен; дополнительный try/catch тут — чтобы сбой детекта ни при
-     * каких условиях не сломал уже успешную отправку/редирект.
-     */
-    private function detectOutboundDocuments(\App\Models\EmailMessage $sent): void
-    {
-        try {
-            if ($sent->related_request_id === null || $sent->attachments()->count() === 0) {
-                return;
-            }
-            $request = \App\Models\Request::find($sent->related_request_id);
-            if ($request === null) {
-                return;
-            }
-            app(\App\Services\Mail\MailRouter::class)->runOutboundDocumentDetection($sent, $request);
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning(
-                'ComposeForm: send-time outbound detection failed (non-fatal)',
-                [
-                    'email_message_id' => $sent->id,
-                    'request_id' => $sent->related_request_id,
-                    'error' => $e->getMessage(),
-                ],
-            );
-        }
-    }
-
-    /**
-     * Foundation §6.2 — отправлены уточняющие вопросы клиенту.
-     */
-    private function handleClarificationBatchHook(\App\Models\EmailMessage $sent, array $marker): void
-    {
-        $batchId = (int) ($marker['batch_id'] ?? 0);
-        if ($batchId === 0) {
-            return;
-        }
-        $batch = \App\Models\ClarificationBatch::find($batchId);
-        if (! $batch) {
-            return;
-        }
-
-        // 1. Mark batch sent.
-        $batch->update([
-            'status' => \App\Models\ClarificationBatch::STATUS_SENT,
-            'sent_at' => now(),
-            'sent_message_id' => $sent->id,
-        ]);
-
-        // 2. Transition Request → AwaitingClientClarification.
-        $targetStatus = $marker['transition_to_status'] ?? null;
-        if ($targetStatus !== 'awaiting_client_clarification') {
-            return;
-        }
-
-        $request = $batch->request;
-        if (! $request) {
-            return;
-        }
-        try {
-            app(\App\Services\Request\RequestStateService::class)->transitionTo(
-                $request,
-                \App\Enums\RequestStatus::AwaitingClientClarification,
-                auth()->user(),
-                [
-                    'event' => 'clarification_sent',
-                    'comment' => sprintf(
-                        'Отправлены уточняющие вопросы клиенту (batch #%d, %d вопросов).',
-                        $batch->id,
-                        $batch->questions()->count(),
-                    ),
-                    'payload' => [
-                        'clarification_batch_id' => $batch->id,
-                        'sent_message_id' => $sent->id,
-                    ],
-                ],
-            );
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning(
-                'ComposeForm: clarification post-send transition failed (non-fatal)',
-                [
-                    'batch_id' => $batch->id,
-                    'request_id' => $request->id,
-                    'current_status' => $request->status->value,
-                    'error' => $e->getMessage(),
-                ],
-            );
-        }
-    }
-
-    /**
-     * Phase 4 — отправлено КП клиенту.
-     *  1. QuotationService::markSent — status=sent + sent_at + sent_email_message_id.
-     *  2. RequestStateService::transitionTo($req, Quoted) с audit event.
-     * Любые исключения — non-fatal (письмо уже отправлено), warning в лог.
-     */
-    private function handleQuotationSentHook(\App\Models\EmailMessage $sent, array $marker): void
-    {
-        $qId = (int) ($marker['quotation_id'] ?? 0);
-        if ($qId === 0) {
-            return;
-        }
-        $quotation = \App\Models\Quotation::find($qId);
-        if (! $quotation) {
-            return;
-        }
-
-        // 1. Mark quotation sent.
-        try {
-            app(\App\Services\Quotations\QuotationService::class)->markSent($quotation, $sent->id);
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning(
-                'ComposeForm: quotation markSent failed (non-fatal)',
-                [
-                    'quotation_id' => $quotation->id,
-                    'sent_message_id' => $sent->id,
-                    'error' => $e->getMessage(),
-                ],
-            );
-            // Продолжаем — transition важнее, markSent потом можно поправить руками.
-        }
-
-        // 2. Transition Request → Quoted.
-        $request = $quotation->request;
-        if (! $request) {
-            return;
-        }
-        try {
-            app(\App\Services\Request\RequestStateService::class)->transitionTo(
-                $request,
-                \App\Enums\RequestStatus::Quoted,
-                auth()->user(),
-                [
-                    'event' => 'quotation_sent',
-                    'comment' => sprintf(
-                        'КП %s v%d отправлено клиенту.',
-                        $quotation->internal_code,
-                        $quotation->version,
-                    ),
-                    'payload' => [
-                        'quotation_id' => $quotation->id,
-                        'quotation_code' => $quotation->internal_code,
-                        'quotation_version' => $quotation->version,
-                        'sent_message_id' => $sent->id,
-                    ],
-                ],
-            );
-        } catch (\Throwable $e) {
-            // Не валим — заявка может быть уже в Quoted/AwaitingInvoice/etc.
-            \Illuminate\Support\Facades\Log::warning(
-                'ComposeForm: quotation post-send transition failed (non-fatal)',
-                [
-                    'quotation_id' => $quotation->id,
-                    'request_id' => $request->id,
-                    'current_status' => $request->status->value,
-                    'error' => $e->getMessage(),
-                ],
-            );
-        }
     }
 
     private function describeError(string $code): string
@@ -891,7 +719,7 @@ class ComposeForm extends Component
             'oauth_refresh_failed' => 'Не удалось обновить OAuth-токен — РОП должен переподключить ящик.',
             'smtp_send_failed' => 'Не удалось отправить через SMTP — попробуйте ещё раз.',
             'not_a_draft' => 'Черновик уже отправлен.',
-            default => 'Не удалось отправить письмо: ' . $code,
+            default => 'Не удалось отправить письмо: '.$code,
         };
     }
 }

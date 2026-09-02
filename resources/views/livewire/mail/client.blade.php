@@ -188,7 +188,7 @@
                 <div class="bsearch">
                     <input type="text" placeholder="Поиск в этом ящике…" wire:model.live.debounce.400ms="search">
                 </div>
-                <button class="compose" wire:click="replySoon">Написать</button>
+                <button class="compose" wire:click="$dispatch('mail-open-compose', { mailboxId: {{ (int) $selectedMailboxId }} })">Написать</button>
             </div>
             <div class="fhdr">
                 <span>{{ \App\Enums\MailFolder::tryFromOrDefault($folder)->label() }}</span>
@@ -320,11 +320,14 @@
 
             <div class="cfoot">
                 <div class="replybtns">
-                    <button class="primary" wire:click="replySoon">Ответить</button>
-                    <button wire:click="replySoon">Ответить всем</button>
-                    <button wire:click="replySoon">Переслать</button>
+                    <button class="primary" wire:click="$dispatch('mail-open-reply', { messageId: {{ $anchor->id }} })">Ответить</button>
+                    <button wire:click="$dispatch('mail-open-reply-all', { messageId: {{ $anchor->id }} })">Ответить всем</button>
+                    <button wire:click="forwardSoon">Переслать</button>
                 </div>
             </div>
         @endif
     </div>
+
+    {{-- Плавающий композер (Фаза 2) — открывается событиями mail-open-* --}}
+    <livewire:mail.composer />
 </div>

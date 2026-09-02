@@ -14,6 +14,7 @@ use App\Services\Mail\SharedMailService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -118,6 +119,12 @@ class Client extends Component
         if (! $anchor) {
             return;
         }
+        // Черновик — открываем в композере, а не в панели чтения.
+        if ($anchor->is_draft) {
+            $this->dispatch('mail-open-draft', draftId: $id);
+
+            return;
+        }
         $this->openId = $id;
         unset($this->openThread, $this->openAnchor);
 
@@ -155,10 +162,17 @@ class Client extends Component
         $this->dispatch('toast', message: 'Помечено непрочитанным.', type: 'success');
     }
 
-    /** Фаза 2: ответ/пересылка. Пока — заглушка. */
-    public function replySoon(): void
+    /** Пересылка — Фаза 2b (пока заглушка). */
+    public function forwardSoon(): void
     {
-        $this->dispatch('toast', message: 'Ответ из почты — в следующем обновлении (Фаза 2).', type: 'info');
+        $this->dispatch('toast', message: 'Пересылка — в следующем обновлении (Фаза 2b).', type: 'info');
+    }
+
+    /** Композер отправил/удалил черновик → обновить список и счётчики. */
+    #[On('mail-sent')]
+    public function onMailSent(): void
+    {
+        unset($this->threads, $this->folders, $this->mailboxes, $this->openThread, $this->openAnchor);
     }
 
     /* --------------------------- Computed data --------------------------- */
