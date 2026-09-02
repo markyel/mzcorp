@@ -101,7 +101,7 @@
             border-radius:10px 10px 0 0;box-shadow:0 18px 50px rgba(15,23,42,.3);overflow:hidden;">
 
     <div class="chd" @pointerdown="startDrag($event)">
-        <span class="ttl">{{ $mode === 'compose' ? 'Новое письмо' : ($subject ?: 'Ответ') }}</span>
+        <span class="ttl">{{ $mode === 'compose' ? 'Новое письмо' : ($mode === 'forward' ? 'Пересылка' : ($subject ?: 'Ответ')) }}</span>
         <span class="hint">· перетащите за заголовок, растяните за угол</span>
         <button type="button" class="wbtn" @pointerdown.stop x-on:click="min = !min" :title="min ? 'Развернуть' : 'Свернуть'">
             <span x-show="!min">▁</span><span x-show="min" x-cloak>▢</span>

@@ -162,12 +162,6 @@ class Client extends Component
         $this->dispatch('toast', message: 'Помечено непрочитанным.', type: 'success');
     }
 
-    /** Пересылка — Фаза 2b (пока заглушка). */
-    public function forwardSoon(): void
-    {
-        $this->dispatch('toast', message: 'Пересылка — в следующем обновлении (Фаза 2b).', type: 'info');
-    }
-
     /** Композер отправил/удалил черновик → обновить список и счётчики. */
     #[On('mail-sent')]
     public function onMailSent(): void

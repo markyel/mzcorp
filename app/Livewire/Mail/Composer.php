@@ -125,6 +125,22 @@ class Composer extends Component
         $this->openReply($messageId, $drafts, all: true);
     }
 
+    #[On('mail-open-forward')]
+    public function openForward(int $messageId, EmailDraftService $drafts): void
+    {
+        $source = $this->findAccessibleMessage($messageId);
+        if (! $source) {
+            $this->dispatch('toast', message: 'Письмо не найдено или недоступно.', type: 'error');
+
+            return;
+        }
+        $draft = $this->createOrToast(fn () => $drafts->createForward($source, $this->user()));
+        if (! $draft) {
+            return;
+        }
+        $this->fillFromDraft($draft, 'forward', null, null);
+    }
+
     #[On('mail-open-compose')]
     public function openCompose(int $mailboxId, EmailDraftService $drafts): void
     {

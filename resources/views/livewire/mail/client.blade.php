@@ -322,7 +322,7 @@
                 <div class="replybtns">
                     <button class="primary" wire:click="$dispatch('mail-open-reply', { messageId: {{ $anchor->id }} })">Ответить</button>
                     <button wire:click="$dispatch('mail-open-reply-all', { messageId: {{ $anchor->id }} })">Ответить всем</button>
-                    <button wire:click="forwardSoon">Переслать</button>
+                    <button wire:click="$dispatch('mail-open-forward', { messageId: {{ $anchor->id }} })">Переслать</button>
                 </div>
             </div>
         @endif

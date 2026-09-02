@@ -159,6 +159,68 @@ class EmailDraftService
     }
 
     /**
+     * Пересылка письма (почтовый клиент) — Fwd:, тело оригинала в body, перенос
+     * вложений. Получатель пустой (заполнит менеджер). Свободное (без заявки),
+     * ящик-отправитель = ящик исходного письма. Новая цепочка (не reply).
+     */
+    public function createForward(EmailMessage $source, User $author): EmailMessage
+    {
+        $mailbox = $source->mailbox ?? ($source->mailbox_id ? Mailbox::find($source->mailbox_id) : null);
+
+        $origBody = trim((string) $source->body_plain);
+        if ($origBody === '' && $source->body_html) {
+            $origBody = trim(html_entity_decode(strip_tags($source->body_html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        }
+        $to = $this->formatRecipientsInline((array) ($source->to_recipients ?? []));
+        $date = $source->sent_at ? $source->sent_at->format('d.m.Y H:i') : '';
+        $header = "\n\n---------- Пересылаемое сообщение ----------\n"
+            .'От: '.trim(($source->from_name ? $source->from_name.' ' : '').'<'.$source->from_email.'>')."\n"
+            .($date !== '' ? "Дата: {$date}\n" : '')
+            .($to !== '' ? "Кому: {$to}\n" : '')
+            .'Тема: '.(string) $source->subject."\n\n"
+            .$origBody;
+
+        $draft = $this->createDraft([
+            'relatedRequestId' => null,
+            'mailbox' => $mailbox,
+            'author' => $author,
+            'subject' => $this->normalizeForwardSubject($source->subject),
+            'to' => [],
+            'cc' => [],
+            'inReplyTo' => null,
+            'references' => [],
+            'bodyHtml' => '',
+            'bodyPlain' => $header,
+        ]);
+
+        // Перенос вложений оригинала (best-effort копирование файлов).
+        foreach ($source->attachments as $att) {
+            try {
+                $content = Storage::disk($att->disk)->get($att->file_path);
+                if ($content === null) {
+                    continue;
+                }
+                $newPath = sprintf('mail/%d/drafts/%d/%s', $mailbox?->id ?? 0, $draft->id, Str::random(8).'_'.$att->filename);
+                Storage::disk('local')->put($newPath, $content);
+                EmailAttachment::create([
+                    'email_message_id' => $draft->id,
+                    'filename' => $att->filename,
+                    'mime_type' => $att->mime_type,
+                    'size_bytes' => $att->size_bytes,
+                    'content_id' => null,
+                    'file_path' => $newPath,
+                    'disk' => 'local',
+                    'is_inline' => false,
+                ]);
+            } catch (\Throwable) {
+                // best-effort: пропускаем нечитаемое вложение
+            }
+        }
+
+        return $draft;
+    }
+
+    /**
      * Свободное новое письмо (почтовый клиент) — без заявки, с выбранного
      * ящика-отправителя. Тема/получатели пустые (заполнит менеджер).
      */
@@ -385,6 +447,31 @@ class EmailDraftService
         }
 
         return $merged;
+    }
+
+    private function normalizeForwardSubject(?string $subject): string
+    {
+        $s = trim((string) $subject);
+        $s = preg_replace('/^\s*(re|fwd|fw)\s*:\s*/i', '', $s) ?? $s;
+        $s = trim($s);
+
+        return $s === '' ? 'Fwd:' : 'Fwd: '.$s;
+    }
+
+    /** @param array<int, array{email?: string, name?: string}> $list */
+    private function formatRecipientsInline(array $list): string
+    {
+        $out = [];
+        foreach ($list as $r) {
+            $email = trim((string) ($r['email'] ?? ''));
+            if ($email === '') {
+                continue;
+            }
+            $name = trim((string) ($r['name'] ?? ''));
+            $out[] = $name !== '' ? "{$name} <{$email}>" : $email;
+        }
+
+        return implode(', ', $out);
     }
 
     private function normalizeReplySubject(?string $subject): string
