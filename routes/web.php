@@ -100,6 +100,14 @@ Route::middleware('auth')->group(function () {
             return view('mail.absent');
         })->name('mail.absent');
 
+        // Раздел «Почта» — почтовый клиент менеджера (личный + общие +
+        // делегированные ящики, папки, чтение; ответ/пересылка — Фаза 2).
+        // Отдельный инструмент, НЕ /dashboard/mail (та — org-wide витрина для
+        // руководителей). Доступ ограничен: manager + admin.
+        Route::get('/dashboard/mail/inbox', function () {
+            return view('mail.inbox');
+        })->middleware('role:manager,admin')->name('mail.inbox');
+
         // ВАЖНО: статичные роуты должны быть ОБЪЯВЛЕНЫ ДО `{request}`-биндинга,
         // иначе Laravel матчит `auto-closed` как ID модели → invalid integer
         // → 500. Доступ внутри страницы дополнительно фильтруется в Livewire
