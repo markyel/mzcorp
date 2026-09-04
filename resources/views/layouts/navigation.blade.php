@@ -84,7 +84,7 @@
         $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];
         // Уведомления клиенту вынесены в подпункт страницы «Настройки»,
         // не дублируем в горизонтальном топбаре (Phase 6).
-        $navLinks[] = ['route' => 'settings.index', 'label' => 'Настройки', 'pattern' => 'settings.*|notifications.*'];
+        $navLinks[] = ['route' => 'settings.index', 'label' => 'Настройки', 'pattern' => 'settings.*|notifications.*|marketing-blocks.*'];
     }
     if ($user?->hasRole('admin')) {
         // Подключение основной почты и активация/деактивация маршрутизации —

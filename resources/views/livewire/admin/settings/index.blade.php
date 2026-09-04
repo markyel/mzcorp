@@ -36,6 +36,20 @@
                 <div class="text-[11px] text-fg-3 whitespace-nowrap">6 типов</div>
             </div>
         </a>
+        @if(auth()->user()?->hasAnyRole(['director', 'admin']))
+            <a href="{{ route('marketing-blocks.index') }}"
+               class="block px-[18px] py-3 hover:bg-neutral-50 transition-colors border-t border-[var(--border-subtle)]">
+                <div class="flex items-center justify-between gap-4">
+                    <div class="min-w-0">
+                        <div class="text-[13px] text-fg-1 font-medium">Рекламные блоки в письмах →</div>
+                        <div class="text-[11.5px] text-fg-3 mt-0.5 leading-snug">
+                            Картинка + заголовок + текст + ссылка под подписью менеджера в письмах клиентам. Из активных блоков в каждое письмо попадает случайный. Превью и тестовая отправка.
+                        </div>
+                    </div>
+                    <div class="text-[11px] text-fg-3 whitespace-nowrap">{{ \App\Models\MarketingBlock::query()->active()->count() }} активных</div>
+                </div>
+            </a>
+        @endif
     </div>
 
 

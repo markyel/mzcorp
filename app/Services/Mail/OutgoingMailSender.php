@@ -95,6 +95,8 @@ class OutgoingMailSender
         }
 
         DB::transaction(function () use ($draft, $finalMessageId, $finalBody) {
+            // update() сохраняет и detected_artifacts.marketing_block_id, который
+            // MarketingBlockService зафиксировал на инстансе в composeFinalBody.
             $draft->update([
                 'is_draft' => false,
                 'sent_at' => now(),
@@ -103,6 +105,23 @@ class OutgoingMailSender
                 'body_html' => $finalBody['html'],
             ]);
         });
+
+        // Счётчик показов рекламного блока (non-fatal).
+        $blockId = $draft->detected_artifacts[\App\Services\Marketing\MarketingBlockService::ARTIFACT_BLOCK_ID] ?? null;
+        if ($blockId) {
+            try {
+                \App\Models\MarketingBlock::query()->whereKey($blockId)->update([
+                    'impressions_count' => DB::raw('impressions_count + 1'),
+                    'last_used_at' => now(),
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('OutgoingMailSender: marketing impressions increment failed', [
+                    'draft_id' => $draft->id,
+                    'block_id' => $blockId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         // Async IMAP APPEND в Sent — best-effort. Письмо в треде уже видно.
         try {
@@ -115,6 +134,22 @@ class OutgoingMailSender
         }
 
         return ['success' => true, 'draft' => $draft->fresh()];
+    }
+
+    /**
+     * Отправить готовое Symfony Email с ящика мимо EmailMessage/драфта
+     * (тестовое письмо рекламного блока и т.п.). Обновляет OAuth-токен,
+     * бросает исключение при сбое — вызывающий решает, что показать.
+     */
+    public function sendAdHoc(\App\Models\Mailbox $mailbox, \Symfony\Component\Mime\Email $email): void
+    {
+        if (! $mailbox->canSendOutbound()) {
+            throw new \RuntimeException("Ящик {$mailbox->email} не может отправлять письма (нет OAuth/пароля или неактивен).");
+        }
+        $this->oauth->ensureFreshToken($mailbox);
+        $mailbox->refresh();
+
+        (new Mailer($this->buildSmtpTransport($mailbox)))->send($email);
     }
 
     public function buildSmtpTransport(\App\Models\Mailbox $mailbox): TransportInterface

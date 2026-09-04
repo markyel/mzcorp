@@ -30,6 +30,7 @@ class OutgoingMailMimeBuilder
     public function __construct(
         private readonly MailQuoteBuilder $quoteBuilder,
         private readonly EmailSignatureService $signatureService,
+        private readonly \App\Services\Marketing\MarketingBlockService $marketing,
     ) {
     }
 
@@ -87,17 +88,45 @@ class OutgoingMailMimeBuilder
             ? (string) $draft->body_html
             : $this->plainToHtml($userText);
 
+        // Рекламный блок под подписью (только письма клиентам — исключения
+        // поставщиков/внутренних решает MarketingBlockService). Выбор случайный,
+        // но один на письмо: id фиксируется в detected_artifacts драфта.
+        $promo = $this->resolvePromo($draft);
+
         $plain = $userText
             . ($signature['plain'] !== '' ? "\n" . $signature['plain'] : '')
+            . ($promo['plain'] !== '' ? $promo['plain'] : '')
             . ($footer['plain'] !== '' ? "\n\n" . $footer['plain'] : '')
             . ($quote['plain'] !== '' ? "\n\n" . $quote['plain'] : '');
 
         $html = $userHtml
             . ($signature['html'] !== '' ? $signature['html'] : '')
+            . ($promo['html'] !== '' ? $promo['html'] : '')
             . ($footer['html'] !== '' ? $footer['html'] : '')
             . ($quote['html'] !== '' ? $quote['html'] : '');
 
         return ['html' => $html, 'plain' => $plain];
+    }
+
+    /**
+     * Рекламный блок для драфта. Fail-soft: сбой маркетинга не должен
+     * ронять отправку письма клиенту.
+     *
+     * @return array{html: string, plain: string, image_url: ?string, image_path: ?string}
+     */
+    private function resolvePromo(EmailMessage $draft): array
+    {
+        try {
+            $promo = $this->marketing->resolveForDraft($draft);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('OutgoingMailMimeBuilder: marketing block failed (non-fatal)', [
+                'draft_id' => $draft->id,
+                'error' => $e->getMessage(),
+            ]);
+            $promo = null;
+        }
+
+        return $promo ?? ['html' => '', 'plain' => '', 'image_url' => null, 'image_path' => null];
     }
 
     /**
@@ -147,7 +176,9 @@ class OutgoingMailMimeBuilder
             $email->text($finalBody['plain']);
         }
         if ($finalBody['html'] !== '') {
-            $email->html($this->embedSignatureLogo($email, $finalBody['html']));
+            $html = $this->embedSignatureLogo($email, $finalBody['html']);
+            $html = $this->embedPromoImage($email, $html, $draft);
+            $email->html($html);
         }
 
         // Threading headers (RFC 5322 §3.6.4).
@@ -230,6 +261,40 @@ class OutgoingMailMimeBuilder
         $email->embedFromPath($logoPath, $cid);
 
         return str_replace($logoUrl, 'cid:'.$cid, $html);
+    }
+
+    /**
+     * Inline-картинка рекламного блока как CID-вложение — по тем же причинам,
+     * что и логотип (Gmail режет data:, внешние http-картинки прячутся до
+     * «показать изображения»). В html src экранирован htmlspecialchars, поэтому
+     * ищем и сырой URL, и экранированный. Нет файла — оставляем http-src
+     * (роут за auth: в треде CRM покажется, в почте клиента — как «картинка
+     * не загружена»; блок при этом остаётся читаемым текстом).
+     */
+    private function embedPromoImage(SymfonyEmail $email, string $html, EmailMessage $draft): string
+    {
+        $promo = $this->resolvePromo($draft);
+        $url = $promo['image_url'];
+        $path = $promo['image_path'];
+        if ($url === null || $path === null || ! is_file($path) || ! is_readable($path)) {
+            return $html;
+        }
+        $needles = array_unique([$url, htmlspecialchars($url, ENT_QUOTES, 'UTF-8')]);
+        $found = false;
+        foreach ($needles as $n) {
+            if (str_contains($html, $n)) {
+                $found = true;
+                break;
+            }
+        }
+        if (! $found) {
+            return $html;
+        }
+
+        $cid = \App\Services\Marketing\MarketingBlockService::IMAGE_CID;
+        $email->embedFromPath($path, $cid);
+
+        return str_replace($needles, 'cid:'.$cid, $html);
     }
 
     /**

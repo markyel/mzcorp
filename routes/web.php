@@ -11,6 +11,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\CorrespondencePdfController;
 use App\Http\Controllers\QuotationPdfController;
 use App\Http\Controllers\SupportAttachmentController;
+use App\Http\Controllers\MarketingBlockImageController;
 use App\Http\Controllers\UserAvatarController;
 use App\Models\ChangelogEntry;
 use App\Models\ClientContact;
@@ -291,6 +292,18 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/letter-templates', function () {
             return view('admin.letter-templates.index');
         })->name('letter-templates.index');
+    });
+
+    // Рекламные блоки в письмах клиентам — директорат и админ.
+    Route::middleware('role:director,admin')->group(function () {
+        Route::get('/dashboard/marketing-blocks', function () {
+            return view('admin.marketing-blocks.index');
+        })->name('marketing-blocks.index');
+
+        // Картинка блока: превью в админке + показ в треде CRM (в письме — CID).
+        Route::get('/dashboard/marketing-blocks/{block}/image', [MarketingBlockImageController::class, 'show'])
+            ->whereNumber('block')
+            ->name('marketing-blocks.image');
     });
 
     // Mail routing rules — управление правилами для РОП и директора.
