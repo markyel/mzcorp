@@ -1,9 +1,11 @@
 <div>
     <div class="mb-4 flex items-start justify-between gap-4">
+        @php $above = app(\App\Services\Marketing\MarketingBlockService::class)->isAboveSignature(); @endphp
         <p class="text-sm text-gray-600 dark:text-gray-400">
-            Блок вставляется <span class="font-medium">под подписью менеджера</span> в письма клиентам, отправленные через MyLift —
+            Блок вставляется <span class="font-medium">{{ $above ? 'над подписью' : 'под подписью' }} менеджера</span> в письма клиентам, отправленные через MyLift —
             и в ручные ответы, и в авто-уведомления. Письма поставщикам и внутренние не затрагиваются.
             Из активных блоков в каждое письмо попадает <span class="font-medium">случайный</span>.
+            Положение меняется в <a href="{{ route('settings.index') }}" class="text-sky-700 hover:underline">Настройках</a> → «Реклама в письмах».
         </p>
         <button type="button" wire:click="{{ $showForm ? 'cancel' : 'startCreate' }}"
                 class="inline-flex items-center px-4 py-2 bg-[#D32027] hover:bg-[#A8181E] text-white text-sm font-medium rounded shadow-sm whitespace-nowrap">

@@ -327,6 +327,13 @@ return [
     | Phase 1.9: UI-переписка. Конфиг для исходящих писем из карточки заявки.
     | См. app/Services/Mail/OutgoingMailboxResolver.php и OutgoingMailSender.
     */
+    // Рекламные блоки в письмах клиентам (MarketingBlockService). Позиция
+    // относительно подписи менеджера: 'above' — над подписью, 'below' — под.
+    // Override в Настройках приложения (app_setting 'marketing.block_position').
+    'marketing' => [
+        'block_position' => env('MARKETING_BLOCK_POSITION', 'below'),
+    ],
+
     'mail_outbound' => [
         // Shared-ящик для fallback'а, когда у assigned менеджера нет своего
         // OAuth-подключённого personal mailbox'а. Резолвится по точному email'у.

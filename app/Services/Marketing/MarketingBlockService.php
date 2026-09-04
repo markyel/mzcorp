@@ -42,10 +42,30 @@ class MarketingBlockService
     /** CID inline-картинки блока в MIME (multipart/related). */
     public const IMAGE_CID = 'mylift-promo';
 
+    public const POSITION_ABOVE = 'above';
+
+    public const POSITION_BELOW = 'below';
+
     public function __construct(
         private readonly SupplierRegistry $suppliers,
         private readonly EmailSignatureService $signature,
     ) {
+    }
+
+    /**
+     * Глобальная позиция блока относительно подписи: 'above' | 'below'.
+     * Настройки приложения (app_setting) поверх config('services.marketing').
+     */
+    public function position(): string
+    {
+        $raw = (string) app_setting('marketing.block_position', config('services.marketing.block_position', self::POSITION_BELOW));
+
+        return $raw === self::POSITION_ABOVE ? self::POSITION_ABOVE : self::POSITION_BELOW;
+    }
+
+    public function isAboveSignature(): bool
+    {
+        return $this->position() === self::POSITION_ABOVE;
     }
 
     /**
@@ -203,13 +223,13 @@ class MarketingBlockService
     {
         $sig = $this->signature->render($author);
         $block = $this->render($d);
+        $above = $this->isAboveSignature();
 
         return '<!doctype html><html><head><meta charset="utf-8"></head>'
             .'<body style="margin:0;padding:16px;background:#fff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Arial,sans-serif;font-size:14px;line-height:1.5;color:#0f1419">'
             .'<p>Добрый день!</p>'
             .'<p>Направляем коммерческое предложение по вашему запросу. Срок поставки по позициям в наличии — 1–2 рабочих дня.</p>'
-            .$sig['html']
-            .$block['html']
+            .($above ? $block['html'].$sig['html'] : $sig['html'].$block['html'])
             .'</body></html>';
     }
 

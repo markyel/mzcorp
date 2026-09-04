@@ -88,20 +88,26 @@ class OutgoingMailMimeBuilder
             ? (string) $draft->body_html
             : $this->plainToHtml($userText);
 
-        // Рекламный блок под подписью (только письма клиентам — исключения
+        // Рекламный блок над или под подписью (глобальная настройка
+        // marketing.block_position; только письма клиентам — исключения
         // поставщиков/внутренних решает MarketingBlockService). Выбор случайный,
         // но один на письмо: id фиксируется в detected_artifacts драфта.
         $promo = $this->resolvePromo($draft);
+        $promoAbove = $promo['html'] !== '' && $this->marketing->isAboveSignature();
+        $promoPlain = $promo['plain'] !== '' ? $promo['plain'] : '';
+        $promoHtml = $promo['html'] !== '' ? $promo['html'] : '';
 
         $plain = $userText
+            . ($promoAbove ? $promoPlain . "\n" : '')
             . ($signature['plain'] !== '' ? "\n" . $signature['plain'] : '')
-            . ($promo['plain'] !== '' ? $promo['plain'] : '')
+            . ($promoAbove ? '' : $promoPlain)
             . ($footer['plain'] !== '' ? "\n\n" . $footer['plain'] : '')
             . ($quote['plain'] !== '' ? "\n\n" . $quote['plain'] : '');
 
         $html = $userHtml
+            . ($promoAbove ? $promoHtml : '')
             . ($signature['html'] !== '' ? $signature['html'] : '')
-            . ($promo['html'] !== '' ? $promo['html'] : '')
+            . ($promoAbove ? '' : $promoHtml)
             . ($footer['html'] !== '' ? $footer['html'] : '')
             . ($quote['html'] !== '' ? $quote['html'] : '');
 
