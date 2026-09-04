@@ -74,6 +74,8 @@
     // «Использование» — статистика активности менеджеров (директорат / админ).
     if ($user?->hasAnyRole(['director', 'admin'])) {
         $navLinks[] = ['route' => 'usage-stats.index', 'label' => 'Использование', 'pattern' => 'usage-stats.*'];
+        // Рекламные блоки в письмах клиентам (директорат / админ).
+        $navLinks[] = ['route' => 'marketing-blocks.index', 'label' => 'Реклама', 'pattern' => 'marketing-blocks.*'];
     }
     // «IQOT» — анализ цен конкурентов (РОП / директорат / админ).
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
