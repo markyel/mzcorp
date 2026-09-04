@@ -370,10 +370,11 @@ class Client extends Component
     private function baseQuery(): Builder
     {
         $uid = (int) $this->user()->id;
+        $mailboxIds = $this->activeMailboxIds();
 
         return EmailMessage::query()
-            ->whereIn('email_messages.mailbox_id', $this->activeMailboxIds())
-            ->whereRaw("(email_messages.detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
+            ->whereIn('email_messages.mailbox_id', $mailboxIds)
+            ->tap(fn (Builder $q) => $this->hideCopiesWhoseOriginalIsListed($q, $mailboxIds))
             ->leftJoin('email_message_user_states as ustate', function ($j) use ($uid) {
                 $j->on('ustate.email_message_id', '=', 'email_messages.id')
                     ->where('ustate.user_id', '=', $uid);
@@ -441,11 +442,13 @@ class Client extends Component
         }
         $uid = (int) $this->user()->id;
 
+        // Бейдж ящика = то, что физически лежит в ЭТОМ ящике (как и список при
+        // выборе одного ящика), поэтому копии здесь не прячем: копия и её
+        // оригинал никогда не лежат в одном ящике.
         return EmailMessage::query()
             ->whereIn('email_messages.mailbox_id', $mailboxIds)
             ->where('email_messages.is_draft', false)
             ->where('email_messages.direction', MailDirection::Inbound->value)
-            ->whereRaw("(email_messages.detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
             ->leftJoin('email_message_user_states as ustate', function ($j) use ($uid) {
                 $j->on('ustate.email_message_id', '=', 'email_messages.id')
                     ->where('ustate.user_id', '=', $uid);
@@ -483,6 +486,64 @@ class Client extends Component
         }
 
         return app(SharedMailService::class)->threadFor($anchor);
+    }
+
+    /**
+     * Спрятать кросс-ящиковую копию письма ТОЛЬКО если её оригинал и так попадает
+     * в текущую выборку ящиков. Иначе — показать копию как обычное письмо.
+     *
+     * Маркер `cross_mailbox_copy_of` ставится не только техническим копиям от
+     * DeliverToManagerInboxJob, но и естественным: клиент пишет «To: info@,
+     * Andrey.Vasukhno@» → письмо лежит в ОБОИХ ящиках, и «оригиналом» становится
+     * тот, чей sync успел первым (личный ящик синкается раньше общего на ~40 с).
+     * Безусловный `IS NULL` при выбранном ящике info@ прятал такое письмо
+     * целиком — оно есть в Yandex, есть в заявке, а в разделе «Почта → info@»
+     * его нет (кейс sminex 04.09.2026, msg#96954 ← копия #96951).
+     *
+     * Правило: один выбранный ящик → показываем всё, что в нём физически лежит
+     * (копия и оригинал в одном ящике невозможны — uniq (mailbox, folder,
+     * message_id)); все ящики → копия прячется, только если её оригинал тоже
+     * в списке (иначе письмо задвоится), а если оригинал в недоступном
+     * пользователю ящике — копия остаётся единственным представителем письма.
+     *
+     * @param  array<int,int>  $mailboxIds
+     */
+    private function hideCopiesWhoseOriginalIsListed(Builder $q, array $mailboxIds): Builder
+    {
+        if ($mailboxIds === []) {
+            return $q;
+        }
+        $placeholders = implode(',', array_fill(0, count($mailboxIds), '?'));
+
+        // Копия прячется, если в выборке есть её оригинал (lookup по PK) ИЛИ
+        // более ранняя копия того же оригинала (оригинал в недоступном ящике,
+        // копии в двух доступных — показываем одну, с меньшим id). Второй
+        // EXISTS ходит по частичному индексу email_messages_cross_mailbox_copy_of_idx
+        // (миграция 2026_09_04_120000): предикат `~ '^[0-9]+$'` обязан
+        // совпадать с индексом дословно, иначе планировщик его не возьмёт, и
+        // это seq-scan ×41 строку (2 с на проде). Ненумерический маркер (не
+        // бывает, маркер = id) трактуем как «не копия» — показываем.
+        $marker = "(email_messages.detected_artifacts->>'cross_mailbox_copy_of')";
+
+        return $q->whereRaw(
+            "({$marker} IS NULL
+              OR NOT ({$marker} ~ '^[0-9]+\$')
+              OR (
+                  NOT EXISTS (
+                      SELECT 1 FROM email_messages o
+                      WHERE o.id = {$marker}::bigint
+                        AND o.mailbox_id IN ({$placeholders})
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM email_messages o2
+                      WHERE (o2.detected_artifacts->>'cross_mailbox_copy_of') ~ '^[0-9]+\$'
+                        AND (o2.detected_artifacts->>'cross_mailbox_copy_of')::bigint = {$marker}::bigint
+                        AND o2.id < email_messages.id
+                        AND o2.mailbox_id IN ({$placeholders})
+                  )
+              ))",
+            array_merge(array_values($mailboxIds), array_values($mailboxIds)),
+        );
     }
 
     /** Найти письмо в пределах доступных ящиков (защита доступа). */
