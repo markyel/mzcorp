@@ -85,7 +85,10 @@
                                         <input type="number"
                                                id="setting-{{ $formKey }}"
                                                wire:model="values.{{ $formKey }}"
-                                               step="{{ $meta['step'] ?? ($meta['type'] === 'float' ? '0.01' : '1') }}"
+                                               {{-- float: step="any" — иначе браузер блокирует отправку ВСЕЙ формы,
+                                                    если значение не кратно шагу (курсы ЦБ с 4 знаками, напр. 86,8872
+                                                    при step=0.5 → «ближайшие допустимые 86,5 и 87»). --}}
+                                               step="{{ $meta['type'] === 'float' ? 'any' : ($meta['step'] ?? '1') }}"
                                                @isset($meta['min']) min="{{ $meta['min'] }}" @endisset
                                                @isset($meta['max']) max="{{ $meta['max'] }}" @endisset
                                                class="w-full px-2.5 py-1.5 border border-border rounded-md text-[13px] mono focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500">
