@@ -10,6 +10,7 @@ use App\Services\Mail\OutgoingMailSender;
 use App\Services\Marketing\MarketingBlockService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -145,8 +146,26 @@ class Blocks extends Component
             $ext = strtolower($this->image->getClientOriginalExtension() ?: 'png');
             $ext = $ext === 'jpeg' ? 'jpg' : $ext;
             $name = Str::random(12).'.'.$ext;
+            $newPath = $this->image->storeAs(MarketingBlock::IMAGE_DIR, $name, MarketingBlock::IMAGE_DISK);
+
+            // storeAs возвращает путь, даже если запись не удалась (Flysystem
+            // put() при ошибке отдаёт false без исключения — например, каталог
+            // принадлежит другому пользователю и php-fpm в него не пишет).
+            // Кейс 04.09.2026: блок сохранился с image_path, файла на диске нет,
+            // в письмах и превью — битая картинка. Проверяем факт записи.
+            if (! Storage::disk(MarketingBlock::IMAGE_DISK)->exists($newPath)) {
+                Log::error('MarketingBlocks: image not written to disk', [
+                    'path' => $newPath,
+                    'disk' => MarketingBlock::IMAGE_DISK,
+                    'dir' => Storage::disk(MarketingBlock::IMAGE_DISK)->path(MarketingBlock::IMAGE_DIR),
+                ]);
+                $this->flashError = 'Картинка не записалась на диск (нет прав на каталог storage/app/private/marketing). Блок не сохранён — сообщите администратору.';
+
+                return;
+            }
+
             $block->deleteImageFile();
-            $data['image_path'] = $this->image->storeAs(MarketingBlock::IMAGE_DIR, $name, MarketingBlock::IMAGE_DISK);
+            $data['image_path'] = $newPath;
             $this->image = null;
         }
 
