@@ -161,7 +161,7 @@ class MarketingBlockService
 
     /**
      * Email-safe разметка: table-layout + inline-CSS, без внешних стилей.
-     * Картинка слева (120px), справа заголовок / текст / «Подробнее →».
+     * Плашка на всю ширину письма; картинка слева (120px), справа заголовок / текст / «Подробнее →».
      * В реальном письме OutgoingMailMimeBuilder заменит image_url на cid:.
      *
      * @param  array{title?: mixed, text?: mixed, url?: mixed, image_url?: mixed, image_path?: mixed}  $d
@@ -198,7 +198,7 @@ class MarketingBlockService
             : '';
 
         $html = '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
-            .'style="margin-top:18px;border-collapse:separate;width:100%;max-width:560px;'
+            .'style="margin-top:18px;border-collapse:separate;width:100%;'
             .'border:1px solid #e5e7eb;border-radius:6px;background:#ffffff">'
             .'<tr>'.$imgCell
             .'<td style="padding:12px 14px;vertical-align:top;'.$font.';font-size:13px;line-height:1.45;color:#0f1419">'
