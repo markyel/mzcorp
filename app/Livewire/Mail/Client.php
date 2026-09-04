@@ -510,39 +510,47 @@ class Client extends Component
      */
     private function hideCopiesWhoseOriginalIsListed(Builder $q, array $mailboxIds): Builder
     {
-        if ($mailboxIds === []) {
+        // Один ящик: копия и её оригинал (или две копии одного оригинала) в
+        // одном ящике невозможны — uniq (mailbox_id, folder, message_id).
+        // Показываем всё, что физически лежит в ящике, без фильтра (20 мс).
+        if (count($mailboxIds) < 2) {
             return $q;
         }
         $placeholders = implode(',', array_fill(0, count($mailboxIds), '?'));
 
-        // Копия прячется, если в выборке есть её оригинал (lookup по PK) ИЛИ
-        // более ранняя копия того же оригинала (оригинал в недоступном ящике,
-        // копии в двух доступных — показываем одну, с меньшим id). Второй
-        // EXISTS ходит по частичному индексу email_messages_cross_mailbox_copy_of_idx
-        // (миграция 2026_09_04_120000): предикат `~ '^[0-9]+$'` обязан
-        // совпадать с индексом дословно, иначе планировщик его не возьмёт, и
-        // это seq-scan ×41 строку (2 с на проде). Ненумерический маркер (не
-        // бывает, маркер = id) трактуем как «не копия» — показываем.
-        $marker = "(email_messages.detected_artifacts->>'cross_mailbox_copy_of')";
+        // Несколько ящиков: множество «скрыть» — копии, у которых в выборке есть
+        // оригинал (lookup по PK) ИЛИ более ранняя копия того же оригинала
+        // (оригинал в недоступном ящике, копии в двух доступных — оставляем
+        // одну, с меньшим id). Множество НЕКОРРЕЛИРОВАННОЕ — строится один
+        // раз (~9.7k строк, ~90 мс на проде), а не на каждую строку списка:
+        // коррелированный NOT EXISTS давал оценку стоимости 500k+ → Postgres
+        // включал JIT и тратил 420 мс на компиляцию 30-мс запроса.
+        // Второй EXISTS ходит по частичному индексу
+        // email_messages_cross_mailbox_copy_of_idx (миграция 2026_09_04_120000):
+        // предикат `~ '^[0-9]+$'` обязан совпадать с индексом дословно.
+        $c = "(c.detected_artifacts->>'cross_mailbox_copy_of')";
 
         return $q->whereRaw(
-            "({$marker} IS NULL
-              OR NOT ({$marker} ~ '^[0-9]+\$')
-              OR (
-                  NOT EXISTS (
-                      SELECT 1 FROM email_messages o
-                      WHERE o.id = {$marker}::bigint
-                        AND o.mailbox_id IN ({$placeholders})
+            "email_messages.id NOT IN (
+                SELECT c.id FROM email_messages c
+                WHERE c.mailbox_id IN ({$placeholders})
+                  AND {$c} ~ '^[0-9]+\$'
+                  AND (
+                      EXISTS (
+                          SELECT 1 FROM email_messages o
+                          WHERE o.id = {$c}::bigint
+                            AND o.mailbox_id IN ({$placeholders})
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM email_messages o2
+                          WHERE (o2.detected_artifacts->>'cross_mailbox_copy_of') ~ '^[0-9]+\$'
+                            AND (o2.detected_artifacts->>'cross_mailbox_copy_of')::bigint = {$c}::bigint
+                            AND o2.id < c.id
+                            AND o2.mailbox_id IN ({$placeholders})
+                      )
                   )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM email_messages o2
-                      WHERE (o2.detected_artifacts->>'cross_mailbox_copy_of') ~ '^[0-9]+\$'
-                        AND (o2.detected_artifacts->>'cross_mailbox_copy_of')::bigint = {$marker}::bigint
-                        AND o2.id < email_messages.id
-                        AND o2.mailbox_id IN ({$placeholders})
-                  )
-              ))",
-            array_merge(array_values($mailboxIds), array_values($mailboxIds)),
+            )",
+            array_merge(array_values($mailboxIds), array_values($mailboxIds), array_values($mailboxIds)),
         );
     }
 
