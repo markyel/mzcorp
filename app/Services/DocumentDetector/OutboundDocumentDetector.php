@@ -366,9 +366,14 @@ class OutboundDocumentDetector
         // выходящий ответ менеджера «Не наша номенклатура» классифицировался
         // как outbound_quotation (keyword «коммерческое предложение» из
         // цитаты клиента). Кейс M-2026-1866.
+        // Сначала срезаем цитату ответа целиком (cutQuotedReplyTail — любая
+        // атрибуция/«>»-хвост, не только наша), затем forward/подпись.
+        // dequoteText внутри cleanInboundReferenceText сохраняет содержимое
+        // цитат — для исходящих это текст КЛИЕНТА (кейс M-2026-14608).
         $rawBody = (string) ($message->body_plain ?? '');
-        $cleanBody = $rawBody !== ''
-            ? $this->cleaner->cleanInboundReferenceText($rawBody)
+        $ownBody = $rawBody !== '' ? $this->cleaner->cutQuotedReplyTail($rawBody) : '';
+        $cleanBody = $ownBody !== ''
+            ? $this->cleaner->cleanInboundReferenceText($ownBody)
             : '';
         $parts = [
             (string) ($message->subject ?? ''),

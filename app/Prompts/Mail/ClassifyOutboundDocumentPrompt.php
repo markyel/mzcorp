@@ -97,7 +97,10 @@ class ClassifyOutboundDocumentPrompt
             return '';
         }
 
-        $clean = $this->cleaner->cleanInboundReferenceText($raw);
+        // 1) цитата ответа (клиентский текст под нашим) — целиком;
+        // 2) forward-блок (если есть своя преамбула) + подпись.
+        $own = $this->cleaner->cutQuotedReplyTail($raw);
+        $clean = $own !== '' ? $this->cleaner->cleanInboundReferenceText($own) : '';
 
         return trim($clean) !== '' ? $clean : $raw;
     }

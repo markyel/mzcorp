@@ -60,6 +60,30 @@ class ClassifyOutboundDocumentPromptTest extends TestCase
         $this->assertStringNotContainsString('Прошу выставить счет', $user);
     }
 
+    public function test_outlook_header_quote_is_cut_from_body(): void
+    {
+        $body = "Добрый день!\r\nСчёт во вложении.\r\n\r\n"
+            . "От: Клиент <client@example.com>\r\n"
+            . "Отправлено: 4 сентября 2026 г. 9:43\r\n"
+            . "Кому: info@myzip.ru\r\n"
+            . "Тема: Запрос счета\r\n\r\n"
+            . "Прошу выставить счет на 5 шт.\r\n";
+
+        $user = $this->userPrompt($this->message($body, 'RE: Запрос счета'));
+
+        $this->assertStringContainsString('Счёт во вложении', $user);
+        $this->assertStringNotContainsString('Прошу выставить счет', $user);
+    }
+
+    public function test_pure_quote_without_own_text_falls_back_to_raw(): void
+    {
+        $body = "> Прошу выставить счет на 5 шт.\n> Реквизиты во вложении.\n";
+
+        $user = $this->userPrompt($this->message($body, 'Re: Запрос'));
+
+        $this->assertStringContainsString('Прошу выставить счет', $user);
+    }
+
     public function test_empty_body_falls_back_to_placeholder(): void
     {
         $user = $this->userPrompt($this->message("   \r\n ", 'КП'));

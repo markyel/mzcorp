@@ -187,6 +187,9 @@ Cross-mailbox дедуп — 3 защитных слоя против Request-д
 - ⏳ **Postgres JIT** на проде — кандидат на `jit=off` (OLTP). Нужен замер по логу медленных запросов перед решением.
 - ⏳ **Реклама: нет расписания «с/по» и лимита показов на контакт** — заказчик в курсе (39 контактов получают 59% писем). Пока ротация ручная через «Активен».
 
+### Закрыто 2026-09-07
+- ✅ **«Счёт отправлен» без счёта** (M-2026-14608, `e78e225` + follow-up) — внутренний пересыл письма клиента с PDF «Реквизиты ООО…» прилинковался по In-Reply-To, LLM-классификатор исходящих прочитал цитату клиента как наш счёт → Invoiced. Три слоя фикса: гард «получатель = заказчик» (`InternalSenderDetector::isAddressedToClient`), срез цитаты/пересыла перед LLM (`EmailTextCleanerService::cutQuotedReplyTail`), и главное — **статус Invoiced по детектору ставится только после того, как парсер создал Invoice** (номер+позиции+сумма), см. `DetectorType::requiresDocumentEvidence`. Данные заявки поправлены (outbound_quote 13513 удалён, `peak_status` сброшен). См. журнал сессии 2026-09-07.
+
 ### Закрыто 2026-09-04
 - ✅ **Модуль «Рекламные блоки в письмах»** — см. журнал сессии 2026-09-04. Гайд: `/docs/director/marketing-blocks`.
 - ✅ **Форма Настроек не отправлялась** (`b9e07c1`) — `step="any"` у float-полей.
@@ -582,6 +585,28 @@ Supervisor (все 4 воркера): `--queue=mail-sync,default,catalog-resolve
 - **request_state_changes.event = varchar(32) (2026-05-22 находка):** Колонка коротко-индексируемая, длинные event-имена (`system.cleanup.internal_client_email_phantom` = 44 символа) падают на `SQLSTATE[22001] String data, right truncated`. Держим event'ы ≤ 32 символов. Использованные: `clarification_sent`, `reanimate`, `cleanup.internal_phantom` (24 chars).
 
 ## Журнал сессий
+
+### Сессия 2026-09-07 — «Счёт отправлен» без счёта (M-2026-14608): детектор исходящих
+
+**Контекст:** заказчик спросил, на каком основании M-2026-14608 получила статус «Счёт отправлен». Разбор по `request_state_changes` → `ai_decisions` → `email_messages`: 04.09 11:41 `ai_auto_apply` (решение 26891, outbound_invoice, 0.90 при пороге 0.85) по письму 97210 — это **не письмо клиенту**, а пересыл из info@myzip.ru на info@liftway.ru с текстом «Этой заявки нет в мз корпе», внутри — письмо клиента «Прошу выставить счёт» и его же PDF «Реквизиты ООО Смайнэкс Комфорт». Пересыл унаследовал In-Reply-To → прилинковался к заявке; rule-based детектор промолчал, LLM-фолбэк (gpt-4o-mini) увидел цитату + имя файла «реквизиты» (оно прямо в списке сигналов счёта в промпте) → invoice 0.9. Менеджер 07.09 вручную вернул «В работе», но чип всё равно показывал «Счёт отправлен»: `displayed_status` берёт `peak_status`, который ручной откат не сбрасывает.
+
+**Принцип от заказчика (зафиксирован):** статус «Счёт отправлен» требует распознанного счёта — номер, номенклатура, сумма. Слова в письме и имя файла — не основание.
+
+#### Что задеплоено (`e78e225` + follow-up)
+
+| Слой | Что |
+|---|---|
+| **Гард по получателю** | `MailRouter::runOutboundDocumentDetection` выходит, если ни один to/cc не заказчик заявки: точный e-mail или тот же **корпоративный** домен. Публичные почтовики (`services.mail.public_mail_domains`, env `MAIL_PUBLIC_MAIL_DOMAINS`) и наши домены по домену не матчатся. `client_email` пуст → не блокируем (как раньше). `InternalSenderDetector::isAddressedToClient` + 11 unit-кейсов. |
+| **Только свой текст менеджера в LLM** | `EmailTextCleanerService::cutQuotedReplyTail` — срез любой цитаты ответа (атрибуция «написал(а):/пишет:/wrote:», `-----Original Message-----`, Outlook-блок «От:/Отправлено:/Кому:», хвостовой «>»-блок; inline-ответы между цитатами сохраняются). Подключён в `ClassifyOutboundDocumentPrompt::ownText` и в rule-based `OutboundDocumentDetector::buildSearchableText` (там `dequoteText` только снимал «>», содержимое цитаты оставалось — комментарий про M-2026-1866 обещал больше, чем делал). Промпт: правила «Fwd/реплика коллеге → other», «реквизиты/карточка предприятия без слова счёт → other». |
+| **Invoiced только по факту счёта** | `DetectorType::requiresDocumentEvidence()` (outbound_invoice): `AiDecisionService::recordSuggestion` больше не auto-apply'ит сразу — suggestion пишется, статус двигает `ParseOutboundQuoteJob` через `AiDecisionService::applyAfterDocumentEvidence` **только когда `InvoiceService::autoIssueFromOutboundQuote` создал Invoice** (требует document_number; parse даёт позиции и сумму). Match-boost для invoice отключён (совпадение позиций — не доказательство счёта, реквизиты/спецификация тоже содержат номенклатуру). Нет вложения / скан / не счёт → suggestion остаётся на плашке менеджеру. Ручные счета из mzCorp (`InvoiceService` → Invoiced) и триаж непривязанных (`InvoiceToRequestService`) не затронуты — там счёт есть по построению. |
+| **Данные M-2026-14608** | Удалён `outbound_quotes` 13513 (parsed из реквизитов, 0 позиций, без суммы); `requests.peak_status` invoiced → null (чип снова показывает операционный статус). `ai_decisions` 26891 оставлен как аудит. |
+
+#### Заметки / уроки
+
+- **`peak_status` не откатывается ручной сменой статуса** — если детектор ошибся и менеджер вернул заявку назад, чип продолжает показывать ложную веху. Кандидат на фикс: при ручном переходе «вниз» из milestone-статуса пересчитывать peak по истории без отменённого события (или сбрасывать, если у заявки нет Invoice/OutboundQuote-подтверждения).
+- **Auto-mode на проде включён** для outbound_invoice / quotation_full / clarification / declined (`detector.auto_mode.*` = true, порог по умолчанию 0.85). КП (`quotation_full`) по-прежнему auto-apply'ится по письму, без ожидания парсера — тот же класс риска, что и счёт; заказчик пока формулировал требование только про счета.
+- **Pre-existing красные тесты в Unit-suite** (не из этой сессии): `InboundIntentClassifierEligibilityTest` — 3 кейса (new/assigned/in_progress теперь eligible в классификаторе, провайдер теста не обновлён); плюс 2 error'а в `MarketingBlockServiceTest` — тесты ходят в прод-БД (`suppliers`), а локальный трафик через VPN до Beget не доходит; на них не смотреть как на регрессию. Полный `tests/Unit` локально: 153 теста, 148 зелёных.
+- **PowerShell + `php.bat` + `--filter "A|B"`** — batch-обёртка Herd повторно парсит аргументы, `|` уходит в cmd как pipe. Запускать phpunit по путям файлов, без `--filter` с альтернативами.
 
 ### Сессия 2026-09-04 — Реклама в письмах (новый модуль) + четыре точечных фикса + аналитика
 
