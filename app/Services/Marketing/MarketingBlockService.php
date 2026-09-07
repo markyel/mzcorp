@@ -154,6 +154,7 @@ class MarketingBlockService
             'title' => $block->title,
             'text' => $block->text,
             'url' => $block->url,
+            'link_text' => $block->linkText(),
             'image_url' => $block->imageUrl(),
             'image_path' => $block->imageLocalPath(),
         ]);
@@ -161,10 +162,11 @@ class MarketingBlockService
 
     /**
      * Email-safe разметка: table-layout + inline-CSS, без внешних стилей.
-     * Плашка на всю ширину письма; картинка слева (120px), справа заголовок / текст / «Подробнее →».
+     * Плашка на всю ширину письма; картинка слева (120px), справа заголовок / текст /
+     * ссылка-призыв (link_text, по умолчанию «Подробнее») со стрелкой.
      * В реальном письме OutgoingMailMimeBuilder заменит image_url на cid:.
      *
-     * @param  array{title?: mixed, text?: mixed, url?: mixed, image_url?: mixed, image_path?: mixed}  $d
+     * @param  array{title?: mixed, text?: mixed, url?: mixed, link_text?: mixed, image_url?: mixed, image_path?: mixed}  $d
      * @return array{html: string, plain: string, image_url: ?string, image_path: ?string}
      */
     public function render(array $d): array
@@ -173,6 +175,7 @@ class MarketingBlockService
         $title = trim((string) ($d['title'] ?? ''));
         $text = trim((string) ($d['text'] ?? ''));
         $url = trim((string) ($d['url'] ?? ''));
+        $linkText = trim((string) ($d['link_text'] ?? '')) ?: MarketingBlock::DEFAULT_LINK_TEXT;
         $imageUrl = trim((string) ($d['image_url'] ?? '')) ?: null;
         $imagePath = trim((string) ($d['image_path'] ?? '')) ?: null;
         $brand = (string) (config('services.company.signature.brand_color') ?? '#D32027');
@@ -194,7 +197,7 @@ class MarketingBlockService
             ? '<a href="'.$e($url).'" style="color:#0f1419;text-decoration:none">'.$e($title).'</a>'
             : $e($title);
         $more = $url !== ''
-            ? '<div style="margin-top:6px"><a href="'.$e($url).'" style="color:'.$e($brand).';text-decoration:none;font-weight:600">Подробнее &rarr;</a></div>'
+            ? '<div style="margin-top:6px"><a href="'.$e($url).'" style="color:'.$e($brand).';text-decoration:none;font-weight:600">'.$e($linkText).' &rarr;</a></div>'
             : '';
 
         $html = '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
@@ -217,7 +220,7 @@ class MarketingBlockService
      * Полный HTML-документ для превью в админке: образец текста письма +
      * подпись автора + блок. Кладётся в iframe srcdoc.
      *
-     * @param  array{title?: mixed, text?: mixed, url?: mixed, image_url?: mixed}  $d
+     * @param  array{title?: mixed, text?: mixed, url?: mixed, link_text?: mixed, image_url?: mixed}  $d
      */
     public function previewDocument(array $d, ?User $author): string
     {
@@ -239,7 +242,7 @@ class MarketingBlockService
      * EmailMessage/очереди, с маркером X-MyLift-System-Notification, чтобы копия
      * из «Отправленных» не линковалась и не плодила заявок. Счётчики не трогаем.
      *
-     * @param  array{title: string, text: string, url: string, image_url?: ?string, image_path?: ?string}  $d
+     * @param  array{title: string, text: string, url: string, link_text?: ?string, image_url?: ?string, image_path?: ?string}  $d
      */
     public function sendTest(array $d, Mailbox $mailbox, string $to, User $actor, OutgoingMailMimeBuilder $mime, OutgoingMailSender $sender): void
     {

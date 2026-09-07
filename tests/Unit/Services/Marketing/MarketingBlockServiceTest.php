@@ -43,6 +43,21 @@ class MarketingBlockServiceTest extends TestCase
         $this->assertSame('/tmp/x.png', $r['image_path']);
     }
 
+    public function test_custom_link_text_replaces_default_and_is_escaped(): void
+    {
+        $r = $this->service->render(['title' => 'T', 'text' => 'X', 'url' => 'https://myzip.ru', 'link_text' => 'Смотреть <каталог>']);
+
+        $this->assertStringContainsString('Смотреть &lt;каталог&gt; &rarr;', $r['html']);
+        $this->assertStringNotContainsString('Подробнее', $r['html']);
+    }
+
+    public function test_blank_link_text_falls_back_to_default(): void
+    {
+        $r = $this->service->render(['title' => 'T', 'text' => 'X', 'url' => 'https://myzip.ru', 'link_text' => '   ']);
+
+        $this->assertStringContainsString('Подробнее &rarr;', $r['html']);
+    }
+
     public function test_render_without_image_has_no_img(): void
     {
         $r = $this->service->render(['title' => 'T', 'text' => 'X', 'url' => 'https://myzip.ru']);

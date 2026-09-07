@@ -22,10 +22,16 @@ class MarketingBlock extends Model
 
     public const IMAGE_DIR = 'marketing';
 
+    /** Текст ссылки-призыва под текстом блока, если свой не задан. Стрелка добавляется при рендере. */
+    public const DEFAULT_LINK_TEXT = 'Подробнее';
+
+    public const LINK_TEXT_MAX = 60;
+
     protected $fillable = [
         'title',
         'text',
         'url',
+        'link_text',
         'image_path',
         'is_active',
         'impressions_count',
@@ -40,6 +46,14 @@ class MarketingBlock extends Model
             'impressions_count' => 'integer',
             'last_used_at' => 'datetime',
         ];
+    }
+
+    /** Текст ссылки для письма: свой или по умолчанию. */
+    public function linkText(): string
+    {
+        $own = trim((string) ($this->link_text ?? ''));
+
+        return $own !== '' ? $own : self::DEFAULT_LINK_TEXT;
     }
 
     public function createdBy(): BelongsTo

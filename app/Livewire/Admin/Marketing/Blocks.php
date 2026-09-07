@@ -38,6 +38,9 @@ class Blocks extends Component
 
     public string $url = '';
 
+    /** Текст ссылки-призыва; пусто — «Подробнее». */
+    public string $linkText = '';
+
     public bool $isActive = true;
 
     /** Новая картинка (TemporaryUploadedFile) — при создании обязательна. */
@@ -90,6 +93,7 @@ class Blocks extends Component
             'title' => $this->title,
             'text' => $this->text,
             'url' => $this->url,
+            'link_text' => $this->linkText,
             'image_url' => $this->currentImageUrl(),
         ], $author);
     }
@@ -111,6 +115,7 @@ class Blocks extends Component
         $this->title = $block->title;
         $this->text = $block->text;
         $this->url = $block->url;
+        $this->linkText = (string) ($block->link_text ?? '');
         $this->isActive = $block->is_active;
         $this->showForm = true;
     }
@@ -135,6 +140,7 @@ class Blocks extends Component
             'title' => trim($this->title),
             'text' => trim($this->text),
             'url' => trim($this->url),
+            'link_text' => trim($this->linkText) !== '' ? trim($this->linkText) : null,
             'is_active' => $this->isActive,
         ];
         if ($isNew) {
@@ -227,6 +233,7 @@ class Blocks extends Component
             'title' => trim($this->title),
             'text' => trim($this->text),
             'url' => trim($this->url),
+            'link_text' => trim($this->linkText),
             'image_url' => $this->currentImageUrl(),
             'image_path' => $this->currentImagePath(),
         ];
@@ -270,6 +277,7 @@ class Blocks extends Component
             'title' => 'required|string|max:120',
             'text' => 'required|string|max:300',
             'url' => 'required|url|max:500',
+            'linkText' => 'nullable|string|max:'.MarketingBlock::LINK_TEXT_MAX,
             'isActive' => 'boolean',
             'image' => ($requireImage ? 'required' : 'nullable')
                 .'|image|mimes:png,jpg,jpeg|max:512|dimensions:max_width=1600,max_height=1600',
@@ -303,7 +311,7 @@ class Blocks extends Component
 
     private function resetForm(): void
     {
-        $this->reset(['editId', 'title', 'text', 'url', 'image']);
+        $this->reset(['editId', 'title', 'text', 'url', 'linkText', 'image']);
         $this->isActive = true;
         $this->resetValidation();
         unset($this->editing);

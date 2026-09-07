@@ -52,6 +52,16 @@
 
                     <div>
                         <label class="block text-xs text-gray-600 mb-1">
+                            Текст ссылки <span class="text-gray-400">(до {{ \App\Models\MarketingBlock::LINK_TEXT_MAX }} символов; пусто — «{{ \App\Models\MarketingBlock::DEFAULT_LINK_TEXT }}»; стрелка → добавится сама)</span>
+                        </label>
+                        <input type="text" wire:model.live.debounce.400ms="linkText" maxlength="{{ \App\Models\MarketingBlock::LINK_TEXT_MAX }}"
+                               placeholder="{{ \App\Models\MarketingBlock::DEFAULT_LINK_TEXT }}"
+                               class="w-full text-sm rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600">
+                        @error('linkText') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">
                             Картинка <span class="text-gray-400">(PNG/JPG, до 512 КБ; в письме показывается шириной 120 px)</span>
                         </label>
                         <div class="flex items-center gap-3">
@@ -163,6 +173,7 @@
                             </td>
                             <td class="px-3 py-2 align-top font-mono text-xs max-w-xs truncate" title="{{ $block->url }}">
                                 <a href="{{ $block->url }}" target="_blank" rel="noopener" class="text-sky-700 hover:underline">{{ $block->url }}</a>
+                                <div class="mt-0.5 font-sans text-gray-500">{{ $block->linkText() }} →</div>
                             </td>
                             <td class="px-3 py-2 align-top text-right tabular-nums">{{ $block->impressions_count }}</td>
                             <td class="px-3 py-2 align-top text-xs text-gray-600 whitespace-nowrap">{{ $block->last_used_at?->format('d.m.Y H:i') ?? '—' }}</td>
