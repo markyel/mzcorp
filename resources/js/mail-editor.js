@@ -88,6 +88,19 @@ export default function mailEditor(opts = {}) {
 
         /* ---------- синхронизация с Livewire ---------- */
 
+        /**
+         * Компонент Livewire композера. Окно телепортировано в body, поэтому
+         * магический $wire здесь резолвится в РОДИТЕЛЬСКИЙ компонент (mail.client)
+         * — берём нужный явно по id (opts.wireId).
+         */
+        wire() {
+            if (opts.wireId && window.Livewire) {
+                const c = window.Livewire.find(opts.wireId);
+                if (c) return c.$wire;
+            }
+            return this.$wire;
+        },
+
         scheduleSync() {
             clearTimeout(this._timer);
             this._timer = setTimeout(() => this.sync(), 800);
@@ -98,7 +111,7 @@ export default function mailEditor(opts = {}) {
             const html = editor.isEmpty ? '' : editor.getHTML();
             if (html === this._last) return;
             this._last = html;
-            this.$wire.set('bodyHtml', html);
+            this.wire()?.set('bodyHtml', html);
         },
 
         flush() {

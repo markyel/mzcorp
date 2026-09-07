@@ -185,6 +185,7 @@
                  событие mail-editor-flush. --}}
             <div class="rte" wire:ignore wire:key="rte-{{ $draftId ?? 0 }}"
                  x-data="mailEditor({
+                     wireId: @js($this->getId()),
                      initialHtml: @js($bodyHtml),
                      uploadUrl: @js($this->inlineImageUploadUrl),
                      csrf: @js(csrf_token()),
