@@ -51,7 +51,7 @@
 @endphp
 
 <div class="max-w-[1320px] mx-auto px-6 pt-3 pb-8"
-     @if($req->isParsingInFlight()) wire:poll.10s @endif>
+     @if($req->isParsingInFlight() || $this->aiDecisionAwaitingParse) wire:poll.10s @endif>
 
 
     {{-- ────────── SUBNAV ────────── --}}

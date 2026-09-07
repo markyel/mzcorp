@@ -165,6 +165,34 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
         $quote->save();
 
         try {
+            $this->parseAndApply($attachment, $message, $request, $quote, $ext, $disk, $parser, $matcher, $enricher);
+        } finally {
+            // Разбор завершён (любой исход). Решения, которые парсер подтвердил,
+            // уже не suggested; остальные — показать менеджеру (снимаем
+            // «ждём разбор», см. AiDecision::PAYLOAD_AWAITING_PARSE_UNTIL).
+            try {
+                app(AiDecisionService::class)->markDocumentParseFinished($message);
+            } catch (\Throwable $e) {
+                Log::warning('ParseOutboundQuoteJob: markDocumentParseFinished failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private function parseAndApply(
+        EmailAttachment $attachment,
+        EmailMessage $message,
+        Request $request,
+        OutboundQuote $quote,
+        string $ext,
+        string $disk,
+        OutboundQuoteParsingService $parser,
+        OutboundQuoteItemMatcher $matcher,
+        OutboundQuoteCatalogEnricher $enricher,
+    ): void {
+        try {
             $absolutePath = Storage::disk($disk)->path($attachment->file_path);
             $content = $parser->extractContent($absolutePath, $ext, isAbsolute: true);
 

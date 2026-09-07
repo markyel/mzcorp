@@ -178,6 +178,10 @@ return [
         'max_attachment_bytes' => (int) env('QUOTE_MAX_ATTACHMENT_BYTES', 15 * 1024 * 1024),
         // Расширения, на которых триггерится ParseOutboundQuoteJob.
         'parseable_extensions' => ['pdf', 'xlsx', 'xls', 'docx'],
+        // Сколько минут прятать AI-плашку «отправлено КП/счёт» от менеджера,
+        // пока ParseOutboundQuoteJob разбирает вложение (страховка от потерянной
+        // job'ы: по истечении плашка появится сама). См. AiDecision::PAYLOAD_AWAITING_PARSE_UNTIL.
+        'awaiting_parse_minutes' => (int) env('QUOTE_AWAITING_PARSE_MINUTES', 15),
         // Сколько символов текстового слоя PDF отдавать в базовый промпт парсера.
         // Раньше было захардкожено 8000 → длинные сводные КП (24 позиции, ~19500
         // символов) обрезались, и хвостовые строки не доходили до модели

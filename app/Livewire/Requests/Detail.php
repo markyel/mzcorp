@@ -1634,9 +1634,27 @@ class Detail extends Component
         return AiDecision::query()
             ->where('request_id', $this->request->id)
             ->where('status', \App\Enums\AiDecisionStatus::Suggested->value)
+            // Пока парсер разбирает КП/счёт из вложения — плашку не показываем
+            // (иначе менеджер жмёт «применить» раньше автоматики, M-2026-14815).
+            ->actionable()
             ->with(['emailMessage:id,subject,from_email,sent_at,direction'])
             ->orderByDesc('id')
             ->get();
+    }
+
+    /**
+     * Есть ли по заявке AI-suggestion «отправлено КП/счёт», который ждёт
+     * разбора вложения парсером (10–40 с). Пока ждёт — карточка поллится,
+     * чтобы статус «КП отправлено» появился без перезагрузки страницы.
+     */
+    #[Computed]
+    public function aiDecisionAwaitingParse(): bool
+    {
+        return AiDecision::query()
+            ->where('request_id', $this->request->id)
+            ->where('status', \App\Enums\AiDecisionStatus::Suggested->value)
+            ->where('payload->' . AiDecision::PAYLOAD_AWAITING_PARSE_UNTIL, '>', now()->toIso8601String())
+            ->exists();
     }
 
     // supplierInquiries computed убран — список «кому отправлено» теперь в

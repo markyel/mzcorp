@@ -40,6 +40,52 @@ class AiDecision extends Model
         ];
     }
 
+    /**
+     * Ключ payload: до какого момента (ISO-8601) suggestion считается
+     * «ждём разбор документа» и НЕ показывается менеджеру. Ставится в
+     * recordSuggestion для типов requiresDocumentEvidence(), когда у письма
+     * есть парсимое вложение; снимается ParseOutboundQuoteJob по завершении
+     * разбора (любой исход). Дедлайн — страховка от потерянной job'ы.
+     */
+    public const PAYLOAD_AWAITING_PARSE_UNTIL = 'awaiting_document_parse_until';
+
+    /**
+     * Suggestion ещё ждёт разбора документа (плашку не показываем — иначе
+     * менеджер подтверждает вручную за 2–10 с, пока парсер работает, и
+     * «автоматика не работает»). Кейс M-2026-14815.
+     */
+    public function isAwaitingDocumentParse(?\DateTimeInterface $now = null): bool
+    {
+        if ($this->status !== AiDecisionStatus::Suggested) {
+            return false;
+        }
+        $until = $this->payload[self::PAYLOAD_AWAITING_PARSE_UNTIL] ?? null;
+        if (! is_string($until) || $until === '') {
+            return false;
+        }
+        try {
+            $deadline = new \DateTimeImmutable($until);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $deadline > ($now ?? now());
+    }
+
+    /**
+     * Scope: suggestion'ы, которые можно показать менеджеру — без тех, что
+     * ждут разбора документа (см. isAwaitingDocumentParse).
+     */
+    public function scopeActionable(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder
+    {
+        $nowIso = now()->toIso8601String();
+
+        return $query->where(function (\Illuminate\Database\Eloquent\Builder $q) use ($nowIso) {
+            $q->whereNull('payload->' . self::PAYLOAD_AWAITING_PARSE_UNTIL)
+                ->orWhere('payload->' . self::PAYLOAD_AWAITING_PARSE_UNTIL, '<=', $nowIso);
+        });
+    }
+
     public function request(): BelongsTo
     {
         return $this->belongsTo(Request::class);

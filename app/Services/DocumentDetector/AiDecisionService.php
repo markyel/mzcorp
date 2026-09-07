@@ -77,12 +77,25 @@ class AiDecisionService
         // вложения / скан / не тот документ) — suggestion остаётся на
         // плашке, менеджер подтверждает вручную.
         if ($type->requiresDocumentEvidence()) {
+            // Пока парсер работает (10–40 с) — плашку менеджеру не показываем,
+            // иначе он подтверждает вручную раньше автоматики (M-2026-14815).
+            // Только если у письма есть что парсить; без вложения решать
+            // человеку сразу.
+            $awaitingParse = $this->hasParseableAttachment($message);
+            if ($awaitingParse) {
+                $decision->update(['payload' => array_merge($payload, [
+                    AiDecision::PAYLOAD_AWAITING_PARSE_UNTIL => now()
+                        ->addMinutes((int) config('services.quotes.awaiting_parse_minutes', 15))
+                        ->toIso8601String(),
+                ])]);
+            }
             Log::info('AiDecisionService: auto-apply deferred until document is parsed', [
                 'decision_id' => $decision->id,
                 'type' => $type->value,
                 'request_id' => $request->id,
                 'email_message_id' => $message->id,
                 'confidence' => $confidence,
+                'awaiting_parse' => $awaitingParse,
             ]);
         } elseif ($this->shouldAutoApply($type, $confidence)) {
             $decision = $this->apply($decision, null, ['auto' => true]);
@@ -490,6 +503,9 @@ class AiDecisionService
         $payload['document_evidence'] = array_merge($evidence, [
             'confirmed_at' => now()->toIso8601String(),
         ]);
+        // Разбор завершён — плашку больше не прячем (если auto-mode выключен,
+        // менеджер увидит её с уже собранными фактами).
+        unset($payload[AiDecision::PAYLOAD_AWAITING_PARSE_UNTIL]);
         $decision->update(['payload' => $payload]);
 
         if (! $this->shouldAutoApply($decision->detector_type, (float) $decision->confidence)) {
@@ -509,6 +525,55 @@ class AiDecisionService
         ]);
 
         return $this->apply($decision->refresh(), null, ['auto' => true]);
+    }
+
+    /**
+     * Разбор документа по письму завершён БЕЗ доказательства (0 позиций, не
+     * счёт, ошибка парсера, файл не найден) — снять «ждём разбор» со всех
+     * ещё suggested-решений этого письма, чтобы менеджер увидел плашку и
+     * решил сам. Идемпотентно.
+     */
+    public function markDocumentParseFinished(EmailMessage $message): void
+    {
+        $decisions = AiDecision::query()
+            ->where('email_message_id', $message->id)
+            ->where('status', AiDecisionStatus::Suggested->value)
+            ->whereNotNull('payload->' . AiDecision::PAYLOAD_AWAITING_PARSE_UNTIL)
+            ->get();
+
+        foreach ($decisions as $decision) {
+            if (! $decision->detector_type->requiresDocumentEvidence()) {
+                continue;
+            }
+            $payload = is_array($decision->payload) ? $decision->payload : [];
+            unset($payload[AiDecision::PAYLOAD_AWAITING_PARSE_UNTIL]);
+            $decision->update(['payload' => $payload]);
+
+            Log::info('AiDecisionService: document parse finished without evidence — suggestion shown to manager', [
+                'decision_id' => $decision->id,
+                'type' => $decision->detector_type->value,
+                'request_id' => $decision->request_id,
+            ]);
+        }
+    }
+
+    /** Есть ли у письма вложение, которое ParseOutboundQuoteJob станет разбирать. */
+    private function hasParseableAttachment(EmailMessage $message): bool
+    {
+        $parseable = (array) config('services.quotes.parseable_extensions', ['pdf', 'xlsx', 'xls', 'docx']);
+        $message->loadMissing('attachments');
+
+        foreach ($message->attachments as $att) {
+            if ($att->is_inline) {
+                continue;
+            }
+            $ext = strtolower((string) pathinfo((string) $att->filename, PATHINFO_EXTENSION));
+            if (in_array($ext, $parseable, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
