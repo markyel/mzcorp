@@ -345,7 +345,13 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
                 // Нет Invoice (не счёт / без номера / договор) — suggestion
                 // остаётся менеджеру на плашке.
                 if ($invoice !== null) {
-                    $this->applyInvoiceDecisionAfterEvidence($request, $message, $quote->fresh(), $invoice);
+                    $this->applyDecisionAfterDocumentEvidence($request, $message, DetectorType::OutboundInvoice, [
+                        'invoice_id' => $invoice->id,
+                        'invoice_number' => $invoice->invoice_number,
+                        'amount' => $invoice->amount_snapshot,
+                        'outbound_quote_id' => $quote->id,
+                        'items_count' => $quote->items()->count(),
+                    ]);
                 } else {
                     Log::info('ParseOutboundQuoteJob: no invoice recognized — Invoiced status not applied', [
                         'quote_id' => $quote->id,
@@ -386,6 +392,24 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
                         'error' => $e->getMessage(),
                     ]);
                 }
+            }
+
+            // КП: статус «КП отправлено» — только по распознанному КП с
+            // позициями (DetectorType::requiresDocumentEvidence). Сюда доходим
+            // после гарда «0 items → return», т.е. позиции есть.
+            $quotationType = match ($this->documentType) {
+                DetectorType::OutboundQuotationFull->value => DetectorType::OutboundQuotationFull,
+                DetectorType::OutboundQuotationPartial->value => DetectorType::OutboundQuotationPartial,
+                default => null,
+            };
+            if ($quotationType !== null) {
+                $this->applyDecisionAfterDocumentEvidence($request, $message, $quotationType, [
+                    'outbound_quote_id' => $quote->id,
+                    'items_count' => $quote->items()->count(),
+                    'document_number' => $quote->document_number,
+                    'total_amount' => $quote->total_amount,
+                    'matched_request_count' => $matchStats['matched_request'] ?? 0,
+                ]);
             }
 
             Log::info('ParseOutboundQuoteJob: success', [
@@ -516,21 +540,29 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
     }
 
     /**
-     * Отложенный auto-apply AiDecision «Отправлен счёт» — после того как из
-     * вложения реально создан Invoice (номер + сумма + позиции). См.
+     * Отложенный auto-apply AiDecision «Отправлен счёт» / «Отправлено КП» —
+     * после того как документ реально разобран (счёт → создан Invoice с
+     * номером и суммой; КП → OutboundQuote с позициями). См.
      * DetectorType::requiresDocumentEvidence и
      * AiDecisionService::applyAfterDocumentEvidence. Non-fatal.
+     *
+     * Ищем suggested-решение ТОГО ЖЕ типа по этому письму. Письмо-КП с
+     * вложением «Счет …» даёт decision типа quotation (тип письма), а job
+     * бежит с типом invoice (тип вложения) — тогда decision'а нет, ничего
+     * не делаем: статус заявки задаёт тип письма, а не файла.
+     *
+     * @param  array<string, mixed>  $evidence
      */
-    private function applyInvoiceDecisionAfterEvidence(
+    private function applyDecisionAfterDocumentEvidence(
         Request $request,
         EmailMessage $message,
-        OutboundQuote $quote,
-        \App\Models\Invoice $invoice,
+        DetectorType $type,
+        array $evidence,
     ): void {
         $decision = AiDecision::query()
             ->where('request_id', $request->id)
             ->where('email_message_id', $message->id)
-            ->where('detector_type', DetectorType::OutboundInvoice->value)
+            ->where('detector_type', $type->value)
             ->where('status', AiDecisionStatus::Suggested->value)
             ->orderByDesc('id')
             ->first();
@@ -539,17 +571,12 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
         }
 
         try {
-            app(AiDecisionService::class)->applyAfterDocumentEvidence($decision, [
-                'invoice_id' => $invoice->id,
-                'invoice_number' => $invoice->invoice_number,
-                'amount' => $invoice->amount_snapshot,
-                'outbound_quote_id' => $quote->id,
-                'items_count' => $quote->items()->count(),
-            ]);
+            app(AiDecisionService::class)->applyAfterDocumentEvidence($decision, $evidence);
         } catch (\Throwable $e) {
-            Log::warning('ParseOutboundQuoteJob: apply after invoice evidence failed (non-fatal)', [
+            Log::warning('ParseOutboundQuoteJob: apply after document evidence failed (non-fatal)', [
                 'decision_id' => $decision->id,
-                'invoice_id' => $invoice->id,
+                'detector_type' => $type->value,
+                'evidence' => $evidence,
                 'error' => $e->getMessage(),
             ]);
         }

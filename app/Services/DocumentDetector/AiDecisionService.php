@@ -70,11 +70,12 @@ class AiDecisionService
         // confidence >= threshold, применяем сразу без UI-подтверждения.
         // Иначе остаётся suggested — оператор увидит плашку.
         //
-        // Исключение — типы с requiresDocumentEvidence() (счёт): по письму
-        // статус не двигаем, ждём, пока ParseOutboundQuoteJob распознает
-        // документ и создаст Invoice → applyAfterDocumentEvidence(). Если
-        // документ не распознан (нет вложения / скан / не счёт) — suggestion
-        // остаётся на плашке, менеджер подтверждает вручную.
+        // Исключение — типы с requiresDocumentEvidence() (счёт, КП): по
+        // письму статус не двигаем, ждём, пока ParseOutboundQuoteJob
+        // распознает документ (Invoice / КП с позициями) →
+        // applyAfterDocumentEvidence(). Если документ не распознан (нет
+        // вложения / скан / не тот документ) — suggestion остаётся на
+        // плашке, менеджер подтверждает вручную.
         if ($type->requiresDocumentEvidence()) {
             Log::info('AiDecisionService: auto-apply deferred until document is parsed', [
                 'decision_id' => $decision->id,
@@ -471,12 +472,13 @@ class AiDecisionService
 
     /**
      * Отложенный auto-apply для типов с requiresDocumentEvidence(): парсер
-     * распознал документ (создан Invoice с номером и суммой) — теперь веха
-     * подтверждена фактом, а не словами в письме. Auto-mode и порог
-     * уверенности проверяются те же, что и при мгновенном apply; если
-     * auto-mode выключен — suggestion остаётся менеджеру.
+     * распознал документ (счёт → создан Invoice с номером и суммой; КП →
+     * OutboundQuote с позициями) — теперь веха подтверждена фактом, а не
+     * словами в письме. Auto-mode и порог уверенности проверяются те же,
+     * что и при мгновенном apply; если auto-mode выключен — suggestion
+     * остаётся менеджеру.
      *
-     * @param  array<string, mixed>  $evidence  invoice_id / invoice_number / amount / outbound_quote_id / items_count
+     * @param  array<string, mixed>  $evidence  outbound_quote_id / items_count / document_number / total_amount / invoice_id / …
      */
     public function applyAfterDocumentEvidence(AiDecision $decision, array $evidence): AiDecision
     {

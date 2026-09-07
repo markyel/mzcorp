@@ -141,6 +141,9 @@ class RequestStatusReassessor
         $hasOq = \App\Models\OutboundQuote::query()
             ->where('request_id', $request->id)
             ->where('document_type', 'outbound_quotation_full')
+            // КП без позиций (парсер ничего не достал) — не КП; та же логика,
+            // что DetectorType::requiresDocumentEvidence.
+            ->whereHas('items')
             ->exists();
         if ($hasOq) {
             return true;

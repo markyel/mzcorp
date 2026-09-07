@@ -66,16 +66,24 @@ enum DetectorType: string
 
     /**
      * Auto-apply только ПОСЛЕ распознавания документа парсером, а не по
-     * письму. «Счёт отправлен» без счёта (номер, позиции, сумма) — не веха:
-     * detector на уровне письма ловит слова «счёт»/«реквизиты» и имя файла,
-     * но не знает, что внутри. Suggestion пишется сразу (плашка менеджеру),
-     * а статус двигается из ParseOutboundQuoteJob, когда из вложения реально
-     * создан Invoice (см. AiDecisionService::applyAfterDocumentEvidence).
+     * письму. «Счёт отправлен» без счёта (номер, позиции, сумма) и «КП
+     * отправлено» без КП с позициями — не вехи: detector на уровне письма
+     * ловит слова «счёт»/«КП»/«реквизиты» и имя файла, но не знает, что
+     * внутри. Suggestion пишется сразу (плашка менеджеру), а статус двигается
+     * из ParseOutboundQuoteJob, когда документ реально разобран: для счёта —
+     * создан Invoice, для КП — OutboundQuote с позициями
+     * (см. AiDecisionService::applyAfterDocumentEvidence).
      * Кейс M-2026-14608: пересыл с PDF «Реквизиты ООО …» → Invoiced без счёта.
+     * Требование заказчика (2026-09-07): то же правило для КП.
      */
     public function requiresDocumentEvidence(): bool
     {
-        return $this === self::OutboundInvoice;
+        return match ($this) {
+            self::OutboundInvoice,
+            self::OutboundQuotationFull,
+            self::OutboundQuotationPartial => true,
+            default => false,
+        };
     }
 
     /**
