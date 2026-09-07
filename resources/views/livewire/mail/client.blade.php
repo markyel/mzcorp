@@ -98,6 +98,7 @@
 .mailapp .trow .clip{color:var(--fg-3);font-size:12px}
 .mailapp .trow .reqchip{font:600 10.5px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px}
 .mailapp .trow .onecchip{font:600 10.5px/1.4 var(--font-mono);background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:4px;white-space:nowrap}
+.mailapp .trow .rubchip{font:700 11px/1.4 var(--font-sans);background:var(--amber-50,#fff7ed);color:var(--amber-700,#b45309);padding:1px 6px;border-radius:4px;white-space:nowrap}
 .mailapp .trow .catchip{font:500 10.5px/1.3 var(--font-sans);padding:1px 6px;border-radius:999px}
 .mailapp .trow .catchip.kp{background:var(--sky-50);color:var(--sky-700)}
 .mailapp .trow .catchip.invoice{background:var(--emerald-50);color:var(--emerald-700)}
@@ -250,6 +251,8 @@
                                         wire:click.stop="toggleFlag({{ $m->id }})" title="Пометить">⚑</button>
                                 @if($m->attachments_count)<span class="clip">📎</span>@endif
                                 @if($m->related_request_id && $m->relatedRequest)
+                                    @php $rrs = $m->relatedRequest->status instanceof AppnumsRequestStatus ? $m->relatedRequest->status : AppnumsRequestStatus::tryFrom((string) $m->relatedRequest->status); @endphp
+                                    @if($rrs === AppnumsRequestStatus::AwaitingInvoice)<span class="rubchip" title="Клиент ждёт счёт — счёт ещё не выставлен">₽</span>@endif
                                     <span class="reqchip">{{ $m->relatedRequest->internal_code }}</span>
                                     @if($m->relatedRequest->onec_number)<span class="onecchip" title="Номер заявки/КП в 1С">1С {{ $m->relatedRequest->onec_number }}</span>@endif
                                 @elseif($cat)
