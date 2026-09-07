@@ -1095,14 +1095,25 @@ class MailRouter
             }
         }
 
-        // Перевод в «ждёт счёт» — если уже не на этой/более поздней вехе.
+        // Перевод в «ждёт счёт» — если уже не на этой/более поздней вехе И
+        // клиент в собственном тексте действительно просит счёт/оплату
+        // (invoice_intent). Цитирует КП с вопросом («а с резьбой М10 есть?»,
+        // M-2026-12166) — письмо привязываем, статус не трогаем.
         $skip = [
             \App\Enums\RequestStatus::AwaitingInvoice,
             \App\Enums\RequestStatus::Invoiced,
             \App\Enums\RequestStatus::Paid,
             \App\Enums\RequestStatus::ClosedWon,
         ];
-        if (! in_array($request->status, $skip, true)) {
+        $invoiceIntent = (bool) ($cited['invoice_intent'] ?? true);
+        if (! $invoiceIntent) {
+            Log::info('MailRouter: cited quote without invoice intent — linked, status unchanged', [
+                'email_message_id' => $message->id,
+                'request_id' => $request->id,
+                'document_number' => $docNo,
+            ]);
+        }
+        if ($invoiceIntent && ! in_array($request->status, $skip, true)) {
             $from = $request->status->value;
             $request->status = \App\Enums\RequestStatus::AwaitingInvoice;
             $request->save();

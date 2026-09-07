@@ -23,34 +23,52 @@ use Illuminate\Support\Facades\Storage;
  * Гейт от ложных совпадений: письмо должно упоминать счёт/КП/оплату ЛИБО номер
  * пришёл из вложения. Несколько КП → берём с наибольшей суммой.
  *
+ * ВАЖНО: из тела берём только СОБСТВЕННЫЙ текст клиента, без цитаты нашего
+ * письма. Кейс M-2026-12166: клиент ответил «а с резьбой М10 есть?» на наше
+ * напоминание, в цитате которого были номер КП 364274 и «перейти к
+ * выставлению счёта» → роутер «нашёл» запрос счёта в нашем же тексте и увёл
+ * заявку в «ждёт счёт». Отдельно возвращаем invoice_intent — есть ли в
+ * собственном тексте клиента слова про счёт/оплату: без них MailRouter
+ * привязывает письмо к заявке КП, но в «ждёт счёт» не переводит.
+ *
  * PDF-текст берём напрямую Smalot'ом (дёшево, без Vision/рендера страниц).
  */
 class CitedOutboundQuoteRouter
 {
-    /** Контекст «счёт/КП/оплата» в тексте письма. */
+    /** Контекст «счёт/КП/оплата» в тексте письма (гейт матчинга номера). */
     private const KEYWORD_RE = '/сч[её]т|на\s+оплат|коммерческое\s+предложение|\bкп\b|invoice|инвойс/iu';
+
+    /** Собственно запрос счёта / оплаты — основание для статуса «ждёт счёт». */
+    private const INVOICE_INTENT_RE = '/сч[её]т|на\s+оплат|оплат[аиуы]|invoice|инвойс|выстав/iu';
 
     /** Числа-кандидаты: 5–8 цифр (наши document_number обычно 6). */
     private const NUMBER_RE = '/\d{5,8}/';
 
     private const MAX_PDF_BYTES = 8 * 1024 * 1024;
 
+    public function __construct(
+        private readonly EmailTextCleanerService $cleaner = new EmailTextCleanerService(),
+    ) {
+    }
+
     /**
-     * @return array{request: Request, document_number: string, total: float, source: string}|null
+     * @return array{request: Request, document_number: string, total: float, source: string, invoice_intent: bool}|null
      */
     public function detect(EmailMessage $message): ?array
     {
-        [$candidates, $hasAttachmentSource] = $this->collectCandidates($message);
+        $ownBody = $this->ownBodyText($message);
+        [$candidates, $hasAttachmentSource] = $this->collectCandidates($message, $ownBody);
         if ($candidates === []) {
             return null;
         }
 
-        $text = mb_strtolower((string) $message->subject . "\n" . (string) $message->body_plain);
+        $text = mb_strtolower((string) $message->subject . "\n" . $ownBody);
         $keywordHit = preg_match(self::KEYWORD_RE, $text) === 1;
         if (! $keywordHit && ! $hasAttachmentSource) {
             // Числа без контекста счёта/КП и не из вложения — не доверяем.
             return null;
         }
+        $invoiceIntent = $this->hasInvoiceIntent((string) $message->subject, $ownBody);
 
         $rows = DB::table('outbound_quotes')
             ->whereIn('document_number', $candidates)
@@ -79,17 +97,48 @@ class CitedOutboundQuoteRouter
             'document_number' => (string) $best->document_number,
             'total' => (float) ($best->total_amount ?? 0),
             'source' => $hasAttachmentSource ? 'attachment' : 'body',
+            'invoice_intent' => $invoiceIntent,
         ];
     }
 
     /**
-     * Числа-кандидаты из темы/тела/имён вложений/текста PDF-вложений.
+     * Собственный текст клиента: без цитаты нашего письма («… написал(а):»,
+     * «>»-блок) и без блока пересылки, если у клиента есть своя преамбула.
+     * Чистый метод — покрыт unit-тестом.
+     */
+    public function ownBodyText(EmailMessage $message): string
+    {
+        $raw = (string) ($message->body_plain ?? '');
+        if (trim($raw) === '') {
+            return '';
+        }
+        $own = $this->cleaner->cutQuotedReplyTail($raw);
+
+        // Клиент переслал наше КП (Fwd) с просьбой выставить счёт — номер лежит
+        // в пересланном блоке. Если преамбула есть, сам блок нам не нужен: номер
+        // почти всегда есть и в теме/имени PDF; если преамбулы нет — берём блок.
+        ['forwarded' => $fwd, 'original' => $orig] = $this->cleaner->extractForwardedContent($own !== '' ? $own : $raw);
+        if ($fwd !== null) {
+            return trim($orig) !== '' ? $orig . "\n" . $fwd : $fwd;
+        }
+
+        return $own;
+    }
+
+    /** Есть ли в собственном тексте клиента (или теме) просьба о счёте/оплате. */
+    public function hasInvoiceIntent(string $subject, string $ownBody): bool
+    {
+        return preg_match(self::INVOICE_INTENT_RE, mb_strtolower($subject . "\n" . $ownBody)) === 1;
+    }
+
+    /**
+     * Числа-кандидаты из темы/собственного текста/имён вложений/текста PDF-вложений.
      *
      * @return array{0: array<int,string>, 1: bool}  [числа, был ли источник-вложение]
      */
-    private function collectCandidates(EmailMessage $message): array
+    private function collectCandidates(EmailMessage $message, string $ownBody): array
     {
-        $texts = [(string) $message->subject, (string) $message->body_plain];
+        $texts = [(string) $message->subject, $ownBody];
         $hasAttachmentSource = false;
 
         foreach ($message->attachments as $att) {
