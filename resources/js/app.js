@@ -23,3 +23,16 @@ const registerMailEditor = () => { if (window.Alpine && ! window.__mailEditorReg
 document.addEventListener('alpine:init', registerMailEditor);
 document.addEventListener('livewire:init', registerMailEditor);
 registerMailEditor();
+
+// Индикатор «Сохранение…» композера почты. Окно телепортировано в body, и
+// Livewire не обрабатывает там wire:loading (директивы сканируются только в
+// DOM компонента) — поэтому сигналим событием из хука commit.
+document.addEventListener('livewire:init', () => {
+    window.Livewire.hook('commit', ({ component, succeed, fail }) => {
+        if (component.name !== 'mail.composer') return;
+        const emit = (on) => window.dispatchEvent(new CustomEvent('mail-composer-saving', { detail: on }));
+        emit(true);
+        succeed(() => emit(false));
+        fail(() => emit(false));
+    });
+});

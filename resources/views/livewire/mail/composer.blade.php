@@ -311,7 +311,7 @@
             <label class="lbl-file" title="Прикрепить файл">📎<input type="file" multiple wire:model="newFiles"></label>
             <button class="discard" wire:click="discard">Удалить</button>
             <span class="spacer"></span>
-            <span class="save" wire:loading.flex wire:target="bodyHtml,subject,toRaw,ccRaw,uploadAttachments"><span class="dot"></span>Сохранение…</span>
+            <span class="save" x-data="{ saving: false }" x-show="saving" x-cloak @mail-composer-saving.window="saving = $event.detail"><span class="dot"></span>Сохранение…</span>
         </div>
     </div>
 
