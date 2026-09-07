@@ -24,7 +24,21 @@ class SupplierInquiryService
 {
     public function __construct(
         private readonly SupplierRegistry $registry,
+        private readonly \App\Services\Mail\InternalSenderDetector $internal = new \App\Services\Mail\InternalSenderDetector(),
     ) {
+    }
+
+    /** Наш домен (services.mail.internal_domains) — сотрудник не может быть поставщиком. */
+    private function isInternalDomain(string $domain): bool
+    {
+        $domain = mb_strtolower(trim($domain));
+        foreach ((array) config('services.mail.internal_domains', []) as $d) {
+            if ($domain !== '' && $domain === mb_strtolower(trim((string) $d))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -163,9 +177,28 @@ class SupplierInquiryService
      * стоп-листа: весь ящик — поставщик). Сначала тред-матч (matchInbound),
      * иначе общий inquiry по supplier_email (создаём, если нет). Делает письмо
      * ЧИТАЕМЫМ в /dashboard/suppliers, не создавая клиентской заявки.
+     *
+     * null — отправитель НАШ сотрудник (домен/ящик/пользователь): внутренняя
+     * переписка в ящике снабжения не делает коллегу «поставщиком». Кейс
+     * 2026-09-07: 16 inquiry с supplier_email=*@myzip.ru (Боев, Роденков,
+     * Курзаев…), 326 внутренних писем помечены «поставщик», а домен-фолбэк
+     * тянул к ним любую внутреннюю переписку во всех ящиках.
      */
-    public function ingestSupplierMessage(EmailMessage $message): SupplierInquiry
+    public function ingestSupplierMessage(EmailMessage $message): ?SupplierInquiry
     {
+        if ($this->internal->detect($message) !== null) {
+            if ($message->direction === MailDirection::Inbound
+                && in_array($message->category, [null, EmailCategory::SupplierReply->value], true)) {
+                $message->forceFill([
+                    'category' => EmailCategory::Irrelevant->value,
+                    'category_reasoning' => 'Внутренняя переписка сотрудника — не поставщик.',
+                    'categorized_at' => $message->categorized_at ?? now(),
+                ])->save();
+            }
+
+            return null;
+        }
+
         // 1) строгий тред-матч; 2) по номеру заявки/док-номеру из ТЕМЫ (поставщик
         //    часто рвёт In-Reply-To, но сохраняет тему с нашим кодом) — иначе
         //    ответ по одной позиции валился в «последний инквайри по e-mail» и
@@ -299,7 +332,7 @@ class SupplierInquiryService
         // разных поставщиков → домен-матч там неверен. Кейс M-2026-12940:
         // info@lift-lt.ru ↔ ответ technicalsupport@lift-lt.ru.
         $domain = \Illuminate\Support\Str::after($from, '@');
-        if ($domain === '' || $domain === $from || in_array($domain, self::FREE_MAIL_DOMAINS, true)) {
+        if ($domain === '' || $domain === $from || in_array($domain, self::FREE_MAIL_DOMAINS, true) || $this->isInternalDomain($domain)) {
             return null;
         }
 
@@ -443,7 +476,7 @@ class SupplierInquiryService
                 if ($hit !== null) {
                     return $hit;
                 }
-                if ($domain !== '') {
+                if ($domain !== '' && ! $this->isInternalDomain($domain) && ! in_array($domain, self::FREE_MAIL_DOMAINS, true)) {
                     $hit = (clone $base())->whereRaw("split_part(lower(supplier_email), '@', 2) = ?", [$domain])->first();
                     if ($hit !== null) {
                         return $hit;

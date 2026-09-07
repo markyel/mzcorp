@@ -216,7 +216,8 @@ class MailRouter
                 Log::info('MailRouter: procurement mailbox — read as supplier correspondence, no request', [
                     'email_message_id' => $message->id,
                     'mailbox_id' => $inboundMailbox->id,
-                    'supplier_inquiry_id' => $inquiry->id,
+                    'supplier_inquiry_id' => $inquiry?->id,
+                    'internal_sender' => $inquiry === null,
                 ]);
             } catch (\Throwable $e) {
                 Log::warning('MailRouter: procurement mailbox ingest failed (non-fatal)', [
@@ -242,7 +243,7 @@ class MailRouter
                     $inquiry = $this->supplierInquiries->ingestSupplierMessage($message);
                     Log::info('MailRouter: supplier-blocklist sender — read as supplier correspondence', [
                         'email_message_id' => $message->id,
-                        'supplier_inquiry_id' => $inquiry->id,
+                        'supplier_inquiry_id' => $inquiry?->id,
                         'from_email' => $message->from_email,
                     ]);
                 } catch (\Throwable $e) {
