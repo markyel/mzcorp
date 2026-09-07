@@ -16,6 +16,10 @@ import './bootstrap';
 // Регистрируем через alpine:init — Alpine поставляется с Livewire, отдельный
 // инстанс не создаём (см. комментарий выше).
 import mailEditor from './mail-editor';
-document.addEventListener('alpine:init', () => {
-    window.Alpine.data('mailEditor', mailEditor);
-});
+// Регистрируем и по alpine:init, и сразу, если Alpine уже стартовал (порядок
+// выполнения module-скрипта и livewire.js зависит от кеша/сети — иначе
+// компонент «mailEditor is not defined», редактор не инициализируется).
+const registerMailEditor = () => { if (window.Alpine && ! window.__mailEditorRegistered) { window.Alpine.data('mailEditor', mailEditor); window.__mailEditorRegistered = true; } };
+document.addEventListener('alpine:init', registerMailEditor);
+document.addEventListener('livewire:init', registerMailEditor);
+registerMailEditor();
