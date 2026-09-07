@@ -97,6 +97,7 @@
 .mailapp .trow .flagbtn.on{color:var(--amber-600)}
 .mailapp .trow .clip{color:var(--fg-3);font-size:12px}
 .mailapp .trow .reqchip{font:600 10.5px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px}
+.mailapp .trow .onecchip{font:600 10.5px/1.4 var(--font-mono);background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:4px;white-space:nowrap}
 .mailapp .trow .catchip{font:500 10.5px/1.3 var(--font-sans);padding:1px 6px;border-radius:999px}
 .mailapp .trow .catchip.kp{background:var(--sky-50);color:var(--sky-700)}
 .mailapp .trow .catchip.invoice{background:var(--emerald-50);color:var(--emerald-700)}
@@ -116,6 +117,7 @@
 .mailapp .chead .meta{font:400 12px/1.4 var(--font-sans);color:var(--fg-3);margin-top:5px}
 .mailapp .chead .reqlink{display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:8px 12px;background:var(--violet-50);border:1px solid var(--violet-600);border-radius:var(--r-md);font-size:12.5px}
 .mailapp .chead .reqlink .code{font-family:var(--font-mono);font-weight:600;color:var(--violet-700)}
+.mailapp .chead .reqlink .onec{font-family:var(--font-mono);font-weight:600;color:var(--emerald-700);margin-left:6px}
 .mailapp .chead .reqlink .st{color:var(--violet-700)}
 .mailapp .chead .reqlink .spacer{flex:1}
 .mailapp .chead .reqlink a{color:var(--violet-700);font-weight:600;text-decoration:none;border-bottom:1px dashed currentColor}
@@ -249,6 +251,7 @@
                                 @if($m->attachments_count)<span class="clip">📎</span>@endif
                                 @if($m->related_request_id && $m->relatedRequest)
                                     <span class="reqchip">{{ $m->relatedRequest->internal_code }}</span>
+                                    @if($m->relatedRequest->onec_number)<span class="onecchip" title="Номер заявки/КП в 1С">1С {{ $m->relatedRequest->onec_number }}</span>@endif
                                 @elseif($cat)
                                     <span class="catchip {{ $cat[1] }}">{{ $cat[0] }}</span>
                                 @endif
@@ -286,6 +289,7 @@
                     <div class="reqlink">
                         <span>Привязано к заявке</span>
                         <span class="code">{{ $req->internal_code }}</span>
+                        @if($req->onec_number)<span class="onec" title="Номер заявки/КП в 1С">1С: {{ $req->onec_number }}</span>@endif
                         @php
                             $reqStatus = $req->status instanceof \App\Enums\RequestStatus
                                 ? $req->status

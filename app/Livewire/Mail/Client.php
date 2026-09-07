@@ -308,7 +308,7 @@ class Client extends Component
                 'ustate.flagged_at as my_flagged_at',
             ])
             ->selectRaw('LEFT(email_messages.body_plain, 200) as body_plain')
-            ->with('relatedRequest:id,internal_code,status')
+            ->with('relatedRequest:id,internal_code,status,onec_number')
             ->withCount('attachments')
             ->orderByRaw('email_messages.sent_at DESC NULLS LAST')
             ->orderByDesc('email_messages.id')
@@ -469,7 +469,7 @@ class Client extends Component
         if ($anchor->related_request_id) {
             return EmailMessage::query()
                 ->visibleTo($user)
-                ->with('relatedRequest:id,internal_code,status')
+                ->with('relatedRequest:id,internal_code,status,onec_number')
                 ->where('related_request_id', $anchor->related_request_id)
                 // Не тащить кросс-ящиковые тех.копии (одно письмо в личном INBOX
                 // менеджера + в общем ящике) — иначе тред двоится.
