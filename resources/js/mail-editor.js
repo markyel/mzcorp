@@ -42,6 +42,7 @@ export default function mailEditor(opts = {}) {
         tableRows: 3,
         tableCols: 3,
         colorOpen: false,
+        blockOpen: false,
         colors: ['#0f1419', '#d32027', '#b45309', '#15803d', '#1d4ed8', '#6b21a8', '#64748b'],
         _last: null,
         _timer: null,
