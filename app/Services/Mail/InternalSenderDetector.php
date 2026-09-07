@@ -100,6 +100,73 @@ class InternalSenderDetector
         return in_array($client, $this->recipientEmails($message), true);
     }
 
+    /**
+     * Адресовано ли ИСХОДЯЩЕЕ письмо заказчику заявки. Гард для outbound
+     * document detector (КП/счёт/уточнение/отказ): документ клиенту может
+     * уйти только клиенту — внутренний пересыл коллеге или третьей стороне
+     * статус заявки двигать не должен.
+     *
+     * Кейс M-2026-14608: письмо клиента «Прошу выставить счёт» + PDF
+     * «Реквизиты ООО …» переслали из info@ на сторонний адрес с комментарием
+     * «Этой заявки нет в мз корпе». Пересыл унаследовал In-Reply-To →
+     * прилинковался к заявке → LLM-классификатор прочитал цитату клиента
+     * и имя файла как «счёт» → заявка ушла в «Счёт отправлен» без счёта.
+     *
+     * Правило: среди to/cc есть адрес заказчика — точный, либо на том же
+     * КОРПОРАТИВНОМ домене (коллега заказчика). Для публичных почтовиков
+     * (gmail.com, mail.ru, …) совпадение домена не считается — там «тот же
+     * домен» ничего не значит. Внутренние домены (наши) тоже не считаются.
+     * Если e-mail заказчика в заявке не заполнен — подтвердить нечем,
+     * возвращаем true (детектор работает как раньше).
+     */
+    public function isAddressedToClient(EmailMessage $message, ?string $clientEmail): bool
+    {
+        $client = mb_strtolower(trim((string) $clientEmail));
+        if ($client === '') {
+            return true;
+        }
+
+        $recipients = $this->recipientEmails($message);
+        if (in_array($client, $recipients, true)) {
+            return true;
+        }
+
+        $clientDomain = (string) substr((string) strrchr($client, '@'), 1);
+        if ($clientDomain === ''
+            || $this->isPublicMailDomain($clientDomain)
+            || $this->isInternalDomain($clientDomain)) {
+            return false;
+        }
+
+        foreach ($recipients as $rcpt) {
+            if (str_ends_with($rcpt, '@' . $clientDomain)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isPublicMailDomain(string $domain): bool
+    {
+        $domains = array_filter(array_map(
+            fn ($d) => mb_strtolower(trim((string) $d)),
+            (array) config('services.mail.public_mail_domains', [])
+        ));
+
+        return in_array(mb_strtolower($domain), $domains, true);
+    }
+
+    private function isInternalDomain(string $domain): bool
+    {
+        $domains = array_filter(array_map(
+            fn ($d) => mb_strtolower(trim((string) $d)),
+            (array) config('services.mail.internal_domains', [])
+        ));
+
+        return in_array(mb_strtolower($domain), $domains, true);
+    }
+
     /** Один контрагент: совпадает точный e-mail или домен. */
     private function isSameParty(string $a, string $b): bool
     {

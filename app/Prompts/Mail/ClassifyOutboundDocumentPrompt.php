@@ -4,6 +4,7 @@ namespace App\Prompts\Mail;
 
 use App\Models\EmailMessage;
 use App\Models\Request;
+use App\Services\Mail\EmailTextCleanerService;
 
 /**
  * Промпт LLM-классификатора исходящих писем менеджера в треде заявки
@@ -29,12 +30,17 @@ class ClassifyOutboundDocumentPrompt
 {
     private const MAX_BODY_CHARS = 4000;
 
+    public function __construct(
+        private readonly EmailTextCleanerService $cleaner = new EmailTextCleanerService(),
+    ) {
+    }
+
     /**
      * @return array<int, array{role: string, content: string}>
      */
     public function build(EmailMessage $message, Request $request): array
     {
-        $body = (string) ($message->body_plain ?: strip_tags((string) $message->body_html));
+        $body = $this->ownText($message);
         $body = mb_substr(trim($body), 0, self::MAX_BODY_CHARS);
 
         $subject = (string) ($message->subject ?? '(без темы)');
@@ -71,6 +77,29 @@ class ClassifyOutboundDocumentPrompt
             ['role' => 'system', 'content' => $this->systemPrompt()],
             ['role' => 'user', 'content' => $userPrompt],
         ];
+    }
+
+    /**
+     * Собственный текст менеджера — без цитаты клиента и без блока
+     * «-------- Перенаправленное сообщение --------». Классифицируем то, что
+     * написал менеджер, а не то, что написал клиент: цитата «Прошу выставить
+     * счёт» и пересланные «реквизиты» иначе читаются LLM как наш счёт
+     * (кейс M-2026-14608). Тот же cleaner, что и в rule-based детекторе
+     * (OutboundDocumentDetector::buildSearchableText, кейс M-2026-1866).
+     *
+     * Если после очистки не осталось ничего (письмо целиком — цитата или
+     * HTML-only) — fallback на сырой текст, чтобы не потерять сигнал.
+     */
+    private function ownText(EmailMessage $message): string
+    {
+        $raw = (string) ($message->body_plain ?: strip_tags((string) $message->body_html));
+        if (trim($raw) === '') {
+            return '';
+        }
+
+        $clean = $this->cleaner->cleanInboundReferenceText($raw);
+
+        return trim($clean) !== '' ? $clean : $raw;
     }
 
     private function systemPrompt(): string
@@ -139,6 +168,13 @@ class ClassifyOutboundDocumentPrompt
 
 ═══ ПРАВИЛА ═══
 
+• Пересыл (subject начинается с «Fwd:», «FW:», «Пересылаемое/Перенаправленное
+  сообщение») или служебная реплика коллеге («этой заявки нет в базе»,
+  «посмотри», «передаю») — это НЕ документ клиенту → other. Текст и файлы
+  клиента внутри пересыла (его «прошу выставить счёт», его «реквизиты»,
+  его карточка организации) — не наш счёт и не наше КП.
+• «Реквизиты», «карточка предприятия», «карточка организации» в имени файла
+  без слов «счёт»/«invoice» — это реквизиты контрагента, не счёт → other.
 • Если есть PDF/XLSX-вложение с КП-признаком в имени файла И body не
   содержит явных слов «счёт» — это quotation.
 • Если есть PDF/XLSX с invoice-признаком ИЛИ body про «счёт на оплату» —

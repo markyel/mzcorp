@@ -327,14 +327,31 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
             // отметить оплаченным. Идемпотентно. Non-fatal: парсинг уже
             // успешно завершён, инвойс — отдельная сущность.
             if ($this->documentType === \App\Enums\DetectorType::OutboundInvoice->value) {
+                $invoice = null;
                 try {
-                    app(\App\Services\Invoices\InvoiceService::class)
+                    $invoice = app(\App\Services\Invoices\InvoiceService::class)
                         ->autoIssueFromOutboundQuote($quote->fresh());
                 } catch (\Throwable $e) {
                     Log::warning('ParseOutboundQuoteJob: auto-issue invoice failed (non-fatal)', [
                         'quote_id' => $quote->id,
                         'request_id' => $request->id,
                         'error' => $e->getMessage(),
+                    ]);
+                }
+
+                // Статус «Счёт отправлен» — только по распознанному счёту
+                // (DetectorType::requiresDocumentEvidence). Invoice создан →
+                // есть номер, позиции, сумма → применяем отложенный AiDecision.
+                // Нет Invoice (не счёт / без номера / договор) — suggestion
+                // остаётся менеджеру на плашке.
+                if ($invoice !== null) {
+                    $this->applyInvoiceDecisionAfterEvidence($request, $message, $quote->fresh(), $invoice);
+                } else {
+                    Log::info('ParseOutboundQuoteJob: no invoice recognized — Invoiced status not applied', [
+                        'quote_id' => $quote->id,
+                        'request_id' => $request->id,
+                        'document_number' => $quote->document_number,
+                        'total_amount' => $quote->total_amount,
                     ]);
                 }
 
@@ -499,6 +516,46 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
     }
 
     /**
+     * Отложенный auto-apply AiDecision «Отправлен счёт» — после того как из
+     * вложения реально создан Invoice (номер + сумма + позиции). См.
+     * DetectorType::requiresDocumentEvidence и
+     * AiDecisionService::applyAfterDocumentEvidence. Non-fatal.
+     */
+    private function applyInvoiceDecisionAfterEvidence(
+        Request $request,
+        EmailMessage $message,
+        OutboundQuote $quote,
+        \App\Models\Invoice $invoice,
+    ): void {
+        $decision = AiDecision::query()
+            ->where('request_id', $request->id)
+            ->where('email_message_id', $message->id)
+            ->where('detector_type', DetectorType::OutboundInvoice->value)
+            ->where('status', AiDecisionStatus::Suggested->value)
+            ->orderByDesc('id')
+            ->first();
+        if (! $decision) {
+            return;
+        }
+
+        try {
+            app(AiDecisionService::class)->applyAfterDocumentEvidence($decision, [
+                'invoice_id' => $invoice->id,
+                'invoice_number' => $invoice->invoice_number,
+                'amount' => $invoice->amount_snapshot,
+                'outbound_quote_id' => $quote->id,
+                'items_count' => $quote->items()->count(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('ParseOutboundQuoteJob: apply after invoice evidence failed (non-fatal)', [
+                'decision_id' => $decision->id,
+                'invoice_id' => $invoice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
      * Boost confidence соответствующего AiDecision и auto-apply, когда
      * quote-парсер успешно сматчил позиции КП с RequestItem'ами заявки.
      *
@@ -531,6 +588,19 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
             ->orderByDesc('id')
             ->first();
         if (! $decision) {
+            return;
+        }
+
+        // Счёт: совпадение позиций — не доказательство счёта (реквизиты или
+        // спецификация тоже содержат нашу номенклатуру). Статус Invoiced
+        // ставится только через applyInvoiceDecisionAfterEvidence, когда
+        // из документа создан Invoice. Здесь — не бустим и не применяем.
+        if ($detectorType->requiresDocumentEvidence()) {
+            Log::info('ParseOutboundQuoteJob: match-boost skipped — type requires document evidence', [
+                'decision_id' => $decision->id,
+                'detector_type' => $detectorType->value,
+            ]);
+
             return;
         }
 

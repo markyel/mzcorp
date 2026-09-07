@@ -69,7 +69,21 @@ class AiDecisionService
         // Foundation §7.3: auto-mode проверка — если type включён в auto и
         // confidence >= threshold, применяем сразу без UI-подтверждения.
         // Иначе остаётся suggested — оператор увидит плашку.
-        if ($this->shouldAutoApply($type, $confidence)) {
+        //
+        // Исключение — типы с requiresDocumentEvidence() (счёт): по письму
+        // статус не двигаем, ждём, пока ParseOutboundQuoteJob распознает
+        // документ и создаст Invoice → applyAfterDocumentEvidence(). Если
+        // документ не распознан (нет вложения / скан / не счёт) — suggestion
+        // остаётся на плашке, менеджер подтверждает вручную.
+        if ($type->requiresDocumentEvidence()) {
+            Log::info('AiDecisionService: auto-apply deferred until document is parsed', [
+                'decision_id' => $decision->id,
+                'type' => $type->value,
+                'request_id' => $request->id,
+                'email_message_id' => $message->id,
+                'confidence' => $confidence,
+            ]);
+        } elseif ($this->shouldAutoApply($type, $confidence)) {
             $decision = $this->apply($decision, null, ['auto' => true]);
         }
 
@@ -453,6 +467,46 @@ class AiDecisionService
         ]);
 
         return $decision;
+    }
+
+    /**
+     * Отложенный auto-apply для типов с requiresDocumentEvidence(): парсер
+     * распознал документ (создан Invoice с номером и суммой) — теперь веха
+     * подтверждена фактом, а не словами в письме. Auto-mode и порог
+     * уверенности проверяются те же, что и при мгновенном apply; если
+     * auto-mode выключен — suggestion остаётся менеджеру.
+     *
+     * @param  array<string, mixed>  $evidence  invoice_id / invoice_number / amount / outbound_quote_id / items_count
+     */
+    public function applyAfterDocumentEvidence(AiDecision $decision, array $evidence): AiDecision
+    {
+        if ($decision->status !== AiDecisionStatus::Suggested) {
+            return $decision; // уже применено/отклонено человеком
+        }
+
+        $payload = is_array($decision->payload) ? $decision->payload : [];
+        $payload['document_evidence'] = array_merge($evidence, [
+            'confirmed_at' => now()->toIso8601String(),
+        ]);
+        $decision->update(['payload' => $payload]);
+
+        if (! $this->shouldAutoApply($decision->detector_type, (float) $decision->confidence)) {
+            Log::info('AiDecisionService: document evidence recorded, auto-mode off — left suggested', [
+                'decision_id' => $decision->id,
+                'type' => $decision->detector_type->value,
+            ]);
+
+            return $decision;
+        }
+
+        Log::info('AiDecisionService: auto-apply after document evidence', [
+            'decision_id' => $decision->id,
+            'type' => $decision->detector_type->value,
+            'request_id' => $decision->request_id,
+            'evidence' => $evidence,
+        ]);
+
+        return $this->apply($decision->refresh(), null, ['auto' => true]);
     }
 
     /**

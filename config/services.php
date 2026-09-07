@@ -393,6 +393,24 @@ return [
         )),
 
         /*
+        | Публичные почтовые домены (бесплатные почтовики). Для них
+        | «получатель на том же домене, что и заказчик» НЕ означает «коллега
+        | заказчика» — InternalSenderDetector::isAddressedToClient считает
+        | адресацию клиенту только по точному совпадению e-mail.
+        |
+        | Список через запятую: MAIL_PUBLIC_MAIL_DOMAINS=gmail.com,mail.ru,…
+        */
+        'public_mail_domains' => array_filter(array_map(
+            'trim',
+            explode(',', (string) env(
+                'MAIL_PUBLIC_MAIL_DOMAINS',
+                'mail.ru,inbox.ru,list.ru,bk.ru,internet.ru,gmail.com,yandex.ru,ya.ru,yandex.com,'
+                . 'rambler.ru,lenta.ru,autorambler.ru,myrambler.ru,outlook.com,hotmail.com,live.com,'
+                . 'icloud.com,me.com,proton.me,protonmail.com,gmx.com,gmx.de'
+            ))
+        )),
+
+        /*
         | Релей-ящики веб-формы сайта. Письма с этих адресов — заявки с сайта:
         | реальный клиент указан в теле (Организация/Контактное лицо/Телефон/
         | E-mail), а не в From. WebFormSubmissionParser извлекает контакты,

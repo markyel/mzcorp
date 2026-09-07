@@ -65,6 +65,20 @@ enum DetectorType: string
     }
 
     /**
+     * Auto-apply только ПОСЛЕ распознавания документа парсером, а не по
+     * письму. «Счёт отправлен» без счёта (номер, позиции, сумма) — не веха:
+     * detector на уровне письма ловит слова «счёт»/«реквизиты» и имя файла,
+     * но не знает, что внутри. Suggestion пишется сразу (плашка менеджеру),
+     * а статус двигается из ParseOutboundQuoteJob, когда из вложения реально
+     * создан Invoice (см. AiDecisionService::applyAfterDocumentEvidence).
+     * Кейс M-2026-14608: пересыл с PDF «Реквизиты ООО …» → Invoiced без счёта.
+     */
+    public function requiresDocumentEvidence(): bool
+    {
+        return $this === self::OutboundInvoice;
+    }
+
+    /**
      * На какой RequestStatus переводим заявку при apply.
      * NULL = AI не предлагает конкретный переход (например inbound_unclear —
      * только алерт менеджеру, без auto-перехода).
