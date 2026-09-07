@@ -251,8 +251,8 @@
                                         wire:click.stop="toggleFlag({{ $m->id }})" title="Пометить">⚑</button>
                                 @if($m->attachments_count)<span class="clip">📎</span>@endif
                                 @if($m->related_request_id && $m->relatedRequest)
-                                    @php $rrs = $m->relatedRequest->status instanceof AppnumsRequestStatus ? $m->relatedRequest->status : AppnumsRequestStatus::tryFrom((string) $m->relatedRequest->status); @endphp
-                                    @if($rrs === AppnumsRequestStatus::AwaitingInvoice)<span class="rubchip" title="Клиент ждёт счёт — счёт ещё не выставлен">₽</span>@endif
+                                    @php $rrs = $m->relatedRequest->status instanceof \App\Enums\RequestStatus ? $m->relatedRequest->status : \App\Enums\RequestStatus::tryFrom((string) $m->relatedRequest->status); @endphp
+                                    @if($rrs === \App\Enums\RequestStatus::AwaitingInvoice)<span class="rubchip" title="Клиент ждёт счёт — счёт ещё не выставлен">₽</span>@endif
                                     <span class="reqchip">{{ $m->relatedRequest->internal_code }}</span>
                                     @if($m->relatedRequest->onec_number)<span class="onecchip" title="Номер заявки/КП в 1С">1С {{ $m->relatedRequest->onec_number }}</span>@endif
                                 @elseif($cat)
