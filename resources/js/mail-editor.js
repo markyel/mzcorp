@@ -95,8 +95,10 @@ export default function mailEditor(opts = {}) {
          */
         wire() {
             if (opts.wireId && window.Livewire) {
+                // Livewire 3: find() отдаёт сам $wire-прокси (set/get/call).
                 const c = window.Livewire.find(opts.wireId);
-                if (c) return c.$wire;
+                if (c && typeof c.set === 'function') return c;
+                if (c && c.$wire) return c.$wire;
             }
             return this.$wire;
         },
