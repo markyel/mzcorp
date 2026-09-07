@@ -98,6 +98,10 @@
 .mailapp .trow .clip{color:var(--fg-3);font-size:12px}
 .mailapp .trow .reqchip{font:600 10.5px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px}
 .mailapp .trow .onecchip{font:600 10.5px/1.4 var(--font-mono);background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:4px;white-space:nowrap}
+/* Заявка «Клиент ждёт счёт»: тёплый цвет текста строки + полоска слева. */
+.mailapp .trow.awaiting-inv .from,.mailapp .trow.awaiting-inv .subj{color:var(--amber-700,#b45309)}
+.mailapp .trow.awaiting-inv .snip{color:var(--amber-600,#d97706)}
+.mailapp .trow.awaiting-inv{box-shadow:inset 3px 0 0 var(--amber-600,#d97706)}
 .mailapp .trow .rubchip{font:700 11px/1.4 var(--font-sans);background:var(--amber-50,#fff7ed);color:var(--amber-700,#b45309);padding:1px 6px;border-radius:4px;white-space:nowrap}
 .mailapp .trow .catchip{font:500 10.5px/1.3 var(--font-sans);padding:1px 6px;border-radius:999px}
 .mailapp .trow .catchip.kp{background:var(--sky-50);color:var(--sky-700)}
@@ -233,8 +237,16 @@
                     $unread = $m->my_read_at === null && $m->direction?->value === 'inbound';
                     $cat = $catChip($m->category);
                     $isOrg = (bool) $m->related_request_id;
+                    // Заявка в «Клиент ждёт счёт» — строка подсвечивается (цвет текста + маркер ₽).
+                    $rrs = null;
+                    if ($m->related_request_id && $m->relatedRequest) {
+                        $rrs = $m->relatedRequest->status instanceof \App\Enums\RequestStatus
+                            ? $m->relatedRequest->status
+                            : \App\Enums\RequestStatus::tryFrom((string) $m->relatedRequest->status);
+                    }
+                    $awaitingInv = $rrs === \App\Enums\RequestStatus::AwaitingInvoice;
                 @endphp
-                <div class="trow {{ $unread ? 'unread' : '' }} {{ $openId === $m->id ? 'active' : '' }}"
+                <div class="trow {{ $unread ? 'unread' : '' }} {{ $openId === $m->id ? 'active' : '' }} {{ $awaitingInv ? 'awaiting-inv' : '' }}"
                      wire:key="trow-{{ $m->id }}" wire:click="openMessage({{ $m->id }})">
                     @if($unread)<span class="dot-unread"></span>@endif
                     <span class="av {{ $isOrg ? 'org' : '' }}">{{ $initials($m->from_name, $m->from_email) }}</span>
@@ -251,8 +263,7 @@
                                         wire:click.stop="toggleFlag({{ $m->id }})" title="Пометить">⚑</button>
                                 @if($m->attachments_count)<span class="clip">📎</span>@endif
                                 @if($m->related_request_id && $m->relatedRequest)
-                                    @php $rrs = $m->relatedRequest->status instanceof \App\Enums\RequestStatus ? $m->relatedRequest->status : \App\Enums\RequestStatus::tryFrom((string) $m->relatedRequest->status); @endphp
-                                    @if($rrs === \App\Enums\RequestStatus::AwaitingInvoice)<span class="rubchip" title="Клиент ждёт счёт — счёт ещё не выставлен">₽</span>@endif
+                                    @if($awaitingInv)<span class="rubchip" title="Клиент ждёт счёт — счёт ещё не выставлен">₽</span>@endif
                                     <span class="reqchip">{{ $m->relatedRequest->internal_code }}</span>
                                     @if($m->relatedRequest->onec_number)<span class="onecchip" title="Номер заявки/КП в 1С">1С {{ $m->relatedRequest->onec_number }}</span>@endif
                                 @elseif($cat)
