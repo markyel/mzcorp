@@ -32,8 +32,10 @@ use Livewire\WithFileUploads;
  * Встраивается один раз в App\Livewire\Mail\Client; открывается событиями
  * mail-open-reply / mail-open-compose / mail-open-draft.
  *
- * Тело — plain text (подпись и цитата приклеиваются в MimeBuilder при send,
- * как в ComposeForm). Богатый HTML-редактор + пересылка — Фаза 2b.
+ * Тело — HTML из богатого редактора (TipTap, resources/js/mail-editor.js):
+ * форматирование, таблицы, картинки в теле (inline-вложения черновика,
+ * см. InlineImageController / MailInlineImageService). Подпись, реклама и
+ * цитата приклеиваются в MimeBuilder при send.
  */
 class Composer extends Component
 {
@@ -312,12 +314,20 @@ class Composer extends Component
         }
     }
 
+    /** Обычные вложения (чипы); inline-картинки тела в списке не показываем. */
     #[Computed]
     public function attachments()
     {
         return $this->draftId
-            ? EmailAttachment::where('email_message_id', $this->draftId)->get()
+            ? EmailAttachment::where('email_message_id', $this->draftId)->where('is_inline', false)->get()
             : collect();
+    }
+
+    /** URL загрузки картинки в тело письма (см. InlineImageController). */
+    #[Computed]
+    public function inlineImageUploadUrl(): ?string
+    {
+        return $this->draftId ? route('mail.inline-images.store', ['draft' => $this->draftId]) : null;
     }
 
     #[Computed]
@@ -366,6 +376,16 @@ class Composer extends Component
             $this->addError('subject', 'Черновик не найден.');
 
             return null;
+        }
+
+        // Картинки, вставленные в тело и потом стёртые, в письмо не идут.
+        try {
+            $drafts->pruneUnreferencedInlineImages($draft, $this->bodyHtml);
+        } catch (\Throwable $e) {
+            Log::warning('Mail\Composer: prune inline images failed (non-fatal)', [
+                'draft_id' => $draft->id,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         // Авторизация отправки: заявка → assigned/acting/privileged; свободное →

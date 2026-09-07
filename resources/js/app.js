@@ -11,3 +11,11 @@ import './bootstrap';
 // Если понадобятся Alpine-плагины (focus / intersect / mask) — регистрировать
 // их через хук document.addEventListener('alpine:init', ...) ДО старта
 // Livewire, или через Livewire.start(... custom alpine ...).
+
+// Богатый редактор письма (почтовый клиент): Alpine-компонент mailEditor.
+// Регистрируем через alpine:init — Alpine поставляется с Livewire, отдельный
+// инстанс не создаём (см. комментарий выше).
+import mailEditor from './mail-editor';
+document.addEventListener('alpine:init', () => {
+    window.Alpine.data('mailEditor', mailEditor);
+});

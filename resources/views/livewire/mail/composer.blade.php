@@ -19,19 +19,48 @@
 .mail-composer .reqbadge{font:600 10.5px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:2px 7px;border-radius:4px}
 .mail-composer .cbodyarea{flex:1 1 auto;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;min-height:120px}
 .mail-composer .rte{flex:1 1 auto;display:flex;flex-direction:column;min-height:120px}
-.mail-composer .rte-toolbar{display:flex;align-items:center;gap:2px;padding:0 0 8px;flex:0 0 auto}
-.mail-composer .rte-toolbar button{min-width:28px;height:26px;padding:0 6px;border:1px solid var(--border);background:var(--bg-surface);border-radius:4px;cursor:pointer;color:var(--fg-2);font-size:12px;display:inline-flex;align-items:center;justify-content:center;line-height:1}
-.mail-composer .rte-toolbar button:hover{background:var(--bg-hover);color:var(--fg-1)}
-.mail-composer .rte-toolbar .sep{width:1px;height:16px;background:var(--border);margin:0 4px}
-.mail-composer .rte-ed{flex:1 1 auto;min-height:100px;outline:none;font:400 13.5px/1.6 var(--font-sans);color:var(--fg-1);overflow-y:auto;word-break:break-word}
-.mail-composer .rte-ed:empty:before{content:attr(data-placeholder);color:var(--fg-4)}
-.mail-composer .rte-ed a{color:var(--sky-700)}
+.mail-composer .rte-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:2px;padding:0 0 8px;flex:0 0 auto}
+.mail-composer .rte-toolbar button,.mail-composer .rte-tablebar button{min-width:28px;height:26px;padding:0 6px;border:1px solid var(--border);background:var(--bg-surface);border-radius:4px;cursor:pointer;color:var(--fg-2);font-size:12px;display:inline-flex;align-items:center;justify-content:center;line-height:1;white-space:nowrap}
+.mail-composer .rte-toolbar button:hover,.mail-composer .rte-tablebar button:hover{background:var(--bg-hover);color:var(--fg-1)}
+.mail-composer .rte-toolbar button.on{background:var(--accent-bg);color:var(--accent);border-color:var(--accent)}
+.mail-composer .rte-toolbar button[disabled]{opacity:.4;cursor:default}
+.mail-composer .rte-toolbar .sep,.mail-composer .rte-tablebar .sep{width:1px;height:16px;background:var(--border);margin:0 4px}
+.mail-composer .rte-toolbar .rte-sel{height:26px;border:1px solid var(--border);border-radius:4px;background:var(--bg-surface);color:var(--fg-2);font:400 12px/1 var(--font-sans);padding:0 4px}
+.mail-composer .rte-toolbar .clr-a{font-weight:700;border-bottom:3px solid var(--accent);line-height:1;padding-bottom:1px}
+.mail-composer .rte-pop{position:relative;display:inline-flex}
+.mail-composer .rte-popover{position:absolute;top:30px;left:0;z-index:5;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:6px;box-shadow:0 8px 24px rgba(15,23,42,.18);padding:8px;display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap}
+.mail-composer .rte-popover input[type=text]{width:260px;height:26px;border:1px solid var(--border);border-radius:4px;padding:0 6px;font:400 12.5px/1 var(--font-mono);color:var(--fg-1);background:var(--bg-surface)}
+.mail-composer .rte-popover input[type=number]{width:52px;height:26px;border:1px solid var(--border);border-radius:4px;padding:0 4px;font:400 12px/1 var(--font-sans);color:var(--fg-1);background:var(--bg-surface);margin-left:4px}
+.mail-composer .rte-popover label{color:var(--fg-2);display:inline-flex;align-items:center}
+.mail-composer .rte-popover .ok{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.mail-composer .rte-popover .rm{color:var(--fg-3)}
+.mail-composer .rte-colors .swatch{width:20px;height:20px;min-width:20px;border-radius:999px;border:1px solid rgba(0,0,0,.15);padding:0}
+.mail-composer .rte-colors .swatch.none{background:var(--bg-surface);color:var(--fg-3)}
+.mail-composer .rte-tablebar{display:flex;align-items:center;flex-wrap:wrap;gap:2px;padding:0 0 8px;flex:0 0 auto}
+.mail-composer .rte-tablebar .lbl{font:500 11.5px/1 var(--font-sans);color:var(--fg-3);margin-right:4px}
+.mail-composer .rte-tablebar .danger{color:var(--red-700)}
+.mail-composer .rte-note{font:400 11.5px/1.3 var(--font-sans);color:var(--fg-3);padding:0 0 6px}
+.mail-composer .rte-note.err{color:var(--red-700)}
+.mail-composer .rte-ed{flex:1 1 auto;min-height:100px;font:400 13.5px/1.6 var(--font-sans);color:var(--fg-1);overflow-y:auto;word-break:break-word;display:flex;flex-direction:column}
+.mail-composer .rte-ed .ProseMirror{outline:none;flex:1 1 auto;min-height:100px}
+.mail-composer .rte-ed .ProseMirror p{margin:0 0 6px}
+.mail-composer .rte-ed .ProseMirror p.is-editor-empty:first-child::before{content:attr(data-placeholder);color:var(--fg-4);float:left;height:0;pointer-events:none}
+.mail-composer .rte-ed h2{font:600 17px/1.3 var(--font-sans);margin:10px 0 6px}
+.mail-composer .rte-ed h3{font:600 14.5px/1.3 var(--font-sans);margin:8px 0 4px}
+.mail-composer .rte-ed a{color:var(--sky-700);text-decoration:underline}
 .mail-composer .rte-ed ul{list-style:disc outside;margin:4px 0;padding-left:24px}
 .mail-composer .rte-ed ol{list-style:decimal outside;margin:4px 0;padding-left:24px}
 .mail-composer .rte-ed li{margin:2px 0}
 .mail-composer .rte-ed blockquote{margin:6px 0;padding-left:12px;border-left:2px solid var(--border-strong);color:var(--fg-2)}
-.mail-composer .rte-ed table{border-collapse:collapse}
-.mail-composer .rte-ed td,.mail-composer .rte-ed th{border:1px solid var(--border);padding:3px 8px}
+.mail-composer .rte-ed hr{border:none;border-top:1px solid var(--border);margin:10px 0}
+.mail-composer .rte-ed img{max-width:100%;height:auto;display:block;margin:6px 0;border-radius:2px}
+.mail-composer .rte-ed img.ProseMirror-selectednode{outline:2px solid var(--sky-500)}
+.mail-composer .rte-ed table{border-collapse:collapse;table-layout:fixed;width:100%;margin:6px 0;overflow:hidden}
+.mail-composer .rte-ed td,.mail-composer .rte-ed th{border:1px solid var(--border);padding:4px 8px;min-width:40px;vertical-align:top;position:relative}
+.mail-composer .rte-ed th{background:var(--bg-surface-2);font-weight:600;text-align:left}
+.mail-composer .rte-ed td p,.mail-composer .rte-ed th p{margin:0}
+.mail-composer .rte-ed .selectedCell:after{content:'';position:absolute;inset:0;background:rgba(14,165,233,.12);pointer-events:none}
+.mail-composer .rte-ed .ProseMirror-gapcursor:after{border-top:1px solid var(--fg-1)}
 .mail-composer .sig{font:400 12px/1.5 var(--font-sans);color:var(--fg-3);margin-top:12px;padding-top:10px;border-top:1px dashed var(--border-subtle);white-space:pre-line;flex:0 0 auto}
 .mail-composer .atts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;flex:0 0 auto}
 .mail-composer .att{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:999px;background:var(--sky-50);color:var(--sky-700);font:500 11px/1 var(--font-sans)}
@@ -149,28 +178,94 @@
         @error('newFiles.*')<div class="err">{{ $message }}</div>@enderror
 
         <div class="cbodyarea">
-            {{-- Богатый редактор: contenteditable под wire:ignore (иначе Livewire
-                 morph сбивал бы курсор), синхронизация HTML в $wire.bodyHtml. --}}
-            <div class="rte" wire:ignore x-data="{
-                    sync() { $wire.set('bodyHtml', $refs.ed.innerHTML) },
-                    cmd(c, v=null) { $refs.ed.focus(); document.execCommand(c, false, v); this.sync(); },
-                    link() { const u = prompt('Ссылка (URL):', 'https://'); if (u) { this.cmd('createLink', u); } },
-                    init() { $refs.ed.innerHTML = ($wire.get('bodyHtml') || ''); }
-                 }">
+            {{-- Богатый редактор (TipTap, resources/js/mail-editor.js) под wire:ignore
+                 (иначе Livewire morph сбивал бы курсор); wire:key по черновику —
+                 при открытии другого письма редактор пересоздаётся с его HTML.
+                 Синхронизация в $wire.bodyHtml с debounce; перед отправкой —
+                 событие mail-editor-flush. --}}
+            <div class="rte" wire:ignore wire:key="rte-{{ $draftId ?? 0 }}"
+                 x-data="mailEditor({
+                     initialHtml: @js($bodyHtml),
+                     uploadUrl: @js($this->inlineImageUploadUrl),
+                     csrf: @js(csrf_token()),
+                     placeholder: 'Ваш ответ…',
+                 })"
+                 @mail-editor-flush.window="flush()"
+                 @click.outside="linkOpen = false; tableOpen = false; colorOpen = false">
                 <div class="rte-toolbar">
-                    <button type="button" @click="cmd('bold')" title="Жирный"><b>B</b></button>
-                    <button type="button" @click="cmd('italic')" title="Курсив"><i>I</i></button>
-                    <button type="button" @click="cmd('underline')" title="Подчёркнутый"><u>U</u></button>
+                    <button type="button" @click="run(c => c.undo())" :disabled="!can('undo')" title="Отменить (Ctrl+Z)">↶</button>
+                    <button type="button" @click="run(c => c.redo())" :disabled="!can('redo')" title="Повторить (Ctrl+Y)">↷</button>
                     <span class="sep"></span>
-                    <button type="button" @click="cmd('insertUnorderedList')" title="Маркированный список">•</button>
-                    <button type="button" @click="cmd('insertOrderedList')" title="Нумерованный список">1.</button>
+                    <select class="rte-sel" :value="blockValue()" @change="setBlock($event.target.value)" title="Стиль абзаца">
+                        <option value="p">Обычный</option>
+                        <option value="2">Заголовок</option>
+                        <option value="3">Подзаголовок</option>
+                    </select>
                     <span class="sep"></span>
-                    <button type="button" @click="link()" title="Ссылка">🔗</button>
-                    <button type="button" @click="cmd('removeFormat')" title="Убрать форматирование">⌫</button>
+                    <button type="button" :class="{ on: is('bold') }" @click="run(c => c.toggleBold())" title="Жирный (Ctrl+B)"><b>B</b></button>
+                    <button type="button" :class="{ on: is('italic') }" @click="run(c => c.toggleItalic())" title="Курсив (Ctrl+I)"><i>I</i></button>
+                    <button type="button" :class="{ on: is('underline') }" @click="run(c => c.toggleUnderline())" title="Подчёркнутый (Ctrl+U)"><u>U</u></button>
+                    <button type="button" :class="{ on: is('strike') }" @click="run(c => c.toggleStrike())" title="Зачёркнутый"><s>S</s></button>
+                    <span class="rte-pop">
+                        <button type="button" @click="colorOpen = !colorOpen; linkOpen = false; tableOpen = false" title="Цвет текста"><span class="clr-a">A</span></button>
+                        <div class="rte-popover rte-colors" x-show="colorOpen" x-cloak>
+                            <template x-for="c in colors" :key="c">
+                                <button type="button" class="swatch" :style="'background:' + c" @click="setColor(c)" :title="c"></button>
+                            </template>
+                            <button type="button" class="swatch none" @click="setColor(null)" title="Без цвета">×</button>
+                        </div>
+                    </span>
+                    <span class="sep"></span>
+                    <button type="button" :class="{ on: is({ textAlign: 'left' }) }" @click="run(c => c.setTextAlign('left'))" title="По левому краю">≡</button>
+                    <button type="button" :class="{ on: is({ textAlign: 'center' }) }" @click="run(c => c.setTextAlign('center'))" title="По центру">☰</button>
+                    <button type="button" :class="{ on: is({ textAlign: 'right' }) }" @click="run(c => c.setTextAlign('right'))" title="По правому краю">⫸</button>
+                    <span class="sep"></span>
+                    <button type="button" :class="{ on: is('bulletList') }" @click="run(c => c.toggleBulletList())" title="Маркированный список">•</button>
+                    <button type="button" :class="{ on: is('orderedList') }" @click="run(c => c.toggleOrderedList())" title="Нумерованный список">1.</button>
+                    <button type="button" :class="{ on: is('blockquote') }" @click="run(c => c.toggleBlockquote())" title="Цитата">❝</button>
+                    <span class="sep"></span>
+                    <span class="rte-pop">
+                        <button type="button" :class="{ on: is('link') }" @click="linkOpen ? (linkOpen = false) : openLink(); tableOpen = false; colorOpen = false" title="Ссылка (Ctrl+K)">🔗</button>
+                        <div class="rte-popover rte-link" x-show="linkOpen" x-cloak @keydown.enter.prevent="applyLink()" @keydown.escape="linkOpen = false">
+                            <input type="text" x-ref="linkInput" x-model="linkUrl" placeholder="https://…">
+                            <button type="button" class="ok" @click="applyLink()">ОК</button>
+                            <button type="button" class="rm" @click="removeLink()" title="Убрать ссылку">×</button>
+                        </div>
+                    </span>
+                    <button type="button" @click="pickImage()" title="Картинка в текст письма (или вставьте из буфера / перетащите)">🖼</button>
+                    <span class="rte-pop">
+                        <button type="button" :class="{ on: is('table') }" @click="tableOpen = !tableOpen; linkOpen = false; colorOpen = false" title="Таблица">▦</button>
+                        <div class="rte-popover rte-table" x-show="tableOpen" x-cloak @keydown.enter.prevent="insertTable()" @keydown.escape="tableOpen = false">
+                            <label>Строк <input type="number" min="1" max="30" x-model="tableRows"></label>
+                            <label>Столбцов <input type="number" min="1" max="12" x-model="tableCols"></label>
+                            <button type="button" class="ok" @click="insertTable()">Вставить</button>
+                        </div>
+                    </span>
+                    <button type="button" @click="run(c => c.setHorizontalRule())" title="Разделитель">—</button>
+                    <button type="button" @click="clearFormat()" title="Убрать форматирование">⌫</button>
                 </div>
-                <div class="rte-ed" x-ref="ed" contenteditable="true"
-                     @input.debounce.900ms="sync()" @blur="sync()"
-                     data-placeholder="Ваш ответ…"></div>
+
+                {{-- Панель таблицы — когда курсор внутри таблицы. --}}
+                <div class="rte-tablebar" x-show="is('table')" x-cloak>
+                    <span class="lbl">Таблица:</span>
+                    <button type="button" @click="run(c => c.addRowBefore())" title="Строка выше">↑ строка</button>
+                    <button type="button" @click="run(c => c.addRowAfter())" title="Строка ниже">↓ строка</button>
+                    <button type="button" @click="run(c => c.addColumnBefore())" title="Столбец слева">← столбец</button>
+                    <button type="button" @click="run(c => c.addColumnAfter())" title="Столбец справа">→ столбец</button>
+                    <span class="sep"></span>
+                    <button type="button" @click="run(c => c.deleteRow())" title="Удалить строку">− строка</button>
+                    <button type="button" @click="run(c => c.deleteColumn())" title="Удалить столбец">− столбец</button>
+                    <button type="button" @click="run(c => c.toggleHeaderRow())" title="Строка-заголовок">Заголовок</button>
+                    <button type="button" @click="run(c => c.mergeOrSplit())" title="Объединить / разделить ячейки">⊞</button>
+                    <span class="sep"></span>
+                    <button type="button" class="danger" @click="run(c => c.deleteTable())" title="Удалить таблицу">Удалить таблицу</button>
+                </div>
+
+                <div class="rte-note" x-show="uploading > 0" x-cloak>Загружаем картинку…</div>
+                <div class="rte-note err" x-show="uploadError" x-text="uploadError" x-cloak></div>
+
+                <div class="rte-ed" x-ref="ed"></div>
+                <input type="file" x-ref="imgInput" accept="image/png,image/jpeg,image/gif" multiple style="display:none" @change="onImagePicked($event)">
             </div>
 
             @if($this->attachments->isNotEmpty())
@@ -190,7 +285,7 @@
         </div>
 
         <div class="cfoot">
-            <button class="btn" wire:click="send" wire:loading.attr="disabled" wire:target="send">
+            <button class="btn" x-on:click="window.dispatchEvent(new CustomEvent('mail-editor-flush'))" wire:click="send" wire:loading.attr="disabled" wire:target="send">
                 <span wire:loading.remove wire:target="send">Отправить</span>
                 <span wire:loading wire:target="send">Отправка…</span>
             </button>

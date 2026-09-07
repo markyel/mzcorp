@@ -212,12 +212,18 @@ class EmailDraftService
         ]);
 
         // Перенос вложений оригинала (best-effort копирование файлов).
+        // Inline-картинки (cid: в теле) переносим как inline с тем же
+        // content_id, а в HTML черновика cid: → наш inline-роут, чтобы редактор
+        // и тред их показывали; при отправке MimeBuilder вернёт cid:.
+        $inlineCids = [];
         foreach ($source->attachments as $att) {
             try {
                 $content = Storage::disk($att->disk)->get($att->file_path);
                 if ($content === null) {
                     continue;
                 }
+                $cid = trim((string) ($att->content_id ?? ''), "<> \t");
+                $isInline = (bool) $att->is_inline && $cid !== '';
                 // Раскрываем MIME encoded-word в имени (иначе в чипах «?»).
                 $name = mb_substr($att->display_filename, 0, 255);
                 $safe = preg_replace('/[^\p{L}\p{N}._\- ]/u', '_', $name) ?? 'file';
@@ -228,17 +234,65 @@ class EmailDraftService
                     'filename' => $name,
                     'mime_type' => $att->mime_type,
                     'size_bytes' => $att->size_bytes,
-                    'content_id' => null,
+                    'content_id' => $isInline ? $cid : null,
                     'file_path' => $newPath,
                     'disk' => 'local',
-                    'is_inline' => false,
+                    'is_inline' => $isInline,
                 ]);
+                if ($isInline) {
+                    $inlineCids[] = $cid;
+                }
             } catch (\Throwable) {
                 // best-effort: пропускаем нечитаемое вложение
             }
         }
 
+        if ($inlineCids !== []) {
+            $draftId = $draft->id;
+            $rewritten = preg_replace_callback(
+                '/(src|href)\s*=\s*(["\'])cid:([^"\']+)\2/i',
+                function (array $m) use ($draftId, $inlineCids): string {
+                    $cid = trim(rawurldecode($m[3]), "<> \t");
+                    if (! in_array($cid, $inlineCids, true)) {
+                        return $m[0];
+                    }
+                    $url = route('attachments.inline', ['emailMessage' => $draftId, 'contentId' => rawurlencode($cid)]);
+
+                    return $m[1].'='.$m[2].$url.$m[2];
+                },
+                $bodyHtml,
+            );
+            if (is_string($rewritten) && $rewritten !== $bodyHtml) {
+                $draft->update(['body_html' => $rewritten]);
+            }
+        }
+
         return $draft;
+    }
+
+    /**
+     * Удалить inline-картинки черновика, на которые тело больше не ссылается
+     * (вставили и стёрли). Вызывается перед отправкой и при автосохранении.
+     * Возвращает число удалённых.
+     */
+    public function pruneUnreferencedInlineImages(EmailMessage $draft, string $bodyHtml): int
+    {
+        if (! $draft->is_draft) {
+            return 0;
+        }
+        $used = app(OutboundHtmlPostProcessor::class)->referencedCids($bodyHtml, (int) $draft->id);
+        $removed = 0;
+        foreach ($draft->attachments()->where('is_inline', true)->whereNotNull('content_id')->get() as $att) {
+            $cid = trim((string) $att->content_id, "<> \t");
+            if (in_array($cid, $used, true)) {
+                continue;
+            }
+            $this->deleteAttachmentFile($att);
+            $att->delete();
+            $removed++;
+        }
+
+        return $removed;
     }
 
     /**

@@ -31,6 +31,7 @@ class OutgoingMailMimeBuilder
         private readonly MailQuoteBuilder $quoteBuilder,
         private readonly EmailSignatureService $signatureService,
         private readonly \App\Services\Marketing\MarketingBlockService $marketing,
+        private readonly OutboundHtmlPostProcessor $postProcessor = new OutboundHtmlPostProcessor(),
     ) {
     }
 
@@ -181,9 +182,16 @@ class OutgoingMailMimeBuilder
         if ($finalBody['plain'] !== '') {
             $email->text($finalBody['plain']);
         }
+        // Картинки из редактора: ссылки на inline-роут → cid:, файлы — inline-
+        // части MIME (multipart/related). Неиспользуемые inline-вложения
+        // черновика (картинку вставили и удалили) в письмо не попадают.
+        $usedCids = [];
         if ($finalBody['html'] !== '') {
             $html = $this->embedSignatureLogo($email, $finalBody['html']);
             $html = $this->embedPromoImage($email, $html, $draft);
+            $cidified = $this->postProcessor->cidify($html, (int) $draft->id);
+            $usedCids = $cidified['cids'];
+            $html = $this->postProcessor->emailSafe($cidified['html']);
             $email->html($html);
         }
 
@@ -223,9 +231,18 @@ class OutgoingMailMimeBuilder
             $headers->addTextHeader('X-MyLift-Author-User-Id', $authorId);
         }
 
-        // Attachments.
+        // Attachments: inline-картинки тела (is_inline + content_id, на которые
+        // ссылается HTML) — embed по cid; остальные — обычные вложения.
         foreach ($draft->attachments as $attachment) {
             $diskPath = Storage::disk($attachment->disk)->path($attachment->file_path);
+            $cid = trim((string) ($attachment->content_id ?? ''), "<> \t");
+            if ($attachment->is_inline && $cid !== '') {
+                if (in_array($cid, $usedCids, true)) {
+                    $email->embedFromPath($diskPath, $cid, $attachment->mime_type ?: null);
+                }
+
+                continue;
+            }
             $email->addPart(new \Symfony\Component\Mime\Part\DataPart(
                 new \Symfony\Component\Mime\Part\File($diskPath),
                 $attachment->filename,

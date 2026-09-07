@@ -140,6 +140,12 @@ Route::middleware('auth')->group(function () {
             ->where('contentId', '.*')
             ->name('attachments.inline');
 
+        // Картинка в тело письма из редактора почтового клиента (inline-вложение
+        // черновика; только автор черновика — проверка в контроллере).
+        Route::post('/dashboard/mail/drafts/{draft}/inline-images', [\App\Http\Controllers\Mail\InlineImageController::class, 'store'])
+            ->whereNumber('draft')
+            ->name('mail.inline-images.store');
+
         // Аватарки пользователей (3 варианта: neutral/won/lost). Отдача с
         // приватного диска через контроллер. Доступно всем ролям на чтение.
         Route::get('/avatars/{user}/{variant}', [UserAvatarController::class, 'show'])
