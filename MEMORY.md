@@ -587,6 +587,29 @@ Supervisor (все 4 воркера): `--queue=mail-sync,default,catalog-resolve
 
 ## Журнал сессий
 
+### Сессия 2026-09-07 (часть 2) — Почта: полноценный редактор письма (TipTap), картинки и таблицы в теле; текст ссылки рекламного блока; персональные отчёты менеджеров
+
+**Задачи заказчика:** (1) персональные отчёты по 7 менеджерам по образцу отчёта руководителя — см. Downloads и память `manager-reports-generator`; (2) свой текст ссылки в рекламном блоке (`marketing_blocks.link_text`, `fb9aca4`); (3) **«полноценное создание письма с фото и таблицами, аналог Яндекс/Gmail»** в почтовом клиенте (`1c792d8` + фиксы `4691681`, `9278a63`, `4620a2e`, стиль `e2ec29f`).
+
+#### Редактор письма (Фаза 2b почтового клиента)
+
+| Слой | Что |
+|---|---|
+| **Frontend** | `resources/js/mail-editor.js` — Alpine-компонент `mailEditor(opts)` на TipTap v2.27 (StarterKit, Underline, Link, Image, Table+Row/Cell/Header, TextAlign, TextStyle+Color, Placeholder). Регистрация в `app.js` через `alpine:init` (Alpine из Livewire). Панель в стиле TipTap Simple Editor: Lucide-иконки через `<x-rte-icon name>` (`resources/views/components/rte-icon.blade.php`), без рамок, группы-разделители, dropdown стиля абзаца, попапы ссылки/таблицы/цвета, панель таблицы при курсоре в таблице. Бандл вырос 88 → 412 КБ (134 КБ gzip). |
+| **Картинки в теле** | `POST /dashboard/mail/drafts/{draft}/inline-images` (`Mail\InlineImageController`, только автор черновика) → `MailInlineImageService::store` (PNG/JPG/GIF ≤10 МБ, GD-уменьшение до 1600 px по большей стороне) → `EmailAttachment` `is_inline=true` + `content_id=<uuid>@mzcorp.ru`; в HTML — ссылка на существующий `attachments.inline` роут (видна в редакторе и треде). Кнопка, Ctrl+V, drag&drop. |
+| **Отправка** | `OutboundHtmlPostProcessor` (pure, unit-тесты): `cidify()` — ссылки inline-роута этого письма → `cid:` + список использованных cid; `emailSafe()` — inline-стили для table/td/th/img/blockquote (Outlook/Gmail без внешних стилей), `&nbsp;` в пустых ячейках. `OutgoingMailMimeBuilder::build` embed'ит только использованные inline-вложения (`embedFromPath`, multipart/related), остальные — обычные attachments. `EmailDraftService::pruneUnreferencedInlineImages` перед отправкой (вставил и стёр → не уходит). Forward теперь переносит inline-картинки с их cid (раньше терялись: `<img src="cid:">` резал санитайзер). |
+| **Санитайзер** | `HtmlSanitizer`: `img[src]` только `cid:`/наш inline-роут (по `app.url`), `style` по белому списку CSS-свойств (без `url(`/`expression`), `s/del/mark`, width на таблицах. |
+
+#### Грабли этой части (все словлены в браузере через Claude in Chrome, на проде)
+
+- **Alpine deep-proxy + ProseMirror = зависание вкладки.** Экземпляр TipTap нельзя класть в состояние Alpine.data (`this.editor = new Editor(...)`): Alpine оборачивает объект в реактивный Proxy, каждая транзакция ProseMirror лезет в тысячи проксируемых объектов → рендерер замерзает (CDP screenshot timeout). Держать в замыкании фабрики (`let editor`), в state — только UI-флаги и `tick` для реактивности кнопок.
+- **`$wire` внутри `<template x-teleport="body">` резолвится в РОДИТЕЛЬСКИЙ Livewire-компонент** (ближайший `wire:id` от body — `mail.client`), поэтому `$wire.set('bodyHtml')` молча уходил не туда и черновики оставались пустыми (вероятно, и у старого мини-редактора). Лечение: передавать `wireId: @js($this->getId())` и брать `window.Livewire.find(id)`. **`Livewire.find(id)` возвращает сам `$wire`-прокси** (у него есть `set/get/call`), а не компонент с полем `$wire`.
+- `<select>` в панели редактора рисовался с наложением текста (forms-plugin + `:value`) — заменён на кнопку-dropdown.
+- Автотест клавиатурой через Claude in Chrome: `Tab` в панели/попапе уводит фокус на кнопки футера, пробел на «Удалить» = discard черновика. Кликать по ref редактора, не по координатам; для проверки синхронизации использовать реальный ввод (после `setContent()` `_last` уже равен HTML и sync намеренно не шлёт).
+- Проверка MIME без отправки: `app(OutgoingMailMimeBuilder::class)->build($draft, $draft->mailbox)->toString()` в tinker — видно `cid:`, `Content-ID`, `multipart/related`.
+
+**Что не сделано / следующие шаги:** композер в карточке заявки (`Requests\Mail\ComposeForm`) по-прежнему plain-text `bodyText` — перевести на тот же `mailEditor`; BCC (нет колонки), автодополнение адресатов из клиентов/контактов, вставка шаблонов в почтовом клиенте (в карточке заявки есть), подпись — показывается превью, редактируется в профиле. Индикатор «Сохранение…» в футере светится постоянно (pre-existing `wire:loading`), стоит поправить.
+
 ### Сессия 2026-09-07 — «Счёт отправлен» без счёта (M-2026-14608): детектор исходящих
 
 **Контекст:** заказчик спросил, на каком основании M-2026-14608 получила статус «Счёт отправлен». Разбор по `request_state_changes` → `ai_decisions` → `email_messages`: 04.09 11:41 `ai_auto_apply` (решение 26891, outbound_invoice, 0.90 при пороге 0.85) по письму 97210 — это **не письмо клиенту**, а пересыл из info@myzip.ru на info@liftway.ru с текстом «Этой заявки нет в мз корпе», внутри — письмо клиента «Прошу выставить счёт» и его же PDF «Реквизиты ООО Смайнэкс Комфорт». Пересыл унаследовал In-Reply-To → прилинковался к заявке; rule-based детектор промолчал, LLM-фолбэк (gpt-4o-mini) увидел цитату + имя файла «реквизиты» (оно прямо в списке сигналов счёта в промпте) → invoice 0.9. Менеджер 07.09 вручную вернул «В работе», но чип всё равно показывал «Счёт отправлен»: `displayed_status` берёт `peak_status`, который ручной откат не сбрасывает.
