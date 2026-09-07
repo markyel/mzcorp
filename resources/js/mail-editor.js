@@ -27,8 +27,12 @@ import Placeholder from '@tiptap/extension-placeholder';
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif'];
 
 export default function mailEditor(opts = {}) {
+    // Экземпляр TipTap держим в замыкании, а НЕ в состоянии Alpine: Alpine
+    // оборачивает данные в глубокий reactive-Proxy, и ProseMirror внутри него
+    // зависает (каждая транзакция трогает тысячи проксируемых объектов).
+    let editor = null;
+
     return {
-        editor: null,
         tick: 0,
         uploading: 0,
         uploadError: '',
@@ -43,7 +47,7 @@ export default function mailEditor(opts = {}) {
         _timer: null,
 
         init() {
-            this.editor = new Editor({
+            editor = new Editor({
                 element: this.$refs.ed,
                 extensions: [
                     StarterKit.configure({
@@ -73,13 +77,13 @@ export default function mailEditor(opts = {}) {
                 onSelectionUpdate: () => { this.tick++; },
                 onTransaction: () => { this.tick++; },
             });
-            this._last = this.editor.getHTML();
+            this._last = editor.getHTML();
         },
 
         destroy() {
             clearTimeout(this._timer);
-            this.editor?.destroy();
-            this.editor = null;
+            editor?.destroy();
+            editor = null;
         },
 
         /* ---------- синхронизация с Livewire ---------- */
@@ -90,8 +94,8 @@ export default function mailEditor(opts = {}) {
         },
 
         sync() {
-            if (! this.editor) return;
-            const html = this.editor.isEmpty ? '' : this.editor.getHTML();
+            if (! editor) return;
+            const html = editor.isEmpty ? '' : editor.getHTML();
             if (html === this._last) return;
             this._last = html;
             this.$wire.set('bodyHtml', html);
@@ -104,27 +108,27 @@ export default function mailEditor(opts = {}) {
 
         /** Подставить HTML извне (шаблон, открытие другого черновика). */
         setContent(html) {
-            if (! this.editor) return;
-            this.editor.commands.setContent(html || '', false);
-            this._last = this.editor.getHTML();
+            if (! editor) return;
+            editor.commands.setContent(html || '', false);
+            this._last = editor.getHTML();
         },
 
         /* ---------- состояние кнопок ---------- */
 
         is(name, attrs) {
             this.tick; // зависимость для реактивности
-            return this.editor ? this.editor.isActive(name, attrs) : false;
+            return editor ? editor.isActive(name, attrs) : false;
         },
 
         can(cmd) {
             this.tick;
-            if (! this.editor) return false;
-            try { return this.editor.can()[cmd](); } catch (e) { return false; }
+            if (! editor) return false;
+            try { return editor.can()[cmd](); } catch (e) { return false; }
         },
 
         run(fn) {
-            if (! this.editor) return;
-            fn(this.editor.chain().focus()).run();
+            if (! editor) return;
+            fn(editor.chain().focus()).run();
             this.tick++;
             this.scheduleSync();
         },
@@ -138,9 +142,9 @@ export default function mailEditor(opts = {}) {
 
         blockValue() {
             this.tick;
-            if (! this.editor) return 'p';
-            if (this.editor.isActive('heading', { level: 2 })) return '2';
-            if (this.editor.isActive('heading', { level: 3 })) return '3';
+            if (! editor) return 'p';
+            if (editor.isActive('heading', { level: 2 })) return '2';
+            if (editor.isActive('heading', { level: 3 })) return '3';
             return 'p';
         },
 
@@ -157,7 +161,7 @@ export default function mailEditor(opts = {}) {
         /* ---------- ссылки ---------- */
 
         openLink() {
-            const prev = this.editor?.getAttributes('link')?.href || '';
+            const prev = editor?.getAttributes('link')?.href || '';
             this.linkUrl = prev || 'https://';
             this.linkOpen = true;
             this.$nextTick(() => this.$refs.linkInput?.focus());
