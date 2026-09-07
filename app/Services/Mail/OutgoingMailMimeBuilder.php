@@ -84,9 +84,13 @@ class OutgoingMailMimeBuilder
         // случаях ниже доклеиваются ОБЩИЕ подпись + футер + цитата, поэтому
         // авто-уведомление выглядит как обычное письмо в треде, с подписью
         // и цитатой оригинала (без отдельной «карточки»-обёртки).
+        // Email-safe inline-стили (рамки таблиц, max-width картинок) — ТОЛЬКО
+        // для текста менеджера из редактора. Подпись, реклама, футер и цитата
+        // свёрстаны сами и трогать их нельзя (кейс 2026-09-07: таблица
+        // телефонов в подписи получила рамки ячеек).
         $prerenderedHtml = trim((string) ($draft->body_html ?? ''));
         $userHtml = $prerenderedHtml !== ''
-            ? (string) $draft->body_html
+            ? $this->postProcessor->emailSafe((string) $draft->body_html)
             : $this->plainToHtml($userText);
 
         // Рекламный блок над или под подписью (глобальная настройка
@@ -191,8 +195,7 @@ class OutgoingMailMimeBuilder
             $html = $this->embedPromoImage($email, $html, $draft);
             $cidified = $this->postProcessor->cidify($html, (int) $draft->id);
             $usedCids = $cidified['cids'];
-            $html = $this->postProcessor->emailSafe($cidified['html']);
-            $email->html($html);
+            $email->html($cidified['html']);
         }
 
         // Threading headers (RFC 5322 §3.6.4).
