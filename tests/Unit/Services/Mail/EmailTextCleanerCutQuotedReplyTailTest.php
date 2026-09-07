@@ -44,9 +44,17 @@ class EmailTextCleanerCutQuotedReplyTailTest extends TestCase
             "Ок, сделаем.\n\n> Прошу счёт\n> на 5 шт\n",
             'Ок, сделаем.',
         ];
-        yield 'inline replies between quotes are kept' => [
+        yield 'inline replies between quotes are kept (quote is not dominant)' => [
             "> Какой срок?\nДве недели.\n> Какая цена?\nУточню.\n",
             "> Какой срок?\nДве недели.\n> Какая цена?\nУточню.",
+        ];
+        yield 'M-2026-12166: mail.ru quote in the middle, footer after it' => [
+            "Добрый день!\nПодскажите а с резьбой М10мм есть?\n\n> \n> Понедельник, 24 августа 2026, 00:01 +03:00 от Агрызков Сергей <sergey.agryzkov@myzip.ru\n> >:\n> \n> Здравствуйте, Андрей Никоноров!\n> Мы отправляли вам коммерческое предложение *364274*.\n> Подскажите, готовы ли вы перейти к выставлению счёта.\n\n--\nОтправлено из мобильной почты\n",
+            "Добрый день!\nПодскажите а с резьбой М10мм есть?",
+        ];
+        yield 'mail.ru attribution without > prefix' => [
+            "Спасибо, всё понятно.\n\nПонедельник, 24 августа 2026, 00:01 +03:00 от Агрызков Сергей <s@myzip.ru>:\nЗдравствуйте!\nМы отправляли КП 364274.\n",
+            'Спасибо, всё понятно.',
         ];
         yield 'bare От: line without header block is not a cut' => [
             "От: нас ничего не требуется, счёт ниже.\nСчёт №5 во вложении.\n",

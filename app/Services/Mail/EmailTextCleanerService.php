@@ -329,6 +329,12 @@ class EmailTextCleanerService
                 $cutAt = $i;
                 break;
             }
+            // mail.ru: «Понедельник, 24 августа 2026, 00:01 +03:00 от X <x@y>:»
+            if (mb_strlen($t) <= 300
+                && preg_match('/^\p{L}+,\s*\d{1,2}\s+\p{L}+\s+\d{4}.*\bот\b.*:\s*$/iu', $t) === 1) {
+                $cutAt = $i;
+                break;
+            }
             if (preg_match('/^-{2,}\s*(Original Message|Исходное сообщение|Первоначальное сообщение)\s*-{2,}\s*$/iu', $t) === 1) {
                 $cutAt = $i;
                 break;
@@ -343,7 +349,35 @@ class EmailTextCleanerService
             }
         }
 
-        // Хвостовой «>»-блок: идём с конца, пока строки пустые или цитированные.
+        // «>»-блок цитаты. Сначала — с первой цитированной строки, если после
+        // неё цитата преобладает (≥ 60% непустых строк): так режется и цитата,
+        // под которой клиент/почтовик дописал подпись или футер без «>»
+        // (кейс M-2026-12166: mail.ru, цитата в середине). Inline-ответы между
+        // цитатами (редкость в деловой переписке) при этом теряются осознанно.
+        $firstQuoted = null;
+        for ($k = 0; $k < $cutAt; $k++) {
+            if (str_starts_with(trim($lines[$k]), '>')) {
+                $firstQuoted = $k;
+                break;
+            }
+        }
+        if ($firstQuoted !== null) {
+            $quoted = 0;
+            $plain = 0;
+            for ($k = $firstQuoted; $k < $cutAt; $k++) {
+                $t = trim($lines[$k]);
+                if ($t === '') {
+                    continue;
+                }
+                str_starts_with($t, '>') ? $quoted++ : $plain++;
+            }
+            if ($quoted >= 2 && $quoted >= 0.6 * ($quoted + $plain)) {
+                return trim(implode("\n", array_slice($lines, 0, $firstQuoted)));
+            }
+        }
+
+        // Иначе — только хвостовой «>»-блок: идём с конца, пока строки пустые
+        // или цитированные (inline-ответы сохраняются).
         $tailStart = $cutAt;
         for ($k = $cutAt - 1; $k >= 0; $k--) {
             $t = trim($lines[$k]);

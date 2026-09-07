@@ -23,13 +23,13 @@ use Illuminate\Support\Facades\Storage;
  * Гейт от ложных совпадений: письмо должно упоминать счёт/КП/оплату ЛИБО номер
  * пришёл из вложения. Несколько КП → берём с наибольшей суммой.
  *
- * ВАЖНО: из тела берём только СОБСТВЕННЫЙ текст клиента, без цитаты нашего
- * письма. Кейс M-2026-12166: клиент ответил «а с резьбой М10 есть?» на наше
- * напоминание, в цитате которого были номер КП 364274 и «перейти к
- * выставлению счёта» → роутер «нашёл» запрос счёта в нашем же тексте и увёл
- * заявку в «ждёт счёт». Отдельно возвращаем invoice_intent — есть ли в
- * собственном тексте клиента слова про счёт/оплату: без них MailRouter
- * привязывает письмо к заявке КП, но в «ждёт счёт» не переводит.
+ * ВАЖНО: просьбу о счёте (invoice_intent) ищем только в СОБСТВЕННОМ тексте
+ * клиента, без цитаты нашего письма. Кейс M-2026-12166: клиент ответил «а с
+ * резьбой М10 есть?» на наше напоминание, в цитате которого были номер КП
+ * 364274 и «перейти к выставлению счёта» → роутер «нашёл» запрос счёта в
+ * нашем же тексте и увёл заявку в «ждёт счёт». Без invoice_intent MailRouter
+ * привязывает письмо к заявке КП (и реанимирует закрытую), но статус не
+ * трогает.
  *
  * PDF-текст берём напрямую Smalot'ом (дёшево, без Vision/рендера страниц).
  */
@@ -38,8 +38,12 @@ class CitedOutboundQuoteRouter
     /** Контекст «счёт/КП/оплата» в тексте письма (гейт матчинга номера). */
     private const KEYWORD_RE = '/сч[её]т|на\s+оплат|коммерческое\s+предложение|\bкп\b|invoice|инвойс/iu';
 
-    /** Собственно запрос счёта / оплаты — основание для статуса «ждёт счёт». */
-    private const INVOICE_INTENT_RE = '/сч[её]т|на\s+оплат|оплат[аиуы]|invoice|инвойс|выстав/iu';
+    /**
+     * Собственно запрос счёта / оплаты — основание для статуса «ждёт счёт».
+     * Начало слова через lookbehind (\b в PCRE не знает кириллицу): «Насчет
+     * оригинала» — не запрос счёта.
+     */
+    private const INVOICE_INTENT_RE = '/(?<!\p{L})(сч[её]т|оплат|invoice|инвойс|выстав)/iu';
 
     /** Числа-кандидаты: 5–8 цифр (наши document_number обычно 6). */
     private const NUMBER_RE = '/\d{5,8}/';
@@ -56,19 +60,22 @@ class CitedOutboundQuoteRouter
      */
     public function detect(EmailMessage $message): ?array
     {
-        $ownBody = $this->ownBodyText($message);
-        [$candidates, $hasAttachmentSource] = $this->collectCandidates($message, $ownBody);
+        // Номер КП ищем во ВСЁМ тексте (в т.ч. в цитате нашего письма — клиент
+        // часто отвечает «выставите счёт» под нашим КП, и номер только там):
+        // это нужно для ПРИВЯЗКИ письма к заявке. А вот просьба о счёте
+        // (invoice_intent) — только из собственного текста клиента.
+        [$candidates, $hasAttachmentSource] = $this->collectCandidates($message);
         if ($candidates === []) {
             return null;
         }
 
-        $text = mb_strtolower((string) $message->subject . "\n" . $ownBody);
+        $text = mb_strtolower((string) $message->subject . "\n" . (string) $message->body_plain);
         $keywordHit = preg_match(self::KEYWORD_RE, $text) === 1;
         if (! $keywordHit && ! $hasAttachmentSource) {
             // Числа без контекста счёта/КП и не из вложения — не доверяем.
             return null;
         }
-        $invoiceIntent = $this->hasInvoiceIntent((string) $message->subject, $ownBody);
+        $invoiceIntent = $this->hasInvoiceIntent((string) $message->subject, $this->ownBodyText($message));
 
         $rows = DB::table('outbound_quotes')
             ->whereIn('document_number', $candidates)
@@ -132,13 +139,13 @@ class CitedOutboundQuoteRouter
     }
 
     /**
-     * Числа-кандидаты из темы/собственного текста/имён вложений/текста PDF-вложений.
+     * Числа-кандидаты из темы/тела/имён вложений/текста PDF-вложений.
      *
      * @return array{0: array<int,string>, 1: bool}  [числа, был ли источник-вложение]
      */
-    private function collectCandidates(EmailMessage $message, string $ownBody): array
+    private function collectCandidates(EmailMessage $message): array
     {
-        $texts = [(string) $message->subject, $ownBody];
+        $texts = [(string) $message->subject, (string) $message->body_plain];
         $hasAttachmentSource = false;
 
         foreach ($message->attachments as $att) {
