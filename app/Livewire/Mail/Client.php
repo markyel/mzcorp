@@ -419,14 +419,15 @@ class Client extends Component
     }
 
     /** Применить фильтр папки + поиск. */
-    private function folderQuery(MailFolder $folder): Builder
+    private function folderQuery(MailFolder $folder, bool $ignoreRequestFilter = false): Builder
     {
         $uid = (int) $this->user()->id;
         $q = $this->baseQuery();
 
         // Режим «письма заявки»: обе стороны переписки, без папок; ящики — все
         // доступные (activeMailboxIds учитывает requestId). Поиск поверх работает.
-        if ($this->requestId) {
+        // Бейджи папок в сайдбаре считаются без этого фильтра (ignoreRequestFilter).
+        if ($this->requestId && ! $ignoreRequestFilter) {
             $q->where('email_messages.is_draft', false)
                 ->where('email_messages.related_request_id', $this->requestId);
             $this->applySearch($q);
@@ -475,10 +476,10 @@ class Client extends Component
     private function folderBadge(MailFolder $folder): ?int
     {
         if ($folder->showsUnread()) {
-            return (clone $this->folderQuery($folder))->whereNull('ustate.read_at')->count();
+            return (clone $this->folderQuery($folder, ignoreRequestFilter: true))->whereNull('ustate.read_at')->count();
         }
         if (in_array($folder, [MailFolder::Drafts, MailFolder::Flagged], true)) {
-            $n = $this->folderQuery($folder)->count();
+            $n = $this->folderQuery($folder, ignoreRequestFilter: true)->count();
 
             return $n > 0 ? $n : null;
         }
