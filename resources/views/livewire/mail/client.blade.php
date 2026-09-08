@@ -85,9 +85,9 @@
 .mailapp .trow.sel{background:var(--sky-50)}
 .mailapp .trow[draggable]{-webkit-user-drag:element}
 .dragghost{position:fixed;top:-100px;left:-100px;padding:6px 12px;border-radius:999px;background:var(--fg-1,#0f1419);color:#fff;font:600 12px/1 system-ui,sans-serif;pointer-events:none;z-index:9999}
-.mailapp .bulkbar{display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--sky-50);border-bottom:1px solid var(--border-subtle);font:400 12px/1 var(--font-sans);color:var(--fg-2)}
-.mailapp .bulkbar .cnt{margin-right:6px;color:var(--fg-1)}
-.mailapp .bulkbar button{height:26px;padding:0 10px;border:1px solid var(--border);background:var(--bg-surface);border-radius:6px;cursor:pointer;color:var(--fg-1);font:500 12px/1 var(--font-sans)}
+.mailapp .bulkbar{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:6px 10px;background:var(--sky-50);border-bottom:1px solid var(--border-subtle);font:400 11.5px/1 var(--font-sans);color:var(--fg-2)}
+.mailapp .bulkbar .cnt{margin-right:4px;color:var(--fg-1);white-space:nowrap}
+.mailapp .bulkbar button{height:26px;padding:0 8px;border:1px solid var(--border);background:var(--bg-surface);border-radius:6px;cursor:pointer;color:var(--fg-1);font:500 11.5px/1 var(--font-sans);white-space:nowrap}
 .mailapp .bulkbar button:hover{background:var(--bg-hover)}
 .mailapp .bulkbar button.link{border:none;background:none;color:var(--sky-700);padding:0 4px}
 .mailapp .bulkbar button.x{border:none;background:none;font-size:16px;color:var(--fg-3);padding:0 4px}
@@ -113,7 +113,8 @@
 .mailapp .fnew button{height:26px;padding:0 8px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:5px;font:600 11.5px/1 var(--font-sans);cursor:pointer}
 .mailapp .fhint{padding:2px 8px 6px;font:400 11px/1.35 var(--font-sans);color:var(--fg-4)}
 .mailapp .trow.active{background:var(--bg-selected);box-shadow:inset 3px 0 0 var(--sky-500)}
-.mailapp .trow .dot-unread{width:7px;height:7px;border-radius:999px;background:var(--accent);position:absolute;left:4px;top:18px}
+.mailapp .trow .dot-unread{width:7px;height:7px;border-radius:999px;background:var(--accent);position:absolute;left:3px;top:10px}
+.mailapp .trow:hover .dot-unread,.mailapp .trow.sel .dot-unread{display:none}
 .mailapp .trow .av{width:30px;height:30px;border-radius:999px;background:var(--neutral-200);color:var(--fg-2);font:600 12px/30px var(--font-sans);text-align:center;flex-shrink:0}
 .mailapp .trow .av.org{background:var(--sky-50);color:var(--sky-700)}
 .mailapp .trow .body{min-width:0}
