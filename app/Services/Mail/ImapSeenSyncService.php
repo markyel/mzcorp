@@ -183,7 +183,7 @@ class ImapSeenSyncService
                 }
                 foreach ($group->pluck('imap_uid')->map(fn ($u) => (int) $u)->chunk(300) as $chunk) {
                     try {
-                        $resp = $conn->flags($chunk->values()->all(), IMAP::ST_UID);
+                        $rows = (array) $conn->flags($chunk->values()->all(), IMAP::ST_UID)->validatedData();
                     } catch (\Throwable $e) {
                         // Ни одного UID из набора на сервере нет (письма уехали в
                         // другую папку/удалены) → webklex бросает «Empty response».
