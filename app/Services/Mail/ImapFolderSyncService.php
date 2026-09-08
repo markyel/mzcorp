@@ -7,6 +7,7 @@ use App\Jobs\Mail\PushImapFolderOpJob;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use App\Models\MailboxFolder;
+use App\Models\MailboxFolderState;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Webklex\PHPIMAP\Client;
@@ -37,6 +38,12 @@ class ImapFolderSyncService
 {
     /** Не дёргать CREATE повторно чаще, чем раз в N минут, если сервер так и не подтвердил папку. */
     private const RECREATE_AFTER_MINUTES = 10;
+
+    /** Первый проход по папке: сколько последних UID просмотреть (история старше — не наша). */
+    private const FIRST_SCAN_LIMIT = 500;
+
+    /** Обычный проход: максимум новых UID за один запуск (остальное — в следующем цикле). */
+    private const PER_RUN_LIMIT = 300;
 
     public function __construct(private readonly MailboxConnector $connector)
     {
@@ -291,7 +298,7 @@ class ImapFolderSyncService
 
         foreach ($folders as $folder) {
             try {
-                $client->openFolder($folder->imap_path, force_select: true);
+                $status = (array) $client->openFolder($folder->imap_path, force_select: true);
                 $serverUids = array_map('intval', (array) $conn->getUid()->validatedData());
             } catch (\Throwable $e) {
                 Log::warning('ImapFolderSyncService: cannot list folder', [
@@ -312,8 +319,41 @@ class ImapFolderSyncService
                 $dbSet[(int) $r->imap_uid] = $r;
             }
 
+            // Watermark по папке (MailboxFolderState, как у INBOX/Sent): смотрим
+            // только UID выше уже просмотренных — перенос письма на сервере даёт
+            // новый UID, так что ничего не теряем. Папки менеджеров бывают на
+            // десятки тысяч писем («Входящие (локально)» у Агрызкова): без
+            // watermark каждый цикл тянул бы заголовки всей истории и job умирал
+            // по таймауту. Первый проход — только последние FIRST_SCAN_LIMIT UID,
+            // история старше остаётся не импортированной (её у нас и так нет).
+            $state = MailboxFolderState::query()->firstOrNew([
+                'mailbox_id' => $mailbox->id,
+                'folder' => $folder->imap_path,
+            ]);
+            $validity = (int) ($status['uidvalidity'] ?? 0);
+            if ($state->exists && $state->uid_validity !== null && (int) $state->uid_validity !== $validity) {
+                Log::warning('ImapFolderSyncService: UIDVALIDITY changed, re-scan from top', [
+                    'mailbox_id' => $mailbox->id, 'folder' => $folder->imap_path,
+                ]);
+                $state->last_uid_seen = 0;
+            }
+            $firstScan = ! $state->exists || (int) $state->last_uid_seen === 0;
+            $watermark = (int) $state->last_uid_seen;
+
+            $candidates = array_values(array_filter($serverUids, fn ($u) => $u > $watermark && ! isset($dbSet[$u])));
+            sort($candidates);
+            if ($firstScan) {
+                $candidates = array_slice($candidates, -self::FIRST_SCAN_LIMIT);
+                $newWatermark = $serverUids !== [] ? max($serverUids) : 0;
+            } elseif (count($candidates) > self::PER_RUN_LIMIT) {
+                $candidates = array_slice($candidates, 0, self::PER_RUN_LIMIT);
+                $newWatermark = (int) end($candidates);
+            } else {
+                $newWatermark = $serverUids !== [] ? max(max($serverUids), $watermark) : $watermark;
+            }
+
             // Новые для нас UID в папке → заголовки → матч по Message-ID.
-            $newUids = array_values(array_filter($serverUids, fn ($u) => ! isset($dbSet[$u])));
+            $newUids = $candidates;
             foreach (array_chunk($newUids, 50) as $chunk) {
                 $mids = $this->fetchMessageIds($client, $chunk);
                 foreach ($mids as $uid => $mid) {
@@ -344,6 +384,12 @@ class ImapFolderSyncService
                     $gone++;
                 }
             }
+
+            $state->uid_validity = $validity;
+            $state->last_uid_seen = max($newWatermark, (int) $state->last_uid_seen);
+            $state->last_synced_at = now();
+            $state->sync_count = (int) $state->sync_count + 1;
+            $state->save();
         }
 
         return ['moved' => $moved, 'unknown' => $unknown, 'gone' => $gone];
