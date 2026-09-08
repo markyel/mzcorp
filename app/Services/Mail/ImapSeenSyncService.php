@@ -190,7 +190,7 @@ class ImapSeenSyncService
                         // Для этого набора просто нет данных — идём дальше.
                         continue;
                     }
-                    foreach ((array) $resp->validatedData() as $uid => $flags) {
+                    foreach ($rows as $uid => $flags) {
                         $serverSeen[$folderPath . '|' . (int) $uid] = $this->hasSeen($flags);
                     }
                 }
