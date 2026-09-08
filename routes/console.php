@@ -314,3 +314,11 @@ Schedule::command('quotes:detect-missed-outbound --apply --days=3')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Сторож очередей: невзятая задача ждёт дольше порога (config queue.watchdog)
+// → warning в лог + bell/mail админам. Инцидент 2026-09-08: очередь default
+// (маршрутизация писем в папки менеджеров, доставка, парсинг) стояла 1.5 часа.
+Schedule::command('queue:watchdog')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onOneServer();

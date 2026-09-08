@@ -109,4 +109,19 @@ return [
         'table' => 'failed_jobs',
     ],
 
+    /*
+    | Сторож очередей (queue:watchdog, каждые 5 минут по расписанию): очередь =>
+    | порог в минутах для самой старой невзятой задачи. Превышение — warning в
+    | лог + уведомление админам (bell + mail), не чаще notify_cooldown_minutes.
+    | Инцидент 2026-09-08: default стояла 1.5 ч, пока воркеры выгребали mail-sync.
+    */
+    'watchdog' => [
+        'queues' => [
+            'default' => (int) env('QUEUE_WATCHDOG_DEFAULT_MINUTES', 10),
+            'mail-sync' => (int) env('QUEUE_WATCHDOG_MAIL_SYNC_MINUTES', 10),
+            'catalog-resolve' => (int) env('QUEUE_WATCHDOG_CATALOG_MINUTES', 60),
+        ],
+        'notify_cooldown_minutes' => (int) env('QUEUE_WATCHDOG_NOTIFY_COOLDOWN', 60),
+    ],
+
 ];

@@ -38,6 +38,7 @@
                                 'delegated_activity' => '🤝',
                                 'attention_overdue' => '⚡',
                                 'openai_circuit_opened' => '⛔',
+                                'queue_stalled' => '⏳',
                                 'support_reply' => '✉',
                                 default => '🔔',
                             };
@@ -46,6 +47,7 @@
                                 'delegated_activity' => 'Делегированная ' . ($data['internal_code'] ?? '') . ' · новое сообщение',
                                 'attention_overdue' => 'Просрочено: ' . ($data['internal_code'] ?? ''),
                                 'openai_circuit_opened' => 'OpenAI недоступен — категоризатор на паузе',
+                                'queue_stalled' => 'Очередь задач встала — письма не разбираются',
                                 'support_reply' => 'Ответ создателя по тикету #' . ($data['ticket_id'] ?? ''),
                                 default => 'Уведомление',
                             };
@@ -54,12 +56,14 @@
                                 'delegated_activity' => ($data['client_name'] ?? '') . ' · ' . ($data['subject'] ?? ''),
                                 'attention_overdue' => ($data['status_label'] ?? '') . ' · ' . ($data['attention_reason'] ?? ''),
                                 'openai_circuit_opened' => 'Подряд ошибок: ' . ($data['fail_count'] ?? 0) . ' · пауза ' . ($data['cooldown_minutes'] ?? 15) . ' мин',
+                                'queue_stalled' => collect($data['stalled'] ?? [])->map(fn ($m, $q) => $q . ': ' . ($m['count'] ?? 0) . ' задач, ждут ' . ($m['oldest_minutes'] ?? 0) . ' мин')->implode(' · '),
                                 'support_reply' => ($data['subject'] ?? '') . ' · ' . \Illuminate\Support\Str::limit($data['reply_preview'] ?? '', 60),
                                 default => '',
                             };
                             $reqId = $data['request_id'] ?? null;
                             $href = match($kind) {
                                 'openai_circuit_opened' => 'https://platform.openai.com/account/billing',
+                                'queue_stalled' => '#',
                                 'support_reply' => $data['ticket_id'] ?? null ? route('support.show', $data['ticket_id']) : '#',
                                 default => $reqId ? route('requests.show', $reqId) : '#',
                             };
