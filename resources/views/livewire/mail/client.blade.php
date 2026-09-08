@@ -136,7 +136,9 @@
 .mailapp .trow .onecchip{font:600 10.5px/1.4 var(--font-mono);background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:4px;white-space:nowrap}
 /* Шапка списка в режиме «письма заявки» (?request=). */
 .mailapp .sscope{display:flex;align-items:center;gap:6px;font:400 11.5px/1 var(--font-sans);color:var(--fg-3)}
-.mailapp .sscope select{flex:1;min-width:0;height:26px;border:1px solid var(--border);border-radius:6px;background:var(--bg-surface);color:var(--fg-1);font:500 11.5px/1 var(--font-sans);padding:0 6px}
+.mailapp .sscope select{flex:1;min-width:0;height:26px;border:1px solid var(--border);border-radius:6px;background-color:var(--bg-surface);background-image:none;-webkit-appearance:none;appearance:none;color:var(--fg-1);font:500 11.5px/1 var(--font-sans);padding:0 22px 0 8px;line-height:24px}
+.mailapp .sscope .selwrap{flex:1;position:relative;display:flex;min-width:0}
+.mailapp .sscope .selwrap:after{content:"▾";position:absolute;right:8px;top:5px;font-size:12px;color:var(--fg-3);pointer-events:none}
 .mailapp .trow .fchip{font:500 10.5px/1.4 var(--font-sans);background:var(--sky-50);color:var(--sky-700,#0369a1);padding:1px 6px;border-radius:4px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}
 .mailapp .fhdr .reqfilter{display:inline-flex;align-items:center;gap:6px;color:var(--fg-2)}
 .mailapp .fhdr .reqfilter .code{font:600 11px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px;text-decoration:none}
@@ -365,13 +367,13 @@
                 {{-- Поиск идёт по всем папкам ящика; здесь можно сузить до одной. --}}
                 <div class="sscope">
                     <span>Искать в</span>
-                    <select wire:model.live="searchIn">
+                    <span class="selwrap"><select wire:model.live="searchIn">
                         <option value="all">всех папках</option>
                         <option value="inbox">только во «Входящих»</option>
                         @foreach($this->customFolders as $cf)
                             <option value="f:{{ $cf['id'] }}">{{ str_repeat('· ', $cf['depth']) }}{{ $cf['name'] }}</option>
                         @endforeach
-                    </select>
+                    </select></span>
                 </div>
             @endif
             <div class="fhdr">
