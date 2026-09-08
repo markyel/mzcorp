@@ -38,10 +38,8 @@ class ImapFolderSyncService
     /** Не дёргать CREATE повторно чаще, чем раз в N минут, если сервер так и не подтвердил папку. */
     private const RECREATE_AFTER_MINUTES = 10;
 
-    public function __construct(
-        private readonly MailboxConnector $connector,
-        private readonly MailFolderRouter $router,
-    ) {
+    public function __construct(private readonly MailboxConnector $connector)
+    {
     }
 
     /** Ящик синхронизирует папки с сервером? Личный, с владельцем, активный, фича включена. */
@@ -470,9 +468,34 @@ class ImapFolderSyncService
         if ($path === null) {
             throw new \RuntimeException("No IMAP path for folder {$folder->id}");
         }
+        $delimiter = $this->delimiter();
         $client = $this->connector->imapClient($mailbox);
         try {
-            $this->router->ensureFolder($client, $path, $this->delimiter());
+            // Протокольный CREATE, а не Client::createFolder(): тот делает EXPUNGE
+            // после создания и без выбранной папки Yandex отвечает
+            // «BAD [CLIENTBUG] EXPUNGE Wrong session state».
+            $conn = $client->getConnection();
+            $existing = (array) $conn->folders('', '*')->validatedData();
+            $current = '';
+            foreach (explode($delimiter, $path) as $part) {
+                if ($part === '') {
+                    continue;
+                }
+                $current = $current === '' ? $part : $current . $delimiter . $part;
+                if (isset($existing[$current])) {
+                    continue;
+                }
+                $r = $conn->createFolder($current);
+                if (! $r->boolean()) {
+                    throw new \RuntimeException('CREATE failed: ' . implode(' ', array_map('strval', (array) $r->validatedData())));
+                }
+                // Yandex web рисует дерево из LSUB — подписываем, иначе папки не видно.
+                try {
+                    $conn->subscribeFolder($current);
+                } catch (\Throwable $e) {
+                    Log::info('ImapFolderSyncService: SUBSCRIBE failed (folder created)', ['folder' => $current, 'error' => $e->getMessage()]);
+                }
+            }
         } finally {
             $client->disconnect();
         }
