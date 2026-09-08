@@ -679,8 +679,33 @@ class Client extends Component
             ->whereIn('email_messages.mailbox_id', $mailboxIds)
             ->tap(fn (Builder $q) => $this->hideCopiesWhoseOriginalIsListed($q, $mailboxIds))
             ->tap(fn (Builder $q) => $this->hideReassignedCopies($q))
+            ->tap(fn (Builder $q) => $this->hideGoneFromServer($q, $mailboxIds))
             ->tap(fn (Builder $q) => $this->joinReadState($q, $mailboxIds))
             ->select('email_messages.*', 'ustate.read_at as my_read_at', 'ustate.flagged_at as my_flagged_at');
+    }
+
+    /**
+     * Личные ящики, зеркалящие сервер (ImapFolderSyncService): входящее письмо
+     * с imap_uid = NULL уже не лежит ни в одной серверной папке, которую мы
+     * видим (удалено / в корзине / спаме) — в почте mzCorp его тоже нет.
+     * Переписка при этом остаётся в карточке заявки. Общие ящики не трогаем.
+     *
+     * @param  list<int>  $mailboxIds
+     */
+    private function hideGoneFromServer(Builder $q, array $mailboxIds): void
+    {
+        $sync = app(\App\Services\Mail\ImapFolderSyncService::class);
+        $synced = \App\Models\Mailbox::query()->whereIn('id', $mailboxIds)->get()
+            ->filter(fn ($m) => $sync->isServerSynced($m))
+            ->pluck('id')->map(fn ($id) => (int) $id)->all();
+        if ($synced === []) {
+            return;
+        }
+        $q->where(function (Builder $w) use ($synced) {
+            $w->whereNotIn('email_messages.mailbox_id', $synced)
+                ->orWhere('email_messages.direction', '!=', MailDirection::Inbound->value)
+                ->orWhereNotNull('email_messages.imap_uid');
+        });
     }
 
     /**
@@ -865,6 +890,7 @@ class Client extends Component
             ->where('email_messages.is_draft', false)
             ->where('email_messages.direction', MailDirection::Inbound->value)
             ->tap(fn (Builder $q) => $this->hideReassignedCopies($q))
+            ->tap(fn (Builder $q) => $this->hideGoneFromServer($q, $mailboxIds))
             ->tap(fn (Builder $q) => $this->joinReadState($q, $mailboxIds))
             ->whereNull('ustate.read_at')
             ->groupBy('email_messages.mailbox_id')

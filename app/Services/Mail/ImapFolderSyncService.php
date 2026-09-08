@@ -116,7 +116,9 @@ class ImapFolderSyncService
      */
     public static function customFoldersFromList(array $list, string $delimiter, array $systemRoots, array $excludedPrefixes): array
     {
-        $specialUse = ['sent', 'drafts', 'trash', 'junk', 'archive', 'all', 'flagged', 'important', 'inbox'];
+        // \Archive намеренно НЕ системная: «Архив» Яндекса для менеджера — обычная
+        // папка, её письма должны быть видны в mzCorp (папка «Archive»).
+        $specialUse = ['sent', 'drafts', 'trash', 'junk', 'all', 'flagged', 'important', 'inbox'];
         $rootsLower = array_map(fn ($r) => mb_strtolower(trim((string) $r)), $systemRoots);
         $prefixesLower = array_map(fn ($p) => mb_strtolower(trim((string) $p)), $excludedPrefixes);
 
@@ -393,6 +395,70 @@ class ImapFolderSyncService
         }
 
         return ['moved' => $moved, 'unknown' => $unknown, 'gone' => $gone];
+    }
+
+    /**
+     * Разовый полный проход по папке (или всем синхронизируемым папкам ящика):
+     * все UID сервера, которых нет в БД под этой папкой, → заголовки → матч по
+     * Message-ID → переселение. Нужен при подключении синка к ящику с большой
+     * историей (Агрызков: 100k писем в «Входящие (локально)»), когда обычный
+     * pull смотрит только последние FIRST_SCAN_LIMIT UID. Запускается командой
+     * mail:folders-backfill, не из планировщика.
+     *
+     * @param  callable(string $folder, int $done, int $total, int $moved):void|null  $progress
+     * @return array{scanned:int, moved:int, unknown:int}
+     */
+    public function backfill(Mailbox $mailbox, ?string $onlyPath = null, ?callable $progress = null, int $chunk = 100): array
+    {
+        $stats = ['scanned' => 0, 'moved' => 0, 'unknown' => 0];
+        if (! $this->isServerSynced($mailbox)) {
+            return $stats;
+        }
+        $folders = MailboxFolder::query()
+            ->where('mailbox_id', $mailbox->id)
+            ->whereNotNull('imap_path')
+            ->whereNotNull('imap_synced_at')
+            ->when($onlyPath !== null, fn ($q) => $q->where('imap_path', $onlyPath))
+            ->get();
+
+        $client = $this->connector->imapClient($mailbox);
+        try {
+            $conn = $client->getConnection();
+            foreach ($folders as $folder) {
+                $client->openFolder($folder->imap_path, force_select: true);
+                $serverUids = array_map('intval', (array) $conn->getUid()->validatedData());
+                $known = EmailMessage::query()
+                    ->where('mailbox_id', $mailbox->id)
+                    ->where('folder', $folder->imap_path)
+                    ->whereNotNull('imap_uid')
+                    ->pluck('imap_uid')->map(fn ($u) => (int) $u)->flip()->all();
+                $todo = array_values(array_filter($serverUids, fn ($u) => ! isset($known[$u])));
+                rsort($todo); // сначала свежие — польза видна раньше
+                $total = count($todo);
+                $done = 0;
+                $movedHere = 0;
+                foreach (array_chunk($todo, $chunk) as $part) {
+                    foreach ($this->fetchMessageIds($client, $part) as $uid => $mid) {
+                        $row = $mid !== null ? $this->findByMessageId($mailbox, $mid) : null;
+                        if ($row && $this->rehome($row, $folder->imap_path, (int) $uid, $folder->id)) {
+                            $movedHere++;
+                        } else {
+                            $stats['unknown']++;
+                        }
+                    }
+                    $done += count($part);
+                    $stats['scanned'] += count($part);
+                    if ($progress) {
+                        $progress($folder->name, $done, $total, $movedHere);
+                    }
+                }
+                $stats['moved'] += $movedHere;
+            }
+        } finally {
+            $client->disconnect();
+        }
+
+        return $stats;
     }
 
     /**

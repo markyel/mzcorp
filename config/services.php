@@ -422,7 +422,7 @@ return [
             'trim',
             explode(',', (string) env(
                 'MAIL_FOLDER_SYNC_SYSTEM_ROOTS',
-                'INBOX,Sent,Drafts,Outbox,Spam,Junk,Trash,Archive,Templates,Отправленные,Черновики,Исходящие,Спам,Удалённые,Удаленные,Архив,Шаблоны'
+                'INBOX,Sent,Drafts,Outbox,Spam,Junk,Trash,Templates,Отправленные,Черновики,Исходящие,Спам,Удалённые,Удаленные,Шаблоны'
             ))
         )),
         'folder_sync_excluded_prefixes' => array_filter(array_map(
