@@ -35,6 +35,18 @@ class MailReassignArchiverService
 {
     private const ARCHIVE_FOLDER_NAME = 'Reassigned';
 
+    /**
+     * Серверные пути архивной папки (оба разделителя). Копии с таким `folder`
+     * почтовый клиент бывшего менеджера не показывает (заявка передана —
+     * письмо ушло из его INBOX и в Яндексе, и в mzCorp), см. Mail\Client.
+     *
+     * @return list<string>
+     */
+    public static function archivePaths(): array
+    {
+        return ['MZ|' . self::ARCHIVE_FOLDER_NAME, 'MZ/' . self::ARCHIVE_FOLDER_NAME];
+    }
+
     public function __construct(
         private readonly MailboxConnector $connector,
         private readonly MailFolderRouter $router,

@@ -678,8 +678,20 @@ class Client extends Component
         return EmailMessage::query()
             ->whereIn('email_messages.mailbox_id', $mailboxIds)
             ->tap(fn (Builder $q) => $this->hideCopiesWhoseOriginalIsListed($q, $mailboxIds))
+            ->tap(fn (Builder $q) => $this->hideReassignedCopies($q))
             ->tap(fn (Builder $q) => $this->joinReadState($q, $mailboxIds))
             ->select('email_messages.*', 'ustate.read_at as my_read_at', 'ustate.flagged_at as my_flagged_at');
+    }
+
+    /**
+     * Копии писем переданных заявок: MailReassignArchiverService переложил их
+     * в Яндексе из INBOX бывшего менеджера в MZ|Reassigned (folder в БД тот же)
+     * — в его почте mzCorp они тоже не показываются. Переписка остаётся в
+     * карточке заявки у нового менеджера.
+     */
+    private function hideReassignedCopies(Builder $q): void
+    {
+        $q->whereNotIn('email_messages.folder', \App\Services\Mail\MailReassignArchiverService::archivePaths());
     }
 
     /**
@@ -852,6 +864,7 @@ class Client extends Component
             ->whereIn('email_messages.mailbox_id', $mailboxIds)
             ->where('email_messages.is_draft', false)
             ->where('email_messages.direction', MailDirection::Inbound->value)
+            ->tap(fn (Builder $q) => $this->hideReassignedCopies($q))
             ->tap(fn (Builder $q) => $this->joinReadState($q, $mailboxIds))
             ->whereNull('ustate.read_at')
             ->groupBy('email_messages.mailbox_id')
