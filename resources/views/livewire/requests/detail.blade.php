@@ -248,7 +248,7 @@
                         onclick="navigator.clipboard.writeText('{{ $req->internal_code }}'); this.textContent='скопировано';">
                     копировать
                 </button>
-                @if(auth()->user()?->hasAnyRole(['manager', 'admin', 'director']))
+                @if(auth()->user()?->hasAnyRole(['manager', 'head_of_sales', 'admin', 'director']))
                     <a href="{{ route('mail.inbox', ['request' => $req->id]) }}"
                        class="text-fg-3 border border-border px-1.5 py-0.5 rounded text-[10.5px] uppercase tracking-wider hover:bg-hover no-underline"
                        title="Открыть раздел «Почта» со всеми письмами этой заявки">

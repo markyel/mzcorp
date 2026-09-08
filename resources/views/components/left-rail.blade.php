@@ -30,12 +30,12 @@
         ['icon' => '⌕', 'label' => 'Поиск по каталогу', 'href' => route('catalog.search'),   'key' => 'catalog'],
     ];
 
-    if ($railUser?->hasAnyRole(['manager', 'admin', 'director'])) {
-        // Менеджер / админ / директорат — почтовый клиент. У менеджера видимость
-        // = свои ящики; у админа/директората — переключалка по ВСЕМ ящикам.
+    if ($railUser?->hasAnyRole(['manager', 'head_of_sales', 'admin', 'director'])) {
+        // Менеджер / РОП / админ / директорат — почтовый клиент. У менеджера
+        // видимость = свои ящики; у РОПа/админа/директората — переключалка по ВСЕМ.
         $rail[] = ['icon' => '✉', 'label' => 'Почта', 'href' => route('mail.inbox'), 'key' => 'mail'];
     } elseif ($canSeeMail) {
-        // РОП / секретарь — org-wide витрина всей почты (надзор).
+        // Секретарь — org-wide витрина всей почты (надзор).
         $rail[] = ['icon' => '✉', 'label' => 'Почта', 'href' => route('mail.index'), 'key' => 'mail'];
     }
 

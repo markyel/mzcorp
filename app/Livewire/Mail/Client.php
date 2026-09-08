@@ -86,7 +86,9 @@ class Client extends Component
 
     private function canAccess(): bool
     {
-        return $this->user()?->hasAnyRole([Role::Manager->value, Role::Admin->value, Role::Director->value]) ?? false;
+        // РОП (head_of_sales) тоже работает в клиенте: у него свой личный ящик
+        // + обзор ящиков менеджеров (2026-09-08: Курзаев видел старую витрину).
+        return $this->user()?->hasAnyRole([Role::Manager->value, Role::HeadOfSales->value, Role::Admin->value, Role::Director->value]) ?? false;
     }
 
     private function user(): ?User

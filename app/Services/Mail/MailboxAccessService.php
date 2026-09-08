@@ -104,10 +104,10 @@ class MailboxAccessService
         return 'personal';
     }
 
-    /** Роли с обзором всех ящиков (переключалка по всем): админ + директорат. */
+    /** Роли с обзором всех ящиков (переключалка по всем): РОП, админ, директорат. */
     public function hasFullMailboxAccess(User $user): bool
     {
-        return $user->hasAnyRole([Role::Admin->value, Role::Director->value]);
+        return $user->hasAnyRole([Role::HeadOfSales->value, Role::Admin->value, Role::Director->value]);
     }
 
     /** Есть ли у пользователя доступ к конкретному ящику. */
