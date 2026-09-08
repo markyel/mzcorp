@@ -334,7 +334,7 @@
             editable(t) { return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); },
             onKey(e) {
                 if (this.editable(e.target)) return;
-                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); this.all(); }
+                if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyA' || e.key.toLowerCase() === 'a')) { e.preventDefault(); this.all(); }
                 else if (e.key === 'Escape' && this.sel.length) { this.clear(); }
             },
             dragStart(id, ev) {
