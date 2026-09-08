@@ -75,8 +75,43 @@
 .mailapp .fhdr{display:flex;align-items:center;justify-content:space-between;padding:2px;font:500 11.5px/1 var(--font-sans);color:var(--fg-3)}
 .mailapp .fhdr b{color:var(--fg-1);font-weight:600;font-feature-settings:'tnum'}
 .mailapp .threads{flex:1;overflow-y:auto}
-.mailapp .trow{display:grid;grid-template-columns:30px 1fr;column-gap:10px;padding:10px 12px;border-bottom:1px solid var(--border-subtle);cursor:pointer;position:relative}
+.mailapp .trow{display:grid;grid-template-columns:16px 30px 1fr;column-gap:8px;padding:10px 12px 10px 10px;border-bottom:1px solid var(--border-subtle);cursor:pointer;position:relative}
 .mailapp .trow:hover{background:var(--bg-hover)}
+/* Выделение писем: чекбокс (виден при наведении/выделении), Shift-диапазон, Ctrl+A, drag&drop в папку. */
+.mailapp .trow .chk{width:16px;height:16px;margin-top:7px;border:1.5px solid var(--border-strong);border-radius:4px;background:var(--bg-surface);opacity:0;transition:opacity .12s;flex-shrink:0;cursor:pointer;position:relative}
+.mailapp .trow:hover .chk,.mailapp .trow.sel .chk{opacity:1}
+.mailapp .trow.sel .chk{background:var(--accent);border-color:var(--accent)}
+.mailapp .trow.sel .chk::after{content:'';position:absolute;left:4px;top:1px;width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.mailapp .trow.sel{background:var(--sky-50)}
+.mailapp .trow[draggable]{-webkit-user-drag:element}
+.dragghost{position:fixed;top:-100px;left:-100px;padding:6px 12px;border-radius:999px;background:var(--fg-1,#0f1419);color:#fff;font:600 12px/1 system-ui,sans-serif;pointer-events:none;z-index:9999}
+.mailapp .bulkbar{display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--sky-50);border-bottom:1px solid var(--border-subtle);font:400 12px/1 var(--font-sans);color:var(--fg-2)}
+.mailapp .bulkbar .cnt{margin-right:6px;color:var(--fg-1)}
+.mailapp .bulkbar button{height:26px;padding:0 10px;border:1px solid var(--border);background:var(--bg-surface);border-radius:6px;cursor:pointer;color:var(--fg-1);font:500 12px/1 var(--font-sans)}
+.mailapp .bulkbar button:hover{background:var(--bg-hover)}
+.mailapp .bulkbar button.link{border:none;background:none;color:var(--sky-700);padding:0 4px}
+.mailapp .bulkbar button.x{border:none;background:none;font-size:16px;color:var(--fg-3);padding:0 4px}
+.mailapp .bulkbar .spacer{flex:1}
+.mailapp .bulkbar .rte-pop{position:relative;display:inline-flex}
+.mailapp .bulkmenu{position:absolute;top:30px;left:0;z-index:6;min-width:200px;max-height:320px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 10px 30px rgba(15,23,42,.16);padding:4px;display:flex;flex-direction:column}
+.mailapp .bulkmenu button{border:none;background:none;text-align:left;height:30px;padding:0 10px;border-radius:5px;font:400 12.5px/1 var(--font-sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mailapp .bulkmenu .hint{padding:8px 10px;color:var(--fg-3);font-size:11.5px;white-space:normal}
+/* Пользовательские папки в панели A. */
+.mailapp .fgroup-folders{display:flex;align-items:center;justify-content:space-between;padding-right:6px}
+.mailapp .fgroup-folders .fadd{border:none;background:none;color:var(--fg-3);cursor:pointer;font-size:15px;line-height:1;padding:0 4px;border-radius:4px}
+.mailapp .fgroup-folders .fadd:hover{background:var(--bg-hover);color:var(--fg-1)}
+.mailapp .fitem.custom{position:relative}
+.mailapp .fitem .ficon{color:var(--fg-4);font-size:10px;width:10px;flex-shrink:0}
+.mailapp .fitem .factions{display:none;gap:2px}
+.mailapp .fitem.custom:hover .factions{display:inline-flex}
+.mailapp .fitem .factions button{border:none;background:none;color:var(--fg-3);cursor:pointer;font-size:12px;line-height:1;padding:1px 3px;border-radius:3px}
+.mailapp .fitem .factions button:hover{background:var(--bg-surface);color:var(--fg-1)}
+.mailapp .fitem.dropover{background:var(--sky-50);box-shadow:inset 0 0 0 1.5px var(--sky-500)}
+.mailapp .fnew{display:flex;gap:4px;padding:4px 8px}
+.mailapp .fnew input{flex:1;min-width:0;height:26px;border:1px solid var(--border);border-radius:5px;padding:0 6px;font:400 12px/1 var(--font-sans);background:var(--bg-surface);color:var(--fg-1);outline:none}
+.mailapp .fnew input:focus{border-color:var(--sky-500)}
+.mailapp .fnew button{height:26px;padding:0 8px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:5px;font:600 11.5px/1 var(--font-sans);cursor:pointer}
+.mailapp .fhint{padding:2px 8px 6px;font:400 11px/1.35 var(--font-sans);color:var(--fg-4)}
 .mailapp .trow.active{background:var(--bg-selected);box-shadow:inset 3px 0 0 var(--sky-500)}
 .mailapp .trow .dot-unread{width:7px;height:7px;border-radius:999px;background:var(--accent);position:absolute;left:4px;top:18px}
 .mailapp .trow .av{width:30px;height:30px;border-radius:999px;background:var(--neutral-200);color:var(--fg-2);font:600 12px/30px var(--font-sans);text-align:center;flex-shrink:0}
@@ -177,7 +212,22 @@
 </style>
 
     {{-- ══════════ PANE A — ящики + папки ══════════ --}}
-    <div class="paneA">
+    <div class="paneA"
+         x-data="{
+            newFolderFor: null, newFolderName: '',
+            dragOver(ev) { ev.currentTarget.classList.add('dropover'); },
+            dragLeave(ev) { ev.currentTarget.classList.remove('dropover'); },
+            drop(ev, folderId) {
+                ev.currentTarget.classList.remove('dropover');
+                let ids = [];
+                try { ids = JSON.parse(ev.dataTransfer.getData('text/plain') || '[]'); } catch (e) {}
+                if (Array.isArray(ids) && ids.length) { $wire.moveToFolder(ids, folderId); }
+            },
+            startNew(parentId) { this.newFolderFor = parentId ?? 0; this.newFolderName = ''; this.$nextTick(() => this.$refs['nf' + (parentId ?? 0)]?.focus()); },
+            submitNew() { const n = this.newFolderName.trim(); if (n) { $wire.createFolder(n, this.newFolderFor || null); } this.newFolderFor = null; this.newFolderName = ''; },
+            rename(id, current) { const n = prompt('Новое имя папки:', current); if (n && n.trim() && n.trim() !== current) { $wire.renameFolder(id, n.trim()); } },
+            remove(id, name) { if (confirm('Удалить папку «' + name + '»? Письма вернутся во «Входящие», подпапки поднимутся на уровень выше.')) { $wire.deleteFolder(id); } }
+         }">
         @php $groups = $this->mailboxGroups; $cur = $groups['current']; @endphp
         <div class="mbx-switch">
             <div class="cur">
@@ -196,13 +246,50 @@
             @foreach($this->folders as $f)
                 <button type="button" wire:key="fld-{{ $f['key'] }}"
                         wire:click="selectFolder('{{ $f['key'] }}')"
-                        class="fitem {{ $f['active'] ? 'active' : '' }}">
+                        class="fitem {{ $f['active'] ? 'active' : '' }}"
+                        @if($f['key'] === 'inbox') @dragover.prevent="dragOver($event)" @dragleave="dragLeave($event)" @drop.prevent="drop($event, null)" @endif>
                     <span class="lbl">{{ $f['label'] }}</span>
                     @if($f['count'])
                         @if($f['unread'])<span class="pill">{{ $f['count'] }}</span>@else<span class="n">{{ $f['count'] }}</span>@endif
                     @endif
                 </button>
             @endforeach
+
+            {{-- Пользовательские папки выбранного ящика: дерево, создание, drop-цели. --}}
+            @php $customId = $this->customFolderId(); @endphp
+            <div class="fgroup-label fgroup-folders">
+                <span>Папки</span>
+                <button type="button" class="fadd" @click="startNew(null)" title="Новая папка">+</button>
+            </div>
+            <div class="fnew" x-show="newFolderFor === 0" x-cloak>
+                <input type="text" x-ref="nf0" x-model="newFolderName" maxlength="80" placeholder="Имя папки"
+                       @keydown.enter.prevent="submitNew()" @keydown.escape="newFolderFor = null">
+                <button type="button" @click="submitNew()">ОК</button>
+            </div>
+            @forelse($this->customFolders as $cf)
+                <div wire:key="cf-{{ $cf['id'] }}" class="fitem custom {{ $customId === $cf['id'] ? 'active' : '' }}"
+                     style="padding-left: {{ 8 + $cf['depth'] * 14 }}px"
+                     wire:click="selectFolder('{{ $cf['key'] }}')"
+                     @dragover.prevent="dragOver($event)" @dragleave="dragLeave($event)" @drop.prevent="drop($event, {{ $cf['id'] }})">
+                    <span class="ficon">{{ $cf['depth'] > 0 ? '└' : '▸' }}</span>
+                    <span class="lbl" title="{{ $cf['name'] }}">{{ $cf['name'] }}</span>
+                    <span class="factions">
+                        @if($cf['depth'] + 1 < \App\Models\MailboxFolder::MAX_DEPTH)
+                            <button type="button" @click.stop="startNew({{ $cf['id'] }})" title="Подпапка">+</button>
+                        @endif
+                        <button type="button" @click.stop="rename({{ $cf['id'] }}, @js($cf['name']))" title="Переименовать">✎</button>
+                        <button type="button" @click.stop="remove({{ $cf['id'] }}, @js($cf['name']))" title="Удалить папку">×</button>
+                    </span>
+                    @if($cf['unread'])<span class="pill">{{ $cf['unread'] }}</span>@elseif($cf['total'])<span class="n">{{ $cf['total'] }}</span>@endif
+                </div>
+                <div class="fnew" x-show="newFolderFor === {{ $cf['id'] }}" x-cloak style="padding-left: {{ 8 + ($cf['depth'] + 1) * 14 }}px">
+                    <input type="text" x-ref="nf{{ $cf['id'] }}" x-model="newFolderName" maxlength="80" placeholder="Имя подпапки"
+                           @keydown.enter.prevent="submitNew()" @keydown.escape="newFolderFor = null">
+                    <button type="button" @click="submitNew()">ОК</button>
+                </div>
+            @empty
+                <div class="fhint" x-show="newFolderFor !== 0">Папок нет — создайте «+» и перетаскивайте письма.</div>
+            @endforelse
 
             @if(!empty($groups['shared']) || !empty($groups['delegated']) || !empty($groups['personalOthers']))
                 <div class="fgroup-label">Ящики</div>
@@ -223,7 +310,46 @@
     </div>
 
     {{-- ══════════ PANE B — список тредов ══════════ --}}
-    <div class="paneB">
+    <div class="paneB"
+         x-data="{
+            sel: [], last: null, moveOpen: false,
+            ids() { return [...$el.querySelectorAll('.trow[data-id]')].map(e => Number(e.dataset.id)); },
+            has(id) { return this.sel.includes(id); },
+            toggle(id, ev) {
+                const all = this.ids();
+                if (ev && ev.shiftKey && this.last !== null && all.includes(this.last)) {
+                    const a = all.indexOf(this.last), b = all.indexOf(id);
+                    const range = all.slice(Math.min(a, b), Math.max(a, b) + 1);
+                    this.sel = [...new Set([...this.sel, ...range])];
+                } else if (this.has(id)) {
+                    this.sel = this.sel.filter(x => x !== id);
+                } else {
+                    this.sel = [...this.sel, id];
+                }
+                this.last = id;
+            },
+            all() { this.sel = this.ids(); },
+            clear() { this.sel = []; this.moveOpen = false; },
+            editable(t) { return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); },
+            onKey(e) {
+                if (this.editable(e.target)) return;
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); this.all(); }
+                else if (e.key === 'Escape' && this.sel.length) { this.clear(); }
+            },
+            dragStart(id, ev) {
+                if (! this.has(id)) { this.sel = [id]; this.last = id; }
+                ev.dataTransfer.setData('text/plain', JSON.stringify(this.sel));
+                ev.dataTransfer.effectAllowed = 'move';
+                const g = document.createElement('div');
+                g.className = 'dragghost';
+                g.textContent = this.sel.length + ' ' + (this.sel.length === 1 ? 'письмо' : (this.sel.length < 5 ? 'письма' : 'писем'));
+                document.body.appendChild(g);
+                ev.dataTransfer.setDragImage(g, 10, 10);
+                setTimeout(() => g.remove(), 0);
+            }
+         }"
+         @keydown.window="onKey($event)"
+         @mail-selection-clear.window="clear()">
         <div class="blist-top">
             <div class="row1">
                 <div class="bsearch">
@@ -240,10 +366,31 @@
                         <button type="button" wire:click="clearRequestFilter" title="Снять фильтр — вернуться к ящику">×</button>
                     </span>
                 @else
-                    <span>{{ \App\Enums\MailFolder::tryFromOrDefault($folder)->label() }}</span>
+                    <span>{{ $this->currentFolderLabel }}</span>
                 @endif
                 <span><b>{{ number_format($this->totalCount, 0, '.', ' ') }}</b> писем</span>
             </div>
+        </div>
+
+        {{-- Панель массовых действий (видна при выделении). --}}
+        <div class="bulkbar" x-show="sel.length" x-cloak>
+            <span class="cnt">Выбрано <b x-text="sel.length"></b></span>
+            <button type="button" @click="$wire.markManyRead(sel)" title="Пометить прочитанными">Прочитано</button>
+            <button type="button" @click="$wire.markManyUnread(sel)" title="Пометить непрочитанными">Непрочитано</button>
+            <span class="rte-pop">
+                <button type="button" @click="moveOpen = !moveOpen">В папку ▾</button>
+                <div class="bulkmenu" x-show="moveOpen" x-cloak @click.outside="moveOpen = false">
+                    <button type="button" @click="$wire.moveToFolder(sel, null); moveOpen = false">Входящие</button>
+                    @foreach($this->customFolders as $cf)
+                        <button type="button" wire:key="bm-{{ $cf['id'] }}" style="padding-left: {{ 10 + $cf['depth'] * 12 }}px"
+                                @click="$wire.moveToFolder(sel, {{ $cf['id'] }}); moveOpen = false">{{ $cf['name'] }}</button>
+                    @endforeach
+                    @if(empty($this->customFolders))<div class="hint">Папок ещё нет — создайте в списке слева.</div>@endif
+                </div>
+            </span>
+            <span class="spacer"></span>
+            <button type="button" class="link" @click="all()">Все на странице</button>
+            <button type="button" class="x" @click="clear()" title="Снять выделение">×</button>
         </div>
 
         <div class="threads">
@@ -262,8 +409,11 @@
                     $awaitingInv = $rrs === \App\Enums\RequestStatus::AwaitingInvoice;
                 @endphp
                 <div class="trow {{ $unread ? 'unread' : '' }} {{ $openId === $m->id ? 'active' : '' }} {{ $awaitingInv ? 'awaiting-inv' : '' }}"
-                     wire:key="trow-{{ $m->id }}" wire:click="openMessage({{ $m->id }})">
+                     wire:key="trow-{{ $m->id }}" wire:click="openMessage({{ $m->id }})"
+                     data-id="{{ $m->id }}" :class="{ sel: has({{ $m->id }}) }"
+                     draggable="true" @dragstart="dragStart({{ $m->id }}, $event)">
                     @if($unread)<span class="dot-unread"></span>@endif
+                    <span class="chk" @click.stop="toggle({{ $m->id }}, $event)" title="Выбрать (Shift — диапазон, Ctrl+A — все)"></span>
                     <span class="av {{ $isOrg ? 'org' : '' }}">{{ $initials($m->from_name, $m->from_email) }}</span>
                     <div class="body">
                         <div class="l1">
@@ -289,7 +439,7 @@
                     </div>
                 </div>
             @empty
-                <div class="empty">В папке «{{ \App\Enums\MailFolder::tryFromOrDefault($folder)->label() }}» пока пусто.</div>
+                <div class="empty">В папке «{{ $this->currentFolderLabel }}» пока пусто.</div>
             @endforelse
 
             @if($this->hasMore)

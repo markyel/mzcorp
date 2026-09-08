@@ -8,8 +8,11 @@ use App\Enums\Role;
 use App\Livewire\Concerns\RendersEmailBody;
 use App\Models\EmailMessage;
 use App\Models\User;
+use App\Models\MailboxFolder;
 use App\Services\Mail\EmailDraftService;
+use App\Services\Mail\ImapSeenSyncService;
 use App\Services\Mail\MailboxAccessService;
+use App\Services\Mail\MailboxFolderService;
 use App\Services\Mail\MailReadService;
 use App\Services\Mail\SharedMailService;
 use Illuminate\Database\Eloquent\Builder;
@@ -93,12 +96,22 @@ class Client extends Component
         $this->selectedMailboxId = $mailboxId;
         $this->folder = MailFolder::Inbox->value;
         $this->requestId = null;
+        unset($this->customFolders);
         $this->resetView();
     }
 
     public function selectFolder(string $folder): void
     {
-        $this->folder = MailFolder::tryFromOrDefault($folder)->value;
+        // `f:<id>` — пользовательская папка выбранного ящика; иначе системная.
+        $customId = MailboxFolder::idFromKey($folder);
+        if ($customId !== null) {
+            $custom = $this->accessibleFolder($customId);
+            $this->folder = ($custom && (int) $custom->mailbox_id === (int) $this->selectedMailboxId)
+                ? 'f:' . $customId
+                : MailFolder::Inbox->value;
+        } else {
+            $this->folder = MailFolder::tryFromOrDefault($folder)->value;
+        }
         $this->requestId = null;
         $this->resetView();
     }
@@ -161,10 +174,204 @@ class Client extends Component
         unset($this->openThread, $this->openAnchor);
 
         $thread = $this->buildThread($anchor);
-        app(MailReadService::class)->markManyRead($thread->pluck('id')->all(), $this->user());
+        $ids = $thread->pluck('id')->all();
+        app(MailReadService::class)->markManyRead($ids, $this->user());
+        // Владелец личного ящика → \Seen на сервере (для чужих ящиков — no-op).
+        app(ImapSeenSyncService::class)->pushSeen($ids, $this->user(), true);
 
         // Обновить список (снять «непрочитано») и счётчики.
         unset($this->threads, $this->folders, $this->mailboxes);
+    }
+
+    /* ----------------------- Массовые действия ------------------------ */
+
+    /** @param  list<int>  $ids */
+    public function markManyRead(array $ids): void
+    {
+        $ids = $this->accessibleIds($ids);
+        if ($ids === []) {
+            return;
+        }
+        app(MailReadService::class)->markManyRead($ids, $this->user());
+        app(ImapSeenSyncService::class)->pushSeen($ids, $this->user(), true);
+        unset($this->threads, $this->folders, $this->mailboxes);
+        $this->dispatch('mail-selection-clear');
+    }
+
+    /** @param  list<int>  $ids */
+    public function markManyUnread(array $ids): void
+    {
+        $ids = $this->accessibleIds($ids);
+        if ($ids === []) {
+            return;
+        }
+        $svc = app(MailReadService::class);
+        foreach ($ids as $id) {
+            $svc->markUnread($id, $this->user());
+        }
+        app(ImapSeenSyncService::class)->pushSeen($ids, $this->user(), false);
+        unset($this->threads, $this->folders, $this->mailboxes);
+        $this->dispatch('mail-selection-clear');
+    }
+
+    /**
+     * Перенести письма в пользовательскую папку (folderId null — во «Входящие»).
+     *
+     * @param  list<int>  $ids
+     */
+    public function moveToFolder(array $ids, ?int $folderId): void
+    {
+        $ids = $this->accessibleIds($ids);
+        if ($ids === []) {
+            return;
+        }
+        try {
+            $n = app(MailboxFolderService::class)->moveMessages($ids, $folderId ?: null, $this->user());
+        } catch (\DomainException $e) {
+            $this->dispatch('toast', message: $e->getMessage(), type: 'error');
+
+            return;
+        }
+        if (in_array($this->openId, $ids, true)) {
+            $this->openId = null;
+            unset($this->openThread, $this->openAnchor);
+        }
+        unset($this->threads, $this->folders);
+        $this->dispatch('mail-selection-clear');
+        $target = $folderId ? MailboxFolder::query()->find($folderId)?->name : 'Входящие';
+        $this->dispatch('toast', message: sprintf('%d %s → «%s».', $n, $this->pluralLetters($n), $target), type: 'success');
+    }
+
+    /* ------------------------- Папки ящика ---------------------------- */
+
+    public function createFolder(string $name, ?int $parentId = null): void
+    {
+        $mailbox = $this->selectedMailbox();
+        if (! $mailbox) {
+            return;
+        }
+        try {
+            $folder = app(MailboxFolderService::class)->create($mailbox, $name, $parentId ?: null, $this->user());
+        } catch (\DomainException $e) {
+            $this->dispatch('toast', message: $e->getMessage(), type: 'error');
+
+            return;
+        }
+        unset($this->customFolders);
+        $this->dispatch('toast', message: "Папка «{$folder->name}» создана.", type: 'success');
+    }
+
+    public function renameFolder(int $folderId, string $name): void
+    {
+        $folder = $this->accessibleFolder($folderId);
+        if (! $folder) {
+            return;
+        }
+        try {
+            app(MailboxFolderService::class)->rename($folder, $name, $this->user());
+        } catch (\DomainException $e) {
+            $this->dispatch('toast', message: $e->getMessage(), type: 'error');
+
+            return;
+        }
+        unset($this->customFolders);
+    }
+
+    public function deleteFolder(int $folderId): void
+    {
+        $folder = $this->accessibleFolder($folderId);
+        if (! $folder) {
+            return;
+        }
+        $name = $folder->name;
+        $moved = app(MailboxFolderService::class)->delete($folder, $this->user());
+        if ($this->folder === 'f:' . $folderId) {
+            $this->folder = MailFolder::Inbox->value;
+            $this->resetView();
+        }
+        unset($this->customFolders, $this->threads, $this->folders);
+        $this->dispatch('toast', message: sprintf('Папка «%s» удалена, %d %s — во входящих.', $name, $moved, $this->pluralLetters($moved)), type: 'success');
+    }
+
+    /** Заголовок текущей папки (системной или пользовательской). */
+    #[Computed]
+    public function currentFolderLabel(): string
+    {
+        $customId = $this->customFolderId();
+        if ($customId !== null) {
+            foreach ($this->customFolders as $f) {
+                if ($f['id'] === $customId) {
+                    return $f['name'];
+                }
+            }
+        }
+
+        return MailFolder::tryFromOrDefault($this->folder)->label();
+    }
+
+    /** Дерево пользовательских папок выбранного ящика (с бейджами). */
+    #[Computed]
+    public function customFolders(): array
+    {
+        $mailbox = $this->selectedMailbox();
+
+        return $mailbox ? app(MailboxFolderService::class)->tree($mailbox, $this->user()) : [];
+    }
+
+    /** id пользовательской папки из $this->folder (`f:<id>`), иначе null. */
+    public function customFolderId(): ?int
+    {
+        return MailboxFolder::idFromKey($this->folder);
+    }
+
+    private function selectedMailbox(): ?\App\Models\Mailbox
+    {
+        if (! $this->selectedMailboxId
+            || ! app(MailboxAccessService::class)->canAccessMailbox($this->user(), $this->selectedMailboxId)) {
+            return null;
+        }
+
+        return \App\Models\Mailbox::query()->find($this->selectedMailboxId);
+    }
+
+    private function accessibleFolder(int $folderId): ?MailboxFolder
+    {
+        $folder = MailboxFolder::query()->find($folderId);
+        if (! $folder || ! app(MailboxAccessService::class)->canAccessMailbox($this->user(), (int) $folder->mailbox_id)) {
+            return null;
+        }
+
+        return $folder;
+    }
+
+    /** Отфильтровать id писем по доступным ящикам. @param list<int> $ids @return list<int> */
+    private function accessibleIds(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+        if ($ids === []) {
+            return [];
+        }
+
+        return EmailMessage::query()
+            ->whereIn('mailbox_id', app(MailboxAccessService::class)->mailboxIdsFor($this->user()))
+            ->whereKey($ids)
+            ->pluck('id')
+            ->map(fn ($v) => (int) $v)
+            ->all();
+    }
+
+    private function pluralLetters(int $n): string
+    {
+        $n10 = $n % 10;
+        $n100 = $n % 100;
+        if ($n10 === 1 && $n100 !== 11) {
+            return 'письмо';
+        }
+        if ($n10 >= 2 && $n10 <= 4 && ($n100 < 12 || $n100 > 14)) {
+            return 'письма';
+        }
+
+        return 'писем';
     }
 
     public function closeReading(): void
@@ -190,6 +397,7 @@ class Client extends Component
             return;
         }
         app(MailReadService::class)->markUnread($id, $this->user());
+        app(ImapSeenSyncService::class)->pushSeen([$id], $this->user(), false);
         unset($this->threads, $this->folders, $this->mailboxes);
         $this->dispatch('toast', message: 'Помечено непрочитанным.', type: 'success');
     }
@@ -436,19 +644,33 @@ class Client extends Component
             return $q;
         }
 
+        // Пользовательская папка (`f:<id>`): всё, что в неё положили, обе стороны.
+        $customId = $this->customFolderId();
+        if ($customId !== null && ! $ignoreRequestFilter) {
+            $q->where('email_messages.is_draft', false)
+                ->where('email_messages.mailbox_folder_id', $customId);
+            $this->applySearch($q);
+
+            return $q;
+        }
+
+        // Письма, разложенные по пользовательским папкам, из системных папок
+        // уходят (как в почтовике); «Помеченные» и «Черновики» — не папки-места.
+        $notFiled = fn (Builder $b) => $b->whereNull('email_messages.mailbox_folder_id');
+
         match ($folder) {
-            MailFolder::Inbox => $q->where('email_messages.is_draft', false)
+            MailFolder::Inbox => $notFiled($q)->where('email_messages.is_draft', false)
                 ->where('email_messages.direction', MailDirection::Inbound->value),
-            MailFolder::Sent => $q->where('email_messages.is_draft', false)
+            MailFolder::Sent => $notFiled($q)->where('email_messages.is_draft', false)
                 ->where('email_messages.direction', MailDirection::Outbound->value),
             MailFolder::Drafts => $q->where('email_messages.is_draft', true)
                 ->where('email_messages.draft_author_user_id', $uid),
             MailFolder::Flagged => $q->where('email_messages.is_draft', false)
                 ->whereNotNull('ustate.flagged_at'),
-            MailFolder::WithRequest => $q->where('email_messages.is_draft', false)
+            MailFolder::WithRequest => $notFiled($q)->where('email_messages.is_draft', false)
                 ->where('email_messages.direction', MailDirection::Inbound->value)
                 ->whereNotNull('email_messages.related_request_id'),
-            MailFolder::WithoutRequest => $q->where('email_messages.is_draft', false)
+            MailFolder::WithoutRequest => $notFiled($q)->where('email_messages.is_draft', false)
                 ->where('email_messages.direction', MailDirection::Inbound->value)
                 ->whereNull('email_messages.related_request_id'),
         };

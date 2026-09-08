@@ -63,6 +63,15 @@ class MailSyncCommand extends Command
                 }
                 $count++;
             }
+
+            // Прочитанность владельца личного ящика ↔ \Seen на сервере
+            // (ImapSeenSyncService::pullSeen). Только личные ящики с владельцем.
+            if ($mailbox->type === \App\Enums\MailboxType::Personal && $mailbox->owner_user_id
+                && in_array('inbox', $folderTypes, true)) {
+                $seenJob = new \App\Jobs\Mail\PullImapSeenFlagsJob($mailbox->id);
+                $this->option('sync') ? dispatch_sync($seenJob) : dispatch($seenJob);
+                $count++;
+            }
         }
 
         $this->info("Total jobs scheduled: {$count}");

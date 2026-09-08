@@ -22,6 +22,8 @@ class EmailMessage extends Model
     protected $fillable = [
         'mailbox_id',
         'folder',
+        // Пользовательская папка почтового клиента (MailboxFolder); NULL — входящие.
+        'mailbox_folder_id',
         'direction',
         'imap_uid',
         'message_id',
