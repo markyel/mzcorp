@@ -720,15 +720,18 @@ class Client extends Component
 
                 return;
             }
+            // Литералы, а не bindings: PostgreSQL выводит тип нетипизированных
+            // параметров в CASE как text → «operator does not exist: bigint = text».
+            // Значения — только целые id (int-cast выше), инъекция невозможна.
             $cases = [];
-            $bindings = [];
             foreach ($map as $mailboxId => $userId) {
-                $cases[] = 'WHEN ? THEN ?';
-                $bindings[] = $mailboxId;
-                $bindings[] = $userId;
+                $cases[] = sprintf('WHEN %d THEN %d', (int) $mailboxId, (int) $userId);
             }
-            $bindings[] = $fallback;
-            $j->whereRaw('ustate.user_id = (CASE email_messages.mailbox_id ' . implode(' ', $cases) . ' ELSE ? END)', $bindings);
+            $j->whereRaw(sprintf(
+                'ustate.user_id = (CASE email_messages.mailbox_id %s ELSE %d END)',
+                implode(' ', $cases),
+                $fallback,
+            ));
         });
     }
 
