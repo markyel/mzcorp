@@ -93,7 +93,7 @@
 .mailapp .bulkbar button.x{border:none;background:none;font-size:16px;color:var(--fg-3);padding:0 4px}
 .mailapp .bulkbar .spacer{flex:1}
 .mailapp .bulkbar .rte-pop{position:relative;display:inline-flex}
-.mailapp .bulkmenu{position:absolute;top:30px;left:0;z-index:6;min-width:200px;max-height:320px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 10px 30px rgba(15,23,42,.16);padding:4px;display:flex;flex-direction:column}
+.mailapp .bulkmenu{position:absolute;top:30px;right:0;max-width:min(320px,calc(100vw - 40px));z-index:6;min-width:200px;max-height:320px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 10px 30px rgba(15,23,42,.16);padding:4px;display:flex;flex-direction:column}
 .mailapp .bulkmenu button{border:none;background:none;text-align:left;height:30px;padding:0 10px;border-radius:5px;font:400 12.5px/1 var(--font-sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mailapp .bulkmenu .hint{padding:8px 10px;color:var(--fg-3);font-size:11.5px;white-space:normal}
 /* Пользовательские папки в панели A. */
