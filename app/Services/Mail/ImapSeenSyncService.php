@@ -34,6 +34,9 @@ class ImapSeenSyncService
     /** Окно pull-синхронизации флагов: письма не старше N дней. */
     public const PULL_DAYS = 14;
 
+    /** Полный проход по всей истории ящика (все письма с imap_uid) — не чаще раза в N часов. */
+    public const FULL_PULL_EVERY_HOURS = 24;
+
     /** Не откатывать «прочитано» в mzCorp, если оно моложе этого (push мог ещё не дойти). */
     private const PULL_UNREAD_GRACE_MINUTES = 10;
 
@@ -131,12 +134,14 @@ class ImapSeenSyncService
      *
      * @return array{0:int,1:int}
      */
-    public function pullSeen(Mailbox $mailbox): array
+    public function pullSeen(Mailbox $mailbox, bool $force = false): array
     {
         $owner = $mailbox->owner;
         if ($mailbox->type !== MailboxType::Personal || ! $owner) {
             return [0, 0];
         }
+        $fullKey = 'imap-seen-full-pull:' . $mailbox->id;
+        $full = $force || ! \Illuminate\Support\Facades\Cache::has($fullKey);
         // INBOX + пользовательские папки, синхронизируемые с сервером
         // (ImapFolderSyncService): письмо, разложенное по папке, лежит там же
         // и на сервере — флаги читаем в его папке.
@@ -153,7 +158,10 @@ class ImapSeenSyncService
             ->where('is_draft', false)
             ->whereIn('folder', array_merge(['INBOX'], $customPaths))
             ->whereNotNull('imap_uid')
-            ->where('sent_at', '>=', now()->subDays(self::PULL_DAYS))
+            // Обычно — окно PULL_DAYS; раз в сутки — вся история ящика в БД
+            // (бейдж «Входящие» считает непрочитанные за всё время, и старые
+            // письма, прочитанные в Яндексе, иначе висели бы непрочитанными).
+            ->when(! $full, fn ($q) => $q->where('sent_at', '>=', now()->subDays(self::PULL_DAYS)))
             ->get(['id', 'imap_uid', 'imap_flags', 'folder']);
         if ($messages->isEmpty()) {
             return [0, 0];
@@ -217,6 +225,10 @@ class ImapSeenSyncService
                 'marked_read' => count($toRead),
                 'marked_unread' => count($toUnread),
             ]);
+        }
+
+        if ($full) {
+            \Illuminate\Support\Facades\Cache::put($fullKey, now()->toIso8601String(), now()->addHours(self::FULL_PULL_EVERY_HOURS));
         }
 
         return [count($toRead), count($toUnread)];
