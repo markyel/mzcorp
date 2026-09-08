@@ -644,6 +644,7 @@ Supervisor (все 4 воркера): `--queue=mail-sync,default,catalog-resolve
 - `DELETE` непустой папки отправляет её письма в Trash — сначала MOVE в INBOX.
 - webklex `Client::createFolder()` делает EXPUNGE после CREATE; без выбранной папки Yandex отвечает `BAD [CLIENTBUG] EXPUNGE Wrong session state` — брать `getConnection()->createFolder()` + `subscribeFolder()` (web-UI Яндекса рисует дерево из LSUB). `MailFolderRouter::ensureFolder` с готовым MUTF-7 путём экранирует `&` → мусорная папка `&-BCIE…`.
 - LIST через `getConnection()->folders('', '*')` отдаёт флаги (`\HasNoChildren`, special-use); `Client::getFolders()` флаги теряет.
+- `SyncImapFoldersJob` падал по таймауту на ящике Агрызкова (13): папка «Входящие (локально)» ~100k писем, заголовки всей истории не вытянуть → watermark по папке в `MailboxFolderState` (folder = imap_path), первый проход — последние 500 UID, далее ≤300 новых за цикл (`0092939`). После фикса: первый pull 57 с (490 писем переехали в папку — они реально лежат там на сервере), повторный 9.5 с (getUid по 100k).
 - `php artisan tinker script.php` после скрипта открывает REPL и висит → всегда `</dev/null` + `timeout N`; вывод не через `| tail` (при таймауте буфер теряется).
 
 ### Сессия 2026-09-07 (часть 2) — Почта: полноценный редактор письма (TipTap), картинки и таблицы в теле; текст ссылки рекламного блока; персональные отчёты менеджеров
