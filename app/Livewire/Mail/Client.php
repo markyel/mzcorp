@@ -384,11 +384,11 @@ class Client extends Component
     /* ------------------------------ Queries ------------------------------ */
 
     /** ID активного ящика (обёрнут в массив для whereIn). @return array<int,int> */
-    private function activeMailboxIds(): array
+    private function activeMailboxIds(bool $allMailboxes = false): array
     {
         // Фильтр «письма заявки» — по всем доступным ящикам (переписка заявки
         // лежит и в личном ящике менеджера, и в общем info@).
-        if ($this->requestId) {
+        if ($allMailboxes) {
             return app(MailboxAccessService::class)->mailboxIdsFor($this->user());
         }
         if ($this->selectedMailboxId
@@ -403,10 +403,10 @@ class Client extends Component
      * Базовый запрос по активному ящику + персональный read/flag через leftJoin.
      * НЕ фильтрует is_draft (это делает папка) и НЕ фильтрует направление.
      */
-    private function baseQuery(): Builder
+    private function baseQuery(bool $allMailboxes = false): Builder
     {
         $uid = (int) $this->user()->id;
-        $mailboxIds = $this->activeMailboxIds();
+        $mailboxIds = $this->activeMailboxIds($allMailboxes);
 
         return EmailMessage::query()
             ->whereIn('email_messages.mailbox_id', $mailboxIds)
@@ -422,12 +422,13 @@ class Client extends Component
     private function folderQuery(MailFolder $folder, bool $ignoreRequestFilter = false): Builder
     {
         $uid = (int) $this->user()->id;
-        $q = $this->baseQuery();
+        $requestMode = $this->requestId && ! $ignoreRequestFilter;
+        $q = $this->baseQuery(allMailboxes: $requestMode);
 
         // Режим «письма заявки»: обе стороны переписки, без папок; ящики — все
-        // доступные (activeMailboxIds учитывает requestId). Поиск поверх работает.
-        // Бейджи папок в сайдбаре считаются без этого фильтра (ignoreRequestFilter).
-        if ($this->requestId && ! $ignoreRequestFilter) {
+        // доступные. Поиск поверх работает. Бейджи папок в сайдбаре считаются
+        // без этого фильтра и по выбранному ящику (ignoreRequestFilter).
+        if ($requestMode) {
             $q->where('email_messages.is_draft', false)
                 ->where('email_messages.related_request_id', $this->requestId);
             $this->applySearch($q);
