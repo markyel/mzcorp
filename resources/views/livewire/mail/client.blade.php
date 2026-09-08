@@ -135,6 +135,9 @@
 .mailapp .trow .reqchip{font:600 10.5px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px}
 .mailapp .trow .onecchip{font:600 10.5px/1.4 var(--font-mono);background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:4px;white-space:nowrap}
 /* Шапка списка в режиме «письма заявки» (?request=). */
+.mailapp .sscope{display:flex;align-items:center;gap:6px;font:400 11.5px/1 var(--font-sans);color:var(--fg-3)}
+.mailapp .sscope select{flex:1;min-width:0;height:26px;border:1px solid var(--border);border-radius:6px;background:var(--bg-surface);color:var(--fg-1);font:500 11.5px/1 var(--font-sans);padding:0 6px}
+.mailapp .trow .fchip{font:500 10.5px/1.4 var(--font-sans);background:var(--sky-50);color:var(--sky-700,#0369a1);padding:1px 6px;border-radius:4px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}
 .mailapp .fhdr .reqfilter{display:inline-flex;align-items:center;gap:6px;color:var(--fg-2)}
 .mailapp .fhdr .reqfilter .code{font:600 11px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px;text-decoration:none}
 .mailapp .fhdr .reqfilter .onec{font:600 10.5px/1.4 var(--font-mono);background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:4px}
@@ -358,6 +361,19 @@
                 </div>
                 <button class="compose" wire:click="compose({{ (int) $selectedMailboxId }})">Написать</button>
             </div>
+            @if(trim($search) !== '' && ! $requestId)
+                {{-- Поиск идёт по всем папкам ящика; здесь можно сузить до одной. --}}
+                <div class="sscope">
+                    <span>Искать в</span>
+                    <select wire:model.live="searchIn">
+                        <option value="all">всех папках</option>
+                        <option value="inbox">только во «Входящих»</option>
+                        @foreach($this->customFolders as $cf)
+                            <option value="f:{{ $cf['id'] }}">{{ str_repeat('· ', $cf['depth']) }}{{ $cf['name'] }}</option>
+                        @endforeach
+                    </select>
+                </div>
+            @endif
             <div class="fhdr">
                 @if($this->filterRequest)
                     <span class="reqfilter" title="{{ $this->filterRequest->subject }}">
@@ -367,7 +383,7 @@
                         <button type="button" wire:click="clearRequestFilter" title="Снять фильтр — вернуться к ящику">×</button>
                     </span>
                 @else
-                    <span>{{ $this->currentFolderLabel }}</span>
+                    <span>{{ $this->searchScopeLabel ?? $this->currentFolderLabel }}</span>
                 @endif
                 <span><b>{{ number_format($this->totalCount, 0, '.', ' ') }}</b> писем</span>
             </div>
@@ -428,6 +444,9 @@
                                 <button type="button" class="flagbtn {{ $m->my_flagged_at ? 'on' : '' }}"
                                         wire:click.stop="toggleFlag({{ $m->id }})" title="Пометить">⚑</button>
                                 @if($m->attachments_count)<span class="clip">📎</span>@endif
+                                @if($m->mailbox_folder_id && $m->mailbox_folder_id !== $this->customFolderId() && isset($this->folderNames[$m->mailbox_folder_id]))
+                                    <span class="fchip" title="Письмо лежит в папке">▸ {{ $this->folderNames[$m->mailbox_folder_id] }}</span>
+                                @endif
                                 @if($m->related_request_id && $m->relatedRequest)
                                     @if($awaitingInv)<span class="rubchip" title="Клиент ждёт счёт — счёт ещё не выставлен">₽</span>@endif
                                     <span class="reqchip">{{ $m->relatedRequest->internal_code }}</span>

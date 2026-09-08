@@ -20,9 +20,39 @@ class MailboxFolder extends Model
         'mailbox_id',
         'parent_id',
         'name',
+        // Путь на IMAP-сервере (raw, MUTF-7) — только у папок личных ящиков,
+        // синхронизируемых с сервером (ImapFolderSyncService); NULL — папка
+        // живёт только в mzCorp.
+        'imap_path',
+        'imap_synced_at',
         'position',
         'created_by_user_id',
     ];
+
+    protected function casts(): array
+    {
+        return ['imap_synced_at' => 'datetime'];
+    }
+
+    /** Имя папки для показа: декодированное из MUTF-7 последнее звено пути. */
+    public static function displayNameFromImapPath(string $imapPath, string $delimiter): string
+    {
+        $parts = $delimiter !== '' ? explode($delimiter, $imapPath) : [$imapPath];
+        $last = (string) end($parts);
+        $decoded = @mb_convert_encoding($last, 'UTF-8', 'UTF7-IMAP');
+
+        return is_string($decoded) && $decoded !== '' ? $decoded : $last;
+    }
+
+    /** Звено пути на сервере из имени папки: MUTF-7, без символа-разделителя. */
+    public static function imapSegmentFromName(string $name, string $delimiter): string
+    {
+        $clean = $delimiter !== '' ? str_replace($delimiter, ' ', $name) : $name;
+        $clean = trim(preg_replace('/\s+/u', ' ', $clean) ?? $clean);
+        $encoded = @mb_convert_encoding($clean, 'UTF7-IMAP', 'UTF-8');
+
+        return is_string($encoded) && $encoded !== '' ? $encoded : $clean;
+    }
 
     public function mailbox(): BelongsTo
     {

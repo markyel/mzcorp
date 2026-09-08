@@ -404,6 +404,32 @@ return [
         |
         | Список через запятую: MAIL_PUBLIC_MAIL_DOMAINS=gmail.com,mail.ru,…
         */
+        /*
+        | Синхронизация пользовательских папок почтового клиента с IMAP-сервером
+        | (ImapFolderSyncService): только ЛИЧНЫЕ ящики с владельцем. Папки
+        | mzCorp ↔ папки Яндекса, перенос письма ↔ UID MOVE.
+        |
+        |  folder_sync_enabled      — общий выключатель (MAIL_FOLDER_SYNC=false).
+        |  folder_sync_delimiter    — разделитель иерархии по умолчанию (Yandex: '|').
+        |  folder_sync_system_roots — корневые папки сервера, которые НЕ являются
+        |                             пользовательскими (вместе с потомками).
+        |  folder_sync_excluded_prefixes — служебные деревья MyLift (MZ|<Фамилия>
+        |                             от MailFolderRouter/MailReassignArchiver).
+        */
+        'folder_sync_enabled' => (bool) env('MAIL_FOLDER_SYNC', true),
+        'folder_sync_delimiter' => (string) env('MAIL_FOLDER_SYNC_DELIMITER', '|'),
+        'folder_sync_system_roots' => array_filter(array_map(
+            'trim',
+            explode(',', (string) env(
+                'MAIL_FOLDER_SYNC_SYSTEM_ROOTS',
+                'INBOX,Sent,Drafts,Outbox,Spam,Junk,Trash,Archive,Templates,Отправленные,Черновики,Исходящие,Спам,Удалённые,Удаленные,Архив,Шаблоны'
+            ))
+        )),
+        'folder_sync_excluded_prefixes' => array_filter(array_map(
+            'trim',
+            explode(',', (string) env('MAIL_FOLDER_SYNC_EXCLUDED_PREFIXES', 'MZ,MyLift'))
+        )),
+
         'public_mail_domains' => array_filter(array_map(
             'trim',
             explode(',', (string) env(

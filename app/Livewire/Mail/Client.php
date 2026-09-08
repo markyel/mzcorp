@@ -58,6 +58,14 @@ class Client extends Component
     #[Url(as: 'request')]
     public ?int $requestId = null;
 
+    /**
+     * Где искать при непустом поиске: 'all' — по всем папкам ящика (по умолчанию),
+     * 'inbox' — только не разложенное по папкам, 'f:<id>' — конкретная папка.
+     * Вне поиска не действует.
+     */
+    #[Url(as: 'in')]
+    public string $searchIn = 'all';
+
     public int $perPage = 40;
 
     private const PER_PAGE_STEP = 20;
@@ -96,8 +104,22 @@ class Client extends Component
         $this->selectedMailboxId = $mailboxId;
         $this->folder = MailFolder::Inbox->value;
         $this->requestId = null;
+        $this->searchIn = 'all';
         unset($this->customFolders);
         $this->resetView();
+    }
+
+    public function updatedSearchIn(): void
+    {
+        $this->perPage = 40;
+        $this->openId = null;
+        unset($this->threads);
+    }
+
+    /** Ищем сейчас? (непустая строка поиска, не режим «письма заявки»). */
+    private function isSearching(): bool
+    {
+        return trim($this->search) !== '' && ! $this->requestId;
     }
 
     public function selectFolder(string $folder): void
@@ -113,6 +135,7 @@ class Client extends Component
             $this->folder = MailFolder::tryFromOrDefault($folder)->value;
         }
         $this->requestId = null;
+        $this->searchIn = 'all';
         $this->resetView();
     }
 
@@ -322,6 +345,40 @@ class Client extends Component
     public function customFolderId(): ?int
     {
         return MailboxFolder::idFromKey($this->folder);
+    }
+
+    /**
+     * Имена пользовательских папок активных ящиков (для чипа «в какой папке
+     * письмо» в результатах поиска и в режиме «письма заявки»).
+     *
+     * @return array<int,string>
+     */
+    #[Computed]
+    public function folderNames(): array
+    {
+        return MailboxFolder::query()
+            ->whereIn('mailbox_id', $this->activeMailboxIds((bool) $this->requestId))
+            ->pluck('name', 'id')
+            ->map(fn ($n) => (string) $n)
+            ->all();
+    }
+
+    /** Подпись режима поиска для шапки списка. */
+    #[Computed]
+    public function searchScopeLabel(): ?string
+    {
+        if (! $this->isSearching()) {
+            return null;
+        }
+        if ($this->searchIn === 'inbox') {
+            return 'Поиск · Входящие';
+        }
+        $fid = MailboxFolder::idFromKey($this->searchIn);
+        if ($fid !== null) {
+            return 'Поиск · ' . ($this->folderNames[$fid] ?? 'папка');
+        }
+
+        return 'Поиск · все папки';
     }
 
     private function selectedMailbox(): ?\App\Models\Mailbox
@@ -543,6 +600,7 @@ class Client extends Component
                 'email_messages.direction',
                 'email_messages.category',
                 'email_messages.related_request_id',
+                'email_messages.mailbox_folder_id',
                 'ustate.read_at as my_read_at',
                 'ustate.flagged_at as my_flagged_at',
             ])
@@ -613,17 +671,65 @@ class Client extends Component
      */
     private function baseQuery(bool $allMailboxes = false): Builder
     {
-        $uid = (int) $this->user()->id;
         $mailboxIds = $this->activeMailboxIds($allMailboxes);
 
         return EmailMessage::query()
             ->whereIn('email_messages.mailbox_id', $mailboxIds)
             ->tap(fn (Builder $q) => $this->hideCopiesWhoseOriginalIsListed($q, $mailboxIds))
-            ->leftJoin('email_message_user_states as ustate', function ($j) use ($uid) {
-                $j->on('ustate.email_message_id', '=', 'email_messages.id')
-                    ->where('ustate.user_id', '=', $uid);
-            })
+            ->tap(fn (Builder $q) => $this->joinReadState($q, $mailboxIds))
             ->select('email_messages.*', 'ustate.read_at as my_read_at', 'ustate.flagged_at as my_flagged_at');
+    }
+
+    /**
+     * Чья прочитанность/флаг показываются по каждому ящику: у ЛИЧНОГО ящика с
+     * владельцем — владельца (одна «правда» на ящик, она же синхронизирована с
+     * \Seen на сервере; директор/РОП, заглянув в ящик, видят её и не меняют),
+     * у общих и делегированных без владельца — текущего пользователя.
+     *
+     * @param  list<int>  $mailboxIds
+     * @return array<int,int>  mailbox_id => user_id
+     */
+    private function readStateUserByMailbox(array $mailboxIds): array
+    {
+        $uid = (int) $this->user()->id;
+        $owners = \App\Models\Mailbox::query()
+            ->whereIn('id', $mailboxIds)
+            ->where('type', \App\Enums\MailboxType::Personal->value)
+            ->whereNotNull('owner_user_id')
+            ->pluck('owner_user_id', 'id');
+
+        $map = [];
+        foreach ($mailboxIds as $id) {
+            $map[(int) $id] = (int) ($owners[$id] ?? $uid);
+        }
+
+        return $map;
+    }
+
+    /** leftJoin email_message_user_states как `ustate` с правилом readStateUserByMailbox(). */
+    private function joinReadState(Builder $q, array $mailboxIds): void
+    {
+        $map = $this->readStateUserByMailbox($mailboxIds);
+        $fallback = (int) $this->user()->id;
+
+        $q->leftJoin('email_message_user_states as ustate', function ($j) use ($map, $fallback) {
+            $j->on('ustate.email_message_id', '=', 'email_messages.id');
+            $distinct = array_values(array_unique($map));
+            if (count($distinct) <= 1) {
+                $j->where('ustate.user_id', '=', $distinct[0] ?? $fallback);
+
+                return;
+            }
+            $cases = [];
+            $bindings = [];
+            foreach ($map as $mailboxId => $userId) {
+                $cases[] = 'WHEN ? THEN ?';
+                $bindings[] = $mailboxId;
+                $bindings[] = $userId;
+            }
+            $bindings[] = $fallback;
+            $j->whereRaw('ustate.user_id = (CASE email_messages.mailbox_id ' . implode(' ', $cases) . ' ELSE ? END)', $bindings);
+        });
     }
 
     /** Применить фильтр папки + поиск. */
@@ -644,11 +750,30 @@ class Client extends Component
             return $q;
         }
 
+        // Поиск идёт по всем папкам ящика (как в почтовике), если не выбран
+        // конкретный «искать в»: 'inbox' — только не разложенное, 'f:<id>' — папка.
+        $searching = $this->isSearching() && ! $ignoreRequestFilter;
+        $searchFolderId = MailboxFolder::idFromKey($this->searchIn);
+        $notFiled = function (Builder $b) use ($searching, $searchFolderId): Builder {
+            if (! $searching || $this->searchIn === 'inbox') {
+                return $b->whereNull('email_messages.mailbox_folder_id');
+            }
+            if ($searchFolderId !== null) {
+                return $b->where('email_messages.mailbox_folder_id', $searchFolderId);
+            }
+
+            return $b; // 'all' — все папки
+        };
+
         // Пользовательская папка (`f:<id>`): всё, что в неё положили, обе стороны.
         $customId = $this->customFolderId();
         if ($customId !== null && ! $ignoreRequestFilter) {
-            $q->where('email_messages.is_draft', false)
-                ->where('email_messages.mailbox_folder_id', $customId);
+            $q->where('email_messages.is_draft', false);
+            if ($searching) {
+                $notFiled($q);
+            } else {
+                $q->where('email_messages.mailbox_folder_id', $customId);
+            }
             $this->applySearch($q);
 
             return $q;
@@ -656,7 +781,6 @@ class Client extends Component
 
         // Письма, разложенные по пользовательским папкам, из системных папок
         // уходят (как в почтовике); «Помеченные» и «Черновики» — не папки-места.
-        $notFiled = fn (Builder $b) => $b->whereNull('email_messages.mailbox_folder_id');
 
         match ($folder) {
             MailFolder::Inbox => $notFiled($q)->where('email_messages.is_draft', false)
@@ -716,8 +840,6 @@ class Client extends Component
         if ($mailboxIds === []) {
             return [];
         }
-        $uid = (int) $this->user()->id;
-
         // Бейдж ящика = то, что физически лежит в ЭТОМ ящике (как и список при
         // выборе одного ящика), поэтому копии здесь не прячем: копия и её
         // оригинал никогда не лежат в одном ящике.
@@ -725,10 +847,7 @@ class Client extends Component
             ->whereIn('email_messages.mailbox_id', $mailboxIds)
             ->where('email_messages.is_draft', false)
             ->where('email_messages.direction', MailDirection::Inbound->value)
-            ->leftJoin('email_message_user_states as ustate', function ($j) use ($uid) {
-                $j->on('ustate.email_message_id', '=', 'email_messages.id')
-                    ->where('ustate.user_id', '=', $uid);
-            })
+            ->tap(fn (Builder $q) => $this->joinReadState($q, $mailboxIds))
             ->whereNull('ustate.read_at')
             ->groupBy('email_messages.mailbox_id')
             ->selectRaw('email_messages.mailbox_id, COUNT(*) as c')

@@ -50,6 +50,30 @@ class MessagePersister
                 ->where('message_id', $messageId)
                 ->first();
 
+            // Синк папок (ImapFolderSyncService): письмо, разложенное по
+            // пользовательской папке, вернули на сервере в эту папку (обычно
+            // INBOX) — это НЕ новое письмо. Переселяем существующую запись
+            // (folder/imap_uid, из папки — вон) и не запускаем пайплайн заново,
+            // иначе повторная классификация/линковка и риск заявки-дубля.
+            if (! $existing) {
+                $filed = EmailMessage::where('mailbox_id', $mailbox->id)
+                    ->where('message_id', $messageId)
+                    ->whereNotNull('mailbox_folder_id')
+                    ->where('folder', '!=', $folder)
+                    ->orderBy('id')
+                    ->first();
+                if ($filed) {
+                    $filed->forceFill([
+                        'folder' => $folder,
+                        'imap_uid' => $msg->getUid(),
+                        'imap_flags' => $this->extractFlags($msg),
+                        'mailbox_folder_id' => null,
+                    ])->saveQuietly();
+
+                    return null;
+                }
+            }
+
             if ($existing) {
                 // Phase 1.9 outbound: если это наш собственный sent draft
                 // (мы сами создали EmailMessage в OutgoingMailSender и

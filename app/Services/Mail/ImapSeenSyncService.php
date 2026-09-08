@@ -137,29 +137,47 @@ class ImapSeenSyncService
         if ($mailbox->type !== MailboxType::Personal || ! $owner) {
             return [0, 0];
         }
+        // INBOX + пользовательские папки, синхронизируемые с сервером
+        // (ImapFolderSyncService): письмо, разложенное по папке, лежит там же
+        // и на сервере — флаги читаем в его папке.
+        $customPaths = \App\Models\MailboxFolder::query()
+            ->where('mailbox_id', $mailbox->id)
+            ->whereNotNull('imap_path')
+            ->whereNotNull('imap_synced_at')
+            ->pluck('imap_path')
+            ->all();
+
         $messages = EmailMessage::query()
             ->where('mailbox_id', $mailbox->id)
             ->where('direction', 'inbound')
             ->where('is_draft', false)
-            ->where('folder', 'INBOX')
+            ->whereIn('folder', array_merge(['INBOX'], $customPaths))
             ->whereNotNull('imap_uid')
             ->where('sent_at', '>=', now()->subDays(self::PULL_DAYS))
-            ->get(['id', 'imap_uid', 'imap_flags']);
+            ->get(['id', 'imap_uid', 'imap_flags', 'folder']);
         if ($messages->isEmpty()) {
             return [0, 0];
         }
 
         $client = null;
-        $serverSeen = [];
+        $serverSeen = []; // "folder|uid" => bool
         try {
             $client = $this->connector->imapClient($mailbox);
-            $inbox = $this->connector->findInbox($client);
-            $client->openFolder($inbox->path); // EXAMINE достаточно для FETCH FLAGS
             $conn = $client->getConnection();
-            foreach ($messages->pluck('imap_uid')->map(fn ($u) => (int) $u)->chunk(300) as $chunk) {
-                $resp = $conn->flags($chunk->values()->all(), IMAP::ST_UID);
-                foreach ((array) $resp->validatedData() as $uid => $flags) {
-                    $serverSeen[(int) $uid] = $this->hasSeen($flags);
+            foreach ($messages->groupBy('folder') as $folderPath => $group) {
+                $path = $folderPath === 'INBOX' ? $this->connector->findInbox($client)->path : (string) $folderPath;
+                try {
+                    $client->openFolder($path); // EXAMINE достаточно для FETCH FLAGS
+                } catch (\Throwable $e) {
+                    Log::info('ImapSeenSyncService: folder not selectable, skipped', ['mailbox_id' => $mailbox->id, 'folder' => $path, 'error' => $e->getMessage()]);
+
+                    continue;
+                }
+                foreach ($group->pluck('imap_uid')->map(fn ($u) => (int) $u)->chunk(300) as $chunk) {
+                    $resp = $conn->flags($chunk->values()->all(), IMAP::ST_UID);
+                    foreach ((array) $resp->validatedData() as $uid => $flags) {
+                        $serverSeen[$folderPath . '|' . (int) $uid] = $this->hasSeen($flags);
+                    }
                 }
             }
         } finally {
@@ -174,14 +192,14 @@ class ImapSeenSyncService
         $toRead = [];
         $toUnread = [];
         foreach ($messages as $m) {
-            $uid = (int) $m->imap_uid;
-            if (! array_key_exists($uid, $serverSeen)) {
-                continue; // письма уже нет в INBOX на сервере
+            $key = $m->folder . '|' . (int) $m->imap_uid;
+            if (! array_key_exists($key, $serverSeen)) {
+                continue; // письма уже нет в этой папке на сервере
             }
             $readAt = $states[$m->id] ?? null;
-            if ($serverSeen[$uid] && $readAt === null) {
+            if ($serverSeen[$key] && $readAt === null) {
                 $toRead[] = $m->id;
-            } elseif (! $serverSeen[$uid] && $readAt !== null
+            } elseif (! $serverSeen[$key] && $readAt !== null
                 && \Illuminate\Support\Carbon::parse($readAt)->lt(now()->subMinutes(self::PULL_UNREAD_GRACE_MINUTES))) {
                 $toUnread[] = $m->id;
             }

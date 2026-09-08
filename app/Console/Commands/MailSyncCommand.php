@@ -68,9 +68,13 @@ class MailSyncCommand extends Command
             // (ImapSeenSyncService::pullSeen). Только личные ящики с владельцем.
             if ($mailbox->type === \App\Enums\MailboxType::Personal && $mailbox->owner_user_id
                 && in_array('inbox', $folderTypes, true)) {
+                // Сначала папки/расположение писем (ImapFolderSyncService),
+                // затем флаги — pull \Seen уже видит письма в их папках.
+                $foldersJob = new \App\Jobs\Mail\SyncImapFoldersJob($mailbox->id);
+                $this->option('sync') ? dispatch_sync($foldersJob) : dispatch($foldersJob);
                 $seenJob = new \App\Jobs\Mail\PullImapSeenFlagsJob($mailbox->id);
                 $this->option('sync') ? dispatch_sync($seenJob) : dispatch($seenJob);
-                $count++;
+                $count += 2;
             }
         }
 

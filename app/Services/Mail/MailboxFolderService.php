@@ -2,6 +2,8 @@
 
 namespace App\Services\Mail;
 
+use App\Enums\MailboxType;
+use App\Jobs\Mail\PushImapFolderOpJob;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use App\Models\MailboxFolder;
@@ -13,14 +15,16 @@ use Illuminate\Support\Facades\DB;
  * счётчики. Доступ — как к ящику (MailboxAccessService): папки общего ящика
  * видят и правят все, кто видит ящик.
  *
- * Папки живут в mzCorp; на IMAP-сервере письмо остаётся на месте (Yandex не
- * делает EXPUNGE после UID MOVE — физический перенос оставил бы дубль в
- * Yandex-интерфейсе, см. MailFolderRouter).
+ * Личные ящики с владельцем синхронизируют папки и расположение писем с
+ * IMAP-сервером (ImapFolderSyncService, PushImapFolderOpJob): локально меняем
+ * сразу, на сервер — job'ом. Общие ящики — папки только в mzCorp.
  */
 class MailboxFolderService
 {
-    public function __construct(private readonly MailboxAccessService $access)
-    {
+    public function __construct(
+        private readonly MailboxAccessService $access,
+        private readonly ImapFolderSyncService $imap,
+    ) {
     }
 
     /**
@@ -39,9 +43,15 @@ class MailboxFolderService
             return [];
         }
 
+        // Непрочитанные: у личного ящика с владельцем — владельца (одна правда
+        // на ящик, как в Client::readStateUserByMailbox), иначе — текущего.
+        $stateUserId = ($mailbox->type === MailboxType::Personal && $mailbox->owner_user_id)
+            ? (int) $mailbox->owner_user_id
+            : (int) $user->id;
+
         $counts = DB::table('email_messages as e')
-            ->leftJoin('email_message_user_states as s', function ($j) use ($user) {
-                $j->on('s.email_message_id', '=', 'e.id')->where('s.user_id', '=', $user->id);
+            ->leftJoin('email_message_user_states as s', function ($j) use ($stateUserId) {
+                $j->on('s.email_message_id', '=', 'e.id')->where('s.user_id', '=', $stateUserId);
             })
             ->whereIn('e.mailbox_folder_id', $folders->pluck('id'))
             ->where('e.is_draft', false)
@@ -102,36 +112,117 @@ class MailboxFolderService
         $position = (int) MailboxFolder::query()
             ->where('mailbox_id', $mailbox->id)->where('parent_id', $parent?->id)->max('position') + 1;
 
-        return MailboxFolder::create([
+        $folder = MailboxFolder::create([
             'mailbox_id' => $mailbox->id,
             'parent_id' => $parent?->id,
             'name' => $name,
             'position' => $position,
             'created_by_user_id' => $user->id,
         ]);
+
+        // Личный ящик с владельцем → папка и на сервере (путь ставим сразу,
+        // job подтверждает CREATE; imap_synced_at проставит job либо pull).
+        if ($this->imap->isServerSynced($mailbox)) {
+            $path = $this->imap->pathFor($folder);
+            if ($path !== null) {
+                $folder->forceFill(['imap_path' => $path])->save();
+                PushImapFolderOpJob::dispatch((int) $mailbox->id, 'create', ['folder_id' => (int) $folder->id]);
+            }
+        }
+
+        return $folder;
     }
 
     public function rename(MailboxFolder $folder, string $name, User $user): void
     {
         $this->ensureAccess($folder->mailbox, $user);
-        $folder->update(['name' => $this->cleanName($name)]);
+        $name = $this->cleanName($name);
+
+        if ($folder->imap_path === null || ! $this->imap->isServerSynced($folder->mailbox)) {
+            $folder->update(['name' => $name]);
+
+            return;
+        }
+
+        $delimiter = $this->imap->delimiter();
+        $oldPath = $folder->imap_path;
+        $newPath = $this->imap->pathFor($folder->replicate(['imap_path'])->forceFill(['name' => $name, 'parent_id' => $folder->parent_id]), $delimiter);
+        if ($newPath === null || $newPath === $oldPath) {
+            $folder->update(['name' => $name]);
+
+            return;
+        }
+
+        DB::transaction(function () use ($folder, $name, $oldPath, $newPath, $delimiter) {
+            $folder->update(['name' => $name, 'imap_path' => $newPath]);
+            $this->rewritePaths((int) $folder->mailbox_id, $oldPath, $newPath, $delimiter);
+        });
+        PushImapFolderOpJob::dispatch((int) $folder->mailbox_id, 'rename', ['old_path' => $oldPath, 'new_path' => $newPath]);
     }
 
     /**
      * Удалить папку: письма — во «Входящие» (mailbox_folder_id = NULL),
-     * подпапки — на уровень выше.
+     * подпапки — на уровень выше. На сервере (личный ящик) то же самое делает
+     * job: письма UID MOVE → INBOX, подпапки RENAME, затем DELETE.
      */
     public function delete(MailboxFolder $folder, User $user): int
     {
         $this->ensureAccess($folder->mailbox, $user);
+        $serverSync = $folder->imap_path !== null && $this->imap->isServerSynced($folder->mailbox);
+        $delimiter = $this->imap->delimiter();
 
-        return DB::transaction(function () use ($folder) {
+        $payload = null;
+        if ($serverSync) {
+            $uids = EmailMessage::query()
+                ->where('mailbox_id', $folder->mailbox_id)
+                ->where('folder', $folder->imap_path)
+                ->whereNotNull('imap_uid')
+                ->pluck('imap_uid')->map(fn ($u) => (int) $u)->values()->all();
+            $childRenames = [];
+            $parentPath = $folder->parent_id ? $folder->parent?->imap_path : null;
+            foreach (MailboxFolder::query()->where('parent_id', $folder->id)->whereNotNull('imap_path')->get() as $child) {
+                $segment = MailboxFolder::imapSegmentFromName($child->name, $delimiter);
+                $childRenames[] = [$child->imap_path, $parentPath !== null ? $parentPath . $delimiter . $segment : $segment];
+            }
+            $payload = ['path' => $folder->imap_path, 'child_renames' => $childRenames, 'uids' => $uids];
+        }
+
+        $moved = DB::transaction(function () use ($folder, $payload, $delimiter) {
             $moved = EmailMessage::query()->where('mailbox_folder_id', $folder->id)->update(['mailbox_folder_id' => null]);
+            if ($payload !== null) {
+                foreach ($payload['child_renames'] as [$old, $new]) {
+                    MailboxFolder::query()->where('mailbox_id', $folder->mailbox_id)->where('imap_path', $old)->update(['imap_path' => $new]);
+                    $this->rewritePaths((int) $folder->mailbox_id, $old, $new, $delimiter);
+                }
+            }
             MailboxFolder::query()->where('parent_id', $folder->id)->update(['parent_id' => $folder->parent_id]);
             $folder->delete();
 
             return $moved;
         });
+
+        if ($payload !== null) {
+            PushImapFolderOpJob::dispatch((int) $folder->mailbox_id, 'delete', $payload);
+        }
+
+        return $moved;
+    }
+
+    /**
+     * Переименование ветки на сервере: обновить imap_path потомков и колонку
+     * folder у писем (само переименованное звено обновляется вызывающим).
+     */
+    private function rewritePaths(int $mailboxId, string $oldPath, string $newPath, string $delimiter): void
+    {
+        $prefix = $oldPath . $delimiter;
+        $like = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $prefix) . '%';
+
+        foreach (MailboxFolder::query()->where('mailbox_id', $mailboxId)->where('imap_path', 'like', $like)->get() as $desc) {
+            $desc->forceFill(['imap_path' => $newPath . $delimiter . substr($desc->imap_path, strlen($prefix))])->save();
+        }
+        EmailMessage::query()->where('mailbox_id', $mailboxId)->where('folder', $oldPath)->update(['folder' => $newPath]);
+        EmailMessage::query()->where('mailbox_id', $mailboxId)->where('folder', 'like', $like)
+            ->update(['folder' => DB::raw("'" . str_replace("'", "''", $newPath . $delimiter) . "' || substr(folder, " . (strlen($prefix) + 1) . ')')]);
     }
 
     /**
@@ -162,7 +253,33 @@ class MailboxFolderService
             $q->where('mailbox_id', $folder->mailbox_id);
         }
 
-        return $q->update(['mailbox_folder_id' => $folder?->id]);
+        $rows = (clone $q)->get(['id', 'mailbox_id', 'folder', 'imap_uid', 'mailbox_folder_id']);
+        $n = $q->update(['mailbox_folder_id' => $folder?->id]);
+
+        // На сервер (личные ящики): UID MOVE по группам (ящик, исходная папка).
+        $toPath = $folder?->imap_path ?? 'INBOX';
+        foreach ($rows->groupBy('mailbox_id') as $mailboxId => $group) {
+            $mailbox = Mailbox::query()->find($mailboxId);
+            if (! $mailbox || ! $this->imap->isServerSynced($mailbox)) {
+                continue;
+            }
+            if ($folder && $folder->imap_path === null) {
+                continue; // папка ещё не на сервере — pull/CREATE догонит позже
+            }
+            foreach ($group->whereNotNull('imap_uid')->groupBy('folder') as $fromPath => $msgs) {
+                if ((string) $fromPath === $toPath || (string) $fromPath === '') {
+                    continue;
+                }
+                PushImapFolderOpJob::dispatch((int) $mailboxId, 'move', [
+                    'from_path' => (string) $fromPath,
+                    'uids' => $msgs->pluck('imap_uid')->map(fn ($u) => (int) $u)->values()->all(),
+                    'to_path' => $toPath,
+                    'mailbox_folder_id' => $folder?->id,
+                ]);
+            }
+        }
+
+        return $n;
     }
 
     private function depthOf(MailboxFolder $folder): int
