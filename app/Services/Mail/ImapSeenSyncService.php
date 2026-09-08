@@ -162,13 +162,14 @@ class ImapSeenSyncService
             // (бейдж «Входящие» считает непрочитанные за всё время, и старые
             // письма, прочитанные в Яндексе, иначе висели бы непрочитанными).
             ->when(! $full, fn ($q) => $q->where('sent_at', '>=', now()->subDays(self::PULL_DAYS)))
-            ->get(['id', 'imap_uid', 'imap_flags', 'folder']);
+            ->get(['id', 'imap_uid', 'imap_flags', 'folder', 'sent_at']);
         if ($messages->isEmpty()) {
             return [0, 0];
         }
 
         $client = null;
         $serverSeen = []; // "folder|uid" => bool
+        $scanned = []; // folder => true — папка реально опрошена (для stale-логики)
         try {
             $client = $this->connector->imapClient($mailbox);
             $conn = $client->getConnection();
@@ -181,6 +182,7 @@ class ImapSeenSyncService
 
                     continue;
                 }
+                $scanned[(string) $folderPath] = true;
                 foreach ($group->pluck('imap_uid')->map(fn ($u) => (int) $u)->chunk(300) as $chunk) {
                     try {
                         $rows = (array) $conn->flags($chunk->values()->all(), IMAP::ST_UID)->validatedData();
@@ -206,10 +208,21 @@ class ImapSeenSyncService
 
         $toRead = [];
         $toUnread = [];
+        $stale = [];
         foreach ($messages as $m) {
             $key = $m->folder . '|' . (int) $m->imap_uid;
             if (! array_key_exists($key, $serverSeen)) {
-                continue; // письма уже нет в этой папке на сервере
+                // Письма уже нет в этой папке на сервере (менеджер переложил/
+                // удалил его в Яндексе; папку синк не догнал — история). В полном
+                // проходе такие письма старше суток снимаем с учёта: помечаем
+                // прочитанными для владельца (как в почтовике — ушедшее из
+                // «Входящих» не висит непрочитанным) и обнуляем imap_uid.
+                if ($full && isset($scanned[$m->folder]) && ($states[$m->id] ?? null) === null
+                    && $m->sent_at !== null && $m->sent_at->lt(now()->subDay())) {
+                    $stale[] = $m->id;
+                }
+
+                continue;
             }
             $readAt = $states[$m->id] ?? null;
             if ($serverSeen[$key] && $readAt === null) {
@@ -218,6 +231,15 @@ class ImapSeenSyncService
                 && \Illuminate\Support\Carbon::parse($readAt)->lt(now()->subMinutes(self::PULL_UNREAD_GRACE_MINUTES))) {
                 $toUnread[] = $m->id;
             }
+        }
+        if ($stale !== []) {
+            $this->read->markManyRead($stale, $owner);
+            foreach (array_chunk($stale, 500) as $chunk) {
+                EmailMessage::query()->whereKey($chunk)->update(['imap_uid' => null]);
+            }
+            Log::info('ImapSeenSyncService: stale rows marked read (gone from server folder)', [
+                'mailbox_id' => $mailbox->id, 'count' => count($stale),
+            ]);
         }
         if ($toRead !== []) {
             $this->read->markManyRead($toRead, $owner);
