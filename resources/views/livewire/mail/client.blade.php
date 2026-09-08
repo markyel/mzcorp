@@ -166,7 +166,9 @@
 .mailapp .chead .top1{display:flex;align-items:flex-start;gap:12px}
 .mailapp .chead h1{margin:0;font:600 17px/1.35 var(--font-sans);color:var(--fg-1);flex:1;letter-spacing:-.005em}
 .mailapp .chead .menu{border:none;background:none;color:var(--fg-3);font-weight:700;letter-spacing:1px;cursor:pointer;padding:4px}
-.mailapp .chead .meta{font:400 12px/1.4 var(--font-sans);color:var(--fg-3);margin-top:5px}
+.mailapp .chead .meta{font:400 12px/1.4 var(--font-sans);color:var(--fg-3);margin-top:5px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.mailapp .chead .sortbtn{height:22px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-surface);color:var(--fg-2);font:500 11px/1 var(--font-sans);cursor:pointer;white-space:nowrap}
+.mailapp .chead .sortbtn:hover{background:var(--bg-hover);color:var(--fg-1)}
 .mailapp .chead .reqlink{display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:8px 12px;background:var(--violet-50);border:1px solid var(--violet-600);border-radius:var(--r-md);font-size:12.5px}
 .mailapp .chead .reqlink .code{font-family:var(--font-mono);font-weight:600;color:var(--violet-700)}
 .mailapp .chead .reqlink .onec{font-family:var(--font-mono);font-weight:600;color:var(--emerald-700);margin-left:6px}
@@ -485,7 +487,16 @@
                     <h1>{{ $anchor->subject ?: '(без темы)' }}</h1>
                     <button class="menu" wire:click="markUnread({{ $anchor->id }})" title="Пометить непрочитанным">⋯</button>
                 </div>
-                <div class="meta">{{ $anchor->from_name ?: $anchor->from_email }} · {{ $thread->count() }} писем</div>
+                <div class="meta">
+                    <span>{{ $anchor->from_name ?: $anchor->from_email }} · {{ $thread->count() }} писем</span>
+                    @if($thread->count() > 1)
+                        {{-- Порядок писем — та же персональная настройка, что в «Переписке» карточки заявки. --}}
+                        <button type="button" class="sortbtn" wire:click="toggleThreadSort"
+                                title="Порядок писем в переписке — переключить (сохраняется в ваших настройках, действует и в карточке заявки)">
+                            {{ $threadSort === 'desc' ? 'Сначала новые ↓' : 'Сначала старые ↑' }}
+                        </button>
+                    @endif
+                </div>
                 @if($req)
                     <div class="reqlink">
                         <span>Привязано к заявке</span>
@@ -504,7 +515,7 @@
             </div>
 
             <div class="cbody">
-                @foreach($thread as $msg)
+                @foreach(($threadSort === 'desc' ? $thread->reverse() : $thread) as $msg)
                     @php $outbound = $msg->direction?->value === 'outbound'; $html = $this->bodyHtmlFor($msg); @endphp
                     <div class="msg {{ $msg->is_draft ? 'draft' : ($outbound ? 'outbound' : '') }}" wire:key="msg-{{ $msg->id }}">
                         <div class="mhead">

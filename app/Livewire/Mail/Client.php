@@ -66,6 +66,19 @@ class Client extends Component
     #[Url(as: 'in')]
     public string $searchIn = 'all';
 
+    /**
+     * Порядок писем в открытой переписке: 'asc' — старые сверху, 'desc' — новые.
+     * Та же персональная настройка, что во вкладке «Переписка» карточки заявки
+     * (users.thread_sort_order) — переключение в одном месте действует везде.
+     */
+    public string $threadSort = 'asc';
+
+    public function toggleThreadSort(): void
+    {
+        $this->threadSort = $this->threadSort === 'asc' ? 'desc' : 'asc';
+        $this->user()?->forceFill(['thread_sort_order' => $this->threadSort])->save();
+    }
+
     public int $perPage = 40;
 
     private const PER_PAGE_STEP = 20;
@@ -82,6 +95,10 @@ class Client extends Component
         if ($this->selectedMailboxId === null || ! in_array($this->selectedMailboxId, $ids, true)) {
             $this->selectedMailboxId = $svc->defaultMailboxId($user);
         }
+
+        $this->threadSort = in_array($user?->thread_sort_order, ['asc', 'desc'], true)
+            ? $user->thread_sort_order
+            : 'asc';
     }
 
     private function canAccess(): bool
