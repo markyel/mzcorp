@@ -100,11 +100,9 @@ class ImapSeenSyncService
         $client = null;
         try {
             $client = $this->connector->imapClient($mailbox);
-            $folder = $client->getFolderByPath($folderPath, soft_fail: true);
-            if (! $folder) {
-                throw new \RuntimeException("Folder {$folderPath} not found");
-            }
-            $client->openFolder($folder->path, force_select: true);
+            // Путь — raw (MUTF-7), как в LIST; getFolderByPath() его перекодирует
+            // и не находит кириллические папки — SELECT напрямую.
+            $client->openFolder($folderPath, force_select: true);
             $conn = $client->getConnection();
             sort($uids);
             foreach (array_chunk($uids, 200) as $chunk) {

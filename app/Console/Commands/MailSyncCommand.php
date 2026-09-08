@@ -68,13 +68,21 @@ class MailSyncCommand extends Command
             // (ImapSeenSyncService::pullSeen). Только личные ящики с владельцем.
             if ($mailbox->type === \App\Enums\MailboxType::Personal && $mailbox->owner_user_id
                 && in_array('inbox', $folderTypes, true)) {
-                // Сначала папки/расположение писем (ImapFolderSyncService),
-                // затем флаги — pull \Seen уже видит письма в их папках.
-                $foldersJob = new \App\Jobs\Mail\SyncImapFoldersJob($mailbox->id);
-                $this->option('sync') ? dispatch_sync($foldersJob) : dispatch($foldersJob);
+                // Папки/расположение писем (ImapFolderSyncService) — не чаще раза
+                // в folder_sync_interval_minutes: pull по папке на 100k писем идёт
+                // ~10 с, и каждые 2 минуты по всем ящикам он забивал mail-sync так,
+                // что очередь default (распределение, доставка менеджеру) стояла
+                // (инцидент 2026-09-08 14:36–16:10).
+                $interval = max(2, (int) config('services.mail.folder_sync_interval_minutes', 10));
+                if ($this->option('sync') || \Illuminate\Support\Facades\Cache::add('folder-sync-throttle:' . $mailbox->id, 1, now()->addMinutes($interval))) {
+                    $foldersJob = new \App\Jobs\Mail\SyncImapFoldersJob($mailbox->id);
+                    $this->option('sync') ? dispatch_sync($foldersJob) : dispatch($foldersJob);
+                    $count++;
+                }
+                // Флаги \Seen — дёшево (FETCH FLAGS по окну 14 дней), каждый цикл.
                 $seenJob = new \App\Jobs\Mail\PullImapSeenFlagsJob($mailbox->id);
                 $this->option('sync') ? dispatch_sync($seenJob) : dispatch($seenJob);
-                $count += 2;
+                $count++;
             }
         }
 

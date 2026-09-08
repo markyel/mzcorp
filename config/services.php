@@ -417,6 +417,9 @@ return [
         |                             от MailFolderRouter/MailReassignArchiver).
         */
         'folder_sync_enabled' => (bool) env('MAIL_FOLDER_SYNC', true),
+        // Как часто (минуты) тянуть папки/расположение писем с сервера на ящик.
+        // Флаги \Seen тянутся каждый цикл mail:sync независимо от этого.
+        'folder_sync_interval_minutes' => (int) env('MAIL_FOLDER_SYNC_INTERVAL_MINUTES', 10),
         'folder_sync_delimiter' => (string) env('MAIL_FOLDER_SYNC_DELIMITER', '|'),
         'folder_sync_system_roots' => array_filter(array_map(
             'trim',
