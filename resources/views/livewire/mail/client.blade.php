@@ -98,6 +98,12 @@
 .mailapp .trow .clip{color:var(--fg-3);font-size:12px}
 .mailapp .trow .reqchip{font:600 10.5px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px}
 .mailapp .trow .onecchip{font:600 10.5px/1.4 var(--font-mono);background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:4px;white-space:nowrap}
+/* Шапка списка в режиме «письма заявки» (?request=). */
+.mailapp .fhdr .reqfilter{display:inline-flex;align-items:center;gap:6px;color:var(--fg-2)}
+.mailapp .fhdr .reqfilter .code{font:600 11px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px;text-decoration:none}
+.mailapp .fhdr .reqfilter .onec{font:600 10.5px/1.4 var(--font-mono);background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:4px}
+.mailapp .fhdr .reqfilter button{border:none;background:none;color:var(--fg-3);cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+.mailapp .fhdr .reqfilter button:hover{color:var(--fg-1)}
 /* Заявка «Клиент ждёт счёт»: тёплый цвет текста строки + полоска слева. */
 .mailapp .trow.awaiting-inv .from,.mailapp .trow.awaiting-inv .subj{color:var(--amber-700,#b45309)}
 .mailapp .trow.awaiting-inv .snip{color:var(--amber-600,#d97706)}
@@ -226,7 +232,16 @@
                 <button class="compose" wire:click="compose({{ (int) $selectedMailboxId }})">Написать</button>
             </div>
             <div class="fhdr">
-                <span>{{ \App\Enums\MailFolder::tryFromOrDefault($folder)->label() }}</span>
+                @if($this->filterRequest)
+                    <span class="reqfilter" title="{{ $this->filterRequest->subject }}">
+                        Письма заявки
+                        <a href="{{ route('requests.show', $this->filterRequest->id) }}" class="code">{{ $this->filterRequest->internal_code }}</a>
+                        @if($this->filterRequest->onec_number)<span class="onec">1С {{ $this->filterRequest->onec_number }}</span>@endif
+                        <button type="button" wire:click="clearRequestFilter" title="Снять фильтр — вернуться к ящику">×</button>
+                    </span>
+                @else
+                    <span>{{ \App\Enums\MailFolder::tryFromOrDefault($folder)->label() }}</span>
+                @endif
                 <span><b>{{ number_format($this->totalCount, 0, '.', ' ') }}</b> писем</span>
             </div>
         </div>

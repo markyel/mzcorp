@@ -47,6 +47,14 @@ class Client extends Component
     #[Url(as: 'open')]
     public ?int $openId = null;
 
+    /**
+     * Фильтр «письма заявки»: /dashboard/mail/inbox?request=<id> — все письма
+     * заявки (входящие и исходящие) по всем доступным ящикам, без папок.
+     * Ссылка из карточки заявки. Сбрасывается выбором ящика/папки/поиском.
+     */
+    #[Url(as: 'request')]
+    public ?int $requestId = null;
+
     public int $perPage = 40;
 
     private const PER_PAGE_STEP = 20;
@@ -84,12 +92,14 @@ class Client extends Component
         }
         $this->selectedMailboxId = $mailboxId;
         $this->folder = MailFolder::Inbox->value;
+        $this->requestId = null;
         $this->resetView();
     }
 
     public function selectFolder(string $folder): void
     {
         $this->folder = MailFolder::tryFromOrDefault($folder)->value;
+        $this->requestId = null;
         $this->resetView();
     }
 
@@ -97,6 +107,27 @@ class Client extends Component
     {
         $this->perPage = 40;
         $this->openId = null;
+        if (trim($this->search) !== '') {
+            $this->requestId = null;
+        }
+    }
+
+    /** Снять фильтр «письма заявки» (крестик в шапке списка). */
+    public function clearRequestFilter(): void
+    {
+        $this->requestId = null;
+        $this->resetView();
+    }
+
+    /** Заявка, по которой отфильтрован список (null — обычный режим). */
+    #[Computed]
+    public function filterRequest(): ?\App\Models\Request
+    {
+        if (! $this->requestId) {
+            return null;
+        }
+
+        return \App\Models\Request::query()->find($this->requestId, ['id', 'internal_code', 'status', 'subject', 'onec_number']);
     }
 
     public function loadMore(): void
@@ -355,6 +386,11 @@ class Client extends Component
     /** ID активного ящика (обёрнут в массив для whereIn). @return array<int,int> */
     private function activeMailboxIds(): array
     {
+        // Фильтр «письма заявки» — по всем доступным ящикам (переписка заявки
+        // лежит и в личном ящике менеджера, и в общем info@).
+        if ($this->requestId) {
+            return app(MailboxAccessService::class)->mailboxIdsFor($this->user());
+        }
         if ($this->selectedMailboxId
             && app(MailboxAccessService::class)->canAccessMailbox($this->user(), $this->selectedMailboxId)) {
             return [$this->selectedMailboxId];
@@ -388,6 +424,16 @@ class Client extends Component
         $uid = (int) $this->user()->id;
         $q = $this->baseQuery();
 
+        // Режим «письма заявки»: обе стороны переписки, без папок; ящики — все
+        // доступные (activeMailboxIds учитывает requestId). Поиск поверх работает.
+        if ($this->requestId) {
+            $q->where('email_messages.is_draft', false)
+                ->where('email_messages.related_request_id', $this->requestId);
+            $this->applySearch($q);
+
+            return $q;
+        }
+
         match ($folder) {
             MailFolder::Inbox => $q->where('email_messages.is_draft', false)
                 ->where('email_messages.direction', MailDirection::Inbound->value),
@@ -405,18 +451,24 @@ class Client extends Component
                 ->whereNull('email_messages.related_request_id'),
         };
 
-        $s = trim($this->search);
-        if ($s !== '') {
-            $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
-            $q->where(function ($w) use ($like) {
-                $w->where('email_messages.subject', 'ilike', $like)
-                    ->orWhere('email_messages.from_email', 'ilike', $like)
-                    ->orWhere('email_messages.from_name', 'ilike', $like)
-                    ->orWhere('email_messages.body_plain', 'ilike', $like);
-            });
-        }
+        $this->applySearch($q);
 
         return $q;
+    }
+
+    private function applySearch(Builder $q): void
+    {
+        $s = trim($this->search);
+        if ($s === '') {
+            return;
+        }
+        $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
+        $q->where(function ($w) use ($like) {
+            $w->where('email_messages.subject', 'ilike', $like)
+                ->orWhere('email_messages.from_email', 'ilike', $like)
+                ->orWhere('email_messages.from_name', 'ilike', $like)
+                ->orWhere('email_messages.body_plain', 'ilike', $like);
+        });
     }
 
     /** Бейдж папки: непрочитанные для inbox/без-заявки, иначе общее число. */
