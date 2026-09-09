@@ -488,6 +488,30 @@ class MailRouter
             // Кейс M-2026-11741.
             try {
                 $cited = $this->citedQuoteRouter->detect($message);
+                // Номер КП/счёта в письме — ещё не просьба о новом счёте: клиент
+                // так же цитирует наш счёт, спрашивая «когда получим», «по срокам
+                // успеваем?», «заберём завтра». Дочернюю заявку заводим только
+                // если в СОБСТВЕННОМ тексте клиента есть просьба о счёте / дозаказ
+                // (PostSaleFulfillmentDetector::wantsNewInvoiceOrOrder). Иначе —
+                // постпродажа ниже. Кейс M-2026-14700 (и ещё ~15 фантомов за
+                // август–сентябрь 2026).
+                if ($cited !== null) {
+                    $isReply = ! empty($message->in_reply_to)
+                        || preg_match('/^\s*(re|fwd|fw|ответ)\b/iu', (string) $message->subject) === 1;
+                    $wants = app(PostSaleFulfillmentDetector::class)->wantsNewInvoiceOrOrder(
+                        (string) $message->subject,
+                        $this->citedQuoteRouter->ownBodyText($message),
+                        $isReply,
+                    );
+                    if (! $wants) {
+                        Log::info('MailRouter: cited quote on closed_won without invoice request → post-sale, no child', [
+                            'email_message_id' => $message->id,
+                            'parent_request_id' => $linkedRequest->id,
+                            'document_number' => $cited['document_number'],
+                        ]);
+                        $cited = null;
+                    }
+                }
                 if ($cited !== null) {
                     $child = app(\App\Services\Request\CitedInvoiceChildService::class)
                         ->createFromCitedQuote($message, $linkedRequest, (string) $cited['document_number']);
