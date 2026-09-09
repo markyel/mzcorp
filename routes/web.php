@@ -86,6 +86,14 @@ Route::middleware('auth')->group(function () {
         })->name('usage-stats.index');
     });
 
+    // «Качество почты» — дрейф решений почтового конвейера (детекторы, откаты
+    // статусов, заявки-фантомы, маршрут писем). РОП, директорат, админ.
+    Route::middleware('role:head_of_sales,director,admin')->group(function () {
+        Route::get('/dashboard/mail-quality', function () {
+            return view('mail-quality.index');
+        })->name('mail-quality.index');
+    });
+
     // Заявки — пул менеджера и карточка. Все 4 роли;
     // фильтрация «своё/всё» — внутри Pool component.
     Route::middleware('role:manager,head_of_sales,director,secretary,admin,procurement')->group(function () {

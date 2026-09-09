@@ -71,6 +71,10 @@
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin', 'secretary'])) {
         $navLinks[] = ['route' => 'analytics.index', 'label' => 'Аналитика', 'pattern' => 'analytics.*'];
     }
+    // «Качество почты» — дрейф решений почтового конвейера (РОП / директорат / админ).
+    if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
+        $navLinks[] = ['route' => 'mail-quality.index', 'label' => 'Качество почты', 'pattern' => 'mail-quality.*'];
+    }
     // «Использование» — статистика активности менеджеров (директорат / админ).
     if ($user?->hasAnyRole(['director', 'admin'])) {
         $navLinks[] = ['route' => 'usage-stats.index', 'label' => 'Использование', 'pattern' => 'usage-stats.*'];
