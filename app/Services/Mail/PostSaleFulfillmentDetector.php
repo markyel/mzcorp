@@ -227,8 +227,7 @@ class PostSaleFulfillmentDetector
         // Reply-контекст: «срок поставки / когда отгрузите» в ОТВЕТЕ (Re:/Fwd:
         // или in_reply_to) про уже размещённый заказ. В первичном письме такая
         // фраза может быть пресейлом, поэтому только в ответах.
-        $isReply = ! empty($message->in_reply_to)
-            || preg_match('/^\s*(re|fwd|fw|ответ)\b/iu', (string) $message->subject) === 1;
+        $isReply = app(EmailTextCleanerService::class)->isReply($message);
         if ($isReply && preg_match(self::REPLY_DELIVERY_RE, $haystack) === 1) {
             return true;
         }

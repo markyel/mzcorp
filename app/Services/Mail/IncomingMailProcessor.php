@@ -323,8 +323,7 @@ class IncomingMailProcessor
         // содержит её артикул — поэтому «спасибо»-ответ на товарный тред
         // ложно проходил как заявка (кейсы «Re: Schmersal AZ02» + пустое тело).
         // Для ответов артикул ищем ТОЛЬКО в свежем теле; тема не в счёт.
-        $isReply = ! empty($message->in_reply_to)
-            || preg_match('/^\s*(re|fwd|fw|ответ)\b/iu', (string) $message->subject) === 1;
+        $isReply = $this->cleaner->isReply($message);
         $articleHaystack = $isReply ? $plain : ((string) $message->subject . "\n" . $plain);
 
         // M-артикул — внутренний SKU MyZip, сильнейший сигнал

@@ -258,9 +258,8 @@ class RequestItemPersister
         // Yandex IMAP использует «|» как разделитель, остальные «/» — учитываем
         // оба, иначе письма уже в MZ|Manager детектились как «нужно
         // route» и вызывали повторный IMAP MOVE.
-        $folderStr = (string) $message->folder;
-        $alreadyRouted = str_contains($folderStr, 'MZ/') || str_contains($folderStr, 'MZ|');
-        $needsRouting = $justCreated || ! $alreadyRouted;
+        $routing = app(\App\Services\Mail\ManagerMailRoutingService::class);
+        $needsRouting = $justCreated || ! $routing->isAlreadyRouted($message);
 
         // Phase 1.8d-pending fix: parser-driven activation. Если items
         // добавлены к существующему Pending-Request у которого письмо уже
@@ -278,23 +277,11 @@ class RequestItemPersister
                 ? $existing->assignedUser
                 : $this->assignment->autoAssign($existing);
             if ($manager && $needsRouting) {
-                // Сначала пробуем синхронно — быстрый happy-path. На transient
-                // Yandex-flake (CLIENTBUG EXPUNGE, no-COPYUID и т.п.) router
-                // бросает TransientImapException → перекладываем на async Job
-                // с экспоненциальным backoff (tries=5, до 30 минут). Без этого
-                // ~1 письмо из 200 застревало в INBOX (см. 2026-05-22 incident
-                // с email_message=2919 / request M-2026-1487).
-                try {
-                    $this->folders->routeToManager($message, $manager);
-                } catch (TransientImapException $e) {
-                    Log::info('RequestItemPersister: transient routing failure, dispatching async retry', [
-                        'email_message_id' => $message->id,
-                        'manager_id' => $manager->id,
-                        'error' => $e->getMessage(),
-                    ]);
-                    RouteMailToManagerJob::dispatch($message->id, $manager->id)
-                        ->delay(now()->addSeconds(30));
-                }
+                // Синхронно, на transient Yandex-flake — async retry с backoff
+                // (без этого ~1 письмо из 200 застревало в INBOX, инцидент
+                // 2026-05-22 email_message=2919 / M-2026-1487). Единый владелец
+                // операции — ManagerMailRoutingService.
+                $routing->routeOrRetry($message, $manager, 'persister');
             }
             // Phase 1.10: первый auto-assign записываем как initial-event
             // в request_state_changes (Pending → Assigned).

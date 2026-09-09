@@ -461,6 +461,18 @@ class EmailTextCleanerService
      *  - пересланное письмо: если у клиента есть своя преамбула — она + блок
      *    пересылки (номер КП/счёта часто только в нём), иначе сам блок.
      */
+    /**
+     * Письмо — ответ в существующий тред: есть In-Reply-To либо тема начинается
+     * с Re/Fwd/Fw/Ответ. Единый владелец понятия (раньше та же regex жила в
+     * трёх местах). InboundReplyLinker::subjectLooksLikeReply намеренно строже
+     * (только «Re:»/«Fwd:» с двоеточием) — это гейт линковки по адресу, не трогаем.
+     */
+    public function isReply(EmailMessage $message): bool
+    {
+        return ! empty($message->in_reply_to)
+            || preg_match('/^\s*(re|fwd|fw|ответ)\b/iu', (string) $message->subject) === 1;
+    }
+
     public function clientOwnText(EmailMessage $message): string
     {
         $raw = (string) ($message->body_plain ?? '');

@@ -500,8 +500,7 @@ class MailRouter
                 // постпродажа ниже. Кейс M-2026-14700 (и ещё ~15 фантомов за
                 // август–сентябрь 2026).
                 if ($cited !== null) {
-                    $isReply = ! empty($message->in_reply_to)
-                        || preg_match('/^\s*(re|fwd|fw|ответ)\b/iu', (string) $message->subject) === 1;
+                    $isReply = app(EmailTextCleanerService::class)->isReply($message);
                     $wants = app(PostSaleFulfillmentDetector::class)->wantsNewInvoiceOrOrder(
                         (string) $message->subject,
                         $this->citedQuoteRouter->ownBodyText($message),

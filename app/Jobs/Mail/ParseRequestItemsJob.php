@@ -420,30 +420,15 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
             // у которой назначен менеджер — двигаем в его папку.
             try {
                 $message->refresh();
-                $folderStr = (string) $message->folder;
-                // Yandex IMAP использует «|» как разделитель папок, остальные «/».
-                $alreadyRouted = str_contains($folderStr, 'MZ/') || str_contains($folderStr, 'MZ|');
-                $needsManualRoute = $message->related_request_id && ! $alreadyRouted;
+                $routing = app(\App\Services\Mail\ManagerMailRoutingService::class);
+                $needsManualRoute = $message->related_request_id && ! $routing->isAlreadyRouted($message);
                 if ($needsManualRoute) {
                     $related = \App\Models\Request::query()
                         ->whereKey($message->related_request_id)
                         ->with('assignedUser')
                         ->first();
                     if ($related && $related->assigned_user_id && $related->assignedUser) {
-                        try {
-                            app(\App\Services\Mail\MailFolderRouter::class)
-                                ->routeToManager($message, $related->assignedUser);
-                        } catch (\App\Exceptions\Mail\TransientImapException $e) {
-                            // Yandex-flake: перекладываем на async Job с
-                            // backoff'ом (см. RouteMailToManagerJob::tries=5).
-                            Log::info('ParseRequestItemsJob: reply-routing transient fail, dispatching async retry', [
-                                'email_message_id' => $message->id,
-                                'manager_id' => $related->assigned_user_id,
-                                'error' => $e->getMessage(),
-                            ]);
-                            \App\Jobs\Mail\RouteMailToManagerJob::dispatch($message->id, $related->assigned_user_id)
-                                ->delay(now()->addSeconds(30));
-                        }
+                        $routing->routeOrRetry($message, $related->assignedUser, 'reply-fallback');
                     }
                 }
             } catch (\Throwable $e) {
@@ -603,19 +588,8 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
             if ($child->assigned_user_id) {
                 $manager = \App\Models\User::find($child->assigned_user_id);
                 if ($manager) {
-                    try {
-                        app(\App\Services\Mail\MailFolderRouter::class)
-                            ->routeToManager($message->fresh(), $manager);
-                    } catch (\App\Exceptions\Mail\TransientImapException $e) {
-                        \App\Jobs\Mail\RouteMailToManagerJob::dispatch($message->id, $manager->id)
-                            ->delay(now()->addSeconds(30));
-                    } catch (\Throwable $e) {
-                        Log::warning('ParseRequestItemsJob: adopt routing failed (non-fatal)', [
-                            'email_message_id' => $message->id,
-                            'manager_id' => $manager->id,
-                            'error' => $e->getMessage(),
-                        ]);
-                    }
+                    app(\App\Services\Mail\ManagerMailRoutingService::class)
+                        ->routeOrRetry($message, $manager, 'adopt');
                 }
             }
         } catch (\Throwable $e) {
@@ -674,19 +648,8 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                         'manager_id' => $manager->id,
                     ]);
                     // Routing — owner получит письмо в личный ящик.
-                    try {
-                        app(\App\Services\Mail\MailFolderRouter::class)
-                            ->routeToManager($message->fresh(), $manager);
-                    } catch (\App\Exceptions\Mail\TransientImapException $e) {
-                        \App\Jobs\Mail\RouteMailToManagerJob::dispatch($message->id, $manager->id)
-                            ->delay(now()->addSeconds(30));
-                    } catch (\Throwable $e) {
-                        Log::warning('ParseRequestItemsJob: empty-items routing failed (non-fatal)', [
-                            'email_message_id' => $message->id,
-                            'manager_id' => $manager->id,
-                            'error' => $e->getMessage(),
-                        ]);
-                    }
+                    app(\App\Services\Mail\ManagerMailRoutingService::class)
+                        ->routeOrRetry($message, $manager, 'empty-items');
                 }
             } else {
                 // Уже назначен — двинуть pending → assigned (через state
