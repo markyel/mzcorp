@@ -173,6 +173,14 @@
 .mailapp .chead .reqlink .code{font-family:var(--font-mono);font-weight:600;color:var(--violet-700)}
 .mailapp .chead .reqlink .onec{font-family:var(--font-mono);font-weight:600;color:var(--emerald-700);margin-left:6px}
 .mailapp .chead .reqlink .st{color:var(--violet-700)}
+.mailapp .chead .decisions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.mailapp .chead .dec{display:inline-flex;align-items:center;gap:6px;font:400 11.5px/1.3 var(--font-sans);color:var(--fg-2);background:var(--bg-app);border:1px solid var(--border);border-radius:6px;padding:3px 8px}
+.mailapp .chead .dec b{font-weight:500;color:var(--fg-1)}
+.mailapp .chead .dec .mono{font:600 11px/1.3 var(--font-mono);color:var(--violet-700)}
+.mailapp .chead .dec .when{color:var(--fg-3);font-family:var(--font-mono);font-size:10.5px}
+.mailapp .chead .dec.created b{color:var(--emerald-700)}
+.mailapp .chead .dec.post_sale b,.mailapp .chead .dec.supplier b{color:var(--amber-700,#b45309)}
+.mailapp .chead .dec.skipped b,.mailapp .chead .dec.none b{color:var(--fg-3)}
 .mailapp .chead .reqlink .spacer{flex:1}
 .mailapp .chead .reqlink a{color:var(--violet-700);font-weight:600;text-decoration:none;border-bottom:1px dashed currentColor}
 .mailapp .cbody{flex:1;overflow-y:auto;padding:0 24px}
@@ -510,6 +518,19 @@
                         <span class="st">· {{ $reqStatus?->label() ?? $req->status }}</span>
                         <span class="spacer"></span>
                         <a href="{{ route('requests.show', $req->id) }}" wire:navigate>Открыть заявку →</a>
+                    </div>
+                @endif
+                {{-- Журнал решений маршрутизатора по этому письму (mail_decisions): почему оно ушло туда, куда ушло. --}}
+                @php $decisions = $anchor->direction?->value === 'inbound' ? $anchor->decisions()->limit(3)->get() : collect(); @endphp
+                @if($decisions->isNotEmpty())
+                    <div class="decisions" title="Решения маршрутизатора по письму, новые первыми">
+                        @foreach($decisions as $d)
+                            <span class="dec {{ $d->outcome }}">
+                                <b>{{ \App\Services\Mail\MailDecisionRecorder::label($d->stage) }}</b>
+                                @if($d->request && $d->request_id !== ($req?->id))<span class="mono">{{ $d->request->internal_code }}</span>@endif
+                                <span class="when">{{ $d->created_at?->timezone(config('app.timezone'))->format('d.m H:i') }}</span>
+                            </span>
+                        @endforeach
                     </div>
                 @endif
             </div>

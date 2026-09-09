@@ -148,4 +148,10 @@ class EmailMessage extends Model
     {
         return $this->belongsTo(SupplierInquiry::class);
     }
+
+    /** Журнал решений маршрутизатора по письму (mail_decisions), новые первыми. */
+    public function decisions(): HasMany
+    {
+        return $this->hasMany(MailDecision::class)->orderByDesc('id');
+    }
 }

@@ -79,6 +79,7 @@ class MailRouter
                 ])->save();
             }
 
+            $this->decide($message, 'system_notification', null, []);
             return;
         }
 
@@ -89,6 +90,7 @@ class MailRouter
         if ($this->supplierCcInbox->isRfqInboxMessage($message)) {
             $this->supplierCcInbox->ingest($message);
 
+            $this->decide($message, 'rfq_inbox', null, []);
             return;
         }
 
@@ -188,10 +190,12 @@ class MailRouter
                 $this->runOutboundDocumentDetection($message, $linkedRequest);
             }
 
+            $this->decide($message, 'outbound', $linkedRequest?->id, ['supplier_rfq' => (bool) ($isSupplierRfq ?? false)]);
             return;
         }
 
         if ($message->direction !== MailDirection::Inbound) {
+            $this->decide($message, 'not_inbound', null, []);
             return;
         }
 
@@ -201,6 +205,7 @@ class MailRouter
         if ($this->isLoopMessage($message)) {
             $this->recordLoopSkipped($message);
 
+            $this->decide($message, 'loop_forward', null, []);
             return;
         }
 
@@ -226,6 +231,7 @@ class MailRouter
                 ]);
             }
 
+            $this->decide($message, 'procurement_mailbox', null, []);
             return;
         }
 
@@ -253,6 +259,7 @@ class MailRouter
                     ]);
                 }
 
+                $this->decide($message, 'blocklist_supplier', null, ['from' => (string) $message->from_email]);
                 return;
             }
 
@@ -275,6 +282,7 @@ class MailRouter
                 'subject' => mb_substr((string) $message->subject, 0, 80),
             ]);
 
+            $this->decide($message, 'blocklist_spam', null, ['from' => (string) $message->from_email]);
             return;
         }
 
@@ -320,6 +328,7 @@ class MailRouter
                     'message_id' => $message->message_id,
                 ]);
 
+                $this->decide($message, 'cross_mailbox_copy', $sameIdLinked->related_request_id, ['copy_of' => $sameIdLinked->id]);
                 return;
             }
         }
@@ -345,6 +354,7 @@ class MailRouter
                     'from_email' => $message->from_email,
                 ]);
 
+                $this->decide($message, 'supplier_thread', null, ['supplier_inquiry_id' => $supplierInquiry->id]);
                 return;
             }
         } catch (\Throwable $e) {
@@ -372,6 +382,7 @@ class MailRouter
                     'from_email' => $message->from_email,
                 ]);
 
+                $this->decide($message, 'supplier_sender_code', null, ['supplier_inquiry_id' => $bySupplierPair->id]);
                 return;
             }
         } catch (\Throwable $e) {
@@ -400,6 +411,7 @@ class MailRouter
                         'from_email' => $message->from_email,
                     ]);
 
+                    $this->decide($message, 'supplier_rfq_subject', null, ['supplier_inquiry_id' => $bySubject->id]);
                     return;
                 }
                 // Инквайри ещё не зарегистрирован (гонка отправки/синка) — всё
@@ -415,6 +427,7 @@ class MailRouter
                     'subject' => $message->subject,
                 ]);
 
+                $this->decide($message, 'supplier_rfq_unregistered', null, []);
                 return;
             } catch (\Throwable $e) {
                 Log::warning('MailRouter: RFQ-subject supplier fallback failed (non-fatal)', [
@@ -539,6 +552,7 @@ class MailRouter
                                 'new_request_id' => $new->id,
                             ]);
 
+                            $this->decide($message, 'closed_won_spin_off', $new->id, ['parent_request_id' => $linkedRequest->id]);
                             return;
                         }
                     }
@@ -554,6 +568,7 @@ class MailRouter
                             'document_number' => $cited['document_number'],
                         ]);
 
+                        $this->decide($message, 'closed_won_invoice_child', $child->id, ['parent_request_id' => $linkedRequest->id, 'document_number' => $cited['document_number']]);
                         return;
                     }
                 }
@@ -571,6 +586,7 @@ class MailRouter
             }
             $this->handlePostSaleMessage($message, $linkedRequest);
 
+            $this->decide($message, 'closed_won_post_sale', $linkedRequest->id, []);
             return;
         }
 
@@ -593,6 +609,7 @@ class MailRouter
                 }
                 $this->handlePostSaleMessage($message, $postSaleRequest);
 
+                $this->decide($message, 'post_sale_order', $postSaleRequest->id, []);
                 return;
             }
 
@@ -602,6 +619,7 @@ class MailRouter
             ]);
             // category остаётся post_sale → create-гейт ниже заявку не создаёт,
             // письмо остаётся в общем ящике без привязки.
+            $postSaleUnlinked = true;
         }
 
         // Phase 1.9: если reply прицеплен к существующей Request — запустим
@@ -696,6 +714,7 @@ class MailRouter
                     $new = app(\App\Services\Request\RequestExtensionService::class)
                         ->spinOffNewRequest($message, $linkedRequest);
                     if ($new !== null) {
+                        $this->decide($message, 'thread_spin_off', $new->id, ['source_request_id' => $linkedRequest->id, 'intent_confidence' => (float) ($intentResult['confidence'] ?? 0)]);
                         return;
                     }
                 } catch (\Throwable $e) {
@@ -904,9 +923,15 @@ class MailRouter
             EmailCategory::ClientRequest->value,
             EmailCategory::ThreadReply->value,
         ];
-        if (in_array($message->category, $createCategories, true)) {
-            $this->incoming->processIfRequest($message);
+        $processed = null;
+        $createAttempted = in_array($message->category, $createCategories, true);
+        if ($createAttempted) {
+            $processed = $this->incoming->processIfRequest($message);
         }
+
+        // Итоговое решение по письму (журнал mail_decisions): ответ в тред /
+        // заявка создана / уже была / отклонена процессором / не заявка.
+        $this->recordFinalDecision($message, $linkedRequest ?? null, $createAttempted, $processed, $postSaleUnlinked ?? false);
 
         $matches = $this->engine->match($message);
 
@@ -919,6 +944,51 @@ class MailRouter
         foreach ($matches as $rule) {
             $this->applyRule($rule, $message);
         }
+    }
+
+    /**
+     * Записать решение маршрутизатора по письму (журнал mail_decisions).
+     * Fail-soft: никогда не влияет на обработку.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function decide(EmailMessage $message, string $stage, ?int $requestId = null, array $payload = []): void
+    {
+        app(MailDecisionRecorder::class)->record($message, $stage, $requestId, $payload);
+    }
+
+    /**
+     * Итоговое решение для писем, дошедших до конца route() (без early return).
+     */
+    private function recordFinalDecision(
+        EmailMessage $message,
+        ?\App\Models\Request $linkedRequest,
+        bool $createAttempted,
+        ?\App\Models\Request $processed,
+        bool $postSaleUnlinked,
+    ): void {
+        if ($linkedRequest !== null) {
+            $this->decide($message, 'thread_reply', $linkedRequest->id);
+
+            return;
+        }
+        if ($postSaleUnlinked) {
+            $this->decide($message, 'post_sale_unlinked');
+
+            return;
+        }
+        if ($createAttempted) {
+            if ($processed === null) {
+                $this->decide($message, 'request_rejected');
+            } elseif ($processed->wasRecentlyCreated) {
+                $this->decide($message, 'request_created', $processed->id);
+            } else {
+                $this->decide($message, 'request_existing', $processed->id);
+            }
+
+            return;
+        }
+        $this->decide($message, 'not_a_request');
     }
 
     private function applyRule(MailRoutingRule $rule, EmailMessage $message): void
