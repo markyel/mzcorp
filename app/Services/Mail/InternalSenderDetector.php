@@ -2,9 +2,12 @@
 
 namespace App\Services\Mail;
 
+use App\Enums\MailDirection;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
+use App\Models\Request;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Детектор внутренних отправителей.
@@ -113,13 +116,22 @@ class InternalSenderDetector
      * и имя файла как «счёт» → заявка ушла в «Счёт отправлен» без счёта.
      *
      * Правило: среди to/cc есть адрес заказчика — точный, либо на том же
-     * КОРПОРАТИВНОМ домене (коллега заказчика). Для публичных почтовиков
-     * (gmail.com, mail.ru, …) совпадение домена не считается — там «тот же
-     * домен» ничего не значит. Внутренние домены (наши) тоже не считаются.
-     * Если e-mail заказчика в заявке не заполнен — подтвердить нечем,
-     * возвращаем true (детектор работает как раньше).
+     * КОРПОРАТИВНОМ домене (коллега заказчика), либо адрес, который САМ писал
+     * в эту заявку (второй контакт клиента: снабженец, бухгалтерия). Для
+     * публичных почтовиков (gmail.com, mail.ru, …) совпадение домена не
+     * считается — там «тот же домен» ничего не значит. Внутренние домены
+     * (наши) тоже не считаются. Если e-mail заказчика в заявке не заполнен —
+     * подтвердить нечем, возвращаем true (детектор работает как раньше).
+     *
+     * Кейс M-2026-14316: заявка пришла с rodionshvedchikov@yandex.ru, счёт
+     * менеджер отправил на vershina2004@yandex.ru — второй адрес того же
+     * заказчика, с которого он и попросил счёт в этом же треде. Оба на
+     * yandex.ru, поэтому домен не спасал: детектор молчал, статус остался
+     * «ждёт счёт», счёт не попал в раздел «Счета». Участие адреса в треде
+     * заявки третью сторону не пропускает — пересыл из 14608 уходил на
+     * адрес, который в заявку никогда не писал.
      */
-    public function isAddressedToClient(EmailMessage $message, ?string $clientEmail): bool
+    public function isAddressedToClient(EmailMessage $message, ?string $clientEmail, ?Request $request = null): bool
     {
         $client = mb_strtolower(trim((string) $clientEmail));
         if ($client === '') {
@@ -128,6 +140,10 @@ class InternalSenderDetector
 
         $recipients = $this->recipientEmails($message);
         if (in_array($client, $recipients, true)) {
+            return true;
+        }
+
+        if ($recipients !== [] && $this->wroteIntoRequest($recipients, $request, $message)) {
             return true;
         }
 
@@ -145,6 +161,29 @@ class InternalSenderDetector
         }
 
         return false;
+    }
+
+    /**
+     * Писал ли кто-то из получателей САМ в эту заявку. Признак «второй контакт
+     * клиента» (снабженец, бухгалтерия, коллега с личной почты): его входящее
+     * письмо уже привязано к заявке, значит и документ ему — документ клиенту.
+     * Третья сторона из кейса M-2026-14608 такой проверки не проходит: на тот
+     * адрес только пересылали, входящих от него в заявке нет.
+     *
+     * @param  list<string>  $recipients
+     */
+    protected function wroteIntoRequest(array $recipients, ?Request $request, EmailMessage $message): bool
+    {
+        $requestId = $request?->id ?? $message->related_request_id;
+        if (! $requestId) {
+            return false;
+        }
+
+        return EmailMessage::query()
+            ->where('related_request_id', $requestId)
+            ->where('direction', MailDirection::Inbound)
+            ->whereIn(DB::raw('lower(from_email)'), $recipients)
+            ->exists();
     }
 
     private function isPublicMailDomain(string $domain): bool

@@ -44,7 +44,7 @@ class OutboundDocumentDetectionService
             // Кейс M-2026-14608: «Fwd: Запрос счета…» из info@ на сторонний
             // адрес с PDF «Реквизиты ООО …» → LLM решил «счёт» → Invoiced
             // без счёта. См. InternalSenderDetector::isAddressedToClient.
-            if (! $this->internalDetector->isAddressedToClient($message, $request->client_email)) {
+            if (! $this->internalDetector->isAddressedToClient($message, $request->client_email, $request)) {
                 Log::info('MailRouter: outbound document detector skipped — not addressed to client', [
                     'email_message_id' => $message->id,
                     'request_id' => $request->id,

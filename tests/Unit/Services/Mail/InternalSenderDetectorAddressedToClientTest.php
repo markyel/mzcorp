@@ -3,6 +3,7 @@
 namespace Tests\Unit\Services\Mail;
 
 use App\Models\EmailMessage;
+use App\Models\Request;
 use App\Services\Mail\InternalSenderDetector;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
@@ -43,6 +44,49 @@ class InternalSenderDetectorAddressedToClientTest extends TestCase
         $m->cc_recipients = array_map(fn (string $e) => ['name' => '', 'email' => $e], $cc);
 
         $this->assertSame($expected, $this->detector->isAddressedToClient($m, $client));
+    }
+
+    /**
+     * Второй адрес того же заказчика (кейс M-2026-14316): счёт ушёл на
+     * vershina2004@yandex.ru, а в заявке записан rodionshvedchikov@yandex.ru.
+     * Оба на публичном домене, поэтому спасает только то, что второй адрес
+     * сам писал в эту заявку.
+     */
+    public function test_recipient_that_wrote_into_the_request_counts_as_the_client(): void
+    {
+        $m = new EmailMessage();
+        $m->to_recipients = [['name' => 'Вершина', 'email' => 'vershina2004@yandex.ru']];
+
+        $this->assertFalse(
+            $this->detector->isAddressedToClient($m, 'rodionshvedchikov@yandex.ru'),
+            'без участия в треде второй адрес на публичном домене не подтверждён',
+        );
+
+        $withThread = new class extends InternalSenderDetector
+        {
+            protected function wroteIntoRequest(array $recipients, ?Request $request, EmailMessage $message): bool
+            {
+                return in_array('vershina2004@yandex.ru', $recipients, true);
+            }
+        };
+
+        $this->assertTrue($withThread->isAddressedToClient($m, 'rodionshvedchikov@yandex.ru'));
+    }
+
+    public function test_third_party_that_never_wrote_into_the_request_is_still_blocked(): void
+    {
+        $m = new EmailMessage();
+        $m->to_recipients = [['name' => '', 'email' => 'info@liftway.ru']];
+
+        $withThread = new class extends InternalSenderDetector
+        {
+            protected function wroteIntoRequest(array $recipients, ?Request $request, EmailMessage $message): bool
+            {
+                return in_array('vershina2004@yandex.ru', $recipients, true);
+            }
+        };
+
+        $this->assertFalse($withThread->isAddressedToClient($m, 'semenova_aa@sminex.com'));
     }
 
     /**
