@@ -9,6 +9,7 @@ use App\Services\Mail\Routing\Handlers\NotInboundHandler;
 use App\Services\Mail\Routing\Handlers\OutboundHandler;
 use App\Services\Mail\Routing\Handlers\ProcurementMailboxHandler;
 use App\Services\Mail\Routing\Handlers\RfqInboxHandler;
+use App\Services\Mail\Routing\Handlers\SupplierReplyHandler;
 use App\Services\Mail\Routing\Handlers\SystemNotificationHandler;
 use Illuminate\Contracts\Container\Container;
 
@@ -34,6 +35,7 @@ final class RoutingPipeline
         ProcurementMailboxHandler::class,
         BlocklistHandler::class,
         CrossMailboxCopyHandler::class,
+        SupplierReplyHandler::class,
     ];
 
     /** @var list<InboundRoutingHandler>|null */

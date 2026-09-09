@@ -75,110 +75,6 @@ class MailRouter
             return;
         }
 
-        // Переписка с поставщиком: если письмо — ответ в треде, ПОМЕЧЕННОМ как
-        // наш запрос расценки поставщику (supplier_inquiries), прицепляем его к
-        // этому запросу и НЕ создаём заявку. Тред-центрично: матч строго по
-        // цепочке (In-Reply-To/References ↔ thread_root_id / message_id уже
-        // прикреплённых писем). ДО категоризации (экономим LLM) и ДО linker'а
-        // (ответ поставщика не должен липнуть к клиентской заявке). Кейс
-        // 0028087@mail.ru: ответы поставщика плодили фантомные заявки.
-        try {
-            // Детерминированно по токену RFQ ([RFQ-<token>] в теме) — приоритетно
-            // над тред-матчем. Ловит ответы на прямые RFQ снабжения (тред часто
-            // сломан), прочая переписка поставщика без токена сюда не попадает.
-            $supplierInquiry = $this->supplierInquiries->matchInboundByRfqToken($message)
-                ?? $this->supplierInquiries->matchInbound($message);
-            if ($supplierInquiry !== null) {
-                $this->supplierInquiries->attachMessage($supplierInquiry, $message);
-                Log::info('MailRouter: supplier inquiry reply — attached, no request', [
-                    'email_message_id' => $message->id,
-                    'supplier_inquiry_id' => $supplierInquiry->id,
-                    'from_email' => $message->from_email,
-                ]);
-
-                $this->decide($message, 'supplier_thread', null, ['supplier_inquiry_id' => $supplierInquiry->id]);
-                return;
-            }
-        } catch (\Throwable $e) {
-            Log::warning('MailRouter: supplier inquiry match failed (non-fatal)', [
-                'email_message_id' => $message->id,
-                'error' => $e->getMessage(),
-            ]);
-        }
-
-        // Позитивный матч по паре «отправитель = supplier_email инквайри» +
-        // «M-код из темы = в теме инквайри» — БЕЗ гарда на фразу «запрос
-        // расценки». Ловит ответы на запросы с ПРОИЗВОЛЬНОЙ темой: часть
-        // менеджеров шлёт запрос поставщику со своей почты со своей темой
-        // «Запрос M-YYYY-NNNN» (не наш авто-формат «Запрос расценки — […]»,
-        // rfq_token нет), а поставщик пересылает «Fwd: …» (In-Reply-To пуст).
-        // Клиент не значится supplier_email инквайри своей же заявки → ложных
-        // привязок клиентских писем нет. Кейс M-2026-12940 (info@lift-lt.ru).
-        try {
-            $bySupplierPair = $this->supplierInquiries->matchInboundBySubject($message);
-            if ($bySupplierPair !== null) {
-                $this->supplierInquiries->attachMessage($bySupplierPair, $message);
-                Log::info('MailRouter: supplier reply matched by sender+code (free-form subject) — attached, no request', [
-                    'email_message_id' => $message->id,
-                    'supplier_inquiry_id' => $bySupplierPair->id,
-                    'from_email' => $message->from_email,
-                ]);
-
-                $this->decide($message, 'supplier_sender_code', null, ['supplier_inquiry_id' => $bySupplierPair->id]);
-                return;
-            }
-        } catch (\Throwable $e) {
-            Log::warning('MailRouter: supplier sender+code match failed (non-fatal)', [
-                'email_message_id' => $message->id,
-                'error' => $e->getMessage(),
-            ]);
-        }
-
-        // Fallback по ТЕМЕ: ответ на НАШ RFQ, но тред разорван (поставщик
-        // переслал наш запрос внутри себя — «Re: Fw: …», In-Reply-To пуст,
-        // References на его домен), поэтому matchInbound по цепочке не связал.
-        // Тема несёт код клиентской заявки (мы зашиваем его в RFQ), и без этого
-        // гарда reply-linker цепляет ответ к клиентской заявке и плодит фантом
-        // (кейс M-2026-9028: ответ поставщика → заявка M-2026-9028). Ответ на
-        // наш RFQ клиентской заявкой быть НЕ может — гасим до linker'а.
-        if ($message->direction === \App\Enums\MailDirection::Inbound
-            && $this->supplierInquiries->looksLikeRfqReply($message)) {
-            try {
-                $bySubject = $this->supplierInquiries->matchInboundBySubject($message);
-                if ($bySubject !== null) {
-                    $this->supplierInquiries->attachMessage($bySubject, $message);
-                    Log::info('MailRouter: supplier reply matched by RFQ subject (broken thread) — attached, no request', [
-                        'email_message_id' => $message->id,
-                        'supplier_inquiry_id' => $bySubject->id,
-                        'from_email' => $message->from_email,
-                    ]);
-
-                    $this->decide($message, 'supplier_rfq_subject', null, ['supplier_inquiry_id' => $bySubject->id]);
-                    return;
-                }
-                // Инквайри ещё не зарегистрирован (гонка отправки/синка) — всё
-                // равно НЕ создаём клиентскую заявку. Помечаем как переписку
-                // поставщика; привяжется, когда инквайри появится.
-                $message->forceFill([
-                    'category' => \App\Enums\EmailCategory::SupplierReply->value,
-                    'categorized_at' => now(),
-                ])->save();
-                Log::info('MailRouter: RFQ-subject reply, inquiry not registered yet — client request suppressed', [
-                    'email_message_id' => $message->id,
-                    'from_email' => $message->from_email,
-                    'subject' => $message->subject,
-                ]);
-
-                $this->decide($message, 'supplier_rfq_unregistered', null, []);
-                return;
-            } catch (\Throwable $e) {
-                Log::warning('MailRouter: RFQ-subject supplier fallback failed (non-fatal)', [
-                    'email_message_id' => $message->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-
         // Phase 1.8c: категоризация (LazyLift drop-in). Заполняет
         // email_messages.category — для дальнейших шагов (linker уровня 4
         // использует это как сигнал, парсер позиций — как gate).
@@ -720,9 +616,15 @@ class MailRouter
             return;
         }
         if ($createAttempted) {
+            // wasRecentlyCreated теряется после fresh()/touch внутри процессора —
+            // «создана в этом проходе» = заявка по этому письму моложе минуты.
+            $createdNow = $processed !== null && (
+                $processed->wasRecentlyCreated
+                || ((int) $processed->email_message_id === (int) $message->id && $processed->created_at?->gte(now()->subMinute()))
+            );
             if ($processed === null) {
                 $this->decide($message, 'request_rejected');
-            } elseif ($processed->wasRecentlyCreated) {
+            } elseif ($createdNow) {
                 $this->decide($message, 'request_created', $processed->id);
             } else {
                 $this->decide($message, 'request_existing', $processed->id);
