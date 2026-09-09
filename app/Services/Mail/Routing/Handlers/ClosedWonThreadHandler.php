@@ -6,6 +6,7 @@ use App\Enums\EmailCategory;
 use App\Enums\RequestStatus;
 use App\Services\Mail\CitedOutboundQuoteRouter;
 use App\Services\Mail\EmailTextCleanerService;
+use App\Services\Mail\InvoiceMentionMatcher;
 use App\Services\Mail\PostSaleFulfillmentDetector;
 use App\Services\Mail\ReplyParseGate;
 use App\Services\Mail\Routing\InboundRoutingHandler;
@@ -48,39 +49,41 @@ final class ClosedWonThreadHandler implements InboundRoutingHandler
         }
 
         try {
-            $cited = $this->citedQuoteRouter->detect($message);
-            // Номер КП/счёта в письме — ещё не просьба о новом счёте: клиент
-            // так же цитирует наш счёт, спрашивая «когда получим», «по срокам
-            // успеваем?», «заберём завтра». Дочернюю заявку заводим только
-            // если в СОБСТВЕННОМ тексте клиента есть просьба о счёте / дозаказ
-            // (PostSaleFulfillmentDetector::wantsNewInvoiceOrOrder). Кейс
-            // M-2026-14700 (и ещё ~15 фантомов за август–сентябрь 2026).
-            if ($cited !== null) {
-                $wants = $this->postSale->wantsNewInvoiceOrOrder(
-                    (string) $message->subject,
-                    $this->citedQuoteRouter->ownBodyText($message),
-                    $this->cleaner->isReply($message),
-                );
-                if (! $wants) {
-                    Log::info('MailRouter: cited quote on closed_won without invoice request → post-sale, no child', [
-                        'email_message_id' => $message->id,
-                        'parent_request_id' => $linkedRequest->id,
-                        'document_number' => $cited['document_number'],
-                    ]);
-                    $cited = null;
-                }
+            $citedRaw = $this->citedQuoteRouter->detect($message);
+            $cited = $citedRaw;
+            $own = $this->citedQuoteRouter->ownBodyText($message);
+            $isReply = $this->cleaner->isReply($message);
+            // Два вопроса по собственному тексту клиента:
+            //  - wantsNew — просит новый счёт/КП/дозаказ вообще (не вопрос о сроках
+            //    и отгрузке — «когда получим», «заберём завтра» → постпродажа;
+            //    кейс M-2026-14700 и ещё ~15 фантомов за август–сентябрь 2026);
+            //  - asksInvoice — при этом просит именно СЧЁТ / собирается платить по
+            //    цитируемому КП (те же позиции) → дочерняя заявка на счёт с
+            //    позициями из КП. Иначе (просит КП на ДРУГИЕ позиции: «дайте КП на
+            //    отводки … 1 шт») → отдельная заявка, позиции из письма. Кейс
+            //    M-2026-15205: номер старого КП в теме + новые позиции → ошибочно
+            //    родилась дочерняя «на счёт» по старому КП.
+            // asksInvoice считается только внутри wantsNew: наш же subject «Счет на
+            // оплату № 6272» иначе выглядит как просьба о счёте (93741).
+            $wantsNew = $this->postSale->wantsNewInvoiceOrOrder((string) $message->subject, $own, $isReply);
+            $asksInvoice = $wantsNew
+                && (new InvoiceMentionMatcher)->requestsInvoiceOrIntendsToPay((string) $message->subject . "\n" . $own);
+            if ($cited !== null && ! $asksInvoice) {
+                Log::info('MailRouter: cited quote on closed_won without invoice request → no invoice child', [
+                    'email_message_id' => $message->id,
+                    'parent_request_id' => $linkedRequest->id,
+                    'document_number' => $cited['document_number'],
+                    'wants_new_order' => $wantsNew,
+                ]);
+                $cited = null;
             }
-            // Номера КП нет, но LLM уверенно видит НОВУЮ заявку («прошу выставить
-            // счёт по наличию: M10732 - 2 шт …»), клиент просит счёт/дозаказ своим
-            // текстом и есть сигналы позиций — новый заказ в старом треде:
-            // разворачиваем в отдельную заявку (spin-off, как для intent=new_request).
-            if ($cited === null && $message->category === EmailCategory::ClientRequest->value) {
-                $wantsNew = $this->postSale->wantsNewInvoiceOrOrder(
-                    (string) $message->subject,
-                    $this->citedQuoteRouter->ownBodyText($message),
-                    $this->cleaner->isReply($message),
-                );
-                if ($wantsNew && $this->parseGate->shouldParse($message)) {
+            // Новый заказ / новое КП в старом треде (LLM видит заявку либо есть
+            // цитата КП с новыми позициями), сигналы позиций есть — разворачиваем
+            // в отдельную заявку (spin-off, как для intent=new_request); позиции
+            // распарсятся из письма. Кейсы M-2026-8429 (101376), M-2026-15205 (101843).
+            if ($cited === null && $wantsNew
+                && ($message->category === EmailCategory::ClientRequest->value || $citedRaw !== null)) {
+                if ($this->parseGate->shouldParse($message)) {
                     $new = $this->extension->spinOffNewRequest($message, $linkedRequest);
                     if ($new !== null) {
                         Log::info('MailRouter: new order in a closed_won thread → spun off into a new request', [
