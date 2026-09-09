@@ -5,7 +5,9 @@ namespace App\Services\Mail\Routing;
 use App\Services\Mail\Routing\Handlers\BlocklistHandler;
 use App\Services\Mail\Routing\Handlers\CategorizeHandler;
 use App\Services\Mail\Routing\Handlers\ClosedWonThreadHandler;
+use App\Services\Mail\Routing\Handlers\CreateRequestHandler;
 use App\Services\Mail\Routing\Handlers\CrossMailboxCopyHandler;
+use App\Services\Mail\Routing\Handlers\LinkedThreadHandler;
 use App\Services\Mail\Routing\Handlers\LinkToRequestHandler;
 use App\Services\Mail\Routing\Handlers\PostSaleOrderHandler;
 use App\Services\Mail\Routing\Handlers\LoopForwardHandler;
@@ -23,9 +25,8 @@ use Illuminate\Contracts\Container\Container;
  * (напр. стоп-лист стоит до LLM-категоризации, чтобы не тратить токены;
  * копия из другого ящика — до линкера, чтобы наследовать решение оригинала).
  *
- * Стадия strangler-переноса из MailRouter::route() (2026-09-09): пока здесь
- * только ранние выходы до матчинга поставщиков; остальная часть route()
- * выполняется после цепочки как раньше и переносится следующими шагами.
+ * Перенос из MailRouter::route() завершён 2026-09-09: цепочка покрывает весь
+ * путь письма; последний шаг (CreateRequestHandler) всегда принимает решение.
  */
 final class RoutingPipeline
 {
@@ -44,6 +45,8 @@ final class RoutingPipeline
         LinkToRequestHandler::class,
         ClosedWonThreadHandler::class,
         PostSaleOrderHandler::class,
+        LinkedThreadHandler::class,
+        CreateRequestHandler::class,
     ];
 
     /** @var list<InboundRoutingHandler>|null */

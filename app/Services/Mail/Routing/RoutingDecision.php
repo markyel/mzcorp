@@ -10,11 +10,16 @@ final class RoutingDecision
 {
     /**
      * @param  array<string, mixed>  $payload
+     * @param  bool  $runRules  прогнать правила маршрутизации (forward/label) после решения —
+     *                          как раньше делал «хвост» route() для писем, дошедших до конца
+     *                          (ответ в тред, создание заявки, не-заявка); ранние выходы правила
+     *                          не запускали и не запускают.
      */
     public function __construct(
         public readonly string $stage,
         public readonly ?int $requestId = null,
         public readonly array $payload = [],
+        public readonly bool $runRules = false,
     ) {
     }
 }
