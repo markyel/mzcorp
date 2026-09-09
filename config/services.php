@@ -84,6 +84,11 @@ return [
         // Phase 1.9: 5-й уровень thread linking (ThreadClarificationAi).
         // Простая задача multi-choice над списком из 2-5 заявок — mini хватает.
         'clarification_model' => env('OPENAI_CLARIFICATION_MODEL', 'gpt-4o-mini'),
+        // Классификация интента ответа клиента, RFQ поставщику, матчинг ответов
+        // на уточнения, разбор офферов поставщиков — короткие структурные
+        // задачи, mini. Ключ читался в 7 местах с inline-дефолтом, а в конфиге
+        // отсутствовал (разбор 2026-09-09) — env не работал.
+        'intent_model' => env('OPENAI_INTENT_MODEL', 'gpt-4o-mini'),
         // Phase 4 outbound LLM-classifier (fallback после rule-based детектора).
         // Простая 4-way классификация — mini достаточно.
         'outbound_classifier_model' => env('OPENAI_OUTBOUND_CLASSIFIER_MODEL', 'gpt-4o-mini'),
@@ -503,15 +508,11 @@ return [
         'empty_body_guard_min_chars' => (int) env('MAIL_EMPTY_BODY_MIN_CHARS', 40),
 
         /*
-        | OutgoingMailLinker L4 time-window (дни). Outbound-письма
-        | привязываются по client_email только если открытая Request
-        | создана в окне последних N дней. Защищает от прилипания свежих
-        | ответов к давно «остывшим» заявкам того же клиента.
-        |
-        | 0 — отключить time-window (опасно: возвращает старое поведение,
-        | при котором фантомные привязки росли каскадом через L1/L2).
+        | OutgoingMailLinker, уровень L4 (fuzzy по получателю): минимальная
+        | схожесть темы (Jaccard по токенам) с открытой заявкой клиента, ниже —
+        | не привязываем. Ключ читался с inline-дефолтом 0.5, в конфиге не был.
         */
-        'outbound_link_window_days' => (int) env('MAIL_OUTBOUND_LINK_WINDOW_DAYS', 90),
+        'outbound_link_subject_similarity_threshold' => (float) env('MAIL_OUTBOUND_LINK_SUBJECT_SIMILARITY', 0.5),
 
         'external_codes' => [
             // Liftway-saas: LZ-REQ-NNNN — общий маркер запроса в их системе.
