@@ -144,7 +144,7 @@ class MarketingBlockService
             return false;
         }
 
-        $request = $draft->related_request_id ? $draft->request : null;
+        $request = $draft->related_request_id ? $draft->relatedRequest : null;
 
         if ($request !== null) {
             $client = mb_strtolower(trim((string) $request->client_email));

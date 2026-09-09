@@ -11,7 +11,7 @@ use Tests\TestCase;
 /**
  * Рендер блока и правило «в какие письма вставлять» (isEligible). Без БД:
  * справочник поставщиков подменён стабом, заявка кладётся в отношение
- * `request` на инстансе письма.
+ * `relatedRequest` на инстансе письма.
  */
 class MarketingBlockServiceTest extends TestCase
 {
@@ -124,7 +124,7 @@ class MarketingBlockServiceTest extends TestCase
         // Контрагент, который и покупает, и поставляет (кейс Liftway, 2026-09-09):
         // письмо по ЕГО заявке — клиентское, блок вставляем.
         $m = $this->draftTo('Order@Liftway.store');
-        $m->setRelation('request', new Request(['client_email' => 'order@liftway.store']));
+        $m->setRelation('relatedRequest', new Request(['client_email' => 'order@liftway.store']));
         $m->related_request_id = 777;
 
         $this->assertTrue($this->service->isEligible($m));
@@ -139,7 +139,7 @@ class MarketingBlockServiceTest extends TestCase
     {
         // По заявке пишем поставщику, а не клиенту заявки — закупка, без блока.
         $m = $this->draftTo('order@liftway.store');
-        $m->setRelation('request', new Request(['client_email' => 'buyer@example.com']));
+        $m->setRelation('relatedRequest', new Request(['client_email' => 'buyer@example.com']));
         $m->related_request_id = 778;
 
         $this->assertFalse($this->service->isEligible($m));
@@ -148,7 +148,7 @@ class MarketingBlockServiceTest extends TestCase
     public function test_letter_in_a_request_to_a_second_client_contact_is_eligible(): void
     {
         $m = $this->draftTo('buh@example.com');
-        $m->setRelation('request', new Request(['client_email' => 'buyer@example.com']));
+        $m->setRelation('relatedRequest', new Request(['client_email' => 'buyer@example.com']));
         $m->related_request_id = 779;
 
         $this->assertTrue($this->service->isEligible($m));
