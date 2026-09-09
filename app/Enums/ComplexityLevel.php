@@ -102,6 +102,26 @@ enum ComplexityLevel: string
         };
     }
 
+    /**
+     * Порядковый номер уровня для сравнений «не сложнее чем».
+     * Используется потолком сложности менеджера (ManagerComplexityGate).
+     */
+    public function rank(): int
+    {
+        return match ($this) {
+            self::Easy => 0,
+            self::Normal => 1,
+            self::Hard => 2,
+            self::VeryHard => 3,
+        };
+    }
+
+    /** Этот уровень не сложнее заданного потолка? */
+    public function isAtMost(self $max): bool
+    {
+        return $this->rank() <= $max->rank();
+    }
+
     /** @return array<int, string> */
     public static function values(): array
     {

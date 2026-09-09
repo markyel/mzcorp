@@ -86,6 +86,13 @@
                             <div class="flex items-center gap-2.5">
                                 <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-neutral-200 text-fg-2 text-[10px] font-semibold">{{ $initials ?: '?' }}</span>
                                 <span class="text-fg-1 font-medium">{{ $u->name }}</span>
+                                {{-- Потолок сложности из карточки: РОПу видно, кто сейчас
+                                     получает только простой поток (ManagerComplexityGate). --}}
+                                @if($u->only_internal_sku_requests)
+                                    <span class="chip chip-info" title="В свободном распределении получает только заявки, где все позиции — M-артикулы">только M-артикулы</span>
+                                @elseif($u->max_complexity_level)
+                                    <span class="chip chip-info" title="В свободном распределении получает заявки не сложнее указанного уровня">не сложнее: {{ mb_strtolower($u->max_complexity_level->label()) }}</span>
+                                @endif
                             </div>
                         </td>
                         <td class="px-4 py-2 mono text-fg-2 text-[12px]">{{ $u->email }}</td>

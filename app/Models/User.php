@@ -46,6 +46,12 @@ class User extends Authenticatable
         // Плановая нагрузка в %; 100 — норма, 50 — в 2 раза меньше, 200 — в 2 раза больше.
         // См. App\Services\Request\AssignmentService::pickWeightedLeastLoadedManager.
         'load_weight',
+        // Потолок сложности заявок в round-robin: NULL — без ограничения,
+        // иначе значение ComplexityLevel («не сложнее чем»). Плюс жёсткий
+        // режим «только заявки, где все позиции — M-артикулы».
+        // См. App\Services\Request\ManagerComplexityGate.
+        'max_complexity_level',
+        'only_internal_sku_requests',
         // Персональный порядок писем в табе «Переписка»: 'asc' (старые сверху)
         // или 'desc' (новые сверху). Применяется ко всем заявкам пользователя.
         'thread_sort_order',
@@ -90,6 +96,8 @@ class User extends Authenticatable
             'unavailable_until' => 'datetime',
             'unavailable_auto_delegate' => 'boolean',
             'load_weight' => 'integer',
+            'max_complexity_level' => \App\Enums\ComplexityLevel::class,
+            'only_internal_sku_requests' => 'boolean',
             'dashboard_period_days' => 'integer',
             'updates_seen_at' => 'datetime',
             'password' => 'hashed',

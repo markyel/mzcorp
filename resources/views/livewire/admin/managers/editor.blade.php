@@ -57,6 +57,40 @@
                         100 — норма; 50 — в 2 раза меньше заявок; 200 — в 2 раза больше. Применяется на стадии round-robin (sticky-правила «один клиент = один менеджер» имеют приоритет).
                     </div>
                 </div>
+
+                {{-- Потолок сложности: отстающему менеджеру оставляем только
+                     простые заявки и поднимаем планку по мере роста.
+                     См. App\Services\Request\ManagerComplexityGate. --}}
+                <div>
+                    <label class="block text-[12px] uppercase tracking-wider text-fg-3 font-semibold mb-1">
+                        Сложность заявок
+                    </label>
+                    <div class="relative w-full max-w-[260px]">
+                        <select wire:model.live="maxComplexityLevel"
+                                @disabled($onlyInternalSku)
+                                class="w-full h-[34px] pl-3 pr-8 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)] appearance-none disabled:opacity-50">
+                            <option value="">Без ограничения</option>
+                            @foreach($complexityLevels as $lvl)
+                                <option value="{{ $lvl->value }}">Не сложнее: {{ mb_strtolower($lvl->label()) }}</option>
+                            @endforeach
+                        </select>
+                        <span class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-fg-3 text-[10px]">▾</span>
+                    </div>
+                    @error('maxComplexityLevel') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
+
+                    <label class="flex items-start gap-2 mt-2 cursor-pointer">
+                        <input type="checkbox" wire:model.live="onlyInternalSku"
+                               class="mt-[2px] w-[15px] h-[15px] rounded border-border text-[var(--sky-600)] focus:ring-0">
+                        <span class="text-[12.5px] text-fg-2">
+                            Только заявки с M-артикулами
+                            <span class="block text-[11.5px] text-fg-3">все позиции пришли нашим артикулом — самый простой поток</span>
+                        </span>
+                    </label>
+
+                    <div class="text-[11.5px] text-fg-3 mt-1">
+                        Ограничение действует при свободном распределении. Заявки своих клиентов и письма на личный ящик приходят как обычно, независимо от сложности. Если заявку не может взять никто — ограничение снимается.
+                    </div>
+                </div>
             </div>
         @endif
 

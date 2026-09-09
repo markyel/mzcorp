@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Admin\Managers;
 
+use App\Enums\ComplexityLevel;
 use App\Enums\Role as RoleEnum;
 use App\Models\User;
 use Livewire\Attributes\Validate;
@@ -54,6 +55,16 @@ class Editor extends Component
     #[Validate('required|integer|between:1,500')]
     public int $loadWeight = 100;
 
+    /**
+     * Потолок сложности заявок в round-robin: '' — без ограничения, иначе
+     * значение ComplexityLevel. Отстающему менеджеру РОП ставит «только
+     * лёгкие» и поднимает по мере роста. См. ManagerComplexityGate.
+     */
+    public string $maxComplexityLevel = '';
+
+    /** Жёсткий режим: только заявки, где все позиции пришли M-артикулом. */
+    public bool $onlyInternalSku = false;
+
     public function mount(?User $user = null): void
     {
         if ($user && $user->exists) {
@@ -62,6 +73,8 @@ class Editor extends Component
             $this->email = $user->email;
             $this->role = $user->roles->first()?->name ?? 'manager';
             $this->loadWeight = (int) ($user->load_weight ?? 100);
+            $this->maxComplexityLevel = $user->max_complexity_level?->value ?? '';
+            $this->onlyInternalSku = (bool) $user->only_internal_sku_requests;
 
             // Защита: не-админ не может открывать страницу редактирования
             // admin-юзера. РОП/директор не должны даже видеть, что такой есть.
@@ -164,6 +177,8 @@ class Editor extends Component
                 'name' => $this->name,
                 'email' => $this->email,
                 'load_weight' => $this->loadWeight,
+                'max_complexity_level' => $this->complexityLimitValue(),
+                'only_internal_sku_requests' => $this->onlyInternalSku,
             ]);
             if ($this->password !== '') {
                 $user->password = $this->password; // hash через cast
@@ -181,6 +196,8 @@ class Editor extends Component
             'email' => $this->email,
             'password' => $this->password, // hash через cast
             'load_weight' => $this->loadWeight,
+            'max_complexity_level' => $this->complexityLimitValue(),
+            'only_internal_sku_requests' => $this->onlyInternalSku,
         ]);
         $user->assignRole($this->role);
 
@@ -190,10 +207,20 @@ class Editor extends Component
         return $this->redirect(route('managers.edit', $user), navigate: true);
     }
 
+    /**
+     * Потолок сложности в БД: '' → NULL (без ограничения), иначе валидное
+     * значение ComplexityLevel. Мусор из формы превращается в NULL.
+     */
+    private function complexityLimitValue(): ?string
+    {
+        return ComplexityLevel::tryFrom($this->maxComplexityLevel)?->value;
+    }
+
     public function render()
     {
         return view('livewire.admin.managers.editor', [
             'roles' => $this->availableRoles(),
+            'complexityLevels' => ComplexityLevel::cases(),
         ]);
     }
 }

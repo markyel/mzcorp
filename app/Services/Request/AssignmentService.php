@@ -53,6 +53,13 @@ use Illuminate\Support\Facades\DB;
  *     через UI «Настройки». Смысл — «во сколько раз больше заявок получит
  *     самый отстающий менеджер чем самый загруженный». Рекомендуемый
  *     диапазон 1.5..3.0 (плавный onboarding). См. `pickWeightedLeastLoadedManager`.
+ *
+ *     Перед балансировкой список кандидатов проходит через
+ *     `ManagerComplexityGate`: у менеджера в карточке может стоять потолок
+ *     сложности («только лёгкие», «только M-артикулы»). Это ограничение
+ *     действует ТОЛЬКО на этой стадии — sticky выше сильнее, своих клиентов
+ *     менеджер продолжает вести. Если заявка не подходит никому, фильтр
+ *     снимается целиком.
  */
 class AssignmentService
 {
@@ -60,6 +67,7 @@ class AssignmentService
         private readonly AttentionService $attention,
         private readonly RequestActivityService $activity,
         private readonly DealerEmailService $dealers,
+        private readonly ManagerComplexityGate $complexityGate,
     ) {
     }
 
@@ -102,11 +110,14 @@ class AssignmentService
             // Формат: auto_round_robin:{"closes":{1:140},"today":{1:6},"tw":{1:3.1}}
             $reason = $rr
                 ? 'auto_round_robin:' . json_encode(
-                    [
+                    array_filter([
                         'closes' => $rr['closes'],
                         'today' => $rr['today'],
                         'tw' => $rr['target_weights'],
-                    ],
+                        // Кого отсекал потолок сложности (если отсекал) — РОПу
+                        // видно, почему заявка не ушла ограниченному менеджеру.
+                        'gate' => $rr['gate'] ?? null,
+                    ], fn ($v) => $v !== null),
                     JSON_UNESCAPED_UNICODE,
                 )
                 : 'auto_round_robin';
@@ -531,6 +542,25 @@ class AssignmentService
             return null;
         }
 
+        // Потолок сложности из карточки менеджера (ManagerComplexityGate):
+        // отстающему РОП оставляет только лёгкие заявки / только M-артикулы и
+        // поднимает потолок по мере роста. Ограничение действует ТОЛЬКО здесь,
+        // на свободном выборе; sticky-уровни выше не трогаем — своих клиентов
+        // менеджер ведёт дальше. Если заявку не может взять никто — фильтр
+        // снимается, без менеджера она не остаётся.
+        $gate = $this->complexityGate->filter($managers, $request);
+        $managers = $gate['managers'];
+        $gateNote = null;
+        if ($gate['excluded'] !== []) {
+            $gateNote = ['excluded' => array_values($gate['excluded']), 'relaxed' => $gate['relaxed']];
+            \Illuminate\Support\Facades\Log::info('AssignmentService: complexity gate applied', [
+                'request_id' => $request->id,
+                'complexity_level' => $request->complexity_level?->value,
+                'excluded_user_ids' => $gateNote['excluded'],
+                'relaxed' => $gate['relaxed'],
+            ]);
+        }
+
         $cfg = (array) config('services.assignment.distribution', []);
         $periodDays = max(1, (int) ($cfg['period_days'] ?? 14));
         $baseClose = max(0.01, (float) ($cfg['base_close_rate'] ?? 10));
@@ -646,6 +676,7 @@ class AssignmentService
             'target_weights' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => round($c['target_weight'], 4)])->all(),
             'closes' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => $c['closes']])->all(),
             'today' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => $c['today']])->all(),
+            'gate' => $gateNote,
         ];
     }
 
