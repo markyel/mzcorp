@@ -82,7 +82,17 @@ class RequestItemPersister
         $justCreated = false;
 
         if (! $existing) {
-            $existing = DB::transaction(function () use ($message) {
+            $existing = DB::transaction(function () use ($message, &$justCreated) {
+                // Гонка создания с IncomingMailProcessor (кейс M-2026-14649/14650):
+                // блокируем строку письма и перепроверяем привязку под блокировкой.
+                $locked = EmailMessage::query()->whereKey($message->id)->lockForUpdate()->first();
+                if ($locked && $locked->related_request_id) {
+                    $message->related_request_id = $locked->related_request_id;
+
+                    return Request::find($locked->related_request_id);
+                }
+
+                $justCreated = true;
                 $req = Request::create([
                     'internal_code' => $this->codeGenerator->next(),
                     'email_message_id' => $message->id,
@@ -95,7 +105,6 @@ class RequestItemPersister
 
                 return $req;
             });
-            $justCreated = true;
         }
 
         // Дедуп против уже сохранённых позиций (filterNewItems читает
@@ -106,8 +115,8 @@ class RequestItemPersister
         // Phase reply-suggestion: для reply-контекста (не initial email
         // Request'а) считаем confidence и решаем — auto-apply / suggest / skip.
         $isReplyContext = $existing->email_message_id !== $message->id;
-        $autoThreshold = (float) config('services.parser.reply_auto_apply_threshold', 0.95);
-        $suggestThreshold = (float) config('services.parser.reply_suggest_threshold', 0.70);
+        $autoThreshold = (float) config('services.mail.parser.reply_auto_apply_threshold', 0.95);
+        $suggestThreshold = (float) config('services.mail.parser.reply_suggest_threshold', 0.70);
 
         $maxPosition = (int) ($existingItems->max('position') ?? 0);
         $newCountActive = 0;

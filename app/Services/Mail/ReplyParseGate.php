@@ -60,7 +60,7 @@ class ReplyParseGate
             return false;
         }
 
-        $signals = (array) config('services.parser.reply_signals', $this->defaultSignals());
+        $signals = (array) config('services.mail.parser.reply_signals', $this->defaultSignals());
         foreach ($signals as $signal) {
             if (@preg_match($signal, $cleaned)) {
                 return true;

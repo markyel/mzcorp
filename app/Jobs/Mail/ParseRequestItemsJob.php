@@ -64,7 +64,10 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
 
     public function uniqueId(): string
     {
-        return sprintf('parse-items:%d', $this->emailMessageId);
+        // force/reset — часть ключа: принудительный перепарсинг (relink-крон,
+        // ручной reparse) не должен молча отбрасываться очередью, если в
+        // последние 5 минут уже был обычный прогон по этому письму.
+        return sprintf('parse-items:%d:%d%d', $this->emailMessageId, (int) $this->force, (int) $this->reset);
     }
 
     public function uniqueFor(): int
@@ -592,8 +595,9 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                 // парсера / ручной reparse) но статус застрял в Pending,
                 // потому что Persister не вызывался (items=0). Теперь
                 // позиции унаследовали — двигаем статус вручную.
-                // Менеджера не меняем.
-                $child->update(['status' => \App\Enums\RequestStatus::Assigned]);
+                // Менеджера не меняем. Через state service: аудит + attention.
+                app(\App\Services\Request\RequestStateService::class)
+                    ->systemAssign($child, 'Позиции унаследованы от родителя — заявка выходит из Pending.');
                 $child = $child->fresh();
             }
             if ($child->assigned_user_id) {
@@ -685,8 +689,10 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
                     }
                 }
             } else {
-                // Уже назначен — двинуть pending → assigned.
-                $request->update(['status' => \App\Enums\RequestStatus::Assigned]);
+                // Уже назначен — двинуть pending → assigned (через state
+                // service: аудит system_assign + attention «свежее назначение»).
+                app(\App\Services\Request\RequestStateService::class)
+                    ->systemAssign($request, 'Парсер не нашёл позиций, менеджер уже назначен — заявка выходит из Pending.');
                 Log::info('ParseRequestItemsJob: empty-items pending → assigned (manager pre-set)', [
                     'email_message_id' => $message->id,
                     'request_id' => $request->id,

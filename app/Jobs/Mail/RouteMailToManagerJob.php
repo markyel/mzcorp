@@ -30,11 +30,22 @@ use Illuminate\Support\Facades\Log;
  * с экспоненциальным backoff. 5 попыток с интервалами 30s/2m/5m/10m/30m
  * покрывают как мелкий flake, так и более длительные «штормы» сервера.
  */
-class RouteMailToManagerJob implements ShouldQueue
+class RouteMailToManagerJob implements ShouldQueue, \Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 5;
+
+    /** Дедуп в очереди по (письмо, менеджер); лок снимается при старте обработки. */
+    public function uniqueId(): string
+    {
+        return sprintf('route:%d:%d', $this->emailMessageId, (int) $this->managerId);
+    }
+
+    public function uniqueFor(): int
+    {
+        return 10 * 60;
+    }
 
     /**
      * Backoff в секундах между попытками: 30s, 2m, 5m, 10m, 30m.

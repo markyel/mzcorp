@@ -495,8 +495,8 @@ class RequestStateService
         // COPY в подпапку MZ|<Фамилия> общего ящика. Идемпотентны.
         $email = $request->emailMessage;
         if ($email) {
-            \App\Jobs\Mail\RouteMailToManagerJob::dispatch($email->id, $newAssignee->id);
-            \App\Jobs\Mail\DeliverToManagerInboxJob::dispatch($email->id, $newAssignee->id);
+            // Deliver → Route цепочкой (порядок обязателен: Route меняет UID).
+            \App\Jobs\Mail\DeliverToManagerInboxJob::chainWithRouting($email->id, $newAssignee->id);
         }
 
         try {
@@ -586,6 +586,44 @@ class RequestStateService
 
         // Phase 1.11: первый дедлайн для свеженазначенной заявки.
         $this->attention->recompute($request);
+    }
+
+    /**
+     * Системный перевод Pending/New → Assigned у заявки, у которой менеджер
+     * уже есть (позиции пришли позже назначения, наследование, ручной reparse).
+     * Единая точка вместо `$request->update(['status' => Assigned])` в job'ах:
+     * пишет аудит `system_assign`, ставит attention «свежее назначение»
+     * (иначе заявка лежала в пуле без SLA-дедлайна и не всплывала).
+     * Идемпотентно: для остальных статусов — no-op.
+     */
+    public function systemAssign(Request $request, string $note = ''): Request
+    {
+        if (! in_array($request->status, [RequestStatus::Pending, RequestStatus::New], true)) {
+            return $request;
+        }
+        $from = $request->status;
+
+        DB::transaction(function () use ($request, $from, $note) {
+            $request->status = RequestStatus::Assigned;
+            if ($request->assigned_at === null) {
+                $request->assigned_at = now();
+            }
+            $request->save();
+
+            RequestStateChange::create([
+                'request_id' => $request->id,
+                'from_status' => $from->value,
+                'to_status' => RequestStatus::Assigned->value,
+                'by_user_id' => null,
+                'event' => 'system_assign',
+                'comment' => $note ?: null,
+                'payload' => $request->assigned_user_id ? ['assigned_to_user_id' => $request->assigned_user_id] : null,
+            ]);
+
+            $this->attention->onAssigned($request);
+        });
+
+        return $request;
     }
 
     /**

@@ -256,9 +256,13 @@ class MailRouter
                 return;
             }
 
-            // spam-kind → отбрасываем.
+            // spam-kind → отбрасываем. Полный набор полей категории, как у
+            // классификатора (иначе confidence/intent оставались с прошлого
+            // значения, а повторная категоризация блокировалась по categorized_at).
             $message->forceFill([
                 'category' => EmailCategory::Irrelevant->value,
+                'category_confidence' => 1.0,
+                'category_intent' => null,
                 'category_reasoning' => 'Blocked by sender_blocklist (from='.$message->from_email.')',
                 'categorized_at' => now(),
             ])->save();
@@ -734,13 +738,11 @@ class MailRouter
                     // становится невалидным, и Deliver падает на re-fetch
                     // failed → cannot reconstruct RFC822 → skip APPEND (молча,
                     // без retry — fetchFullRfc822 не throw'ит).
-                    // FIFO в очереди не строгий, но dispatch порядок даёт
-                    // приоритет первому job'у. Кейс M-2026-1928 msg#4712.
-                    \App\Jobs\Mail\DeliverToManagerInboxJob::dispatch(
-                        $message->id,
-                        $linkedRequest->assigned_user_id,
-                    );
-                    \App\Jobs\Mail\RouteMailToManagerJob::dispatch(
+                    // Порядок гарантирует цепочка (Bus::chain): Route стартует
+                    // только после успешного Deliver; если Deliver исчерпал
+                    // retry — Route всё равно диспатчится из catch, чтобы письмо
+                    // не осталось во «Входящих» общего ящика. Кейс M-2026-1928.
+                    \App\Jobs\Mail\DeliverToManagerInboxJob::chainWithRouting(
                         $message->id,
                         $linkedRequest->assigned_user_id,
                     );

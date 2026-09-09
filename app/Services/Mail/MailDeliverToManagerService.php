@@ -5,6 +5,7 @@ namespace App\Services\Mail;
 use App\Enums\MailboxType;
 use App\Exceptions\Mail\TransientImapException;
 use App\Models\EmailMessage;
+use Illuminate\Support\Facades\DB;
 use App\Models\MailAppendAudit;
 use App\Models\Mailbox;
 use App\Models\User;
@@ -101,8 +102,11 @@ class MailDeliverToManagerService
                 return false;
             }
 
+            // Только ЛИЧНЫЙ ящик менеджера: при совпадении адреса с общим
+            // ящиком APPEND ушёл бы в общий (разбор 2026-09-09).
             $managerMailbox = Mailbox::query()
                 ->whereRaw('LOWER(email) = ?', [$managerEmail])
+                ->where('type', \App\Enums\MailboxType::Personal)
                 ->first();
             if (! $managerMailbox) {
                 Log::info('MailDeliverToManagerService: no personal mailbox for manager, skip', [
@@ -303,13 +307,22 @@ class MailDeliverToManagerService
             }
 
             // Audit: фиксируем доставку, чтобы повторный dispatch не задвоил.
-            $deliveries[] = [
-                'user_id' => $manager->id,
-                'mailbox_id' => $managerMailbox->id,
-                'delivered_at' => now()->toIso8601String(),
-            ];
-            $artifacts['inbox_deliveries'] = $deliveries;
-            $message->forceFill(['detected_artifacts' => $artifacts])->save();
+            // Под блокировкой строки и по СВЕЖИМ artifacts: параллельно эту же
+            // JSON-колонку пишут MailFolderRouter/архиватор/парсер — иначе
+            // «lost update» стирал их отметки (разбор 2026-09-09).
+            DB::transaction(function () use ($message, $manager, $managerMailbox) {
+                $fresh = EmailMessage::query()->whereKey($message->id)->lockForUpdate()->first();
+                $artifacts = (array) ($fresh?->detected_artifacts ?? $message->detected_artifacts ?? []);
+                $deliveries = (array) ($artifacts['inbox_deliveries'] ?? []);
+                $deliveries[] = [
+                    'user_id' => $manager->id,
+                    'mailbox_id' => $managerMailbox->id,
+                    'delivered_at' => now()->toIso8601String(),
+                ];
+                $artifacts['inbox_deliveries'] = $deliveries;
+                ($fresh ?? $message)->forceFill(['detected_artifacts' => $artifacts])->save();
+                $message->detected_artifacts = $artifacts;
+            });
 
             Log::info('MailDeliverToManagerService: delivered', [
                 'email_message_id' => $message->id,

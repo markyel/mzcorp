@@ -23,7 +23,7 @@ use Illuminate\Support\Facades\Log;
  * `email_messages.detected_artifacts.inbox_deliveries[]`. Повторный
  * dispatch на того же user_id — no-op.
  */
-class DeliverToManagerInboxJob implements ShouldQueue
+class DeliverToManagerInboxJob implements ShouldQueue, \Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing
 {
     use Dispatchable;
     use InteractsWithQueue;
@@ -31,6 +31,44 @@ class DeliverToManagerInboxJob implements ShouldQueue
     use SerializesModels;
 
     public int $tries = 4;
+
+    /**
+     * Дедуп в очереди: шесть мест диспатча (роутер, персистер, парсер,
+     * переподчинение, реанимация) могли поставить одно и то же письмо одному
+     * менеджеру дважды → два APPEND, дубль в ящике. Лок снимается при старте
+     * обработки, поэтому retry/backoff не блокируются.
+     */
+    public function uniqueId(): string
+    {
+        return sprintf('deliver:%d:%d', $this->emailMessageId, $this->managerId);
+    }
+
+    public function uniqueFor(): int
+    {
+        return 10 * 60;
+    }
+
+    /**
+     * Доставка в личный ящик, затем перенос в подпапку MZ|<Фамилия> общего.
+     * Порядок обязателен: Route делает UID MOVE и инвалидирует UID, по которому
+     * Deliver re-fetch'ит RFC822. Раньше держался на FIFO очереди (не строгом).
+     * Если Deliver исчерпал retry, Route всё равно запускается из catch —
+     * секретарь должен видеть распределение независимо от личного ящика.
+     */
+    public static function chainWithRouting(int $emailMessageId, int $managerId): void
+    {
+        \Illuminate\Support\Facades\Bus::chain([
+            new self($emailMessageId, $managerId),
+            new RouteMailToManagerJob($emailMessageId, $managerId),
+        ])->catch(function (\Throwable $e) use ($emailMessageId, $managerId) {
+            Log::warning('DeliverToManagerInboxJob chain failed — dispatching routing anyway', [
+                'email_message_id' => $emailMessageId,
+                'manager_id' => $managerId,
+                'error' => $e->getMessage(),
+            ]);
+            RouteMailToManagerJob::dispatch($emailMessageId, $managerId);
+        })->dispatch();
+    }
     public int $timeout = 60;
 
     /**

@@ -154,7 +154,19 @@ class IncomingMailProcessor
         // уведомления уходили бы на технический ящик формы.
         $client = $this->buildClientFields($message);
 
-        $request = DB::transaction(function () use ($message, $client) {
+        $created = false;
+        $request = DB::transaction(function () use ($message, $client, &$created) {
+            // Гонка создания (кейс M-2026-14649/14650: два прохода по одному
+            // письму в одну секунду — роутер и крон/персистер). Блокируем строку
+            // письма и перепроверяем привязку уже под блокировкой.
+            $locked = EmailMessage::query()->whereKey($message->id)->lockForUpdate()->first();
+            if ($locked && $locked->related_request_id) {
+                $message->related_request_id = $locked->related_request_id;
+
+                return Request::find($locked->related_request_id);
+            }
+
+            $created = true;
             $req = Request::create(array_merge([
                 'internal_code' => $this->codeGenerator->next(),
                 'email_message_id' => $message->id,
@@ -176,6 +188,15 @@ class IncomingMailProcessor
 
             return $req;
         });
+
+        if (! $created) {
+            Log::info('IncomingMailProcessor: request already created by a parallel pass — reused', [
+                'email_message_id' => $message->id,
+                'request_id' => $request?->id,
+            ]);
+
+            return $request;
+        }
 
         // Phase 1.8d: парсер позиций в очереди. После успешного persist'а
         // RequestItemPersister сам вызовет AssignmentService::autoAssign(),

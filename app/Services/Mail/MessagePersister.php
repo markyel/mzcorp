@@ -322,7 +322,7 @@ class MessagePersister
                 if ($bytes === false || $bytes === '') {
                     return $m[0];
                 }
-                $utf8 = $this->safeConvertToUtf8($bytes, $charset);
+                $utf8 = self::safeConvertToUtf8($bytes, $charset);
 
                 return is_string($utf8) && $utf8 !== '' ? $utf8 : $bytes;
             },
@@ -345,7 +345,7 @@ class MessagePersister
      * Возвращает UTF-8 строку или null, если ничего разумного не вышло
      * (caller сам решает, что подставить в fallback).
      */
-    private function safeConvertToUtf8(string $bytes, string $charset): ?string
+    private static function safeConvertToUtf8(string $bytes, string $charset): ?string
     {
         // Алиасы charset'ов, которые mbstring не знает под присланным именем.
         // Кейс «Тяговые канаты»: корейский клиент закодировал кириллицу в
@@ -465,7 +465,7 @@ class MessagePersister
             if (stripos($charset, 'UTF-8') !== false && mb_check_encoding($decoded, 'UTF-8')) {
                 return $decoded;
             }
-            $converted = $this->safeConvertToUtf8($decoded, $charset);
+            $converted = self::safeConvertToUtf8($decoded, $charset);
 
             return is_string($converted) && $converted !== '' ? $converted : null;
         }
@@ -706,7 +706,7 @@ class MessagePersister
             ksort($parts);
             $joined = implode('', $parts);
             if (strtoupper($charset) !== 'UTF-8') {
-                $converted = $this->safeConvertToUtf8($joined, $charset);
+                $converted = self::safeConvertToUtf8($joined, $charset);
                 if (is_string($converted) && $converted !== '') {
                     return $converted;
                 }
@@ -727,7 +727,7 @@ class MessagePersister
                 $decoded = rawurldecode($rest);
                 $cs = $cs !== '' ? $cs : 'UTF-8';
                 if (strtoupper($cs) !== 'UTF-8') {
-                    $converted = $this->safeConvertToUtf8($decoded, $cs);
+                    $converted = self::safeConvertToUtf8($decoded, $cs);
                     if (is_string($converted) && $converted !== '') {
                         return $converted;
                     }

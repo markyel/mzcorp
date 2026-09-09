@@ -48,10 +48,13 @@ class ReassignService
 
         $assignment = DB::transaction(function () use ($request, $newAssignee, $reason, $by): RequestAssignment {
             $request->assigned_user_id = $newAssignee->id;
-            // Если заявка была в Pending (без позиций) — оставляем в Pending,
-            // иначе переводим в Assigned. New статус не возвращаем — это
-            // регрессия по UI-чипам.
-            if ($request->status !== RequestStatus::Pending) {
+            // Статус НЕ откатываем: заявка в «КП отправлено» / «ждёт счёт» /
+            // «счёт выставлен» при переподчинении остаётся на своей стадии
+            // (иначе менялись вес нагрузки в распределении и SLA-дедлайн, а
+            // sticky-переподчинение по ответу клиента возвращало сделку на
+            // старт — разбор 2026-09-09). Pending остаётся Pending (позиций
+            // ещё нет), New → Assigned (заявка становится видимой менеджеру).
+            if ($request->status === RequestStatus::New) {
                 $request->status = RequestStatus::Assigned;
             }
             $request->assigned_at = now();
@@ -88,8 +91,9 @@ class ReassignService
         // Все три идемпотентны: повторный dispatch не задвоит.
         $email = $request->emailMessage;
         if ($email) {
-            RouteMailToManagerJob::dispatch($email->id, $newAssignee->id);
-            DeliverToManagerInboxJob::dispatch($email->id, $newAssignee->id);
+            // Deliver → Route цепочкой: Route переносит письмо (меняет UID),
+            // Deliver re-fetch'ит полный RFC822 по UID — порядок обязателен.
+            DeliverToManagerInboxJob::chainWithRouting($email->id, $newAssignee->id);
 
             if ($oldAssigneeId !== null && $oldAssigneeId !== $newAssignee->id) {
                 ArchiveFromOldManagerInboxJob::dispatch($email->id, $oldAssigneeId);
