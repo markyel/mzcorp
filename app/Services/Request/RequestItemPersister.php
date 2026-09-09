@@ -93,6 +93,15 @@ class RequestItemPersister
                 }
 
                 $justCreated = true;
+                // Второй, расходящийся путь создания заявки (без организации,
+                // без клиента из веб-формы, без события RequestCreated). По
+                // разбору 2026-09-09 должен уйти в IncomingMailProcessor; пока —
+                // замеряем, ходит ли сюда кто-то вообще (по логу за неделю).
+                Log::warning('RequestItemPersister: request created by the secondary path (should go through IncomingMailProcessor)', [
+                    'email_message_id' => $message->id,
+                    'category' => $message->category,
+                    'mailbox_id' => $message->mailbox_id,
+                ]);
                 $req = Request::create([
                     'internal_code' => $this->codeGenerator->next(),
                     'email_message_id' => $message->id,
