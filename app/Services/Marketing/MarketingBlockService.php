@@ -19,10 +19,13 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
  *
  * Одна точка вставки — OutgoingMailMimeBuilder::composeFinalBody(): через неё
  * идут и ручные ответы менеджеров, и авто-уведомления (ClientNotificationService),
- * и RFQ поставщикам. Поэтому исключения решаются здесь, по получателям:
- *   - письмо поставщику (SupplierRegistry по адресу To, либо уже проставлен
- *     supplier_inquiry_id) — без рекламы;
+ * и RFQ поставщикам. Поэтому исключения решаются здесь, по КОНТЕКСТУ письма
+ * (см. isEligible), а не по карточке адресата:
+ *   - запрос поставщику (supplier_inquiry_id) или письмо поставщику вне
+ *     клиентской заявки — без рекламы;
  *   - все получатели внутренние (services.mail.internal_domains) — без рекламы;
+ *   - письмо по клиентской заявке её клиенту — с рекламой, даже если тот же
+ *     контрагент есть в справочнике поставщиков;
  *   - нет активных блоков — ничего не вставляем.
  *
  * Выбор случайный, но ОДИН на письмо: composeFinalBody вызывается дважды за
@@ -102,7 +105,22 @@ class MarketingBlockService
         return $block ? $this->renderBlock($block) : null;
     }
 
-    /** Письмо клиенту (не поставщику, не внутреннее)? */
+    /**
+     * Вставляем ли блок в это письмо. Решает КОНТЕКСТ письма (в каком процессе
+     * оно написано), а не карточка адресата: один и тот же контрагент у нас и
+     * покупает, и поставляет (Liftway, Meteor, nlp-group и ещё ~35 компаний), и
+     * по клиентской заявке ему надо писать с рекламой. Кейс 2026-09-09: за
+     * неделю 401 письмо менеджеров клиентам ушло без блока только потому, что
+     * адресат числился в справочнике поставщиков.
+     *
+     *  - запрос поставщику (supplier_inquiry_id) — без блока;
+     *  - все получатели внутренние — без блока;
+     *  - письмо по клиентской заявке, адресат = клиент этой заявки — блок есть,
+     *    даже если этот адрес в справочнике поставщиков;
+     *  - письмо по заявке на другой адрес: поставщику — без блока (закупка по
+     *    заявке), остальным (второй контакт клиента, копия) — с блоком;
+     *  - контекста заявки нет — прежнее правило по справочнику поставщиков.
+     */
     public function isEligible(EmailMessage $draft): bool
     {
         if ($draft->supplier_inquiry_id) {
@@ -113,20 +131,35 @@ class MarketingBlockService
         if ($to === []) {
             return false;
         }
+
+        $all = array_merge($to, $this->emails((array) ($draft->cc_recipients ?? [])));
+        $hasExternal = false;
+        foreach ($all as $email) {
+            if (! $this->isInternalAddress($email)) {
+                $hasExternal = true;
+                break;
+            }
+        }
+        if (! $hasExternal) {
+            return false;
+        }
+
+        $request = $draft->related_request_id ? $draft->request : null;
+
+        if ($request !== null) {
+            $client = mb_strtolower(trim((string) $request->client_email));
+            if ($client !== '' && in_array($client, $to, true)) {
+                return true;
+            }
+        }
+
         foreach ($to as $email) {
             if ($this->suppliers->isSupplier($email)) {
                 return false;
             }
         }
 
-        $all = array_merge($to, $this->emails((array) ($draft->cc_recipients ?? [])));
-        foreach ($all as $email) {
-            if (! $this->isInternalAddress($email)) {
-                return true;
-            }
-        }
-
-        return false;
+        return true;
     }
 
     public function isInternalAddress(string $email): bool

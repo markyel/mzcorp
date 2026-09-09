@@ -3,21 +3,39 @@
 namespace Tests\Unit\Services\Marketing;
 
 use App\Models\EmailMessage;
+use App\Models\Request;
 use App\Services\Marketing\MarketingBlockService;
+use App\Services\Supplier\SupplierRegistry;
 use Tests\TestCase;
 
 /**
- * Рендер блока и правила «кому вставлять». Без записи в БД: SupplierRegistry
- * ходит в таблицу suppliers только на чтение (пустой ответ = не поставщик).
+ * Рендер блока и правило «в какие письма вставлять» (isEligible). Без БД:
+ * справочник поставщиков подменён стабом, заявка кладётся в отношение
+ * `request` на инстансе письма.
  */
 class MarketingBlockServiceTest extends TestCase
 {
+    /** Адреса, которые стаб считает поставщиками. */
+    private const SUPPLIERS = ['order@liftway.store', 'sales@meteor.ru'];
+
     private MarketingBlockService $service;
 
     protected function setUp(): void
     {
         parent::setUp();
         config()->set('services.mail.internal_domains', ['myzip.ru', 'mylift.ru']);
+        app()->instance(SupplierRegistry::class, new class(self::SUPPLIERS) extends SupplierRegistry
+        {
+            /** @param  list<string>  $known */
+            public function __construct(private readonly array $known)
+            {
+            }
+
+            public function isSupplier(?string $email): bool
+            {
+                return in_array(mb_strtolower(trim((string) $email)), $this->known, true);
+            }
+        });
         $this->service = app(MarketingBlockService::class);
     }
 
@@ -99,6 +117,49 @@ class MarketingBlockServiceTest extends TestCase
         $m->supplier_inquiry_id = 5;
 
         $this->assertFalse($this->service->isEligible($m));
+    }
+
+    public function test_letter_in_a_client_request_is_eligible_even_if_recipient_is_a_supplier(): void
+    {
+        // Контрагент, который и покупает, и поставляет (кейс Liftway, 2026-09-09):
+        // письмо по ЕГО заявке — клиентское, блок вставляем.
+        $m = $this->draftTo('Order@Liftway.store');
+        $m->setRelation('request', new Request(['client_email' => 'order@liftway.store']));
+        $m->related_request_id = 777;
+
+        $this->assertTrue($this->service->isEligible($m));
+    }
+
+    public function test_letter_to_a_supplier_outside_a_client_request_is_not_eligible(): void
+    {
+        $this->assertFalse($this->service->isEligible($this->draftTo('order@liftway.store')));
+    }
+
+    public function test_letter_in_a_request_to_a_supplier_who_is_not_the_client_is_not_eligible(): void
+    {
+        // По заявке пишем поставщику, а не клиенту заявки — закупка, без блока.
+        $m = $this->draftTo('order@liftway.store');
+        $m->setRelation('request', new Request(['client_email' => 'buyer@example.com']));
+        $m->related_request_id = 778;
+
+        $this->assertFalse($this->service->isEligible($m));
+    }
+
+    public function test_letter_in_a_request_to_a_second_client_contact_is_eligible(): void
+    {
+        $m = $this->draftTo('buh@example.com');
+        $m->setRelation('request', new Request(['client_email' => 'buyer@example.com']));
+        $m->related_request_id = 779;
+
+        $this->assertTrue($this->service->isEligible($m));
+    }
+
+    private function draftTo(string $email): EmailMessage
+    {
+        $m = new EmailMessage;
+        $m->to_recipients = [['email' => $email]];
+
+        return $m;
     }
 
     public function test_no_recipients_not_eligible(): void
