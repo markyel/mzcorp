@@ -515,6 +515,34 @@ class MailRouter
                         $cited = null;
                     }
                 }
+                // Номера КП в письме нет, но LLM уверенно видит НОВУЮ заявку
+                // («прошу выставить счёт по наличию: M10732 - 2 шт …»), клиент
+                // просит счёт/дозаказ своим текстом и есть сигналы позиций —
+                // это не постпродажа, а новый заказ в старом треде: разворачиваем
+                // в отдельную заявку (spin-off, как для intent=new_request).
+                // Кейс M-2026-8429 → письмо 101376 (2026-09-09): без этого любой
+                // ответ в тред выигранной сделки без номера КП молча становился
+                // «постпродажей» независимо от вердикта классификатора.
+                if ($cited === null && $message->category === EmailCategory::ClientRequest->value) {
+                    $wantsNew = app(PostSaleFulfillmentDetector::class)->wantsNewInvoiceOrOrder(
+                        (string) $message->subject,
+                        $this->citedQuoteRouter->ownBodyText($message),
+                        app(EmailTextCleanerService::class)->isReply($message),
+                    );
+                    if ($wantsNew && app(\App\Services\Mail\ReplyParseGate::class)->shouldParse($message)) {
+                        $new = app(\App\Services\Request\RequestExtensionService::class)
+                            ->spinOffNewRequest($message, $linkedRequest);
+                        if ($new !== null) {
+                            Log::info('MailRouter: new order in a closed_won thread → spun off into a new request', [
+                                'email_message_id' => $message->id,
+                                'parent_request_id' => $linkedRequest->id,
+                                'new_request_id' => $new->id,
+                            ]);
+
+                            return;
+                        }
+                    }
+                }
                 if ($cited !== null) {
                     $child = app(\App\Services\Request\CitedInvoiceChildService::class)
                         ->createFromCitedQuote($message, $linkedRequest, (string) $cited['document_number']);
