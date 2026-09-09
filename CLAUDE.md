@@ -59,6 +59,7 @@ MyLift — **CRM-прослойка** между входящей email-почт
 4. **Проверь модель.** Посмотри `$fillable`, `$casts`, relations.
 5. **Проверь `.env.example`** при добавлении новых переменных окружения.
 6. **Сверься с Foundation** (`design/uploads/MyLift_Foundation.md`) — фича уже описана? Какие поля? Какие enum'ы?
+7. **Правишь детекторы почты** (`PostSaleFulfillmentDetector`, `InvoiceMentionMatcher`, `EmailTextCleanerService`, `CitedOutboundQuoteRouter`, `InboundIntentClassifier`, ветки `MailRouter`) — перед деплоем прогони на проде `php artisan mail:detector-replay` (корпус из 542 реальных писем, эталон в `storage/app/mail-corpus/baseline.json`), разбери расхождения глазами и только потом `--record` новый эталон. Решения маршрутизатора по письму — таблица `mail_decisions` (стадия + исход), смотри её раньше логов.
 
 ## Стиль кода Laravel
 
