@@ -292,7 +292,8 @@ class InboundIntentClassifier
         $own = trim(app(\App\Services\Mail\EmailTextCleanerService::class)->clientOwnText($message));
         $text = mb_strlen($own) >= 12 ? $own : $raw;
 
-        return preg_match(self::INVOICE_TOKENS_RE, $text) === 1;
+        // Слабое упоминание счёта — единый владелец понятия InvoiceMentionMatcher.
+        return (new \App\Services\Mail\InvoiceMentionMatcher)->mentions($text);
     }
 
     private function intentToDetectorType(string $intent, RequestStatus $currentStatus): ?DetectorType

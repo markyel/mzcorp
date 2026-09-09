@@ -38,13 +38,6 @@ class CitedOutboundQuoteRouter
     /** Контекст «счёт/КП/оплата» в тексте письма (гейт матчинга номера). */
     private const KEYWORD_RE = '/сч[её]т|на\s+оплат|коммерческое\s+предложение|\bкп\b|invoice|инвойс/iu';
 
-    /**
-     * Собственно запрос счёта / оплаты — основание для статуса «ждёт счёт».
-     * Начало слова через lookbehind (\b в PCRE не знает кириллицу): «Насчет
-     * оригинала» — не запрос счёта.
-     */
-    private const INVOICE_INTENT_RE = '/(?<!\p{L})(сч[её]т|оплат|invoice|инвойс|выстав)/iu';
-
     /** Числа-кандидаты: 5–8 цифр (наши document_number обычно 6). */
     private const NUMBER_RE = '/\d{5,8}/';
 
@@ -120,10 +113,16 @@ class CitedOutboundQuoteRouter
         return $this->cleaner->clientOwnText($message);
     }
 
-    /** Есть ли в собственном тексте клиента (или теме) просьба о счёте/оплате. */
+    /**
+     * Есть ли в собственном тексте клиента (или теме) просьба о счёте либо
+     * намерение оплатить. Единый владелец понятия — InvoiceMentionMatcher.
+     * Раньше здесь была широкая regex (любое «счёт/оплат/выстав»), и вопрос
+     * «когда получим по счёту № N» уводил заявку в «ждёт счёт»; реплей
+     * 2026-09-09 по 166 письмам с цитатой КП: 33 таких ложных срабатывания.
+     */
     public function hasInvoiceIntent(string $subject, string $ownBody): bool
     {
-        return preg_match(self::INVOICE_INTENT_RE, mb_strtolower($subject . "\n" . $ownBody)) === 1;
+        return (new InvoiceMentionMatcher)->requestsInvoiceOrIntendsToPay($subject . "\n" . $ownBody);
     }
 
     /**
