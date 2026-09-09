@@ -280,22 +280,17 @@ class InboundIntentClassifier
      */
     private function mentionsInvoiceToken(EmailMessage $message): bool
     {
-        $text = trim((string) ($message->body_plain ?: strip_tags((string) $message->body_html)));
-        if ($text === '') {
+        $raw = trim((string) ($message->body_plain ?: strip_tags((string) $message->body_html)));
+        if ($raw === '') {
             return false;
         }
 
-        // Срезать цитату по самому раннему маркеру (построчно-независимо).
-        $cut = mb_strlen($text);
-        foreach (self::QUOTE_MARKERS_RE as $re) {
-            if (preg_match($re, $text, $m, PREG_OFFSET_CAPTURE)) {
-                $charPos = mb_strlen(substr($text, 0, $m[0][1]));
-                $cut = min($cut, $charPos);
-            }
-        }
-        if ($cut >= 12) {
-            $text = mb_substr($text, 0, $cut);
-        }
+        // Собственный текст клиента — единый владелец понятия
+        // (EmailTextCleanerService::clientOwnText). Если после среза цитаты
+        // осталось меньше 12 символов (ответ-«одно слово» под цитатой), как и
+        // раньше берём весь текст, чтобы не потерять короткое «Счёт, пожалуйста».
+        $own = trim(app(\App\Services\Mail\EmailTextCleanerService::class)->clientOwnText($message));
+        $text = mb_strlen($own) >= 12 ? $own : $raw;
 
         return preg_match(self::INVOICE_TOKENS_RE, $text) === 1;
     }

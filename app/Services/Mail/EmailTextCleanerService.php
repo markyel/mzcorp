@@ -2,6 +2,8 @@
 
 namespace App\Services\Mail;
 
+use App\Models\EmailMessage;
+
 /**
  * Очистка текста inbound-письма перед AI-парсингом позиций.
  *
@@ -443,6 +445,39 @@ class EmailTextCleanerService
         }
 
         return $text;
+    }
+
+    /**
+     * СОБСТВЕННЫЙ текст клиента в письме — единственная точка для всех
+     * детекторов намерения (просьба о счёте, статус заказа, цитата нашего КП,
+     * интент ответа). До 2026-09-09 это понятие считалось в трёх местах по-разному
+     * (CitedOutboundQuoteRouter, PostSaleFulfillmentDetector, InboundIntentClassifier)
+     * и одно письмо получало разные вердикты.
+     *
+     * Правила:
+     *  - тело — body_plain, при «битом» plain (пусто/CSS-мусор) — текст из body_html;
+     *  - срезается любая цитата (наша и чужая): атрибуция «пишет/wrote», Outlook-
+     *    шапка, «-----Original Message-----», «>»-блок — cutQuotedReplyTail;
+     *  - пересланное письмо: если у клиента есть своя преамбула — она + блок
+     *    пересылки (номер КП/счёта часто только в нём), иначе сам блок.
+     */
+    public function clientOwnText(EmailMessage $message): string
+    {
+        $raw = (string) ($message->body_plain ?? '');
+        if ($this->bodyPlainLooksBroken($raw) && trim((string) $message->body_html) !== '') {
+            $raw = $this->htmlToText((string) $message->body_html);
+        }
+        if (trim($raw) === '') {
+            return '';
+        }
+        $own = $this->cutQuotedReplyTail($raw);
+
+        ['forwarded' => $fwd, 'original' => $orig] = $this->extractForwardedContent($own !== '' ? $own : $raw);
+        if ($fwd !== null) {
+            return trim($orig) !== '' ? $orig . "\n" . $fwd : $fwd;
+        }
+
+        return $own;
     }
 
     /**

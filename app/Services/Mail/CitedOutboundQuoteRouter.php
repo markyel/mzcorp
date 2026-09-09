@@ -115,21 +115,9 @@ class CitedOutboundQuoteRouter
      */
     public function ownBodyText(EmailMessage $message): string
     {
-        $raw = (string) ($message->body_plain ?? '');
-        if (trim($raw) === '') {
-            return '';
-        }
-        $own = $this->cleaner->cutQuotedReplyTail($raw);
-
-        // Клиент переслал наше КП (Fwd) с просьбой выставить счёт — номер лежит
-        // в пересланном блоке. Если преамбула есть, сам блок нам не нужен: номер
-        // почти всегда есть и в теме/имени PDF; если преамбулы нет — берём блок.
-        ['forwarded' => $fwd, 'original' => $orig] = $this->cleaner->extractForwardedContent($own !== '' ? $own : $raw);
-        if ($fwd !== null) {
-            return trim($orig) !== '' ? $orig . "\n" . $fwd : $fwd;
-        }
-
-        return $own;
+        // Единый владелец понятия — EmailTextCleanerService::clientOwnText
+        // (те же правила: срез любой цитаты + блок пересылки при преамбуле).
+        return $this->cleaner->clientOwnText($message);
     }
 
     /** Есть ли в собственном тексте клиента (или теме) просьба о счёте/оплате. */

@@ -236,12 +236,17 @@ class PostSaleFulfillmentDetector
         return false;
     }
 
-    /** Свежий текст письма без хвоста цитаты. Fail-soft. */
+    /**
+     * Свежий текст письма без цитат — единый владелец понятия
+     * EmailTextCleanerService::clientOwnText (раньше здесь резалась только
+     * цитата нашего домена, и «выставить счёт» из чужой цитаты давало ложную
+     * просьбу счёта). Fail-soft.
+     */
     private function freshText(EmailMessage $message): string
     {
         $body = (string) $message->body_plain;
         try {
-            return app(EmailTextCleanerService::class)->cutOwnQuotedTail($body);
+            return app(EmailTextCleanerService::class)->clientOwnText($message);
         } catch (\Throwable $e) {
             return $body;
         }
