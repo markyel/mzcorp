@@ -126,6 +126,98 @@ class CitedOutboundQuoteRouter
     }
 
     /**
+     * Применить маршрут «клиент процитировал наш КП → запрос счёта»: привязать
+     * письмо к заявке КП, реанимировать её если закрыта потерей, перевести в
+     * «ждёт счёт» (AwaitingInvoice), записать аудит. Идемпотентно. Перенесено
+     * из MailRouter без изменений (2026-09-09).
+     *
+     * @param  array{request: Request, document_number: string, total: float, source: string, invoice_intent?: bool}  $cited
+     */
+    public function applyInvoiceRequest(EmailMessage $message, array $cited): Request
+    {
+        $request = $cited['request'];
+        $docNo = $cited['document_number'];
+
+        if ($message->related_request_id !== $request->id) {
+            $message->forceFill(['related_request_id' => $request->id])->save();
+        }
+
+        // Заявка закрыта потерей (клиент молчал, теперь вернулся за счётом) →
+        // реанимируем. reanimate() работает только из closed_lost.
+        if ($request->status === \App\Enums\RequestStatus::ClosedLost) {
+            try {
+                $request = app(\App\Services\Request\RequestStateService::class)->reanimate(
+                    $request,
+                    null,
+                    $message,
+                    true,
+                    'reanimate_from_cited_quote',
+                    sprintf('Клиент прислал запрос счёта по КП %s — реанимация', $docNo),
+                );
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: cited-quote reanimate failed (non-fatal)', [
+                    'request_id' => $request->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Перевод в «ждёт счёт» — если уже не на этой/более поздней вехе И
+        // клиент в собственном тексте действительно просит счёт/оплату
+        // (invoice_intent). Цитирует КП с вопросом («а с резьбой М10 есть?»,
+        // M-2026-12166) — письмо привязываем, статус не трогаем.
+        $skip = [
+            \App\Enums\RequestStatus::AwaitingInvoice,
+            \App\Enums\RequestStatus::Invoiced,
+            \App\Enums\RequestStatus::Paid,
+            \App\Enums\RequestStatus::ClosedWon,
+        ];
+        $invoiceIntent = (bool) ($cited['invoice_intent'] ?? true);
+        if (! $invoiceIntent) {
+            Log::info('MailRouter: cited quote without invoice intent — linked, status unchanged', [
+                'email_message_id' => $message->id,
+                'request_id' => $request->id,
+                'document_number' => $docNo,
+            ]);
+        }
+        if ($invoiceIntent && ! in_array($request->status, $skip, true)) {
+            $from = $request->status->value;
+            $request->status = \App\Enums\RequestStatus::AwaitingInvoice;
+            $request->save();
+            \App\Models\RequestStateChange::create([
+                'request_id' => $request->id,
+                'from_status' => $from,
+                'to_status' => \App\Enums\RequestStatus::AwaitingInvoice->value,
+                'by_user_id' => null,
+                'event' => 'invoice_requested_cited_quote',
+                'comment' => sprintf('Клиент процитировал КП %s и запросил счёт (маршрут по номеру КП, %s)', $docNo, $cited['source']),
+                'payload' => [
+                    'document_number' => $docNo,
+                    'source' => $cited['source'],
+                    'email_message_id' => $message->id,
+                ],
+            ]);
+            try {
+                app(\App\Services\Request\AttentionService::class)->recompute($request->fresh());
+            } catch (\Throwable $e) {
+                Log::info('MailRouter: attention recompute after cited-quote route failed (non-fatal)', [
+                    'request_id' => $request->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        Log::info('MailRouter: cited-quote invoice-request routed', [
+            'email_message_id' => $message->id,
+            'request_id' => $request->id,
+            'document_number' => $docNo,
+            'source' => $cited['source'],
+        ]);
+
+        return $request->fresh();
+    }
+
+    /**
      * Числа-кандидаты из темы/тела/имён вложений/текста PDF-вложений.
      *
      * @return array{0: array<int,string>, 1: bool}  [числа, был ли источник-вложение]

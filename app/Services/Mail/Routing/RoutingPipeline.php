@@ -3,7 +3,11 @@
 namespace App\Services\Mail\Routing;
 
 use App\Services\Mail\Routing\Handlers\BlocklistHandler;
+use App\Services\Mail\Routing\Handlers\CategorizeHandler;
+use App\Services\Mail\Routing\Handlers\ClosedWonThreadHandler;
 use App\Services\Mail\Routing\Handlers\CrossMailboxCopyHandler;
+use App\Services\Mail\Routing\Handlers\LinkToRequestHandler;
+use App\Services\Mail\Routing\Handlers\PostSaleOrderHandler;
 use App\Services\Mail\Routing\Handlers\LoopForwardHandler;
 use App\Services\Mail\Routing\Handlers\NotInboundHandler;
 use App\Services\Mail\Routing\Handlers\OutboundHandler;
@@ -36,6 +40,10 @@ final class RoutingPipeline
         BlocklistHandler::class,
         CrossMailboxCopyHandler::class,
         SupplierReplyHandler::class,
+        CategorizeHandler::class,
+        LinkToRequestHandler::class,
+        ClosedWonThreadHandler::class,
+        PostSaleOrderHandler::class,
     ];
 
     /** @var list<InboundRoutingHandler>|null */

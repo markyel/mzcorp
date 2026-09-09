@@ -17,6 +17,12 @@ final class RoutingContext
     /** Заявка, к которой письмо привязано линкером / роутером цитат (если уже известна). */
     public ?Request $linkedRequest = null;
 
+    /**
+     * Категория post_sale, но надёжного заказа для привязки нет — письмо
+     * остаётся во входящих без заявки (create-гейт его не подхватывает).
+     */
+    public bool $postSaleUnlinked = false;
+
     public function __construct(public readonly EmailMessage $message)
     {
     }
