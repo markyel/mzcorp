@@ -35,6 +35,44 @@ class PostSaleFulfillmentDetectorTest extends TestCase
         return $m;
     }
 
+    /**
+     * Пересылка клиентом собственного запроса другому поставщику (письмо 103750,
+     * «есть в наличии … цена и сроки поставки»): Yandex ставит In-Reply-To на его
+     * же письмо, `isReply` даёт true — но тред не наш, и «сроки поставки» здесь
+     * пресейл, а не вопрос про отгрузку.
+     */
+    public function test_delivery_terms_in_a_foreign_thread_are_presale(): void
+    {
+        $body = "Добрый день.\nУ Вас есть в наличии или под заказ кнопка закрытия дверей KM804343 G08 KONE 1 штука.\nЦена и сроки поставки.";
+
+        $foreign = new class extends PostSaleFulfillmentDetector
+        {
+            protected function repliesToOurThread(\App\Models\EmailMessage $message): bool
+            {
+                return false;
+            }
+        };
+        $m = $this->message('кнопки', $body);
+        $m->in_reply_to = '96931789054287@mail.yandex.ru';
+
+        $this->assertFalse($foreign->deliveryStatusInquiry($m));
+    }
+
+    public function test_delivery_terms_in_our_own_thread_stay_post_sale(): void
+    {
+        $ours = new class extends PostSaleFulfillmentDetector
+        {
+            protected function repliesToOurThread(\App\Models\EmailMessage $message): bool
+            {
+                return true;
+            }
+        };
+        $m = $this->message('Re: Счёт 9375', 'Добрый день! Уточните сроки поставки по нашему заказу.');
+        $m->in_reply_to = 'our-message@mzcorp.ru';
+
+        $this->assertTrue($ours->deliveryStatusInquiry($m));
+    }
+
     public function test_invoice_request_with_assembly_is_not_post_sale(): void
     {
         // Запрос счёта + комплектация + количество — новая заявка.

@@ -224,15 +224,49 @@ class PostSaleFulfillmentDetector
             return true;
         }
 
-        // Reply-контекст: «срок поставки / когда отгрузите» в ОТВЕТЕ (Re:/Fwd:
-        // или in_reply_to) про уже размещённый заказ. В первичном письме такая
-        // фраза может быть пресейлом, поэтому только в ответах.
+        // Reply-контекст: «срок поставки / когда отгрузите» про уже размещённый
+        // заказ. В ПЕРВИЧНОМ письме та же фраза — обычный пресейл («цена и сроки
+        // поставки»), поэтому ветка работает только для ответа В НАШЕМ треде.
+        //
+        // Кейс M-2026-15402/письмо 103750: клиент переслал нам свой же запрос
+        // другому поставщику («есть в наличии … цена и сроки поставки»). Yandex
+        // проставил In-Reply-To на ЕГО собственное письмо, `isReply` дал true —
+        // и запрос кнопок KONE уехал в постпродажу без заявки. Пересылка — не
+        // ответ в нашей переписке, поэтому одного `isReply` мало.
+        // Прогон по 60 дням (2026-09-10): вердикт меняют 11 писем из 1455, все
+        // без заявки и все — запросы цен.
         $isReply = app(EmailTextCleanerService::class)->isReply($message);
-        if ($isReply && preg_match(self::REPLY_DELIVERY_RE, $haystack) === 1) {
+        if ($isReply
+            && $this->repliesToOurThread($message)
+            && preg_match(self::REPLY_DELIVERY_RE, $haystack) === 1) {
             return true;
         }
 
         return false;
+    }
+
+    /**
+     * Письмо — продолжение НАШЕЙ переписки: либо уже привязано к заявке, либо
+     * его In-Reply-To указывает на письмо, которое лежит у нас в базе. Чужой
+     * тред (пересылка клиентом собственного письма другому поставщику, Fwd
+     * рассылки) сюда не попадает. Fail-soft: при недоступной БД считаем, что
+     * тред не наш — тогда «сроки поставки» останутся признаком пресейла.
+     */
+    protected function repliesToOurThread(EmailMessage $message): bool
+    {
+        if ($message->related_request_id !== null) {
+            return true;
+        }
+        $inReplyTo = trim((string) $message->in_reply_to);
+        if ($inReplyTo === '') {
+            return false;
+        }
+
+        try {
+            return EmailMessage::query()->where('message_id', $inReplyTo)->exists();
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     /**
