@@ -47,4 +47,13 @@ class SupplierInquiryItem extends Model
     {
         return $this->hasMany(SupplierOffer::class)->orderByDesc('id');
     }
+
+    /**
+     * M-артикул позиции: у позиция-центричных RFQ он свой, у остальных —
+     * через строку заявки. null, если позицию так и не сопоставили с каталогом.
+     */
+    public function catalogSku(): ?string
+    {
+        return $this->catalogItem?->sku ?? $this->requestItem?->catalogItem?->sku;
+    }
 }

@@ -19,7 +19,7 @@
 
         <div class="px-4 pb-3">
             <input type="search" wire:model.live.debounce.300ms="search"
-                   placeholder="{{ $tab === 'registry' ? 'Поиск: email / домен / название' : ($tab === 'nomenclature' ? 'Поиск: название / артикул / SKU' : 'Поиск: e-mail / название / тема') }}"
+                   placeholder="{{ $tab === 'registry' ? 'Поиск: email / домен / название' : ($tab === 'nomenclature' ? 'Поиск: M-артикул / название / артикул' : 'Поиск: M-артикул / заявка / поставщик / тема') }}"
                    class="h-[30px] w-full max-w-[440px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
         </div>
 
@@ -104,7 +104,24 @@
                                     <a href="{{ route('suppliers.show', $i->id) }}" wire:navigate class="text-sky-700 hover:underline font-medium">{{ $i->supplier_name ?: $i->supplier_email }}</a>
                                     @if($i->supplier_name)<div class="text-[11px] text-fg-4 mono">{{ $i->supplier_email }}</div>@endif
                                 </td>
-                                <td class="px-3 py-2 text-fg-2"><span class="truncate inline-block max-w-[300px] align-bottom">{{ $i->subject ?: '—' }}</span></td>
+                                <td class="px-3 py-2 text-fg-2">
+                                    <span class="truncate inline-block max-w-[300px] align-bottom">{{ $i->subject ?: '—' }}</span>
+                                    @php $chips = $this->itemChips($i); @endphp
+                                    @if($chips['chips'])
+                                        <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-fg-4 max-w-[340px]">
+                                            @foreach($chips['chips'] as $c)
+                                                <span @class(['mono' => (bool) $c['code'], 'text-fg-1 font-medium' => $c['hit']])
+                                                      title="{{ $c['name'] }}">{{ $c['code'] ?: \Illuminate\Support\Str::limit($c['name'], 24) }}</span>
+                                            @endforeach
+                                            @if($chips['rest'] > 0)<span>ещё {{ $chips['rest'] }}</span>@endif
+                                        </div>
+                                    @elseif($chips['via_request'])
+                                        <div class="mt-0.5 text-[11px] text-fg-4">
+                                            позиции не зафиксированы · заявка
+                                            <a href="{{ route('requests.show', $i->related_request_id) }}" wire:navigate class="text-sky-700 hover:underline mono">{{ $chips['via_request'] }}</a>
+                                        </div>
+                                    @endif
+                                </td>
                                 <td class="px-3 py-2 text-right mono text-fg-2">{{ $i->messages_count }}</td>
                                 <td class="px-3 py-2">
                                     @php $rs = $i->responseState(); @endphp

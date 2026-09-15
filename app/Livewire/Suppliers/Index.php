@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Suppliers;
 
+use App\Models\CatalogItem;
 use App\Models\RequestItem;
 use App\Models\Supplier;
 use App\Models\SupplierInquiry;
@@ -85,24 +86,122 @@ class Index extends Component
         $this->dispatch('toast', message: 'Удалён из реестра.', type: 'success');
     }
 
+    /**
+     * M-артикул каталога из строки поиска: «M22456», «м 22456», «M-22456».
+     * Возвращает нормализованный SKU либо null, если это не похоже на артикул.
+     * Кириллическая «М» — частый ввод с русской раскладки, приводим к латинице.
+     */
+    public static function normalizeSku(string $term): ?string
+    {
+        if (preg_match('/^[MmМм]\s*-?\s*(\d{3,})$/u', trim($term), $m) !== 1) {
+            return null;
+        }
+
+        return 'M' . $m[1];
+    }
+
+    /**
+     * id каталожных позиций для поискового запроса: точный M-артикул резолвим
+     * заранее, чтобы не гонять ilike по каталогу внутри EXISTS на каждую строку.
+     *
+     * @return array<int, int>
+     */
+    private function catalogIdsFor(string $term): array
+    {
+        $sku = static::normalizeSku($term);
+
+        return $sku === null ? [] : CatalogItem::where('sku', $sku)->pluck('id')->all();
+    }
+
     #[Computed]
     public function inquiries()
     {
         $q = SupplierInquiry::query()
             ->withCount(['messages', 'inboundMessages', 'items'])
-            ->with('createdBy:id,name');
+            ->with([
+                'createdBy:id,name',
+                'items:id,supplier_inquiry_id,request_item_id,catalog_item_id,item_name,status',
+                'items.catalogItem:id,sku,name',
+                'items.requestItem:id,request_id,catalog_item_id,parsed_article,parsed_name',
+                'items.requestItem.catalogItem:id,sku,name',
+                'relatedRequest:id,internal_code',
+            ]);
 
         $s = trim($this->search);
         if ($s !== '') {
             $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
-            $q->where(function ($w) use ($like) {
+            $catIds = $this->catalogIdsFor($s);
+            $q->where(function ($w) use ($like, $catIds) {
                 $w->where('supplier_email', 'ilike', $like)
                     ->orWhere('supplier_name', 'ilike', $like)
-                    ->orWhere('subject', 'ilike', $like);
+                    ->orWhere('subject', 'ilike', $like)
+                    ->orWhereHas('relatedRequest', fn ($r) => $r->where('internal_code', 'ilike', $like))
+                    // Позиции запроса: снабженец ищет по нашему M-артикулу, по
+                    // артикулу из письма клиента или по коду заявки-источника.
+                    ->orWhereHas('items', function ($i) use ($like, $catIds) {
+                        $i->where(function ($x) use ($like, $catIds) {
+                            $x->where('item_name', 'ilike', $like)
+                                ->orWhereHas('requestItem', fn ($ri) => $ri
+                                    ->where('parsed_article', 'ilike', $like)
+                                    ->orWhere('parsed_name', 'ilike', $like)
+                                    ->orWhereHas('request', fn ($r) => $r->where('internal_code', 'ilike', $like)));
+                            if ($catIds !== []) {
+                                $x->orWhereIn('catalog_item_id', $catIds)
+                                    ->orWhereHas('requestItem', fn ($ri) => $ri->whereIn('catalog_item_id', $catIds));
+                            }
+                        });
+                    });
+                // Ранние запросы (до июля 2026) уходили без фиксации позиций.
+                // Для них единственная зацепка — заявка, под которую сорсили;
+                // в выдаче такие строки помечены «позиции не зафиксированы».
+                if ($catIds !== []) {
+                    $w->orWhere(fn ($x) => $x->doesntHave('items')
+                        ->whereHas('relatedRequest.items', fn ($ri) => $ri->whereIn('catalog_item_id', $catIds)));
+                }
             });
         }
 
         return $q->orderByDesc('id')->paginate(30);
+    }
+
+    /**
+     * Позиции запроса для строки таблицы: сначала те, что совпали с поиском,
+     * чтобы снабженец сразу видел, почему запрос попал в выдачу.
+     *
+     * @return array{chips: array<int, array{code: ?string, name: string, hit: bool}>, rest: int, via_request: ?string}
+     */
+    public function itemChips(SupplierInquiry $inquiry, int $limit = 4): array
+    {
+        $s = mb_strtolower(trim($this->search));
+        $sku = $s !== '' ? static::normalizeSku($s) : null;
+
+        // Позиции не зафиксированы — показываем заявку, под которую сорсили:
+        // только через неё такой запрос и находится по M-артикулу.
+        if ($inquiry->items->isEmpty()) {
+            return ['chips' => [], 'rest' => 0, 'via_request' => $inquiry->relatedRequest?->internal_code];
+        }
+
+        $rows = $inquiry->items->map(function (SupplierInquiryItem $it) use ($s, $sku) {
+            $code = $it->catalogSku() ?: $it->requestItem?->parsed_article;
+            $name = (string) ($it->catalogItem?->name
+                ?: $it->requestItem?->catalogItem?->name
+                ?: $it->requestItem?->parsed_name
+                ?: $it->item_name
+                ?: '—');
+            $hit = $s !== '' && (
+                ($sku !== null && $code === $sku)
+                || ($code !== null && str_contains(mb_strtolower($code), $s))
+                || str_contains(mb_strtolower($name), $s)
+            );
+
+            return ['code' => $code, 'name' => $name, 'hit' => $hit];
+        })->sortByDesc('hit')->values();
+
+        return [
+            'chips' => $rows->take($limit)->all(),
+            'rest' => max(0, $rows->count() - $limit),
+            'via_request' => null,
+        ];
     }
 
     #[Computed]
@@ -164,11 +263,15 @@ class Index extends Component
 
         $s = trim($this->search);
         $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
+        $catIds = $s !== '' ? $this->catalogIdsFor($s) : [];
         if ($s !== '') {
-            $q->where(function ($w) use ($like) {
+            $q->where(function ($w) use ($like, $catIds) {
                 $w->where('parsed_name', 'ilike', $like)
                     ->orWhere('parsed_article', 'ilike', $like)
                     ->orWhereHas('catalogItem', fn ($c) => $c->where('name', 'ilike', $like)->orWhere('sku', 'ilike', $like));
+                if ($catIds !== []) {
+                    $w->orWhereIn('catalog_item_id', $catIds);
+                }
             });
         }
 
@@ -210,10 +313,12 @@ class Index extends Component
                 'offers',
                 'catalogItem:id,sku,name,is_price_actual',
             ])
-            ->when($s !== '', fn ($w) => $w->whereHas(
-                'catalogItem',
-                fn ($c) => $c->where('name', 'ilike', $like)->orWhere('sku', 'ilike', $like),
-            ))
+            ->when($s !== '', fn ($w) => $w->where(function ($x) use ($like, $catIds) {
+                $x->whereHas('catalogItem', fn ($c) => $c->where('name', 'ilike', $like)->orWhere('sku', 'ilike', $like));
+                if ($catIds !== []) {
+                    $x->orWhereIn('catalog_item_id', $catIds);
+                }
+            }))
             ->get()
             ->groupBy(fn (SupplierInquiryItem $sii) => 'c' . $sii->catalog_item_id);
 
