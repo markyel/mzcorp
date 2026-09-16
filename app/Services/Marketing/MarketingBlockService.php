@@ -49,6 +49,18 @@ class MarketingBlockService
 
     public const POSITION_BELOW = 'below';
 
+    /**
+     * utm-метка перехода из письма менеджера. Без неё такие визиты Метрика
+     * относит к «переходам по ссылкам на сайтах» и смешивает с кликами из
+     * веб-интерфейсов почты (e.mail.ru и т.п.) либо теряет источник совсем.
+     * utm_source отделяет письма CRM от массовой рассылки.
+     */
+    public const UTM_SOURCE = 'mylift_crm';
+
+    public const UTM_MEDIUM = 'email';
+
+    public const UTM_CAMPAIGN = 'promo_block';
+
     public function __construct(
         private readonly SupplierRegistry $suppliers,
         private readonly EmailSignatureService $signature,
@@ -179,6 +191,42 @@ class MarketingBlockService
     }
 
     /**
+     * Добавляет utm-метку к ссылке блока: источник, канал и id блока, чтобы в
+     * Метрике было видно и сам канал, и какой именно блок сработал.
+     *
+     * Существующий query сохраняем (ссылки блоков — поисковые URL каталога со
+     * своими параметрами), уже проставленные вручную utm не переписываем,
+     * не-http ссылки не трогаем.
+     */
+    public static function withUtm(string $url, ?int $blockId = null): string
+    {
+        $url = trim($url);
+        if ($url === '' || preg_match('~^https?://~i', $url) !== 1) {
+            return $url;
+        }
+
+        $hash = '';
+        if (($pos = strpos($url, '#')) !== false) {
+            $hash = substr($url, $pos);
+            $url = substr($url, 0, $pos);
+        }
+
+        [$base, $query] = array_pad(explode('?', $url, 2), 2, '');
+        parse_str($query, $params);
+
+        $params += [
+            'utm_source' => self::UTM_SOURCE,
+            'utm_medium' => self::UTM_MEDIUM,
+            'utm_campaign' => self::UTM_CAMPAIGN,
+        ];
+        if ($blockId !== null && ! isset($params['utm_content'])) {
+            $params['utm_content'] = 'block-'.$blockId;
+        }
+
+        return $base.'?'.http_build_query($params).$hash;
+    }
+
+    /**
      * @return array{html: string, plain: string, image_url: ?string, image_path: ?string}
      */
     public function renderBlock(MarketingBlock $block): array
@@ -186,7 +234,9 @@ class MarketingBlockService
         return $this->render([
             'title' => $block->title,
             'text' => $block->text,
-            'url' => $block->url,
+            // Метку ставим только здесь: тестовая отправка и превью в админке
+            // идут через render() напрямую и статистику не пачкают.
+            'url' => self::withUtm((string) $block->url, $block->id),
             'link_text' => $block->linkText(),
             'image_url' => $block->imageUrl(),
             'image_path' => $block->imageLocalPath(),
