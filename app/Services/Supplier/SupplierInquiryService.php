@@ -211,7 +211,14 @@ class SupplierInquiryService
             ?? $this->matchInboundByAnyCode($message);
         if ($inquiry === null) {
             $email = mb_strtolower(trim((string) $message->from_email));
-            $inquiry = SupplierInquiry::query()
+            // Фолбэк «последний тред этого поставщика» опасен, когда в теме есть
+            // НАШ токен RFQ, но он не разрешился: значит письмо относится к
+            // конкретному запросу — просто не к запросу этого отправителя
+            // (пересылка чужого письма). Кейс inquiry 5340: пересылку от
+            // UniSystem прицепило к её же свежему треду, и оффер 170 EUR повис
+            // на чужой позиции. Такому письму заводим отдельный тред.
+            $hasForeignToken = $this->extractRfqToken($message->subject) !== null;
+            $inquiry = $hasForeignToken ? null : SupplierInquiry::query()
                 ->whereRaw('lower(supplier_email) = ?', [$email])
                 ->orderByDesc('id')
                 ->first();
@@ -412,8 +419,18 @@ class SupplierInquiryService
         if ($token === null) {
             return null;
         }
+        $inquiry = SupplierInquiry::query()->where('rfq_token', $token)->first();
+        if ($inquiry === null) {
+            return null;
+        }
 
-        return SupplierInquiry::query()->where('rfq_token', $token)->first();
+        // Токен в теме — ещё не доказательство, что пишет ТОТ поставщик: чужое
+        // письмо могли переслать. Кейс UniSystem: нам вернули пересылку запроса,
+        // отправленного Paul Schaab, с его токеном в теме. Класть такое письмо
+        // в чужой тред нельзя — ни по токену, ни по фолбэку.
+        return $this->sameParty((string) $inquiry->supplier_email, (string) $message->from_email)
+            ? $inquiry
+            : null;
     }
 
     public function matchInboundByAnyCode(EmailMessage $message): ?SupplierInquiry

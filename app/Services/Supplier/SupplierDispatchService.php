@@ -118,10 +118,12 @@ class SupplierDispatchService
                     ? ' / [' . trim((string) $request->onec_number) . ']'
                     : '';
                 // Уникальный токен RFQ в теме → детерминированный матч ответа
-                // поставщика (createFromOutbound извлечёт его из темы и сохранит
-                // на инквайри). Устойчив к сломанному треду / общей переписке.
+                // поставщика. Устойчив к сломанному треду и к пересылке чужого
+                // письма. Токен ОБЯЗАТЕЛЬНО сохраняем на инквайри ниже: матч
+                // ищет по колонке rfq_token, а не по тексту темы.
                 $rfqSvc = app(SupplierInquiryService::class);
-                $rfqMarker = ' ' . $rfqSvc->rfqMarker($rfqSvc->generateRfqToken());
+                $rfqToken = $rfqSvc->generateRfqToken();
+                $rfqMarker = ' ' . $rfqSvc->rfqMarker($rfqToken);
                 $subject = ($lang === 'en'
                     ? 'Price request — [' . $request->internal_code . ']' . $onecSuffix
                     : 'Запрос расценки — [' . $request->internal_code . ']' . $onecSuffix)
@@ -168,6 +170,7 @@ class SupplierDispatchService
                     'related_request_id' => $request->id,
                     'status' => 'open',
                     'created_by_user_id' => $by->id,
+                    'rfq_token' => $rfqToken,
                 ]);
                 // item_name сохраняем ТАКИМ ЖЕ, как ушло в письмо (правка
                 // менеджера / каталожное имя), а не сырой $item->parsed_name.
