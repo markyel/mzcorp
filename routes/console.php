@@ -284,6 +284,15 @@ Schedule::command('mail:classify-intent-pending')
     ->onOneServer()
     ->runInBackground();
 
+// Фаза 4.3: плановый перезапрос цен по мониторингам, у которых подошёл срок.
+// Раз в час, а не раз в сутки: кнопка «Запросить сейчас» в разделе «Снабжение»
+// ставит next_due_at в прошлое и ждёт ближайшего прогона.
+Schedule::command('procurement:price-monitors')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Фаза 3.5: авто-напоминания поставщикам по открытым RFQ без ответа.
 // Раз в день утром — поставщик увидит нудж в начале рабочего дня; интервал и
 // лимит напоминаний — config services.suppliers.reminder.* (no-op при enabled=false).

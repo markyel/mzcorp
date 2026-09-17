@@ -5,10 +5,12 @@ namespace App\Livewire\Procurement;
 use App\Enums\Role;
 use App\Models\CatalogItem;
 use App\Models\IqotPosition;
+use App\Models\PriceMonitor;
 use App\Models\Supplier;
 use App\Models\SupplierInquiry;
 use App\Models\User;
 use App\Services\Catalog\CatalogSearchService;
+use App\Services\Procurement\PriceMonitorService;
 use App\Services\Supplier\SupplierInquiryLifecycleService;
 use App\Services\Supplier\SupplierItemTranslator;
 use App\Services\Supplier\SupplierMatchService;
@@ -53,6 +55,24 @@ class Index extends Component
 
     /** Начальный размер окна infinite-scroll (строк). */
     public const PER_PAGE = 25;
+
+    /** Вкладка раздела: requests — запросы и блокеры; refresh — к актуализации; monitor — мониторинг цен. */
+    #[Url(as: 'tab', except: 'requests')]
+    public string $tab = 'requests';
+
+    /** Включить автоматический мониторинг цен по отправляемым позициям. */
+    public bool $monitorEnabled = false;
+
+    /** Период перезапроса цены, дней. */
+    public int $monitorDays = PriceMonitor::DEFAULT_INTERVAL_DAYS;
+
+    /**
+     * Окно спроса для вкладки «К актуализации», дней. Порог «регулярно
+     * спрашивают» — от 2 заявок за это окно (решение заказчика 17.09.2026).
+     */
+    public const REFRESH_WINDOW_DAYS = 30;
+
+    public const REFRESH_REGULAR_MIN_REQUESTS = 2;
 
     #[Url(as: 'q', except: '')]
     public string $search = '';
@@ -701,12 +721,182 @@ class Index extends Component
         if (($result['failed'] ?? 0) > 0) {
             $msg .= " Ошибок: {$result['failed']}.";
         }
+
+        // Мониторинг включаем только если письмо реально ушло: иначе позиция
+        // встанет на регулярный перезапрос, ни разу не будучи запрошенной.
+        if ($this->monitorEnabled && ($result['sent'] ?? 0) > 0) {
+            $days = PriceMonitor::clampInterval($this->monitorDays);
+            $n = app(PriceMonitorService::class)->enable(
+                $cids, $supplierIds, $days, $user, $result['inquiry_ids'][0] ?? null
+            );
+            $msg .= " На мониторинг цен поставлено позиций: {$n} (перезапрос раз в {$days} дн.).";
+        }
+
         session()->flash('procurement_status', $msg);
 
-        // Сброс выбора.
+        // Сброс выбора. monitorEnabled/monitorDays НЕ сбрасываем: снабженец
+        // обычно ставит на мониторинг несколько пачек подряд с тем же периодом.
         $this->reset(['selected', 'selectedSuppliers', 'addedSupplierIds', 'supplierSearch', 'note',
             'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn', 'rfqFiles', 'attachCatalogPhotos']);
-        unset($this->positions, $this->supplierOptions, $this->iqotByCatalogId, $this->selectedPositions, $this->oemOptions, $this->previewLanguages);
+        unset($this->positions, $this->supplierOptions, $this->iqotByCatalogId, $this->selectedPositions,
+            $this->oemOptions, $this->previewLanguages, $this->refreshList, $this->monitors, $this->monitorSummary);
+    }
+
+    public function setTab(string $t): void
+    {
+        $this->tab = in_array($t, ['requests', 'refresh', 'monitor'], true) ? $t : 'requests';
+        $this->perPage = self::PER_PAGE;
+    }
+
+    /**
+     * Вкладка «К актуализации»: позиции с неактуальной ценой, по которым был
+     * спрос за последние REFRESH_WINDOW_DAYS дней. Две причины попадания,
+     * сортировка по ним же:
+     *   1 — лежит на складе и цены нет: продать можно прямо сейчас, мешает цена;
+     *   2 — регулярный спрос (от REFRESH_REGULAR_MIN_REQUESTS заявок за окно).
+     * Позиции, уже стоящие на мониторинге, помечаются, но из списка не убираются:
+     * до следующего перезапроса цена всё равно не появится.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    #[Computed]
+    public function refreshList(): array
+    {
+        $since = now()->subDays(self::REFRESH_WINDOW_DAYS);
+
+        $rows = DB::table('request_items')
+            ->join('catalog_items', 'catalog_items.id', '=', 'request_items.catalog_item_id')
+            ->join('requests', 'requests.id', '=', 'request_items.request_id')
+            ->where('request_items.is_active', true)
+            ->where('catalog_items.is_active', true)
+            ->where('catalog_items.is_price_actual', false)
+            ->whereNull('requests.merged_into_id')
+            ->where('requests.created_at', '>=', $since)
+            ->select(
+                'catalog_items.id as cid',
+                'catalog_items.sku',
+                'catalog_items.name',
+                'catalog_items.brand',
+                'catalog_items.price',
+                'catalog_items.stock_available',
+                DB::raw('count(distinct requests.id) as req_count'),
+                DB::raw('max(requests.created_at) as last_at'),
+            )
+            ->groupBy('catalog_items.id', 'catalog_items.sku', 'catalog_items.name', 'catalog_items.brand',
+                'catalog_items.price', 'catalog_items.stock_available')
+            ->get();
+
+        $search = trim($this->search);
+        $monitored = PriceMonitor::query()->where('is_active', true)->pluck('next_due_at', 'catalog_item_id');
+
+        $out = [];
+        foreach ($rows as $r) {
+            $stock = (int) ($r->stock_available ?? 0);
+            $reqs = (int) $r->req_count;
+            $priority = $stock > 0 ? 1 : ($reqs >= self::REFRESH_REGULAR_MIN_REQUESTS ? 2 : 0);
+            if ($priority === 0) {
+                continue;
+            }
+            if ($search !== '' && mb_stripos($r->sku.' '.$r->name.' '.(string) $r->brand, $search) === false) {
+                continue;
+            }
+            $out[] = [
+                'cid' => (int) $r->cid,
+                'sku' => $r->sku,
+                'name' => $r->name,
+                'brand' => $r->brand,
+                'price' => $r->price,
+                'stock' => $stock,
+                'req_count' => $reqs,
+                'last_at' => $r->last_at,
+                'priority' => $priority,
+                'reason' => $priority === 1 ? 'На складе, цены нет' : 'Регулярный спрос',
+                'monitored_until' => $monitored[$r->cid] ?? null,
+            ];
+        }
+        usort($out, fn ($a, $b) => [$a['priority'], -$a['req_count'], -$a['stock']]
+            <=> [$b['priority'], -$b['req_count'], -$b['stock']]);
+
+        return $out;
+    }
+
+    /** @return array{p1:int, p2:int, total:int, monitored:int} */
+    #[Computed]
+    public function refreshSummary(): array
+    {
+        $list = $this->refreshList;
+
+        return [
+            'p1' => count(array_filter($list, fn ($x) => $x['priority'] === 1)),
+            'p2' => count(array_filter($list, fn ($x) => $x['priority'] === 2)),
+            'total' => count($list),
+            'monitored' => count(array_filter($list, fn ($x) => $x['monitored_until'] !== null)),
+        ];
+    }
+
+    /** Вкладка «Мониторинг цен»: активные и выключенные мониторинги. */
+    #[Computed]
+    public function monitors()
+    {
+        $q = PriceMonitor::query()
+            ->with(['catalogItem:id,sku,name,brand,price,stock_available,is_price_actual', 'createdBy:id,name'])
+            ->orderByRaw('is_active desc, next_due_at asc nulls last');
+
+        $s = trim($this->search);
+        if ($s !== '') {
+            $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
+            $q->whereHas('catalogItem', fn ($c) => $c->where('sku', 'ilike', $like)->orWhere('name', 'ilike', $like));
+        }
+
+        return $q->limit(300)->get();
+    }
+
+    /** @return array{active:int, due:int, stale:int} */
+    #[Computed]
+    public function monitorSummary(): array
+    {
+        $rows = PriceMonitor::query()->where('is_active', true)
+            ->with('catalogItem:id,is_price_actual')->get();
+
+        return [
+            'active' => $rows->count(),
+            'due' => $rows->filter(fn ($m) => $m->next_due_at !== null && $m->next_due_at->isPast())->count(),
+            'stale' => $rows->filter(fn ($m) => $m->catalogItem && ! $m->catalogItem->is_price_actual)->count(),
+        ];
+    }
+
+    public function disableMonitor(int $id): void
+    {
+        $m = PriceMonitor::find($id);
+        if ($m === null) {
+            return;
+        }
+        app(PriceMonitorService::class)->disable($m);
+        unset($this->monitors, $this->monitorSummary, $this->refreshList, $this->refreshSummary);
+        $this->dispatch('toast', message: 'Мониторинг выключен.', type: 'success');
+    }
+
+    public function updateMonitorInterval(int $id, int $days): void
+    {
+        $m = PriceMonitor::find($id);
+        if ($m === null) {
+            return;
+        }
+        app(PriceMonitorService::class)->setInterval($m, $days);
+        unset($this->monitors, $this->monitorSummary);
+        $this->dispatch('toast', message: 'Период обновлён: раз в '.$m->fresh()->interval_days.' дн.', type: 'success');
+    }
+
+    /** Поставить позицию мониторинга в очередь на ближайший прогон планировщика. */
+    public function monitorNow(int $id): void
+    {
+        $m = PriceMonitor::find($id);
+        if ($m === null || ! $m->is_active) {
+            return;
+        }
+        $m->forceFill(['next_due_at' => now()->subMinute()])->save();
+        unset($this->monitors, $this->monitorSummary);
+        $this->dispatch('toast', message: 'Запрос уйдёт при ближайшем прогоне (раз в час).', type: 'success');
     }
 
     /** Базовый запрос блокеров (сматченные stale-позиции в до-КП заявках). */

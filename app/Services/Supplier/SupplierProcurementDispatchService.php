@@ -37,7 +37,7 @@ class SupplierProcurementDispatchService
      * @param  array<int, int>  $supplierIds
      * @param  array{names_ru?:array<int,string>, names_en?:array<int,string>, oem?:array<int,string>, qty?:array<int,string>, qty_en?:array<int,string>, greeting_ru?:?string, greeting_en?:?string, intro_ru?:?string, intro_en?:?string, closing_ru?:?string, closing_en?:?string}  $edits
      *                                                                                                                                                                                                                                                                                         правки письма по catalog_item: названия/кол-во по языкам + артикул + обращение/вступление/закрытие по языкам
-     * @return array{sent:int, failed:int, skipped:int, suppliers:array<int,string>, error:?string}
+     * @return array{sent:int, failed:int, skipped:int, suppliers:array<int,string>, inquiry_ids:array<int,int>, error:?string}
      */
     /**
      * @param  array<int, array{path:string, name:string, mime:string, size:int}>  $extraFiles
@@ -46,7 +46,7 @@ class SupplierProcurementDispatchService
      */
     public function dispatch(array $catalogItemIds, array $supplierIds, ?string $note, User $by, array $edits = [], array $extraFiles = []): array
     {
-        $zero = ['sent' => 0, 'failed' => 0, 'skipped' => 0, 'suppliers' => [], 'error' => null];
+        $zero = ['sent' => 0, 'failed' => 0, 'skipped' => 0, 'suppliers' => [], 'inquiry_ids' => [], 'error' => null];
 
         $items = CatalogItem::query()
             ->whereIn('id', array_values(array_unique(array_map('intval', $catalogItemIds))))
@@ -68,6 +68,9 @@ class SupplierProcurementDispatchService
         $failed = 0;
         $skipped = 0;
         $names = [];
+        // id созданных тредов — нужны вызывающему, чтобы привязать к ним
+        // мониторинг цен (PriceMonitorService).
+        $inquiryIds = [];
 
         foreach ($suppliers as $supplier) {
             if (trim((string) $supplier->email) === '') {
@@ -157,6 +160,7 @@ class SupplierProcurementDispatchService
                 $sentMsg->forceFill(['supplier_inquiry_id' => $inquiry->id, 'related_request_id' => null])->save();
 
                 $sent++;
+                $inquiryIds[] = $inquiry->id;
                 $names[] = (string) ($supplier->name ?: $supplier->email);
             } catch (\Throwable $e) {
                 $failed++;
@@ -164,7 +168,8 @@ class SupplierProcurementDispatchService
             }
         }
 
-        return ['sent' => $sent, 'failed' => $failed, 'skipped' => $skipped, 'suppliers' => $names, 'error' => null];
+        return ['sent' => $sent, 'failed' => $failed, 'skipped' => $skipped, 'suppliers' => $names,
+            'inquiry_ids' => $inquiryIds, 'error' => null];
     }
 
     /** Название каталожной позиции: правка > name_en (для en) > name. */

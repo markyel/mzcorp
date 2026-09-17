@@ -90,6 +90,27 @@
         </div>
     </div>
 
+    {{-- Вкладки раздела --}}
+    @php
+        $refreshSum = $this->refreshSummary;
+        $monSum = $this->monitorSummary;
+        $tabs = [
+            'requests' => ['⛏ Запросы', null],
+            'refresh' => ['💰 К актуализации', $refreshSum['total']],
+            'monitor' => ['🔁 Мониторинг цен', $monSum['active']],
+        ];
+    @endphp
+    <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden text-[12.5px]">
+        @foreach($tabs as $k => [$label, $count])
+            <button type="button" wire:click="setTab('{{ $k }}')"
+                    class="h-[30px] px-3 whitespace-nowrap font-medium border-r border-border last:border-r-0
+                           {{ $tab === $k ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface text-fg-2 hover:text-fg-1' }}">
+                {{ $label }}@if($count !== null) <span class="mono opacity-70">{{ $count }}</span>@endif
+            </button>
+        @endforeach
+    </div>
+
+    @if($tab === 'requests')
     {{-- Заголовок + сводка --}}
     <div class="ds-card">
         <div class="ds-card-header">
@@ -332,6 +353,203 @@
             @endif
         </div>
     </div>
+    @endif
+
+    @if($tab === 'refresh')
+        {{-- К актуализации: приоритезированный список позиций, по которым стоит
+             обновить цену. Порог «регулярного спроса» — решение заказчика. --}}
+        <div class="ds-card">
+            <div class="ds-card-header">
+                <h2 class="text-[16px] font-semibold text-fg-1">💰 К актуализации</h2>
+                <span class="text-[12px] text-fg-3 ml-2">что запрашивать у поставщиков в первую очередь</span>
+            </div>
+            <div class="ds-card-body">
+                <div class="flex flex-wrap gap-6 text-[13px]">
+                    <div><span class="text-[22px] font-semibold text-emerald-700 mono">{{ $refreshSum['p1'] }}</span>
+                        <span class="text-fg-3">на складе, но без цены <span class="text-fg-4">— продать можно сразу, мешает только цена</span></span></div>
+                    <div><span class="text-[22px] font-semibold text-fg-1 mono">{{ $refreshSum['p2'] }}</span>
+                        <span class="text-fg-3">регулярный спрос без наличия</span></div>
+                    <div><span class="text-[22px] font-semibold text-sky-700 mono">{{ $refreshSum['monitored'] }}</span>
+                        <span class="text-fg-3">уже на мониторинге</span></div>
+                </div>
+                <div class="text-[11.5px] text-fg-4 mt-2">
+                    Позиции с неактуальной ценой, которые спрашивали за последние
+                    <b>{{ \App\Livewire\Procurement\Index::REFRESH_WINDOW_DAYS }} дн.</b>
+                    Сначала те, что лежат на складе: по ним сделка упирается только в цену.
+                    Затем те, что спрашивали от
+                    <b>{{ \App\Livewire\Procurement\Index::REFRESH_REGULAR_MIN_REQUESTS }} раз</b> за окно.
+                    Отметьте нужные и отправьте запрос поставщикам — там же можно включить мониторинг.
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+            <input type="search" wire:model.live.debounce.300ms="search"
+                   placeholder="Поиск: артикул / наименование / бренд"
+                   class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
+        </div>
+
+        <div class="ds-card">
+            <div class="overflow-x-auto">
+                <table class="w-full text-[12.5px]">
+                    <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
+                        <tr>
+                            <th class="w-8 px-3 py-2"></th>
+                            <th class="text-left px-3 py-2">Артикул</th>
+                            <th class="text-left px-3 py-2">Позиция</th>
+                            <th class="text-left px-3 py-2">Почему в списке</th>
+                            <th class="text-right px-3 py-2">Заявок за 30 дн.</th>
+                            <th class="text-right px-3 py-2">Остаток</th>
+                            <th class="text-right px-3 py-2">Цена</th>
+                            <th class="text-left px-3 py-2">Мониторинг</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse(array_slice($this->refreshList, 0, $perPage) as $p)
+                            <tr wire:key="ref-{{ $p['cid'] }}" class="border-b border-border-subtle hover:bg-hover">
+                                <td class="px-3 py-2">
+                                    <input type="checkbox" wire:model.live="selected.{{ $p['cid'] }}"
+                                           class="w-4 h-4 accent-sky-600 cursor-pointer">
+                                </td>
+                                <td class="px-3 py-2 mono whitespace-nowrap">{{ $p['sku'] }}</td>
+                                <td class="px-3 py-2 text-fg-2">
+                                    <span class="inline-block max-w-[420px] truncate align-bottom" title="{{ $p['name'] }}">{{ $p['name'] }}</span>
+                                    @if($p['brand'])<div class="text-[11px] text-fg-4">{{ $p['brand'] }}</div>@endif
+                                </td>
+                                <td class="px-3 py-2">
+                                    <span class="chip {{ $p['priority'] === 1 ? 'chip-ok' : 'chip-sky' }} text-[10.5px]">{{ $p['reason'] }}</span>
+                                </td>
+                                <td class="px-3 py-2 text-right mono">{{ $p['req_count'] }}</td>
+                                <td class="px-3 py-2 text-right mono {{ $p['stock'] > 0 ? 'text-emerald-700' : 'text-fg-4' }}">
+                                    {{ $p['stock'] > 0 ? $p['stock'] : '—' }}
+                                </td>
+                                <td class="px-3 py-2 text-right mono text-fg-3">{{ $p['price'] ? number_format((float) $p['price'], 0, ',', ' ') : '—' }}</td>
+                                <td class="px-3 py-2 text-[11.5px]">
+                                    @if($p['monitored_until'])
+                                        <span class="text-sky-700">до {{ \Illuminate\Support\Carbon::parse($p['monitored_until'])->format('d.m.Y') }}</span>
+                                    @else
+                                        <span class="text-fg-4">нет</span>
+                                    @endif
+                                </td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="8" class="px-3 py-10 text-center text-fg-3 text-[13px]">
+                                {{ trim($search) !== '' ? 'Ничего не найдено.' : 'Нет позиций с неактуальной ценой и спросом за последние 30 дней.' }}
+                            </td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+            @if(count($this->refreshList) > $perPage)
+                <div class="px-4 py-3 text-[11.5px] text-fg-3 flex items-center gap-3">
+                    <span>Показано {{ $perPage }} из {{ count($this->refreshList) }}</span>
+                    <button type="button" wire:click="loadMore" class="btn btn-sm">Показать ещё</button>
+                </div>
+            @endif
+        </div>
+    @endif
+
+    @if($tab === 'monitor')
+        {{-- Мониторинг цен: что стоит на регулярном перезапросе. --}}
+        <div class="ds-card">
+            <div class="ds-card-header">
+                <h2 class="text-[16px] font-semibold text-fg-1">🔁 Автоматический мониторинг цен</h2>
+                <span class="text-[12px] text-fg-3 ml-2">регулярный перезапрос цены у поставщиков</span>
+            </div>
+            <div class="ds-card-body">
+                <div class="flex flex-wrap gap-6 text-[13px]">
+                    <div><span class="text-[22px] font-semibold text-fg-1 mono">{{ $monSum['active'] }}</span> <span class="text-fg-3">позиций на мониторинге</span></div>
+                    <div><span class="text-[22px] font-semibold text-amber-700 mono">{{ $monSum['stale'] }}</span> <span class="text-fg-3">из них цена сейчас неактуальна</span></div>
+                    <div><span class="text-[22px] font-semibold text-sky-700 mono">{{ $monSum['due'] }}</span> <span class="text-fg-3">ждут ближайшего прогона</span></div>
+                </div>
+                <div class="text-[11.5px] text-fg-4 mt-2">
+                    Запрос уходит тем же поставщикам, которым его отправили при включении мониторинга.
+                    Планировщик проверяет сроки раз в час. Мониторинг не снимается сам, когда цена
+                    стала актуальной — через период она снова устареет; выключается кнопкой.
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+            <input type="search" wire:model.live.debounce.300ms="search"
+                   placeholder="Поиск: артикул / наименование"
+                   class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
+        </div>
+
+        <div class="ds-card">
+            <div class="overflow-x-auto">
+                <table class="w-full text-[12.5px]">
+                    <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
+                        <tr>
+                            <th class="text-left px-3 py-2">Артикул</th>
+                            <th class="text-left px-3 py-2">Позиция</th>
+                            <th class="text-left px-3 py-2">Цена сейчас</th>
+                            <th class="text-left px-3 py-2">Последний запрос</th>
+                            <th class="text-left px-3 py-2">Следующий</th>
+                            <th class="text-right px-3 py-2">Период</th>
+                            <th class="text-left px-3 py-2">Включил</th>
+                            <th class="text-right px-3 py-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse($this->monitors as $m)
+                            @php $ci = $m->catalogItem; $left = $m->daysLeft(); @endphp
+                            <tr wire:key="mon-{{ $m->id }}" class="border-b border-border-subtle hover:bg-hover {{ $m->is_active ? '' : 'opacity-60' }}">
+                                <td class="px-3 py-2 mono whitespace-nowrap">{{ $ci?->sku ?? '—' }}</td>
+                                <td class="px-3 py-2 text-fg-2">
+                                    <span class="inline-block max-w-[360px] truncate align-bottom" title="{{ $ci?->name }}">{{ $ci?->name ?? '—' }}</span>
+                                    @if($ci?->stock_available > 0)<span class="chip chip-ok text-[10px] ml-1">на складе {{ $ci->stock_available }}</span>@endif
+                                </td>
+                                <td class="px-3 py-2">
+                                    @if($ci?->is_price_actual)
+                                        <span class="chip chip-ok text-[10.5px]">актуальна</span>
+                                    @else
+                                        <span class="chip chip-warn text-[10.5px]">неактуальна</span>
+                                    @endif
+                                </td>
+                                <td class="px-3 py-2 mono text-fg-3 whitespace-nowrap">
+                                    {{ $m->last_dispatched_at?->format('d.m.Y') ?? '—' }}
+                                </td>
+                                <td class="px-3 py-2 mono whitespace-nowrap">
+                                    @if(! $m->is_active)
+                                        <span class="text-fg-4">выключен</span>
+                                    @elseif($left === null)
+                                        <span class="text-fg-4">—</span>
+                                    @elseif($left <= 0)
+                                        <span class="text-sky-700">в очереди</span>
+                                    @else
+                                        {{ $m->next_due_at->format('d.m.Y') }} <span class="text-fg-4">({{ $left }} дн.)</span>
+                                    @endif
+                                </td>
+                                <td class="px-3 py-2 text-right">
+                                    <input type="number" min="{{ \App\Models\PriceMonitor::MIN_INTERVAL_DAYS }}"
+                                           max="{{ \App\Models\PriceMonitor::MAX_INTERVAL_DAYS }}"
+                                           value="{{ $m->interval_days }}"
+                                           wire:change="updateMonitorInterval({{ $m->id }}, $event.target.value)"
+                                           class="h-[26px] w-[70px] px-1.5 border border-border rounded-md bg-surface text-[12px] text-right outline-none focus:border-sky-500"
+                                           title="Период перезапроса, дней">
+                                </td>
+                                <td class="px-3 py-2 text-fg-3 whitespace-nowrap">{{ $m->createdBy?->name ?? '—' }}</td>
+                                <td class="px-3 py-2 text-right whitespace-nowrap">
+                                    @if($m->is_active)
+                                        <button type="button" wire:click="monitorNow({{ $m->id }})"
+                                                class="text-[11.5px] text-sky-700 hover:underline mr-2">запросить сейчас</button>
+                                        <button type="button" wire:click="disableMonitor({{ $m->id }})"
+                                                wire:confirm="Выключить мониторинг по этой позиции?"
+                                                class="text-[11.5px] text-red-600 hover:underline">выключить</button>
+                                    @endif
+                                </td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="8" class="px-3 py-10 text-center text-fg-3 text-[13px]">
+                                {{ trim($search) !== '' ? 'Ничего не найдено.' : 'Пока ничего не стоит на мониторинге. Включите его при отправке запроса поставщикам.' }}
+                            </td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    @endif
 
     {{-- Панель запроса поставщикам (по выбранным позициям) — модальное окно,
          закреплённое внизу экрана. Стили позиционирования — инлайн, чтобы не
@@ -517,6 +735,26 @@
                         Приложить фото выбранных позиций из каталога
                     </label>
                 </div>
+
+                {{-- Мониторинг цен: позиции встанут на регулярный перезапрос тем же
+                     поставщикам. Включается только при реально отправленном письме. --}}
+                <label class="flex flex-wrap items-center gap-2 p-2.5 rounded-md border border-border bg-surface-2 text-[12.5px] cursor-pointer">
+                    <input type="checkbox" wire:model.live="monitorEnabled" class="w-4 h-4 accent-sky-600">
+                    <span class="font-medium text-fg-1">🔁 Включить мониторинг цен</span>
+                    <span class="text-fg-3">перезапрашивать эти позиции раз в</span>
+                    <input type="number" wire:model.live="monitorDays"
+                           min="{{ \App\Models\PriceMonitor::MIN_INTERVAL_DAYS }}"
+                           max="{{ \App\Models\PriceMonitor::MAX_INTERVAL_DAYS }}"
+                           class="h-[26px] w-[68px] px-1.5 border border-border rounded-md bg-surface text-[12px] text-right outline-none focus:border-sky-500"
+                           @disabled(! $monitorEnabled)>
+                    <span class="text-fg-3">дн.</span>
+                    @if($monitorEnabled)
+                        <span class="text-[11.5px] text-fg-4 w-full">
+                            Запрос уйдёт тем же поставщикам автоматически. Список и выключение —
+                            во вкладке «Мониторинг цен».
+                        </span>
+                    @endif
+                </label>
 
                 @error('send') <div class="text-[12px] text-red-600">{{ $message }}</div> @enderror
 
