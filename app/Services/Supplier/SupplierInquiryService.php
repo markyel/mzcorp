@@ -4,11 +4,14 @@ namespace App\Services\Supplier;
 
 use App\Enums\EmailCategory;
 use App\Enums\MailDirection;
+use App\Jobs\Suppliers\ParseSupplierReplyJob;
 use App\Models\EmailMessage;
 use App\Models\Request as RequestModel;
 use App\Models\SupplierInquiry;
 use App\Models\User;
+use App\Services\Mail\InternalSenderDetector;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * Модуль поставщиков (фундамент): пометка пойманного треда как нашего запроса
@@ -24,9 +27,8 @@ class SupplierInquiryService
 {
     public function __construct(
         private readonly SupplierRegistry $registry,
-        private readonly \App\Services\Mail\InternalSenderDetector $internal = new \App\Services\Mail\InternalSenderDetector(),
-    ) {
-    }
+        private readonly InternalSenderDetector $internal = new InternalSenderDetector,
+    ) {}
 
     /** Наш домен (services.mail.internal_domains) — сотрудник не может быть поставщиком. */
     private function isInternalDomain(string $domain): bool
@@ -180,6 +182,7 @@ class SupplierInquiryService
      *
      * null — отправитель НАШ сотрудник (домен/ящик/пользователь): внутренняя
      * переписка в ящике снабжения не делает коллегу «поставщиком». Кейс
+     *
      * 2026-09-07: 16 inquiry с supplier_email=*@myzip.ru (Боев, Роденков,
      * Курзаев…), 326 внутренних писем помечены «поставщик», а домен-фолбэк
      * тянул к ним любую внутреннюю переписку во всех ящиках.
@@ -216,18 +219,31 @@ class SupplierInquiryService
             // конкретному запросу — просто не к запросу этого отправителя
             // (пересылка чужого письма). Кейс inquiry 5340: пересылку от
             // UniSystem прицепило к её же свежему треду, и оффер 170 EUR повис
-            // на чужой позиции. Такому письму заводим отдельный тред.
-            $hasForeignToken = $this->extractRfqToken($message->subject) !== null;
-            $inquiry = $hasForeignToken ? null : SupplierInquiry::query()
-                ->whereRaw('lower(supplier_email) = ?', [$email])
-                ->orderByDesc('id')
-                ->first();
+            // на чужой позиции.
+            $foreign = $this->inquiryByForeignRfqToken($message);
+            $requestId = $foreign?->related_request_id;
+            if ($requestId !== null) {
+                // Заявка из чужого токена известна: если этого поставщика по ней
+                // уже спрашивали — письмо принадлежит тому треду (кейс 5116:
+                // UniSystem ответила по M-2026-15843 темой от Paul Schaab).
+                $inquiry = SupplierInquiry::query()
+                    ->whereRaw('lower(supplier_email) = ?', [$email])
+                    ->where('related_request_id', $requestId)
+                    ->orderByDesc('id')
+                    ->first();
+            } elseif ($foreign === null && $this->extractRfqToken($message->subject) === null) {
+                $inquiry = SupplierInquiry::query()
+                    ->whereRaw('lower(supplier_email) = ?', [$email])
+                    ->orderByDesc('id')
+                    ->first();
+            }
             if ($inquiry === null) {
                 $inquiry = SupplierInquiry::create([
                     'supplier_email' => $email,
                     'supplier_name' => $message->from_name ?: null,
                     'subject' => $message->subject ?: 'Переписка с поставщиком',
                     'thread_root_id' => $message->message_id ?: null,
+                    'related_request_id' => $requestId,
                     'status' => 'open',
                 ]);
             }
@@ -320,7 +336,7 @@ class SupplierInquiryService
         if ($from === '') {
             return null;
         }
-        $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $code) . '%';
+        $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $code).'%';
 
         // 1) Точное совпадение адреса поставщика.
         $exact = SupplierInquiry::query()
@@ -338,7 +354,7 @@ class SupplierInquiryService
         // доменов: у бесплатных почт (mail.ru/gmail/яндекс) домен общий у
         // разных поставщиков → домен-матч там неверен. Кейс M-2026-12940:
         // info@lift-lt.ru ↔ ответ technicalsupport@lift-lt.ru.
-        $domain = \Illuminate\Support\Str::after($from, '@');
+        $domain = Str::after($from, '@');
         if ($domain === '' || $domain === $from || in_array($domain, self::FREE_MAIL_DOMAINS, true) || $this->isInternalDomain($domain)) {
             return null;
         }
@@ -382,7 +398,7 @@ class SupplierInquiryService
     public function generateRfqToken(): string
     {
         do {
-            $token = \Illuminate\Support\Str::upper(\Illuminate\Support\Str::random(7));
+            $token = Str::upper(Str::random(7));
         } while (SupplierInquiry::query()->where('rfq_token', $token)->exists());
 
         return $token;
@@ -391,7 +407,7 @@ class SupplierInquiryService
     /** Маркер токена для добавления в тему письма-запроса. */
     public function rfqMarker(string $token): string
     {
-        return '[RFQ-' . mb_strtoupper(trim($token)) . ']';
+        return '[RFQ-'.mb_strtoupper(trim($token)).']';
     }
 
     /** Извлечь токен RFQ из темы (для createFromOutbound и матча ответа). */
@@ -431,6 +447,28 @@ class SupplierInquiryService
         return $this->sameParty((string) $inquiry->supplier_email, (string) $message->from_email)
             ? $inquiry
             : null;
+    }
+
+    /**
+     * Запрос-владелец токена [RFQ-…] из темы, если письмо пришло НЕ от него
+     * (переслали чужое письмо). Нужен, чтобы по заявке владельца найти тред
+     * самого отправителя, а если его нет — завести новый уже с этой заявкой,
+     * а не «висящий» тред без привязки.
+     */
+    private function inquiryByForeignRfqToken(EmailMessage $message): ?SupplierInquiry
+    {
+        $token = $this->extractRfqToken($message->subject);
+        if ($token === null) {
+            return null;
+        }
+        $owner = SupplierInquiry::query()->where('rfq_token', $token)->first();
+        if ($owner === null) {
+            return null;
+        }
+
+        return $this->sameParty((string) $owner->supplier_email, (string) $message->from_email)
+            ? null
+            : $owner;
     }
 
     public function matchInboundByAnyCode(EmailMessage $message): ?SupplierInquiry
@@ -567,7 +605,7 @@ class SupplierInquiryService
         // Фаза 3.3: входящий ответ поставщика на запрос С ПОЗИЦИЯМИ — разобрать
         // в предложения (async, идемпотентно по message_id).
         if ($message->direction === MailDirection::Inbound && $inquiry->items()->exists()) {
-            \App\Jobs\Suppliers\ParseSupplierReplyJob::dispatch($message->id, $inquiry->id);
+            ParseSupplierReplyJob::dispatch($message->id, $inquiry->id);
         }
     }
 
