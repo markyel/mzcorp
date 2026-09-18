@@ -6,7 +6,9 @@ use App\Enums\MailDirection;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * Письмо (входящее или исходящее).
@@ -137,8 +139,16 @@ class EmailMessage extends Model
         return $this->belongsTo(Request::class, 'related_request_id');
     }
 
+    /** Метки письма — их может быть несколько, в отличие от папки. */
+    public function labels(): BelongsToMany
+    {
+        return $this->belongsToMany(MailLabel::class, 'email_message_labels', 'email_message_id', 'mail_label_id')
+            ->orderBy('mail_labels.sort_order')
+            ->orderBy('mail_labels.name');
+    }
+
     /** Назначение/прочитанность в разделе «Почта выбывших» (shared-mail). */
-    public function sharedAssignment(): \Illuminate\Database\Eloquent\Relations\HasOne
+    public function sharedAssignment(): HasOne
     {
         return $this->hasOne(SharedMailAssignment::class);
     }

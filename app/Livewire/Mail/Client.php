@@ -5,8 +5,10 @@ namespace App\Livewire\Mail;
 use App\Enums\MailDirection;
 use App\Enums\MailFolder;
 use App\Enums\Role;
+use App\Jobs\Mail\SyncMailboxFolderJob;
 use App\Livewire\Concerns\RendersEmailBody;
 use App\Models\EmailMessage;
+use App\Models\MailLabel;
 use App\Models\User;
 use App\Models\MailboxFolder;
 use App\Services\Mail\EmailDraftService;
@@ -14,9 +16,11 @@ use App\Services\Mail\ImapSeenSyncService;
 use App\Services\Mail\MailboxAccessService;
 use App\Services\Mail\MailboxFolderService;
 use App\Services\Mail\MailReadService;
+use App\Services\Mail\MessageLabelService;
 use App\Services\Mail\SharedMailService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
@@ -58,6 +62,19 @@ class Client extends Component
     #[Url(as: 'request')]
     public ?int $requestId = null;
 
+    /** Фильтр по метке (id из mail_labels); null — без фильтра. */
+    #[Url(as: 'label')]
+    public ?int $labelId = null;
+
+    /** Когда в этой сессии последний раз жали «синхронизировать». */
+    public ?string $syncedAt = null;
+
+    /**
+     * Короткое сообщение под шапкой списка (метки, синхронизация). Не toast:
+     * событие 'toast' в проекте никто не слушает — рендерера нет.
+     */
+    public ?string $notice = null;
+
     /**
      * Где искать при непустом поиске: 'all' — по всем папкам ящика (по умолчанию),
      * 'inbox' — только не разложенное по папкам, 'f:<id>' — конкретная папка.
@@ -82,6 +99,9 @@ class Client extends Component
     public int $perPage = 40;
 
     private const PER_PAGE_STEP = 20;
+
+    /** Пауза между ручными синхронизациями одного ящика, секунд. */
+    private const SYNC_THROTTLE_SECONDS = 20;
 
     public function mount(): void
     {
@@ -456,6 +476,154 @@ class Client extends Component
         unset($this->openThread, $this->openAnchor);
     }
 
+    /* ----------------------------- Метки ----------------------------- */
+
+    /** Словарь меток — общий на компанию. */
+    #[Computed]
+    public function labels(): Collection
+    {
+        return MailLabel::query()->orderBy('sort_order')->orderBy('name')->get();
+    }
+
+    /** Сколько писем под каждой меткой в доступных ящиках. @return array<int,int> */
+    #[Computed]
+    public function labelCounts(): array
+    {
+        return app(MessageLabelService::class)->counts(
+            app(MailboxAccessService::class)->mailboxIdsFor($this->user())
+        );
+    }
+
+    public function filterByLabel(?int $labelId): void
+    {
+        $this->labelId = $labelId ?: null;
+        $this->notice = null;
+        $this->resetView();
+    }
+
+    public function dismissNotice(): void
+    {
+        $this->notice = null;
+    }
+
+    /** Переключить метку на письме (контекстное меню строки). */
+    public function toggleLabel(int $messageId, int $labelId): void
+    {
+        $message = $this->findAccessible($messageId);
+        $label = MailLabel::query()->find($labelId);
+        if (! $message || ! $label) {
+            return;
+        }
+        app(MessageLabelService::class)->toggle($message, $label, $this->user());
+        unset($this->threads, $this->labelCounts, $this->openThread);
+    }
+
+    /**
+     * Повесить/снять метку на выделенных письмах.
+     *
+     * @param  list<int>  $ids
+     */
+    public function labelMany(array $ids, int $labelId, bool $on): void
+    {
+        $ids = $this->accessibleIds($ids);
+        $label = MailLabel::query()->find($labelId);
+        if ($ids === [] || ! $label) {
+            return;
+        }
+        $n = app(MessageLabelService::class)->apply($ids, $label, $on, $this->user());
+        unset($this->threads, $this->labelCounts, $this->openThread);
+        $this->notice = $on
+            ? sprintf('Метка «%s» — на %d %s.', $label->name, $n, $this->pluralLetters($n))
+            : sprintf('Метка «%s» снята с %d %s.', $label->name, $n, $this->pluralLetters($n));
+        $this->dispatch('mail-selection-clear');
+    }
+
+    /**
+     * Создать метку и сразу повесить её на письма (если переданы).
+     *
+     * @param  list<int>  $ids
+     */
+    public function createLabel(string $name, ?string $color = null, array $ids = []): void
+    {
+        $label = app(MessageLabelService::class)->findOrCreate($name, $color, $this->user());
+        if ($label === null) {
+            return;
+        }
+        unset($this->labels, $this->labelCounts);
+        if ($ids !== []) {
+            $this->labelMany($ids, $label->id, true);
+
+            return;
+        }
+        $this->notice = "Метка «{$label->name}» создана.";
+    }
+
+    public function renameLabel(int $labelId, string $name): void
+    {
+        $label = MailLabel::query()->find($labelId);
+        if (! $label) {
+            return;
+        }
+        $ok = app(MessageLabelService::class)->rename($label, $name);
+        unset($this->labels, $this->threads, $this->openThread);
+        if (! $ok) {
+            $this->notice = 'Метка с таким именем уже есть — переименование отменено.';
+        }
+    }
+
+    public function recolorLabel(int $labelId, string $color): void
+    {
+        $label = MailLabel::query()->find($labelId);
+        if (! $label) {
+            return;
+        }
+        app(MessageLabelService::class)->recolor($label, $color);
+        unset($this->labels, $this->threads, $this->openThread);
+    }
+
+    public function deleteLabel(int $labelId): void
+    {
+        $label = MailLabel::query()->find($labelId);
+        if (! $label) {
+            return;
+        }
+        $name = $label->name;
+        app(MessageLabelService::class)->delete($label);
+        if ($this->labelId === $labelId) {
+            $this->labelId = null;
+        }
+        unset($this->labels, $this->labelCounts, $this->threads, $this->openThread);
+        $this->notice = "Метка «{$name}» удалена у всех писем.";
+    }
+
+    /* ------------------------ Ручная синхронизация ------------------------ */
+
+    /**
+     * Принудительно синхронизировать выбранный ящик: письма приходят сами раз
+     * в 2 минуты (mail:sync в расписании), но иногда ждать нельзя. Троттл —
+     * чтобы кнопка не превращалась в способ забить очередь.
+     */
+    public function syncNow(): void
+    {
+        $mailboxId = (int) $this->selectedMailboxId;
+        if ($mailboxId <= 0 || ! app(MailboxAccessService::class)->canAccessMailbox($this->user(), $mailboxId)) {
+            return;
+        }
+
+        $key = 'mail-sync-now:' . $mailboxId;
+        if (! Cache::add($key, 1, now()->addSeconds(self::SYNC_THROTTLE_SECONDS))) {
+            $this->notice = 'Синхронизация уже идёт — подождите несколько секунд.';
+
+            return;
+        }
+
+        foreach (['inbox', 'sent'] as $folderType) {
+            dispatch(new SyncMailboxFolderJob($mailboxId, $folderType));
+        }
+        $this->syncedAt = now()->format('H:i');
+        $this->notice = 'Синхронизация запущена — новые письма появятся в списке через несколько секунд.';
+    }
+
     public function toggleFlag(int $id): void
     {
         $email = $this->findAccessible($id);
@@ -630,6 +798,7 @@ class Client extends Component
             ])
             ->selectRaw('LEFT(email_messages.body_plain, 200) as body_plain')
             ->with('relatedRequest:id,internal_code,status,onec_number')
+            ->with('labels:id,name,color')
             ->withCount('attachments')
             ->orderByRaw('email_messages.sent_at DESC NULLS LAST')
             ->orderByDesc('email_messages.id')
@@ -802,6 +971,17 @@ class Client extends Component
         $uid = (int) $this->user()->id;
         $requestMode = $this->requestId && ! $ignoreRequestFilter;
         $q = $this->baseQuery(allMailboxes: $requestMode);
+
+        // Фильтр по метке применяется поверх любой папки: метка — это срез,
+        // а не место, письмо остаётся лежать там, где лежало.
+        if ($this->labelId !== null && ! $ignoreRequestFilter) {
+            $q->whereExists(function ($sub) {
+                $sub->selectRaw('1')
+                    ->from('email_message_labels as eml')
+                    ->whereColumn('eml.email_message_id', 'email_messages.id')
+                    ->where('eml.mail_label_id', $this->labelId);
+            });
+        }
 
         // Режим «письма заявки»: обе стороны переписки, без папок; ящики — все
         // доступные. Поиск поверх работает. Бейджи папок в сайдбаре считаются

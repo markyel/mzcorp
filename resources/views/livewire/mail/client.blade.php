@@ -48,13 +48,43 @@
      останавливает поллинг, когда вкладка в фоне. Открытое письмо и высоты
      iframe переживают морф (wire:ignore.self), композер — отдельный компонент,
      его поллинг не трогает. --}}
-<div class="mailapp" wire:key="mailapp" wire:poll.60s>
+{{-- Ширина списка писем живёт в localStorage и пишется в --paneB-w на <html>,
+     а не в style самого блока: wire:poll морфит разметку, и инлайновый стиль
+     на элементе компонента слетал бы после каждого опроса. --}}
+<div class="mailapp" wire:key="mailapp" wire:poll.60s
+     x-data="{
+        minW: 300, maxW: 820, w: 400, drag: false, ox: 0, ow: 0,
+        init() {
+            const saved = parseInt(localStorage.getItem('mzcorp.mail.listWidth') || '', 10);
+            this.setW(Number.isFinite(saved) ? saved : 400);
+        },
+        setW(px) {
+            this.w = Math.max(this.minW, Math.min(this.maxW, Math.round(px)));
+            document.documentElement.style.setProperty('--paneB-w', this.w + 'px');
+        },
+        startResize(ev) { this.drag = true; this.ox = ev.clientX; this.ow = this.w; },
+        moveResize(ev) { if (this.drag) this.setW(this.ow + (ev.clientX - this.ox)); },
+        stopResize() {
+            if (! this.drag) return;
+            this.drag = false;
+            try { localStorage.setItem('mzcorp.mail.listWidth', String(this.w)); } catch (e) {}
+        },
+        resetWidth() { this.setW(400); try { localStorage.setItem('mzcorp.mail.listWidth', '400'); } catch (e) {} }
+     }"
+     :class="{ resizing: drag }"
+     @mousemove.window="moveResize($event)" @mouseup.window="stopResize()">
 <style>
 /* scoped mail client — на токенах дизайн-системы, без Tailwind-пересборки */
-.mailapp{display:grid;grid-template-columns:240px 400px 1fr;height:calc(100vh - var(--topbar-h, 56px));min-height:520px;
+/* Ширина списка писем — тянется мышью, хранится в localStorage (см. mailResizer). */
+.mailapp{display:grid;grid-template-columns:240px var(--paneB-w, 400px) 1fr;height:calc(100vh - var(--topbar-h, 56px));min-height:520px;
     overflow:hidden;background:var(--bg-surface);font-family:var(--font-sans);color:var(--fg-1)}
 .mailapp *{box-sizing:border-box}
 @media(max-width:1100px){.mailapp{grid-template-columns:220px 1fr}.mailapp .paneC{display:none}}
+/* Рукоятка ресайза: узкая полоса на правой границе списка, курсор — как у сплиттера. */
+.mailapp .paneB{position:relative}
+.mailapp .bresize{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;z-index:5;background:transparent}
+.mailapp .bresize:hover,.mailapp .bresize.dragging{background:linear-gradient(to right,transparent 2px,var(--sky-500) 2px,var(--sky-500) 5px,transparent 5px)}
+.mailapp.resizing{user-select:none;cursor:col-resize}
 
 /* PANE A */
 .mailapp .paneA{background:var(--bg-sidebar);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
@@ -138,6 +168,47 @@
 .mailapp .trow .from{font:500 13px/1.3 var(--font-sans);color:var(--fg-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
 .mailapp .trow.unread .from{font-weight:700}
 .mailapp .trow .from .more-to{font-weight:400;color:var(--fg-4)}
+/* Метки: фильтр над списком, чипы в строке, контекстное меню строки. */
+.mailapp .lblbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.mailapp .lblchip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;border:1px solid transparent;
+    font:500 11.5px/1 var(--font-sans);cursor:pointer;white-space:nowrap}
+.mailapp .lblchip.on{box-shadow:inset 0 0 0 1.5px currentColor}
+.mailapp .lblchip .n{font-family:var(--font-mono);opacity:.7}
+.mailapp .lblchip.all{background:var(--neutral-100);color:var(--fg-2)}
+.mailapp .trow .rowlabels{display:inline-flex;gap:4px;flex-wrap:wrap;margin-top:2px}
+.mailapp .trow .rowlabel{display:inline-flex;align-items:center;height:16px;padding:0 6px;border-radius:999px;font:500 10.5px/1 var(--font-sans)}
+.mailapp .ctxmenu{position:fixed;z-index:60;min-width:230px;max-height:70vh;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border);
+    border-radius:8px;box-shadow:0 12px 34px rgba(15,23,42,.18);padding:4px}
+.mailapp .ctxmenu .sec{padding:6px 10px 3px;font:600 10px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.06em}
+.mailapp .ctxmenu button{display:flex;align-items:center;gap:8px;width:100%;border:none;background:none;text-align:left;height:30px;padding:0 10px;
+    border-radius:5px;font:400 12.5px/1 var(--font-sans);color:var(--fg-1);cursor:pointer}
+.mailapp .ctxmenu button:hover{background:var(--bg-hover)}
+.mailapp .ctxmenu .swatch{width:10px;height:10px;border-radius:999px;flex-shrink:0}
+.mailapp .ctxmenu .tick{width:12px;flex-shrink:0;color:var(--sky-600)}
+.mailapp .ctxmenu .sep{height:1px;background:var(--border-subtle);margin:4px 2px}
+.mailapp .ctxmenu .newlbl{display:flex;gap:4px;padding:4px 6px}
+.mailapp .ctxmenu .newlbl input{flex:1;min-width:0;height:26px;border:1px solid var(--border);border-radius:5px;padding:0 6px;
+    font:400 12px/1 var(--font-sans);background:var(--bg-surface);color:var(--fg-1);outline:none}
+.mailapp .ctxmenu .newlbl input:focus{border-color:var(--sky-500)}
+.mailapp .ctxmenu .newlbl button{width:auto;height:26px;padding:0 8px;border:1px solid var(--accent);background:var(--accent);color:#fff;
+    border-radius:5px;font:600 11.5px/1 var(--font-sans)}
+.mailapp .notice{display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--emerald-50);border-bottom:1px solid var(--border-subtle);
+    font:400 11.5px/1.35 var(--font-sans);color:var(--emerald-700)}
+.mailapp .notice button{border:none;background:none;color:var(--fg-3);cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+.mailapp .syncbtn{height:30px;padding:0 10px;border:1px solid var(--border);background:var(--bg-surface);border-radius:var(--r-md);cursor:pointer;
+    color:var(--fg-2);font:500 12.5px/1 var(--font-sans);white-space:nowrap}
+.mailapp .syncbtn:hover{background:var(--bg-hover);color:var(--fg-1)}
+.mailapp .syncbtn[disabled]{opacity:.6;cursor:default}
+.mailapp .lblbar .rte-pop{position:relative;display:inline-flex}
+.mailapp .lblmgr{top:26px;left:0;right:auto;min-width:300px;padding:6px}
+.mailapp .lblmgr .lblrow{display:flex;align-items:center;gap:4px;padding:3px 2px}
+.mailapp .lblmgr .lblrow input{flex:1;min-width:0;height:26px;border:1px solid var(--border);border-radius:5px;padding:0 6px;
+    font:400 12px/1 var(--font-sans);background:var(--bg-surface);color:var(--fg-1);outline:none}
+.mailapp .lblmgr .lblrow input:focus{border-color:var(--sky-500)}
+.mailapp .lblmgr .lblrow .dot{width:14px;height:14px;border-radius:999px;border:1.5px solid transparent;cursor:pointer;padding:0;flex-shrink:0}
+.mailapp .lblmgr .lblrow .dot.on{border-color:var(--fg-1)}
+.mailapp .lblmgr .lblrow .del{border:none;background:none;color:var(--fg-3);cursor:pointer;font-size:13px;padding:0 4px}
+.mailapp .lblmgr .lblrow .del:hover{color:var(--accent)}
 .mailapp .trow .when{font:500 11px/1 var(--font-mono);color:var(--fg-3);flex-shrink:0}
 .mailapp .trow.unread .when{color:var(--fg-1);font-weight:600}
 .mailapp .trow .l2{display:flex;align-items:baseline;gap:6px;margin-top:2px}
@@ -345,7 +416,38 @@
     {{-- ══════════ PANE B — список тредов ══════════ --}}
     <div class="paneB"
          x-data="{
-            sel: [], last: null, moveOpen: false,
+            sel: [], last: null, moveOpen: false, mgrOpen: false,
+            /* Контекстное меню строки: метки и быстрые действия (как в Яндексе). */
+            menu: { open: false, x: 0, y: 0, id: null, labels: [] },
+            newLabel: '',
+            openMenu(id, labels, ev) {
+                /* Правый клик по невыделенной строке работает по ней одной —
+                   иначе легко повесить метку не на то, что видишь. */
+                if (! this.has(id)) { this.sel = []; this.last = id; }
+                this.menu = {
+                    open: true, id, labels: labels,
+                    x: Math.min(ev.clientX, window.innerWidth - 250),
+                    y: Math.min(ev.clientY, window.innerHeight - 320),
+                };
+                this.newLabel = '';
+            },
+            closeMenu() { this.menu.open = false; },
+            /* На что действуем: на выделение, если правый клик был по нему. */
+            targets() { return (this.sel.length > 1 && this.has(this.menu.id)) ? this.sel : [this.menu.id]; },
+            hasLabel(labelId) { return this.menu.labels.includes(labelId); },
+            toggleLabel(labelId) {
+                const ids = this.targets();
+                if (ids.length > 1) { $wire.labelMany(ids, labelId, ! this.hasLabel(labelId)); }
+                else { $wire.toggleLabel(this.menu.id, labelId); }
+                this.closeMenu();
+            },
+            addLabel() {
+                const name = this.newLabel.trim();
+                if (! name) return;
+                $wire.createLabel(name, 'sky', this.targets());
+                this.newLabel = '';
+                this.closeMenu();
+            },
             ids() { return [...$el.querySelectorAll('.trow[data-id]')].map(e => Number(e.dataset.id)); },
             has(id) { return this.sel.includes(id); },
             toggle(id, ev) {
@@ -362,11 +464,12 @@
                 this.last = id;
             },
             all() { this.sel = this.ids(); },
-            clear() { this.sel = []; this.moveOpen = false; },
+            clear() { this.sel = []; this.moveOpen = false; this.menu.open = false; },
             editable(t) { return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); },
             onKey(e) {
                 if (this.editable(e.target)) return;
                 if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyA' || e.key.toLowerCase() === 'a')) { e.preventDefault(); this.all(); }
+                else if (e.key === 'Escape' && this.menu.open) { this.closeMenu(); }
                 else if (e.key === 'Escape' && this.sel.length) { this.clear(); }
             },
             dragStart(id, ev) {
@@ -388,8 +491,56 @@
                 <div class="bsearch">
                     <input type="text" placeholder="Поиск в этом ящике…" wire:model.live.debounce.400ms="search">
                 </div>
+                {{-- Принудительная синхронизация: обычно почта подтягивается сама
+                     раз в 2 минуты, но иногда письмо нужно прямо сейчас. --}}
+                <button type="button" class="syncbtn" wire:click="syncNow" wire:loading.attr="disabled" wire:target="syncNow"
+                        title="Забрать письма из ящика прямо сейчас{{ $syncedAt ? ' · последний раз в '.$syncedAt : '' }}">
+                    <span wire:loading.remove wire:target="syncNow">↻</span>
+                    <span wire:loading wire:target="syncNow">…</span>
+                </button>
                 <button class="compose" wire:click="compose({{ (int) $selectedMailboxId }})">Написать</button>
             </div>
+
+            {{-- Фильтр по меткам: срез поверх текущей папки, письмо остаётся на месте. --}}
+            @if(count($this->labels))
+                @php $lcounts = $this->labelCounts; @endphp
+                <div class="lblbar">
+                    <button type="button" class="lblchip all {{ $labelId === null ? 'on' : '' }}"
+                            wire:click="filterByLabel(null)">Все письма</button>
+                    @foreach($this->labels as $label)
+                        <button type="button" wire:key="lf-{{ $label->id }}"
+                                class="lblchip {{ $labelId === $label->id ? 'on' : '' }}"
+                                style="background:{{ $label->bg() }};color:{{ $label->fg() }}"
+                                wire:click="filterByLabel({{ $labelId === $label->id ? 'null' : $label->id }})">
+                            {{ $label->name }}
+                            @if(($lcounts[$label->id] ?? 0) > 0)<span class="n">{{ $lcounts[$label->id] }}</span>@endif
+                        </button>
+                    @endforeach
+
+                    {{-- Управление словарём меток: переименовать, перекрасить, удалить. --}}
+                    <span class="rte-pop">
+                        <button type="button" class="lblchip all" @click="mgrOpen = ! mgrOpen" title="Управление метками">⚙</button>
+                        <div class="bulkmenu lblmgr" x-show="mgrOpen" x-cloak @click.outside="mgrOpen = false">
+                            @foreach($this->labels as $label)
+                                <div class="lblrow" wire:key="lm-{{ $label->id }}">
+                                    <input type="text" value="{{ $label->name }}" maxlength="{{ \App\Models\MailLabel::NAME_MAX }}"
+                                           @keydown.enter.prevent="$wire.renameLabel({{ $label->id }}, $event.target.value)"
+                                           @keydown.stop title="Измените имя и нажмите Enter">
+                                    @foreach(\App\Models\MailLabel::COLORS as $key => $c)
+                                        <button type="button" class="dot {{ $label->color === $key ? 'on' : '' }}"
+                                                style="background:{{ $c[1] }}" title="{{ $key }}"
+                                                wire:click="recolorLabel({{ $label->id }}, '{{ $key }}')"></button>
+                                    @endforeach
+                                    <button type="button" class="del" title="Удалить метку у всех писем"
+                                            wire:click="deleteLabel({{ $label->id }})"
+                                            wire:confirm="Удалить метку «{{ $label->name }}»? Она исчезнет со всех писем.">✕</button>
+                                </div>
+                            @endforeach
+                            <div class="hint">Метки общие: их видят все, кто работает с этими ящиками.</div>
+                        </div>
+                    </span>
+                </div>
+            @endif
             @if(trim($search) !== '' && ! $requestId)
                 {{-- Поиск идёт по всем папкам ящика; здесь можно сузить до одной. --}}
                 <div class="sscope">
@@ -417,6 +568,14 @@
                 <span><b>{{ number_format($this->totalCount, 0, '.', ' ') }}</b> писем</span>
             </div>
         </div>
+
+        @if($notice)
+            <div class="notice">
+                <span>{{ $notice }}</span>
+                <span style="flex:1"></span>
+                <button type="button" wire:click="dismissNotice" title="Скрыть">×</button>
+            </div>
+        @endif
 
         {{-- Панель массовых действий (видна при выделении). --}}
         <div class="bulkbar" x-show="sel.length" x-cloak>
@@ -458,10 +617,12 @@
                     // адресат; в смешанных папках без подписи не разобрать.
                     $toPrefix = $isToParty && ! in_array($folder, ['sent', 'drafts'], true);
                 @endphp
+                @php $rowLabelIds = $m->labels->pluck('id')->all(); @endphp
                 <div class="trow {{ $unread ? 'unread' : '' }} {{ $openId === $m->id ? 'active' : '' }} {{ $awaitingInv ? 'awaiting-inv' : '' }}"
                      wire:key="trow-{{ $m->id }}" wire:click="openMessage({{ $m->id }})"
                      data-id="{{ $m->id }}" :class="{ sel: has({{ $m->id }}) }"
-                     draggable="true" @dragstart="dragStart({{ $m->id }}, $event)">
+                     draggable="true" @dragstart="dragStart({{ $m->id }}, $event)"
+                     @contextmenu.prevent.stop="openMenu({{ $m->id }}, {{ \Illuminate\Support\Js::from($rowLabelIds) }}, $event)">
                     @if($unread)<span class="dot-unread"></span>@endif
                     <span class="chk" @click.stop="toggle({{ $m->id }}, $event)" title="Выбрать (Shift — диапазон, Ctrl+A — все)"></span>
                     <span class="av {{ $isOrg ? 'org' : '' }}">{{ $initials($partyName, $partyEmail) }}</span>
@@ -471,6 +632,14 @@
                             <span class="when">{{ $fmtWhen($m->sent_at) }}</span>
                         </div>
                         <div class="l2"><span class="subj">{{ $m->subject ?: '(без темы)' }}</span></div>
+                        @if($m->labels->isNotEmpty())
+                            <div class="rowlabels">
+                                @foreach($m->labels as $label)
+                                    <span class="rowlabel" wire:key="rl-{{ $m->id }}-{{ $label->id }}"
+                                          style="background:{{ $label->bg() }};color:{{ $label->fg() }}">{{ $label->name }}</span>
+                                @endforeach
+                            </div>
+                        @endif
                         <div class="l3">
                             <span class="snip">{{ \Illuminate\Support\Str::limit(trim((string) $m->body_plain), 90) }}</span>
                             <span class="metaicons">
@@ -499,6 +668,43 @@
                 <div class="blist-foot"><button wire:click="loadMore">Показать ещё</button></div>
             @endif
         </div>
+
+        {{-- Контекстное меню строки: метки (поставить/снять), создание метки
+             на лету и быстрые действия. Открывается правым кликом по письму. --}}
+        <div class="ctxmenu" x-show="menu.open" x-cloak
+             :style="`left:${menu.x}px; top:${menu.y}px`"
+             @click.outside="closeMenu()" @contextmenu.outside="closeMenu()">
+            <div class="sec" x-text="(sel.length > 1 && has(menu.id)) ? ('Метки · выбрано ' + sel.length) : 'Метки'"></div>
+            @forelse($this->labels as $label)
+                <button type="button" wire:key="cm-{{ $label->id }}" @click="toggleLabel({{ $label->id }})">
+                    <span class="tick" x-text="hasLabel({{ $label->id }}) ? '✓' : ''"></span>
+                    <span class="swatch" style="background:{{ $label->fg() }}"></span>
+                    <span>{{ $label->name }}</span>
+                </button>
+            @empty
+                <div class="sec" style="text-transform:none;letter-spacing:0;font-weight:400">Меток пока нет — заведите первую ниже.</div>
+            @endforelse
+
+            <div class="newlbl">
+                <input type="text" x-model="newLabel" maxlength="{{ \App\Models\MailLabel::NAME_MAX }}"
+                       placeholder="Новая метка" @keydown.enter.prevent="addLabel()" @keydown.stop>
+                <button type="button" @click="addLabel()">+</button>
+            </div>
+
+            <div class="sep"></div>
+            <button type="button" @click="$wire.markManyRead(targets()); closeMenu()">Прочитано</button>
+            <button type="button" @click="$wire.markManyUnread(targets()); closeMenu()">Непрочитано</button>
+            <button type="button" @click="$wire.toggleFlag(menu.id); closeMenu()">⚑ Пометить</button>
+            <div class="sep"></div>
+            <div class="sec" style="text-transform:none;letter-spacing:0;font-weight:400">
+                Метки общие для всех, кто видит этот ящик.
+            </div>
+        </div>
+
+        {{-- Рукоятка ширины списка: тянем мышью, двойной клик — вернуть 400 px. --}}
+        <div class="bresize" :class="{ dragging: drag }"
+             @mousedown.prevent="startResize($event)" @dblclick="resetWidth()"
+             title="Потяните, чтобы изменить ширину списка. Двойной клик — вернуть по умолчанию"></div>
     </div>
 
     {{-- ══════════ PANE C — чтение ══════════ --}}
