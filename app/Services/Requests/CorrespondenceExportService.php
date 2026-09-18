@@ -44,7 +44,6 @@ class CorrespondenceExportService
     {
         $query = EmailMessage::query()
             ->where('related_request_id', $request->id)
-            ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
             ->where('is_draft', false)
             ->with([
                 'attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline,file_path,disk',
@@ -58,7 +57,10 @@ class CorrespondenceExportService
             $query->whereIn('id', $ids ?: [0]);
         }
 
-        return $query->get();
+        // Дубли-копии убираем в PHP: копию, чей оригинал увели в другую
+        // заявку, прятать нельзя — иначе письма в переписке не останется
+        // вовсе. Правило одно на карточку и на выгрузку.
+        return EmailMessage::dropDuplicateCopies($query->get());
     }
 
     /**

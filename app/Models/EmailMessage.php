@@ -139,6 +139,32 @@ class EmailMessage extends Model
         return $this->belongsTo(Request::class, 'related_request_id');
     }
 
+    /**
+     * Убрать из треда cross-mailbox копии, ОРИГИНАЛ которых в этом же треде.
+     *
+     * Копия — то же письмо, доставленное в личный ящик менеджера
+     * (detected_artifacts.cross_mailbox_copy_of). Дважды показывать его не
+     * надо, но и прятать копию, чей оригинал увели в другую заявку, нельзя:
+     * тогда письма в переписке не остаётся вовсе (кейс M-2026-15292 — ответ
+     * клиента породил новую заявку, оригинал ушёл туда, а копия здесь
+     * пряталась как дубль).
+     *
+     * @param  \Illuminate\Support\Collection<int, self>  $thread
+     * @return \Illuminate\Support\Collection<int, self>
+     */
+    public static function dropDuplicateCopies(\Illuminate\Support\Collection $thread): \Illuminate\Support\Collection
+    {
+        $presentIds = $thread->pluck('id')->flip();
+
+        return $thread
+            ->reject(function (self $message) use ($presentIds): bool {
+                $originId = data_get($message->detected_artifacts, 'cross_mailbox_copy_of');
+
+                return $originId !== null && $presentIds->has((int) $originId);
+            })
+            ->values();
+    }
+
     /** Метки письма — их может быть несколько, в отличие от папки. */
     public function labels(): BelongsToMany
     {

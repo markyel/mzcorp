@@ -156,13 +156,8 @@ class Detail extends Component
         // отсортированы по sent_at для естественной хронологии. NULL sent_at
         // (редкие письма без Date header) уходят в конец.
         // Phase 1.9: visibleTo фильтрует чужие черновики (свои показываются).
-        $this->thread = EmailMessage::query()
+        $thread = EmailMessage::query()
             ->where('related_request_id', $this->request->id)
-            // Скрываем cross-mailbox копии — то же письмо, доставленное
-            // в личный ящик менеджера через DeliverToManagerInboxJob
-            // (detected_artifacts.cross_mailbox_copy_of). Показываем
-            // только оригинал, чтобы в треде не дублировалось.
-            ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
             // Переписка с ПОСТАВЩИКОМ, ПРИВЯЗАННАЯ к инквайри (supplier_inquiry_id),
             // живёт в табе «Поставщики» и в клиентский тред не попадает. НО письма
             // rfq@mzcorp.ru CC / супплаер-реплаи без инквайри (supplier_inquiry_id
@@ -180,6 +175,12 @@ class Detail extends Component
             ->orderByRaw('sent_at IS NULL, sent_at ASC')
             ->orderBy('id')
             ->get();
+
+        // Cross-mailbox копии убираем только там, где в треде есть оригинал —
+        // см. EmailMessage::dropDuplicateCopies (кейс M-2026-15292: письмо
+        // клиента от 15.09 пропало из карточки, потому что оригинал ушёл в
+        // новую заявку, а копия здесь пряталась как дубль).
+        $this->thread = EmailMessage::dropDuplicateCopies($thread);
 
         if (! in_array($this->tab, self::TABS, true)) {
             $this->tab = 'overview';
