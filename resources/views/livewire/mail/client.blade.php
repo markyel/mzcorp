@@ -33,6 +33,13 @@
         }
         return [$name, $email, true, max(0, $to->count() - 1)];
     };
+    $plural = function (int $n): string {
+        $n10 = $n % 10;
+        $n100 = $n % 100;
+        if ($n10 === 1 && $n100 !== 11) return 'письмо';
+        if ($n10 >= 2 && $n10 <= 4 && ($n100 < 12 || $n100 > 14)) return 'письма';
+        return 'писем';
+    };
     $catChip = function ($cat) {
         return match ($cat) {
             'client_request' => ['заявка', 'kp'],
@@ -262,6 +269,21 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .chead .dec.skipped b,.mailapp .chead .dec.none b{color:var(--fg-3)}
 .mailapp .chead .reqlink .spacer{flex:1}
 .mailapp .chead .reqlink a{color:var(--violet-700);font-weight:600;text-decoration:none;border-bottom:1px dashed currentColor}
+/* Полоса «ещё письма в переписке»: открыто ровно выбранное письмо, соседние —
+   свёрнутым списком, клик по строке открывает её. */
+.mailapp .tstrip{border-bottom:1px solid var(--border-subtle);background:var(--bg-app)}
+.mailapp .tstrip-head{display:flex;align-items:center;gap:6px;width:100%;border:none;background:none;cursor:pointer;
+    padding:7px 24px;font:500 12px/1 var(--font-sans);color:var(--fg-2);text-align:left}
+.mailapp .tstrip-head:hover{color:var(--fg-1)}
+.mailapp .tstrip-list{padding:0 12px 6px}
+.mailapp .tstrip-item{display:flex;align-items:center;gap:8px;width:100%;border:none;background:none;cursor:pointer;
+    padding:5px 12px;border-radius:6px;font:400 12px/1.3 var(--font-sans);color:var(--fg-2);text-align:left}
+.mailapp .tstrip-item:hover{background:var(--bg-hover)}
+.mailapp .tstrip-item.cur{background:var(--bg-selected);color:var(--fg-1);font-weight:500}
+.mailapp .tstrip-item .dir{width:10px;flex-shrink:0;color:var(--fg-4)}
+.mailapp .tstrip-item .who{width:180px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mailapp .tstrip-item .sub{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg-3)}
+.mailapp .tstrip-item .when{flex-shrink:0;font:400 11px/1 var(--font-mono);color:var(--fg-4)}
 .mailapp .cbody{flex:1;overflow-y:auto;padding:0 24px}
 .mailapp .msg{border-bottom:1px solid var(--border-subtle);padding:14px 0 20px}
 .mailapp .msg.draft{background:var(--warn-soft, #f6ecd6);margin:0 -24px;padding:14px 24px 16px;border-left:3px solid var(--warn, #9c7420)}
@@ -797,8 +819,36 @@ body.mail-resizing iframe{pointer-events:none}
                 @endif
             </div>
 
+            {{-- Остальные письма переписки — свёрнутым списком. Показываем ровно
+                 то письмо, которое выбрали в списке (как в обычном почтовике);
+                 к соседним можно перейти отсюда одним кликом. --}}
+            @php $others = $thread->reject(fn ($m) => (int) $m->id === (int) $anchor->id); @endphp
+            @if($others->isNotEmpty())
+                <div class="tstrip" x-data="{ open: false }">
+                    <button type="button" class="tstrip-head" @click="open = ! open">
+                        <span x-text="open ? '▾' : '▸'"></span>
+                        <span>Ещё {{ $others->count() }} {{ $plural($others->count()) }} в этой переписке</span>
+                    </button>
+                    <div class="tstrip-list" x-show="open" x-cloak>
+                        @foreach(($threadSort === 'desc' ? $thread->reverse() : $thread) as $m)
+                            @php [$sName, $sEmail, $sIsTo] = $counterparty($m); @endphp
+                            <button type="button" wire:key="ts-{{ $m->id }}"
+                                    class="tstrip-item {{ (int) $m->id === (int) $anchor->id ? 'cur' : '' }}"
+                                    wire:click="openMessage({{ $m->id }})">
+                                <span class="dir">{{ $m->direction?->value === 'outbound' ? '↑' : '↓' }}</span>
+                                <span class="who">{{ $sIsTo ? 'кому: ' : '' }}{{ \Illuminate\Support\Str::limit($sName ?: $sEmail, 28) }}</span>
+                                <span class="sub">{{ \Illuminate\Support\Str::limit($m->subject ?: '(без темы)', 42) }}</span>
+                                @if($m->attachments->isNotEmpty())<span class="clip">📎</span>@endif
+                                <span class="when">{{ $fmtWhen($m->is_draft ? ($m->last_edited_at ?? $m->created_at) : $m->sent_at) }}</span>
+                            </button>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
+
             <div class="cbody">
-                @foreach(($threadSort === 'desc' ? $thread->reverse() : $thread) as $msg)
+                @php $openMsg = $thread->firstWhere('id', $anchor->id) ?? $anchor; @endphp
+                @foreach([$openMsg] as $msg)
                     @php $outbound = $msg->direction?->value === 'outbound'; $html = $this->bodyHtmlFor($msg); @endphp
                     <div class="msg {{ $msg->is_draft ? 'draft' : ($outbound ? 'outbound' : '') }}" wire:key="msg-{{ $msg->id }}">
                         <div class="mhead">
@@ -903,11 +953,13 @@ body.mail-resizing iframe{pointer-events:none}
                 @endforeach
             </div>
 
-            @php $lastMsg = $thread->reject(fn ($m) => $m->is_draft)->last() ?? $anchor; @endphp
+            {{-- Отвечаем на ОТКРЫТОЕ письмо, а не на последнее в переписке:
+                 на экране именно оно, и ответ должен уйти в его тред. --}}
+            @php $replyTo = $openMsg->is_draft ? ($thread->reject(fn ($m) => $m->is_draft)->last() ?? $anchor) : $openMsg; @endphp
             <div class="cfoot">
                 <div class="replybtns">
-                    <button class="primary" wire:click="reply({{ $lastMsg->id }})">Ответить</button>
-                    <button wire:click="replyAll({{ $lastMsg->id }})">Ответить всем</button>
+                    <button class="primary" wire:click="reply({{ $replyTo->id }})">Ответить</button>
+                    <button wire:click="replyAll({{ $replyTo->id }})">Ответить всем</button>
                 </div>
                 <div class="cfoot-hint">Переслать конкретное письмо — кнопкой у самого письма выше</div>
             </div>

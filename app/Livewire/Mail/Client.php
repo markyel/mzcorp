@@ -240,11 +240,12 @@ class Client extends Component
         $this->openId = $id;
         unset($this->openThread, $this->openAnchor);
 
-        $thread = $this->buildThread($anchor);
-        $ids = $thread->pluck('id')->all();
-        app(MailReadService::class)->markManyRead($ids, $this->user());
+        // Прочитанным помечаем ТОЛЬКО открытое письмо, как в обычном почтовике.
+        // Раньше открытие гасило всю переписку — при показе одного письма это
+        // прятало бы непрочитанные соседние письма из счётчиков.
+        app(MailReadService::class)->markManyRead([$anchor->id], $this->user());
         // Владелец личного ящика → \Seen на сервере (для чужих ящиков — no-op).
-        app(ImapSeenSyncService::class)->pushSeen($ids, $this->user(), true);
+        app(ImapSeenSyncService::class)->pushSeen([$anchor->id], $this->user(), true);
 
         // Обновить список (снять «непрочитано») и счётчики.
         unset($this->threads, $this->folders, $this->mailboxes);
