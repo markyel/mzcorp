@@ -940,10 +940,22 @@ class Detail extends Component
         }
 
         $messageId = $email->id;
+        // Те же правила, что в App\Livewire\Concerns\RendersEmailBody: cid, на
+        // который в этом письме нет вложения (типовой случай — картинка в
+        // цитате, которую почтовый клиент в ответ не перевкладывает), заменяем
+        // прозрачным пикселем, иначе каждый рендер даёт 404 и битую иконку.
+        $known = \App\Livewire\Concerns\RendersEmailBody::knownContentIds($email);
+        $missingPixel = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
         $html = preg_replace_callback(
             '/(src|href)\s*=\s*(["\'])cid:([^"\']+)\2/i',
-            function ($m) use ($messageId) {
+            function ($m) use ($messageId, $known, $missingPixel) {
+                if (! isset($known[\App\Livewire\Concerns\RendersEmailBody::normalizeContentId($m[3])])) {
+                    return $m[1] === 'href'
+                        ? 'href=' . $m[2] . '#' . $m[2] . ' data-cid-missing="1"'
+                        : 'src=' . $m[2] . $missingPixel . $m[2] . ' data-cid-missing="1"';
+                }
+
                 $url = route('attachments.inline', [
                     'emailMessage' => $messageId,
                     'contentId' => rawurlencode($m[3]),

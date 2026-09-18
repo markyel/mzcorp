@@ -1560,7 +1560,7 @@
                                                                 a.rel = 'noopener noreferrer';
                                                             });
                                                             const s = doc.createElement('style');
-                                                            s.textContent = 'html,body{margin:0;padding:0}body{padding:8px 12px;font:13px/1.55 system-ui,-apple-system,Segoe UI,Inter,sans-serif;color:#0a0a0a;word-break:break-word}img{max-width:100%;height:auto}';
+                                                            s.textContent = 'html,body{margin:0;padding:0}body{padding:8px 12px;font:13px/1.55 system-ui,-apple-system,Segoe UI,Inter,sans-serif;color:#0a0a0a;word-break:break-word}img{max-width:100%;height:auto}img[data-cid-missing]{width:14px!important;height:14px!important;opacity:.35}';
                                                             (doc.head || doc.documentElement).appendChild(s);
                                                             try { new ResizeObserver(fit).observe(doc.documentElement); } catch (e) {}
                                                             {{-- toggle не всплывает, ловим на capture: сворачивание цитаты

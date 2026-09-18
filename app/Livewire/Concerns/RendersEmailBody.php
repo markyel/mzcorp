@@ -18,6 +18,9 @@ trait RendersEmailBody
      * Заменить cid:NNN в src/href HTML body на inline-роут вложений + свернуть
      * цитаты в `<details>`.
      */
+    /** Прозрачный 1×1 GIF — подстановка вместо картинки, которой в письме нет. */
+    private const MISSING_CID_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
     public function bodyHtmlFor(EmailMessage $email): ?string
     {
         if (! $email->body_html) {
@@ -25,10 +28,21 @@ trait RendersEmailBody
         }
 
         $messageId = $email->id;
+        $known = static::knownContentIds($email);
 
         $html = preg_replace_callback(
             '/(src|href)\s*=\s*(["\'])cid:([^"\']+)\2/i',
-            function ($m) use ($messageId) {
+            function ($m) use ($messageId, $known) {
+                // Цитата в ответе сохраняет <img src="cid:…">, а сами картинки
+                // почтовые клиенты в ответ НЕ перевкладывают. Ссылаться на
+                // такой cid нельзя: каждый рендер письма давал 404 в консоли и
+                // иконку битой картинки. Подставляем прозрачный пиксель.
+                if (! isset($known[static::normalizeContentId($m[3])])) {
+                    return $m[1] === 'href'
+                        ? 'href='.$m[2].'#'.$m[2].' data-cid-missing="1"'
+                        : 'src='.$m[2].self::MISSING_CID_PIXEL.$m[2].' data-cid-missing="1"';
+                }
+
                 $url = route('attachments.inline', [
                     'emailMessage' => $messageId,
                     'contentId' => rawurlencode($m[3]),
@@ -40,6 +54,35 @@ trait RendersEmailBody
         ) ?? $email->body_html;
 
         return $this->collapseQuotedBlocks($html);
+    }
+
+    /**
+     * content_id вложений письма в нормализованном виде — ключи для проверки
+     * «есть ли на что ссылаться».
+     *
+     * @return array<string, true>
+     */
+    public static function knownContentIds(EmailMessage $email): array
+    {
+        $ids = $email->relationLoaded('attachments')
+            ? $email->attachments->pluck('content_id')
+            : $email->attachments()->whereNotNull('content_id')->pluck('content_id');
+
+        $out = [];
+        foreach ($ids as $cid) {
+            $key = static::normalizeContentId((string) $cid);
+            if ($key !== '') {
+                $out[$key] = true;
+            }
+        }
+
+        return $out;
+    }
+
+    /** cid без угловых скобок, пробелов и процент-кодирования, в нижнем регистре. */
+    public static function normalizeContentId(?string $cid): string
+    {
+        return mb_strtolower(trim(rawurldecode((string) $cid), "<> \t"));
     }
 
     private function collapseQuotedBlocks(string $html): string
