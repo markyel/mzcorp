@@ -123,12 +123,14 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .trow[draggable]{-webkit-user-drag:element}
 .dragghost{position:fixed;top:-100px;left:-100px;padding:6px 12px;border-radius:999px;background:var(--fg-1,#0f1419);color:#fff;font:600 12px/1 system-ui,sans-serif;pointer-events:none;z-index:9999}
 /* Высота фиксирована и перенос запрещён: закреплённая панель не должна менять
-   высоту при выделении, иначе список писем под ней дёргается. Что не влезло по
-   ширине — уезжает в горизонтальную прокрутку, а не на вторую строку. */
+   высоту при выделении, иначе список писем под ней дёргается. Прокрутку по
+   горизонтали НЕ включаем — overflow на панели обрезал бы выпадающее меню
+   «В папку», которое лежит внутри неё. Содержимое подобрано так, чтобы
+   влезать в колонку 400 px; что не влезет при ещё более узкой — обрежет сам
+   список (paneB), меню при этом остаётся видимым. */
 .mailapp .bulkbar{display:flex;align-items:center;flex-wrap:nowrap;gap:4px;height:38px;padding:0 10px;
     background:var(--sky-50);border-bottom:1px solid var(--border-subtle);font:400 11.5px/1 var(--font-sans);
-    color:var(--fg-2);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
-.mailapp .bulkbar::-webkit-scrollbar{height:0}
+    color:var(--fg-2)}
 .mailapp .bulkbar > *{flex-shrink:0}
 /* Счётчик сжимается первым: кнопки действий важнее подписи. */
 .mailapp .bulkbar .cnt{margin-right:4px;color:var(--fg-1);white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
@@ -462,7 +464,8 @@ body.mail-resizing iframe{pointer-events:none}
             },
             closeMenu() { this.menu.open = false; },
             /* На что действуем: на выделение, если правый клик был по нему. */
-            targets() { return (this.sel.length > 1 && this.has(this.menu.id)) ? this.sel : [this.menu.id]; },
+            /* Копия, а не прокси Alpine: в $wire реактивный массив уезжает пустым. */
+            targets() { return (this.sel.length > 1 && this.has(this.menu.id)) ? [...this.sel] : [this.menu.id]; },
             hasLabel(labelId) { return this.menu.labels.includes(labelId); },
             toggleLabel(labelId) {
                 const ids = this.targets();
@@ -621,15 +624,18 @@ body.mail-resizing iframe{pointer-events:none}
                 <template x-if="sel.length"><span>Выбрано <b x-text="sel.length"></b></span></template>
                 <template x-if="! sel.length"><span class="idle-hint">Выберите письма</span></template>
             </span>
-            <button type="button" :disabled="! sel.length" @click="$wire.markManyRead(sel)" title="Пометить прочитанными">Прочитано</button>
-            <button type="button" :disabled="! sel.length" @click="$wire.markManyUnread(sel)" title="Пометить непрочитанными">Непрочитано</button>
+            {{-- В $wire уходит КОПИЯ массива: sel — реактивный прокси Alpine,
+                 и Livewire доезжал до сервера с пустым списком (действия молча
+                 ничего не делали). Спред снимает прокси. --}}
+            <button type="button" :disabled="! sel.length" @click="$wire.markManyRead([...sel])" title="Пометить прочитанными">Прочитано</button>
+            <button type="button" :disabled="! sel.length" @click="$wire.markManyUnread([...sel])" title="Пометить непрочитанными">Непрочитано</button>
             <span class="rte-pop">
                 <button type="button" :disabled="! sel.length" @click="moveOpen = !moveOpen">В папку ▾</button>
                 <div class="bulkmenu" x-show="moveOpen" x-cloak @click.outside="moveOpen = false">
-                    <button type="button" @click="$wire.moveToFolder(sel, null); moveOpen = false">Входящие</button>
+                    <button type="button" @click="$wire.moveToFolder([...sel], null); moveOpen = false">Входящие</button>
                     @foreach($this->customFolders as $cf)
                         <button type="button" wire:key="bm-{{ $cf['id'] }}" style="padding-left: {{ 10 + $cf['depth'] * 12 }}px"
-                                @click="$wire.moveToFolder(sel, {{ $cf['id'] }}); moveOpen = false">{{ $cf['name'] }}</button>
+                                @click="$wire.moveToFolder([...sel], {{ $cf['id'] }}); moveOpen = false">{{ $cf['name'] }}</button>
                     @endforeach
                     @if(empty($this->customFolders))<div class="hint">Папок ещё нет — создайте в списке слева.</div>@endif
                 </div>

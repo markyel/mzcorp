@@ -468,12 +468,24 @@ class Client extends Component
             return [];
         }
 
-        return EmailMessage::query()
+        $allowed = EmailMessage::query()
             ->whereIn('mailbox_id', app(MailboxAccessService::class)->mailboxIdsFor($this->user()))
             ->whereKey($ids)
             ->pluck('id')
             ->map(fn ($v) => (int) $v)
             ->all();
+
+        // Массовое действие «молча ничего не делает» выглядит как сломанная
+        // кнопка. Если список пришёл, а после проверки доступа опустел —
+        // оставляем след, иначе такое не диагностируется.
+        if ($allowed === []) {
+            \Illuminate\Support\Facades\Log::info('Mail\Client: bulk action got no accessible ids', [
+                'user_id' => $this->user()?->id,
+                'requested' => count($ids),
+            ]);
+        }
+
+        return $allowed;
     }
 
     private function pluralLetters(int $n): string
