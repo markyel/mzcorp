@@ -945,6 +945,24 @@ return [
             : 'https://api.direct.yandex.com/json/v5/',
         'oauth_authorize_url' => 'https://oauth.yandex.ru/authorize',
         'oauth_token_url' => 'https://oauth.yandex.ru/token',
+
+        /*
+         * YML-фид товарной кампании. В нём только позиции «остаток > 0 и цена
+         * актуальна» — те, по которым клиент получит цену сразу. Адрес закрыт
+         * токеном: фид раскрывает розничные цены, которых на сайте анонимному
+         * посетителю не видно.
+         */
+        'feed' => [
+            'token' => env('YANDEX_DIRECT_FEED_TOKEN'),
+            'shop_url' => env('YANDEX_DIRECT_FEED_SHOP_URL', 'https://myzip.ru'),
+            'product_url' => env(
+                'YANDEX_DIRECT_FEED_PRODUCT_URL',
+                'https://www.mylift.ru/ru/?com=shop&srv=product&code={sku}',
+            ),
+            'utm_source' => env('YANDEX_DIRECT_FEED_UTM_SOURCE', 'yandex'),
+            'utm_medium' => env('YANDEX_DIRECT_FEED_UTM_MEDIUM', 'cpc'),
+            'utm_campaign' => env('YANDEX_DIRECT_FEED_UTM_CAMPAIGN', 'direct_products'),
+        ],
     ],
 
 ];

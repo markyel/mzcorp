@@ -14,6 +14,7 @@ use App\Http\Controllers\SupportAttachmentController;
 use App\Http\Controllers\Marketing\MarketingReportController;
 use App\Http\Controllers\MarketingBlockImageController;
 use App\Http\Controllers\UserAvatarController;
+use App\Http\Controllers\YandexDirectFeedController;
 use App\Models\ChangelogEntry;
 use App\Models\ClientContact;
 use App\Models\ClientNotificationTemplate;
@@ -48,6 +49,13 @@ Route::get('/feeds/liftway/in-transit.yml', [LiftwayFeedController::class, 'inTr
 // ТЕСТОВЫЙ фид полной карточки товара (100 позиций, config full_limit).
 Route::get('/feeds/liftway/full.yml', [LiftwayFeedController::class, 'full'])
     ->name('feeds.liftway.full');
+
+// YML-фид товарной кампании Яндекс.Директа. БЕЗ auth (забирает робот Яндекса),
+// секрет — в самом адресе: фид раскрывает розничные цены, которых на сайте
+// анонимному посетителю не видно. Токен в YANDEX_DIRECT_FEED_TOKEN.
+Route::get('/feeds/direct/{token}/products.yml', [YandexDirectFeedController::class, 'products'])
+    ->where('token', '[A-Za-z0-9_-]{16,128}')
+    ->name('feeds.direct.products');
 
 Route::get('/dashboard', function () {
     return view('dashboard');
