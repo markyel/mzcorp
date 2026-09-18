@@ -119,6 +119,11 @@ class Client extends Component
         $this->threadSort = in_array($user?->thread_sort_order, ['asc', 'desc'], true)
             ? $user->thread_sort_order
             : 'asc';
+
+        // ?label=<id> из чужой ссылки: метки личные, чужую не применяем.
+        if ($this->labelId !== null && $this->myLabel($this->labelId) === null) {
+            $this->labelId = null;
+        }
     }
 
     private function canAccess(): bool
@@ -478,25 +483,34 @@ class Client extends Component
 
     /* ----------------------------- Метки ----------------------------- */
 
-    /** Словарь меток — общий на компанию. */
+    /** Метки ТЕКУЩЕГО пользователя: набор личный, чужие не показываем. */
     #[Computed]
     public function labels(): Collection
     {
-        return MailLabel::query()->orderBy('sort_order')->orderBy('name')->get();
+        return MailLabel::query()->ownedBy($this->user())
+            ->orderBy('sort_order')->orderBy('name')->get();
     }
 
-    /** Сколько писем под каждой меткой в доступных ящиках. @return array<int,int> */
+    /** Сколько писем под каждой моей меткой в доступных ящиках. @return array<int,int> */
     #[Computed]
     public function labelCounts(): array
     {
         return app(MessageLabelService::class)->counts(
-            app(MailboxAccessService::class)->mailboxIdsFor($this->user())
+            app(MailboxAccessService::class)->mailboxIdsFor($this->user()),
+            $this->user(),
         );
+    }
+
+    /** Метка по id — только своя; чужую действие просто не найдёт. */
+    private function myLabel(int $labelId): ?MailLabel
+    {
+        return MailLabel::query()->ownedBy($this->user())->whereKey($labelId)->first();
     }
 
     public function filterByLabel(?int $labelId): void
     {
-        $this->labelId = $labelId ?: null;
+        // Фильтр только по своей метке: id из чужого набора молча сбрасываем.
+        $this->labelId = $labelId && $this->myLabel($labelId) !== null ? $labelId : null;
         $this->notice = null;
         $this->resetView();
     }
@@ -510,7 +524,7 @@ class Client extends Component
     public function toggleLabel(int $messageId, int $labelId): void
     {
         $message = $this->findAccessible($messageId);
-        $label = MailLabel::query()->find($labelId);
+        $label = $this->myLabel($labelId);
         if (! $message || ! $label) {
             return;
         }
@@ -526,7 +540,7 @@ class Client extends Component
     public function labelMany(array $ids, int $labelId, bool $on): void
     {
         $ids = $this->accessibleIds($ids);
-        $label = MailLabel::query()->find($labelId);
+        $label = $this->myLabel($labelId);
         if ($ids === [] || ! $label) {
             return;
         }
@@ -560,7 +574,7 @@ class Client extends Component
 
     public function renameLabel(int $labelId, string $name): void
     {
-        $label = MailLabel::query()->find($labelId);
+        $label = $this->myLabel($labelId);
         if (! $label) {
             return;
         }
@@ -573,7 +587,7 @@ class Client extends Component
 
     public function recolorLabel(int $labelId, string $color): void
     {
-        $label = MailLabel::query()->find($labelId);
+        $label = $this->myLabel($labelId);
         if (! $label) {
             return;
         }
@@ -583,7 +597,7 @@ class Client extends Component
 
     public function deleteLabel(int $labelId): void
     {
-        $label = MailLabel::query()->find($labelId);
+        $label = $this->myLabel($labelId);
         if (! $label) {
             return;
         }
@@ -773,6 +787,8 @@ class Client extends Component
     #[Computed]
     public function threads(): Collection
     {
+        $uid = (int) ($this->user()?->id ?? 0);
+
         return $this->folderQuery(MailFolder::tryFromOrDefault($this->folder))
             // Узкий select: строка списка = шапка + сниппет, тела не нужны.
             // С `email_messages.*` уезжали body_html/body_plain/raw_source всех
@@ -798,7 +814,9 @@ class Client extends Component
             ])
             ->selectRaw('LEFT(email_messages.body_plain, 200) as body_plain')
             ->with('relatedRequest:id,internal_code,status,onec_number')
-            ->with('labels:id,name,color')
+            // Только СВОИ метки: набор личный, чужие чипы в строке не нужны.
+            ->with(['labels' => fn ($q) => $q->select('mail_labels.id', 'name', 'color')
+                ->where('mail_labels.owner_user_id', $uid)])
             ->withCount('attachments')
             ->orderByRaw('email_messages.sent_at DESC NULLS LAST')
             ->orderByDesc('email_messages.id')

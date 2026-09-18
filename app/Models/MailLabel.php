@@ -2,13 +2,15 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
- * Метка письма в почтовом клиенте. Словарь общий на компанию — см. миграцию
- * 2026_09_18_170000_create_mail_labels_tables.
+ * Метка письма в почтовом клиенте. Набор ЛИЧНЫЙ: у каждого менеджера свой,
+ * чужие метки он не видит и не трогает (решение заказчика 18.09.2026, см.
+ * миграцию 2026_09_18_190000_make_mail_labels_personal).
  */
 class MailLabel extends Model
 {
@@ -24,7 +26,7 @@ class MailLabel extends Model
 
     public const NAME_MAX = 40;
 
-    protected $fillable = ['name', 'color', 'sort_order', 'created_by_user_id'];
+    protected $fillable = ['owner_user_id', 'name', 'color', 'sort_order', 'created_by_user_id'];
 
     protected function casts(): array
     {
@@ -34,6 +36,22 @@ class MailLabel extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
+    public function owner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'owner_user_id');
+    }
+
+    /** Метки конкретного пользователя — единственный допустимый способ их читать. */
+    public function scopeOwnedBy(Builder $q, ?User $user): Builder
+    {
+        return $q->where('owner_user_id', $user?->id ?? 0);
+    }
+
+    public function belongsToUser(?User $user): bool
+    {
+        return $user !== null && (int) $this->owner_user_id === (int) $user->id;
     }
 
     public function messages(): BelongsToMany

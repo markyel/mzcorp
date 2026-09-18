@@ -14,30 +14,35 @@ use Illuminate\Support\Facades\DB;
  * чтобы секретарь видел пометку в вебе. Здесь метки живут только в mzCorp,
  * их может быть у письма сколько угодно, и они ничего не шлют наружу.
  *
- * Словарь общий на компанию, поэтому создание идёт через нормализацию имени и
- * поиск существующей метки без учёта регистра — иначе из «Тендер» и «тендер»
- * получились бы две разные метки с одинаковым смыслом.
+ * Набор меток ЛИЧНЫЙ: у каждого менеджера свой. Поэтому имя уникально в
+ * пределах владельца («Срочно» может быть у каждого), а поиск существующей
+ * метки идёт по владельцу и имени без учёта регистра — иначе у одного человека
+ * из «Тендер» и «тендер» получились бы две метки с одинаковым смыслом.
  */
 class MessageLabelService
 {
-    /** Найти существующую метку по имени (без учёта регистра) или создать. */
-    public function findOrCreate(string $name, ?string $color, ?User $by): ?MailLabel
+    /** Найти метку пользователя по имени (без учёта регистра) или создать. */
+    public function findOrCreate(string $name, ?string $color, ?User $owner): ?MailLabel
     {
         $name = MailLabel::normalizeName($name);
-        if ($name === '') {
+        if ($name === '' || $owner === null) {
             return null;
         }
 
-        $existing = MailLabel::query()->whereRaw('lower(name) = lower(?)', [$name])->first();
+        $existing = MailLabel::query()
+            ->ownedBy($owner)
+            ->whereRaw('lower(name) = lower(?)', [$name])
+            ->first();
         if ($existing !== null) {
             return $existing;
         }
 
         return MailLabel::create([
+            'owner_user_id' => $owner->id,
             'name' => $name,
             'color' => MailLabel::isValidColor($color) ? $color : 'sky',
-            'sort_order' => (int) MailLabel::query()->max('sort_order') + 1,
-            'created_by_user_id' => $by?->id,
+            'sort_order' => (int) MailLabel::query()->ownedBy($owner)->max('sort_order') + 1,
+            'created_by_user_id' => $owner->id,
         ]);
     }
 
@@ -48,6 +53,7 @@ class MessageLabelService
             return false;
         }
         $taken = MailLabel::query()
+            ->where('owner_user_id', $label->owner_user_id)
             ->whereRaw('lower(name) = lower(?)', [$name])
             ->whereKeyNot($label->id)
             ->exists();
@@ -130,19 +136,21 @@ class MessageLabelService
     }
 
     /**
-     * Сколько писем помечено каждой меткой — для счётчиков в фильтре.
+     * Сколько писем помечено каждой меткой ВЛАДЕЛЬЦА — для счётчиков в фильтре.
      *
      * @param  array<int, int>  $mailboxIds
      * @return array<int, int> label_id => количество
      */
-    public function counts(array $mailboxIds): array
+    public function counts(array $mailboxIds, ?User $owner): array
     {
-        if ($mailboxIds === []) {
+        if ($mailboxIds === [] || $owner === null) {
             return [];
         }
 
         return DB::table('email_message_labels as eml')
             ->join('email_messages as m', 'm.id', '=', 'eml.email_message_id')
+            ->join('mail_labels as l', 'l.id', '=', 'eml.mail_label_id')
+            ->where('l.owner_user_id', $owner->id)
             ->whereIn('m.mailbox_id', $mailboxIds)
             ->groupBy('eml.mail_label_id')
             ->selectRaw('eml.mail_label_id, count(*) as n')

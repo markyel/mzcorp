@@ -531,7 +531,7 @@ body.mail-resizing iframe{pointer-events:none}
                                             wire:confirm="Удалить метку «{{ $label->name }}»? Она исчезнет со всех писем.">Удалить</button>
                                 </div>
                             @endforeach
-                            <div class="hint">Метки общие: их видят все, кто работает с этими ящиками.</div>
+                            <div class="hint">Метки личные: ваш набор, коллеги его не видят.</div>
                         </div>
                     </span>
                 </div>
@@ -692,7 +692,7 @@ body.mail-resizing iframe{pointer-events:none}
             <button type="button" @click="$wire.toggleFlag(menu.id); closeMenu()">⚑ Пометить</button>
             <div class="sep"></div>
             <div class="sec" style="text-transform:none;letter-spacing:0;font-weight:400">
-                Метки общие для всех, кто видит этот ящик.
+                Метки личные — у каждого свой набор.
             </div>
         </div>
 
