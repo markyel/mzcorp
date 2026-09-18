@@ -11,6 +11,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\CorrespondencePdfController;
 use App\Http\Controllers\QuotationPdfController;
 use App\Http\Controllers\SupportAttachmentController;
+use App\Http\Controllers\Marketing\MarketingReportController;
 use App\Http\Controllers\MarketingBlockImageController;
 use App\Http\Controllers\UserAvatarController;
 use App\Models\ChangelogEntry;
@@ -411,6 +412,19 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/mailboxes', function () {
             return view('admin.mailboxes.index');
         })->name('mailboxes.index');
+
+        // Раздел «Маркетинг» — рабочее место по договору оказания маркетинговых
+        // услуг: доступы к внешним сервисам (шифрованные пароли), план и
+        // заметки, журнал работ, ежемесячный отчёт по форме Приложения № 1.
+        // Только админ — в разделе лежат пароли от рекламных кабинетов.
+        Route::get('/dashboard/marketing', function () {
+            return view('marketing.index');
+        })->name('marketing.index');
+
+        Route::get('/dashboard/marketing/reports/{report}/download',
+            [MarketingReportController::class, 'download'])
+            ->whereNumber('report')
+            ->name('marketing.report.download');
     });
 
     // Документация — рукописные гайды по ролям (resources/docs/{section}/*.md).
