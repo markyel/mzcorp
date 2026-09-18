@@ -439,8 +439,9 @@ class AssignmentService
 
     /**
      * Level 3: fallback по `parsed_article` (TRIM) / `parsed_name`
-     * (LOWER+TRIM). Используется когда catalog_item_id ещё не резолвлен
-     * и клиент пишет с нового email-адреса.
+     * (LOWER+TRIM) плюс нормализованные токены артикулов (ItemTokenizer).
+     * Используется когда catalog_item_id ещё не резолвлен и клиент пишет
+     * с нового email-адреса.
      *
      * @param  array<int, int>  $managerIds
      * @param  array<int, string>  $openStatuses
@@ -467,16 +468,45 @@ class AssignmentService
             ->values()
             ->all();
 
-        if (empty($articles) && empty($names)) {
+        // Нормализованные токены: точное сравнение строк ловит только
+        // побуквенные совпадения, а одну и ту же позицию клиент и площадка
+        // пишут по-разному — «MLKAT-X (VER-1)» против «MLKAT-X VER-1»
+        // (кейс M-2026-16404 / M-2026-16406: заявки ушли разным менеджерам,
+        // РОП переназначал руками). См. ItemTokenizer.
+        $tokens = ItemTokenizer::tokensFor($items);
+
+        if (empty($articles) && empty($names) && empty($tokens)) {
             return null;
         }
 
-        $matchClosure = function ($q) use ($articles, $names) {
+        $tokenSince = now()->subDays(max(1, (int) config('services.assignment.text_sticky_window_days', 30)));
+
+        $matchClosure = function ($q) use ($articles, $names, $tokens, $tokenSince) {
             if (! empty($articles)) {
                 $q->orWhereIn(DB::raw('TRIM(request_items.parsed_article)'), $articles);
             }
             if (! empty($names)) {
                 $q->orWhereIn(DB::raw('LOWER(TRIM(request_items.parsed_name))'), $names);
+            }
+            if (! empty($tokens)) {
+                // Окно — только для токенов: точное совпадение строки и так
+                // редкое, а нормализованное срабатывает заметно чаще, и старая
+                // открытая заявка притягивала бы к себе новые месяцами.
+                $q->orWhere(function ($t) use ($tokens, $tokenSince) {
+                    $t->where('requests.created_at', '>=', $tokenSince)
+                        ->where(function ($x) use ($tokens) {
+                            $x->orWhereIn(DB::raw(ItemTokenizer::sqlNormalize('request_items.parsed_article')), $tokens);
+                            // Артикул второй позиции нередко лежит внутри названия
+                            // первой («…MLKAT-X (VER-1), шинный модуль CAN1X»).
+                            foreach ($tokens as $token) {
+                                $x->orWhere(
+                                    DB::raw(ItemTokenizer::sqlNormalize('request_items.parsed_name')),
+                                    'like',
+                                    '%'.$token.'%',
+                                );
+                            }
+                        });
+                });
             }
         };
 
