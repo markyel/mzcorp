@@ -127,14 +127,16 @@ class YandexDirectFeedService
                 $this->param($w, 'Артикулы производителя', implode(', ', $codes));
             }
             $this->param($w, 'Наличие', 'на складе');
-            if ((int) $it->lead_time_days > 0) {
-                $this->param($w, 'Срок поставки, дней', (string) (int) $it->lead_time_days);
-            }
+            // lead_time_days НЕ выводим: у позиций в наличии он означает срок
+            // поставки СЛЕДУЮЩЕЙ партии (у 980 из 2435 это 60+ дней) и рядом
+            // с «на складе» читается как противоречие.
             if ((float) $it->weight > 0) {
                 $this->param($w, 'Вес, кг', (string) round((float) $it->weight, 3));
             }
+            // unit_name в каталоге хранит не единицу измерения, а узел лифта,
+            // к которому относится деталь, — так и подписываем.
             if (trim((string) $it->unit_name) !== '') {
-                $this->param($w, 'Единица', (string) $it->unit_name);
+                $this->param($w, 'Узел', mb_substr((string) $it->unit_name, 0, 200));
             }
 
             $w->endElement(); // offer
@@ -191,12 +193,14 @@ class YandexDirectFeedService
 
     /**
      * Коды производителя позиции (articles + brand_article), нормализованные и
-     * без дублей.
+     * без дублей. Наш собственный M-артикул отбрасываем: в `articles` он лежит
+     * у 648 позиций из 2435, а «артикулом производителя» не является.
      *
      * @return array<int, string>
      */
     public static function codes(object $item): array
     {
+        $ownSku = mb_strtoupper(trim((string) ($item->sku ?? '')));
         $raw = $item->articles ?? [];
         if (is_string($raw)) {
             $raw = json_decode($raw, true) ?: [];
@@ -210,6 +214,10 @@ class YandexDirectFeedService
         foreach ($raw as $code) {
             $code = trim((string) $code);
             if ($code === '' || mb_strlen($code) > 60) {
+                continue;
+            }
+            $upper = mb_strtoupper($code);
+            if ($ownSku !== '' && $upper === $ownSku) {
                 continue;
             }
             // Побеждает ПЕРВОЕ написание: в articles код приведён к виду

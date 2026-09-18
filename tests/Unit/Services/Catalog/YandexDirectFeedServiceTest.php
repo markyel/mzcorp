@@ -70,6 +70,19 @@ class YandexDirectFeedServiceTest extends TestCase
         $this->assertSame(['ZAA177CAB1', 'GAA453BM1'], YandexDirectFeedService::codes($item));
     }
 
+    public function test_codes_drop_our_own_article(): void
+    {
+        // В articles у части позиций лежит наш же M-артикул — производителя он
+        // не обозначает и в «артикулах производителя» ему не место.
+        $item = (object) [
+            'sku' => 'M21678',
+            'articles' => ['LCD1003NL', 'M21678'],
+            'brand_article' => 'LCD1003NL',
+        ];
+
+        $this->assertSame(['LCD1003NL'], YandexDirectFeedService::codes($item));
+    }
+
     public function test_codes_survive_empty_input(): void
     {
         $this->assertSame([], YandexDirectFeedService::codes((object) []));
