@@ -183,12 +183,13 @@ body.mail-resizing iframe{pointer-events:none}
     color:var(--fg-2);font:500 12.5px/1 var(--font-sans);white-space:nowrap}
 .mailapp .syncbtn:hover{background:var(--bg-hover);color:var(--fg-1)}
 .mailapp .syncbtn[disabled]{opacity:.6;cursor:default}
-/* Панель управления метками. Ширину держим в пределах списка: paneB —
-   overflow:hidden, и всё, что шире, просто срезается (цвета и «Удалить»
-   уезжали под панель чтения). */
-.mailapp .lblbar .rte-pop{position:relative;display:inline-flex}
-.mailapp .lblmgr{top:26px;left:0;right:auto;min-width:0;
-    width:calc(var(--paneB-w, 400px) - 28px);max-width:calc(100vw - 40px);padding:6px}
+/* Панель управления метками прижата к краям самого списка, а не к шестерёнке:
+   шестерёнка стоит в середине строки, и панель любой ширины уезжала бы за
+   правый край — paneB обрезает всё, что вышло за него (overflow:hidden). */
+.mailapp .blist-top{position:relative}
+.mailapp .lblmgr{position:absolute;top:100%;left:12px;right:12px;margin-top:2px;
+    width:auto;min-width:0;max-width:none;padding:6px;z-index:7}
+.mailapp .lblbar .mgrwrap{display:inline-flex}
 .mailapp .lblmgr .mgrhdr{padding:4px 6px 6px;font:600 11.5px/1 var(--font-sans);color:var(--fg-2)}
 .mailapp .lblmgr .lblrow{display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding:5px 4px;border-top:1px solid var(--border-subtle)}
 .mailapp .lblmgr .lblrow input{flex:1 1 100%;min-width:0;height:27px;border:1px solid var(--border);border-radius:5px;padding:0 6px;
@@ -508,9 +509,12 @@ body.mail-resizing iframe{pointer-events:none}
                     @endforeach
 
                     {{-- Управление словарём меток: переименовать, перекрасить, удалить. --}}
-                    <span class="rte-pop">
+                    {{-- Обёртка нужна ради @click.outside: он висит на ней, а не на
+                         самой панели — иначе клик по шестерёнке считался бы «снаружи»
+                         и закрывал панель в тот же тик, в который она открывается. --}}
+                    <span class="mgrwrap" @click.outside="mgrOpen = false">
                         <button type="button" class="lblchip all" @click="mgrOpen = ! mgrOpen" title="Управление метками">⚙</button>
-                        <div class="bulkmenu lblmgr" x-show="mgrOpen" x-cloak @click.outside="mgrOpen = false">
+                        <div class="bulkmenu lblmgr" x-show="mgrOpen" x-cloak>
                             <div class="mgrhdr">Управление метками · имя и Enter, цвет — кружком</div>
                             @foreach($this->labels as $label)
                                 <div class="lblrow" wire:key="lm-{{ $label->id }}">
