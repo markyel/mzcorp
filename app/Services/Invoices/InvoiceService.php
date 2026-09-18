@@ -868,15 +868,55 @@ class InvoiceService
                 'status' => InvoiceStatus::Expired->value,
             ]);
 
-            $this->maybeTransitionToAwaitingInvoice($invoice, null, systemTransition: true);
+            // Статус заявки НЕ трогаем: счёт выставлен, и заявка живёт с этим
+            // статусом до оплаты либо до авто-закрытия по неоплате (ветка (c)
+            // в requests:auto-close-inactive, она смотрит и pending, и expired
+            // счета). Раньше просрочка возвращала заявку в «Согласован / ждёт
+            // счёт», и в карточке получалось «счёт выставлен, а статус ждёт
+            // счёт» — решение заказчика 18.09.2026 по кейсу M-2026-15292.
+            // Аннулирование счёта (cancel) поведения не меняет: там счёта
+            // действительно больше нет и нужен новый.
+            $this->logExpiryWithoutTransition($invoice);
 
             return $invoice->fresh();
         });
     }
 
     /**
+     * Отметить просрочку в истории заявки, не двигая статус: без записи
+     * событие пропадает из хронологии карточки, и «почему счёт просрочен»
+     * приходится искать в таблице счетов.
+     */
+    private function logExpiryWithoutTransition(Invoice $invoice): void
+    {
+        $request = $invoice->request;
+        if (! $request) {
+            return;
+        }
+
+        $status = is_object($request->status) ? $request->status->value : (string) $request->status;
+
+        \App\Models\RequestStateChange::create([
+            'request_id' => $request->id,
+            'from_status' => $status,
+            'to_status' => $status,
+            'by_user_id' => null,
+            'event' => 'invoice_expired',
+            'comment' => sprintf(
+                'Счёт №%s просрочен. Статус заявки не меняем — ждём оплату.',
+                $invoice->invoice_number,
+            ),
+            'payload' => [
+                'invoice_id' => $invoice->id,
+                'invoice_number' => $invoice->invoice_number,
+            ],
+        ]);
+    }
+
+    /**
      * Перевести Request → AwaitingInvoice если все её Invoice'ы в финальных
-     * статусах (нет pending). Используется после cancel / expire.
+     * статусах (нет pending). Используется после cancel: аннулированный счёт
+     * надо перевыставить. При ПРОСРОЧКЕ статус не трогаем — см. expire().
      */
     private function maybeTransitionToAwaitingInvoice(
         Invoice $invoice,

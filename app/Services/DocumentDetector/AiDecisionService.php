@@ -464,6 +464,10 @@ class AiDecisionService
             ->where('source_email_message_id', $message->id)
             ->update(['is_active' => false]);
 
+        // …и статус исходной возвращаем: раз дополнение живёт отдельной
+        // заявкой, старой незачем висеть «в работе» из-за него.
+        $this->restoreStatusAfterSpinOff($source, $message, $author);
+
         $decision->update([
             'status' => AiDecisionStatus::ManuallyConfirmed->value,
             'applied_by_user_id' => $author?->id,
@@ -481,6 +485,72 @@ class AiDecisionService
         ]);
 
         return $decision;
+    }
+
+    /**
+     * Вернуть исходной заявке статус, который сдвинуло ЭТО ЖЕ письмо.
+     *
+     * Пока письмо считалось дополнением, детектор `inbound_extension` уводил
+     * заявку из «Счёт выставлен» в «В работе». Когда то же письмо признано
+     * отдельной заявкой, позиции уезжают туда — и держать исходную в «В
+     * работе» не за что: счёт по ней выставлен и ждёт оплаты. Кейс
+     * M-2026-15292: заявка со счётом №9512 ушла в «В работе», а потом по
+     * сроку счёта — в «Согласован / ждёт счёт».
+     *
+     * Возвращаем только если с тех пор статус никто не менял — решение
+     * менеджера важнее.
+     */
+    private function restoreStatusAfterSpinOff(Request $source, EmailMessage $message, ?User $author): void
+    {
+        $decisionIds = AiDecision::query()
+            ->where('email_message_id', $message->id)
+            ->where('request_id', $source->id)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+        if ($decisionIds === []) {
+            return;
+        }
+
+        $change = \App\Models\RequestStateChange::query()
+            ->where('request_id', $source->id)
+            ->where('event', 'ai_auto_apply')
+            ->orderByDesc('id')
+            ->limit(20)
+            ->get()
+            ->first(fn ($row) => in_array((int) data_get($row->payload, 'ai_decision_id'), $decisionIds, true));
+        if ($change === null) {
+            return;
+        }
+
+        $from = RequestStatus::tryFrom((string) $change->from_status);
+        $to = RequestStatus::tryFrom((string) $change->to_status);
+        $current = $source->status instanceof RequestStatus
+            ? $source->status
+            : RequestStatus::tryFrom((string) $source->status);
+
+        if ($from === null || $to === null || $from === $to || $current !== $to || $current->isTerminal()) {
+            return;
+        }
+
+        try {
+            $this->stateService->transitionTo($source, $from, $author, [
+                'event' => 'extension_spun_off',
+                'comment' => sprintf(
+                    'Дополнение вынесено в отдельную заявку — статус «%s» возвращён.',
+                    $from->label(),
+                ),
+                'payload' => [
+                    'email_message_id' => $message->id,
+                    'reverted_from' => $to->value,
+                ],
+            ], systemTransition: true);
+        } catch (\Throwable $e) {
+            Log::warning('AiDecisionService: restore status after spin-off failed (non-fatal)', [
+                'request_id' => $source->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
