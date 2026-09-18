@@ -3,11 +3,13 @@
 namespace App\Livewire\Marketing;
 
 use App\Enums\MarketingSection;
+use App\Models\MarketingContact;
 use App\Models\MarketingEntry;
 use App\Models\MarketingReport;
 use App\Models\MarketingService;
 use App\Services\Marketing\MarketingReportService;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
@@ -17,15 +19,16 @@ use Livewire\Component;
  * Раздел «Маркетинг» — рабочее место по договору оказания маркетинговых услуг.
  * ТОЛЬКО для админа: здесь лежат доступы к внешним сервисам.
  *
- * Четыре вкладки:
+ * Вкладки:
  *  - «Доступы»  — сервисы и креды (секреты шифрованы, показываются по клику);
+ *  - «Книжка»   — подрядчики и площадки по направлениям (контакты, папки);
  *  - «План»     — задачи и заметки на месяц по разделам формы отчёта;
  *  - «Журнал»   — что фактически сделано (из него собирается отчёт);
  *  - «Отчёт»    — форма Приложения № 1 за месяц + выгрузка .docx.
  */
 class Workspace extends Component
 {
-    public const TABS = ['access', 'plan', 'log', 'report'];
+    public const TABS = ['access', 'contacts', 'plan', 'log', 'report'];
 
     #[Url(as: 'tab', except: 'access')]
     public string $tab = 'access';
@@ -66,6 +69,32 @@ class Workspace extends Component
 
     /** id сервисов, для которых секреты сейчас раскрыты на экране. */
     public array $revealed = [];
+
+    /* ------------------------ Записная книжка ------------------------ */
+
+    public bool $showContactForm = false;
+
+    public ?int $contactEditId = null;
+
+    #[Url(as: 'q', except: '')]
+    public string $contactSearch = '';
+
+    public string $cTopic = '';
+
+    public string $cOrganization = '';
+
+    public string $cPerson = '';
+
+    /** Адреса в форме — по одному на строку или через запятую. */
+    public string $cEmails = '';
+
+    public string $cPhone = '';
+
+    public string $cFolder = '';
+
+    public string $cNotes = '';
+
+    public bool $cActive = true;
 
     /* ------------------------ План / журнал ------------------------ */
 
@@ -276,6 +305,126 @@ class Workspace extends Component
         $this->sCategory = 'ads';
         $this->sActive = true;
         $this->showServiceForm = false;
+        $this->resetValidation();
+    }
+
+    /* ===================== Записная книжка ===================== */
+
+    /**
+     * Контакты, сгруппированные по направлению: в книжке ищут «кто у нас по
+     * календарям», а не отдельную строку.
+     *
+     * @return Collection<string, Collection<int, MarketingContact>>
+     */
+    #[Computed]
+    public function contactGroups()
+    {
+        return MarketingContact::query()
+            ->search($this->contactSearch)
+            ->orderBy('topic')
+            ->orderByDesc('is_active')
+            ->orderBy('organization')
+            ->get()
+            ->groupBy('topic');
+    }
+
+    /** Направления для подсказки в форме. @return array<int, string> */
+    #[Computed]
+    public function contactTopics(): array
+    {
+        return MarketingContact::query()->distinct()->orderBy('topic')->pluck('topic')
+            ->map(fn ($t) => (string) $t)->all();
+    }
+
+    #[Computed]
+    public function contactsTotal(): int
+    {
+        return MarketingContact::query()->count();
+    }
+
+    public function startContactCreate(): void
+    {
+        $this->resetContactForm();
+        $this->showContactForm = true;
+    }
+
+    public function startContactEdit(int $id): void
+    {
+        $contact = MarketingContact::query()->find($id);
+        if ($contact === null) {
+            return;
+        }
+        $this->contactEditId = $contact->id;
+        $this->cTopic = (string) $contact->topic;
+        $this->cOrganization = (string) $contact->organization;
+        $this->cPerson = (string) $contact->contact_person;
+        $this->cEmails = $contact->emailsText();
+        $this->cPhone = (string) $contact->phone;
+        $this->cFolder = (string) $contact->folder_path;
+        $this->cNotes = (string) $contact->notes;
+        $this->cActive = (bool) $contact->is_active;
+        $this->showContactForm = true;
+    }
+
+    public function saveContact(): void
+    {
+        $this->ensureAdmin();
+        $this->validate([
+            'cTopic' => ['required', 'string', 'max:80'],
+            'cOrganization' => ['required', 'string', 'max:200'],
+            'cPerson' => ['nullable', 'string', 'max:160'],
+            'cPhone' => ['nullable', 'string', 'max:120'],
+            'cFolder' => ['nullable', 'string', 'max:500'],
+        ], [], ['cTopic' => 'направление', 'cOrganization' => 'организация']);
+
+        $contact = $this->contactEditId ? MarketingContact::query()->find($this->contactEditId) : new MarketingContact;
+        if ($contact === null) {
+            $this->flashError = 'Контакт не найден.';
+
+            return;
+        }
+        $isNew = ! $contact->exists;
+
+        $emails = MarketingContact::parseEmails($this->cEmails);
+        $contact->fill([
+            'topic' => trim($this->cTopic),
+            'organization' => trim($this->cOrganization),
+            'contact_person' => trim($this->cPerson) ?: null,
+            'emails' => $emails ?: null,
+            'phone' => trim($this->cPhone) ?: null,
+            'folder_path' => trim($this->cFolder) ?: null,
+            'notes' => trim($this->cNotes) ?: null,
+            'is_active' => $this->cActive,
+            'updated_by_user_id' => Auth::id(),
+        ]);
+        if ($isNew) {
+            $contact->created_by_user_id = Auth::id();
+        }
+        $contact->save();
+
+        $this->resetContactForm();
+        unset($this->contactGroups, $this->contactTopics, $this->contactsTotal);
+        $this->flashMessage = $isNew ? 'Контакт добавлен.' : 'Контакт обновлён.';
+    }
+
+    public function deleteContact(int $id): void
+    {
+        $this->ensureAdmin();
+        MarketingContact::query()->whereKey($id)->delete();
+        unset($this->contactGroups, $this->contactTopics, $this->contactsTotal);
+        $this->flashMessage = 'Контакт удалён.';
+    }
+
+    public function cancelContactForm(): void
+    {
+        $this->resetContactForm();
+    }
+
+    private function resetContactForm(): void
+    {
+        $this->reset(['contactEditId', 'cTopic', 'cOrganization', 'cPerson', 'cEmails', 'cPhone', 'cFolder', 'cNotes']);
+        $this->cActive = true;
+        $this->showContactForm = false;
         $this->resetValidation();
     }
 

@@ -23,6 +23,7 @@
             @php
                 $tabs = [
                     'access' => ['🔐 Доступы', count($this->services)],
+                    'contacts' => ['📇 Записная книжка', $this->contactsTotal],
                     'plan' => ['🗒 План и заметки', $sum['plan'] + $sum['note']],
                     'log' => ['✅ Журнал работ', $sum['work']],
                     'report' => ['📄 Отчёт', null],
@@ -167,6 +168,141 @@
                     </div>
                 @empty
                     <div class="text-[13px] text-fg-3">Пока ни одного сервиса. Добавьте Яндекс.Директ, сервис рассылок, аналитику — всё, к чему нужны доступы.</div>
+                @endforelse
+            </div>
+        </div>
+    @endif
+
+    {{-- ======================= ЗАПИСНАЯ КНИЖКА ======================= --}}
+    @if($tab === 'contacts')
+        <div class="ds-card">
+            <div class="ds-card-header flex-wrap">
+                <h3 class="text-[15px] font-semibold text-fg-1">📇 Записная книжка</h3>
+                <span class="text-[12px] text-fg-3">подрядчики и площадки по направлениям</span>
+                <span class="flex-1"></span>
+                <input type="search" wire:model.live.debounce.300ms="contactSearch"
+                       placeholder="Поиск: направление, организация, адрес, заметка"
+                       class="h-[30px] w-[280px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                <button type="button" wire:click="{{ $showContactForm ? 'cancelContactForm' : 'startContactCreate' }}"
+                        class="btn btn-sm btn-primary">{{ $showContactForm ? 'Отмена' : '+ Добавить контакт' }}</button>
+            </div>
+
+            @if($showContactForm)
+                <div class="ds-card-body border-b border-border-subtle">
+                    <form wire:submit.prevent="saveContact" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                            <label class="{{ $lbl }}">Направление</label>
+                            <input type="text" wire:model="cTopic" maxlength="80" list="mk-topics"
+                                   placeholder="Календари" class="{{ $inp }}">
+                            <datalist id="mk-topics">
+                                @foreach($this->contactTopics as $topic)
+                                    <option value="{{ $topic }}"></option>
+                                @endforeach
+                            </datalist>
+                            @error('cTopic') <span class="text-[11px] text-red-600">{{ $message }}</span> @enderror
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="{{ $lbl }}">Организация</label>
+                            <input type="text" wire:model="cOrganization" maxlength="200"
+                                   placeholder="типография ООО «МИРАО»" class="{{ $inp }}">
+                            @error('cOrganization') <span class="text-[11px] text-red-600">{{ $message }}</span> @enderror
+                        </div>
+                        <div>
+                            <label class="{{ $lbl }}">Контактное лицо</label>
+                            <input type="text" wire:model="cPerson" maxlength="160" placeholder="Анна Февралева" class="{{ $inp }}">
+                        </div>
+                        <div>
+                            <label class="{{ $lbl }}">Телефон</label>
+                            <input type="text" wire:model="cPhone" maxlength="120" placeholder="+7 905 542-50-24" class="{{ $inp }}">
+                        </div>
+                        <div>
+                            <label class="{{ $lbl }}">Адреса <span class="text-fg-4">(по одному в строке или через запятую)</span></label>
+                            <textarea wire:model="cEmails" rows="2" placeholder="print2@m-ppk.ru" class="{{ $area }}"></textarea>
+                        </div>
+                        <div class="md:col-span-3">
+                            <label class="{{ $lbl }}">Папка с файлами</label>
+                            <input type="text" wire:model="cFolder" maxlength="500"
+                                   placeholder="\\phobos\MyZip\CommonFiles\Marketing\КАЛЕНДАРИ" class="{{ $inp }} mono">
+                        </div>
+                        <div class="md:col-span-3">
+                            <label class="{{ $lbl }}">Заметка</label>
+                            <textarea wire:model="cNotes" rows="2"
+                                      placeholder="съёмки моделей или мозаика; первый счёт по выставке ждём в сентябре 2026" class="{{ $area }}"></textarea>
+                        </div>
+                        <div class="md:col-span-3 flex items-center gap-3">
+                            <label class="inline-flex items-center gap-2 text-[12.5px] text-fg-2">
+                                <input type="checkbox" wire:model="cActive" class="rounded border-border"> работаем
+                            </label>
+                            <span class="flex-1"></span>
+                            <button type="button" wire:click="cancelContactForm" class="btn btn-sm">Отмена</button>
+                            <button type="submit" class="btn btn-sm btn-primary">Сохранить</button>
+                        </div>
+                    </form>
+                </div>
+            @endif
+
+            <div class="ds-card-body space-y-4">
+                @forelse($this->contactGroups as $topic => $contacts)
+                    <div wire:key="topic-{{ md5($topic) }}">
+                        <div class="flex items-baseline gap-2 mb-1.5">
+                            <span class="text-[13px] font-semibold text-fg-1">{{ $topic }}</span>
+                            <span class="mono text-[11px] text-fg-4">{{ count($contacts) }}</span>
+                        </div>
+                        <div class="border border-border rounded-md divide-y divide-[var(--border-subtle)]">
+                            @foreach($contacts as $contact)
+                                <div wire:key="ct-{{ $contact->id }}" class="px-3 py-2 {{ $contact->is_active ? '' : 'opacity-60' }}">
+                                    <div class="flex flex-wrap items-center gap-2 text-[13px]">
+                                        <span class="font-medium text-fg-1">{{ $contact->organization }}</span>
+                                        @if($contact->contact_person)
+                                            <span class="text-[12.5px] text-fg-2">· {{ $contact->contact_person }}</span>
+                                        @endif
+                                        @if($contact->phone)
+                                            <span class="mono text-[12px] text-fg-2">{{ $contact->phone }}</span>
+                                            <x-copy-button :value="$contact->phone" title="Скопировать телефон" />
+                                        @endif
+                                        @if(! $contact->is_active)
+                                            <span class="chip text-[10.5px]" style="background:var(--neutral-100);color:var(--fg-4)">не работаем</span>
+                                        @endif
+                                        <span class="flex-1"></span>
+                                        <button type="button" wire:click="startContactEdit({{ $contact->id }})" class="btn btn-sm">✎</button>
+                                        <button type="button" wire:click="deleteContact({{ $contact->id }})"
+                                                wire:confirm="Удалить контакт «{{ $contact->organization }}»?" class="btn btn-sm btn-danger">✕</button>
+                                    </div>
+
+                                    @if($contact->emailList())
+                                        <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+                                            @foreach($contact->emailList() as $email)
+                                                <span class="inline-flex items-center gap-1">
+                                                    <a href="mailto:{{ $email }}" class="mono text-sky-700 hover:underline">{{ $email }}</a>
+                                                    <x-copy-button :value="$email" title="Скопировать адрес" />
+                                                </span>
+                                            @endforeach
+                                            @if(count($contact->emailList()) > 1)
+                                                <x-copy-button :value="$contact->emailsJoined()" title="Скопировать все адреса одной строкой" />
+                                            @endif
+                                        </div>
+                                    @endif
+
+                                    @if($contact->folder_path)
+                                        {{-- Ссылку на сетевую папку браузер не откроет — даём путь с копированием. --}}
+                                        <div class="mt-1 flex items-center gap-1.5 text-[12px] text-fg-3">
+                                            <span>📁</span>
+                                            <span class="mono text-fg-2 break-all select-all">{{ $contact->folder_path }}</span>
+                                            <x-copy-button :value="$contact->folder_path" title="Скопировать путь к папке" />
+                                        </div>
+                                    @endif
+
+                                    @if($contact->notes)
+                                        <div class="mt-1 text-[12.5px] text-fg-2 whitespace-pre-line">{{ $contact->notes }}</div>
+                                    @endif
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                @empty
+                    <div class="text-[13px] text-fg-3">
+                        {{ $contactSearch !== '' ? 'По запросу «'.$contactSearch.'» ничего не нашлось.' : 'Книжка пустая. Добавьте первое направление — например, «Календари» или «Выставка».' }}
+                    </div>
                 @endforelse
             </div>
         </div>
