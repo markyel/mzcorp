@@ -257,15 +257,77 @@ class Client extends Component
         // Прочитанным помечаем ТОЛЬКО открытое письмо, как в обычном почтовике.
         // Раньше открытие гасило всю переписку — при показе одного письма это
         // прятало бы непрочитанные соседние письма из счётчиков.
-        app(MailReadService::class)->markManyRead([$anchor->id], $this->user());
-        // Владелец личного ящика → \Seen на сервере (для чужих ящиков — no-op).
-        app(ImapSeenSyncService::class)->pushSeen([$anchor->id], $this->user(), true);
+        // От лица владельца состояния (для личного ящика — его хозяина):
+        // список показывает именно его прочитанность. \Seen внутри пишется
+        // только когда состояние наше собственное.
+        $this->applyReadState([$anchor->id], true);
 
         // Обновить список (снять «непрочитано») и счётчики.
         unset($this->threads, $this->folders, $this->mailboxes);
     }
 
     /* ----------------------- Массовые действия ------------------------ */
+
+    /**
+     * Чья прочитанность (и флаг) стоит за письмом: у ЛИЧНОГО ящика — его
+     * владелец, у общих — текущий пользователь. Ровно то же правило, по
+     * которому список показывает «непрочитано» (readStateUserByMailbox).
+     *
+     * Без этого кнопка врёт: РОП или админ, открыв ящик менеджера, жмёт
+     * «Прочитано», запись уходит в ЕГО состояние, а в списке отображается
+     * состояние владельца — визуально не меняется ничего.
+     *
+     * @param  list<int>  $ids
+     * @return array<int, list<int>>  user_id => id писем
+     */
+    private function groupByStateUser(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $byMessage = EmailMessage::query()->whereKey($ids)->pluck('mailbox_id', 'id');
+        $map = $this->readStateUserByMailbox(
+            array_values(array_unique(array_map('intval', $byMessage->all())))
+        );
+        $fallback = (int) $this->user()->id;
+
+        $out = [];
+        foreach ($byMessage as $messageId => $mailboxId) {
+            $out[$map[(int) $mailboxId] ?? $fallback][] = (int) $messageId;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Пометить прочитанным/непрочитанным от лица владельца состояния.
+     * \Seen на сервере трогаем ТОЛЬКО когда состояние наше собственное:
+     * IMAP-флаг личного ящика пишет лишь его владелец.
+     *
+     * @param  list<int>  $ids
+     */
+    private function applyReadState(array $ids, bool $read): void
+    {
+        $svc = app(MailReadService::class);
+        $me = (int) $this->user()->id;
+
+        foreach ($this->groupByStateUser($ids) as $userId => $chunk) {
+            $actor = $userId === $me ? $this->user() : User::query()->find($userId);
+            if (! $actor) {
+                continue;
+            }
+            if ($read) {
+                $svc->markManyRead($chunk, $actor);
+            } else {
+                foreach ($chunk as $id) {
+                    $svc->markUnread($id, $actor);
+                }
+            }
+            if ($userId === $me) {
+                app(ImapSeenSyncService::class)->pushSeen($chunk, $this->user(), $read);
+            }
+        }
+    }
 
     /** @param  list<int>  $ids */
     public function markManyRead(array $ids): void
@@ -274,8 +336,7 @@ class Client extends Component
         if ($ids === []) {
             return;
         }
-        app(MailReadService::class)->markManyRead($ids, $this->user());
-        app(ImapSeenSyncService::class)->pushSeen($ids, $this->user(), true);
+        $this->applyReadState($ids, true);
         unset($this->threads, $this->folders, $this->mailboxes);
         $this->dispatch('mail-selection-clear');
     }
@@ -287,11 +348,7 @@ class Client extends Component
         if ($ids === []) {
             return;
         }
-        $svc = app(MailReadService::class);
-        foreach ($ids as $id) {
-            $svc->markUnread($id, $this->user());
-        }
-        app(ImapSeenSyncService::class)->pushSeen($ids, $this->user(), false);
+        $this->applyReadState($ids, false);
         unset($this->threads, $this->folders, $this->mailboxes);
         $this->dispatch('mail-selection-clear');
     }
@@ -671,7 +728,14 @@ class Client extends Component
         if (! $email) {
             return;
         }
-        app(MailReadService::class)->toggleFlag($id, $this->user());
+        // Флаг берётся из того же ustate, что и прочитанность, — значит и
+        // ставить его надо от лица владельца состояния, иначе флаг в списке
+        // не появится.
+        $stateUser = array_key_first($this->groupByStateUser([$id]));
+        $actor = $stateUser === (int) $this->user()->id
+            ? $this->user()
+            : User::query()->find($stateUser);
+        app(MailReadService::class)->toggleFlag($id, $actor ?? $this->user());
         unset($this->threads, $this->folders);
     }
 
@@ -681,10 +745,9 @@ class Client extends Component
         if (! $email) {
             return;
         }
-        app(MailReadService::class)->markUnread($id, $this->user());
-        app(ImapSeenSyncService::class)->pushSeen([$id], $this->user(), false);
+        $this->applyReadState([$id], false);
         unset($this->threads, $this->folders, $this->mailboxes);
-        $this->dispatch('toast', message: 'Помечено непрочитанным.', type: 'success');
+        $this->notice = 'Письмо помечено непрочитанным.';
     }
 
     /** Удалить свой черновик прямо из треда/папки. */
