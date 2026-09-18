@@ -122,13 +122,21 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .trow.sel{background:var(--sky-50)}
 .mailapp .trow[draggable]{-webkit-user-drag:element}
 .dragghost{position:fixed;top:-100px;left:-100px;padding:6px 12px;border-radius:999px;background:var(--fg-1,#0f1419);color:#fff;font:600 12px/1 system-ui,sans-serif;pointer-events:none;z-index:9999}
-.mailapp .bulkbar{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:6px 10px;background:var(--sky-50);border-bottom:1px solid var(--border-subtle);font:400 11.5px/1 var(--font-sans);color:var(--fg-2)}
-.mailapp .bulkbar .cnt{margin-right:4px;color:var(--fg-1);white-space:nowrap}
+/* Высота фиксирована и перенос запрещён: закреплённая панель не должна менять
+   высоту при выделении, иначе список писем под ней дёргается. Что не влезло по
+   ширине — уезжает в горизонтальную прокрутку, а не на вторую строку. */
+.mailapp .bulkbar{display:flex;align-items:center;flex-wrap:nowrap;gap:4px;height:38px;padding:0 10px;
+    background:var(--sky-50);border-bottom:1px solid var(--border-subtle);font:400 11.5px/1 var(--font-sans);
+    color:var(--fg-2);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.mailapp .bulkbar::-webkit-scrollbar{height:0}
+.mailapp .bulkbar > *{flex-shrink:0}
+/* Счётчик сжимается первым: кнопки действий важнее подписи. */
+.mailapp .bulkbar .cnt{margin-right:4px;color:var(--fg-1);white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .mailapp .bulkbar button{height:26px;padding:0 8px;border:1px solid var(--border);background:var(--bg-surface);border-radius:6px;cursor:pointer;color:var(--fg-1);font:500 11.5px/1 var(--font-sans);white-space:nowrap}
 .mailapp .bulkbar button:hover{background:var(--bg-hover)}
 .mailapp .bulkbar button.link{border:none;background:none;color:var(--sky-700);padding:0 4px}
 .mailapp .bulkbar button.x{border:none;background:none;font-size:16px;color:var(--fg-3);padding:0 4px}
-.mailapp .bulkbar .spacer{flex:1}
+.mailapp .bulkbar .spacer{flex:1 1 auto;min-width:4px}
 /* Закреплённая панель без выделения: тише фоном, кнопки неактивны. */
 .mailapp .bulkbar.idle{background:var(--bg-app)}
 .mailapp .bulkbar .idle-hint{color:var(--fg-4)}
@@ -627,7 +635,7 @@ body.mail-resizing iframe{pointer-events:none}
                 </div>
             </span>
             <span class="spacer"></span>
-            <button type="button" class="link" @click="all()">Все на странице</button>
+            <button type="button" class="link" @click="all()" title="Выбрать все письма на странице">Все</button>
             <button type="button" class="pin {{ $bulkBarPinned ? 'on' : '' }}" wire:click="toggleBulkBarPin"
                     title="{{ $bulkBarPinned ? 'Открепить: панель будет появляться только при выделении' : 'Закрепить панель — останется на виду и без выделения' }}">📌</button>
             <button type="button" class="x" :disabled="! sel.length" @click="clear()" title="Снять выделение">×</button>
