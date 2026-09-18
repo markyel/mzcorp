@@ -314,6 +314,86 @@ class Composer extends Component
         }
     }
 
+    /* ---------------------------- шаблоны ---------------------------- */
+
+    /**
+     * Личное дерево шаблонов для меню вставки — та же библиотека, что во
+     * вкладке «Переписка» карточки заявки (раздел «Шаблоны писем»).
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\LetterTemplate>
+     */
+    #[Computed]
+    public function templateTree()
+    {
+        return app(\App\Services\Mail\LetterTemplateService::class)->tree((int) auth()->id());
+    }
+
+    /** Свои папки — выбор при «Сохранить как шаблон». */
+    #[Computed]
+    public function templateFolders()
+    {
+        return \App\Models\LetterTemplate::folders()
+            ->ownedBy((int) auth()->id())
+            ->orderBy('name')
+            ->get(['id', 'name']);
+    }
+
+    /**
+     * Вставить шаблон в тело. Редактор здесь богатый (HTML), а шаблоны в
+     * библиотеке хранятся простым текстом — поэтому переводим строки в
+     * абзацы и дописываем в конец, не затирая уже набранное.
+     */
+    public function insertTemplateById(int $id, EmailDraftService $drafts): void
+    {
+        $tpl = \App\Models\LetterTemplate::templates()
+            ->ownedBy((int) auth()->id())
+            ->find($id);
+        if (! $tpl) {
+            return;
+        }
+
+        $body = trim((string) $tpl->body);
+        if ($body !== '') {
+            $html = collect(preg_split('/\R/u', $body) ?: [])
+                ->map(fn ($line) => '<p>'.($line === '' ? '<br>' : e($line)).'</p>')
+                ->implode('');
+            $this->bodyHtml = trim(strip_tags($this->bodyHtml)) === ''
+                ? $html
+                : rtrim($this->bodyHtml).$html;
+            $this->bodyText = trim($this->htmlToPlain($this->bodyHtml));
+        }
+
+        if (trim((string) $tpl->subject) !== '' && trim($this->subject) === '') {
+            $this->subject = mb_substr((string) $tpl->subject, 0, 998);
+        }
+
+        $this->autoSave($drafts);
+        // Редактор хранит своё состояние в JS — просим подтянуть новое тело.
+        $this->dispatch('mail-editor-set-html', html: $this->bodyHtml);
+    }
+
+    /** Сохранить набранное письмо в личную библиотеку шаблонов. */
+    public function saveAsTemplate(string $name, ?int $parentId): void
+    {
+        $name = trim($name);
+        $body = trim($this->htmlToPlain($this->bodyHtml));
+        if ($name === '' || $body === '') {
+            $this->dispatch('mail-composer-note', text: 'Нужны название шаблона и непустое письмо.');
+
+            return;
+        }
+
+        app(\App\Services\Mail\LetterTemplateService::class)->saveFromLetter(
+            name: $name,
+            body: $body,
+            parentId: $parentId,
+            subject: trim($this->subject) !== '' ? $this->subject : null,
+            by: auth()->user(),
+        );
+        unset($this->templateTree, $this->templateFolders);
+        $this->dispatch('mail-composer-note', text: 'Шаблон сохранён.');
+    }
+
     /** Обычные вложения (чипы); inline-картинки тела в списке не показываем. */
     #[Computed]
     public function attachments()

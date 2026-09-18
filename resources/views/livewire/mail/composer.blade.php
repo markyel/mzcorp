@@ -37,6 +37,27 @@
 .mail-composer .rte-menu button{width:100%;height:30px;justify-content:flex-start;padding:0 10px;font:400 13px/1 var(--font-sans);color:var(--fg-1);border-radius:5px}
 .mail-composer .rte-menu button.h2{font-weight:600;font-size:15px}
 .mail-composer .rte-menu button.h3{font-weight:600;font-size:13.5px}
+/* Меню шаблонов писем и подпанель «сохранить как шаблон». */
+.mail-composer .tplmenu{left:auto;right:0;min-width:270px;max-width:320px}
+.mail-composer .tplmenu .tpltree{max-height:240px;overflow-y:auto}
+.mail-composer .tplmenu .tplfolder{padding:4px 6px;font:600 12px/1.4 var(--font-sans);color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mail-composer .tplmenu button.tplitem{height:28px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mail-composer .tplmenu .tplhint{padding:8px 6px;font:400 12px/1.4 var(--font-sans);color:var(--fg-3);white-space:normal}
+.mail-composer .tplmenu .tplsep{height:1px;background:var(--border-subtle);margin:4px 2px}
+.mail-composer .tplmenu .tpllink{display:block;padding:7px 10px;font:400 12.5px/1 var(--font-sans);color:var(--sky-700);text-decoration:none;border-radius:5px}
+.mail-composer .tplmenu .tpllink:hover{background:var(--bg-hover)}
+.mail-composer .tplmenu .tplsave{display:flex;flex-direction:column;gap:6px;padding:4px}
+.mail-composer .tplmenu .tplsave input,.mail-composer .tplmenu .tplsave select{height:30px;border:1px solid var(--border);border-radius:6px;padding:0 8px;font:400 12.5px/1 var(--font-sans);background:var(--bg-surface);color:var(--fg-1);outline:none}
+.mail-composer .tplmenu .tplbtns{display:flex;gap:6px}
+.mail-composer .tplmenu .tplbtns button{height:28px;width:auto;padding:0 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-surface)}
+.mail-composer .tplmenu .tplbtns button.prim{background:var(--accent);border-color:var(--accent);color:var(--fg-on-accent);font-weight:600}
+.mail-composer .cnote{font:500 12px/1 var(--font-sans);color:var(--emerald-700)}
+/* Подсветка окна при перетаскивании файлов. */
+.mail-composer .cbody-wrap{position:relative}
+.mail-composer .dropveil{position:absolute;inset:0;z-index:12;background:rgba(14,165,233,.08);border:2px dashed var(--sky-500);
+    border-radius:8px;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.mail-composer .dropveil-in{padding:8px 14px;border-radius:999px;background:var(--bg-surface);border:1px solid var(--sky-500);
+    font:600 13px/1 var(--font-sans);color:var(--sky-700)}
 .mail-composer .rte-popover input[type=text]{width:260px;height:30px;border:1px solid var(--border);border-radius:6px;padding:0 8px;font:400 12.5px/1 var(--font-mono);color:var(--fg-1);background:var(--bg-surface);outline:none}
 .mail-composer .rte-popover input[type=text]:focus{border-color:var(--sky-500)}
 .mail-composer .rte-popover input[type=number]{width:54px;height:30px;border:1px solid var(--border);border-radius:6px;padding:0 6px;font:400 12.5px/1 var(--font-sans);color:var(--fg-1);background:var(--bg-surface);margin-left:6px;outline:none}
@@ -164,7 +185,34 @@
         <button type="button" class="wbtn" @pointerdown.stop wire:click="close" title="Свернуть — черновик сохранится">×</button>
     </div>
 
-    <div class="cbody-wrap" x-show="!min">
+    {{-- Перетаскивание файлов прямо в окно письма: как во вкладке «Переписка»
+         карточки заявки. Файлы кладём в тот же скрытый input (wire:model
+         newFiles) и стреляем change — дальше штатный updatedNewFiles. Каждый
+         drop самостоятельный: input.files перезаписываем, а не мерджим, иначе
+         прошлый набор уйдёт повторно и создаст дубли вложений. --}}
+    <div class="cbody-wrap" x-show="!min"
+         x-data="{
+            dragging: false,
+            onDrop(ev) {
+                this.dragging = false;
+                const dropped = ev.dataTransfer?.files;
+                if (! dropped || dropped.length === 0) return;
+                const input = document.getElementById('composer-files-{{ $draftId ?? 0 }}');
+                if (! input) return;
+                const dt = new DataTransfer();
+                for (const f of dropped) dt.items.add(f);
+                input.files = dt.files;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+         }"
+         @dragenter.prevent="dragging = true"
+         @dragover.prevent="dragging = true"
+         @dragleave.prevent="dragging = false"
+         @drop.prevent="onDrop($event)"
+         @mail-attachments-uploaded.window="const i = document.getElementById('composer-files-{{ $draftId ?? 0 }}'); if (i) i.value = '';">
+        <div class="dropveil" x-show="dragging" x-cloak>
+            <div class="dropveil-in">📎 Отпустите, чтобы прикрепить</div>
+        </div>
         <div class="cfields">
             <div class="crow">
                 <span class="k">От</span>
@@ -205,6 +253,9 @@
                      placeholder: 'Ваш ответ…',
                  })"
                  @mail-editor-flush.window="flush()"
+                 {{-- Вставка шаблона меняет bodyHtml на сервере — редактор
+                      живёт под wire:ignore и сам об этом не узнает. --}}
+                 @mail-editor-set-html.window="setContent($event.detail.html)"
                  @click.outside="linkOpen = false; tableOpen = false; colorOpen = false; blockOpen = false">
                 <div class="rte-toolbar">
                     <button type="button" @click="run(c => c.undo())" :disabled="!can('undo')" title="Отменить (Ctrl+Z)"><x-rte-icon name="undo"/></button>
@@ -263,6 +314,49 @@
                     <button type="button" @click="clearFormat()" title="Убрать форматирование"><x-rte-icon name="eraser"/></button>
                     <span class="sep"></span>
                     <button type="button" class="dd add" @click="pickImage()" title="Картинка в текст письма (или вставьте из буфера / перетащите)"><x-rte-icon name="image"/><span>Картинка</span></button>
+                    <span class="sep"></span>
+                    {{-- Шаблоны писем — та же личная библиотека, что во вкладке
+                         «Переписка» карточки заявки. Шаблон хранится текстом,
+                         поэтому вставляется абзацами в конец письма. --}}
+                    <span class="rte-pop" x-data="{ tplOpen: false, tplSaving: false, tplName: '', tplParent: '' }"
+                          @click.outside="tplOpen = false; tplSaving = false">
+                        <button type="button" class="dd" @click="tplOpen = ! tplOpen; tplSaving = false" title="Шаблоны писем">
+                            <span>📄 Шаблоны</span><x-rte-icon name="chevron" class="rte-ico sm"/>
+                        </button>
+                        <div class="rte-menu tplmenu" x-show="tplOpen" x-cloak>
+                            <div x-show="! tplSaving">
+                                @php $tplTree = $this->templateTree; @endphp
+                                @if($tplTree->isEmpty())
+                                    <div class="tplhint">Библиотека пуста — сохраните это письмо как шаблон.</div>
+                                @else
+                                    <div class="tpltree">
+                                        @foreach($tplTree as $node)
+                                            @include('livewire.mail._composer-template-node', ['node' => $node, 'depth' => 0])
+                                        @endforeach
+                                    </div>
+                                @endif
+                                <div class="tplsep"></div>
+                                <button type="button" @click="tplSaving = true">☆ Сохранить как шаблон</button>
+                                <a href="{{ route('letter-templates.index') }}" target="_blank" rel="noopener" class="tpllink">⚙ Управление шаблонами →</a>
+                            </div>
+                            <div x-show="tplSaving" x-cloak class="tplsave">
+                                <input type="text" x-model="tplName" placeholder="Название шаблона" @keydown.stop>
+                                <select x-model="tplParent">
+                                    <option value="">— в корень —</option>
+                                    @foreach($this->templateFolders as $folder)
+                                        <option value="{{ $folder->id }}">{{ $folder->name }}</option>
+                                    @endforeach
+                                </select>
+                                <div class="tplbtns">
+                                    <button type="button" class="prim"
+                                            @click="window.dispatchEvent(new CustomEvent('mail-editor-flush'));
+                                                    $wire.saveAsTemplate(tplName, tplParent === '' ? null : parseInt(tplParent));
+                                                    tplOpen = false; tplSaving = false; tplName = ''; tplParent = '';">Сохранить</button>
+                                    <button type="button" @click="tplSaving = false">Отмена</button>
+                                </div>
+                            </div>
+                        </div>
+                    </span>
                 </div>
 
                 {{-- Панель таблицы — когда курсор внутри таблицы. --}}
@@ -308,10 +402,14 @@
                 <span wire:loading.remove wire:target="send">Отправить</span>
                 <span wire:loading wire:target="send">Отправка…</span>
             </button>
-            <label class="lbl-file" title="Прикрепить файл">📎<input type="file" multiple wire:model="newFiles"></label>
+            <label class="lbl-file" title="Прикрепить файл — или перетащите файлы в окно">📎<input
+                    type="file" multiple wire:model="newFiles" id="composer-files-{{ $draftId ?? 0 }}"></label>
             <button class="discard" wire:click="discard">Удалить</button>
             <span class="spacer"></span>
             <span class="save" x-data="{ saving: false }" x-show="saving" x-cloak @mail-composer-saving.window="saving = $event.detail"><span class="dot"></span>Сохранение…</span>
+            {{-- Короткий ответ на действие (шаблон сохранён и т.п.). --}}
+            <span class="cnote" x-data="{ t: '' }" x-show="t" x-cloak x-text="t"
+                  @mail-composer-note.window="t = $event.detail.text; setTimeout(() => t = '', 4000)"></span>
         </div>
     </div>
 
