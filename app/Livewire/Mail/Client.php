@@ -615,6 +615,11 @@ class Client extends Component
                 'email_messages.subject',
                 'email_messages.from_name',
                 'email_messages.from_email',
+                // Получатель нужен строке списка: в «Отправленных» и
+                // «Черновиках» отправитель всегда сам владелец ящика, полезен
+                // именно адресат. См. counterparty() в client.blade.php.
+                'email_messages.to_recipients',
+                'email_messages.is_draft',
                 'email_messages.sent_at',
                 'email_messages.direction',
                 'email_messages.category',

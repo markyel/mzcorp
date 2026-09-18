@@ -17,6 +17,22 @@
         $b = mb_substr($parts[1] ?? '', 0, 1);
         return mb_strtoupper($a.$b) ?: mb_strtoupper(mb_substr($src, 0, 2));
     };
+    /**
+     * Кого показывать в строке списка. Для исходящих и черновиков — получателя:
+     * отправитель там всегда владелец ящика, и список из одинаковых имён
+     * бесполезен. Возвращает [имя, адрес, это получатель?, сколько ещё адресатов].
+     */
+    $counterparty = function ($m) {
+        $outbound = ($m->direction?->value === 'outbound') || $m->is_draft;
+        $to = collect($m->to_recipients ?? [])->filter(fn ($r) => is_array($r));
+        $first = $to->first();
+        $name = trim((string) ($first['name'] ?? ''));
+        $email = trim((string) ($first['email'] ?? ''));
+        if (! $outbound || ($name === '' && $email === '')) {
+            return [$m->from_name, $m->from_email, false, 0];
+        }
+        return [$name, $email, true, max(0, $to->count() - 1)];
+    };
     $catChip = function ($cat) {
         return match ($cat) {
             'client_request' => ['заявка', 'kp'],
@@ -121,6 +137,7 @@
 .mailapp .trow .l1{display:flex;align-items:baseline;gap:6px}
 .mailapp .trow .from{font:500 13px/1.3 var(--font-sans);color:var(--fg-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
 .mailapp .trow.unread .from{font-weight:700}
+.mailapp .trow .from .more-to{font-weight:400;color:var(--fg-4)}
 .mailapp .trow .when{font:500 11px/1 var(--font-mono);color:var(--fg-3);flex-shrink:0}
 .mailapp .trow.unread .when{color:var(--fg-1);font-weight:600}
 .mailapp .trow .l2{display:flex;align-items:baseline;gap:6px;margin-top:2px}
@@ -436,6 +453,10 @@
                             : \App\Enums\RequestStatus::tryFrom((string) $m->relatedRequest->status);
                     }
                     $awaitingInv = $rrs === \App\Enums\RequestStatus::AwaitingInvoice;
+                    [$partyName, $partyEmail, $isToParty, $moreTo] = $counterparty($m);
+                    // В «Отправленных»/«Черновиках» папка и так говорит, что это
+                    // адресат; в смешанных папках без подписи не разобрать.
+                    $toPrefix = $isToParty && ! in_array($folder, ['sent', 'drafts'], true);
                 @endphp
                 <div class="trow {{ $unread ? 'unread' : '' }} {{ $openId === $m->id ? 'active' : '' }} {{ $awaitingInv ? 'awaiting-inv' : '' }}"
                      wire:key="trow-{{ $m->id }}" wire:click="openMessage({{ $m->id }})"
@@ -443,10 +464,10 @@
                      draggable="true" @dragstart="dragStart({{ $m->id }}, $event)">
                     @if($unread)<span class="dot-unread"></span>@endif
                     <span class="chk" @click.stop="toggle({{ $m->id }}, $event)" title="Выбрать (Shift — диапазон, Ctrl+A — все)"></span>
-                    <span class="av {{ $isOrg ? 'org' : '' }}">{{ $initials($m->from_name, $m->from_email) }}</span>
+                    <span class="av {{ $isOrg ? 'org' : '' }}">{{ $initials($partyName, $partyEmail) }}</span>
                     <div class="body">
                         <div class="l1">
-                            <span class="from">{{ $m->from_name ?: $m->from_email }}</span>
+                            <span class="from" title="{{ $isToParty ? 'Кому: ' : '' }}{{ $partyEmail }}">{{ $toPrefix ? 'Кому: ' : '' }}{{ $partyName ?: $partyEmail }}@if($moreTo) <span class="more-to">+{{ $moreTo }}</span>@endif</span>
                             <span class="when">{{ $fmtWhen($m->sent_at) }}</span>
                         </div>
                         <div class="l2"><span class="subj">{{ $m->subject ?: '(без темы)' }}</span></div>
@@ -496,7 +517,8 @@
                     <button class="menu" wire:click="markUnread({{ $anchor->id }})" title="Пометить непрочитанным">⋯</button>
                 </div>
                 <div class="meta">
-                    <span>{{ $anchor->from_name ?: $anchor->from_email }} · {{ $thread->count() }} писем</span>
+                    @php [$headName, $headEmail, $headIsTo] = $counterparty($anchor); @endphp
+                    <span>{{ $headIsTo ? 'кому: ' : '' }}{{ $headName ?: $headEmail }} · {{ $thread->count() }} писем</span>
                     @if($thread->count() > 1)
                         {{-- Порядок писем — та же персональная настройка, что в «Переписке» карточки заявки. --}}
                         <button type="button" class="sortbtn" wire:click="toggleThreadSort"
