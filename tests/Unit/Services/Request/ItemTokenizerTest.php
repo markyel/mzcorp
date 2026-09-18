@@ -49,6 +49,10 @@ class ItemTokenizerTest extends TestCase
         $this->assertFalse(ItemTokenizer::isDistinctive('L140MM'));
         $this->assertFalse(ItemTokenizer::isDistinctive('D15MM'));
         $this->assertFalse(ItemTokenizer::isDistinctive('24V'));
+        // Напряжение питания встречается у половины позиций.
+        $this->assertFalse(ItemTokenizer::isDistinctive('220VAC'));
+        $this->assertFalse(ItemTokenizer::isDistinctive('24VDC'));
+        $this->assertFalse(ItemTokenizer::isDistinctive('750W'));
     }
 
     public function test_our_catalog_article_always_counts(): void

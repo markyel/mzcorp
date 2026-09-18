@@ -48,8 +48,12 @@ class ItemTokenizer
         return preg_replace('/[^A-Z0-9]/u', '', $latin) ?? '';
     }
 
-    /** Единицы измерения — хвост размерного токена, а не артикула. */
-    private const UNITS = 'MM|CM|M|KG|G|MG|L|ML|V|W|A|HZ|N|NM|PCS|SHT';
+    /**
+     * Единицы измерения — хвост размерного токена, а не артикула. Электрические
+     * (VAC/VDC/KW) тоже: «220VAC» стоит у половины позиций и связывал бы
+     * заведомо разные заявки — нашлось при проверке на живых позициях.
+     */
+    private const UNITS = 'MM|CM|M|KG|G|MG|L|ML|VAC|VDC|V|KW|W|MA|A|KHZ|HZ|NM|N|PCS|SHT';
 
     /**
      * Годится ли токен для матчинга.
