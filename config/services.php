@@ -924,4 +924,27 @@ return [
         'alert_stale_hours' => (int) env('CATALOG_SYNC_ALERT_HOURS', 18),
     ],
 
+    /*
+     * Яндекс.Директ API v5 — товарные объявления по складским позициям.
+     * Рекламируем только то, на что можем сразу дать цену: остаток > 0 и
+     * is_price_actual. Протухла цена или кончился остаток — группа на паузу.
+     *
+     * Приложение «mzDirect» (Яндекс ID), право direct:api. Токен получается
+     * один раз кодом подтверждения и живёт долго; refresh обязателен, иначе
+     * синхронизация однажды встанет молча.
+     */
+    'yandex_direct' => [
+        'client_id' => env('YANDEX_DIRECT_CLIENT_ID'),
+        'client_secret' => env('YANDEX_DIRECT_CLIENT_SECRET'),
+        'token' => env('YANDEX_DIRECT_TOKEN'),
+        'refresh_token' => env('YANDEX_DIRECT_REFRESH_TOKEN'),
+        // Песочница не требует одобренного полного доступа — там и отлаживаем.
+        'sandbox' => (bool) env('YANDEX_DIRECT_SANDBOX', true),
+        'endpoint' => env('YANDEX_DIRECT_SANDBOX', true)
+            ? 'https://api-sandbox.direct.yandex.com/json/v5/'
+            : 'https://api.direct.yandex.com/json/v5/',
+        'oauth_authorize_url' => 'https://oauth.yandex.ru/authorize',
+        'oauth_token_url' => 'https://oauth.yandex.ru/token',
+    ],
+
 ];
