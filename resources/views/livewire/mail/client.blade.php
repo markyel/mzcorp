@@ -48,31 +48,7 @@
      останавливает поллинг, когда вкладка в фоне. Открытое письмо и высоты
      iframe переживают морф (wire:ignore.self), композер — отдельный компонент,
      его поллинг не трогает. --}}
-{{-- Ширина списка писем живёт в localStorage и пишется в --paneB-w на <html>,
-     а не в style самого блока: wire:poll морфит разметку, и инлайновый стиль
-     на элементе компонента слетал бы после каждого опроса. --}}
-<div class="mailapp" wire:key="mailapp" wire:poll.60s
-     x-data="{
-        minW: 300, maxW: 820, w: 400, drag: false, ox: 0, ow: 0,
-        init() {
-            const saved = parseInt(localStorage.getItem('mzcorp.mail.listWidth') || '', 10);
-            this.setW(Number.isFinite(saved) ? saved : 400);
-        },
-        setW(px) {
-            this.w = Math.max(this.minW, Math.min(this.maxW, Math.round(px)));
-            document.documentElement.style.setProperty('--paneB-w', this.w + 'px');
-        },
-        startResize(ev) { this.drag = true; this.ox = ev.clientX; this.ow = this.w; },
-        moveResize(ev) { if (this.drag) this.setW(this.ow + (ev.clientX - this.ox)); },
-        stopResize() {
-            if (! this.drag) return;
-            this.drag = false;
-            try { localStorage.setItem('mzcorp.mail.listWidth', String(this.w)); } catch (e) {}
-        },
-        resetWidth() { this.setW(400); try { localStorage.setItem('mzcorp.mail.listWidth', '400'); } catch (e) {} }
-     }"
-     :class="{ resizing: drag }"
-     @mousemove.window="moveResize($event)" @mouseup.window="stopResize()">
+<div class="mailapp" wire:key="mailapp" wire:poll.60s>
 <style>
 /* scoped mail client — на токенах дизайн-системы, без Tailwind-пересборки */
 /* Ширина списка писем — тянется мышью, хранится в localStorage (см. mailResizer). */
@@ -80,11 +56,19 @@
     overflow:hidden;background:var(--bg-surface);font-family:var(--font-sans);color:var(--fg-1)}
 .mailapp *{box-sizing:border-box}
 @media(max-width:1100px){.mailapp{grid-template-columns:220px 1fr}.mailapp .paneC{display:none}}
-/* Рукоятка ресайза: узкая полоса на правой границе списка, курсор — как у сплиттера. */
+/* Рукоятка ресайза: узкая полоса на границе списка и чтения. Живёт в корне
+   .mailapp, а НЕ внутри paneB: у вложенного x-data своя область видимости,
+   и запись this.drag из обработчика уходила бы в неё, а не в корневую. */
+.mailapp{position:relative}
 .mailapp .paneB{position:relative}
-.mailapp .bresize{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;z-index:5;background:transparent}
+.mailapp .bresize{position:absolute;top:0;left:calc(240px + var(--paneB-w, 400px) - 3px);width:7px;height:100%;
+    cursor:col-resize;z-index:20;background:transparent}
 .mailapp .bresize:hover,.mailapp .bresize.dragging{background:linear-gradient(to right,transparent 2px,var(--sky-500) 2px,var(--sky-500) 5px,transparent 5px)}
-.mailapp.resizing{user-select:none;cursor:col-resize}
+/* Пока тянем: курсор-сплиттер по всей странице, без выделения текста, и
+   письмо в iframe не перехватывает мышь. */
+body.mail-resizing{user-select:none;cursor:col-resize}
+body.mail-resizing iframe{pointer-events:none}
+@media(max-width:1100px){.mailapp .bresize{display:none}}
 
 /* PANE A */
 .mailapp .paneA{background:var(--bg-sidebar);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
@@ -199,16 +183,22 @@
     color:var(--fg-2);font:500 12.5px/1 var(--font-sans);white-space:nowrap}
 .mailapp .syncbtn:hover{background:var(--bg-hover);color:var(--fg-1)}
 .mailapp .syncbtn[disabled]{opacity:.6;cursor:default}
+/* Панель управления метками. Ширину держим в пределах списка: paneB —
+   overflow:hidden, и всё, что шире, просто срезается (цвета и «Удалить»
+   уезжали под панель чтения). */
 .mailapp .lblbar .rte-pop{position:relative;display:inline-flex}
-.mailapp .lblmgr{top:26px;left:0;right:auto;min-width:300px;padding:6px}
-.mailapp .lblmgr .lblrow{display:flex;align-items:center;gap:4px;padding:3px 2px}
-.mailapp .lblmgr .lblrow input{flex:1;min-width:0;height:26px;border:1px solid var(--border);border-radius:5px;padding:0 6px;
+.mailapp .lblmgr{top:26px;left:0;right:auto;min-width:0;
+    width:calc(var(--paneB-w, 400px) - 28px);max-width:calc(100vw - 40px);padding:6px}
+.mailapp .lblmgr .mgrhdr{padding:4px 6px 6px;font:600 11.5px/1 var(--font-sans);color:var(--fg-2)}
+.mailapp .lblmgr .lblrow{display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding:5px 4px;border-top:1px solid var(--border-subtle)}
+.mailapp .lblmgr .lblrow input{flex:1 1 100%;min-width:0;height:27px;border:1px solid var(--border);border-radius:5px;padding:0 6px;
     font:400 12px/1 var(--font-sans);background:var(--bg-surface);color:var(--fg-1);outline:none}
 .mailapp .lblmgr .lblrow input:focus{border-color:var(--sky-500)}
-.mailapp .lblmgr .lblrow .dot{width:14px;height:14px;border-radius:999px;border:1.5px solid transparent;cursor:pointer;padding:0;flex-shrink:0}
+.mailapp .lblmgr .lblrow .dot{width:15px;height:15px;border-radius:999px;border:2px solid transparent;cursor:pointer;padding:0;flex-shrink:0}
 .mailapp .lblmgr .lblrow .dot.on{border-color:var(--fg-1)}
-.mailapp .lblmgr .lblrow .del{border:none;background:none;color:var(--fg-3);cursor:pointer;font-size:13px;padding:0 4px}
-.mailapp .lblmgr .lblrow .del:hover{color:var(--accent)}
+.mailapp .lblmgr .lblrow .del{margin-left:auto;height:24px;border:1px solid var(--border);background:var(--bg-surface);color:var(--fg-2);
+    cursor:pointer;font:500 11.5px/1 var(--font-sans);padding:0 8px;border-radius:5px;white-space:nowrap}
+.mailapp .lblmgr .lblrow .del:hover{color:var(--accent);border-color:var(--red-300)}
 .mailapp .trow .when{font:500 11px/1 var(--font-mono);color:var(--fg-3);flex-shrink:0}
 .mailapp .trow.unread .when{color:var(--fg-1);font-weight:600}
 .mailapp .trow .l2{display:flex;align-items:baseline;gap:6px;margin-top:2px}
@@ -521,6 +511,7 @@
                     <span class="rte-pop">
                         <button type="button" class="lblchip all" @click="mgrOpen = ! mgrOpen" title="Управление метками">⚙</button>
                         <div class="bulkmenu lblmgr" x-show="mgrOpen" x-cloak @click.outside="mgrOpen = false">
+                            <div class="mgrhdr">Управление метками · имя и Enter, цвет — кружком</div>
                             @foreach($this->labels as $label)
                                 <div class="lblrow" wire:key="lm-{{ $label->id }}">
                                     <input type="text" value="{{ $label->name }}" maxlength="{{ \App\Models\MailLabel::NAME_MAX }}"
@@ -528,12 +519,12 @@
                                            @keydown.stop title="Измените имя и нажмите Enter">
                                     @foreach(\App\Models\MailLabel::COLORS as $key => $c)
                                         <button type="button" class="dot {{ $label->color === $key ? 'on' : '' }}"
-                                                style="background:{{ $c[1] }}" title="{{ $key }}"
+                                                style="background:{{ $c[1] }}" title="Цвет: {{ $key }}"
                                                 wire:click="recolorLabel({{ $label->id }}, '{{ $key }}')"></button>
                                     @endforeach
                                     <button type="button" class="del" title="Удалить метку у всех писем"
                                             wire:click="deleteLabel({{ $label->id }})"
-                                            wire:confirm="Удалить метку «{{ $label->name }}»? Она исчезнет со всех писем.">✕</button>
+                                            wire:confirm="Удалить метку «{{ $label->name }}»? Она исчезнет со всех писем.">Удалить</button>
                                 </div>
                             @endforeach
                             <div class="hint">Метки общие: их видят все, кто работает с этими ящиками.</div>
@@ -701,11 +692,50 @@
             </div>
         </div>
 
-        {{-- Рукоятка ширины списка: тянем мышью, двойной клик — вернуть 400 px. --}}
-        <div class="bresize" :class="{ dragging: drag }"
-             @mousedown.prevent="startResize($event)" @dblclick="resetWidth()"
-             title="Потяните, чтобы изменить ширину списка. Двойной клик — вернуть по умолчанию"></div>
     </div>
+
+    {{-- Рукоятка ширины списка. Состояние держит она сама, а не корневой x-data:
+         события мыши приходят на элемент внутри своей области видимости, и
+         обмен состоянием между вложенными x-data — лишний источник поломок.
+         Ширина пишется в --paneB-w на <html> (wire:poll морфит компонент, и
+         инлайновый стиль на нём слетал бы) и дублируется в localStorage.
+         На время перетаскивания гасим pointer-events у iframe письма: иначе
+         курсор заходит на тело письма, iframe съедает mousemove и тяга встаёт. --}}
+    <div class="bresize"
+         x-data="{
+            min: 300, max: 820, drag: false, ox: 0, ow: 400,
+            current() {
+                const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--paneB-w'), 10);
+                return Number.isFinite(v) ? v : 400;
+            },
+            setW(px) {
+                const v = Math.max(this.min, Math.min(this.max, Math.round(px)));
+                document.documentElement.style.setProperty('--paneB-w', v + 'px');
+                try { localStorage.setItem('mzcorp.mail.listWidth', String(v)); } catch (e) {}
+            },
+            start(ev) {
+                this.drag = true;
+                this.ox = ev.clientX;
+                this.ow = this.current();
+                document.body.classList.add('mail-resizing');
+            },
+            move(ev) { if (this.drag) this.setW(this.ow + (ev.clientX - this.ox)); },
+            stop() {
+                if (! this.drag) return;
+                this.drag = false;
+                document.body.classList.remove('mail-resizing');
+            }
+         }"
+         x-init="(() => {
+            const saved = parseInt(localStorage.getItem('mzcorp.mail.listWidth') || '', 10);
+            if (Number.isFinite(saved)) { document.documentElement.style.setProperty('--paneB-w', Math.max(300, Math.min(820, saved)) + 'px'); }
+         })()"
+         :class="{ dragging: drag }"
+         @mousedown.prevent="start($event)"
+         @mousemove.window="move($event)"
+         @mouseup.window="stop()"
+         @dblclick="setW(400)"
+         title="Потяните, чтобы изменить ширину списка. Двойной клик — вернуть по умолчанию"></div>
 
     {{-- ══════════ PANE C — чтение ══════════ --}}
     <div class="paneC">
