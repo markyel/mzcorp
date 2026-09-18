@@ -58,6 +58,9 @@ class User extends Authenticatable
         // Персональный дефолтный период дашборда (preset 1/7/30/90 дней).
         // См. App\Livewire\Dashboard\Index::setPeriod / mount.
         'dashboard_period_days',
+        // Держать панель массовых действий в почте закреплённой (видна всегда,
+        // неактивна без выделения). См. App\Livewire\Mail\Client::toggleBulkBarPin.
+        'mail_bulkbar_pinned',
         // Аватарки (относительные пути на диске local). 3 варианта:
         // нейтральный / победитель / проигравший. См. avatarUrl* ниже.
         'avatar_neutral_path',
@@ -99,6 +102,7 @@ class User extends Authenticatable
             'max_complexity_level' => \App\Enums\ComplexityLevel::class,
             'only_internal_sku_requests' => 'boolean',
             'dashboard_period_days' => 'integer',
+            'mail_bulkbar_pinned' => 'boolean',
             'updates_seen_at' => 'datetime',
             'password' => 'hashed',
         ];

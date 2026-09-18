@@ -96,6 +96,19 @@ class Client extends Component
         $this->user()?->forceFill(['thread_sort_order' => $this->threadSort])->save();
     }
 
+    /**
+     * Панель массовых действий закреплена: видна всегда, без выделения —
+     * неактивна. По умолчанию выключено (панель всплывает при выделении).
+     * Личная настройка, живёт у пользователя.
+     */
+    public bool $bulkBarPinned = false;
+
+    public function toggleBulkBarPin(): void
+    {
+        $this->bulkBarPinned = ! $this->bulkBarPinned;
+        $this->user()?->forceFill(['mail_bulkbar_pinned' => $this->bulkBarPinned])->save();
+    }
+
     public int $perPage = 40;
 
     private const PER_PAGE_STEP = 20;
@@ -119,6 +132,7 @@ class Client extends Component
         $this->threadSort = in_array($user?->thread_sort_order, ['asc', 'desc'], true)
             ? $user->thread_sort_order
             : 'asc';
+        $this->bulkBarPinned = (bool) ($user?->mail_bulkbar_pinned ?? false);
 
         // ?label=<id> из чужой ссылки: метки личные, чужую не применяем.
         if ($this->labelId !== null && $this->myLabel($this->labelId) === null) {

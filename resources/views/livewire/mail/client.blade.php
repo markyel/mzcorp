@@ -129,6 +129,14 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .bulkbar button.link{border:none;background:none;color:var(--sky-700);padding:0 4px}
 .mailapp .bulkbar button.x{border:none;background:none;font-size:16px;color:var(--fg-3);padding:0 4px}
 .mailapp .bulkbar .spacer{flex:1}
+/* Закреплённая панель без выделения: тише фоном, кнопки неактивны. */
+.mailapp .bulkbar.idle{background:var(--bg-app)}
+.mailapp .bulkbar .idle-hint{color:var(--fg-4)}
+.mailapp .bulkbar button:disabled{opacity:.45;cursor:default}
+.mailapp .bulkbar button:disabled:hover{background:var(--bg-surface)}
+.mailapp .bulkbar button.pin{border:none;background:none;padding:0 4px;filter:grayscale(1);opacity:.5}
+.mailapp .bulkbar button.pin.on{filter:none;opacity:1}
+.mailapp .bulkbar button.pin:hover{opacity:1}
 .mailapp .bulkbar .rte-pop{position:relative;display:inline-flex}
 .mailapp .bulkmenu{position:absolute;top:30px;right:0;max-width:min(320px,calc(100vw - 40px));z-index:6;min-width:200px;max-height:320px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 10px 30px rgba(15,23,42,.16);padding:4px;display:flex;flex-direction:column}
 .mailapp .bulkmenu button{border:none;background:none;text-align:left;height:30px;padding:0 10px;border-radius:5px;font:400 12.5px/1 var(--font-sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -595,12 +603,20 @@ body.mail-resizing iframe{pointer-events:none}
         @endif
 
         {{-- Панель массовых действий (видна при выделении). --}}
-        <div class="bulkbar" x-show="sel.length" x-cloak>
-            <span class="cnt">Выбрано <b x-text="sel.length"></b></span>
-            <button type="button" @click="$wire.markManyRead(sel)" title="Пометить прочитанными">Прочитано</button>
-            <button type="button" @click="$wire.markManyUnread(sel)" title="Пометить непрочитанными">Непрочитано</button>
+        {{-- Панель массовых действий. По умолчанию всплывает при выделении;
+             закреплённая (личная настройка) висит всегда и без выделения
+             просто неактивна — чтобы действия были на виду. --}}
+        <div class="bulkbar {{ $bulkBarPinned ? 'pinned' : '' }}"
+             :class="{ idle: ! sel.length }"
+             @if(! $bulkBarPinned) x-show="sel.length" x-cloak @endif>
+            <span class="cnt">
+                <template x-if="sel.length"><span>Выбрано <b x-text="sel.length"></b></span></template>
+                <template x-if="! sel.length"><span class="idle-hint">Выберите письма</span></template>
+            </span>
+            <button type="button" :disabled="! sel.length" @click="$wire.markManyRead(sel)" title="Пометить прочитанными">Прочитано</button>
+            <button type="button" :disabled="! sel.length" @click="$wire.markManyUnread(sel)" title="Пометить непрочитанными">Непрочитано</button>
             <span class="rte-pop">
-                <button type="button" @click="moveOpen = !moveOpen">В папку ▾</button>
+                <button type="button" :disabled="! sel.length" @click="moveOpen = !moveOpen">В папку ▾</button>
                 <div class="bulkmenu" x-show="moveOpen" x-cloak @click.outside="moveOpen = false">
                     <button type="button" @click="$wire.moveToFolder(sel, null); moveOpen = false">Входящие</button>
                     @foreach($this->customFolders as $cf)
@@ -612,7 +628,9 @@ body.mail-resizing iframe{pointer-events:none}
             </span>
             <span class="spacer"></span>
             <button type="button" class="link" @click="all()">Все на странице</button>
-            <button type="button" class="x" @click="clear()" title="Снять выделение">×</button>
+            <button type="button" class="pin {{ $bulkBarPinned ? 'on' : '' }}" wire:click="toggleBulkBarPin"
+                    title="{{ $bulkBarPinned ? 'Открепить: панель будет появляться только при выделении' : 'Закрепить панель — останется на виду и без выделения' }}">📌</button>
+            <button type="button" class="x" :disabled="! sel.length" @click="clear()" title="Снять выделение">×</button>
         </div>
 
         <div class="threads">
