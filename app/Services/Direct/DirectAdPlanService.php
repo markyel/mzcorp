@@ -146,7 +146,7 @@ class DirectAdPlanService
     public static function groupName(object $item): string
     {
         $sku = (string) ($item->sku ?? '');
-        $name = trim((string) ($item->name ?? ''));
+        $name = self::squeeze((string) ($item->name ?? ''));
 
         return Str::limit(trim($sku.' '.$name), 55, '');
     }
@@ -157,7 +157,9 @@ class DirectAdPlanService
      */
     public static function adTitle(object $item): string
     {
-        $base = trim((string) ($item->name ?? ''));
+        // В каталожных именах встречаются двойные пробелы («Канат  d=7,8») —
+        // в объявлении это выглядит опечаткой.
+        $base = self::squeeze((string) ($item->name ?? ''));
         if ($base === '') {
             $base = trim(((string) ($item->brand ?? '')).' '.((string) ($item->sku ?? '')));
         }
@@ -235,16 +237,26 @@ class DirectAdPlanService
             trim((string) ($item->brand ?? '')),
             $codes !== [] ? 'арт. '.$codes[0] : '',
         ]);
-        $head = $parts !== [] ? implode(', ', $parts).'. ' : '';
+        $head = $parts !== [] ? implode(', ', $parts) : '';
         $tail = 'Есть на складе, счёт в день обращения.';
 
-        $text = $head.$tail;
-        if (mb_strlen($text) <= self::TEXT_MAX) {
-            return $text;
+        if ($head === '') {
+            return $tail;
+        }
+        if (mb_strlen($head) + 2 + mb_strlen($tail) <= self::TEXT_MAX) {
+            return $head.'. '.$tail;
         }
 
-        // Голова длиннее лимита — оставляем обещание, оно важнее бренда.
-        return self::cutWords($head, self::TEXT_MAX - mb_strlen($tail) - 1).' '.$tail;
+        // Голова не помещается целиком. Режем её по словам и ОБЯЗАТЕЛЬНО
+        // закрываем точкой: без неё «…1770 ГОСТ Есть на складе» читается как
+        // оборванная фраза. Если места под осмысленный огрызок нет — оставляем
+        // одно обещание, оно важнее бренда.
+        $room = self::TEXT_MAX - mb_strlen($tail) - 2;
+        if ($room < 12) {
+            return $tail;
+        }
+
+        return self::cutWords($head, $room).'. '.$tail;
     }
 
     /**
@@ -304,6 +316,12 @@ class DirectAdPlanService
     public static function codes(object $item): array
     {
         return YandexDirectFeedService::codes($item);
+    }
+
+    /** Схлопнуть повторяющиеся пробелы каталожного имени. */
+    public static function squeeze(string $value): string
+    {
+        return trim(preg_replace('/\s+/u', ' ', $value) ?? '');
     }
 
     /** Обрезать по границе слова, чтобы не оставлять половину артикула. */

@@ -144,6 +144,28 @@ class DirectAdPlanServiceTest extends TestCase
         $this->assertStringContainsString('счёт в день обращения', $text);
     }
 
+    public function test_cut_head_is_closed_with_a_full_stop(): void
+    {
+        // Кейс M07441: «…1770 ГОСТ Есть на складе» читалось как оборванная
+        // фраза — обрезанная голова обязана закрываться точкой.
+        $text = Plan::adText($this->item([
+            'brand' => 'МЕЧЕЛ (БМК)',
+            'articles' => ['7,8-Г-В-Н-Р-Т-1770 ГОСТ 3077-80'],
+            'brand_article' => '7,8-Г-В-Н-Р-Т-1770 ГОСТ 3077-80',
+        ]));
+
+        $this->assertLessThanOrEqual(Plan::TEXT_MAX, mb_strlen($text));
+        $this->assertStringNotContainsString('ГОСТ Есть', $text);
+        $this->assertStringContainsString('. Есть на складе', $text);
+    }
+
+    public function test_double_spaces_of_the_catalog_name_are_squeezed(): void
+    {
+        $title = Plan::adTitle($this->item(['name' => 'Канат  d=7,8 мм грузовой']));
+
+        $this->assertStringNotContainsString('  ', $title);
+    }
+
     public function test_price_never_appears_in_the_ad(): void
     {
         // Решение заказчика: цену не публикуем — на карточке её анонимно не видно.
