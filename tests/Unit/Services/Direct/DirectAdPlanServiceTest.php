@@ -67,6 +67,17 @@ class DirectAdPlanServiceTest extends TestCase
         $this->assertSame('Плата (v2)', Plan::tidyTail('Плата (v2)'));
     }
 
+    public function test_cut_never_ends_on_a_conjunction_or_preposition(): void
+    {
+        // Кейс M15556: второй заголовок «Поручень для эскалатора и
+        // траволатора» резался по лимиту и оставлял висящий союз.
+        $this->assertSame('Поручень для эскалатора', Plan::tidyTail('Поручень для эскалатора и'));
+        $this->assertSame('Направляющая поручня', Plan::tidyTail('Направляющая поручня для'));
+        $this->assertSame('Отгрузка со склада', Plan::tidyTail('Отгрузка со склада и из'));
+        // Осмысленный хвост не трогаем.
+        $this->assertSame('Поручень эскалатора', Plan::tidyTail('Поручень эскалатора'));
+    }
+
     public function test_title_falls_back_to_brand_and_sku(): void
     {
         $title = Plan::adTitle($this->item(['name' => '']));
