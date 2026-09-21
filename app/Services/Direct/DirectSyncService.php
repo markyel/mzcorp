@@ -134,12 +134,12 @@ class DirectSyncService
             ->take(self::MAX_TEXTS);
         $needPublish = $plan->filter(fn ($row) => $row['keywords'] !== [] && ! ($byKey[$row['sku']] ?? null)?->isComplete())
             ->take(self::MAX_PUBLISH);
-        $needModeration = $published->filter(fn ($ad) => $ad->isDraft() && in_array($ad->sku, $queueSkus, true))
-            ->take(self::MAX_MODERATE);
 
         $report['texts'] = $needTexts->pluck('sku')->all();
         $report['published'] = $needPublish->pluck('sku')->all();
-        $report['moderated'] = $needModeration->pluck('sku')->values()->all();
+        // Что уйдёт на модерацию, считаем ПОСЛЕ создания: иначе свежий черновик
+        // ждал бы следующего часа, хотя создан этим же прогоном.
+        $report['moderated'] = $this->draftsToModerate($queueSkus)->pluck('sku')->values()->all();
         // Отклонённое не переотправляем автоматом: причина никуда не делась,
         // второй заход даст тот же отказ и раздражение модератора.
         $report['attention'] = $published->filter(fn ($ad) => $ad->isRejected())
@@ -175,8 +175,11 @@ class DirectSyncService
                 fn ($m) => str_contains($m, ':') && ! str_contains($m, 'группа #'),
             ));
         }
-        if ($needModeration->isNotEmpty()) {
-            $res = $this->publisher->moderate($needModeration->pluck('ad_id')->all(), $by);
+        // Перечитываем черновики: в списке уже и те, что созданы шагом выше.
+        $drafts = $this->draftsToModerate($queueSkus);
+        if ($drafts->isNotEmpty()) {
+            $report['moderated'] = $drafts->pluck('sku')->values()->all();
+            $res = $this->publisher->moderate($drafts->pluck('ad_id')->all(), $by);
             if (! $res['ok']) {
                 $report['errors'][] = $res['message'];
             }
@@ -191,6 +194,24 @@ class DirectSyncService
         );
 
         return $report;
+    }
+
+    /**
+     * Черновики, которым пора на модерацию: только свои, только из очереди и
+     * никогда отклонённые — у отказа не делась причина, второй заход даст тот
+     * же вердикт.
+     *
+     * @param  array<int, string>  $queueSkus
+     * @return \Illuminate\Database\Eloquent\Collection<int, DirectPublishedAd>
+     */
+    public function draftsToModerate(array $queueSkus)
+    {
+        return DirectPublishedAd::query()
+            ->whereNotNull('ad_id')
+            ->where('status', 'DRAFT')
+            ->whereIn('sku', $queueSkus)
+            ->limit(self::MAX_MODERATE)
+            ->get();
     }
 
     /**

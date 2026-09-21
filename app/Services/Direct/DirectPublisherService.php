@@ -234,7 +234,11 @@ class DirectPublisherService
                 return $this->failRow($record, $sku, 'объявление', $res);
             }
             $record->ad_id = $adId;
-            $record->state = 'DRAFT';
+            // Состояние и статус в Директе — разные вещи: объявление выключено
+            // (State) и при этом черновик (Status). Путать их нельзя: на
+            // модерацию мы отбираем по статусу.
+            $record->state = 'OFF';
+            $record->status = 'DRAFT';
             $record->save();
         }
 
