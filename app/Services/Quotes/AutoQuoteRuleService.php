@@ -392,14 +392,51 @@ class AutoQuoteRuleService
      */
     public static function articleInText(RequestItem $item): bool
     {
-        $sku = trim((string) ($item->catalogItem?->sku ?? ''));
-        if ($sku === '') {
+        $haystack = self::normalize($item->parsed_article.' '.$item->parsed_name);
+        if ($haystack === '') {
             return false;
         }
 
-        $haystack = self::normalize($item->parsed_article.' '.$item->parsed_name);
+        foreach (self::itemCodes($item->catalogItem) as $code) {
+            if (str_contains($haystack, $code)) {
+                return true;
+            }
+        }
 
-        return $haystack !== '' && str_contains($haystack, self::normalize($sku));
+        return false;
+    }
+
+    /**
+     * Все коды позиции: наш артикул и коды производителя.
+     *
+     * Клиент пишет то, что у него перед глазами: половина заявок приходит с
+     * OEM-кодом («KM857781G12»), а не с нашим M-артикулом, и каталог сводит их
+     * к одной позиции. Требовать именно наш артикул — значит не узнавать
+     * постоянных клиентов: у pomlts@yandex.ru 73 заявки и ни одной с M-кодом.
+     *
+     * @return array<int, string> нормализованные коды
+     */
+    public static function itemCodes(?CatalogItem $catalog): array
+    {
+        if ($catalog === null) {
+            return [];
+        }
+
+        $raw = array_merge(
+            [(string) $catalog->sku, (string) $catalog->brand_article],
+            array_map(fn ($a) => (string) $a, (array) ($catalog->articles ?? [])),
+        );
+
+        $out = [];
+        foreach ($raw as $code) {
+            $normalized = self::normalize($code);
+            // Двухсимвольный «код» найдётся в любом тексте.
+            if (mb_strlen($normalized) >= 4) {
+                $out[$normalized] = true;
+            }
+        }
+
+        return array_keys($out);
     }
 
     /**
@@ -433,17 +470,19 @@ class AutoQuoteRuleService
             return false;
         }
 
-        $sku = self::normalize((string) ($item->catalogItem?->sku ?? ''));
-        if ($sku === '') {
+        $codes = self::itemCodes($item->catalogItem);
+        if ($codes === []) {
             return false;
         }
 
         // Свой текст клиента — сюда же попадает и блок пересылки: клиенты
         // часто шлют заявку одной пересылкой, без единого своего слова, и это
         // нормальная заявка.
-        $own = $this->cleaner->clientOwnText($source);
-        if (str_contains(self::normalize($source->subject.' '.$own), $sku)) {
-            return true;
+        $own = self::normalize($source->subject.' '.$this->cleaner->clientOwnText($source));
+        foreach ($codes as $code) {
+            if (str_contains($own, $code)) {
+                return true;
+            }
         }
 
         // Артикул нашёлся только в цитате. Сама по себе цитата не порок:
@@ -452,11 +491,16 @@ class AutoQuoteRuleService
         // система рискует «узнать» артикул, который сама же и предложила.
         // Кейс M-2026-16064: в треде процитирован наш счёт, а письмо клиента —
         // про сдвиг сроков, заявки там нет вовсе.
-        if (! str_contains(self::normalize($source->subject.' '.$source->body_plain), $sku)) {
-            return false;
+        $full = self::normalize($source->subject.' '.$source->body_plain);
+        $inQuote = false;
+        foreach ($codes as $code) {
+            if (str_contains($full, $code)) {
+                $inQuote = true;
+                break;
+            }
         }
 
-        return ! $this->hasOwnDocumentBefore($request, $source);
+        return $inQuote && ! $this->hasOwnDocumentBefore($request, $source);
     }
 
     /** Уходил ли клиенту наш документ (КП или счёт) до этого письма. */
