@@ -37,6 +37,9 @@ class YandexDirectFeedService
             ->where('is_price_actual', true)
             ->whereNotNull('sku')
             ->where('sku', '!=', '')
+            // Исключённые вручную в разделе «Директ»: по складу и цене подходят,
+            // но сами по себе спросом не пользуются (комплектующие, расходники).
+            ->whereNotIn('id', \App\Services\Direct\DirectCandidateService::excludedItemIds() ?: [0])
             ->orderBy('id')
             ->get([
                 'id', 'sku', 'name', 'part_type', 'brand', 'brand_article', 'articles',

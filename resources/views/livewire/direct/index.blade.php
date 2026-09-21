@@ -125,7 +125,8 @@
                                 <th class="text-right py-1.5 pr-2">Остаток</th>
                                 <th class="text-right py-1.5 pr-2">Заявок</th>
                                 <th class="text-right py-1.5 pr-2">Оплачено</th>
-                                <th class="text-left py-1.5">Коды</th>
+                                <th class="text-left py-1.5 pr-2">Коды</th>
+                                <th class="py-1.5"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -145,13 +146,21 @@
                                     <td class="py-1.5 pr-2 text-right mono">{{ (int) $row->stock_available }}</td>
                                     <td class="py-1.5 pr-2 text-right mono">{{ (int) $row->reqs }}</td>
                                     <td class="py-1.5 pr-2 text-right mono">{{ $money($row->paid) }} ₽</td>
-                                    <td class="py-1.5 text-[11.5px] text-fg-3">
+                                    <td class="py-1.5 pr-2 text-[11.5px] text-fg-3">
                                         {{ $codes ? \Illuminate\Support\Str::limit(implode(', ', $codes), 30) : '—' }}
+                                    </td>
+                                    <td class="py-1.5 text-right">
+                                        {{-- Причину спрашиваем сразу: через месяц «почему эта позиция снята»
+                                             по одному артикулу уже не восстановить. --}}
+                                        <button type="button" class="btn btn-sm"
+                                                x-data
+                                                @click="$wire.excludeItem('{{ $row->sku }}', window.prompt('Почему убираем {{ $row->sku }} из рекламы? (можно пусто)', '') ?? '')"
+                                                title="Убрать позицию из рекламы — и из очереди, и из фида">✕ Не рекламировать</button>
                                     </td>
                                 </tr>
                                 @if($inWork && $i + 1 === $adsLimit)
                                     <tr wire:key="dq-line">
-                                        <td colspan="8" class="py-1">
+                                        <td colspan="9" class="py-1">
                                             <div class="flex items-center gap-2 text-[11px] text-fg-4">
                                                 <span class="flex-1" style="height:1px;background:var(--border-strong)"></span>
                                                 <span>граница: выше — в работе, ниже — в очереди</span>
@@ -165,6 +174,42 @@
                     </table>
                 </div>
             @endif
+        </div>
+    </div>
+
+    {{-- Снятые с рекламы вручную --}}
+    @php $excluded = $this->excluded; @endphp
+    <div class="ds-card">
+        <div class="ds-card-header flex-wrap">
+            <h3 class="text-[15px] font-semibold text-fg-1">🚫 Не рекламируем</h3>
+            <span class="text-[12px] text-fg-3">сняты вручную — не попадают ни в очередь, ни в фид</span>
+            <span class="flex-1"></span>
+            <span class="mono text-[12px] text-fg-4">{{ $excluded->count() }}</span>
+        </div>
+        <div class="ds-card-body">
+            @forelse($excluded as $ex)
+                <div wire:key="dx-{{ $ex->id }}"
+                     class="flex flex-wrap items-center gap-2 py-2 {{ ! $loop->last ? 'border-b border-border-subtle' : '' }}">
+                    <span class="mono text-[12.5px] text-fg-1">{{ $ex->sku }}</span>
+                    <span class="text-[12.5px] text-fg-2">
+                        {{ \Illuminate\Support\Str::limit($ex->catalogItem?->name ?? '—', 52) }}
+                    </span>
+                    @if($ex->reason)
+                        <span class="text-[12px] text-fg-3">· {{ \Illuminate\Support\Str::limit($ex->reason, 60) }}</span>
+                    @endif
+                    <span class="flex-1"></span>
+                    <span class="text-[11px] text-fg-4">
+                        {{ $ex->excludedBy?->name ?? 'система' }} · {{ $ex->created_at?->format('d.m.Y') }}
+                    </span>
+                    <button type="button" class="btn btn-sm" wire:click="restoreItem('{{ $ex->sku }}')"
+                            title="Вернуть позицию в очередь">↩ Вернуть</button>
+                </div>
+            @empty
+                <div class="text-[13px] text-fg-3">
+                    Пока никого. Сюда попадают позиции, которые проходят по складу и цене, но сами по себе
+                    спросом не пользуются — комплектующие к другому товару, расходники, упаковка.
+                </div>
+            @endforelse
         </div>
     </div>
 </div>

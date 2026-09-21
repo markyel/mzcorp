@@ -120,8 +120,39 @@ class Index extends Component
     public function refreshQueue(): void
     {
         app(DirectCandidateService::class)->forget();
-        unset($this->queue, $this->readyCount);
+        unset($this->queue, $this->readyCount, $this->excluded);
         $this->notice = 'Очередь пересобрана.';
+    }
+
+    /** Позиции, снятые с рекламы вручную. */
+    #[Computed]
+    public function excluded()
+    {
+        return app(DirectCandidateService::class)->excluded();
+    }
+
+    /**
+     * Убрать позицию из рекламы: по складу и цене она проходит, но сама по себе
+     * спросом не пользуется (комплектующее к другому товару, расходник).
+     * Исключение действует и на очередь, и на YML-фид.
+     */
+    public function excludeItem(string $sku, ?string $reason = null): void
+    {
+        $this->ensureAdmin();
+        $excluded = app(DirectCandidateService::class)->exclude($sku, $reason, Auth::user());
+        unset($this->queue, $this->readyCount, $this->excluded);
+
+        $this->notice = $excluded === null
+            ? "Позиция {$sku} не найдена в каталоге."
+            : "{$sku} убрана из рекламы — из очереди и из фида.";
+    }
+
+    public function restoreItem(string $sku): void
+    {
+        $this->ensureAdmin();
+        app(DirectCandidateService::class)->restore($sku);
+        unset($this->queue, $this->readyCount, $this->excluded);
+        $this->notice = "{$sku} возвращена в очередь.";
     }
 
     public function dismiss(): void

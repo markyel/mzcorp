@@ -2,6 +2,9 @@
 
 namespace App\Services\Direct;
 
+use App\Models\CatalogItem;
+use App\Models\DirectExcludedItem;
+use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -46,6 +49,7 @@ class DirectCandidateService
         return (int) Cache::remember('direct:ready_count', self::CACHE_TTL, fn () => DB::selectOne("
             select count(*) n from catalog_items
             where is_active and stock_available > 0 and price > 0 and is_price_actual
+              and not exists (select 1 from direct_excluded_items x where x.catalog_item_id = catalog_items.id)
         ")->n);
     }
 
@@ -57,6 +61,64 @@ class DirectCandidateService
         }
     }
 
+    /**
+     * Исключить позицию из рекламы: по складу и цене она подходит, но сама по
+     * себе спросом не пользуется (расходники, комплектующие к другому товару).
+     */
+    public function exclude(string $sku, ?string $reason, ?User $by): ?DirectExcludedItem
+    {
+        $item = CatalogItem::query()->where('sku', $sku)->first(['id', 'sku']);
+        if ($item === null) {
+            return null;
+        }
+
+        $excluded = DirectExcludedItem::updateOrCreate(
+            ['catalog_item_id' => $item->id],
+            [
+                'sku' => $item->sku,
+                'reason' => $reason !== null && trim($reason) !== '' ? mb_substr(trim($reason), 0, 200) : null,
+                'excluded_by_user_id' => $by?->id,
+            ],
+        );
+        $this->forget();
+        Cache::forget('direct:excluded_ids');
+        Cache::forget('yandex_direct_feed:products_yml');
+
+        return $excluded;
+    }
+
+    /** Вернуть позицию в очередь. */
+    public function restore(string $sku): bool
+    {
+        $deleted = DirectExcludedItem::query()->where('sku', $sku)->delete() > 0;
+        if ($deleted) {
+            $this->forget();
+            Cache::forget('direct:excluded_ids');
+            Cache::forget('yandex_direct_feed:products_yml');
+        }
+
+        return $deleted;
+    }
+
+    /** @return Collection<int, DirectExcludedItem> */
+    public function excluded(): Collection
+    {
+        return DirectExcludedItem::query()
+            ->with(['catalogItem:id,sku,name,price,stock_available', 'excludedBy:id,name'])
+            ->orderByDesc('id')
+            ->get();
+    }
+
+    /** id исключённых позиций — общий фильтр для очереди и фида. */
+    public static function excludedItemIds(): array
+    {
+        return Cache::remember(
+            'direct:excluded_ids',
+            self::CACHE_TTL,
+            fn () => DirectExcludedItem::query()->pluck('catalog_item_id')->map(fn ($id) => (int) $id)->all(),
+        );
+    }
+
     private function sql(): string
     {
         $months = self::DEMAND_MONTHS;
@@ -66,6 +128,8 @@ class DirectCandidateService
                 select id, sku, name, brand, brand_article, price, stock_available, articles
                 from catalog_items
                 where is_active and stock_available > 0 and price > 0 and is_price_actual
+                  -- вручную исключённые из рекламы (раздел «Директ»)
+                  and not exists (select 1 from direct_excluded_items x where x.catalog_item_id = catalog_items.id)
             ),
             demand as (
                 select ri.catalog_item_id cid,
