@@ -8,6 +8,7 @@ use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Models\RequestItem;
 use App\Services\Mail\PostSaleFulfillmentDetector;
+use App\Services\Quotations\QuotationService;
 
 /**
  * Правило автоматической выдачи КП: годится ли заявка на автомат и что именно
@@ -36,6 +37,7 @@ class AutoQuoteRuleService
 
     public function __construct(
         private readonly PostSaleFulfillmentDetector $postSale,
+        private readonly QuotationService $quotations,
     ) {}
 
     /**
@@ -46,7 +48,7 @@ class AutoQuoteRuleService
     public function verdict(Request $request): array
     {
         $items = $request->items->filter(fn (RequestItem $i) => (bool) $i->is_active)->values();
-        $lines = $this->lines($items);
+        $lines = $this->lines($items, $this->discountFor($request));
         $total = array_sum(array_column($lines, 'total'));
 
         $checks = [];
@@ -125,19 +127,29 @@ class AutoQuoteRuleService
     }
 
     /**
-     * Что автомат поставил бы в КП: позиция каталога, количество и каталожная
-     * цена. Никаких скидок — их даёт менеджер осознанно.
+     * Что автомат поставил бы в КП.
+     *
+     * Скидку берём ту же, что подставилась бы в ручное КП, — из карточки
+     * организации, и через ту же формулу `MAX(цена × (1 − скидка), цена_мин)`.
+     * Иначе автомат выставляет каталожную цену там, где менеджер даёт
+     * привычные клиенту минус двадцать процентов: на холостом прогоне это
+     * сразу дало медиану расхождения ровно 1,25.
      *
      * @param  \Illuminate\Support\Collection<int, RequestItem>  $items
      * @return array<int, array<string, mixed>>
      */
-    public function lines($items): array
+    public function lines($items, float $discountPercent = 0.0): array
     {
         $out = [];
         foreach ($items as $item) {
             $catalog = $item->catalogItem;
             $qty = (float) $item->parsed_qty;
-            $price = (float) ($catalog?->price ?? 0);
+            $catalogPrice = (float) ($catalog?->price ?? 0);
+            $price = $this->quotations->computeFinalUnitPrice(
+                $catalogPrice,
+                $catalog?->price_min !== null ? (float) $catalog->price_min : null,
+                $discountPercent,
+            );
 
             $out[] = [
                 'request_item_id' => $item->id,
@@ -146,6 +158,8 @@ class AutoQuoteRuleService
                 'asked' => trim((string) ($item->parsed_article ?: $item->parsed_name)),
                 'qty' => $qty,
                 'unit' => (string) ($item->parsed_unit ?: 'шт.'),
+                'catalog_price' => $catalogPrice,
+                'discount_percent' => $discountPercent,
                 'unit_price' => $price,
                 'total' => round($price * max($qty, 0), 2),
                 'price_actual' => (bool) ($catalog?->is_price_actual ?? false),
@@ -154,6 +168,12 @@ class AutoQuoteRuleService
         }
 
         return $out;
+    }
+
+    /** Скидка клиента из карточки организации — та же, что и в ручном КП. */
+    public function discountFor(Request $request): float
+    {
+        return (float) ($request->organization?->discount_percent ?? 0);
     }
 
     /**
