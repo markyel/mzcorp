@@ -99,6 +99,20 @@ class DirectSyncServiceTest extends TestCase
         $this->assertSame([], $resume);
     }
 
+    public function test_draft_is_not_suspended_either(): void
+    {
+        // «Объявление является черновиком и не может быть остановлено» —
+        // и не надо: показов оно не даёт. Погасим после модерации.
+        [$suspend] = $this->sync()->decide(
+            [],
+            new Collection([$this->ad('M00193', 11, 'OFF', 'DRAFT')]),
+            $this->states([11 => ['OFF', 'DRAFT']]),
+            10,
+        );
+
+        $this->assertSame([], $suspend);
+    }
+
     public function test_show_limit_is_respected_and_the_rest_waits(): void
     {
         $ads = new Collection([$this->ad('A', 1, 'ON'), $this->ad('B', 2, 'ON'), $this->ad('C', 3, 'ON')]);
