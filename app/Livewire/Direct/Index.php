@@ -58,6 +58,9 @@ class Index extends Component
 
     public int $adsLimit = self::DEFAULT_ADS_LIMIT;
 
+    /** Сколько держим готовыми: написаны, созданы, прошли модерацию, ждут. */
+    public int $benchSize = DirectSyncService::DEFAULT_BENCH;
+
     public string $adTone = DirectAdTone::DEFAULT;
 
     public ?string $notice = null;
@@ -77,6 +80,7 @@ class Index extends Component
     {
         $this->ensureAdmin();
         $this->adsLimit = self::clamp((int) $settings->get(self::SETTING_ADS_LIMIT, self::DEFAULT_ADS_LIMIT));
+        $this->benchSize = app(DirectSyncService::class)->benchSize();
         $this->adTone = DirectAdTone::normalize($settings->get(self::SETTING_AD_TONE, DirectAdTone::DEFAULT));
     }
 
@@ -99,10 +103,21 @@ class Index extends Component
             'Сколько объявлений держим в Яндекс.Директе одновременно',
         );
 
-        unset($this->queue, $this->plan);
-        $this->notice = $before === $this->adsLimit
-            ? "В работе {$this->adsLimit} позиций."
-            : "Было {$before}, стало {$this->adsLimit} позиций в работе.";
+        // Скамейка не может быть меньше показа: резерв на то и резерв.
+        $this->benchSize = max($this->adsLimit, min(DirectSyncService::MAX_BENCH, $this->benchSize));
+        $settings->set(
+            DirectSyncService::SETTING_BENCH,
+            (string) $this->benchSize,
+            AppSetting::TYPE_INT,
+            Auth::id(),
+            'Сколько объявлений держим готовыми (написаны, созданы, прошли модерацию)',
+        );
+
+        unset($this->queue, $this->plan, $this->syncState);
+        $this->notice = ($before === $this->adsLimit
+            ? "В показе {$this->adsLimit} позиций"
+            : "Было {$before}, стало {$this->adsLimit} позиций в показе")
+            .", готовыми держим {$this->benchSize}.";
     }
 
     /** Очередь: берём с запасом, чтобы показать и тех, кто ждёт за порогом. */
@@ -372,11 +387,13 @@ class Index extends Component
 
         $this->syncReport = $report;
         $this->notice = sprintf(
-            '%s: проверено %d, выключить %d, включить %d.',
+            '%s: показ −%d/+%d, тексты %d, создать %d, на модерацию %d.',
             $report['applied'] ? 'Применено' : 'Предложения',
-            $report['checked'],
             count($report['suspend']),
             count($report['resume']),
+            count($report['texts']),
+            count($report['published']),
+            count($report['moderated']),
         );
         if ($report['errors'] !== []) {
             $this->error = implode(' · ', $report['errors']);
@@ -414,6 +431,9 @@ class Index extends Component
         return [
             'enabled' => $sync->enabled(),
             'dry' => $sync->dryRun(),
+            'bench' => $sync->benchSize(),
+            'ready' => DirectPublishedAd::query()->where('status', 'ACCEPTED')->count(),
+            'onAir' => DirectPublishedAd::query()->where('state', 'ON')->count(),
             'last' => app(SettingsService::class)->get(DirectSyncService::SETTING_LAST_RUN),
         ];
     }

@@ -39,11 +39,14 @@ class DirectSyncCommand extends Command
         $report = $sync->run($apply);
 
         $this->info(sprintf(
-            '%s: проверено %d, выключить %d, включить %d.',
+            '%s: проверено %d, выключить %d, включить %d, тексты %d, создать %d, на модерацию %d.',
             $report['applied'] ? 'Применено' : 'Предложения',
             $report['checked'],
             count($report['suspend']),
             count($report['resume']),
+            count($report['texts']),
+            count($report['published']),
+            count($report['moderated']),
         ));
 
         foreach ($report['suspend'] as $line) {
@@ -51,6 +54,14 @@ class DirectSyncCommand extends Command
         }
         foreach ($report['resume'] as $line) {
             $this->line('  + '.$line);
+        }
+        foreach (['texts' => 'тексты', 'published' => 'создать', 'moderated' => 'модерация'] as $key => $label) {
+            if ($report[$key] !== []) {
+                $this->line('  '.$label.': '.implode(', ', $report[$key]));
+            }
+        }
+        foreach ($report['attention'] as $line) {
+            $this->warn('  ⚠ '.$line);
         }
         foreach ($report['errors'] as $line) {
             $this->warn('  ! '.$line);

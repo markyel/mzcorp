@@ -84,9 +84,14 @@
         <div class="ds-card-body">
             <form wire:submit.prevent="saveLimit" class="flex flex-wrap items-end gap-3">
                 <div>
-                    <label class="block text-[11.5px] text-fg-3 mb-1">Объявлений одновременно</label>
+                    <label class="block text-[11.5px] text-fg-3 mb-1">Показываем одновременно</label>
                     <input type="number" wire:model="adsLimit" min="{{ \App\Livewire\Direct\Index::MIN_ADS_LIMIT }}"
                            max="{{ \App\Livewire\Direct\Index::MAX_ADS_LIMIT }}" class="{{ $inp }} w-[120px] mono">
+                </div>
+                <div>
+                    <label class="block text-[11.5px] text-fg-3 mb-1">Держим готовыми</label>
+                    <input type="number" wire:model="benchSize" min="{{ \App\Livewire\Direct\Index::MIN_ADS_LIMIT }}"
+                           max="{{ \App\Services\Direct\DirectSyncService::MAX_BENCH }}" class="{{ $inp }} w-[120px] mono">
                 </div>
                 <button type="submit" class="btn btn-sm btn-primary">Сохранить</button>
                 <span class="flex-1"></span>
@@ -98,6 +103,9 @@
             <div class="mt-2 text-[11.5px] text-fg-4">
                 Рекламируем только то, на что можем сразу дать цену: по такой заявке с артикулом
                 КП уходит автоматически. Начинаем с малого числа и расширяемся по мере окупаемости.
+                Разница между «показываем» и «держим готовыми» — скамейка запасных: объявления
+                написаны, созданы и прошли модерацию, но выключены. Выпала позиция из наличия —
+                на её место мгновенно встаёт готовое, а не идёт весь путь с нуля.
             </div>
         </div>
     </div>
@@ -525,10 +533,22 @@
         </div>
         <div class="ds-card-body space-y-2">
             <div class="text-[12.5px] text-fg-2">
-                Позиция пропала с остатка или у неё устарела цена — объявление выключается.
-                Вернулась — включается обратно. Выключение идёт без ограничений: оно экономит.
-                Включение — не больше {{ \App\Services\Direct\DirectSyncService::MAX_RESUMES }} за прогон,
-                и только для объявлений, уже прошедших модерацию: черновик автомат в работу не переводит.
+                Прогон ведёт весь конвейер: пишет тексты тем, у кого их нет, создаёт объявления,
+                отправляет черновики на модерацию и держит в показе первые
+                <b class="mono">{{ $adsLimit }}</b> позиций очереди из
+                <b class="mono">{{ $sync['bench'] }}</b> подготовленных.
+                Выпала позиция — гаснет, вернулась или подошла очередь — зажигается из резерва.
+            </div>
+            <div class="flex flex-wrap items-center gap-3 text-[12px] text-fg-3">
+                <span>готовы к показу: <b class="mono text-fg-1">{{ $sync['ready'] }}</b></span>
+                <span>идут показы: <b class="mono text-fg-1">{{ $sync['onAir'] }}</b></span>
+                <span class="text-fg-4">
+                    потолки за прогон: тексты {{ \App\Services\Direct\DirectSyncService::MAX_TEXTS }},
+                    создание {{ \App\Services\Direct\DirectSyncService::MAX_PUBLISH }},
+                    модерация {{ \App\Services\Direct\DirectSyncService::MAX_MODERATE }},
+                    включение {{ \App\Services\Direct\DirectSyncService::MAX_RESUMES }};
+                    выключение без ограничений
+                </span>
             </div>
 
             <div class="flex flex-wrap items-center gap-2">
@@ -560,8 +580,21 @@
                     @foreach($syncReport['resume'] as $line)
                         <div class="text-[12px] text-emerald-700">+ включить: {{ $line }}</div>
                     @endforeach
-                    @if(! $syncReport['suspend'] && ! $syncReport['resume'])
-                        <div class="text-[12px] text-fg-3">Менять нечего — всё соответствует складу.</div>
+                    @if($syncReport['texts'])
+                        <div class="text-[12px] text-fg-2">✎ написать тексты: <span class="mono">{{ implode(', ', $syncReport['texts']) }}</span></div>
+                    @endif
+                    @if($syncReport['published'])
+                        <div class="text-[12px] text-fg-2">＋ создать объявления: <span class="mono">{{ implode(', ', $syncReport['published']) }}</span></div>
+                    @endif
+                    @if($syncReport['moderated'])
+                        <div class="text-[12px] text-fg-2">→ на модерацию: <span class="mono">{{ implode(', ', $syncReport['moderated']) }}</span></div>
+                    @endif
+                    @foreach($syncReport['attention'] as $line)
+                        <div class="text-[12px] text-red-700">⚠ требует внимания: {{ $line }}</div>
+                    @endforeach
+                    @if(! $syncReport['suspend'] && ! $syncReport['resume'] && ! $syncReport['texts']
+                        && ! $syncReport['published'] && ! $syncReport['moderated'])
+                        <div class="text-[12px] text-fg-3">Менять нечего — конвейер в равновесии.</div>
                     @endif
                     @foreach($syncReport['errors'] as $line)
                         <div class="text-[12px] text-red-700">! {{ $line }}</div>
