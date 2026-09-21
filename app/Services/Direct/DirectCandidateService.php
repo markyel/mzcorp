@@ -125,7 +125,7 @@ class DirectCandidateService
 
         return "
             with ready as (
-                select id, sku, name, brand, brand_article, price, stock_available, articles
+                select id, sku, name, brand, brand_article, price, stock_available, articles, part_type
                 from catalog_items
                 where is_active and stock_available > 0 and price > 0 and is_price_actual
                   -- вручную исключённые из рекламы (раздел «Директ»)
@@ -144,7 +144,7 @@ class DirectCandidateService
                 group by ri.catalog_item_id
             )
             select ready.sku, ready.name, ready.brand, ready.brand_article,
-                   ready.price, ready.stock_available, ready.articles,
+                   ready.price, ready.stock_available, ready.articles, ready.part_type,
                    coalesce(demand.reqs, 0) reqs,
                    coalesce(demand.won, 0) won,
                    coalesce(demand.paid, 0) paid

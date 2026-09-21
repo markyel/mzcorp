@@ -45,6 +45,28 @@ class DirectAdPlanServiceTest extends TestCase
         $this->assertStringNotContainsString('  ', $title);
     }
 
+    public function test_cut_title_never_leaves_an_open_bracket(): void
+    {
+        // Живой кейс: «…FCU 0735X (FS0735) (24V DC, 35» — скобка открылась,
+        // закрывающая не влезла, объявление читалось обрывком.
+        $title = Plan::adTitle($this->item([
+            'name' => 'Фотозавеса динамическая FCU 0735X (FS0735) (24V DC, 35 лучей)',
+        ]));
+
+        $this->assertLessThanOrEqual(Plan::TITLE_MAX, mb_strlen($title));
+        $this->assertSame(mb_substr_count($title, '('), mb_substr_count($title, ')'));
+        $this->assertStringEndsNotWith(',', $title);
+        $this->assertSame('Фотозавеса динамическая FCU 0735X (FS0735)', $title);
+    }
+
+    public function test_tidy_tail_removes_dangling_punctuation(): void
+    {
+        $this->assertSame('Плата LCD', Plan::tidyTail('Плата LCD ('));
+        $this->assertSame('Плата LCD', Plan::tidyTail('Плата LCD, '));
+        $this->assertSame('Ремень [A]', Plan::tidyTail('Ремень [A] [B'));
+        $this->assertSame('Плата (v2)', Plan::tidyTail('Плата (v2)'));
+    }
+
     public function test_title_falls_back_to_brand_and_sku(): void
     {
         $title = Plan::adTitle($this->item(['name' => '']));
@@ -53,10 +75,57 @@ class DirectAdPlanServiceTest extends TestCase
         $this->assertStringContainsString('M00193', $title);
     }
 
-    public function test_second_title_and_text_fit_the_limits(): void
+    public function test_second_title_takes_the_brand_when_the_headline_lacks_it(): void
     {
-        $this->assertLessThanOrEqual(Plan::TITLE2_MAX, mb_strlen(Plan::adTitle2()));
+        // Заголовок про поручень без бренда — во втором ставим бренд.
+        $title2 = Plan::adTitle2($this->item([
+            'name' => 'Поручень резиновый тип C699 чёрный',
+            'brand' => 'Schindler',
+            'part_type' => 'Поручень эскалатора и траволатора',
+        ]));
 
+        $this->assertSame('Schindler · со склада', $title2);
+        $this->assertLessThanOrEqual(Plan::TITLE2_MAX, mb_strlen($title2));
+    }
+
+    public function test_second_title_switches_to_the_assembly_when_the_brand_is_already_in_the_headline(): void
+    {
+        $item = $this->item(['part_type' => 'Поручень эскалатора и траволатора']);
+        // Заголовок «Гребёнка центральная OTIS 506NCE…» бренд уже содержит.
+        $title2 = Plan::adTitle2($item, Plan::adTitle($item));
+
+        $this->assertStringNotContainsString('OTIS', $title2);
+        $this->assertStringContainsString('Поручень эскалатора', $title2);
+    }
+
+    public function test_second_titles_differ_across_positions(): void
+    {
+        $a = Plan::adTitle2($this->item(['name' => 'Поручень C699', 'brand' => 'Schindler']));
+        $b = Plan::adTitle2($this->item(['name' => 'Ролик каретки', 'brand' => 'Fermator']));
+
+        $this->assertNotSame($a, $b, 'второй заголовок обязан различаться между позициями');
+    }
+
+    public function test_second_title_falls_back_when_there_is_nothing_to_say(): void
+    {
+        $title2 = Plan::adTitle2($this->item(['brand' => '', 'part_type' => '', 'name' => 'Деталь']));
+
+        $this->assertSame('Отгрузка со склада', $title2);
+    }
+
+    public function test_short_part_type_cuts_the_enumeration(): void
+    {
+        $this->assertSame('Поручень эскалатора', Plan::shortPartType(
+            (object) ['part_type' => 'Поручень эскалатора и траволатора']
+        ));
+        $this->assertSame('Ролик подвеса ДК', Plan::shortPartType(
+            (object) ['part_type' => 'Ролик подвеса ДК/ДШ']
+        ));
+        $this->assertSame('', Plan::shortPartType((object) []));
+    }
+
+    public function test_text_fits_the_limits(): void
+    {
         $text = Plan::adText($this->item());
         $this->assertLessThanOrEqual(Plan::TEXT_MAX, mb_strlen($text));
         $this->assertStringContainsString('506NCE', $text);
@@ -79,7 +148,7 @@ class DirectAdPlanServiceTest extends TestCase
     {
         // Решение заказчика: цену не публикуем — на карточке её анонимно не видно.
         $item = $this->item();
-        foreach ([Plan::adTitle($item), Plan::adTitle2(), Plan::adText($item)] as $part) {
+        foreach ([Plan::adTitle($item), Plan::adTitle2($item), Plan::adText($item)] as $part) {
             $this->assertStringNotContainsString('1070', $part);
             $this->assertStringNotContainsString('₽', $part);
         }

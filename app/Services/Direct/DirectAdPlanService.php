@@ -68,7 +68,7 @@ class DirectAdPlanService
             'brand' => (string) ($item->brand ?? ''),
             'group' => self::groupName($item),
             'title' => $title,
-            'title2' => self::adTitle2(),
+            'title2' => self::adTitle2($item, $title),
             'text' => $text,
             'url' => YandexDirectFeedService::productUrl((string) ($item->sku ?? '')),
             'keywords' => $keywords,
@@ -112,9 +112,61 @@ class DirectAdPlanService
         return self::cutWords($base, self::TITLE_MAX);
     }
 
-    public static function adTitle2(): string
+    /**
+     * Второй заголовок — место для того, чего нет в первом: бренда или узла
+     * лифта. Один и тот же текст на всех объявлениях выглядит как шаблон и
+     * ничего не добавляет, поэтому берём первый подходящий вариант, который
+     * НЕ повторяет первый заголовок и влезает в лимит.
+     */
+    public static function adTitle2(object $item, ?string $title = null): string
     {
-        return Str::limit('Со склада, отгрузка сразу', self::TITLE2_MAX, '');
+        $title = mb_strtolower($title ?? self::adTitle($item));
+        $brand = trim((string) ($item->brand ?? ''));
+        $unit = self::shortPartType($item);
+
+        $candidates = [];
+        // Бренда нет в заголовке — он самый полезный второй заголовок.
+        if ($brand !== '' && ! str_contains($title, mb_strtolower($brand))) {
+            $candidates[] = $brand.' · со склада';
+            $candidates[] = $brand;
+        }
+        // Иначе — узел: «Поручень эскалатора», «Ролик двери кабины».
+        if ($unit !== '' && ! str_contains($title, mb_strtolower(mb_substr($unit, 0, 12)))) {
+            $candidates[] = $unit.' · в наличии';
+            $candidates[] = $unit;
+        }
+        $candidates[] = 'Отгрузка со склада';
+        $candidates[] = 'Есть на складе';
+
+        foreach ($candidates as $variant) {
+            $variant = trim($variant);
+            if ($variant !== '' && mb_strlen($variant) <= self::TITLE2_MAX) {
+                return $variant;
+            }
+        }
+
+        return 'Есть на складе';
+    }
+
+    /**
+     * Узел из каталожной категории: «Поручень эскалатора и траволатора» →
+     * «Поручень эскалатора». Категории длинные и с перечислениями — берём
+     * начало до первого разделителя.
+     */
+    public static function shortPartType(object $item): string
+    {
+        $raw = trim((string) ($item->part_type ?? ''));
+        if ($raw === '') {
+            return '';
+        }
+        // Режем по первому разделителю перечисления.
+        $head = preg_split('/[,(\/]| и | или /u', $raw)[0] ?? $raw;
+        $head = trim($head, " \t.-–—");
+
+        // Режем по самому лимиту второго заголовка: суффикс «· в наличии»
+        // подставляется только если после него текст всё ещё помещается,
+        // иначе узел уходит один — целым словом, а не обрубком.
+        return self::cutWords(Str::ucfirst($head), self::TITLE2_MAX);
     }
 
     /** Текст: бренд, артикул производителя и обещание, которое мы держим. */
@@ -201,11 +253,35 @@ class DirectAdPlanService
     {
         $value = trim($value);
         if (mb_strlen($value) <= $max) {
-            return $value;
+            return self::tidyTail($value);
         }
         $cut = mb_substr($value, 0, $max);
         $space = mb_strrpos($cut, ' ');
 
-        return trim($space !== false && $space > $max * 0.6 ? mb_substr($cut, 0, $space) : $cut);
+        return self::tidyTail($space !== false && $space > $max * 0.6 ? mb_substr($cut, 0, $space) : $cut);
+    }
+
+    /**
+     * Прибрать хвост после обрезки: незакрытая скобка и висящая пунктуация.
+     * Кейс «Фотозавеса динамическая FCU 0735X (FS0735) (24V DC, 35» — скобка
+     * открылась, закрывающая не поместилась, объявление читается как обрывок.
+     */
+    public static function tidyTail(string $value): string
+    {
+        $value = trim($value);
+
+        // Отрезаем незакрытые скобки вместе с их содержимым.
+        foreach ([['(', ')'], ['[', ']']] as [$open, $close]) {
+            while (mb_substr_count($value, $open) > mb_substr_count($value, $close)) {
+                $pos = mb_strrpos($value, $open);
+                if ($pos === false) {
+                    break;
+                }
+                $value = rtrim(mb_substr($value, 0, $pos));
+            }
+        }
+
+        // …и висящие разделители на конце.
+        return trim(rtrim($value, " \t,;:.-–—/\\+&"));
     }
 }
