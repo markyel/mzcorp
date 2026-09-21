@@ -33,10 +33,23 @@ class AutoQuoteComparisonTest extends TestCase
         $this->assertStringContainsString('не распознан', Cmp::LABELS[Cmp::KIND_UNPARSED]);
     }
 
+    public function test_delivery_line_is_a_service_not_a_difference(): void
+    {
+        // Кейс M-2026-14969: товар и цена сошлись, менеджер дописал доставку.
+        // Это нормальная работа, а не расхождение состава.
+        $this->assertTrue(Cmp::isServiceLine(['sku' => '', 'name' => "Доставка ЭКСПРЕСС по адресу '305003, г.Курск"]));
+        $this->assertTrue(Cmp::isServiceLine(['sku' => '—', 'name' => 'Транспортные расходы']));
+        $this->assertTrue(Cmp::isServiceLine(['sku' => null, 'name' => 'Упаковка деревянная']));
+
+        // Товарная строка услугой не считается, даже если про доставку в имени.
+        $this->assertFalse(Cmp::isServiceLine(['sku' => 'M16741', 'name' => 'Плата управления VEG2000']));
+        $this->assertFalse(Cmp::isServiceLine(['sku' => 'M04667', 'name' => 'Блок доставки приводов']));
+    }
+
     public function test_labels_cover_every_kind(): void
     {
         // Подпись под чипом берётся по ключу — пропуск означает пустой чип.
-        foreach ([Cmp::KIND_NONE, Cmp::KIND_UNPARSED, Cmp::KIND_SAME, Cmp::KIND_PRICE, Cmp::KIND_NOMENCLATURE, Cmp::KIND_COMPOSITION] as $kind) {
+        foreach ([Cmp::KIND_NONE, Cmp::KIND_UNPARSED, Cmp::KIND_DELIVERY, Cmp::KIND_SAME, Cmp::KIND_PRICE, Cmp::KIND_NOMENCLATURE, Cmp::KIND_COMPOSITION] as $kind) {
             $this->assertArrayHasKey($kind, Cmp::LABELS);
             $this->assertNotSame('', Cmp::LABELS[$kind]);
         }

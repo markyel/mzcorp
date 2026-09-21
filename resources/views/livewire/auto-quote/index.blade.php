@@ -5,7 +5,7 @@
     $summary = $this->summary;
     $labels = \App\Services\Quotes\AutoQuoteComparisonService::LABELS;
     $kindStyle = fn ($k) => match ($k) {
-        'same' => 'background:var(--emerald-50);color:var(--emerald-700)',
+        'same', 'delivery' => 'background:var(--emerald-50);color:var(--emerald-700)',
         'price', 'unparsed' => 'background:var(--amber-50);color:var(--amber-800)',
         'nomenclature', 'composition' => 'background:var(--red-50);color:var(--red-700)',
         default => 'background:var(--neutral-100);color:var(--fg-3)',
@@ -50,7 +50,9 @@
             @php $total = array_sum($summary); @endphp
             @if($total > 0)
                 <div class="text-[11.5px] text-fg-4">
-                    Совпало с менеджером: <b class="mono text-fg-2">{{ round(($summary['same'] ?? 0) / $total * 100) }}%</b>.
+                    {{-- «Добавлена доставка» считаем совпадением: товар и цена сошлись. --}}
+                    Совпало с менеджером:
+                    <b class="mono text-fg-2">{{ round((($summary['same'] ?? 0) + ($summary['delivery'] ?? 0)) / $total * 100) }}%</b>.
                     Расхождения по номенклатуре и составу — это экспертиза менеджера поверх буквального запроса:
                     подобранная замена, дополненный комплект. Там и проходит граница автомата.
                 </div>
@@ -165,11 +167,20 @@
                                 </thead>
                                 <tbody>
                                     @foreach($c['rows'] as $line)
-                                        <tr class="border-t border-border-subtle"
-                                            style="{{ $line['only_auto'] || $line['only_fact'] ? 'background:var(--red-50)' : ($line['price_differs'] || $line['qty_differs'] ? 'background:var(--amber-50)' : '') }}">
+                                        @php
+                                            $rowStyle = match (true) {
+                                                (bool) ($line['service'] ?? false) => 'background:var(--neutral-100)',
+                                                $line['only_auto'] || $line['only_fact'] => 'background:var(--red-50)',
+                                                $line['price_differs'] || $line['qty_differs'] => 'background:var(--amber-50)',
+                                                default => '',
+                                            };
+                                        @endphp
+                                        <tr class="border-t border-border-subtle" style="{{ $rowStyle }}">
                                             <td class="py-1.5 pr-2 mono">{{ $line['sku'] ?: '—' }}</td>
                                             <td class="py-1.5 pr-2">{{ \Illuminate\Support\Str::limit($line['name'], 54) }}
-                                                @if($line['only_auto'])
+                                                @if($line['service'] ?? false)
+                                                    <span class="text-[11px] text-fg-4">— услуга, автомат её не ставит</span>
+                                                @elseif($line['only_auto'])
                                                     <span class="text-[11px] text-red-700">— только у автомата</span>
                                                 @elseif($line['only_fact'])
                                                     <span class="text-[11px] text-red-700">— добавил менеджер</span>

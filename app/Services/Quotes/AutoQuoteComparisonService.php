@@ -43,6 +43,16 @@ class AutoQuoteComparisonService
     /** Документ клиенту ушёл, но распознан не был — сравнивать не с чем. */
     public const KIND_UNPARSED = 'unparsed';
 
+    /** Товар и цена сошлись, менеджер дописал доставку — это не расхождение. */
+    public const KIND_DELIVERY = 'delivery';
+
+    /**
+     * Строки-услуги, которые менеджер дописывает к товару: доставка, экспресс,
+     * упаковка. Автомат их не ставит и ставить не должен — КП на позицию
+     * выдаётся без доставки, её считают отдельно и позже.
+     */
+    public const SERVICE_RE = '/доставк|экспресс|транспортн|перевозк|курьер|отправк|упаковк|погрузк|достави/iu';
+
     public const KIND_SAME = 'same';
 
     public const KIND_PRICE = 'price';
@@ -54,6 +64,7 @@ class AutoQuoteComparisonService
     public const LABELS = [
         self::KIND_NONE => 'клиенту ничего не ушло',
         self::KIND_UNPARSED => 'документ не распознан',
+        self::KIND_DELIVERY => 'добавлена доставка',
         self::KIND_SAME => 'совпало',
         self::KIND_PRICE => 'другая цена',
         self::KIND_NOMENCLATURE => 'другая номенклатура',
@@ -217,20 +228,45 @@ class AutoQuoteComparisonService
      */
     private function kind(array $auto, array $fact, array $rows): string
     {
-        if (count($auto) !== count($fact)) {
+        // Доставку менеджер дописывает почти всегда, и это не расхождение:
+        // КП на позицию выдаётся без неё, доставку считают отдельно. Сравниваем
+        // товарные строки, а услугу отмечаем отдельным видом.
+        $service = array_filter($rows, fn ($r) => $r['service']);
+        $goods = array_values(array_filter($rows, fn ($r) => ! $r['service']));
+        $factGoods = array_filter($fact, fn ($l) => ! self::isServiceLine($l));
+
+        if (count($auto) !== count($factGoods)) {
             return self::KIND_COMPOSITION;
         }
-        if (array_keys($auto) !== array_keys($fact)) {
+        if (array_keys($auto) !== array_keys($factGoods)) {
             // Тот же размер, но другие артикулы — подобрана замена.
             return self::KIND_NOMENCLATURE;
         }
-        foreach ($rows as $row) {
+        foreach ($goods as $row) {
             if ($row['price_differs'] || $row['qty_differs']) {
                 return self::KIND_PRICE;
             }
         }
 
-        return self::KIND_SAME;
+        return $service !== [] ? self::KIND_DELIVERY : self::KIND_SAME;
+    }
+
+    /**
+     * Строка документа — услуга, а не товар.
+     *
+     * Опознаём по названию и по отсутствию артикула: «Доставка ЭКСПРЕСС по
+     * адресу …» приходит без кода, а товарная строка без кода к нам просто не
+     * попадёт — автомат работает по сматченным позициям.
+     *
+     * @param  array<string, mixed>  $line
+     */
+    public static function isServiceLine(array $line): bool
+    {
+        $sku = trim((string) ($line['sku'] ?? ''));
+        $name = (string) ($line['name'] ?? '');
+
+        return preg_match(self::SERVICE_RE, $name) === 1
+            && (AutoQuoteRuleService::normalize($sku) === '' || ! preg_match('/\d/', $sku));
     }
 
     /**
@@ -252,6 +288,8 @@ class AutoQuoteComparisonService
             'fact' => $fact,
             'only_auto' => $auto !== null && $fact === null,
             'only_fact' => $auto === null && $fact !== null,
+            // Услуга менеджера (доставка) — не расхождение, метим отдельно.
+            'service' => $auto === null && $fact !== null && self::isServiceLine($fact),
             'price_differs' => $auto !== null && $fact !== null && $factPrice > 0
                 && abs($autoPrice - $factPrice) / max($factPrice, 0.01) > self::PRICE_TOLERANCE,
             'qty_differs' => $auto !== null && $fact !== null && abs($autoQty - $factQty) > 0.001,
