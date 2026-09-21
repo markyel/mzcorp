@@ -372,6 +372,47 @@ class DirectPublisherService
     }
 
     /**
+     * Переписать тексты уже созданного объявления и отправить его на проверку
+     * заново. Нужно после отказа модерации: причину мы устранили в правилах,
+     * но в Директе лежит прежний текст, и сам он не обновится.
+     *
+     * @param  array<string, mixed>  $row  строка плана
+     * @return array{ok: bool, message: string}
+     */
+    public function updateAd(DirectPublishedAd $record, array $row, ?User $by = null): array
+    {
+        $res = $this->call('ads', 'update', [
+            'Ads' => [[
+                'Id' => (int) $record->ad_id,
+                'TextAd' => array_filter([
+                    'Title' => $row['title'],
+                    'Title2' => $row['title2'],
+                    'Text' => $row['text'],
+                    'Href' => $row['url'],
+                ], fn ($v) => $v !== null && $v !== ''),
+            ]],
+        ], $record->sku, $by);
+
+        $errors = trim(self::errorText($res).' '.self::resultErrors($res['result'] ?? null));
+        if (! $res['ok'] || $errors !== '') {
+            return ['ok' => false, 'message' => $record->sku.': '.($errors ?: 'обновление не прошло')];
+        }
+
+        $record->fill([
+            'title' => $row['title'],
+            'title2' => $row['title2'],
+            'text' => $row['text'],
+            'status' => 'MODERATION',
+            'status_note' => null,
+            'moderated_at' => now(),
+        ])->save();
+
+        $this->moderate([(int) $record->ad_id], $by);
+
+        return ['ok' => true, 'message' => $record->sku.': текст переписан, отправлено на проверку заново.'];
+    }
+
+    /**
      * Отправить объявления на модерацию.
      *
      * Единственная наша операция, которую видит Яндекс: до неё объявление —

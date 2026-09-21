@@ -158,8 +158,8 @@ class DirectAdPlanService
     public static function adTitle(object $item): string
     {
         // В каталожных именах встречаются двойные пробелы («Канат  d=7,8») —
-        // в объявлении это выглядит опечаткой.
-        $base = self::squeeze((string) ($item->name ?? ''));
+        // в объявлении это выглядит опечаткой, — и крик капсом.
+        $base = self::calmCaps(self::squeeze((string) ($item->name ?? '')), $item);
         if ($base === '') {
             $base = trim(((string) ($item->brand ?? '')).' '.((string) ($item->sku ?? '')));
         }
@@ -215,7 +215,7 @@ class DirectAdPlanService
      */
     public static function shortPartType(object $item): string
     {
-        $raw = trim((string) ($item->part_type ?? ''));
+        $raw = self::calmCaps(trim((string) ($item->part_type ?? '')), $item);
         if ($raw === '') {
             return '';
         }
@@ -326,6 +326,30 @@ class DirectAdPlanService
     public static function squeeze(string $value): string
     {
         return trim(preg_replace('/\s+/u', ' ', $value) ?? '');
+    }
+
+    /**
+     * Приглушить крик капсом, оставив заглавными бренды и артикулы.
+     *
+     * Каталожные названия пишут для склада, и заглавными там выделяют что
+     * угодно: «Коннектор С РАЗЪЕМАМИ тяговых ремней». Модератор Директа такой
+     * заголовок отклоняет (кейс M07484), и ему всё равно, что так в карточке.
+     * МЕЧЕЛ, ЩЛЗ, ГОСТ остаются — это имена, а не крик.
+     */
+    public static function calmCaps(string $value, object $item): string
+    {
+        $allowed = mb_strtolower(implode(' ', array_filter([
+            (string) ($item->brand ?? ''),
+            (string) ($item->brand_article ?? ''),
+            implode(' ', self::codes($item)),
+        ])));
+        $allowed = preg_replace('/[^a-z0-9а-я]+/u', '', $allowed) ?? '';
+
+        return preg_replace_callback(
+            '/[А-ЯЁ]{4,}/u',
+            fn ($m) => str_contains($allowed, mb_strtolower($m[0])) ? $m[0] : mb_strtolower($m[0]),
+            $value,
+        ) ?? $value;
     }
 
     /**

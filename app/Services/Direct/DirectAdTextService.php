@@ -325,6 +325,21 @@ class DirectAdTextService
         return true;
     }
 
+    /**
+     * Бренд и артикулы — единственное, что законно писать заглавными: МЕЧЕЛ,
+     * ЩЛЗ, ГОСТ, УИРФ. Всё прочее заглавными — крик.
+     */
+    private static function brandHaystack(object $item): string
+    {
+        $raw = mb_strtolower(implode(' ', array_filter([
+            (string) ($item->brand ?? ''),
+            (string) ($item->brand_article ?? ''),
+            implode(' ', DirectAdPlanService::codes($item)),
+        ])));
+
+        return preg_replace('/[^a-z0-9а-я]+/u', '', $raw) ?? '';
+    }
+
     /** Всё, что известно о позиции, одной строкой без разделителей. */
     private static function cardHaystack(object $item): string
     {
@@ -383,7 +398,10 @@ class DirectAdTextService
             return false;
         }
 
-        $haystack = $item !== null ? self::cardHaystack($item) : '';
+        // Сверяем ТОЛЬКО с брендом и артикулами. Каталожные названия сами
+        // написаны с криком («Коннектор С РАЗЪЕМАМИ тяговых ремней»), и
+        // сверка с именем такой капс легализовала — Директ отклонил (M07484).
+        $haystack = $item !== null ? self::brandHaystack($item) : '';
         foreach ($m[0] as $token) {
             if ($haystack === '' || ! str_contains($haystack, mb_strtolower($token))) {
                 return true;

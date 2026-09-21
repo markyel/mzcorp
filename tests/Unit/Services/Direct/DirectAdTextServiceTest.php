@@ -100,10 +100,11 @@ class DirectAdTextServiceTest extends TestCase
             'part_type' => 'Канат грузовой',
         ];
 
-        $this->assertFalse(Texts::shouts('Канат МЕЧЕЛ ГОСТ 3077-80 в наличии', $rope));
+        $this->assertFalse(Texts::shouts('Канат МЕЧЕЛ в наличии', $rope));
         $this->assertFalse(Texts::shouts('Арт. УИРФ 469135.055, есть на складе', $rope));
-        // Слово не из карточки — крик.
+        // Слово не бренд и не артикул — крик, даже если так в названии.
         $this->assertTrue(Texts::shouts('Канат МЕЧЕЛ СРОЧНО со склада', $rope));
+        $this->assertTrue(Texts::shouts('Коннектор С РАЗЪЕМАМИ тяговых ремней', $rope));
         // Всё из карточки, но набрано капсом целиком — тоже крик.
         $this->assertTrue(Texts::shouts('КАНАТ МЕЧЕЛ ГОСТ В НАЛИЧИИ', $rope));
     }

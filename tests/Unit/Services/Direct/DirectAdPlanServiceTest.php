@@ -165,6 +165,30 @@ class DirectAdPlanServiceTest extends TestCase
         $this->assertSame('Арт. E10 18 (MEMCO)', Plan::tidyTail('Арт. E10 18 (MEMCO)'));
     }
 
+    public function test_shouting_catalog_names_are_calmed_but_brands_are_not(): void
+    {
+        // Кейс M07484: «Коннектор С РАЗЪЕМАМИ тяговых ремней» — модерация
+        // отклонила. Каталог пишут для склада, там капсом выделяют что угодно.
+        $item = $this->item([
+            'name' => 'Коннектор С РАЗЪЕМАМИ тяговых ремней 30мм 43кН',
+            'brand' => 'Semperit',
+        ]);
+
+        $title = Plan::adTitle($item);
+        $this->assertStringContainsString('разъемами', $title);
+        $this->assertStringNotContainsString('РАЗЪЕМАМИ', $title);
+
+        // Бренд и обозначение заглавными — это имена, а не крик.
+        $rope = $this->item([
+            'name' => 'Канат МЕЧЕЛ ГОСТ 3077-80 грузовой',
+            'brand' => 'МЕЧЕЛ',
+            'articles' => ['ГОСТ 3077-80'],
+            'brand_article' => 'ГОСТ 3077-80',
+        ]);
+        $this->assertStringContainsString('МЕЧЕЛ', Plan::adTitle($rope));
+        $this->assertStringContainsString('ГОСТ', Plan::adTitle($rope));
+    }
+
     public function test_keyword_words_are_counted_the_way_direct_counts_them(): void
     {
         // Кейс M07441: по пробелам у нас выходило 4 слова, Директ насчитал 11

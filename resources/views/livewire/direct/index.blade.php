@@ -601,6 +601,9 @@
                     @if($syncReport['moderated'])
                         <div class="text-[12px] text-fg-2">→ на модерацию: <span class="mono">{{ implode(', ', $syncReport['moderated']) }}</span></div>
                     @endif
+                    @if($syncReport['fixed'] ?? [])
+                        <div class="text-[12px] text-fg-2">↻ переписать после отказа: <span class="mono">{{ implode(', ', $syncReport['fixed']) }}</span></div>
+                    @endif
                     @foreach($syncReport['attention'] as $line)
                         <div class="text-[12px] text-red-700">⚠ требует внимания: {{ $line }}</div>
                     @endforeach

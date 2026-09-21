@@ -49,6 +49,9 @@ class DirectSyncService
 
     public const MAX_MODERATE = 25;
 
+    /** Сколько отклонённых переписываем за прогон. */
+    public const MAX_FIXES = 5;
+
     public function __construct(
         private readonly DirectPublisherService $publisher,
         private readonly DirectCandidateService $candidates,
@@ -86,7 +89,7 @@ class DirectSyncService
     /**
      * Прогон. $apply=null — брать режим из настроек.
      *
-     * @return array{applied: bool, checked: int, states: int, suspend: array<int, string>, resume: array<int, string>, texts: array<int, string>, published: array<int, string>, moderated: array<int, string>, attention: array<int, string>, errors: array<int, string>}
+     * @return array{applied: bool, checked: int, states: int, suspend: array<int, string>, resume: array<int, string>, texts: array<int, string>, published: array<int, string>, moderated: array<int, string>, fixed: array<int, string>, attention: array<int, string>, errors: array<int, string>}
      */
     public function run(?bool $apply = null, ?User $by = null): array
     {
@@ -94,7 +97,7 @@ class DirectSyncService
         $report = [
             'applied' => $apply, 'checked' => 0, 'states' => 0,
             'suspend' => [], 'resume' => [], 'texts' => [], 'published' => [],
-            'moderated' => [], 'attention' => [], 'errors' => [],
+            'moderated' => [], 'fixed' => [], 'attention' => [], 'errors' => [],
         ];
 
         $campaignId = $this->publisher->campaignId();
@@ -140,9 +143,15 @@ class DirectSyncService
         // Что уйдёт на модерацию, считаем ПОСЛЕ создания: иначе свежий черновик
         // ждал бы следующего часа, хотя создан этим же прогоном.
         $report['moderated'] = $this->draftsToModerate($queueSkus)->pluck('sku')->values()->all();
-        // Отклонённое не переотправляем автоматом: причина никуда не делась,
-        // второй заход даст тот же отказ и раздражение модератора.
-        $report['attention'] = $published->filter(fn ($ad) => $ad->isRejected())
+        // Отклонённое переотправляем, только если текст ИЗМЕНИЛСЯ: причина
+        // отказа обычно чинится в правилах, а тот же текст даст тот же вердикт.
+        $planBySku = $plan->keyBy('sku');
+        $rejected = $published->filter(fn ($ad) => $ad->isRejected());
+        $fixable = $rejected->filter(fn ($ad) => isset($planBySku[$ad->sku]) && $ad->differsFrom($planBySku[$ad->sku]))
+            ->take(self::MAX_FIXES);
+
+        $report['fixed'] = $fixable->pluck('sku')->values()->all();
+        $report['attention'] = $rejected->reject(fn ($ad) => $fixable->contains('sku', $ad->sku))
             ->map(fn ($ad) => $ad->sku.' — '.($ad->status_note ?: 'отклонено модерацией'))
             ->values()->all();
         // Объявление без фраз показов не даст никогда: у позиции нет кодов,
@@ -180,6 +189,13 @@ class DirectSyncService
                 fn ($m) => str_contains($m, ':') && ! str_contains($m, 'группа #'),
             ));
         }
+        foreach ($fixable as $ad) {
+            $res = $this->publisher->updateAd($ad, $planBySku[$ad->sku], $by);
+            if (! $res['ok']) {
+                $report['errors'][] = $res['message'];
+            }
+        }
+
         // Перечитываем черновики: в списке уже и те, что созданы шагом выше.
         $drafts = $this->draftsToModerate($queueSkus);
         if ($drafts->isNotEmpty()) {
