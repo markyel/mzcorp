@@ -58,6 +58,7 @@ class DirectApiClient
                 'message' => (string) ($body['error']['error_string'] ?? 'Ошибка Директа'),
                 'detail' => (string) ($body['error']['error_detail'] ?? ''),
             ];
+            $error['detail'] = trim($error['detail'].' '.self::hint($error['code'], (bool) ($cfg['sandbox'] ?? false)));
             Log::warning('Direct API: ошибка', $error + ['service' => $service, 'method' => $method]);
 
             return ['ok' => false, 'result' => null, 'error' => $error, 'units' => $units, 'http' => $response->status()];
@@ -70,6 +71,25 @@ class DirectApiClient
             'units' => $units,
             'http' => $response->status(),
         ];
+    }
+
+    /**
+     * Подсказка к ошибкам, которые сами себя не объясняют.
+     *
+     * 513 «Ваш логин не подключен к Яндекс.Директу» в режиме песочницы значит
+     * не то, что написано: доступ есть, а песочница просто не провизионирована
+     * под наш логин — она заводится отдельно от боевого аккаунта. Боевой
+     * контур при этой же ошибке работает.
+     */
+    public static function hint(int $code, bool $sandbox): string
+    {
+        return match (true) {
+            $code === 513 && $sandbox => 'Похоже, дело не в доступе: песочница заводится отдельно от боевого аккаунта. '
+                .'Проверьте боевой контур — YANDEX_DIRECT_SANDBOX=false.',
+            $code === 58 => 'Заявка на доступ к API ещё не одобрена.',
+            $code === 53 => 'Токен не принят: истёк или выдан другому приложению.',
+            default => '',
+        };
     }
 
     /**

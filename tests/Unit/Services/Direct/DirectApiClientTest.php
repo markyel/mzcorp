@@ -12,6 +12,16 @@ use Tests\TestCase;
  */
 class DirectApiClientTest extends TestCase
 {
+    public function test_misleading_sandbox_error_gets_a_hint(): void
+    {
+        // 513 в песочнице говорит «нет доступа», а на деле песочница просто
+        // не заведена под наш логин — боевой контур при этом работает.
+        $this->assertStringContainsString('YANDEX_DIRECT_SANDBOX=false', DirectApiClient::hint(513, true));
+        $this->assertSame('', DirectApiClient::hint(513, false));
+        $this->assertStringContainsString('не одобрена', DirectApiClient::hint(58, false));
+        $this->assertSame('', DirectApiClient::hint(0, true));
+    }
+
     public function test_units_header_is_parsed(): void
     {
         // «потрачено/осталось/суточный лимит» — так Директ отдаёт расход баллов.
