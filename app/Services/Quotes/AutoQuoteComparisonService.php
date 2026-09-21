@@ -240,7 +240,7 @@ class AutoQuoteComparisonService
         $outbound = OutboundQuote::query()
             ->where('request_id', $request->id)
             ->where('status', OutboundQuote::STATUS_MATCHED)
-            ->with(['items.catalogItem:id,sku'])
+            ->with(['items.catalogItem:id,sku', 'emailMessage:id,sent_at'])
             ->orderByRaw("case
                 when document_type like 'outbound_quotation%' then 0
                 when document_type = 'outbound_invoice' then 1
@@ -261,7 +261,10 @@ class AutoQuoteComparisonService
             'label' => $type === DetectorType::OutboundInvoice->value ? 'счёт менеджера' : 'КП менеджера',
             'number' => (string) $outbound->document_number,
             'date' => $outbound->document_date?->format('d.m.Y'),
-            'date_raw' => $outbound->document_date ?: $outbound->created_at,
+            // Для перемотки цены нужна ОТМЕТКА ВРЕМЕНИ, а не дата документа:
+            // `document_date` — это полночь, а импорт каталога проходит утром,
+            // и КП, отправленное днём, откатывалось бы к вчерашней цене.
+            'date_raw' => $outbound->emailMessage?->sent_at ?: ($outbound->created_at ?: $outbound->document_date),
             'total' => (float) $outbound->total_amount,
             'lines' => $outbound->items->map(fn ($i) => [
                 'sku' => (string) ($i->catalogItem?->sku ?: $i->raw_article),
