@@ -89,6 +89,25 @@ class DirectAdTextServiceTest extends TestCase
         $this->assertFalse(Texts::violatesRules('Гребёнка OTIS 506NCE в наличии', 'title'));
     }
 
+    public function test_cyrillic_caps_from_the_card_are_legal(): void
+    {
+        // МЕЧЕЛ, ГОСТ, УИРФ — это бренды и обозначения из карточки, не крик.
+        $rope = (object) [
+            'sku' => 'M07441',
+            'name' => 'Канат d=7,8 мм ГОСТ 3077-80 грузовой',
+            'brand' => 'МЕЧЕЛ (БМК)',
+            'articles' => ['УИРФ 469135.055'],
+            'part_type' => 'Канат грузовой',
+        ];
+
+        $this->assertFalse(Texts::shouts('Канат МЕЧЕЛ ГОСТ 3077-80 в наличии', $rope));
+        $this->assertFalse(Texts::shouts('Арт. УИРФ 469135.055, есть на складе', $rope));
+        // Слово не из карточки — крик.
+        $this->assertTrue(Texts::shouts('Канат МЕЧЕЛ СРОЧНО со склада', $rope));
+        // Всё из карточки, но набрано капсом целиком — тоже крик.
+        $this->assertTrue(Texts::shouts('КАНАТ МЕЧЕЛ ГОСТ В НАЛИЧИИ', $rope));
+    }
+
     public function test_exclamation_is_allowed_only_in_text_and_only_in_loud_tones(): void
     {
         $this->assertTrue(Texts::violatesRules('Гребёнка OTIS в наличии!', 'title', 'energetic'));

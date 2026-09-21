@@ -202,7 +202,7 @@ class DirectAdTextService
         if (! self::isFaithful($value, $item)) {
             return null;
         }
-        if (self::violatesRules($value, $field, $tone)) {
+        if (self::violatesRules($value, $field, $tone, $item)) {
             return null;
         }
 
@@ -236,15 +236,7 @@ class DirectAdTextService
      */
     public static function isFaithful(string $value, object $item): bool
     {
-        $haystack = mb_strtolower(implode(' ', array_filter([
-            (string) ($item->name ?? ''),
-            (string) ($item->brand ?? ''),
-            (string) ($item->brand_article ?? ''),
-            (string) ($item->part_type ?? ''),
-            (string) ($item->sku ?? ''),
-            implode(' ', DirectAdPlanService::codes($item)),
-        ])));
-        $haystack = preg_replace('/[^a-z0-9а-я]+/u', '', $haystack) ?? '';
+        $haystack = self::cardHaystack($item);
 
         foreach (preg_split('/[^A-Za-z0-9]+/u', $value) ?: [] as $token) {
             if ($token === '' || mb_strlen($token) < 2) {
@@ -258,12 +250,31 @@ class DirectAdTextService
         return true;
     }
 
+    /** Всё, что известно о позиции, одной строкой без разделителей. */
+    private static function cardHaystack(object $item): string
+    {
+        $raw = mb_strtolower(implode(' ', array_filter([
+            (string) ($item->name ?? ''),
+            (string) ($item->brand ?? ''),
+            (string) ($item->brand_article ?? ''),
+            (string) ($item->part_type ?? ''),
+            (string) ($item->sku ?? ''),
+            implode(' ', DirectAdPlanService::codes($item)),
+        ])));
+
+        return preg_replace('/[^a-z0-9а-я]+/u', '', $raw) ?? '';
+    }
+
     /**
      * То, за что снимают с модерации или за что придётся отвечать: цена в
      * тексте (её на карточке анонимному посетителю не видно), превосходная
      * степень без доказательств, КАПС и лишние восклицания.
+     *
+     * $item нужен для капса: МЕЧЕЛ, УТОС, ГОСТ, УИРФ — это настоящие бренды и
+     * обозначения из карточки, а не крик. Заглавное слово законно, если оно в
+     * карточке есть; выдуманное — нет.
      */
-    public static function violatesRules(string $value, string $field, ?string $tone = null): bool
+    public static function violatesRules(string $value, string $field, ?string $tone = null, ?object $item = null): bool
     {
         // Цена и скидки — решение заказчика: рекламируем наличие, не цену.
         if (preg_match('/(₽|\bруб\b|\bруб\.|\bцена\b|\bцены\b|скидк|распродаж|дешевл|бесплатн)/iu', $value)) {
@@ -273,8 +284,7 @@ class DirectAdTextService
         if (preg_match('/(лучш|самый|самая|самое|самые|№\s?1|номер\s?один|гаранти|100\s?%|круглосуточн)/iu', $value)) {
             return true;
         }
-        // КАПС из кириллицы. Латиница не в счёт: OTIS и FCU пишутся так по делу.
-        if (preg_match('/[А-ЯЁ]{4,}/u', $value)) {
+        if (self::shouts($value, $item)) {
             return true;
         }
 
@@ -284,6 +294,32 @@ class DirectAdTextService
         }
 
         return $exclamations > (DirectAdTone::allowsExclamation($tone) ? 1 : 0);
+    }
+
+    /**
+     * Крик капсом. Латиница не в счёт — OTIS и FCU пишутся так по делу.
+     * Кириллическое слово капсом законно, если оно есть в карточке (МЕЧЕЛ,
+     * ЩЛЗ, ГОСТ, УИРФ), и незаконно, если модель написала капсом обычное слово
+     * или набрала капсом всю строку.
+     */
+    public static function shouts(string $value, ?object $item = null): bool
+    {
+        if (! preg_match_all('/[А-ЯЁ]{4,}/u', $value, $m)) {
+            return false;
+        }
+
+        $haystack = $item !== null ? self::cardHaystack($item) : '';
+        foreach ($m[0] as $token) {
+            if ($haystack === '' || ! str_contains($haystack, mb_strtolower($token))) {
+                return true;
+            }
+        }
+
+        // Все слова из карточки, но строка целиком набрана капсом — это уже крик.
+        $letters = preg_match_all('/\p{Cyrillic}/u', $value);
+        $upper = preg_match_all('/[А-ЯЁ]/u', $value);
+
+        return $letters >= 8 && $upper / max(1, $letters) > 0.7;
     }
 
     private static function systemPrompt(string $tone): string
