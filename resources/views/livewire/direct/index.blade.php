@@ -519,13 +519,19 @@
     <div class="ds-card">
         <div class="ds-card-header flex-wrap">
             <h3 class="text-[15px] font-semibold text-fg-1">🔄 Синхронизация с наличием</h3>
-            <span class="chip text-[10.5px]"
-                  style="background:{{ $sync['enabled'] ? 'var(--emerald-50)' : 'var(--neutral-100)' }};color:{{ $sync['enabled'] ? 'var(--emerald-700)' : 'var(--fg-3)' }}">
-                <span class="dot"></span>{{ $sync['enabled'] ? 'работает раз в час' : 'выключена' }}
+            @php
+                // Одна фраза вместо двух чипов: «включена» при режиме предложений
+                // читалось как «работает», а прогон при этом ничего не менял.
+                $live = $sync['enabled'] && ! $sync['dry'];
+                $sState = match (true) {
+                    $live => ['работает и меняет, раз в час', 'var(--emerald-50)', 'var(--emerald-700)'],
+                    $sync['enabled'] => ['включена, но вхолостую: только показывает, что сделала бы', 'var(--amber-50)', 'var(--amber-800)'],
+                    default => ['выключена', 'var(--neutral-100)', 'var(--fg-3)'],
+                };
+            @endphp
+            <span class="chip text-[10.5px]" style="background:{{ $sState[1] }};color:{{ $sState[2] }}">
+                <span class="dot"></span>{{ $sState[0] }}
             </span>
-            @if($sync['dry'])
-                <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)">только предложения</span>
-            @endif
             <span class="flex-1"></span>
             @if($sync['last'])
                 <span class="text-[11.5px] text-fg-4">последний прогон: {{ $sync['last'] }}</span>
@@ -555,9 +561,15 @@
                 <button type="button" class="btn btn-sm" wire:click="toggleSync('enabled')">
                     {{ $sync['enabled'] ? '⏸ Выключить автопрогон' : '▶ Включить автопрогон' }}
                 </button>
-                <button type="button" class="btn btn-sm" wire:click="toggleSync('dry')">
-                    {{ $sync['dry'] ? 'Разрешить менять в Директе' : 'Вернуть режим предложений' }}
+                <button type="button" class="btn btn-sm {{ $sync['enabled'] && $sync['dry'] ? 'btn-primary' : '' }}"
+                        wire:click="toggleSync('dry')">
+                    {{ $sync['dry'] ? '🔓 Разрешить менять в Директе' : '🔒 Вернуть режим предложений' }}
                 </button>
+                @if($sync['enabled'] && $sync['dry'])
+                    <span class="text-[11.5px] text-amber-800">
+                        ← пока не нажмёте, прогон каждый час ничего не меняет
+                    </span>
+                @endif
                 <span class="flex-1"></span>
                 <button type="button" class="btn btn-sm" wire:click="runSync" wire:loading.attr="disabled" wire:target="runSync">
                     <span wire:loading.remove wire:target="runSync">Прогнать сейчас (предложения)</span>
