@@ -340,13 +340,34 @@ class AutoQuoteRuleService
         }
 
         // Один адрес может быть заведён у нескольких организаций — это норма
-        // (снабженец обслуживает несколько юрлиц). Брать первую попавшуюся
-        // нельзя: у них может быть разная цена. Берём, только если все
-        // кандидаты согласны в цене, иначе клиент считается неопознанным.
-        $pricing = $candidates->map(fn (Organization $o) => $o->pricing_mode?->value
-            .'|'.number_format($this->discounts->discountFor($o), 2, '.', ''))->unique();
+        // (снабженец обслуживает несколько юрлиц). Клиент при этом не пишет, на
+        // кого выставлять, и угадывать мы не будем: по решению заказчика берём
+        // САМЫЕ ВЫГОДНЫЕ клиенту условия. Кейс M-2026-16261: контакт заведён у
+        // ООО «ЗИПИС» (20%) и «ИНДУСТРИЯ СЕРВИСА» (15%) — даём 20%, как и
+        // сделал менеджер. Ошибка в свою пользу тут дороже: клиент сравнит
+        // цену с прошлым КП и уйдёт.
+        return self::mostGenerous($candidates, fn (Organization $o) => $this->discounts->discountFor($o));
+    }
 
-        return $pricing->count() === 1 ? $candidates->first() : null;
+    /**
+     * Организация с лучшими для клиента условиями.
+     *
+     * «Себестоимость + наценка» считаем лучшим вариантом: этот режим для
+     * особых клиентов и почти всегда даёт цену ниже каталожной со скидкой.
+     *
+     * @param  \Illuminate\Support\Collection<int, Organization>  $candidates
+     * @param  callable(Organization): float  $discountOf
+     */
+    public static function mostGenerous($candidates, callable $discountOf): ?Organization
+    {
+        $costPlus = $candidates->first(
+            fn (Organization $o) => $o->pricing_mode === OrganizationPricingMode::CostPlus,
+        );
+        if ($costPlus !== null) {
+            return $costPlus;
+        }
+
+        return $candidates->sortByDesc($discountOf)->first();
     }
 
     /**

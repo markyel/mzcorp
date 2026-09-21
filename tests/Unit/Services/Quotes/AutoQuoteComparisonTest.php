@@ -2,8 +2,11 @@
 
 namespace Tests\Unit\Services\Quotes;
 
+use App\Enums\OrganizationPricingMode;
+use App\Models\Organization;
 use App\Services\Quotes\AutoQuoteComparisonService as Cmp;
 use App\Services\Quotes\AutoQuoteRuleService as Rule;
+use Illuminate\Support\Collection;
 use Tests\TestCase;
 
 /**
@@ -43,6 +46,37 @@ class AutoQuoteComparisonTest extends TestCase
     {
         // Копеечные расхождения округления — не повод звать это «другая цена».
         $this->assertSame(0.01, Cmp::PRICE_TOLERANCE);
+    }
+
+    public function test_one_email_two_companies_gets_the_better_terms(): void
+    {
+        // Кейс M-2026-16261: контакт заведён у ООО «ЗИПИС» (20%) и у
+        // «ИНДУСТРИЯ СЕРВИСА» (15%), клиент не пишет, на кого выставлять.
+        // Решение заказчика: даём лучшие условия.
+        $zipis = new Organization(['name' => 'ООО «ЗИПИС»', 'discount_percent' => 20]);
+        $other = new Organization(['name' => 'ИНДУСТРИЯ СЕРВИСА', 'discount_percent' => 15]);
+
+        $picked = Rule::mostGenerous(
+            new Collection([$other, $zipis]),
+            fn (Organization $o) => (float) $o->discount_percent,
+        );
+
+        $this->assertSame('ООО «ЗИПИС»', $picked?->name);
+    }
+
+    public function test_cost_plus_wins_over_any_discount(): void
+    {
+        // «Себестоимость + наценка» — режим для особых клиентов, он почти
+        // всегда ниже каталожной цены со скидкой.
+        $special = new Organization(['name' => 'Спецклиент', 'pricing_mode' => OrganizationPricingMode::CostPlus]);
+        $plain = new Organization(['name' => 'Обычный', 'discount_percent' => 20]);
+
+        $picked = Rule::mostGenerous(
+            new Collection([$plain, $special]),
+            fn (Organization $o) => (float) $o->discount_percent,
+        );
+
+        $this->assertSame('Спецклиент', $picked?->name);
     }
 
     public function test_rule_thresholds_match_the_analysis(): void
