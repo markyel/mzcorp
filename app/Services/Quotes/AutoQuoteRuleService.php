@@ -109,17 +109,14 @@ class AutoQuoteRuleService
             $this->clientIsKnown($request),
             'первому обращению отвечает человек',
         );
+        // Не проверка, а пояснение: клиент опознан — считаем по его условиям,
+        // не опознан — розница. Розница безопасна (это верхняя граница цены),
+        // поэтому автомат из-за неё не останавливается.
         $checks[] = $this->check(
             'client_price_known',
-            'Клиент опознан — знаем его цену',
-            $organization !== null,
-            $organization !== null
-                ? $organization->name.' · '.(
-                    $organization->pricing_mode === OrganizationPricingMode::CostPlus
-                        ? 'себестоимость + наценка'
-                        : 'скидка '.rtrim(rtrim(number_format($this->discounts->discountFor($organization), 2, ',', ' '), '0'), ',').'%'
-                )
-                : 'организация не привязана — прайсовая цена клиенту не годится',
+            'Цена клиента',
+            true,
+            self::pricingLabel($organization, $this->discounts->discountFor($organization)),
         );
         $checks[] = $this->check(
             'no_invoice_request',
@@ -142,6 +139,10 @@ class AutoQuoteRuleService
             'checks' => $checks,
             'lines' => $lines,
             'total' => (float) $total,
+            // Кем считали цену: опознанный клиент со своими условиями или
+            // розница по каталогу.
+            'organization' => $organization,
+            'pricing' => self::pricingLabel($organization, $this->discounts->discountFor($organization)),
         ];
     }
 
@@ -283,6 +284,26 @@ class AutoQuoteRuleService
         }
 
         return (float) ($catalog->purchase_price ?? 0);
+    }
+
+    /**
+     * По каким условиям посчитана цена — одной строкой для интерфейса.
+     *
+     * Клиента не опознали — это не повод молчать: розница по каталогу и есть
+     * цена для тех, у кого особых условий нет. Опознали — считаем по карточке.
+     */
+    public static function pricingLabel(?Organization $organization, float $discount): string
+    {
+        if ($organization === null) {
+            return 'розница по каталогу — клиент не опознан';
+        }
+        if ($organization->pricing_mode === OrganizationPricingMode::CostPlus) {
+            return $organization->name.' · себестоимость + наценка';
+        }
+
+        return $organization->name.($discount > 0
+            ? ' · скидка '.rtrim(rtrim(number_format($discount, 2, ',', ' '), '0'), ',').'%'
+            : ' · без скидки, розница');
     }
 
     /**

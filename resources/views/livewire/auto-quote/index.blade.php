@@ -114,6 +114,11 @@
                         @endif
 
                         <div class="flex flex-wrap items-center gap-3 text-[11.5px] text-fg-3">
+                            {{-- По чьим условиям посчитана цена: опознанный клиент или розница. --}}
+                            <span class="chip text-[10.5px]"
+                                  style="{{ ($v['organization'] ?? null) ? 'background:var(--sky-50);color:var(--sky-700)' : 'background:var(--neutral-100);color:var(--fg-3)' }}">
+                                {{ $v['pricing'] ?? '' }}
+                            </span>
                             <span>менеджер: <span class="text-fg-2">{{ $r->assignedUser?->name ?? '—' }}</span></span>
                             <span>статус: <span class="text-fg-2">{{ $r->status?->label() ?? $r->status }}</span></span>
                             @if($c['document'])
