@@ -2,6 +2,7 @@
 
 namespace App\Services\Direct;
 
+use App\Models\DirectAdTitle;
 use App\Services\Catalog\YandexDirectFeedService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
@@ -33,7 +34,10 @@ class DirectAdPlanService
     /** Сколько фраз оставляем группе: больше — размывает статистику позиции. */
     public const KEYWORDS_PER_GROUP = 8;
 
-    public function __construct(private readonly DirectCandidateService $candidates) {}
+    public function __construct(
+        private readonly DirectCandidateService $candidates,
+        private readonly DirectTitleService $titles,
+    ) {}
 
     /**
      * План по первым $limit позициям очереди.
@@ -42,24 +46,32 @@ class DirectAdPlanService
      */
     public function plan(int $limit): Collection
     {
-        return $this->candidates->queue($limit)->take($limit)->map(fn ($item) => $this->forItem($item));
+        $items = $this->candidates->queue($limit)->take($limit);
+        $stored = $this->titles->storedFor($items->pluck('sku')->map(fn ($s) => (string) $s)->all());
+
+        return $items->map(fn ($item) => $this->forItem($item, $stored[(string) $item->sku] ?? null));
     }
 
     /**
      * @return array<string, mixed>
      */
-    public function forItem(object $item): array
+    public function forItem(object $item, ?DirectAdTitle $stored = null): array
     {
         $keywords = self::keywords($item);
-        $title = self::adTitle($item);
+        $ruleTitle = self::adTitle($item);
+        $title = $stored?->title ?: $ruleTitle;
         $text = self::adText($item);
 
         $warnings = [];
         if ($keywords === []) {
             $warnings[] = 'Нет кодов производителя — рекламировать нечем, фразы пустые.';
         }
-        if (mb_strlen((string) ($item->name ?? '')) > self::TITLE_MAX) {
-            $warnings[] = 'Название длиннее заголовка — обрезано, проверьте читаемость.';
+        // Замечание снимается, как только заголовок переписан моделью или руками.
+        if ($stored === null && mb_strlen((string) ($item->name ?? '')) > self::TITLE_MAX) {
+            $warnings[] = 'Название длиннее заголовка — обрезано, стоит переписать.';
+        }
+        if ($stored !== null && $stored->isStale((string) ($item->name ?? ''))) {
+            $warnings[] = 'Позицию переименовали в каталоге — заголовок мог устареть.';
         }
 
         return [
@@ -68,6 +80,8 @@ class DirectAdPlanService
             'brand' => (string) ($item->brand ?? ''),
             'group' => self::groupName($item),
             'title' => $title,
+            'title_rule' => $ruleTitle,
+            'title_source' => $stored?->source ?? DirectAdTitle::SOURCE_RULE,
             'title2' => self::adTitle2($item, $title),
             'text' => $text,
             'url' => YandexDirectFeedService::productUrl((string) ($item->sku ?? '')),

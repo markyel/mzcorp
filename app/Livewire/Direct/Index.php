@@ -3,9 +3,12 @@
 namespace App\Livewire\Direct;
 
 use App\Models\AppSetting;
+use App\Models\CatalogItem;
+use App\Models\DirectAdTitle;
 use App\Services\Direct\DirectAdPlanService;
 use App\Services\Direct\DirectApiClient;
 use App\Services\Direct\DirectCandidateService;
+use App\Services\Direct\DirectTitleService;
 use App\Services\Settings\SettingsService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
@@ -153,6 +156,78 @@ class Index extends Component
         $this->notice = $excluded === null
             ? "Позиция {$sku} не найдена в каталоге."
             : "{$sku} убрана из рекламы — из очереди и из фида.";
+    }
+
+    /**
+     * Переписать заголовок моделью. Правила остаются страховкой: если модель
+     * выдумала бренд или модель оборудования, результат отбрасывается и
+     * заголовок остаётся прежним.
+     */
+    public function generateTitle(string $sku, DirectTitleService $titles): void
+    {
+        $this->ensureAdmin();
+        $item = app(DirectCandidateService::class)->queue($this->adsLimit)->firstWhere('sku', $sku);
+        if ($item === null) {
+            $this->error = "Позиция {$sku} не найдена в очереди.";
+
+            return;
+        }
+
+        $result = $titles->generate($item, Auth::user());
+        unset($this->plan);
+
+        if ($result === null) {
+            $this->error = "{$sku}: модель не дала пригодного заголовка — оставил вариант правила.";
+
+            return;
+        }
+        $this->notice = "{$sku}: заголовок переписан — «{$result->title}».";
+    }
+
+    /** Переписать заголовки всем позициям плана, у которых есть замечания. */
+    public function generateTitlesForFlagged(DirectTitleService $titles): void
+    {
+        $this->ensureAdmin();
+        $done = 0;
+        $skipped = 0;
+
+        foreach ($this->plan as $row) {
+            if ($row['warnings'] === [] || $row['title_source'] !== DirectAdTitle::SOURCE_RULE) {
+                continue;
+            }
+            $item = app(DirectCandidateService::class)->queue($this->adsLimit)->firstWhere('sku', $row['sku']);
+            if ($item === null) {
+                continue;
+            }
+            $titles->generate($item, Auth::user()) === null ? $skipped++ : $done++;
+        }
+
+        unset($this->plan);
+        $this->notice = "Переписано заголовков: {$done}".($skipped ? ", отклонено моделью: {$skipped}" : '.');
+    }
+
+    /** Правка заголовка руками — она сильнее и правила, и модели. */
+    public function saveTitle(string $sku, string $title, DirectTitleService $titles): void
+    {
+        $this->ensureAdmin();
+        $item = CatalogItem::query()->where('sku', $sku)->first(['id', 'sku', 'name']);
+        if ($item === null || trim($title) === '') {
+            $this->error = 'Пустой заголовок не сохраняю.';
+
+            return;
+        }
+        $saved = $titles->save($item, $title, DirectAdTitle::SOURCE_MANUAL, Auth::user());
+        unset($this->plan);
+        $this->notice = "{$sku}: заголовок сохранён — «{$saved->title}».";
+    }
+
+    /** Вернуть заголовок, собранный правилом. */
+    public function resetTitle(string $sku, DirectTitleService $titles): void
+    {
+        $this->ensureAdmin();
+        $titles->forget($sku);
+        unset($this->plan);
+        $this->notice = "{$sku}: вернул заголовок по правилу.";
     }
 
     public function restoreItem(string $sku): void

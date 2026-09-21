@@ -946,6 +946,11 @@ return [
         'oauth_authorize_url' => 'https://oauth.yandex.ru/authorize',
         'oauth_token_url' => 'https://oauth.yandex.ru/token',
 
+        // Имя кампании-контейнера: все объявления по складу живут в ней одной.
+        'campaign_name' => env('YANDEX_DIRECT_CAMPAIGN_NAME', 'Склад — запчасти (авто)'),
+        // Модель для заголовков там, где правило даёт обрубок.
+        'title_model' => env('YANDEX_DIRECT_TITLE_MODEL', 'gpt-4o-mini'),
+
         /*
          * YML-фид товарной кампании. В нём только позиции «остаток > 0 и цена
          * актуальна» — те, по которым клиент получит цену сразу. Адрес закрыт
