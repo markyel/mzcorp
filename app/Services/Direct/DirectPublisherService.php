@@ -155,6 +155,11 @@ class DirectPublisherService
             }
         }
 
+        $tamed = $this->tameAutotargeting($campaignId, $by);
+        if ($tamed > 0) {
+            $messages[] = "Автотаргетингу сбита ставка до ".self::autotargetingBid()." ₽ в {$tamed} группах.";
+        }
+
         return ['published' => $published, 'skipped' => $skipped, 'failed' => $failed, 'messages' => $messages];
     }
 
@@ -360,6 +365,50 @@ class DirectPublisherService
         }
 
         return $id;
+    }
+
+    /**
+     * Сбить ставку автотаргетингу до минимума.
+     *
+     * Директ добавляет в каждую группу псевдофразу `---autotargeting` с нашей
+     * же ставкой и останавливать её запрещает («Автотаргетинг не может быть
+     * остановлен», код 8305). Показы по фразам, которые подбирает Яндекс, —
+     * противоположность замыслу: мы платим за узкие запросы по артикулу.
+     * Остаётся ставка: с минимальной автотаргетинг почти не выигрывает
+     * аукционы, а расход остаётся на наших фразах.
+     *
+     * @return int сколько псевдофраз поправили
+     */
+    public function tameAutotargeting(int $campaignId, ?User $by = null): int
+    {
+        $bid = (int) round(self::autotargetingBid() * 1_000_000);
+
+        $res = $this->call('keywords', 'get', [
+            'SelectionCriteria' => ['CampaignIds' => [$campaignId]],
+            'FieldNames' => ['Id', 'Keyword', 'Bid'],
+        ], null, $by);
+
+        $ids = [];
+        foreach ($res['result']['Keywords'] ?? [] as $keyword) {
+            if (str_contains((string) ($keyword['Keyword'] ?? ''), 'autotargeting')
+                && (int) ($keyword['Bid'] ?? 0) > $bid) {
+                $ids[] = (int) $keyword['Id'];
+            }
+        }
+        if ($ids === []) {
+            return 0;
+        }
+
+        $set = $this->call('bids', 'set', [
+            'Bids' => array_map(fn ($id) => ['KeywordId' => $id, 'Bid' => $bid], $ids),
+        ], null, $by);
+
+        return $set['ok'] ? count($ids) : 0;
+    }
+
+    public static function autotargetingBid(): float
+    {
+        return (float) config('services.yandex_direct.autotargeting_bid', 0.3);
     }
 
     /**

@@ -959,6 +959,9 @@ return [
         'region_ids' => env('YANDEX_DIRECT_REGION_IDS', '225'),   // 225 — Россия
         'daily_budget' => (float) env('YANDEX_DIRECT_DAILY_BUDGET', 300),
         'default_bid' => (float) env('YANDEX_DIRECT_DEFAULT_BID', 3),
+        // Автотаргетинг Директ навязывает и останавливать не даёт — сбиваем
+        // ему ставку до минимума, чтобы платить за свои узкие фразы.
+        'autotargeting_bid' => (float) env('YANDEX_DIRECT_AUTOTARGETING_BID', 0.3),
         'search_strategy' => env('YANDEX_DIRECT_SEARCH_STRATEGY', 'HIGHEST_POSITION'),
 
         /*
