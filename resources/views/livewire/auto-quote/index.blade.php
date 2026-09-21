@@ -61,8 +61,19 @@
     {{-- Список заявок --}}
     <div class="ds-card">
         <div class="ds-card-header flex-wrap">
+            @php $vol = $this->volume; @endphp
             <h3 class="text-[15px] font-semibold text-fg-1">Заявки под автомат</h3>
-            <span class="text-[12px] text-fg-3">за {{ $days }} дн. · показано {{ count($rows) }}</span>
+            <span class="text-[12px] text-fg-3">
+                за {{ $days }} дн.: прошли правило <b class="mono text-fg-1">{{ $vol['eligible'] }}</b>
+                из <b class="mono">{{ $vol['candidates'] }}</b> кандидатов
+                · это <b class="mono text-fg-1">{{ $vol['per_month'] }}</b> заявок в месяц
+                @if($vol['capped'])
+                    <span class="text-amber-800">· упёрлись в потолок {{ \App\Livewire\AutoQuote\Index::MAX_ROWS }}, возьмите окно короче</span>
+                @endif
+                @if($kind !== 'all')
+                    · показано по фильтру <b class="mono">{{ count($rows) }}</b>
+                @endif
+            </span>
             <span class="flex-1"></span>
             {{-- Подписи к двум суммам в строке: иначе непонятно, что с чем сравнивается. --}}
             <span class="text-[11px] text-fg-4 uppercase tracking-wide">авто на дату · факт · заявка</span>

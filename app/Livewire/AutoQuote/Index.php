@@ -21,8 +21,13 @@ use Livewire\Component;
  */
 class Index extends Component
 {
-    /** Сколько заявок считаем за раз: вердикт — это несколько запросов на заявку. */
-    public const MAX_ROWS = 120;
+    /**
+     * Сколько заявок считаем за раз: вердикт — это несколько запросов на
+     * заявку, поэтому потолок есть. Но он искажал картину объёма («46 за две
+     * недели» при потоке вдвое больше), поэтому рядом всегда показываем,
+     * сколько кандидатов было всего.
+     */
+    public const MAX_ROWS = 400;
 
     #[Url]
     public int $days = 14;
@@ -55,7 +60,7 @@ class Index extends Component
                 'organization:id,name,inn,discount_percent,pricing_mode',
                 'assignedUser:id,name',
             ])
-            ->whereIn('id', $this->candidateIds())
+            ->whereIn('id', $this->candidateIds)
             ->orderByDesc('created_at')
             ->get();
 
@@ -93,6 +98,28 @@ class Index extends Component
     }
 
     /**
+     * Объём потока: сколько заявок прошло предотбор и сколько правило приняло.
+     * Пересчитываем в месяц — прогноз из анализа тоже месячный.
+     *
+     * @return array<string, mixed>
+     */
+    #[Computed]
+    public function volume(): array
+    {
+        $days = max(1, min(180, $this->days));
+        $candidates = count($this->candidateIds);
+        $eligible = count($this->rows);
+
+        return [
+            'days' => $days,
+            'candidates' => $candidates,
+            'eligible' => $eligible,
+            'capped' => $candidates >= self::MAX_ROWS,
+            'per_month' => (int) round($eligible / $days * 30.4),
+        ];
+    }
+
+    /**
      * Сводка по видам расхождений — то, ради чего прогон и затеян.
      *
      * @return array<string, int>
@@ -115,7 +142,8 @@ class Index extends Component
      *
      * @return array<int, int>
      */
-    private function candidateIds(): array
+    #[Computed(persist: true)]
+    public function candidateIds(): array
     {
         $days = max(1, min(180, $this->days));
 
