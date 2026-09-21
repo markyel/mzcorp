@@ -182,7 +182,7 @@ class AutoQuoteRuleService
     public function clientWroteArticle(Request $request, RequestItem $item): bool
     {
         $source = $item->source_email_message_id
-            ? EmailMessage::query()->find($item->source_email_message_id, ['id', 'direction', 'subject', 'body_text'])
+            ? EmailMessage::query()->find($item->source_email_message_id, ['id', 'direction', 'subject', 'body_plain'])
             : null;
 
         if ($source === null) {
@@ -192,7 +192,7 @@ class AutoQuoteRuleService
                 ->where('related_request_id', $request->id)
                 ->where('direction', MailDirection::Inbound->value)
                 ->orderBy('id')
-                ->first(['id', 'direction', 'subject', 'body_text']);
+                ->first(['id', 'direction', 'subject', 'body_plain']);
         }
         if ($source === null || (string) $source->direction !== MailDirection::Inbound->value) {
             return false;
@@ -200,7 +200,7 @@ class AutoQuoteRuleService
 
         $sku = self::normalize((string) ($item->catalogItem?->sku ?? ''));
 
-        return $sku !== '' && str_contains(self::normalize($source->subject.' '.$source->body_text), $sku);
+        return $sku !== '' && str_contains(self::normalize($source->subject.' '.$source->body_plain), $sku);
     }
 
     /** Есть ли у клиента заявки старше этой. */
