@@ -436,14 +436,46 @@ class AutoQuoteRuleService
             return false;
         }
 
-        // Только СОБСТВЕННЫЙ текст клиента, без цитаты. Кейс M-2026-16064:
-        // письмо в старом треде «очень нужно письмо о сдвиге сроков», а позиция
-        // вытащена из процитированного ниже счёта — заявки там нет вовсе, и
-        // автомату отвечать нечего. Владелец понятия «свой текст» один —
-        // EmailTextCleanerService::clientOwnText.
+        // Свой текст клиента — сюда же попадает и блок пересылки: клиенты
+        // часто шлют заявку одной пересылкой, без единого своего слова, и это
+        // нормальная заявка.
         $own = $this->cleaner->clientOwnText($source);
+        if (str_contains(self::normalize($source->subject.' '.$own), $sku)) {
+            return true;
+        }
 
-        return str_contains(self::normalize($source->subject.' '.$own), $sku);
+        // Артикул нашёлся только в цитате. Сама по себе цитата не порок:
+        // клиент мог процитировать СВОЁ прежнее письмо. Порок — когда артикул
+        // мог прийти из НАШЕЙ бумаги: если по заявке уже уходило КП или счёт,
+        // система рискует «узнать» артикул, который сама же и предложила.
+        // Кейс M-2026-16064: в треде процитирован наш счёт, а письмо клиента —
+        // про сдвиг сроков, заявки там нет вовсе.
+        if (! str_contains(self::normalize($source->subject.' '.$source->body_plain), $sku)) {
+            return false;
+        }
+
+        return ! $this->hasOwnDocumentBefore($request, $source);
+    }
+
+    /** Уходил ли клиенту наш документ (КП или счёт) до этого письма. */
+    private function hasOwnDocumentBefore(Request $request, EmailMessage $message): bool
+    {
+        $moment = $message->sent_at ?? $message->created_at;
+
+        $quoted = Quotation::query()
+            ->where('request_id', $request->id)
+            ->whereNotNull('sent_at')
+            ->when($moment !== null, fn ($q) => $q->where('sent_at', '<=', $moment))
+            ->exists();
+
+        if ($quoted) {
+            return true;
+        }
+
+        return OutboundQuote::query()
+            ->where('request_id', $request->id)
+            ->when($moment !== null, fn ($q) => $q->where('created_at', '<=', $moment))
+            ->exists();
     }
 
     /** Есть ли у клиента заявки старше этой. */
