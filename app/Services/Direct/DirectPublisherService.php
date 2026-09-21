@@ -117,6 +117,8 @@ class DirectPublisherService
         $skipped = 0;
         $failed = 0;
         $messages = [];
+        // Один запрос на весь прогон: что в кампании уже есть.
+        $groups = $this->existingGroups($campaignId, $by);
 
         foreach ($rows as $row) {
             if ($published + $failed >= $limit) {
@@ -146,7 +148,7 @@ class DirectPublisherService
                 continue;
             }
 
-            $result = $this->publishRow($row, $item, $record, $campaignId, $by);
+            $result = $this->publishRow($row, $item, $record, $campaignId, $by, $groups);
             $result['ok'] ? $published++ : $failed++;
             if ($result['message'] !== '') {
                 $messages[] = $result['message'];
@@ -162,10 +164,17 @@ class DirectPublisherService
      * остаток, а не создаст второй комплект.
      *
      * @param  array<string, mixed>  $row
+     * @param  array<string, int>  $groups  артикул → уже существующая группа
      * @return array{ok: bool, message: string}
      */
-    private function publishRow(array $row, CatalogItem $item, DirectPublishedAd $record, int $campaignId, ?User $by): array
-    {
+    private function publishRow(
+        array $row,
+        CatalogItem $item,
+        DirectPublishedAd $record,
+        int $campaignId,
+        ?User $by,
+        array $groups = [],
+    ): array {
         $sku = (string) $row['sku'];
         $record->fill([
             'sku' => $sku,
@@ -177,6 +186,13 @@ class DirectPublisherService
             'published_by_user_id' => $by?->id,
         ]);
 
+        // Группа могла остаться в аккаунте от прерванного прогона — берём её,
+        // а не создаём вторую: дубли в Директе чистить дорого и вручную.
+        if ($record->ad_group_id === null && isset($groups[$sku])) {
+            $record->ad_group_id = $groups[$sku];
+            $record->save();
+        }
+
         if ($record->ad_group_id === null) {
             $res = $this->call('adgroups', 'add', [
                 'AdGroups' => [[
@@ -186,7 +202,7 @@ class DirectPublisherService
                 ]],
             ], $sku, $by);
 
-            $groupId = (int) (Arr::get($res['result'] ?? [], 'AddResults.0.AdGroupId') ?? 0);
+            $groupId = self::addedId($res['result'] ?? null, 'AdGroupId');
             if (! $res['ok'] || $groupId <= 0) {
                 return $this->failRow($record, $sku, 'группа', $res);
             }
@@ -208,7 +224,7 @@ class DirectPublisherService
                 ]],
             ], $sku, $by);
 
-            $adId = (int) (Arr::get($res['result'] ?? [], 'AddResults.0.Id') ?? 0);
+            $adId = self::addedId($res['result'] ?? null);
             if (! $res['ok'] || $adId <= 0) {
                 return $this->failRow($record, $sku, 'объявление', $res);
             }
@@ -325,6 +341,48 @@ class DirectPublisherService
             $by?->id,
             'Идентификатор кампании-контейнера в Яндекс.Директе',
         );
+    }
+
+    /**
+     * Идентификатор созданного объекта. Директ кладёт его в `Id` — и для
+     * объявления, и для группы, и для фразы; «AdGroupId» в ответе adgroups.add
+     * нет, хотя напрашивается. На этом мы уже потеряли десять групп: разбор
+     * считал успешный ответ ошибкой, а объекты в аккаунте остались.
+     */
+    public static function addedId(mixed $result, ?string $alias = null): int
+    {
+        $row = Arr::get((array) $result, 'AddResults.0', []);
+        $id = (int) ($row['Id'] ?? 0);
+        if ($id <= 0 && $alias !== null) {
+            $id = (int) ($row[$alias] ?? 0);
+        }
+
+        return $id;
+    }
+
+    /**
+     * Группы нашей кампании: артикул → идентификатор. Имя группы начинается с
+     * артикула — по нему и опознаём своё.
+     *
+     * @return array<string, int>
+     */
+    public function existingGroups(int $campaignId, ?User $by = null): array
+    {
+        $res = $this->call('adgroups', 'get', [
+            'SelectionCriteria' => ['CampaignIds' => [$campaignId]],
+            'FieldNames' => ['Id', 'Name'],
+        ], null, $by);
+
+        $out = [];
+        foreach ($res['result']['AdGroups'] ?? [] as $group) {
+            $name = trim((string) ($group['Name'] ?? ''));
+            $sku = strtok($name, ' ');
+            if ($sku !== false && $sku !== '' && (int) ($group['Id'] ?? 0) > 0) {
+                $out[$sku] = (int) $group['Id'];
+            }
+        }
+
+        return $out;
     }
 
     /** @return array<int, int> */

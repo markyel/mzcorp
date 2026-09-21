@@ -21,6 +21,16 @@ class DirectPublisherServiceTest extends TestCase
         $this->assertSame([225, 213], Publisher::regionIds());
     }
 
+    public function test_added_id_comes_from_the_id_field(): void
+    {
+        // Директ отдаёт идентификатор в «Id» — и для группы тоже, хотя
+        // «AdGroupId» напрашивается. На этом мы потеряли десять групп.
+        $this->assertSame(5801416484, Publisher::addedId(['AddResults' => [['Id' => 5801416484, 'Errors' => []]]], 'AdGroupId'));
+        $this->assertSame(7, Publisher::addedId(['AddResults' => [['AdGroupId' => 7]]], 'AdGroupId'));
+        $this->assertSame(0, Publisher::addedId(['AddResults' => [['Errors' => [['Message' => 'нет']]]]], 'AdGroupId'));
+        $this->assertSame(0, Publisher::addedId(null));
+    }
+
     public function test_per_object_errors_are_pulled_out_of_a_successful_response(): void
     {
         $result = [
