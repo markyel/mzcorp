@@ -439,6 +439,13 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/direct', function () {
             return view('direct.index');
         })->name('direct.index');
+
+        // Авто-КП — холостой прогон автоматической выдачи: что автомат выдал бы
+        // по заявке и чем это расходится с тем, что ушло клиенту. Ничего не
+        // создаёт и не отправляет. Доступ проверяется в компоненте (РОП+).
+        Route::get('/dashboard/auto-quote', function () {
+            return view('auto-quote.index');
+        })->name('auto-quote.index');
     });
 
     // Документация — рукописные гайды по ролям (resources/docs/{section}/*.md).

@@ -85,6 +85,9 @@
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'iqot.index', 'label' => 'IQOT', 'pattern' => 'iqot.*'];
         $navLinks[] = ['route' => 'catalog.match-audit', 'label' => 'Аудит матчинга', 'pattern' => 'catalog.match-audit'];
+        // «Авто-КП» — холостой прогон автоматической выдачи КП: сравнение с тем,
+        // что менеджер отправил на самом деле. Ничего не отправляет.
+        $navLinks[] = ['route' => 'auto-quote.index', 'label' => 'Авто-КП', 'pattern' => 'auto-quote.*'];
     }
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];
