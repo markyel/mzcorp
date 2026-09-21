@@ -69,6 +69,7 @@ class AutoQuoteComparisonService
                 'label' => self::LABELS[self::KIND_NONE],
                 'document' => null,
                 'rows' => array_map(fn ($l) => $this->row($l, null), $lines),
+                'total_auto' => (float) array_sum(array_column($lines, 'total')),
                 'total_actual' => null,
             ];
         }
@@ -91,11 +92,16 @@ class AutoQuoteComparisonService
             }
         }
 
+        $kind = $this->kind($auto->all(), $fact->all(), $rows);
+
         return [
-            'kind' => $this->kind($auto->all(), $fact->all(), $rows),
-            'label' => self::LABELS[$this->kind($auto->all(), $fact->all(), $rows)],
+            'kind' => $kind,
+            'label' => self::LABELS[$kind],
             'document' => $actual,
             'rows' => $rows,
+            // Сумма автомата — ПОСЛЕ перемотки: в шапке строки должно стоять
+            // то же число, что и в таблице под ней.
+            'total_auto' => (float) array_sum(array_column($lines, 'total')),
             'total_actual' => (float) $actual['total'],
         ];
     }

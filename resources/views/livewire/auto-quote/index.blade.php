@@ -63,6 +63,9 @@
         <div class="ds-card-header flex-wrap">
             <h3 class="text-[15px] font-semibold text-fg-1">Заявки под автомат</h3>
             <span class="text-[12px] text-fg-3">за {{ $days }} дн. · показано {{ count($rows) }}</span>
+            <span class="flex-1"></span>
+            {{-- Подписи к двум суммам в строке: иначе непонятно, что с чем сравнивается. --}}
+            <span class="text-[11px] text-fg-4 uppercase tracking-wide">авто на дату · факт · заявка</span>
         </div>
         <div class="ds-card-body space-y-1.5">
             @forelse($rows as $row)
@@ -80,8 +83,10 @@
                         <span class="text-[12px] text-fg-3 truncate max-w-[280px]">{{ $v['lines'][0]['name'] ?? '' }}</span>
                         <span class="flex-1"></span>
                         <span class="chip text-[10.5px]" style="{{ $kindStyle($c['kind']) }}">{{ $c['label'] }}</span>
-                        <span class="mono text-[12px] text-fg-2 w-[110px] text-right">{{ $money($v['total']) }} ₽</span>
-                        <span class="mono text-[12px] text-fg-4 w-[110px] text-right">
+                        {{-- Сумма автомата в ценах дня документа — та же, что в таблице ниже. --}}
+                        <span class="mono text-[12px] text-fg-2 w-[110px] text-right"
+                              title="Авто-КП в ценах на момент документа">{{ $money($c['total_auto'] ?? $v['total']) }} ₽</span>
+                        <span class="mono text-[12px] text-fg-4 w-[110px] text-right" title="Что ушло клиенту">
                             {{ $c['total_actual'] !== null ? $money($c['total_actual']).' ₽' : '—' }}
                         </span>
                         <span class="text-[11px] text-fg-4 w-[92px] text-right">{{ $r->created_at?->format('d.m H:i') }}</span>
