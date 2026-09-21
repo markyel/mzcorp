@@ -12,6 +12,7 @@ use App\Models\Organization;
 use App\Models\Request;
 use App\Models\RequestItem;
 use App\Services\Clients\ClientDiscountImportService;
+use App\Services\Mail\EmailTextCleanerService;
 use App\Services\Mail\PostSaleFulfillmentDetector;
 use App\Services\Quotations\QuotationService;
 
@@ -44,6 +45,7 @@ class AutoQuoteRuleService
         private readonly PostSaleFulfillmentDetector $postSale,
         private readonly QuotationService $quotations,
         private readonly ClientDiscountImportService $discounts,
+        private readonly EmailTextCleanerService $cleaner,
     ) {}
 
     /**
@@ -408,7 +410,7 @@ class AutoQuoteRuleService
     public function clientWroteArticle(Request $request, RequestItem $item): bool
     {
         $source = $item->source_email_message_id
-            ? EmailMessage::query()->find($item->source_email_message_id, ['id', 'direction', 'subject', 'body_plain'])
+            ? EmailMessage::query()->find($item->source_email_message_id)
             : null;
 
         if ($source === null) {
@@ -418,7 +420,7 @@ class AutoQuoteRuleService
                 ->where('related_request_id', $request->id)
                 ->where('direction', MailDirection::Inbound->value)
                 ->orderBy('id')
-                ->first(['id', 'direction', 'subject', 'body_plain']);
+                ->first();
         }
         // direction — тоже кастованный enum, сравниваем по значению.
         $direction = $source?->direction instanceof MailDirection
@@ -430,8 +432,18 @@ class AutoQuoteRuleService
         }
 
         $sku = self::normalize((string) ($item->catalogItem?->sku ?? ''));
+        if ($sku === '') {
+            return false;
+        }
 
-        return $sku !== '' && str_contains(self::normalize($source->subject.' '.$source->body_plain), $sku);
+        // Только СОБСТВЕННЫЙ текст клиента, без цитаты. Кейс M-2026-16064:
+        // письмо в старом треде «очень нужно письмо о сдвиге сроков», а позиция
+        // вытащена из процитированного ниже счёта — заявки там нет вовсе, и
+        // автомату отвечать нечего. Владелец понятия «свой текст» один —
+        // EmailTextCleanerService::clientOwnText.
+        $own = $this->cleaner->clientOwnText($source);
+
+        return str_contains(self::normalize($source->subject.' '.$own), $sku);
     }
 
     /** Есть ли у клиента заявки старше этой. */
