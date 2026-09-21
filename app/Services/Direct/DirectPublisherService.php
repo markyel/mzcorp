@@ -469,13 +469,19 @@ class DirectPublisherService
     public static function resultErrors(mixed $result): string
     {
         $out = [];
-        foreach (Arr::get((array) $result, 'AddResults', []) ?: [] as $row) {
-            foreach (($row['Errors'] ?? []) + ($row['Warnings'] ?? []) as $err) {
-                $out[] = trim(($err['Message'] ?? '').' '.($err['Details'] ?? ''));
+        // Ключ зависит от метода: AddResults, SuspendResults, ResumeResults…
+        foreach ((array) $result as $key => $rows) {
+            if (! is_array($rows) || ! str_ends_with((string) $key, 'Results')) {
+                continue;
+            }
+            foreach ($rows as $row) {
+                foreach (array_merge((array) ($row['Errors'] ?? []), (array) ($row['Warnings'] ?? [])) as $err) {
+                    $out[] = trim(($err['Message'] ?? '').' '.($err['Details'] ?? ''));
+                }
             }
         }
 
-        return implode('; ', array_filter($out));
+        return implode('; ', array_filter(array_unique($out)));
     }
 
     /** Обрезать структуру для журнала — без простыней в БД. */

@@ -13,6 +13,7 @@ use App\Services\Direct\DirectAdTone;
 use App\Services\Direct\DirectApiClient;
 use App\Services\Direct\DirectCandidateService;
 use App\Services\Direct\DirectPublisherService;
+use App\Services\Direct\DirectSyncService;
 use App\Services\Settings\SettingsService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
@@ -65,6 +66,9 @@ class Index extends Component
 
     /** Построчный итог последней публикации. */
     public array $publishLog = [];
+
+    /** Итог последнего прогона синхронизации. */
+    public array $syncReport = [];
 
     public function mount(SettingsService $settings): void
     {
@@ -313,6 +317,64 @@ class Index extends Component
             .($res['skipped'] ? ", пропущено: {$res['skipped']}" : '')
             .($res['failed'] ? ", с ошибкой: {$res['failed']}" : '').'.';
         $this->publishLog = array_slice($res['messages'], 0, 20);
+    }
+
+    /**
+     * Прогон синхронизации руками. По умолчанию — предложения: показать, что
+     * изменилось бы, ничего не трогая в Директе.
+     */
+    public function runSync(DirectSyncService $sync, bool $apply = false): void
+    {
+        $this->ensureAdmin();
+        $report = $sync->run($apply, Auth::user());
+        unset($this->publishedAds, $this->operations, $this->syncState);
+
+        $this->syncReport = $report;
+        $this->notice = sprintf(
+            '%s: проверено %d, выключить %d, включить %d.',
+            $report['applied'] ? 'Применено' : 'Предложения',
+            $report['checked'],
+            count($report['suspend']),
+            count($report['resume']),
+        );
+        if ($report['errors'] !== []) {
+            $this->error = implode(' · ', $report['errors']);
+        }
+    }
+
+    /** Выключатель автосинхронизации и режим «только предложения». */
+    public function toggleSync(string $key, SettingsService $settings): void
+    {
+        $this->ensureAdmin();
+        $map = [
+            'enabled' => [DirectSyncService::SETTING_ENABLED, 'Автосинхронизация рекламы с наличием', false],
+            'dry' => [DirectSyncService::SETTING_DRY_RUN, 'Синхронизация только предлагает, ничего не меняет', true],
+        ];
+        if (! isset($map[$key])) {
+            return;
+        }
+        [$setting, $label, $default] = $map[$key];
+
+        $next = ! (bool) $settings->get($setting, $default);
+        $settings->set($setting, $next ? '1' : '0', AppSetting::TYPE_BOOL, Auth::id(), $label);
+        unset($this->syncState);
+
+        $this->notice = $key === 'enabled'
+            ? ($next ? 'Автосинхронизация включена — прогон раз в час.' : 'Автосинхронизация выключена.')
+            : ($next ? 'Режим «только предложения»: прогон ничего не меняет.' : 'Прогон применяет изменения в Директе.');
+    }
+
+    /** Состояние автосинхронизации для карточки. */
+    #[Computed]
+    public function syncState(): array
+    {
+        $sync = app(DirectSyncService::class);
+
+        return [
+            'enabled' => $sync->enabled(),
+            'dry' => $sync->dryRun(),
+            'last' => app(SettingsService::class)->get(DirectSyncService::SETTING_LAST_RUN),
+        ];
     }
 
     /** Наша кампания глазами Директа: состояние, статус, число объявлений. */

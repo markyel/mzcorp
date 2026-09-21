@@ -472,6 +472,71 @@
             @endif
         </div>
     </div>
+
+    {{-- Автосинхронизация с наличием --}}
+    @php $sync = $this->syncState; @endphp
+    <div class="ds-card">
+        <div class="ds-card-header flex-wrap">
+            <h3 class="text-[15px] font-semibold text-fg-1">🔄 Синхронизация с наличием</h3>
+            <span class="chip text-[10.5px]"
+                  style="background:{{ $sync['enabled'] ? 'var(--emerald-50)' : 'var(--neutral-100)' }};color:{{ $sync['enabled'] ? 'var(--emerald-700)' : 'var(--fg-3)' }}">
+                <span class="dot"></span>{{ $sync['enabled'] ? 'работает раз в час' : 'выключена' }}
+            </span>
+            @if($sync['dry'])
+                <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)">только предложения</span>
+            @endif
+            <span class="flex-1"></span>
+            @if($sync['last'])
+                <span class="text-[11.5px] text-fg-4">последний прогон: {{ $sync['last'] }}</span>
+            @endif
+        </div>
+        <div class="ds-card-body space-y-2">
+            <div class="text-[12.5px] text-fg-2">
+                Позиция пропала с остатка или у неё устарела цена — объявление выключается.
+                Вернулась — включается обратно. Выключение идёт без ограничений: оно экономит.
+                Включение — не больше {{ \App\Services\Direct\DirectSyncService::MAX_RESUMES }} за прогон,
+                и только для объявлений, уже прошедших модерацию: черновик автомат в работу не переводит.
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <button type="button" class="btn btn-sm" wire:click="toggleSync('enabled')">
+                    {{ $sync['enabled'] ? '⏸ Выключить автопрогон' : '▶ Включить автопрогон' }}
+                </button>
+                <button type="button" class="btn btn-sm" wire:click="toggleSync('dry')">
+                    {{ $sync['dry'] ? 'Разрешить менять в Директе' : 'Вернуть режим предложений' }}
+                </button>
+                <span class="flex-1"></span>
+                <button type="button" class="btn btn-sm" wire:click="runSync" wire:loading.attr="disabled" wire:target="runSync">
+                    <span wire:loading.remove wire:target="runSync">Прогнать сейчас (предложения)</span>
+                    <span wire:loading wire:target="runSync">Считаю…</span>
+                </button>
+                <button type="button" class="btn btn-sm btn-primary" wire:click="runSync(true)"
+                        wire:loading.attr="disabled" wire:target="runSync"
+                        title="Применить изменения в Директе прямо сейчас">Применить</button>
+            </div>
+
+            @if($syncReport)
+                <div class="rounded-md border border-border-subtle p-2 space-y-0.5">
+                    <div class="text-[12px] text-fg-3">
+                        {{ $syncReport['applied'] ? 'Применено' : 'Предложения' }} ·
+                        проверено <span class="mono">{{ $syncReport['checked'] }}</span> объявлений
+                    </div>
+                    @foreach($syncReport['suspend'] as $line)
+                        <div class="text-[12px] text-amber-800">− выключить: {{ $line }}</div>
+                    @endforeach
+                    @foreach($syncReport['resume'] as $line)
+                        <div class="text-[12px] text-emerald-700">+ включить: {{ $line }}</div>
+                    @endforeach
+                    @if(! $syncReport['suspend'] && ! $syncReport['resume'])
+                        <div class="text-[12px] text-fg-3">Менять нечего — всё соответствует складу.</div>
+                    @endif
+                    @foreach($syncReport['errors'] as $line)
+                        <div class="text-[12px] text-red-700">! {{ $line }}</div>
+                    @endforeach
+                </div>
+            @endif
+        </div>
+    </div>
     {{-- Снятые с рекламы вручную --}}
     @php $excluded = $this->excluded; @endphp
     <div class="ds-card">

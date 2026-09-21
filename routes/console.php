@@ -331,3 +331,14 @@ Schedule::command('queue:watchdog')
     ->everyFiveMinutes()
     ->withoutOverlapping()
     ->onOneServer();
+
+// Реклама по складу: выключить объявления позиций, которых не стало в наличии,
+// и вернуть те, что вернулись. Ежечасно — остаток меняется импортом пару раз в
+// сутки, час отставания погоды не делает. Прогон уважает выключатель раздела
+// («direct.sync_enabled») и по умолчанию только предлагает: автомат в рекламном
+// кабинете тратит деньги, поэтому заводится осторожно. См. DirectSyncService.
+Schedule::command('direct:sync')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
