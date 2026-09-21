@@ -145,6 +145,11 @@ class DirectSyncService
         $report['attention'] = $published->filter(fn ($ad) => $ad->isRejected())
             ->map(fn ($ad) => $ad->sku.' — '.($ad->status_note ?: 'отклонено модерацией'))
             ->values()->all();
+        // Объявление без фраз показов не даст никогда: у позиции нет кодов,
+        // пригодных для Директа. Само не починится — нужен человек.
+        foreach ($published->filter(fn ($ad) => ($ad->keyword_ids ?? []) === []) as $ad) {
+            $report['attention'][] = $ad->sku.' — объявление без фраз: у позиции нет пригодных кодов';
+        }
 
         if (! $apply) {
             return $report;
@@ -251,7 +256,11 @@ class DirectSyncService
             $isTarget = isset($target[$ad->sku]);
             $now = $state($ad);
 
-            if (! $isTarget && $now === 'ON') {
+            // OFF у объявления значит «не показывается, потому что остановлена
+            // кампания», а не «выключено нами» — наше выключение это SUSPENDED.
+            // Поэтому гасим и OFF: иначе запуск кампании разом поднимет все
+            // созданные объявления мимо лимита показа.
+            if (! $isTarget && in_array($now, ['ON', 'OFF'], true)) {
                 $suspend[] = [
                     'sku' => $ad->sku,
                     'ad_id' => (int) $ad->ad_id,
@@ -260,7 +269,7 @@ class DirectSyncService
                         : 'нет остатка или цена неактуальна',
                 ];
             }
-            if ($isTarget && $now === 'OFF') {
+            if ($isTarget && $now === 'SUSPENDED') {
                 $resume[] = ['sku' => $ad->sku, 'ad_id' => (int) $ad->ad_id];
             }
         }
