@@ -75,7 +75,7 @@
                     <button type="button" class="w-full flex flex-wrap items-center gap-2 px-3 py-2 text-left" @click="open = ! open">
                         <span class="text-fg-4 text-[11px]" x-text="open ? '▾' : '▸'"></span>
                         <a href="{{ route('requests.show', $r->id) }}" target="_blank"
-                           class="mono text-[12.5px] text-sky-700 hover:underline" @click.stop>{{ $r->code }}</a>
+                           class="mono text-[12.5px] text-sky-700 hover:underline" @click.stop>{{ $r->internal_code }}</a>
                         <span class="text-[13px] text-fg-1 truncate max-w-[260px]">{{ $r->client_name ?: $r->client_email }}</span>
                         <span class="text-[12px] text-fg-3 truncate max-w-[280px]">{{ $v['lines'][0]['name'] ?? '' }}</span>
                         <span class="flex-1"></span>
@@ -88,6 +88,26 @@
                     </button>
 
                     <div x-show="open" x-cloak class="px-3 pb-3 pt-1 border-t border-border-subtle space-y-2 text-[12.5px]">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <a href="{{ route('requests.show', $r->id) }}" target="_blank" class="btn btn-sm">
+                                ↗ Открыть заявку {{ $r->internal_code }}
+                            </a>
+                            @if($c['document'])
+                                <a href="{{ route('requests.show', $r->id) }}#documents" target="_blank" class="btn btn-sm">
+                                    ↗ {{ $c['document']['label'] }} {{ $c['document']['number'] }}
+                                </a>
+                            @endif
+                            <span class="flex-1"></span>
+                            <span class="text-[11.5px] text-fg-4">{{ $r->client_email }}</span>
+                        </div>
+
+                        @if($row['asked_text'] ?? '')
+                            <div class="rounded-md border border-border-subtle p-2 text-[12px] text-fg-2 leading-snug">
+                                <span class="text-fg-4 text-[11px] uppercase tracking-wide">письмо клиента</span><br>
+                                {{ $row['asked_text'] }}
+                            </div>
+                        @endif
+
                         <div class="flex flex-wrap items-center gap-3 text-[11.5px] text-fg-3">
                             <span>менеджер: <span class="text-fg-2">{{ $r->assignedUser?->name ?? '—' }}</span></span>
                             <span>статус: <span class="text-fg-2">{{ $r->status?->label() ?? $r->status }}</span></span>

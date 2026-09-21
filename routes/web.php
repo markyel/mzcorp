@@ -446,6 +446,13 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/auto-quote', function () {
             return view('auto-quote.index');
         })->name('auto-quote.index');
+
+        // Скидки контрагентов — загрузка выгрузки из корпоративной базы.
+        // Скидка уходит в карточку организации и оттуда в КП, включая
+        // автоматическое. Доступ проверяется в компоненте (РОП+).
+        Route::get('/dashboard/client-discounts', function () {
+            return view('clients.discounts');
+        })->name('client-discounts.index');
     });
 
     // Документация — рукописные гайды по ролям (resources/docs/{section}/*.md).

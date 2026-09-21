@@ -7,6 +7,7 @@ use App\Enums\MatchPath;
 use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Models\RequestItem;
+use App\Services\Clients\ClientDiscountImportService;
 use App\Services\Mail\PostSaleFulfillmentDetector;
 use App\Services\Quotations\QuotationService;
 
@@ -38,6 +39,7 @@ class AutoQuoteRuleService
     public function __construct(
         private readonly PostSaleFulfillmentDetector $postSale,
         private readonly QuotationService $quotations,
+        private readonly ClientDiscountImportService $discounts,
     ) {}
 
     /**
@@ -170,10 +172,13 @@ class AutoQuoteRuleService
         return $out;
     }
 
-    /** Скидка клиента из карточки организации — та же, что и в ручном КП. */
+    /**
+     * Скидка клиента: карточка организации, а если там пусто — выгрузка скидок
+     * из корпоративной базы по ИНН. Та же скидка подставляется в ручное КП.
+     */
     public function discountFor(Request $request): float
     {
-        return (float) ($request->organization?->discount_percent ?? 0);
+        return $this->discounts->discountFor($request->organization);
     }
 
     /**

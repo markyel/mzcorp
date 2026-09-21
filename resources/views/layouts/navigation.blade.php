@@ -88,6 +88,8 @@
         // «Авто-КП» — холостой прогон автоматической выдачи КП: сравнение с тем,
         // что менеджер отправил на самом деле. Ничего не отправляет.
         $navLinks[] = ['route' => 'auto-quote.index', 'label' => 'Авто-КП', 'pattern' => 'auto-quote.*'];
+        // Скидки контрагентов — загрузка выгрузки и просмотр; питают цену в КП.
+        $navLinks[] = ['route' => 'client-discounts.index', 'label' => 'Скидки', 'pattern' => 'client-discounts.*'];
     }
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'managers.index', 'label' => 'Менеджеры', 'pattern' => 'managers.*'];

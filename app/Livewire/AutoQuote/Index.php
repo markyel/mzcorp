@@ -65,6 +65,9 @@ class Index extends Component
                 'request' => $request,
                 'verdict' => $verdict,
                 'comparison' => $comparison,
+                // Текст клиента рядом с решением автомата: без него по списку
+                // не понять, что именно просили и почему менеджер ответил иначе.
+                'asked_text' => $this->inboundExcerpt($request->id),
             ];
         }
 
@@ -125,6 +128,27 @@ class Index extends Component
             order by max(r.created_at) desc
             limit ".self::MAX_ROWS.'
         '));
+    }
+
+    /** Первое письмо клиента по заявке, коротко — «что просили». */
+    private function inboundExcerpt(int $requestId): string
+    {
+        $message = \App\Models\EmailMessage::query()
+            ->where('related_request_id', $requestId)
+            ->where('direction', \App\Enums\MailDirection::Inbound->value)
+            ->where('is_draft', false)
+            ->orderBy('id')
+            ->first(['subject', 'body_plain']);
+
+        if ($message === null) {
+            return '';
+        }
+
+        // Цитаты и подписи отрезаем грубо: нужен смысл запроса, а не письмо.
+        $body = preg_split('/^(>|--|С уважением|Best regards)/miu', (string) $message->body_plain)[0] ?? '';
+        $text = trim(preg_replace('/\s+/u', ' ', $message->subject.' — '.$body) ?? '');
+
+        return mb_substr($text, 0, 400);
     }
 
     public function setKind(string $kind): void
