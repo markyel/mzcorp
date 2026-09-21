@@ -175,6 +175,8 @@ class DirectSyncService
             DirectPublishedAd::query()->where('ad_id', $id)->update([
                 'state' => $ad['State'] ?? null,
                 'status' => $ad['Status'] ?? null,
+                // Причина отказа: без неё «Отклонено» не говорит, что править.
+                'status_note' => mb_substr((string) ($ad['StatusClarification'] ?? ''), 0, 1000) ?: null,
                 'synced_at' => now(),
             ]);
         }

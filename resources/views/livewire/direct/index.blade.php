@@ -362,6 +362,14 @@
         // таблице: запись заводится и на неудачной попытке, и её надо доделать.
         $doneSkus = $ads->filter(fn ($a) => $a->isComplete())->pluck('sku')->all();
         $left = $plan->filter(fn ($p) => $p['in_rotation'] && $p['keywords'] !== [] && ! in_array($p['sku'], $doneSkus, true))->count();
+        $drafts = $ads->filter(fn ($a) => $a->isDraft())->count();
+        $rejected = $ads->filter(fn ($a) => $a->isRejected())->count();
+        $statusStyle = fn ($s) => match ($s) {
+            'ACCEPTED' => 'background:var(--emerald-50);color:var(--emerald-700)',
+            'REJECTED' => 'background:var(--red-50);color:var(--red-700)',
+            'MODERATION', 'PREACCEPTED' => 'background:var(--amber-50);color:var(--amber-800)',
+            default => 'background:var(--neutral-100);color:var(--fg-3)',
+        };
     @endphp
     <div class="ds-card">
         <div class="ds-card-header flex-wrap">
@@ -386,6 +394,21 @@
                         title="Создать группы, объявления-черновики и фразы. На модерацию ничего не уйдёт">
                     <span wire:loading.remove wire:target="publishAds">Опубликовать ({{ min($left, \App\Livewire\Direct\Index::PUBLISH_BATCH) }})</span>
                     <span wire:loading wire:target="publishAds">Публикую…</span>
+                </button>
+            @endif
+            @if($campaign && $ads->isNotEmpty())
+                <button type="button" class="btn btn-sm" wire:click="refreshStates"
+                        wire:loading.attr="disabled" wire:target="refreshStates" title="Спросить у Директа статусы модерации">
+                    <span wire:loading.remove wire:target="refreshStates">↻ Статусы</span>
+                    <span wire:loading wire:target="refreshStates">Спрашиваю…</span>
+                </button>
+            @endif
+            @if($drafts)
+                <button type="button" class="btn btn-sm btn-primary" wire:click="moderateAds"
+                        wire:loading.attr="disabled" wire:target="moderateAds"
+                        title="После отправки каждая правка текста запускает проверку заново">
+                    <span wire:loading.remove wire:target="moderateAds">Отправить на модерацию ({{ $drafts }})</span>
+                    <span wire:loading wire:target="moderateAds">Отправляю…</span>
                 </button>
             @endif
         </div>
@@ -431,9 +454,19 @@
                                         @if($ad->last_error)
                                             <span class="text-amber-800">{{ \Illuminate\Support\Str::limit($ad->last_error, 60) }}</span>
                                         @else
-                                            <span class="chip text-[10.5px]" style="background:var(--neutral-100);color:var(--fg-3)">
-                                                {{ $ad->state ?? 'черновик' }}
+                                            <span class="chip text-[10.5px]" style="{{ $statusStyle($ad->status) }}">
+                                                {{ $ad->statusLabel() }}
                                             </span>
+                                            @if($ad->state === 'ON')
+                                                <span class="text-[11px] text-emerald-700">· идут показы</span>
+                                            @endif
+                                            @if($ad->status_note)
+                                                <div class="text-[11px] text-fg-3 mt-0.5">{{ \Illuminate\Support\Str::limit($ad->status_note, 90) }}</div>
+                                            @endif
+                                            @if($ad->isDraft())
+                                                <button type="button" class="btn btn-sm ml-1" wire:click="moderateAds('{{ $ad->sku }}')"
+                                                        title="Отправить только это объявление">→ на модерацию</button>
+                                            @endif
                                         @endif
                                     </td>
                                 </tr>

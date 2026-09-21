@@ -53,6 +53,9 @@ class Index extends Component
     /** Сколько объявлений создаём за нажатие: три вызова API на позицию. */
     public const PUBLISH_BATCH = 10;
 
+    /** Сколько отправляем на модерацию за нажатие. */
+    public const MODERATE_BATCH = 25;
+
     public int $adsLimit = self::DEFAULT_ADS_LIMIT;
 
     public string $adTone = DirectAdTone::DEFAULT;
@@ -317,6 +320,44 @@ class Index extends Component
             .($res['skipped'] ? ", пропущено: {$res['skipped']}" : '')
             .($res['failed'] ? ", с ошибкой: {$res['failed']}" : '').'.';
         $this->publishLog = array_slice($res['messages'], 0, 20);
+    }
+
+    /**
+     * Отправить черновики на модерацию. Пачкой — все, что ждут; с артикулом —
+     * только одно, чтобы первые отправить поштучно и посмотреть на вердикт.
+     */
+    public function moderateAds(DirectPublisherService $publisher, ?string $sku = null): void
+    {
+        $this->ensureAdmin();
+
+        $ads = DirectPublishedAd::query()
+            ->whereNotNull('ad_id')
+            ->where('status', 'DRAFT')
+            ->when($sku !== null, fn ($q) => $q->where('sku', $sku))
+            ->limit(self::MODERATE_BATCH)
+            ->pluck('ad_id')
+            ->all();
+
+        $res = $publisher->moderate($ads, Auth::user());
+        unset($this->publishedAds, $this->operations);
+
+        $res['ok'] ? $this->notice = $res['message'] : $this->error = $res['message'];
+    }
+
+    /** Подтянуть статусы модерации из Директа. */
+    public function refreshStates(DirectSyncService $sync): void
+    {
+        $this->ensureAdmin();
+        $campaignId = app(DirectPublisherService::class)->campaignId();
+        if ($campaignId === null) {
+            $this->error = 'Кампания ещё не создана.';
+
+            return;
+        }
+
+        $states = $sync->pullStates($campaignId, Auth::user());
+        unset($this->publishedAds, $this->operations);
+        $this->notice = 'Статусы обновлены: '.count($states).' объявлений.';
     }
 
     /**

@@ -368,6 +368,52 @@ class DirectPublisherService
     }
 
     /**
+     * Отправить объявления на модерацию.
+     *
+     * Единственная наша операция, которую видит Яндекс: до неё объявление —
+     * черновик, после — предмет проверки, и каждая последующая правка текста
+     * отправляет его на проверку заново. Поэтому кнопка отдельная и нажимает
+     * её человек.
+     *
+     * @param  array<int, int>  $adIds
+     * @return array{ok: bool, sent: int, message: string}
+     */
+    public function moderate(array $adIds, ?User $by = null): array
+    {
+        $adIds = array_values(array_filter(array_map('intval', $adIds)));
+        if ($adIds === []) {
+            return ['ok' => true, 'sent' => 0, 'message' => 'Нечего отправлять: черновиков нет.'];
+        }
+
+        $res = $this->call('ads', 'moderate', [
+            'SelectionCriteria' => ['Ids' => $adIds],
+        ], null, $by);
+
+        if (! $res['ok']) {
+            return ['ok' => false, 'sent' => 0, 'message' => self::errorText($res)];
+        }
+
+        // Директ отвечает поштучно: часть объявлений могла не уйти.
+        $errors = self::resultErrors($res['result']);
+        $sent = 0;
+        foreach (Arr::get((array) $res['result'], 'ModerateResults', []) ?: [] as $row) {
+            if (($row['Errors'] ?? []) === []) {
+                $sent++;
+            }
+        }
+
+        DirectPublishedAd::query()
+            ->whereIn('ad_id', $adIds)
+            ->update(['status' => 'MODERATION', 'moderated_at' => now()]);
+
+        return [
+            'ok' => true,
+            'sent' => $sent,
+            'message' => "Отправлено на модерацию: {$sent}".($errors !== '' ? '. Отказы: '.$errors : '.'),
+        ];
+    }
+
+    /**
      * Сбить ставку автотаргетингу до минимума.
      *
      * Директ добавляет в каждую группу псевдофразу `---autotargeting` с нашей

@@ -13,8 +13,8 @@ class DirectPublishedAd extends Model
 {
     protected $fillable = [
         'catalog_item_id', 'sku', 'campaign_id', 'ad_group_id', 'ad_id', 'keyword_ids',
-        'title', 'title2', 'text', 'keywords', 'state', 'status', 'last_error',
-        'published_at', 'synced_at', 'published_by_user_id',
+        'title', 'title2', 'text', 'keywords', 'state', 'status', 'status_note', 'last_error',
+        'published_at', 'synced_at', 'moderated_at', 'published_by_user_id',
     ];
 
     protected $casts = [
@@ -22,7 +22,33 @@ class DirectPublishedAd extends Model
         'keywords' => 'array',
         'published_at' => 'datetime',
         'synced_at' => 'datetime',
+        'moderated_at' => 'datetime',
     ];
+
+    /** Статусы Директа по-человечески. */
+    public const STATUSES = [
+        'DRAFT' => 'черновик',
+        'MODERATION' => 'на модерации',
+        'PREACCEPTED' => 'принято предварительно',
+        'ACCEPTED' => 'принято',
+        'REJECTED' => 'отклонено',
+    ];
+
+    public function statusLabel(): string
+    {
+        return self::STATUSES[(string) $this->status] ?? (string) ($this->status ?? 'нет данных');
+    }
+
+    /** Объявление ждёт нашего решения: создано, но на модерацию не уходило. */
+    public function isDraft(): bool
+    {
+        return $this->ad_id !== null && (string) $this->status === 'DRAFT';
+    }
+
+    public function isRejected(): bool
+    {
+        return (string) $this->status === 'REJECTED';
+    }
 
     public function catalogItem(): BelongsTo
     {
