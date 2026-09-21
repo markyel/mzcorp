@@ -1,0 +1,330 @@
+<?php
+
+namespace App\Services\Direct;
+
+use App\Models\CatalogItem;
+use App\Models\DirectAdText;
+use App\Models\User;
+use App\Services\AI\OpenAIChatService;
+use Illuminate\Support\Facades\Log;
+
+/**
+ * Тексты объявлений: правила по умолчанию, модель — когда хотим рекламный
+ * текст вместо складской формулировки.
+ *
+ * Пишем весь набор сразу (заголовок, второй заголовок, текст) и ЗАРАНЕЕ, для
+ * всей очереди, а не только для позиций в ротации: каждое изменение текста у
+ * работающего объявления отправляет его на повторную модерацию, поэтому
+ * вычитывать тексты надо до публикации.
+ *
+ * Модель не имеет права ничего придумывать: всё, что она пишет, обязано
+ * встречаться в карточке позиции. Выдуманная совместимость («подходит для
+ * KONE») в рекламе запчастей — это претензия клиента и отказ модерации,
+ * поэтому каждое поле проверяется отдельно и негодное просто отбрасывается —
+ * на его месте остаётся вариант правила.
+ */
+class DirectAdTextService
+{
+    /** Лимиты Директа по полям — по ним же режем ответ модели. */
+    public const LIMITS = [
+        'title' => DirectAdPlanService::TITLE_MAX,
+        'title2' => DirectAdPlanService::TITLE2_MAX,
+        'text' => DirectAdPlanService::TEXT_MAX,
+    ];
+
+    public function __construct(
+        private readonly OpenAIChatService $openai,
+    ) {}
+
+    /**
+     * Сохранённые тексты по артикулам.
+     *
+     * @return array<string, DirectAdText>
+     */
+    public function storedFor(array $skus): array
+    {
+        if ($skus === []) {
+            return [];
+        }
+
+        return DirectAdText::query()->whereIn('sku', $skus)->get()->keyBy('sku')->all();
+    }
+
+    /**
+     * Написать объявление моделью и сохранить. Возвращает запись или null,
+     * если ничего пригодного не получилось (тогда работают правила).
+     */
+    public function generate(object $item, ?User $by = null, ?string $tone = null): ?DirectAdText
+    {
+        $catalogItem = CatalogItem::query()->where('sku', (string) $item->sku)->first(['id', 'sku', 'name']);
+        if ($catalogItem === null) {
+            return null;
+        }
+
+        $tone = DirectAdTone::normalize($tone);
+        $model = (string) config('services.yandex_direct.title_model', 'gpt-4o-mini');
+        $rule = [
+            'title' => DirectAdPlanService::adTitle($item),
+            'title2' => DirectAdPlanService::adTitle2($item),
+            'text' => DirectAdPlanService::adText($item),
+        ];
+
+        try {
+            $res = $this->openai->chat([
+                ['role' => 'system', 'content' => self::systemPrompt($tone)],
+                ['role' => 'user', 'content' => self::userPrompt($item, $rule)],
+            ], $model, [
+                'temperature' => DirectAdTone::temperature($tone),
+                'max_tokens' => 300,
+                'response_format' => ['type' => 'json_object'],
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Direct: объявление не сгенерировано', ['sku' => $item->sku, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+
+        $answer = self::decode((string) ($res['content'] ?? ''));
+        if ($answer === null) {
+            Log::info('Direct: ответ модели не разобран', ['sku' => $item->sku, 'raw' => $res['content'] ?? '']);
+
+            return null;
+        }
+
+        $accepted = [];
+        $dropped = [];
+        foreach (self::LIMITS as $field => $max) {
+            $value = self::acceptField((string) ($answer[$field] ?? ''), $field, $item, $tone);
+            if ($value === null) {
+                $dropped[] = $field;
+
+                continue;
+            }
+            $accepted[$field] = $value;
+        }
+
+        if ($dropped !== []) {
+            Log::info('Direct: поля объявления отклонены', [
+                'sku' => $item->sku, 'dropped' => $dropped, 'answer' => $answer,
+            ]);
+        }
+        if ($accepted === []) {
+            return null;
+        }
+
+        return $this->save($catalogItem, $accepted, DirectAdText::SOURCE_AI, $by, $model, $tone);
+    }
+
+    /**
+     * Сохранить тексты. Переданные поля перезаписываются, остальные остаются
+     * как были — правка одного заголовка не должна стирать вычитанный текст.
+     *
+     * @param  array<string, string>  $fields
+     */
+    public function save(
+        CatalogItem $item,
+        array $fields,
+        string $source,
+        ?User $by,
+        ?string $model = null,
+        ?string $tone = null,
+    ): DirectAdText {
+        $payload = [
+            'sku' => $item->sku,
+            'source' => $source,
+            'model' => $model,
+            'tone' => $tone,
+            'source_name' => $item->name,
+            'created_by_user_id' => $by?->id,
+        ];
+
+        foreach (DirectAdText::FIELDS as $field) {
+            if (! array_key_exists($field, $fields)) {
+                continue;
+            }
+            $value = trim((string) $fields[$field]);
+            $payload[$field] = $value === ''
+                ? null
+                : DirectAdPlanService::tidyTail(mb_substr($value, 0, self::LIMITS[$field]));
+        }
+
+        return DirectAdText::updateOrCreate(['catalog_item_id' => $item->id], $payload);
+    }
+
+    public function forget(string $sku): bool
+    {
+        return DirectAdText::query()->where('sku', $sku)->delete() > 0;
+    }
+
+    /**
+     * Разобрать ответ модели. Просили JSON, но ставить на это всё нельзя:
+     * если пришла просто строка, считаем её заголовком.
+     *
+     * @return array<string, string>|null
+     */
+    public static function decode(string $raw): ?array
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return null;
+        }
+
+        // JSON бывает завёрнут в ```json … ``` — вырезаем содержимое фигурных скобок.
+        if (preg_match('/\{.*\}/su', $raw, $m)) {
+            $decoded = json_decode($m[0], true);
+            if (is_array($decoded)) {
+                return array_map(fn ($v) => is_scalar($v) ? (string) $v : '', $decoded);
+            }
+        }
+
+        $line = self::cleanAnswer($raw, self::LIMITS['title']);
+
+        return $line === null ? null : ['title' => $line];
+    }
+
+    /** Поле, годное к публикации, или null — тогда останется вариант правила. */
+    public static function acceptField(string $raw, string $field, object $item, ?string $tone = null): ?string
+    {
+        $value = self::cleanAnswer($raw, self::LIMITS[$field] ?? DirectAdPlanService::TITLE_MAX);
+        if ($value === null) {
+            return null;
+        }
+        if (! self::isFaithful($value, $item)) {
+            return null;
+        }
+        if (self::violatesRules($value, $field, $tone)) {
+            return null;
+        }
+
+        return $value;
+    }
+
+    /** Ответ модели: одна строка без кавычек, точки-хвоста и лишних пояснений. */
+    public static function cleanAnswer(string $raw, int $max = DirectAdPlanService::TITLE_MAX): ?string
+    {
+        $line = trim(preg_split('/\R/u', trim($raw))[0] ?? '');
+        // Кавычки снимаем регуляркой, а не trim(): trim режет по байтам и на
+        // «ёлочках» способен откусить половину кириллической буквы.
+        $line = preg_replace('/^[\s"\'«»`]+|[\s"\'«»`.]+$/u', '', $line) ?? '';
+        $line = trim(preg_replace('/\s+/u', ' ', $line) ?? '');
+
+        if ($line === '' || mb_strlen($line) < 4) {
+            return null;
+        }
+        if (mb_strlen($line) > $max) {
+            $line = DirectAdPlanService::cutWords($line, $max);
+        }
+
+        return DirectAdPlanService::tidyTail($line) ?: null;
+    }
+
+    /**
+     * Проверка на выдумку: латиница и цифры в тексте должны встречаться в
+     * карточке позиции. Русские слова не проверяем — их модель переформулирует
+     * («резиновый» → «для эскалатора»), а вот «KONE» или «GO50AEX» из воздуха
+     * взяться не должны.
+     */
+    public static function isFaithful(string $value, object $item): bool
+    {
+        $haystack = mb_strtolower(implode(' ', array_filter([
+            (string) ($item->name ?? ''),
+            (string) ($item->brand ?? ''),
+            (string) ($item->brand_article ?? ''),
+            (string) ($item->part_type ?? ''),
+            (string) ($item->sku ?? ''),
+            implode(' ', DirectAdPlanService::codes($item)),
+        ])));
+        $haystack = preg_replace('/[^a-z0-9а-я]+/u', '', $haystack) ?? '';
+
+        foreach (preg_split('/[^A-Za-z0-9]+/u', $value) ?: [] as $token) {
+            if ($token === '' || mb_strlen($token) < 2) {
+                continue;
+            }
+            if (! str_contains($haystack, mb_strtolower($token))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * То, за что снимают с модерации или за что придётся отвечать: цена в
+     * тексте (её на карточке анонимному посетителю не видно), превосходная
+     * степень без доказательств, КАПС и лишние восклицания.
+     */
+    public static function violatesRules(string $value, string $field, ?string $tone = null): bool
+    {
+        // Цена и скидки — решение заказчика: рекламируем наличие, не цену.
+        if (preg_match('/(₽|\bруб\b|\bруб\.|\bцена\b|\bцены\b|скидк|распродаж|дешевл|бесплатн)/iu', $value)) {
+            return true;
+        }
+        // Превосходная степень и обещания, которые модерация требует доказать.
+        if (preg_match('/(лучш|самый|самая|самое|самые|№\s?1|номер\s?один|гаранти|100\s?%|круглосуточн)/iu', $value)) {
+            return true;
+        }
+        // КАПС из кириллицы. Латиница не в счёт: OTIS и FCU пишутся так по делу.
+        if (preg_match('/[А-ЯЁ]{4,}/u', $value)) {
+            return true;
+        }
+
+        $exclamations = mb_substr_count($value, '!');
+        if ($field !== 'text' && $exclamations > 0) {
+            return true;
+        }
+
+        return $exclamations > (DirectAdTone::allowsExclamation($tone) ? 1 : 0);
+    }
+
+    private static function systemPrompt(string $tone): string
+    {
+        $limits = self::LIMITS;
+        $toneLine = 'Тон объявления: '.DirectAdTone::label($tone).'. '.DirectAdTone::prompt($tone);
+
+        return <<<TXT
+        Ты пишешь объявления для поиска Яндекс.Директа. Рекламодатель — поставщик запчастей
+        к лифтам и эскалаторам, товар лежит на складе и отгружается сразу.
+
+        {$toneLine}
+
+        Правила, которые важнее тона:
+        1. Только факты из карточки товара. НИЧЕГО не добавляй: ни совместимость, ни бренды,
+           ни модели оборудования, ни размеры, которых нет в данных.
+        2. Длина строго: заголовок до {$limits['title']} символов, второй заголовок до
+           {$limits['title2']}, текст до {$limits['text']}. Короче — лучше.
+        3. Никаких цен, сумм, скидок и слова «бесплатно».
+        4. Никакой превосходной степени («лучший», «самый», «№1») и слова «гарантия» —
+           модерация требует это доказывать.
+        5. Без КАПСА и без точки в конце заголовков.
+        6. Заголовок — что это за деталь, с брендом и артикулом производителя, если они есть.
+           Второй заголовок — короткое дополнение, которого нет в первом.
+           Текст — выгода покупателю: есть на складе, счёт в день обращения, отгрузка сразу.
+        7. Не обрывай слова и не оставляй открытых скобок.
+
+        Ответ — только JSON вида {"title": "…", "title2": "…", "text": "…"}, без пояснений.
+        TXT;
+    }
+
+    /**
+     * @param  array<string, string>  $rule
+     */
+    private static function userPrompt(object $item, array $rule): string
+    {
+        $codes = DirectAdPlanService::codes($item);
+
+        return implode("\n", array_filter([
+            'Название в каталоге: '.(string) ($item->name ?? ''),
+            ($item->brand ?? '') ? 'Бренд: '.$item->brand : '',
+            $codes !== [] ? 'Артикулы производителя: '.implode(', ', array_slice($codes, 0, 5)) : '',
+            ($item->part_type ?? '') ? 'Категория: '.$item->part_type : '',
+            (int) ($item->stock_available ?? 0) > 0 ? 'На складе: есть' : '',
+            '',
+            'Автоматический вариант, собранный по шаблону:',
+            'title: '.$rule['title'],
+            'title2: '.$rule['title2'],
+            'text: '.$rule['text'],
+            '',
+            'Напиши лучше, уложившись в лимиты.',
+        ]));
+    }
+}

@@ -102,6 +102,36 @@
         </div>
     </div>
 
+    {{-- Тон рекламных текстов --}}
+    <div class="ds-card">
+        <div class="ds-card-header flex-wrap">
+            <h3 class="text-[15px] font-semibold text-fg-1">🎭 Тон объявлений</h3>
+            <span class="text-[12px] text-fg-3">как написано — факты берутся из карточки при любом тоне</span>
+            <span class="flex-1"></span>
+            <span class="text-[12px] text-fg-3">сейчас: <b class="text-fg-1">{{ \App\Services\Direct\DirectAdTone::label($adTone) }}</b></span>
+        </div>
+        <div class="ds-card-body">
+            <div class="flex flex-wrap gap-2">
+                @foreach($tones as $key => $tone)
+                    <button type="button" wire:key="tone-{{ $key }}" wire:click="$set('adTone', '{{ $key }}')"
+                            class="text-left px-3 py-2 rounded-md border transition-colors"
+                            style="border-color:{{ $adTone === $key ? 'var(--sky-500)' : 'var(--border)' }};
+                                   background:{{ $adTone === $key ? 'var(--sky-50)' : 'transparent' }};max-width:260px">
+                        <div class="text-[12.5px] font-medium text-fg-1">{{ $tone['label'] }}</div>
+                        <div class="text-[11px] text-fg-3 leading-snug mt-0.5">{{ $tone['hint'] }}</div>
+                    </button>
+                @endforeach
+            </div>
+            <div class="flex flex-wrap items-center gap-3 mt-3">
+                <button type="button" class="btn btn-sm btn-primary" wire:click="saveTone">Сохранить тон</button>
+                <span class="text-[11.5px] text-fg-4">
+                    Тон применяется к новым текстам. Уже написанные объявления не меняются сами:
+                    каждая правка текста у работающего объявления — это повторная модерация.
+                </span>
+            </div>
+        </div>
+    </div>
+
     {{-- Очередь позиций --}}
     <div class="ds-card">
         <div class="ds-card-header flex-wrap">
@@ -177,12 +207,24 @@
         </div>
     </div>
 
-    {{-- План публикации --}}
-    @php $plan = $this->plan; $warned = $plan->filter(fn ($p) => $p['warnings'] !== [])->count(); @endphp
+    {{-- План объявлений --}}
+    @php
+        $plan = $this->plan;
+        $warned = $plan->filter(fn ($p) => $p['warnings'] !== [])->count();
+        $pending = $plan->filter(fn ($p) => $p['source'] === 'rule')->count();
+        $fields = [
+            'title' => ['Заголовок', \App\Services\Direct\DirectAdPlanService::TITLE_MAX],
+            'title2' => ['Второй заголовок', \App\Services\Direct\DirectAdPlanService::TITLE2_MAX],
+            'text' => ['Текст', \App\Services\Direct\DirectAdPlanService::TEXT_MAX],
+        ];
+        $srcStyle = fn ($s) => $s === 'manual'
+            ? 'background:var(--emerald-50);color:var(--emerald-700)'
+            : ($s === 'ai' ? 'background:var(--sky-50);color:var(--sky-700)' : 'background:var(--neutral-100);color:var(--fg-3)');
+    @endphp
     <div class="ds-card">
         <div class="ds-card-header flex-wrap">
-            <h3 class="text-[15px] font-semibold text-fg-1">📝 План объявлений</h3>
-            <span class="text-[12px] text-fg-3">что уйдёт в Директ при текущем лимите · пока ничего не создано</span>
+            <h3 class="text-[15px] font-semibold text-fg-1">📝 Объявления</h3>
+            <span class="text-[12px] text-fg-3">пишем заранее на всю очередь · в Директ пока ничего не создано</span>
             @if($warned)
                 <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)">
                     <span class="dot"></span>замечаний: {{ $warned }}
@@ -190,66 +232,95 @@
             @endif
             <span class="flex-1"></span>
             <span class="text-[12px] text-fg-3">кампания: <span class="mono text-fg-2">{{ \App\Services\Direct\DirectAdPlanService::campaignName() }}</span></span>
-            @if($warned)
-                <button type="button" class="btn btn-sm" wire:click="generateTitlesForFlagged"
-                        wire:loading.attr="disabled" wire:target="generateTitlesForFlagged"
-                        title="Переписать моделью заголовки там, где правилу не хватило длины">
-                    <span wire:loading.remove wire:target="generateTitlesForFlagged">✨ Переписать заголовки ({{ $warned }})</span>
-                    <span wire:loading wire:target="generateTitlesForFlagged">Пишу…</span>
+            @if($pending)
+                <button type="button" class="btn btn-sm" wire:click="generateMissing"
+                        wire:loading.attr="disabled" wire:target="generateMissing"
+                        title="Написать тексты всем позициям, где их ещё нет — включая те, что ждут за порогом">
+                    <span wire:loading.remove wire:target="generateMissing">✨ Написать недостающие ({{ $pending }})</span>
+                    <span wire:loading wire:target="generateMissing">Пишу…</span>
                 </button>
             @endif
         </div>
         <div class="ds-card-body space-y-2">
+            <div class="text-[11.5px] text-fg-4">
+                Тексты готовятся до публикации: у работающего объявления любая правка — повторная
+                модерация, поэтому очередь «на подходе» пишем и вычитываем заранее.
+            </div>
+
             @forelse($plan as $p)
-                <div wire:key="dp-{{ $p['sku'] }}" class="border border-border rounded-md" x-data="{ open: false }">
+                @if(! $p['in_rotation'] && ($plan[$loop->index - 1]['in_rotation'] ?? false))
+                    <div class="flex items-center gap-2 text-[11px] text-fg-4 py-1" wire:key="dp-line">
+                        <span class="flex-1" style="height:1px;background:var(--border-strong)"></span>
+                        <span>ниже — резерв: в ротацию не уйдут, но тексты готовим заранее</span>
+                        <span class="flex-1" style="height:1px;background:var(--border-strong)"></span>
+                    </div>
+                @endif
+
+                <div wire:key="dp-{{ $p['sku'] }}" class="border border-border rounded-md {{ $p['in_rotation'] ? '' : 'opacity-70' }}"
+                     x-data="{ open: false }">
                     <button type="button" class="w-full flex flex-wrap items-center gap-2 px-3 py-2 text-left" @click="open = ! open">
                         <span class="text-fg-4 text-[11px]" x-text="open ? '▾' : '▸'"></span>
                         <span class="mono text-[12px] text-fg-4">{{ $p['sku'] }}</span>
                         <span class="text-[13px] text-fg-1">{{ $p['title'] }}</span>
+                        <span class="chip text-[10.5px]" style="{{ $srcStyle($p['source']) }}">
+                            {{ \App\Models\DirectAdText::SOURCES[$p['source']] ?? $p['source'] }}
+                        </span>
                         <span class="flex-1"></span>
+                        @unless($p['in_rotation'])
+                            <span class="text-[11px] text-fg-4">резерв</span>
+                        @endunless
                         <span class="text-[11.5px] text-fg-3">фраз: <span class="mono">{{ count($p['keywords']) }}</span></span>
                         @if($p['warnings'])
                             <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)">⚠</span>
                         @endif
                     </button>
-                    <div x-show="open" x-cloak class="px-3 pb-3 pt-1 border-t border-border-subtle space-y-1.5 text-[12.5px]"
-                         x-data="{ edit: false, draft: @js($p['title']) }">
+
+                    <div x-show="open" x-cloak class="px-3 pb-3 pt-1 border-t border-border-subtle space-y-2 text-[12.5px]">
                         <div class="flex flex-wrap items-center gap-2">
-                            <span class="text-fg-3 w-[130px]">Заголовок</span>
-                            {{-- x-show, не x-if: внутри template Livewire не навешивает wire:click. --}}
-                            <span x-show="! edit" class="flex flex-wrap items-center gap-2">
-                                    <span>{{ $p['title'] }}</span>
-                                    <span class="mono text-[11px] text-fg-4">{{ mb_strlen($p['title']) }}/{{ \App\Services\Direct\DirectAdPlanService::TITLE_MAX }}</span>
-                                    @php $src = $p['title_source']; @endphp
-                                    <span class="chip text-[10.5px]"
-                                          style="background:{{ $src === 'manual' ? 'var(--emerald-50)' : ($src === 'ai' ? 'var(--sky-50)' : 'var(--neutral-100)') }};
-                                                 color:{{ $src === 'manual' ? 'var(--emerald-700)' : ($src === 'ai' ? 'var(--sky-700)' : 'var(--fg-3)') }}">
-                                        {{ \App\Models\DirectAdTitle::SOURCES[$src] ?? $src }}
-                                    </span>
-                                    <button type="button" class="btn btn-sm" @click="edit = true">✎ Править</button>
-                                    <button type="button" class="btn btn-sm" wire:click="generateTitle('{{ $p['sku'] }}')"
-                                            wire:loading.attr="disabled" wire:target="generateTitle">✨ Моделью</button>
-                                    @if($src !== 'rule')
-                                        <button type="button" class="btn btn-sm" wire:click="resetTitle('{{ $p['sku'] }}')"
-                                                title="Вернуть заголовок, собранный правилом">↩ По правилу</button>
-                                    @endif
-                            </span>
-                            <span x-show="edit" x-cloak class="flex flex-wrap items-center gap-2 flex-1">
-                                    <input type="text" x-model="draft" maxlength="{{ \App\Services\Direct\DirectAdPlanService::TITLE_MAX }}"
-                                           class="{{ $inp }} flex-1 min-w-[260px]" @keydown.enter.prevent="$wire.saveTitle('{{ $p['sku'] }}', draft); edit = false">
-                                    <span class="mono text-[11px] text-fg-4" x-text="draft.length + '/{{ \App\Services\Direct\DirectAdPlanService::TITLE_MAX }}'"></span>
-                                    <button type="button" class="btn btn-sm btn-primary" @click="$wire.saveTitle('{{ $p['sku'] }}', draft); edit = false">Сохранить</button>
-                                    <button type="button" class="btn btn-sm" @click="edit = false; draft = @js($p['title'])">Отмена</button>
-                            </span>
+                            <span class="text-[11.5px] text-fg-4">{{ $p['name'] }}</span>
+                            <span class="flex-1"></span>
+                            <button type="button" class="btn btn-sm" wire:click="generateAd('{{ $p['sku'] }}')"
+                                    wire:loading.attr="disabled" wire:target="generateAd"
+                                    title="Написать моделью все поля объявления в выбранном тоне">✨ Написать моделью</button>
+                            @if($p['source'] !== 'rule')
+                                <button type="button" class="btn btn-sm" wire:click="resetAd('{{ $p['sku'] }}')"
+                                        title="Вернуть тексты, собранные правилами">↩ По правилам</button>
+                            @endif
                         </div>
-                        @if($p['title_source'] !== 'rule' && $p['title_rule'] !== $p['title'])
-                            <div class="text-[11.5px] text-fg-4">
-                                <span class="w-[130px] inline-block">Было по правилу</span>{{ $p['title_rule'] }}
+
+                        {{-- Поля объявления: правятся по месту, правка сильнее модели. --}}
+                        @foreach($fields as $f => [$label, $max])
+                            <div wire:key="dp-{{ $p['sku'] }}-{{ $f }}" class="flex flex-wrap items-start gap-2"
+                                 x-data="{ edit: false, draft: @js($p[$f]) }">
+                                <span class="text-fg-3 w-[130px] shrink-0 pt-[3px]">{{ $label }}</span>
+                                {{-- x-show, не x-if: внутри template Livewire не навешивает wire:click. --}}
+                                <span x-show="! edit" class="flex flex-wrap items-center gap-2">
+                                    <span class="text-fg-1">{{ $p[$f] }}</span>
+                                    <span class="mono text-[11px] {{ mb_strlen($p[$f]) > $max ? 'text-red-600' : 'text-fg-4' }}">
+                                        {{ mb_strlen($p[$f]) }}/{{ $max }}
+                                    </span>
+                                    <span class="chip text-[10.5px]" style="{{ $srcStyle($p['sources'][$f]) }}">
+                                        {{ \App\Models\DirectAdText::SOURCES[$p['sources'][$f]] ?? $p['sources'][$f] }}
+                                    </span>
+                                    <button type="button" class="btn btn-sm" @click="edit = true">✎</button>
+                                </span>
+                                <span x-show="edit" x-cloak class="flex flex-wrap items-center gap-2 flex-1">
+                                    <input type="text" x-model="draft" maxlength="{{ $max }}"
+                                           class="{{ $inp }} flex-1 min-w-[260px]"
+                                           @keydown.enter.prevent="$wire.saveField('{{ $p['sku'] }}', '{{ $f }}', draft); edit = false">
+                                    <span class="mono text-[11px] text-fg-4" x-text="draft.length + '/{{ $max }}'"></span>
+                                    <button type="button" class="btn btn-sm btn-primary"
+                                            @click="$wire.saveField('{{ $p['sku'] }}', '{{ $f }}', draft); edit = false">Сохранить</button>
+                                    <button type="button" class="btn btn-sm" @click="edit = false; draft = @js($p[$f])">Отмена</button>
+                                </span>
+                                @if($p['sources'][$f] !== 'rule' && $p['rule'][$f] !== $p[$f])
+                                    <span class="basis-full text-[11px] text-fg-4 pl-[138px]">
+                                        по правилу: {{ $p['rule'][$f] }}
+                                    </span>
+                                @endif
                             </div>
-                        @endif
-                        <div><span class="text-fg-3 w-[130px] inline-block">Второй заголовок</span>{{ $p['title2'] }}</div>
-                        <div><span class="text-fg-3 w-[130px] inline-block">Текст</span>{{ $p['text'] }}
-                            <span class="mono text-[11px] text-fg-4">{{ mb_strlen($p['text']) }}/{{ \App\Services\Direct\DirectAdPlanService::TEXT_MAX }}</span></div>
+                        @endforeach
+
                         <div><span class="text-fg-3 w-[130px] inline-block align-top">Ссылка</span>
                             <a href="{{ $p['url'] }}" target="_blank" rel="noopener" class="text-sky-700 hover:underline break-all">{{ \Illuminate\Support\Str::limit($p['url'], 110) }}</a></div>
                         <div><span class="text-fg-3 w-[130px] inline-block align-top">Фразы</span>

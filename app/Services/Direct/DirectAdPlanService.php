@@ -2,8 +2,9 @@
 
 namespace App\Services\Direct;
 
-use App\Models\DirectAdTitle;
+use App\Models\DirectAdText;
 use App\Services\Catalog\YandexDirectFeedService;
+use App\Services\Settings\SettingsService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
@@ -36,42 +37,73 @@ class DirectAdPlanService
 
     public function __construct(
         private readonly DirectCandidateService $candidates,
-        private readonly DirectTitleService $titles,
+        private readonly DirectAdTextService $texts,
     ) {}
 
     /**
-     * План по первым $limit позициям очереди.
+     * План по очереди. $limit — сколько позиций реально уйдёт в ротацию,
+     * $depth — насколько глубоко готовим тексты: вычитывать их надо ДО
+     * публикации, иначе правка у работающего объявления = повторная модерация.
      *
      * @return Collection<int, array<string, mixed>>
      */
-    public function plan(int $limit): Collection
+    public function plan(int $limit, ?int $depth = null): Collection
     {
-        $items = $this->candidates->queue($limit)->take($limit);
-        $stored = $this->titles->storedFor($items->pluck('sku')->map(fn ($s) => (string) $s)->all());
+        $depth = max($limit, $depth ?? $limit);
+        $items = $this->candidates->queue($depth)->take($depth);
+        $stored = $this->texts->storedFor($items->pluck('sku')->map(fn ($s) => (string) $s)->all());
+        $tone = self::currentTone();
 
-        return $items->map(fn ($item) => $this->forItem($item, $stored[(string) $item->sku] ?? null));
+        return $items->values()->map(fn ($item, $i) => $this->forItem(
+            $item,
+            $stored[(string) $item->sku] ?? null,
+            $i < $limit,
+            $tone,
+        ));
     }
 
     /**
      * @return array<string, mixed>
      */
-    public function forItem(object $item, ?DirectAdTitle $stored = null): array
-    {
+    public function forItem(
+        object $item,
+        ?DirectAdText $stored = null,
+        bool $inRotation = true,
+        ?string $tone = null,
+    ): array {
         $keywords = self::keywords($item);
-        $ruleTitle = self::adTitle($item);
-        $title = $stored?->title ?: $ruleTitle;
-        $text = self::adText($item);
+        $stored = $stored !== null && $stored->hasAnything() ? $stored : null;
+
+        $rule = [
+            'title' => self::adTitle($item),
+            'title2' => '',
+            'text' => self::adText($item),
+        ];
+        $title = trim((string) ($stored?->title ?? '')) ?: $rule['title'];
+        // Второй заголовок зависит от первого — он не должен его повторять.
+        $rule['title2'] = self::adTitle2($item, $title);
+
+        $fields = [];
+        $sources = [];
+        foreach (DirectAdText::FIELDS as $field) {
+            $own = trim((string) ($stored?->{$field} ?? ''));
+            $fields[$field] = $own !== '' ? $own : $rule[$field];
+            $sources[$field] = $own !== '' ? ($stored?->source ?? DirectAdText::SOURCE_RULE) : DirectAdText::SOURCE_RULE;
+        }
 
         $warnings = [];
         if ($keywords === []) {
             $warnings[] = 'Нет кодов производителя — рекламировать нечем, фразы пустые.';
         }
         // Замечание снимается, как только заголовок переписан моделью или руками.
-        if ($stored === null && mb_strlen((string) ($item->name ?? '')) > self::TITLE_MAX) {
+        if ($sources['title'] === DirectAdText::SOURCE_RULE && mb_strlen((string) ($item->name ?? '')) > self::TITLE_MAX) {
             $warnings[] = 'Название длиннее заголовка — обрезано, стоит переписать.';
         }
-        if ($stored !== null && $stored->isStale((string) ($item->name ?? ''))) {
-            $warnings[] = 'Позицию переименовали в каталоге — заголовок мог устареть.';
+        if ($stored?->isStale((string) ($item->name ?? ''))) {
+            $warnings[] = 'Позицию переименовали в каталоге — тексты могли устареть.';
+        }
+        if ($tone !== null && $stored?->isOtherTone($tone)) {
+            $warnings[] = 'Написано прежним тоном — «'.DirectAdTone::label($stored->tone).'».';
         }
 
         return [
@@ -79,17 +111,29 @@ class DirectAdPlanService
             'name' => (string) ($item->name ?? ''),
             'brand' => (string) ($item->brand ?? ''),
             'group' => self::groupName($item),
-            'title' => $title,
-            'title_rule' => $ruleTitle,
-            'title_source' => $stored?->source ?? DirectAdTitle::SOURCE_RULE,
-            'title2' => self::adTitle2($item, $title),
-            'text' => $text,
+            'in_rotation' => $inRotation,
+            'title' => $fields['title'],
+            'title2' => $fields['title2'],
+            'text' => $fields['text'],
+            'rule' => $rule,
+            'sources' => $sources,
+            // Источник объявления целиком: правило, пока ни одно поле не тронуто.
+            'source' => $stored?->source ?? DirectAdText::SOURCE_RULE,
+            'tone' => $stored?->tone,
             'url' => YandexDirectFeedService::productUrl((string) ($item->sku ?? '')),
             'keywords' => $keywords,
             'warnings' => $warnings,
             'price' => (float) ($item->price ?? 0),
             'stock' => (int) ($item->stock_available ?? 0),
         ];
+    }
+
+    /** Текущий тон рекламы из настроек. */
+    public static function currentTone(): string
+    {
+        return DirectAdTone::normalize(
+            app(SettingsService::class)->get('direct.ad_tone', DirectAdTone::DEFAULT),
+        );
     }
 
     /** Имя кампании-контейнера. */

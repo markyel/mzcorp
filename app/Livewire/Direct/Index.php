@@ -4,11 +4,12 @@ namespace App\Livewire\Direct;
 
 use App\Models\AppSetting;
 use App\Models\CatalogItem;
-use App\Models\DirectAdTitle;
+use App\Models\DirectAdText;
 use App\Services\Direct\DirectAdPlanService;
+use App\Services\Direct\DirectAdTextService;
+use App\Services\Direct\DirectAdTone;
 use App\Services\Direct\DirectApiClient;
 use App\Services\Direct\DirectCandidateService;
-use App\Services\Direct\DirectTitleService;
 use App\Services\Settings\SettingsService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
@@ -32,7 +33,22 @@ class Index extends Component
 
     public const MAX_ADS_LIMIT = 500;
 
+    /** Ключ настройки «тон рекламных текстов». */
+    public const SETTING_AD_TONE = 'direct.ad_tone';
+
+    /**
+     * Насколько глубже лимита готовим тексты. Объявление правится без
+     * повторной модерации только до публикации, поэтому очередь «на подходе»
+     * должна быть написана и вычитана заранее.
+     */
+    public const PREPARE_AHEAD = 10;
+
+    /** Сколько позиций пишем за одно нажатие — чтобы запрос не висел минутами. */
+    public const BULK_LIMIT = 25;
+
     public int $adsLimit = self::DEFAULT_ADS_LIMIT;
+
+    public string $adTone = DirectAdTone::DEFAULT;
 
     public ?string $notice = null;
 
@@ -45,6 +61,7 @@ class Index extends Component
     {
         $this->ensureAdmin();
         $this->adsLimit = self::clamp((int) $settings->get(self::SETTING_ADS_LIMIT, self::DEFAULT_ADS_LIMIT));
+        $this->adTone = DirectAdTone::normalize($settings->get(self::SETTING_AD_TONE, DirectAdTone::DEFAULT));
     }
 
     public static function clamp(int $value): int
@@ -76,7 +93,13 @@ class Index extends Component
     #[Computed]
     public function queue()
     {
-        return app(DirectCandidateService::class)->queue(max(20, $this->adsLimit + 10));
+        return app(DirectCandidateService::class)->queue($this->planDepth());
+    }
+
+    /** Глубина подготовки текстов: ротация плюс ближайший резерв. */
+    public function planDepth(): int
+    {
+        return max(20, $this->adsLimit + self::PREPARE_AHEAD);
     }
 
     #[Computed]
@@ -135,11 +158,14 @@ class Index extends Component
         return app(DirectCandidateService::class)->excluded();
     }
 
-    /** План публикации: что именно уйдёт в Директ при текущем лимите. */
+    /**
+     * План публикации: что уйдёт в Директ при текущем лимите и что готовим
+     * следом. Тексты пишем на всю глубину, а не только на ротацию.
+     */
     #[Computed]
     public function plan()
     {
-        return app(DirectAdPlanService::class)->plan($this->adsLimit);
+        return app(DirectAdPlanService::class)->plan($this->adsLimit, $this->planDepth());
     }
 
     /**
@@ -158,76 +184,109 @@ class Index extends Component
             : "{$sku} убрана из рекламы — из очереди и из фида.";
     }
 
-    /**
-     * Переписать заголовок моделью. Правила остаются страховкой: если модель
-     * выдумала бренд или модель оборудования, результат отбрасывается и
-     * заголовок остаётся прежним.
-     */
-    public function generateTitle(string $sku, DirectTitleService $titles): void
+    /** Тон рекламных текстов — на уже написанные объявления не влияет. */
+    public function saveTone(SettingsService $settings): void
     {
         $this->ensureAdmin();
-        $item = app(DirectCandidateService::class)->queue($this->adsLimit)->firstWhere('sku', $sku);
+        $this->adTone = DirectAdTone::normalize($this->adTone);
+
+        $settings->set(
+            self::SETTING_AD_TONE,
+            $this->adTone,
+            AppSetting::TYPE_STRING,
+            Auth::id(),
+            'Каким тоном модель пишет тексты объявлений Директа',
+        );
+
+        unset($this->plan);
+        $this->notice = 'Тон рекламы: '.mb_strtolower(DirectAdTone::label($this->adTone))
+            .'. Уже написанные объявления остались прежними — перепишите их кнопкой, если нужно.';
+    }
+
+    /**
+     * Написать объявление моделью. Правила остаются страховкой: если модель
+     * выдумала бренд или модель оборудования, поле отбрасывается и остаётся
+     * прежний вариант.
+     */
+    public function generateAd(string $sku, DirectAdTextService $texts): void
+    {
+        $this->ensureAdmin();
+        $item = $this->queue->firstWhere('sku', $sku);
         if ($item === null) {
             $this->error = "Позиция {$sku} не найдена в очереди.";
 
             return;
         }
 
-        $result = $titles->generate($item, Auth::user());
+        $result = $texts->generate($item, Auth::user(), $this->adTone);
         unset($this->plan);
 
         if ($result === null) {
-            $this->error = "{$sku}: модель не дала пригодного заголовка — оставил вариант правила.";
+            $this->error = "{$sku}: модель не дала пригодного текста — оставил вариант правила.";
 
             return;
         }
-        $this->notice = "{$sku}: заголовок переписан — «{$result->title}».";
+        $this->notice = "{$sku}: объявление написано — «{$result->title}».";
     }
 
-    /** Переписать заголовки всем позициям плана, у которых есть замечания. */
-    public function generateTitlesForFlagged(DirectTitleService $titles): void
+    /**
+     * Написать тексты всем позициям очереди, где их ещё нет — включая те, что
+     * ждут за порогом ротации. В этом и смысл: объявление правится без
+     * повторной модерации только до публикации.
+     */
+    public function generateMissing(DirectAdTextService $texts): void
     {
         $this->ensureAdmin();
         $done = 0;
         $skipped = 0;
 
         foreach ($this->plan as $row) {
-            if ($row['warnings'] === [] || $row['title_source'] !== DirectAdTitle::SOURCE_RULE) {
+            if ($row['source'] !== DirectAdText::SOURCE_RULE) {
                 continue;
             }
-            $item = app(DirectCandidateService::class)->queue($this->adsLimit)->firstWhere('sku', $row['sku']);
+            if ($done + $skipped >= self::BULK_LIMIT) {
+                break;
+            }
+            $item = $this->queue->firstWhere('sku', $row['sku']);
             if ($item === null) {
                 continue;
             }
-            $titles->generate($item, Auth::user()) === null ? $skipped++ : $done++;
+            $texts->generate($item, Auth::user(), $this->adTone) === null ? $skipped++ : $done++;
         }
 
         unset($this->plan);
-        $this->notice = "Переписано заголовков: {$done}".($skipped ? ", отклонено моделью: {$skipped}" : '.');
+        $this->notice = $done + $skipped === 0
+            ? 'Все позиции очереди уже написаны.'
+            : "Написано объявлений: {$done}".($skipped ? ", отклонено проверкой: {$skipped}." : '.');
     }
 
-    /** Правка заголовка руками — она сильнее и правила, и модели. */
-    public function saveTitle(string $sku, string $title, DirectTitleService $titles): void
+    /** Правка поля руками — она сильнее и правила, и модели. */
+    public function saveField(string $sku, string $field, string $value, DirectAdTextService $texts): void
     {
         $this->ensureAdmin();
+        if (! in_array($field, DirectAdText::FIELDS, true)) {
+            return;
+        }
+
         $item = CatalogItem::query()->where('sku', $sku)->first(['id', 'sku', 'name']);
-        if ($item === null || trim($title) === '') {
-            $this->error = 'Пустой заголовок не сохраняю.';
+        if ($item === null || trim($value) === '') {
+            $this->error = 'Пустое поле не сохраняю.';
 
             return;
         }
-        $saved = $titles->save($item, $title, DirectAdTitle::SOURCE_MANUAL, Auth::user());
+
+        $saved = $texts->save($item, [$field => $value], DirectAdText::SOURCE_MANUAL, Auth::user(), null, $this->adTone);
         unset($this->plan);
-        $this->notice = "{$sku}: заголовок сохранён — «{$saved->title}».";
+        $this->notice = "{$sku}: сохранено — «{$saved->{$field}}».";
     }
 
-    /** Вернуть заголовок, собранный правилом. */
-    public function resetTitle(string $sku, DirectTitleService $titles): void
+    /** Вернуть тексты, собранные правилами. */
+    public function resetAd(string $sku, DirectAdTextService $texts): void
     {
         $this->ensureAdmin();
-        $titles->forget($sku);
+        $texts->forget($sku);
         unset($this->plan);
-        $this->notice = "{$sku}: вернул заголовок по правилу.";
+        $this->notice = "{$sku}: вернул тексты по правилам.";
     }
 
     public function restoreItem(string $sku): void
@@ -249,6 +308,7 @@ class Index extends Component
         $cfg = config('services.yandex_direct');
 
         return view('livewire.direct.index', [
+            'tones' => DirectAdTone::all(),
             'sandbox' => (bool) ($cfg['sandbox'] ?? true),
             'endpoint' => (string) ($cfg['endpoint'] ?? ''),
             'hasToken' => trim((string) ($cfg['token'] ?? '')) !== '',
