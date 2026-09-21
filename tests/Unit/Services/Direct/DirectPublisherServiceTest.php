@@ -43,6 +43,20 @@ class DirectPublisherServiceTest extends TestCase
         $this->assertStringContainsString('слишком длинный', Publisher::resultErrors($result));
     }
 
+    public function test_warnings_can_be_told_apart_from_errors(): void
+    {
+        // Кейс M07484: правка легла, но Директ отметил «Title2 не применён».
+        // Считать это провалом — значит не сохранить снимок и обновлять по кругу.
+        $result = ['UpdateResults' => [[
+            'Id' => 1,
+            'Errors' => [],
+            'Warnings' => [['Message' => 'Поле Title2 не применено']],
+        ]]];
+
+        $this->assertStringContainsString('Title2', Publisher::resultErrors($result));
+        $this->assertSame('', Publisher::resultErrors($result, false));
+    }
+
     public function test_no_errors_means_empty_string(): void
     {
         $this->assertSame('', Publisher::resultErrors(['AddResults' => [['Id' => 1], ['Id' => 2]]]));

@@ -393,10 +393,15 @@ class DirectPublisherService
             ]],
         ], $record->sku, $by);
 
-        $errors = trim(self::errorText($res).' '.self::resultErrors($res['result'] ?? null));
+        // Предупреждения — не отказ. «Комбинаторный баннер изменён через
+        // устаревший API» и «Title2 не применён» значат, что правка легла, но
+        // не полностью; считать это провалом — значит не сохранить снимок и
+        // гонять обновление по кругу.
+        $errors = trim(self::errorText($res).' '.self::resultErrors($res['result'] ?? null, false));
         if (! $res['ok'] || $errors !== '') {
             return ['ok' => false, 'message' => $record->sku.': '.($errors ?: 'обновление не прошло')];
         }
+        $warnings = self::resultErrors($res['result'] ?? null);
 
         $record->fill([
             'title' => $row['title'],
@@ -409,7 +414,11 @@ class DirectPublisherService
 
         $this->moderate([(int) $record->ad_id], $by);
 
-        return ['ok' => true, 'message' => $record->sku.': текст переписан, отправлено на проверку заново.'];
+        return [
+            'ok' => true,
+            'message' => $record->sku.': текст переписан, отправлено на проверку заново.'
+                .($warnings !== '' ? ' Директ отметил: '.$warnings : ''),
+        ];
     }
 
     /**
@@ -557,7 +566,7 @@ class DirectPublisherService
      * Ошибки отдельных объектов: Директ отвечает 200 и кладёт их в AddResults,
      * поэтому «ок» на уровне запроса ещё ничего не значит.
      */
-    public static function resultErrors(mixed $result): string
+    public static function resultErrors(mixed $result, bool $withWarnings = true): string
     {
         $out = [];
         // Ключ зависит от метода: AddResults, SuspendResults, ResumeResults…
@@ -566,7 +575,11 @@ class DirectPublisherService
                 continue;
             }
             foreach ($rows as $row) {
-                foreach (array_merge((array) ($row['Errors'] ?? []), (array) ($row['Warnings'] ?? [])) as $err) {
+                $problems = (array) ($row['Errors'] ?? []);
+                if ($withWarnings) {
+                    $problems = array_merge($problems, (array) ($row['Warnings'] ?? []));
+                }
+                foreach ($problems as $err) {
                     $out[] = trim(($err['Message'] ?? '').' '.($err['Details'] ?? ''));
                 }
             }
