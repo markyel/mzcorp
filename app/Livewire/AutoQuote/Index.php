@@ -48,7 +48,13 @@ class Index extends Component
         $compare = app(AutoQuoteComparisonService::class);
 
         $requests = Request::query()
-            ->with(['items.catalogItem:id,sku,name,price,is_price_actual,stock_available', 'assignedUser:id,name'])
+            // price_min обязателен: он пол цены в формуле, и без него скидка
+            // уводит КП ниже минимальной цены позиции (кейс M22546).
+            ->with([
+                'items.catalogItem:id,sku,name,price,price_min,is_price_actual,stock_available',
+                'organization:id,name,inn,discount_percent',
+                'assignedUser:id,name',
+            ])
             ->whereIn('id', $this->candidateIds())
             ->orderByDesc('created_at')
             ->get();

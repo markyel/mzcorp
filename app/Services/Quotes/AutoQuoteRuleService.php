@@ -4,6 +4,7 @@ namespace App\Services\Quotes;
 
 use App\Enums\MailDirection;
 use App\Enums\MatchPath;
+use App\Models\CatalogItem;
 use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Models\RequestItem;
@@ -147,11 +148,8 @@ class AutoQuoteRuleService
             $catalog = $item->catalogItem;
             $qty = (float) $item->parsed_qty;
             $catalogPrice = (float) ($catalog?->price ?? 0);
-            $price = $this->quotations->computeFinalUnitPrice(
-                $catalogPrice,
-                $catalog?->price_min !== null ? (float) $catalog->price_min : null,
-                $discountPercent,
-            );
+            $priceMin = self::priceMin($catalog);
+            $price = $this->quotations->computeFinalUnitPrice($catalogPrice, $priceMin, $discountPercent);
 
             $out[] = [
                 'request_item_id' => $item->id,
@@ -161,6 +159,7 @@ class AutoQuoteRuleService
                 'qty' => $qty,
                 'unit' => (string) ($item->parsed_unit ?: 'шт.'),
                 'catalog_price' => $catalogPrice,
+                'price_min' => $priceMin,
                 'discount_percent' => $discountPercent,
                 'unit_price' => $price,
                 'total' => round($price * max($qty, 0), 2),
@@ -170,6 +169,29 @@ class AutoQuoteRuleService
         }
 
         return $out;
+    }
+
+    /**
+     * Минимальная цена позиции — пол в формуле скидки.
+     *
+     * Если позицию загрузили выборочным списком колонок без `price_min`,
+     * свойство молча равно null, пол не срабатывает и КП уходит ниже
+     * минимальной цены (кейс M22546: 534,59 вместо 568,00). Деньги не должны
+     * зависеть от того, какие колонки перечислил вызывающий — дочитываем.
+     */
+    public static function priceMin(?CatalogItem $catalog): ?float
+    {
+        if ($catalog === null) {
+            return null;
+        }
+        if (! array_key_exists('price_min', $catalog->getAttributes())) {
+            $catalog->setAttribute(
+                'price_min',
+                CatalogItem::query()->whereKey($catalog->getKey())->value('price_min'),
+            );
+        }
+
+        return $catalog->price_min !== null ? (float) $catalog->price_min : null;
     }
 
     /**
