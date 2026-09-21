@@ -137,7 +137,9 @@ class AutoQuoteComparisonService
             );
 
             $line['catalog_price_then'] = $then['price'];
+            $line['price_min_then'] = $then['price_min'];
             $line['price_rewound'] = $then['changed'];
+            $line['rewound_to'] = $moment;
             if (! $then['changed']) {
                 continue;
             }

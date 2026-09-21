@@ -177,24 +177,44 @@
                             </table>
                         </div>
 
-                        {{-- Что просил клиент — чтобы видеть, с чего всё началось --}}
+                        {{-- Что просил клиент и как получилась цена.
+                             Берём СТРОКУ СРАВНЕНИЯ, а не сегодняшний расчёт:
+                             иначе пояснение спорит с таблицей над ним. --}}
+                        @php
+                            $explainRow = collect($c['rows'])->first(fn ($x) => $x['auto'] !== null);
+                            $l = $explainRow['auto'] ?? ($v['lines'][0] ?? []);
+                            $rewound = $l['price_rewound'] ?? false;
+                            $basePrice = $rewound ? $l['catalog_price_then'] : ($l['catalog_price'] ?? 0);
+                            $baseMin = $rewound ? ($l['price_min_then'] ?? null) : ($l['price_min'] ?? null);
+                        @endphp
                         <div class="text-[11.5px] text-fg-3">
-                            Клиент просил: <span class="mono text-fg-2">{{ $v['lines'][0]['asked'] ?? '—' }}</span>
-                            @if(($v['lines'][0]['pricing_mode'] ?? '') === 'cost_plus')
-                                <span class="text-fg-4">· спеццена: закупочная {{ $money($v['lines'][0]['purchase_price']) }} ₽
-                                    + {{ rtrim(rtrim(number_format($v['lines'][0]['markup_percent'], 2, ',', ' '), '0'), ',') }}%
-                                    = <b class="text-fg-2">{{ $money($v['lines'][0]['unit_price']) }} ₽</b>
-                                    <span class="text-fg-4">(каталог {{ $money($v['lines'][0]['catalog_price']) }} ₽ не применяется)</span></span>
-                            @elseif(($v['lines'][0]['discount_percent'] ?? 0) > 0)
-                                <span class="text-fg-4">· цена: каталог {{ $money($v['lines'][0]['catalog_price']) }} ₽
-                                    − {{ rtrim(rtrim(number_format($v['lines'][0]['discount_percent'], 2, ',', ' '), '0'), ',') }}%
-                                    @if(($v['lines'][0]['price_min'] ?? 0) > 0)
-                                        , но не ниже минимальной {{ $money($v['lines'][0]['price_min']) }} ₽
+                            Клиент просил: <span class="mono text-fg-2">{{ $l['asked'] ?? '—' }}</span>
+                            @if(($l['pricing_mode'] ?? '') === 'cost_plus')
+                                <span class="text-fg-4">· спеццена: закупочная {{ $money($l['purchase_price']) }} ₽
+                                    + {{ rtrim(rtrim(number_format($l['markup_percent'], 2, ',', ' '), '0'), ',') }}%
+                                    = <b class="text-fg-2">{{ $money($l['unit_price']) }} ₽</b>
+                                    <span class="text-fg-4">(каталог {{ $money($l['catalog_price']) }} ₽ не применяется;
+                                        закупочная сегодняшняя — истории по ней нет)</span></span>
+                            @elseif(($l['discount_percent'] ?? 0) > 0)
+                                <span class="text-fg-4">· цена
+                                    @if($rewound)
+                                        на {{ optional($l['rewound_to'])->format('d.m H:i') }}:
+                                    @else
+                                        :
                                     @endif
-                                    = <b class="text-fg-2">{{ $money($v['lines'][0]['unit_price']) }} ₽</b></span>
+                                    каталог {{ $money($basePrice) }} ₽
+                                    − {{ rtrim(rtrim(number_format($l['discount_percent'], 2, ',', ' '), '0'), ',') }}%
+                                    @if(($baseMin ?? 0) > 0)
+                                        , но не ниже минимальной {{ $money($baseMin) }} ₽
+                                    @endif
+                                    = <b class="text-fg-2">{{ $money($l['unit_price']) }} ₽</b>
+                                    @if($rewound)
+                                        <span class="text-fg-4">· сегодня эта позиция стоила бы {{ $money($l['price_today']) }} ₽</span>
+                                    @endif
+                                </span>
                             @endif
-                            @if(($v['lines'][0]['stock'] ?? 0) > 0)
-                                <span class="text-emerald-700">· на складе {{ $v['lines'][0]['stock'] }}</span>
+                            @if(($l['stock'] ?? 0) > 0)
+                                <span class="text-emerald-700">· на складе {{ $l['stock'] }}</span>
                             @endif
                         </div>
 
