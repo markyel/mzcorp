@@ -305,9 +305,22 @@ class AutoQuoteRuleService
             return null;
         }
 
-        return Organization::query()
+        $candidates = Organization::query()
             ->whereHas('contacts', fn ($q) => $q->whereRaw('lower(email) = ?', [$email]))
-            ->first();
+            ->get();
+
+        if ($candidates->isEmpty()) {
+            return null;
+        }
+
+        // Один адрес может быть заведён у нескольких организаций — это норма
+        // (снабженец обслуживает несколько юрлиц). Брать первую попавшуюся
+        // нельзя: у них может быть разная цена. Берём, только если все
+        // кандидаты согласны в цене, иначе клиент считается неопознанным.
+        $pricing = $candidates->map(fn (Organization $o) => $o->pricing_mode?->value
+            .'|'.number_format($this->discounts->discountFor($o), 2, '.', ''))->unique();
+
+        return $pricing->count() === 1 ? $candidates->first() : null;
     }
 
     /**
