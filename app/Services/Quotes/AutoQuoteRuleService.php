@@ -60,7 +60,7 @@ class AutoQuoteRuleService
             'matched',
             'Все позиции сматчены по M-артикулу',
             $items->count() > 0 && $items->every(fn ($i) => $i->catalog_item_id !== null
-                && $i->match_path === MatchPath::InternalSku->value),
+                && self::matchPath($i) === MatchPath::InternalSku),
             $this->matchPathsDetail($items),
         );
         $checks[] = $this->check(
@@ -242,6 +242,18 @@ class AutoQuoteRuleService
         return false;
     }
 
+    /**
+     * Путь матчинга позиции. Поле приходит то enum'ом (каст модели), то
+     * строкой (сырой запрос) — приводим к одному виду, чтобы сравнение не
+     * зависело от того, как позицию достали.
+     */
+    public static function matchPath(RequestItem $item): ?MatchPath
+    {
+        $raw = $item->match_path;
+
+        return $raw instanceof MatchPath ? $raw : MatchPath::tryFrom((string) $raw);
+    }
+
     /** Сравнение артикулов без регистра и разделителей: «XO-508» = «xo 508». */
     public static function normalize(?string $value): string
     {
@@ -261,7 +273,7 @@ class AutoQuoteRuleService
     /** @param  \Illuminate\Support\Collection<int, RequestItem>  $items */
     private function matchPathsDetail($items): string
     {
-        $paths = $items->map(fn ($i) => MatchPath::tryFrom((string) $i->match_path)?->label() ?? 'не сматчена')
+        $paths = $items->map(fn ($i) => self::matchPath($i)?->label() ?? 'не сматчена')
             ->unique()->values()->all();
 
         return $paths === [] ? 'позиций нет' : implode(', ', $paths);
