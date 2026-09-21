@@ -21,10 +21,19 @@ class AutoQuoteComparisonTest extends TestCase
         $this->assertSame('', Rule::normalize(null));
     }
 
+    public function test_nothing_sent_is_told_apart_from_not_recognised(): void
+    {
+        // Кейс M-2026-16283: КП клиенту ушло вложением, парсер его не разобрал.
+        // Подпись «клиенту ничего не ушло» была бы прямой неправдой.
+        $this->assertNotSame(Cmp::LABELS[Cmp::KIND_NONE], Cmp::LABELS[Cmp::KIND_UNPARSED]);
+        $this->assertStringContainsString('ничего не ушло', Cmp::LABELS[Cmp::KIND_NONE]);
+        $this->assertStringContainsString('не распознан', Cmp::LABELS[Cmp::KIND_UNPARSED]);
+    }
+
     public function test_labels_cover_every_kind(): void
     {
         // Подпись под чипом берётся по ключу — пропуск означает пустой чип.
-        foreach ([Cmp::KIND_NONE, Cmp::KIND_SAME, Cmp::KIND_PRICE, Cmp::KIND_NOMENCLATURE, Cmp::KIND_COMPOSITION] as $kind) {
+        foreach ([Cmp::KIND_NONE, Cmp::KIND_UNPARSED, Cmp::KIND_SAME, Cmp::KIND_PRICE, Cmp::KIND_NOMENCLATURE, Cmp::KIND_COMPOSITION] as $kind) {
             $this->assertArrayHasKey($kind, Cmp::LABELS);
             $this->assertNotSame('', Cmp::LABELS[$kind]);
         }

@@ -6,7 +6,7 @@
     $labels = \App\Services\Quotes\AutoQuoteComparisonService::LABELS;
     $kindStyle = fn ($k) => match ($k) {
         'same' => 'background:var(--emerald-50);color:var(--emerald-700)',
-        'price' => 'background:var(--amber-50);color:var(--amber-800)',
+        'price', 'unparsed' => 'background:var(--amber-50);color:var(--amber-800)',
         'nomenclature', 'composition' => 'background:var(--red-50);color:var(--red-700)',
         default => 'background:var(--neutral-100);color:var(--fg-3)',
     };
@@ -120,6 +120,13 @@
                                 <span>документ: <span class="text-fg-2">{{ $c['document']['label'] }}
                                     {{ $c['document']['number'] }}</span>
                                     @if($c['document']['date'])<span class="text-fg-4">от {{ $c['document']['date'] }}</span>@endif
+                                </span>
+                            @elseif($c['sent_hint'] ?? null)
+                                {{-- Письмо клиенту ушло, но документ не разобран: сравнивать не с чем,
+                                     и говорить «ничего не ушло» было бы неправдой. --}}
+                                <span class="text-amber-800">
+                                    документ не распознан: {{ $c['sent_hint']['file'] ?? 'вложения нет' }}
+                                    <span class="text-fg-4">· письмо от {{ $c['sent_hint']['date'] }}</span>
                                 </span>
                             @else
                                 <span class="text-amber-800">клиенту ничего не ушло</span>

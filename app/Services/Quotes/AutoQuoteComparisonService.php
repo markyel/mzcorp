@@ -3,6 +3,8 @@
 namespace App\Services\Quotes;
 
 use App\Enums\DetectorType;
+use App\Enums\MailDirection;
+use App\Models\EmailMessage;
 use App\Models\OutboundQuote;
 use App\Models\Quotation;
 use App\Models\Request;
@@ -38,6 +40,9 @@ class AutoQuoteComparisonService
 
     public const KIND_NONE = 'none';
 
+    /** Документ клиенту ушёл, но распознан не был — сравнивать не с чем. */
+    public const KIND_UNPARSED = 'unparsed';
+
     public const KIND_SAME = 'same';
 
     public const KIND_PRICE = 'price';
@@ -47,7 +52,8 @@ class AutoQuoteComparisonService
     public const KIND_COMPOSITION = 'composition';
 
     public const LABELS = [
-        self::KIND_NONE => 'документа нет',
+        self::KIND_NONE => 'клиенту ничего не ушло',
+        self::KIND_UNPARSED => 'документ не распознан',
         self::KIND_SAME => 'совпало',
         self::KIND_PRICE => 'другая цена',
         self::KIND_NOMENCLATURE => 'другая номенклатура',
@@ -64,10 +70,18 @@ class AutoQuoteComparisonService
     {
         $actual = $this->actualDocument($request);
         if ($actual === null) {
+            // «Нет распознанного документа» и «клиенту ничего не ушло» — разные
+            // вещи. Кейс M-2026-16283: КП «Предложение МЗ-367788.pdf» клиенту
+            // отправлено, но парсер его не разобрал; подпись «ничего не ушло»
+            // была прямой неправдой.
+            $sent = $this->unparsedOutbound($request);
+            $kind = $sent === null ? self::KIND_NONE : self::KIND_UNPARSED;
+
             return [
-                'kind' => self::KIND_NONE,
-                'label' => self::LABELS[self::KIND_NONE],
+                'kind' => $kind,
+                'label' => self::LABELS[$kind],
                 'document' => null,
+                'sent_hint' => $sent,
                 'rows' => array_map(fn ($l) => $this->row($l, null), $lines),
                 'total_auto' => (float) array_sum(array_column($lines, 'total')),
                 'total_actual' => null,
@@ -103,6 +117,41 @@ class AutoQuoteComparisonService
             // то же число, что и в таблице под ней.
             'total_auto' => (float) array_sum(array_column($lines, 'total')),
             'total_actual' => (float) $actual['total'],
+        ];
+    }
+
+    /**
+     * Ушло ли клиенту письмо с документом, которого мы не распознали.
+     *
+     * Отсекаем запросы поставщикам: они тоже исходящие и тоже с вложениями, но
+     * к клиенту отношения не имеют — их видно по токену RFQ в теме.
+     *
+     * @return array{date: string, subject: string, file: ?string}|null
+     */
+    public function unparsedOutbound(Request $request): ?array
+    {
+        $message = EmailMessage::query()
+            ->where('related_request_id', $request->id)
+            ->where('direction', MailDirection::Outbound->value)
+            ->where('is_draft', false)
+            ->where('subject', 'not ilike', '%[RFQ-%')
+            ->where('subject', 'not ilike', '%запрос расценки%')
+            ->with(['attachments:id,email_message_id,filename,mime_type'])
+            ->orderByDesc('id')
+            ->first(['id', 'subject', 'sent_at']);
+
+        if ($message === null) {
+            return null;
+        }
+
+        $file = $message->attachments
+            ->first(fn ($a) => str_contains((string) $a->mime_type, 'pdf')
+                || preg_match('/\.(pdf|xlsx?|docx?)$/i', (string) $a->filename));
+
+        return [
+            'date' => $message->sent_at?->format('d.m.Y H:i') ?? '',
+            'subject' => (string) $message->subject,
+            'file' => $file?->filename,
         ];
     }
 
