@@ -95,7 +95,7 @@ class DirectAdPlanServiceTest extends TestCase
             'part_type' => 'Поручень эскалатора и траволатора',
         ]));
 
-        $this->assertSame('Schindler · со склада', $title2);
+        $this->assertSame('Schindler, со склада', $title2);
         $this->assertLessThanOrEqual(Plan::TITLE2_MAX, mb_strlen($title2));
     }
 
@@ -153,6 +153,24 @@ class DirectAdPlanServiceTest extends TestCase
 
         $this->assertLessThanOrEqual(Plan::TEXT_MAX, mb_strlen($text));
         $this->assertStringContainsString('счёт в день обращения', $text);
+    }
+
+    public function test_characters_direct_refuses_are_stripped(): void
+    {
+        // Кейс M05236: «безопасность проема лифта ·» — из-за типографской
+        // точки Директ не создал объявление целиком.
+        $this->assertSame('безопасность проема лифта', Plan::tidyTail('безопасность проема лифта ·'));
+        $this->assertSame('OTIS со склада', Plan::tidyTail('OTIS · со склада'));
+        // Обычная пунктуация остаётся.
+        $this->assertSame('Арт. E10 18 (MEMCO)', Plan::tidyTail('Арт. E10 18 (MEMCO)'));
+    }
+
+    public function test_keyword_words_are_counted_the_way_direct_counts_them(): void
+    {
+        // Кейс M07441: по пробелам у нас выходило 4 слова, Директ насчитал 11
+        // и отбил фразу при создании.
+        $this->assertNull(Plan::normalizeKeyword('7,8-Г-В-Н-Р-Т-1770 ГОСТ 3077-80'));
+        $this->assertSame('601.6369.049 купить', Plan::normalizeKeyword('601.6369.049 купить'));
     }
 
     public function test_cut_head_is_closed_with_a_full_stop(): void

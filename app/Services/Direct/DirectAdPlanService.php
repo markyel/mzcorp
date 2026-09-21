@@ -187,12 +187,12 @@ class DirectAdPlanService
         $candidates = [];
         // Бренда нет в заголовке — он самый полезный второй заголовок.
         if ($brand !== '' && ! str_contains($title, mb_strtolower($brand))) {
-            $candidates[] = $brand.' · со склада';
+            $candidates[] = $brand.', со склада';
             $candidates[] = $brand;
         }
         // Иначе — узел: «Поручень эскалатора», «Ролик двери кабины».
         if ($unit !== '' && ! str_contains($title, mb_strtolower(mb_substr($unit, 0, 12)))) {
-            $candidates[] = $unit.' · в наличии';
+            $candidates[] = $unit.', в наличии';
             $candidates[] = $unit;
         }
         $candidates[] = 'Отгрузка со склада';
@@ -223,7 +223,7 @@ class DirectAdPlanService
         $head = preg_split('/[,(\/]| и | или /u', $raw)[0] ?? $raw;
         $head = trim($head, " \t.-–—");
 
-        // Режем по самому лимиту второго заголовка: суффикс «· в наличии»
+        // Режем по самому лимиту второго заголовка: суффикс «, в наличии»
         // подставляется только если после него текст всё ещё помещается,
         // иначе узел уходит один — целым словом, а не обрубком.
         return self::cutWords(Str::ucfirst($head), self::TITLE2_MAX);
@@ -301,7 +301,11 @@ class DirectAdPlanService
         if (mb_strlen($clean) < 3) {
             return null;
         }
-        if (count(explode(' ', $clean)) > self::KEYWORD_MAX_WORDS) {
+        // Слова Директ считает по любому разделителю, а не по пробелам: в
+        // «7,8-Г-В-Н-Р-Т-1770 ГОСТ 3077-80» он видит одиннадцать слов, мы
+        // видели четыре — и фраза отлетала уже при создании (кейс M07441).
+        $words = preg_split('/[^\p{L}\p{N}]+/u', $clean, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (count($words) > self::KEYWORD_MAX_WORDS) {
             return null;
         }
 
@@ -322,6 +326,23 @@ class DirectAdPlanService
     public static function squeeze(string $value): string
     {
         return trim(preg_replace('/\s+/u', ' ', $value) ?? '');
+    }
+
+    /**
+     * Выбросить символы, которых Директ в текстах не принимает.
+     *
+     * «В поле Title можно использовать только буквы латинского, турецкого,
+     * русского, украинского, белорусского или казахского алфавита, цифры и
+     * знаки пунктуации» — и типографская точка-разделитель «·» в этот список
+     * не входит, хотя формально пунктуация. Кейс M05236: «безопасность проема
+     * лифта ·» — объявление не создалось целиком.
+     */
+    public static function sanitize(string $value): string
+    {
+        // Латиница, кириллица, цифры, пробел и безопасная пунктуация.
+        $clean = preg_replace('/[^\p{Latin}\p{Cyrillic}0-9\s.,!?:;()\[\]«»"\'\-\/+%№=]/u', ' ', $value) ?? '';
+
+        return self::squeeze($clean);
     }
 
     /** Обрезать по границе слова, чтобы не оставлять половину артикула. */
@@ -357,7 +378,7 @@ class DirectAdPlanService
      */
     public static function tidyTail(string $value): string
     {
-        $value = trim($value);
+        $value = self::sanitize($value);
 
         // Отрезаем незакрытые скобки вместе с их содержимым.
         foreach ([['(', ')'], ['[', ']']] as [$open, $close]) {

@@ -133,7 +133,7 @@ class DirectAdTextServiceTest extends TestCase
 
         $this->assertNull(Texts::acceptField('Гребёнка в сборе', 'title2', $item, null, 'Гребёнка OTIS 506NCE'));
         $this->assertSame(
-            'OTIS · со склада',
+            'OTIS со склада',
             Texts::acceptField('OTIS · со склада', 'title2', $item, null, 'Гребёнка центральная 506NCE'),
         );
     }
@@ -157,7 +157,7 @@ class DirectAdTextServiceTest extends TestCase
     {
         $item = $this->item();
 
-        $this->assertSame('OTIS · со склада', Texts::acceptField('OTIS · со склада', 'title2', $item));
+        $this->assertSame('OTIS со склада', Texts::acceptField('OTIS · со склада', 'title2', $item));
         // Второй заголовок длиннее 30 — режется по словам, а не отбрасывается.
         $accepted = Texts::acceptField('OTIS со склада в наличии отгрузка в день обращения', 'title2', $item);
         $this->assertNotNull($accepted);

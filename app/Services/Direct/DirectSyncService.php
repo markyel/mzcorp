@@ -321,7 +321,9 @@ class DirectSyncService
         }
 
         $errors = DirectPublisherService::resultErrors($res['result']);
-        if ($errors !== '') {
+        // «Объявление не остановлено» на resume значит «оно и так идёт» —
+        // это не ошибка, а гонка нашего снимка с состоянием Директа.
+        if ($errors !== '' && ! preg_match('/не (остановлен|запущен)/iu', $errors)) {
             $report['errors'][] = $method.': '.$errors;
         }
     }
