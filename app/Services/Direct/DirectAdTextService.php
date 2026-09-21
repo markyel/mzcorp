@@ -91,10 +91,12 @@ class DirectAdTextService
             return null;
         }
 
+        // Порядок важен: второй заголовок проверяется против принятого первого.
         $accepted = [];
         $dropped = [];
         foreach (self::LIMITS as $field => $max) {
-            $value = self::acceptField((string) ($answer[$field] ?? ''), $field, $item, $tone);
+            $against = $field === 'title2' ? ($accepted['title'] ?? $rule['title']) : null;
+            $value = self::acceptField((string) ($answer[$field] ?? ''), $field, $item, $tone, $against);
             if ($value === null) {
                 $dropped[] = $field;
 
@@ -192,9 +194,19 @@ class DirectAdTextService
         return $line === null ? null : ['title' => $line];
     }
 
-    /** Поле, годное к публикации, или null — тогда останется вариант правила. */
-    public static function acceptField(string $raw, string $field, object $item, ?string $tone = null): ?string
-    {
+    /**
+     * Поле, годное к публикации, или null — тогда останется вариант правила.
+     *
+     * $against — уже принятый заголовок: второй заголовок пристраивается к
+     * нему в выдаче и повторять его слова не должен.
+     */
+    public static function acceptField(
+        string $raw,
+        string $field,
+        object $item,
+        ?string $tone = null,
+        ?string $against = null,
+    ): ?string {
         $value = self::cleanAnswer($raw, self::LIMITS[$field] ?? DirectAdPlanService::TITLE_MAX);
         if ($value === null) {
             return null;
@@ -205,8 +217,71 @@ class DirectAdTextService
         if (self::violatesRules($value, $field, $tone, $item)) {
             return null;
         }
+        if ($field === 'title2' && self::isTautology($value, $against)) {
+            return null;
+        }
 
         return $value;
+    }
+
+    /**
+     * Повтор внутри фразы или повтор первого заголовка. Кейс M00073: второй
+     * заголовок «Собранный контакт в сборе» — и тавтология, и слово «контакт»
+     * уже сказано в первом заголовке; тридцать символов потрачены впустую.
+     *
+     * Сравниваем согласный скелет слова: «собранный» → «сбрннй», «сборе» →
+     * «сбр». Русские чередования («сбор» / «собр») простое усечение основы не
+     * ловит, а скелет ловит.
+     */
+    public static function isTautology(string $value, ?string $against = null): bool
+    {
+        $own = self::skeletons($value);
+        foreach ($own as $i => $a) {
+            foreach (array_slice($own, $i + 1) as $b) {
+                if (self::sameRoot($a, $b)) {
+                    return true;
+                }
+            }
+        }
+
+        foreach (self::skeletons((string) $against) as $b) {
+            foreach ($own as $a) {
+                if (self::sameRoot($a, $b)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Согласные скелеты значимых русских слов фразы.
+     *
+     * @return array<int, string>
+     */
+    private static function skeletons(string $value): array
+    {
+        $out = [];
+        foreach (preg_split('/[^\p{Cyrillic}]+/u', mb_strtolower($value)) ?: [] as $word) {
+            if (mb_strlen($word) < 5) {
+                continue;
+            }
+            $skeleton = preg_replace('/[аеёиоуыэюяйъь]/u', '', $word) ?? '';
+            if (mb_strlen($skeleton) >= 3) {
+                $out[] = $skeleton;
+            }
+        }
+
+        return $out;
+    }
+
+    private static function sameRoot(string $a, string $b): bool
+    {
+        $short = mb_strlen($a) <= mb_strlen($b) ? $a : $b;
+        $long = $short === $a ? $b : $a;
+
+        return mb_strlen($short) >= 3 && str_starts_with($long, $short);
     }
 
     /** Ответ модели: одна строка без кавычек, точки-хвоста и лишних пояснений. */
@@ -343,9 +418,13 @@ class DirectAdTextService
            модерация требует это доказывать.
         5. Без КАПСА и без точки в конце заголовков.
         6. Заголовок — что это за деталь, с брендом и артикулом производителя, если они есть.
-           Второй заголовок — короткое дополнение, которого нет в первом.
-           Текст — выгода покупателю: есть на складе, счёт в день обращения, отгрузка сразу.
-        7. Не обрывай слова и не оставляй открытых скобок.
+        7. Второй заголовок показывается сразу после первого, через разделитель, поэтому он
+           обязан добавлять НОВОЕ. Пиши в нём одно из: бренд (если его нет в первом заголовке),
+           узел лифта или эскалатора, где деталь стоит, или срок отгрузки. Запрещено повторять
+           слова первого заголовка и повторять слово внутри самого второго заголовка:
+           «Собранный контакт в сборе» — так нельзя.
+        8. Текст — выгода покупателю: есть на складе, счёт в день обращения, отгрузка сразу.
+        9. Не обрывай слова и не оставляй открытых скобок. Лучше короче, чем обрубок.
 
         Ответ — только JSON вида {"title": "…", "title2": "…", "text": "…"}, без пояснений.
         TXT;

@@ -116,6 +116,28 @@ class DirectAdTextServiceTest extends TestCase
         $this->assertTrue(Texts::violatesRules('Есть на складе! Отгрузим сразу!', 'text', 'energetic'));
     }
 
+    public function test_tautology_in_the_second_headline_is_refused(): void
+    {
+        // Кейс M00073: «Собранный контакт в сборе» — и повтор внутри фразы,
+        // и слово «контакт» уже сказано в первом заголовке.
+        $this->assertTrue(Texts::isTautology('Собранный контакт в сборе'));
+        $this->assertTrue(Texts::isTautology('Контакт двери с активатором', 'Контакт двери Bernstein SEL2-A1Z P'));
+        // Дополнение, а не повтор — так и надо.
+        $this->assertFalse(Texts::isTautology('Bernstein · отгрузка сразу', 'Контакт двери Bernstein SEL2-A1Z P'));
+        $this->assertFalse(Texts::isTautology('Выключатель безопасности', 'Контакт двери Bernstein SEL2-A1Z P'));
+    }
+
+    public function test_second_headline_is_checked_against_the_headline(): void
+    {
+        $item = $this->item();
+
+        $this->assertNull(Texts::acceptField('Гребёнка в сборе', 'title2', $item, null, 'Гребёнка OTIS 506NCE'));
+        $this->assertSame(
+            'OTIS · со склада',
+            Texts::acceptField('OTIS · со склада', 'title2', $item, null, 'Гребёнка центральная 506NCE'),
+        );
+    }
+
     public function test_json_answer_is_decoded(): void
     {
         $raw = '```json'."\n".'{"title":"Гребёнка OTIS 506NCE","title2":"OTIS · со склада","text":"Есть на складе"}'."\n".'```';
