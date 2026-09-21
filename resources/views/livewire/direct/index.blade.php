@@ -351,6 +351,125 @@
         </div>
     </div>
 
+
+    {{-- Публикация в Директ --}}
+    @php
+        $campaign = $this->campaign;
+        $ads = $this->publishedAds;
+        $ops = $this->operations;
+        $readyToPublish = $plan->filter(fn ($p) => $p['in_rotation'] && $p['keywords'] !== [])->count();
+        $publishedSkus = $ads->pluck('sku')->all();
+        $left = $plan->filter(fn ($p) => $p['in_rotation'] && $p['keywords'] !== [] && ! in_array($p['sku'], $publishedSkus, true))->count();
+    @endphp
+    <div class="ds-card">
+        <div class="ds-card-header flex-wrap">
+            <h3 class="text-[15px] font-semibold text-fg-1">🚀 Публикация в Директ</h3>
+            @if($campaign)
+                <span class="chip text-[10.5px]" style="background:var(--emerald-50);color:var(--emerald-700)">
+                    <span class="dot"></span>кампания #{{ $campaign['id'] }}
+                </span>
+            @else
+                <span class="chip text-[10.5px]" style="background:var(--neutral-100);color:var(--fg-3)">кампании ещё нет</span>
+            @endif
+            <span class="flex-1"></span>
+            @if(! $campaign)
+                <button type="button" class="btn btn-sm btn-primary" wire:click="createCampaign"
+                        wire:loading.attr="disabled" wire:target="createCampaign">
+                    <span wire:loading.remove wire:target="createCampaign">Создать кампанию</span>
+                    <span wire:loading wire:target="createCampaign">Создаю…</span>
+                </button>
+            @elseif($left)
+                <button type="button" class="btn btn-sm btn-primary" wire:click="publishAds"
+                        wire:loading.attr="disabled" wire:target="publishAds"
+                        title="Создать группы, объявления-черновики и фразы. На модерацию ничего не уйдёт">
+                    <span wire:loading.remove wire:target="publishAds">Опубликовать ({{ min($left, \App\Livewire\Direct\Index::PUBLISH_BATCH) }})</span>
+                    <span wire:loading wire:target="publishAds">Публикую…</span>
+                </button>
+            @endif
+        </div>
+        <div class="ds-card-body space-y-2">
+            <div class="text-[11.5px] text-fg-4">
+                Кампания создаётся остановленной, объявления — черновиками: показов нет и денег не тратится,
+                пока вы сами не отправите их на модерацию и не запустите кампанию.
+                Регион: <span class="mono">{{ implode(', ', \App\Services\Direct\DirectPublisherService::regionIds()) }}</span>,
+                ставка фразы: <span class="mono">{{ \App\Services\Direct\DirectPublisherService::defaultBid() }} ₽</span>,
+                дневной бюджет: <span class="mono">{{ (float) config('services.yandex_direct.daily_budget') }} ₽</span>.
+            </div>
+
+            @if($publishLog)
+                <div class="rounded-md border border-border-subtle p-2 space-y-0.5">
+                    @foreach($publishLog as $line)
+                        <div class="text-[12px] text-fg-2">{{ $line }}</div>
+                    @endforeach
+                </div>
+            @endif
+
+            @if($ads->isNotEmpty())
+                <div class="overflow-x-auto">
+                    <table class="w-full text-[12.5px]" style="border-collapse:collapse">
+                        <thead>
+                            <tr class="text-fg-3 text-[11px] uppercase tracking-wide">
+                                <th class="text-left py-1.5 pr-2">Артикул</th>
+                                <th class="text-left py-1.5 pr-2">Заголовок</th>
+                                <th class="text-right py-1.5 pr-2">Группа</th>
+                                <th class="text-right py-1.5 pr-2">Объявление</th>
+                                <th class="text-right py-1.5 pr-2">Фраз</th>
+                                <th class="text-left py-1.5 pr-2">Состояние</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($ads as $ad)
+                                <tr wire:key="da-{{ $ad->id }}" class="border-t border-border-subtle">
+                                    <td class="py-1.5 pr-2 mono">{{ $ad->sku }}</td>
+                                    <td class="py-1.5 pr-2">{{ \Illuminate\Support\Str::limit($ad->title, 48) }}</td>
+                                    <td class="py-1.5 pr-2 text-right mono text-fg-4">{{ $ad->ad_group_id ?? '—' }}</td>
+                                    <td class="py-1.5 pr-2 text-right mono text-fg-4">{{ $ad->ad_id ?? '—' }}</td>
+                                    <td class="py-1.5 pr-2 text-right mono">{{ count($ad->keyword_ids ?? []) }}</td>
+                                    <td class="py-1.5 pr-2">
+                                        @if($ad->last_error)
+                                            <span class="text-amber-800">{{ \Illuminate\Support\Str::limit($ad->last_error, 60) }}</span>
+                                        @else
+                                            <span class="chip text-[10.5px]" style="background:var(--neutral-100);color:var(--fg-3)">
+                                                {{ $ad->state ?? 'черновик' }}
+                                            </span>
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @else
+                <div class="text-[13px] text-fg-3">
+                    Пока ничего не опубликовано. Готовых к публикации позиций в ротации:
+                    <b class="mono">{{ $readyToPublish }}</b> — у них есть тексты и фразы.
+                </div>
+            @endif
+
+            {{-- Журнал: что уходило в Директ и во что обошлось --}}
+            @if($ops->isNotEmpty())
+                <details class="pt-1">
+                    <summary class="text-[12px] text-fg-3 cursor-pointer">Журнал операций ({{ $ops->count() }})</summary>
+                    <div class="mt-1 space-y-0.5">
+                        @foreach($ops as $op)
+                            <div class="flex flex-wrap items-center gap-2 text-[11.5px] py-0.5 border-t border-border-subtle">
+                                <span class="mono text-fg-4">{{ $op->created_at?->format('d.m H:i:s') }}</span>
+                                <span class="mono {{ $op->ok ? 'text-fg-2' : 'text-amber-800' }}">{{ $op->title() }}</span>
+                                @if($op->error_message)
+                                    <span class="text-amber-800">{{ \Illuminate\Support\Str::limit($op->error_message, 70) }}</span>
+                                @endif
+                                <span class="flex-1"></span>
+                                @if($op->units_spent !== null)
+                                    <span class="text-fg-4">баллов: <span class="mono">{{ $op->units_spent }}</span></span>
+                                @endif
+                                <span class="text-fg-4">{{ $op->user?->name ?? 'система' }}</span>
+                            </div>
+                        @endforeach
+                    </div>
+                </details>
+            @endif
+        </div>
+    </div>
     {{-- Снятые с рекламы вручную --}}
     @php $excluded = $this->excluded; @endphp
     <div class="ds-card">

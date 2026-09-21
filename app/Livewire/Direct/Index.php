@@ -5,11 +5,14 @@ namespace App\Livewire\Direct;
 use App\Models\AppSetting;
 use App\Models\CatalogItem;
 use App\Models\DirectAdText;
+use App\Models\DirectOperation;
+use App\Models\DirectPublishedAd;
 use App\Services\Direct\DirectAdPlanService;
 use App\Services\Direct\DirectAdTextService;
 use App\Services\Direct\DirectAdTone;
 use App\Services\Direct\DirectApiClient;
 use App\Services\Direct\DirectCandidateService;
+use App\Services\Direct\DirectPublisherService;
 use App\Services\Settings\SettingsService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
@@ -46,6 +49,9 @@ class Index extends Component
     /** Сколько позиций пишем за одно нажатие — чтобы запрос не висел минутами. */
     public const BULK_LIMIT = 25;
 
+    /** Сколько объявлений создаём за нажатие: три вызова API на позицию. */
+    public const PUBLISH_BATCH = 10;
+
     public int $adsLimit = self::DEFAULT_ADS_LIMIT;
 
     public string $adTone = DirectAdTone::DEFAULT;
@@ -56,6 +62,9 @@ class Index extends Component
 
     /** Результат последней проверки связи: баллы и кампании аккаунта. */
     public ?array $check = null;
+
+    /** Построчный итог последней публикации. */
+    public array $publishLog = [];
 
     public function mount(SettingsService $settings): void
     {
@@ -278,6 +287,58 @@ class Index extends Component
         $saved = $texts->save($item, [$field => $value], DirectAdText::SOURCE_MANUAL, Auth::user(), null, $this->adTone);
         unset($this->plan);
         $this->notice = "{$sku}: сохранено — «{$saved->{$field}}».";
+    }
+
+    /** Создать кампанию-контейнер (остановленную) или подхватить готовую. */
+    public function createCampaign(DirectPublisherService $publisher): void
+    {
+        $this->ensureAdmin();
+        $res = $publisher->ensureCampaign(Auth::user());
+        unset($this->campaign, $this->publishedAds, $this->operations);
+
+        $res['ok'] ? $this->notice = $res['message'] : $this->error = $res['message'];
+    }
+
+    /**
+     * Создать структуру по позициям в ротации: группа, объявление-черновик,
+     * фразы. На модерацию ничего не уходит — это отдельный шаг.
+     */
+    public function publishAds(DirectPublisherService $publisher): void
+    {
+        $this->ensureAdmin();
+        $res = $publisher->publish($this->plan, Auth::user(), self::PUBLISH_BATCH);
+        unset($this->publishedAds, $this->operations);
+
+        $this->notice = "Опубликовано: {$res['published']}"
+            .($res['skipped'] ? ", пропущено: {$res['skipped']}" : '')
+            .($res['failed'] ? ", с ошибкой: {$res['failed']}" : '').'.';
+        $this->publishLog = array_slice($res['messages'], 0, 20);
+    }
+
+    /** Наша кампания глазами Директа: состояние, статус, число объявлений. */
+    #[Computed]
+    public function campaign(): ?array
+    {
+        $id = app(DirectPublisherService::class)->campaignId();
+        if ($id === null) {
+            return null;
+        }
+
+        return ['id' => $id, 'name' => DirectAdPlanService::campaignName()];
+    }
+
+    /** @return \Illuminate\Support\Collection<int, DirectPublishedAd> */
+    #[Computed]
+    public function publishedAds()
+    {
+        return DirectPublishedAd::query()->orderByDesc('id')->limit(50)->get();
+    }
+
+    /** @return \Illuminate\Support\Collection<int, DirectOperation> */
+    #[Computed]
+    public function operations()
+    {
+        return DirectOperation::query()->with('user:id,name')->orderByDesc('id')->limit(15)->get();
     }
 
     /** Вернуть тексты, собранные правилами. */

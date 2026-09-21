@@ -952,6 +952,16 @@ return [
         'title_model' => env('YANDEX_DIRECT_TITLE_MODEL', 'gpt-4o-mini'),
 
         /*
+         * Параметры создаваемой структуры. Кампания создаётся остановленной, а
+         * объявления — черновиками, поэтому бюджет и ставка здесь означают
+         * «во что это обойдётся, когда мы её запустим», а не текущий расход.
+         */
+        'region_ids' => env('YANDEX_DIRECT_REGION_IDS', '225'),   // 225 — Россия
+        'daily_budget' => (float) env('YANDEX_DIRECT_DAILY_BUDGET', 300),
+        'default_bid' => (float) env('YANDEX_DIRECT_DEFAULT_BID', 3),
+        'search_strategy' => env('YANDEX_DIRECT_SEARCH_STRATEGY', 'HIGHEST_POSITION'),
+
+        /*
          * YML-фид товарной кампании. В нём только позиции «остаток > 0 и цена
          * актуальна» — те, по которым клиент получит цену сразу. Адрес закрыт
          * токеном: фид раскрывает розничные цены, которых на сайте анонимному
