@@ -87,7 +87,9 @@ class DirectAdPlanService
         $sources = [];
         foreach (DirectAdText::FIELDS as $field) {
             $own = trim((string) ($stored?->{$field} ?? ''));
-            $fields[$field] = $own !== '' ? $own : $rule[$field];
+            // Сохранённое чистим на лету: тексты писались до того, как мы
+            // научились глушить капс, а лежат уже в базе (кейс M07484).
+            $fields[$field] = $own !== '' ? self::calmCaps(self::tidyTail($own), $item) : $rule[$field];
             $sources[$field] = $own !== '' ? ($stored?->source ?? DirectAdText::SOURCE_RULE) : DirectAdText::SOURCE_RULE;
         }
 
