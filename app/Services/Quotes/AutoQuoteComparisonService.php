@@ -6,6 +6,7 @@ use App\Enums\DetectorType;
 use App\Models\OutboundQuote;
 use App\Models\Quotation;
 use App\Models\Request;
+use App\Services\Quotations\QuotationService;
 
 /**
  * Сличение автоматического КП с тем, что по заявке реально ушло клиенту.
@@ -28,6 +29,10 @@ use App\Models\Request;
  */
 class AutoQuoteComparisonService
 {
+    public function __construct(
+        private readonly QuotationService $quotations,
+    ) {}
+
     /** Цены считаем разными, если расходятся больше чем на процент. */
     public const PRICE_TOLERANCE = 0.01;
 
@@ -68,6 +73,10 @@ class AutoQuoteComparisonService
             ];
         }
 
+        // Приводим автомат к дате документа: каталог с тех пор мог переоцениться,
+        // и тогда «другая цена» — это наша же переоценка, а не ошибка правила.
+        $lines = $this->rewind($lines, $actual['date_raw'] ?? null);
+
         $auto = collect($lines)->keyBy(fn ($l) => AutoQuoteRuleService::normalize($l['sku']));
         $fact = collect($actual['lines'])->keyBy(fn ($l) => AutoQuoteRuleService::normalize($l['sku']));
 
@@ -89,6 +98,59 @@ class AutoQuoteComparisonService
             'rows' => $rows,
             'total_actual' => (float) $actual['total'],
         ];
+    }
+
+    /**
+     * Пересчитать строки автомата на дату документа.
+     *
+     * Сравнение ретроспективное: менеджер выставлял КП по прайсу того дня, а у
+     * нас в каталоге уже новая цена. Без перемотки список показывает «другая
+     * цена» там, где на самом деле расхождения не было.
+     *
+     * Режим «себестоимость + наценка» перемотать нельзя — истории закупочных
+     * цен мы не ведём; такие строки честно помечаем.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     * @return array<int, array<string, mixed>>
+     */
+    public function rewind(array $lines, ?\DateTimeInterface $moment): array
+    {
+        if ($moment === null) {
+            return $lines;
+        }
+
+        foreach ($lines as &$line) {
+            $line['price_today'] = $line['unit_price'];
+
+            if (($line['pricing_mode'] ?? 'standard') === 'cost_plus') {
+                $line['price_rewound'] = false;
+                $line['no_history'] = true;
+
+                continue;
+            }
+
+            $then = AutoQuoteRuleService::priceAt(
+                (string) $line['sku'],
+                $moment,
+                (float) ($line['catalog_price'] ?? 0),
+                isset($line['price_min']) ? (float) $line['price_min'] : null,
+            );
+
+            $line['catalog_price_then'] = $then['price'];
+            $line['price_rewound'] = $then['changed'];
+            if (! $then['changed']) {
+                continue;
+            }
+
+            $line['unit_price'] = $this->quotations->computeFinalUnitPrice(
+                $then['price'],
+                $then['price_min'],
+                (float) ($line['discount_percent'] ?? 0),
+            );
+            $line['total'] = round($line['unit_price'] * max((float) $line['qty'], 0), 2);
+        }
+
+        return $lines;
     }
 
     /**
@@ -161,6 +223,7 @@ class AutoQuoteComparisonService
                 'label' => 'КП из системы',
                 'number' => (string) $quotation->internal_code,
                 'date' => $quotation->sent_at?->format('d.m.Y'),
+                'date_raw' => $quotation->sent_at,
                 'total' => (float) $quotation->total,
                 'lines' => $quotation->items->map(fn ($i) => [
                     'sku' => (string) $i->snapshot_sku,
@@ -198,6 +261,7 @@ class AutoQuoteComparisonService
             'label' => $type === DetectorType::OutboundInvoice->value ? 'счёт менеджера' : 'КП менеджера',
             'number' => (string) $outbound->document_number,
             'date' => $outbound->document_date?->format('d.m.Y'),
+            'date_raw' => $outbound->document_date ?: $outbound->created_at,
             'total' => (float) $outbound->total_amount,
             'lines' => $outbound->items->map(fn ($i) => [
                 'sku' => (string) ($i->catalogItem?->sku ?: $i->raw_article),

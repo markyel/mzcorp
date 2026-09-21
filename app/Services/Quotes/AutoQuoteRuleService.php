@@ -6,6 +6,7 @@ use App\Enums\MailDirection;
 use App\Enums\MatchPath;
 use App\Enums\OrganizationPricingMode;
 use App\Models\CatalogItem;
+use App\Models\CatalogPriceChange;
 use App\Models\EmailMessage;
 use App\Models\Organization;
 use App\Models\Request;
@@ -215,6 +216,44 @@ class AutoQuoteRuleService
         }
 
         return $catalog->price_min !== null ? (float) $catalog->price_min : null;
+    }
+
+    /**
+     * Цена позиции на дату — по истории изменений каталога.
+     *
+     * Сравнивать сегодняшнюю цену с КП недельной давности бессмысленно: между
+     * ними мог пройти импорт каталога, и «другая цена» окажется нашей же
+     * переоценкой, а не ошибкой правила. Берём первое изменение ПОСЛЕ даты
+     * документа — цена «до» него и действовала в тот момент.
+     *
+     * @return array{price: float, price_min: ?float, changed: bool}
+     */
+    public static function priceAt(string $sku, ?\DateTimeInterface $moment, float $currentPrice, ?float $currentMin): array
+    {
+        if ($moment === null) {
+            return ['price' => $currentPrice, 'price_min' => $currentMin, 'changed' => false];
+        }
+
+        $change = CatalogPriceChange::query()
+            ->where('sku', $sku)
+            ->where('changed_at', '>', $moment)
+            ->orderBy('changed_at')
+            ->first(['old_price', 'old_price_min']);
+
+        if ($change === null) {
+            return ['price' => $currentPrice, 'price_min' => $currentMin, 'changed' => false];
+        }
+
+        // В переходе может меняться только одно из двух полей — недостающее
+        // берём сегодняшнее, оно с тех пор и не менялось.
+        $price = $change->old_price !== null ? (float) $change->old_price : $currentPrice;
+        $min = $change->old_price_min !== null ? (float) $change->old_price_min : $currentMin;
+
+        return [
+            'price' => $price,
+            'price_min' => $min,
+            'changed' => abs($price - $currentPrice) > 0.005 || abs(($min ?? 0) - ($currentMin ?? 0)) > 0.005,
+        ];
     }
 
     /** Закупочная цена позиции — база режима «себестоимость + наценка». */

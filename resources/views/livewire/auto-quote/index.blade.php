@@ -129,7 +129,7 @@
                                         <th class="text-left py-1.5 pr-2">Артикул</th>
                                         <th class="text-left py-1.5 pr-2">Позиция</th>
                                         <th class="text-right py-1.5 pr-2">Авто: кол-во</th>
-                                        <th class="text-right py-1.5 pr-2">Авто: цена</th>
+                                        <th class="text-right py-1.5 pr-2" title="Цена автомата на дату документа: каталог с тех пор мог переоцениться">Авто: цена на дату</th>
                                         <th class="text-right py-1.5 pr-2">Факт: кол-во</th>
                                         <th class="text-right py-1.5 pr-2">Факт: цена</th>
                                         <th class="text-right py-1.5">Разница</th>
@@ -148,7 +148,14 @@
                                                 @endif
                                             </td>
                                             <td class="py-1.5 pr-2 text-right mono">{{ $line['auto'] ? rtrim(rtrim(number_format($line['auto']['qty'], 3, ',', ' '), '0'), ',') : '—' }}</td>
-                                            <td class="py-1.5 pr-2 text-right mono">{{ $line['auto'] ? $money($line['auto']['unit_price']) : '—' }}</td>
+                                            <td class="py-1.5 pr-2 text-right mono">
+                                                {{ $line['auto'] ? $money($line['auto']['unit_price']) : '—' }}
+                                                @if($line['auto']['price_rewound'] ?? false)
+                                                    <div class="text-[10.5px] text-fg-4">сегодня {{ $money($line['auto']['price_today']) }} ₽</div>
+                                                @elseif($line['auto']['no_history'] ?? false)
+                                                    <div class="text-[10.5px] text-fg-4">по сегодняшней закупочной</div>
+                                                @endif
+                                            </td>
                                             <td class="py-1.5 pr-2 text-right mono {{ $line['qty_differs'] ? 'text-amber-800 font-medium' : '' }}">
                                                 {{ $line['fact'] ? rtrim(rtrim(number_format($line['fact']['qty'], 3, ',', ' '), '0'), ',') : '—' }}
                                             </td>
