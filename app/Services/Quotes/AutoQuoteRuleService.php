@@ -54,7 +54,8 @@ class AutoQuoteRuleService
     public function verdict(Request $request): array
     {
         $items = $request->items->filter(fn (RequestItem $i) => (bool) $i->is_active)->values();
-        $lines = $this->lines($items, $this->discountFor($request), $request->organization);
+        $organization = $this->organizationFor($request);
+        $lines = $this->lines($items, $this->discounts->discountFor($organization), $organization);
         $total = array_sum(array_column($lines, 'total'));
 
         $checks = [];
@@ -107,6 +108,18 @@ class AutoQuoteRuleService
             'Клиент не новый',
             $this->clientIsKnown($request),
             'первому обращению отвечает человек',
+        );
+        $checks[] = $this->check(
+            'client_price_known',
+            'Клиент опознан — знаем его цену',
+            $organization !== null,
+            $organization !== null
+                ? $organization->name.' · '.(
+                    $organization->pricing_mode === OrganizationPricingMode::CostPlus
+                        ? 'себестоимость + наценка'
+                        : 'скидка '.rtrim(rtrim(number_format($this->discounts->discountFor($organization), 2, ',', ' '), '0'), ',').'%'
+                )
+                : 'организация не привязана — прайсовая цена клиенту не годится',
         );
         $checks[] = $this->check(
             'no_invoice_request',
@@ -273,6 +286,31 @@ class AutoQuoteRuleService
     }
 
     /**
+     * Организация клиента: привязка заявки, а если её нет — поиск по e-mail в
+     * контактах организаций.
+     *
+     * Привязка проставляется не всегда (кейс M-2026-16470: заявка без
+     * организации, хотя ООО «Ураллифтналадка» с её же адресом и скидкой 17% в
+     * системе есть). Без организации мы не знаем цену клиента, а прайсовая
+     * цена ему не годится — поэтому ищем, и если не нашли, автомат молчит.
+     */
+    public function organizationFor(Request $request): ?Organization
+    {
+        if ($request->organization !== null) {
+            return $request->organization;
+        }
+
+        $email = mb_strtolower(trim((string) $request->client_email));
+        if ($email === '') {
+            return null;
+        }
+
+        return Organization::query()
+            ->whereHas('contacts', fn ($q) => $q->whereRaw('lower(email) = ?', [$email]))
+            ->first();
+    }
+
+    /**
      * Скидка клиента: карточка организации, а если там пусто — выгрузка скидок
      * из корпоративной базы по ИНН. Та же скидка подставляется в ручное КП.
      *
@@ -281,7 +319,7 @@ class AutoQuoteRuleService
      */
     public function discountFor(Request $request): float
     {
-        return $this->discounts->discountFor($request->organization);
+        return $this->discounts->discountFor($this->organizationFor($request));
     }
 
     /**
