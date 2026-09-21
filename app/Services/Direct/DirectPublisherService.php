@@ -372,6 +372,50 @@ class DirectPublisherService
     }
 
     /**
+     * Убрать объявление из кабинета: позицию сняли с рекламы, и висеть в
+     * рабочем списке ей незачем.
+     *
+     * Прошедшее модерацию архивируем — статистика показов и кликов остаётся,
+     * а из «всех, кроме архивных» объявление уходит. Черновик и отклонённое
+     * архивировать нельзя и не за чем: удаляем вместе с группой, потому что
+     * группа без объявления — мусор, который потом не опознать.
+     *
+     * @return array{ok: bool, message: string}
+     */
+    public function retire(DirectPublishedAd $record, ?User $by = null): array
+    {
+        $sku = (string) $record->sku;
+
+        if ((string) $record->status === 'ACCEPTED') {
+            // Архивировать можно только остановленное.
+            if ($record->state !== 'SUSPENDED') {
+                $this->call('ads', 'suspend', ['SelectionCriteria' => ['Ids' => [(int) $record->ad_id]]], $sku, $by);
+            }
+            $res = $this->call('ads', 'archive', ['SelectionCriteria' => ['Ids' => [(int) $record->ad_id]]], $sku, $by);
+            $errors = trim(self::errorText($res).' '.self::resultErrors($res['result'] ?? null, false));
+            if ($errors !== '') {
+                return ['ok' => false, 'message' => $sku.': не архивируется — '.$errors];
+            }
+
+            $record->update(['state' => 'ARCHIVED', 'synced_at' => now()]);
+
+            return ['ok' => true, 'message' => $sku.': объявление в архиве.'];
+        }
+
+        $res = $this->call('adgroups', 'delete', [
+            'SelectionCriteria' => ['Ids' => [(int) $record->ad_group_id]],
+        ], $sku, $by);
+        $errors = trim(self::errorText($res).' '.self::resultErrors($res['result'] ?? null, false));
+        if ($errors !== '') {
+            return ['ok' => false, 'message' => $sku.': не удаляется — '.$errors];
+        }
+
+        $record->delete();
+
+        return ['ok' => true, 'message' => $sku.': группа и объявление удалены.'];
+    }
+
+    /**
      * Переписать тексты уже созданного объявления и отправить его на проверку
      * заново. Нужно после отказа модерации: причину мы устранили в правилах,
      * но в Директе лежит прежний текст, и сам он не обновится.

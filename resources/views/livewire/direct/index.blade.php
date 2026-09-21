@@ -601,6 +601,9 @@
                     @if($syncReport['moderated'])
                         <div class="text-[12px] text-fg-2">→ на модерацию: <span class="mono">{{ implode(', ', $syncReport['moderated']) }}</span></div>
                     @endif
+                    @if($syncReport['retired'] ?? [])
+                        <div class="text-[12px] text-fg-2">✕ убрать из кабинета: <span class="mono">{{ implode(', ', $syncReport['retired']) }}</span></div>
+                    @endif
                     @if($syncReport['fixed'] ?? [])
                         <div class="text-[12px] text-fg-2">↻ переписать после отказа: <span class="mono">{{ implode(', ', $syncReport['fixed']) }}</span></div>
                     @endif

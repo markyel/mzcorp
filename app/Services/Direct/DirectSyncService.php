@@ -89,7 +89,7 @@ class DirectSyncService
     /**
      * Прогон. $apply=null — брать режим из настроек.
      *
-     * @return array{applied: bool, checked: int, states: int, suspend: array<int, string>, resume: array<int, string>, texts: array<int, string>, published: array<int, string>, moderated: array<int, string>, fixed: array<int, string>, attention: array<int, string>, errors: array<int, string>}
+     * @return array{applied: bool, checked: int, states: int, suspend: array<int, string>, resume: array<int, string>, texts: array<int, string>, published: array<int, string>, moderated: array<int, string>, fixed: array<int, string>, retired: array<int, string>, attention: array<int, string>, errors: array<int, string>}
      */
     public function run(?bool $apply = null, ?User $by = null): array
     {
@@ -97,7 +97,7 @@ class DirectSyncService
         $report = [
             'applied' => $apply, 'checked' => 0, 'states' => 0,
             'suspend' => [], 'resume' => [], 'texts' => [], 'published' => [],
-            'moderated' => [], 'fixed' => [], 'attention' => [], 'errors' => [],
+            'moderated' => [], 'fixed' => [], 'retired' => [], 'attention' => [], 'errors' => [],
         ];
 
         $campaignId = $this->publisher->campaignId();
@@ -117,8 +117,15 @@ class DirectSyncService
         $queue = $this->candidates->queue($bench)->take($bench);
         $queueSkus = $queue->pluck('sku')->map(fn ($s) => (string) $s)->all();
 
-        $published = DirectPublishedAd::query()->whereNotNull('ad_id')->get();
+        $published = DirectPublishedAd::query()->whereNotNull('ad_id')->where('state', '!=', 'ARCHIVED')->get();
         $report['checked'] = $published->count();
+
+        // Позицию сняли с рекламы вручную — объявление убираем из кабинета, а
+        // не просто гасим: «не рекламировать» должно доводиться до конца.
+        $excludedIds = DirectCandidateService::excludedItemIds();
+        $retire = $published->filter(fn ($ad) => in_array((int) $ad->catalog_item_id, $excludedIds, true));
+        $report['retired'] = $retire->pluck('sku')->values()->all();
+        $published = $published->reject(fn ($ad) => $retire->contains('sku', $ad->sku));
 
         // 1. Показ: гасим лишнее, зажигаем готовое.
         [$suspend, $resume] = $this->decide($queueSkus, $published, $states, $this->adsLimit());
@@ -189,6 +196,13 @@ class DirectSyncService
                 fn ($m) => str_contains($m, ':') && ! str_contains($m, 'группа #'),
             ));
         }
+        foreach ($retire as $ad) {
+            $res = $this->publisher->retire($ad, $by);
+            if (! $res['ok']) {
+                $report['errors'][] = $res['message'];
+            }
+        }
+
         foreach ($fixable as $ad) {
             $res = $this->publisher->updateAd($ad, $planBySku[$ad->sku], $by);
             if (! $res['ok']) {
