@@ -433,6 +433,12 @@ Route::middleware('auth')->group(function () {
             [MarketingReportController::class, 'download'])
             ->whereNumber('report')
             ->name('marketing.report.download');
+
+        // Раздел «Директ» — реклама складских позиций через API: сколько
+        // объявлений держим, очередь позиций, связь с API. Только админ.
+        Route::get('/dashboard/direct', function () {
+            return view('direct.index');
+        })->name('direct.index');
     });
 
     // Документация — рукописные гайды по ролям (resources/docs/{section}/*.md).
