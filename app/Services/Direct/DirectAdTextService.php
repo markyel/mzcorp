@@ -112,7 +112,17 @@ class DirectAdTextService
             return null;
         }
 
-        return $this->save($catalogItem, $accepted, DirectAdText::SOURCE_AI, $by, $model, $tone);
+        // Пакетная генерация идёт по десяткам позиций: сбой на одной не должен
+        // ронять весь проход — пропускаем её и идём дальше.
+        try {
+            return $this->save($catalogItem, $accepted, DirectAdText::SOURCE_AI, $by, $model, $tone);
+        } catch (\Throwable $e) {
+            Log::error('Direct: объявление не сохранено', [
+                'sku' => $item->sku, 'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     /**
