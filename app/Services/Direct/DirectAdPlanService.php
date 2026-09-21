@@ -127,6 +127,10 @@ class DirectAdPlanService
             'warnings' => $warnings,
             'price' => (float) ($item->price ?? 0),
             'stock' => (int) ($item->stock_available ?? 0),
+            // Деньги и спрос — то, по чему позиция попала в очередь.
+            'reqs' => (int) ($item->reqs ?? 0),
+            'paid' => (float) ($item->paid ?? 0),
+            'codes' => self::codes($item),
         ];
     }
 

@@ -1,7 +1,6 @@
 @php
     $inp = 'h-[30px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500';
     $money = fn ($v) => number_format((float) $v, 0, ',', ' ');
-    $queue = $this->queue;
 @endphp
 
 <div class="space-y-4">
@@ -140,86 +139,18 @@
         </div>
     </div>
 
-    {{-- Очередь позиций --}}
-    <div class="ds-card">
-        <div class="ds-card-header flex-wrap">
-            <h3 class="text-[15px] font-semibold text-fg-1">📋 Очередь позиций</h3>
-            <span class="text-[12px] text-fg-3">по деньгам за 12 месяцев</span>
-            <span class="flex-1"></span>
-            <button type="button" class="btn btn-sm" wire:click="refreshQueue">↻ Пересобрать</button>
-        </div>
-        <div class="ds-card-body">
-            @if($queue->isEmpty())
-                <div class="text-[13px] text-fg-3">Пусто: нет позиций с остатком и актуальной ценой.</div>
-            @else
-                <div class="overflow-x-auto">
-                    <table class="w-full text-[12.5px]" style="border-collapse:collapse">
-                        <thead>
-                            <tr class="text-fg-3 text-[11px] uppercase tracking-wide">
-                                <th class="text-left py-1.5 pr-2">#</th>
-                                <th class="text-left py-1.5 pr-2">Артикул</th>
-                                <th class="text-left py-1.5 pr-2">Позиция</th>
-                                <th class="text-right py-1.5 pr-2">Цена</th>
-                                <th class="text-right py-1.5 pr-2">Остаток</th>
-                                <th class="text-right py-1.5 pr-2">Заявок</th>
-                                <th class="text-right py-1.5 pr-2">Оплачено</th>
-                                <th class="text-left py-1.5 pr-2">Коды</th>
-                                <th class="py-1.5"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach($queue as $i => $row)
-                                @php
-                                    $inWork = $i < $adsLimit;
-                                    $codes = \App\Services\Catalog\YandexDirectFeedService::codes($row);
-                                @endphp
-                                <tr wire:key="dq-{{ $row->sku }}" class="border-t border-border-subtle {{ $inWork ? '' : 'opacity-55' }}">
-                                    <td class="py-1.5 pr-2 mono text-fg-4">{{ $i + 1 }}</td>
-                                    <td class="py-1.5 pr-2 mono {{ $inWork ? 'text-fg-1' : 'text-fg-3' }}">{{ $row->sku }}</td>
-                                    <td class="py-1.5 pr-2">
-                                        <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($row->name, 54) }}</div>
-                                        @if($row->brand)<div class="text-[11px] text-fg-4">{{ $row->brand }}</div>@endif
-                                    </td>
-                                    <td class="py-1.5 pr-2 text-right mono">{{ $money($row->price) }} ₽</td>
-                                    <td class="py-1.5 pr-2 text-right mono">{{ (int) $row->stock_available }}</td>
-                                    <td class="py-1.5 pr-2 text-right mono">{{ (int) $row->reqs }}</td>
-                                    <td class="py-1.5 pr-2 text-right mono">{{ $money($row->paid) }} ₽</td>
-                                    <td class="py-1.5 pr-2 text-[11.5px] text-fg-3">
-                                        {{ $codes ? \Illuminate\Support\Str::limit(implode(', ', $codes), 30) : '—' }}
-                                    </td>
-                                    <td class="py-1.5 text-right">
-                                        {{-- Причину спрашиваем сразу: через месяц «почему эта позиция снята»
-                                             по одному артикулу уже не восстановить. --}}
-                                        <button type="button" class="btn btn-sm"
-                                                x-data
-                                                @click="$wire.excludeItem('{{ $row->sku }}', window.prompt('Почему убираем {{ $row->sku }} из рекламы? (можно пусто)', '') ?? '')"
-                                                title="Убрать позицию из рекламы — и из очереди, и из фида">✕ Не рекламировать</button>
-                                    </td>
-                                </tr>
-                                @if($inWork && $i + 1 === $adsLimit)
-                                    <tr wire:key="dq-line">
-                                        <td colspan="9" class="py-1">
-                                            <div class="flex items-center gap-2 text-[11px] text-fg-4">
-                                                <span class="flex-1" style="height:1px;background:var(--border-strong)"></span>
-                                                <span>граница: выше — в работе, ниже — в очереди</span>
-                                                <span class="flex-1" style="height:1px;background:var(--border-strong)"></span>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                @endif
-                            @endforeach
-                        </tbody>
-                    </table>
-                </div>
-            @endif
-        </div>
-    </div>
-
-    {{-- План объявлений --}}
+    {{-- Позиции: очередь, тексты и публикация одним списком --}}
     @php
         $plan = $this->plan;
+        $ads = $this->publishedAds->keyBy('sku');
+        $campaign = $this->campaign;
+        $ops = $this->operations;
+
         $warned = $plan->filter(fn ($p) => $p['warnings'] !== [])->count();
         $pending = $plan->filter(fn ($p) => $p['source'] === 'rule')->count();
+        $left = $plan->filter(fn ($p) => $p['keywords'] !== [] && ! ($ads[$p['sku']] ?? null)?->isComplete())->count();
+        $drafts = $ads->filter(fn ($a) => $a->isDraft())->count();
+
         $fields = [
             'title' => ['Заголовок', \App\Services\Direct\DirectAdPlanService::TITLE_MAX],
             'title2' => ['Второй заголовок', \App\Services\Direct\DirectAdPlanService::TITLE2_MAX],
@@ -228,59 +159,136 @@
         $srcStyle = fn ($s) => $s === 'manual'
             ? 'background:var(--emerald-50);color:var(--emerald-700)'
             : ($s === 'ai' ? 'background:var(--sky-50);color:var(--sky-700)' : 'background:var(--neutral-100);color:var(--fg-3)');
+
+        // Одна строка — одно состояние позиции, от «в очереди» до «идут показы».
+        $stage = function ($p) use ($ads) {
+            $ad = $ads[$p['sku']] ?? null;
+            if ($ad === null || $ad->ad_id === null) {
+                return $p['keywords'] === []
+                    ? ['нечем рекламировать', 'background:var(--red-50);color:var(--red-700)']
+                    : ['не опубликована', 'background:var(--neutral-100);color:var(--fg-3)'];
+            }
+
+            return match (true) {
+                $ad->state === 'ARCHIVED' => ['в архиве', 'background:var(--neutral-100);color:var(--fg-3)'],
+                $ad->isRejected() => ['отклонено', 'background:var(--red-50);color:var(--red-700)'],
+                $ad->status === 'DRAFT' => ['черновик', 'background:var(--neutral-100);color:var(--fg-3)'],
+                $ad->status === 'MODERATION' => ['на модерации', 'background:var(--amber-50);color:var(--amber-800)'],
+                $ad->state === 'ON' => ['идут показы', 'background:var(--emerald-50);color:var(--emerald-700)'],
+                $ad->state === 'SUSPENDED' => ['в резерве', 'background:var(--sky-50);color:var(--sky-700)'],
+                default => ['готово, ждёт кампании', 'background:var(--sky-50);color:var(--sky-700)'],
+            };
+        };
     @endphp
+
     <div class="ds-card">
         <div class="ds-card-header flex-wrap">
-            <h3 class="text-[15px] font-semibold text-fg-1">📝 Объявления</h3>
-            <span class="text-[12px] text-fg-3">пишем заранее на всю очередь · в Директ пока ничего не создано</span>
+            <h3 class="text-[15px] font-semibold text-fg-1">📋 Позиции</h3>
+            <span class="text-[12px] text-fg-3">
+                первые <b class="mono">{{ $adsLimit }}</b> в показе, готовим <b class="mono">{{ $benchSize }}</b>
+            </span>
+            @if($campaign)
+                <span class="chip text-[10.5px]" style="background:var(--emerald-50);color:var(--emerald-700)">
+                    <span class="dot"></span>кампания #{{ $campaign['id'] }}
+                </span>
+            @else
+                <span class="chip text-[10.5px]" style="background:var(--neutral-100);color:var(--fg-3)">кампании ещё нет</span>
+            @endif
             @if($warned)
                 <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)">
                     <span class="dot"></span>замечаний: {{ $warned }}
                 </span>
             @endif
             <span class="flex-1"></span>
-            <span class="text-[12px] text-fg-3">кампания: <span class="mono text-fg-2">{{ \App\Services\Direct\DirectAdPlanService::campaignName() }}</span></span>
+
+            <button type="button" class="btn btn-sm" wire:click="refreshQueue" title="Пересобрать очередь по свежим остаткам">↻ Очередь</button>
+            @if($campaign)
+                <button type="button" class="btn btn-sm" wire:click="refreshStates"
+                        wire:loading.attr="disabled" wire:target="refreshStates" title="Спросить у Директа статусы">
+                    <span wire:loading.remove wire:target="refreshStates">↻ Статусы</span>
+                    <span wire:loading wire:target="refreshStates">Спрашиваю…</span>
+                </button>
+            @endif
             @if($pending)
                 <button type="button" class="btn btn-sm" wire:click="generateMissing"
                         wire:loading.attr="disabled" wire:target="generateMissing"
-                        title="Написать тексты всем позициям, где их ещё нет — включая те, что ждут за порогом">
-                    <span wire:loading.remove wire:target="generateMissing">✨ Написать недостающие ({{ $pending }})</span>
+                        title="Написать тексты всем позициям, где их ещё нет">
+                    <span wire:loading.remove wire:target="generateMissing">✨ Тексты ({{ $pending }})</span>
                     <span wire:loading wire:target="generateMissing">Пишу…</span>
                 </button>
             @endif
+            @if(! $campaign)
+                <button type="button" class="btn btn-sm btn-primary" wire:click="createCampaign"
+                        wire:loading.attr="disabled" wire:target="createCampaign">
+                    <span wire:loading.remove wire:target="createCampaign">Создать кампанию</span>
+                    <span wire:loading wire:target="createCampaign">Создаю…</span>
+                </button>
+            @elseif($left)
+                <button type="button" class="btn btn-sm btn-primary" wire:click="publishAds"
+                        wire:loading.attr="disabled" wire:target="publishAds"
+                        title="Создать группы, объявления-черновики и фразы. На модерацию ничего не уйдёт">
+                    <span wire:loading.remove wire:target="publishAds">Опубликовать ({{ min($left, \App\Livewire\Direct\Index::PUBLISH_BATCH) }})</span>
+                    <span wire:loading wire:target="publishAds">Публикую…</span>
+                </button>
+            @endif
+            @if($drafts)
+                <button type="button" class="btn btn-sm btn-primary" wire:click="moderateAds"
+                        wire:loading.attr="disabled" wire:target="moderateAds"
+                        title="После отправки каждая правка текста запускает проверку заново">
+                    <span wire:loading.remove wire:target="moderateAds">На модерацию ({{ $drafts }})</span>
+                    <span wire:loading wire:target="moderateAds">Отправляю…</span>
+                </button>
+            @endif
         </div>
-        <div class="ds-card-body space-y-2">
-            <div class="text-[11.5px] text-fg-4">
-                Тексты готовятся до публикации: у работающего объявления любая правка — повторная
-                модерация, поэтому очередь «на подходе» пишем и вычитываем заранее.
+
+        <div class="ds-card-body space-y-1.5">
+            @if($publishLog)
+                <div class="rounded-md border border-border-subtle p-2 space-y-0.5">
+                    @foreach($publishLog as $line)
+                        <div class="text-[12px] text-fg-2">{{ $line }}</div>
+                    @endforeach
+                </div>
+            @endif
+
+            {{-- Шапка списка: те же колонки, что и в строках --}}
+            <div class="hidden md:flex items-center gap-2 px-3 text-fg-3 text-[10.5px] uppercase tracking-wide">
+                <span class="w-[14px]"></span>
+                <span class="w-[62px]">Артикул</span>
+                <span class="flex-1">Заголовок объявления</span>
+                <span class="w-[130px] text-right">Состояние</span>
+                <span class="w-[54px] text-right">Фраз</span>
+                <span class="w-[64px] text-right">Остаток</span>
+                <span class="w-[60px] text-right">Заявок</span>
+                <span class="w-[92px] text-right">Оплачено</span>
             </div>
 
             @forelse($plan as $p)
+                @php [$stageLabel, $stageStyle] = $stage($p); $ad = $ads[$p['sku']] ?? null; @endphp
+
                 @if(! $p['in_rotation'] && ($plan[$loop->index - 1]['in_rotation'] ?? false))
                     <div class="flex items-center gap-2 text-[11px] text-fg-4 py-1" wire:key="dp-line">
                         <span class="flex-1" style="height:1px;background:var(--border-strong)"></span>
-                        <span>ниже — резерв: в ротацию не уйдут, но тексты готовим заранее</span>
+                        <span>ниже — резерв: тексты и модерация заранее, в показ не уходят</span>
                         <span class="flex-1" style="height:1px;background:var(--border-strong)"></span>
                     </div>
                 @endif
 
-                <div wire:key="dp-{{ $p['sku'] }}" class="border border-border rounded-md {{ $p['in_rotation'] ? '' : 'opacity-70' }}"
+                <div wire:key="dp-{{ $p['sku'] }}" class="border border-border rounded-md {{ $p['in_rotation'] ? '' : 'opacity-75' }}"
                      x-data="{ open: false }">
-                    <button type="button" class="w-full flex flex-wrap items-center gap-2 px-3 py-2 text-left" @click="open = ! open">
-                        <span class="text-fg-4 text-[11px]" x-text="open ? '▾' : '▸'"></span>
-                        <span class="mono text-[12px] text-fg-4">{{ $p['sku'] }}</span>
-                        <span class="text-[13px] text-fg-1">{{ $p['title'] }}</span>
-                        <span class="chip text-[10.5px]" style="{{ $srcStyle($p['source']) }}">
-                            {{ \App\Models\DirectAdText::SOURCES[$p['source']] ?? $p['source'] }}
-                        </span>
-                        <span class="flex-1"></span>
-                        @unless($p['in_rotation'])
-                            <span class="text-[11px] text-fg-4">резерв</span>
-                        @endunless
-                        <span class="text-[11.5px] text-fg-3">фраз: <span class="mono">{{ count($p['keywords']) }}</span></span>
+                    <button type="button" class="w-full flex items-center gap-2 px-3 py-2 text-left" @click="open = ! open">
+                        <span class="text-fg-4 text-[11px] w-[14px]" x-text="open ? '▾' : '▸'"></span>
+                        <span class="mono text-[12px] text-fg-4 w-[62px]">{{ $p['sku'] }}</span>
+                        <span class="flex-1 text-[13px] text-fg-1 truncate">{{ $p['title'] }}</span>
                         @if($p['warnings'])
                             <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)">⚠</span>
                         @endif
+                        <span class="w-[130px] text-right">
+                            <span class="chip text-[10.5px]" style="{{ $stageStyle }}">{{ $stageLabel }}</span>
+                        </span>
+                        <span class="w-[54px] text-right mono text-[12px] text-fg-3">{{ count($p['keywords']) }}</span>
+                        <span class="w-[64px] text-right mono text-[12px] text-fg-3">{{ $p['stock'] }}</span>
+                        <span class="w-[60px] text-right mono text-[12px] text-fg-3">{{ $p['reqs'] }}</span>
+                        <span class="w-[92px] text-right mono text-[12px] text-fg-3">{{ $money($p['paid']) }} ₽</span>
                     </button>
 
                     <div x-show="open" x-cloak class="px-3 pb-3 pt-1 border-t border-border-subtle space-y-2 text-[12.5px]">
@@ -294,9 +302,15 @@
                                 <button type="button" class="btn btn-sm" wire:click="resetAd('{{ $p['sku'] }}')"
                                         title="Вернуть тексты, собранные правилами">↩ По правилам</button>
                             @endif
+                            @if($ad?->isDraft())
+                                <button type="button" class="btn btn-sm" wire:click="moderateAds('{{ $p['sku'] }}')"
+                                        title="Отправить только это объявление">→ на модерацию</button>
+                            @endif
+                            <button type="button" class="btn btn-sm" x-data
+                                    @click="$wire.excludeItem('{{ $p['sku'] }}', window.prompt('Почему убираем {{ $p['sku'] }} из рекламы? (можно пусто)', '') ?? '')"
+                                    title="Снять позицию с рекламы: уйдёт из очереди, из фида и из кабинета">✕ Не рекламировать</button>
                         </div>
 
-                        {{-- Поля объявления: правятся по месту, правка сильнее модели. --}}
                         @foreach($fields as $f => [$label, $max])
                             <div wire:key="dp-{{ $p['sku'] }}-{{ $f }}" class="flex flex-wrap items-start gap-2"
                                  x-data="{ edit: false, draft: @js($p[$f]) }">
@@ -322,15 +336,11 @@
                                     <button type="button" class="btn btn-sm" @click="edit = false; draft = @js($p[$f])">Отмена</button>
                                 </span>
                                 @if($p['sources'][$f] !== 'rule' && $p['rule'][$f] !== $p[$f])
-                                    <span class="basis-full text-[11px] text-fg-4 pl-[138px]">
-                                        по правилу: {{ $p['rule'][$f] }}
-                                    </span>
+                                    <span class="basis-full text-[11px] text-fg-4 pl-[138px]">по правилу: {{ $p['rule'][$f] }}</span>
                                 @endif
                             </div>
                         @endforeach
 
-                        <div><span class="text-fg-3 w-[130px] inline-block align-top">Ссылка</span>
-                            <a href="{{ $p['url'] }}" target="_blank" rel="noopener" class="text-sky-700 hover:underline break-all">{{ \Illuminate\Support\Str::limit($p['url'], 110) }}</a></div>
                         <div><span class="text-fg-3 w-[130px] inline-block align-top">Фразы</span>
                             @if($p['keywords'])
                                 <span class="inline-flex flex-wrap gap-1">
@@ -342,154 +352,48 @@
                                 <span class="text-amber-700">нет — у позиции не заполнены коды производителя</span>
                             @endif
                         </div>
-                        <div><span class="text-fg-3 w-[130px] inline-block">Группа</span><span class="mono text-[11.5px]">{{ $p['group'] }}</span></div>
+                        <div><span class="text-fg-3 w-[130px] inline-block align-top">Ссылка</span>
+                            <a href="{{ $p['url'] }}" target="_blank" rel="noopener"
+                               class="text-sky-700 hover:underline break-all">{{ \Illuminate\Support\Str::limit($p['url'], 100) }}</a></div>
+                        <div><span class="text-fg-3 w-[130px] inline-block">Цена</span>
+                            <span class="mono">{{ $money($p['price']) }} ₽</span>
+                            <span class="text-fg-4 text-[11.5px]">— в объявлении не публикуется</span></div>
+
+                        @if($ad)
+                            <div class="flex flex-wrap items-center gap-3 pt-1 border-t border-border-subtle text-[11.5px] text-fg-3">
+                                <span>группа <span class="mono text-fg-2">{{ $ad->ad_group_id }}</span></span>
+                                <span>объявление <span class="mono text-fg-2">{{ $ad->ad_id }}</span></span>
+                                <span>статус <span class="text-fg-2">{{ $ad->statusLabel() }}</span></span>
+                                @if($ad->state)<span>состояние <span class="mono text-fg-2">{{ $ad->state }}</span></span>@endif
+                                @if($ad->published_at)<span>создано {{ $ad->published_at->format('d.m H:i') }}</span>@endif
+                            </div>
+                            @if($ad->status_note)
+                                <div class="text-[11.5px] text-fg-3">{{ $ad->status_note }}</div>
+                            @endif
+                            @if($ad->last_error)
+                                <div class="text-[12px] text-amber-800">⚠ {{ $ad->last_error }}</div>
+                            @endif
+                        @else
+                            <div class="text-[11.5px] text-fg-4 pt-1 border-t border-border-subtle">
+                                В Директе ещё не создана — уйдёт очередной публикацией.
+                            </div>
+                        @endif
+
                         @foreach($p['warnings'] as $wmsg)
                             <div class="text-[12px] text-amber-800">⚠ {{ $wmsg }}</div>
                         @endforeach
                     </div>
                 </div>
             @empty
-                <div class="text-[13px] text-fg-3">Очередь пуста — плану не из чего собираться.</div>
+                <div class="text-[13px] text-fg-3">Пусто: нет позиций с остатком и актуальной ценой.</div>
             @endforelse
 
             <div class="text-[11.5px] text-fg-4 pt-1">
                 Цена в объявлениях не указывается: на карточке сайта её анонимному посетителю не видно,
                 и расхождение текста со страницей ни к чему. Вместо неё — наличие и срок отгрузки.
-            </div>
-        </div>
-    </div>
-
-
-    {{-- Публикация в Директ --}}
-    @php
-        $campaign = $this->campaign;
-        $ads = $this->publishedAds;
-        $ops = $this->operations;
-        $readyToPublish = $plan->filter(fn ($p) => $p['in_rotation'] && $p['keywords'] !== [])->count();
-        // «Сделано» — это доведённое до конца объявление, а не просто строка в
-        // таблице: запись заводится и на неудачной попытке, и её надо доделать.
-        $doneSkus = $ads->filter(fn ($a) => $a->isComplete())->pluck('sku')->all();
-        $left = $plan->filter(fn ($p) => $p['in_rotation'] && $p['keywords'] !== [] && ! in_array($p['sku'], $doneSkus, true))->count();
-        $drafts = $ads->filter(fn ($a) => $a->isDraft())->count();
-        $rejected = $ads->filter(fn ($a) => $a->isRejected())->count();
-        $statusStyle = fn ($s) => match ($s) {
-            'ACCEPTED' => 'background:var(--emerald-50);color:var(--emerald-700)',
-            'REJECTED' => 'background:var(--red-50);color:var(--red-700)',
-            'MODERATION', 'PREACCEPTED' => 'background:var(--amber-50);color:var(--amber-800)',
-            default => 'background:var(--neutral-100);color:var(--fg-3)',
-        };
-    @endphp
-    <div class="ds-card">
-        <div class="ds-card-header flex-wrap">
-            <h3 class="text-[15px] font-semibold text-fg-1">🚀 Публикация в Директ</h3>
-            @if($campaign)
-                <span class="chip text-[10.5px]" style="background:var(--emerald-50);color:var(--emerald-700)">
-                    <span class="dot"></span>кампания #{{ $campaign['id'] }}
-                </span>
-            @else
-                <span class="chip text-[10.5px]" style="background:var(--neutral-100);color:var(--fg-3)">кампании ещё нет</span>
-            @endif
-            <span class="flex-1"></span>
-            @if(! $campaign)
-                <button type="button" class="btn btn-sm btn-primary" wire:click="createCampaign"
-                        wire:loading.attr="disabled" wire:target="createCampaign">
-                    <span wire:loading.remove wire:target="createCampaign">Создать кампанию</span>
-                    <span wire:loading wire:target="createCampaign">Создаю…</span>
-                </button>
-            @elseif($left)
-                <button type="button" class="btn btn-sm btn-primary" wire:click="publishAds"
-                        wire:loading.attr="disabled" wire:target="publishAds"
-                        title="Создать группы, объявления-черновики и фразы. На модерацию ничего не уйдёт">
-                    <span wire:loading.remove wire:target="publishAds">Опубликовать ({{ min($left, \App\Livewire\Direct\Index::PUBLISH_BATCH) }})</span>
-                    <span wire:loading wire:target="publishAds">Публикую…</span>
-                </button>
-            @endif
-            @if($campaign && $ads->isNotEmpty())
-                <button type="button" class="btn btn-sm" wire:click="refreshStates"
-                        wire:loading.attr="disabled" wire:target="refreshStates" title="Спросить у Директа статусы модерации">
-                    <span wire:loading.remove wire:target="refreshStates">↻ Статусы</span>
-                    <span wire:loading wire:target="refreshStates">Спрашиваю…</span>
-                </button>
-            @endif
-            @if($drafts)
-                <button type="button" class="btn btn-sm btn-primary" wire:click="moderateAds"
-                        wire:loading.attr="disabled" wire:target="moderateAds"
-                        title="После отправки каждая правка текста запускает проверку заново">
-                    <span wire:loading.remove wire:target="moderateAds">Отправить на модерацию ({{ $drafts }})</span>
-                    <span wire:loading wire:target="moderateAds">Отправляю…</span>
-                </button>
-            @endif
-        </div>
-        <div class="ds-card-body space-y-2">
-            <div class="text-[11.5px] text-fg-4">
-                Кампания создаётся остановленной, объявления — черновиками: показов нет и денег не тратится,
-                пока вы сами не отправите их на модерацию и не запустите кампанию.
-                Регион: <span class="mono">{{ implode(', ', \App\Services\Direct\DirectPublisherService::regionIds()) }}</span>,
-                ставка фразы: <span class="mono">{{ \App\Services\Direct\DirectPublisherService::defaultBid() }} ₽</span>,
-                дневной бюджет: <span class="mono">{{ (float) config('services.yandex_direct.daily_budget') }} ₽</span>.
+                Годных к показу позиций всего: <b class="mono">{{ $money($this->readyCount) }}</b>.
             </div>
 
-            @if($publishLog)
-                <div class="rounded-md border border-border-subtle p-2 space-y-0.5">
-                    @foreach($publishLog as $line)
-                        <div class="text-[12px] text-fg-2">{{ $line }}</div>
-                    @endforeach
-                </div>
-            @endif
-
-            @if($ads->isNotEmpty())
-                <div class="overflow-x-auto">
-                    <table class="w-full text-[12.5px]" style="border-collapse:collapse">
-                        <thead>
-                            <tr class="text-fg-3 text-[11px] uppercase tracking-wide">
-                                <th class="text-left py-1.5 pr-2">Артикул</th>
-                                <th class="text-left py-1.5 pr-2">Заголовок</th>
-                                <th class="text-right py-1.5 pr-2">Группа</th>
-                                <th class="text-right py-1.5 pr-2">Объявление</th>
-                                <th class="text-right py-1.5 pr-2">Фраз</th>
-                                <th class="text-left py-1.5 pr-2">Состояние</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach($ads as $ad)
-                                <tr wire:key="da-{{ $ad->id }}" class="border-t border-border-subtle">
-                                    <td class="py-1.5 pr-2 mono">{{ $ad->sku }}</td>
-                                    <td class="py-1.5 pr-2">{{ \Illuminate\Support\Str::limit($ad->title, 48) }}</td>
-                                    <td class="py-1.5 pr-2 text-right mono text-fg-4">{{ $ad->ad_group_id ?? '—' }}</td>
-                                    <td class="py-1.5 pr-2 text-right mono text-fg-4">{{ $ad->ad_id ?? '—' }}</td>
-                                    <td class="py-1.5 pr-2 text-right mono">{{ count($ad->keyword_ids ?? []) }}</td>
-                                    <td class="py-1.5 pr-2">
-                                        @if($ad->last_error)
-                                            <span class="text-amber-800">{{ \Illuminate\Support\Str::limit($ad->last_error, 60) }}</span>
-                                        @else
-                                            <span class="chip text-[10.5px]" style="{{ $statusStyle($ad->status) }}">
-                                                {{ $ad->statusLabel() }}
-                                            </span>
-                                            @if($ad->state === 'ON')
-                                                <span class="text-[11px] text-emerald-700">· идут показы</span>
-                                            @endif
-                                            @if($ad->status_note)
-                                                <div class="text-[11px] text-fg-3 mt-0.5">{{ \Illuminate\Support\Str::limit($ad->status_note, 90) }}</div>
-                                            @endif
-                                            @if($ad->isDraft())
-                                                <button type="button" class="btn btn-sm ml-1" wire:click="moderateAds('{{ $ad->sku }}')"
-                                                        title="Отправить только это объявление">→ на модерацию</button>
-                                            @endif
-                                        @endif
-                                    </td>
-                                </tr>
-                            @endforeach
-                        </tbody>
-                    </table>
-                </div>
-            @else
-                <div class="text-[13px] text-fg-3">
-                    Пока ничего не опубликовано. Готовых к публикации позиций в ротации:
-                    <b class="mono">{{ $readyToPublish }}</b> — у них есть тексты и фразы.
-                </div>
-            @endif
-
-            {{-- Журнал: что уходило в Директ и во что обошлось --}}
             @if($ops->isNotEmpty())
                 <details class="pt-1">
                     <summary class="text-[12px] text-fg-3 cursor-pointer">Журнал операций ({{ $ops->count() }})</summary>
