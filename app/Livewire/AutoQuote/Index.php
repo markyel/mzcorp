@@ -51,8 +51,8 @@ class Index extends Component
             // price_min обязателен: он пол цены в формуле, и без него скидка
             // уводит КП ниже минимальной цены позиции (кейс M22546).
             ->with([
-                'items.catalogItem:id,sku,name,price,price_min,is_price_actual,stock_available',
-                'organization:id,name,inn,discount_percent',
+                'items.catalogItem:id,sku,name,price,price_min,purchase_price,is_price_actual,stock_available',
+                'organization:id,name,inn,discount_percent,pricing_mode',
                 'assignedUser:id,name',
             ])
             ->whereIn('id', $this->candidateIds())

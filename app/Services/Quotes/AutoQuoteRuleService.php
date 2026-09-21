@@ -4,8 +4,10 @@ namespace App\Services\Quotes;
 
 use App\Enums\MailDirection;
 use App\Enums\MatchPath;
+use App\Enums\OrganizationPricingMode;
 use App\Models\CatalogItem;
 use App\Models\EmailMessage;
+use App\Models\Organization;
 use App\Models\Request;
 use App\Models\RequestItem;
 use App\Services\Clients\ClientDiscountImportService;
@@ -51,7 +53,7 @@ class AutoQuoteRuleService
     public function verdict(Request $request): array
     {
         $items = $request->items->filter(fn (RequestItem $i) => (bool) $i->is_active)->values();
-        $lines = $this->lines($items, $this->discountFor($request));
+        $lines = $this->lines($items, $this->discountFor($request), $request->organization);
         $total = array_sum(array_column($lines, 'total'));
 
         $checks = [];
@@ -132,24 +134,40 @@ class AutoQuoteRuleService
     /**
      * Что автомат поставил бы в КП.
      *
-     * Скидку берём ту же, что подставилась бы в ручное КП, — из карточки
-     * организации, и через ту же формулу `MAX(цена × (1 − скидка), цена_мин)`.
-     * Иначе автомат выставляет каталожную цену там, где менеджер даёт
-     * привычные клиенту минус двадцать процентов: на холостом прогоне это
-     * сразу дало медиану расхождения ровно 1,25.
+     * Цену считаем ровно так же, как ручное КП, и режимов у неё два:
+     *
+     *   · стандартный — каталог минус скидка клиента, но не ниже `price_min`;
+     *   · себестоимость + наценка — закупочная × (1 + наценка), БЕЗ пола и
+     *     БЕЗ скидки (`OrganizationPricingMode::CostPlus`).
+     *
+     * Второй режим — не экзотика: у такого клиента каталожная цена завышена
+     * вдвое (кейс Liftway: автомат ставил 1 060,28 там, где менеджер отправил
+     * 812,88). Пропустить режим здесь значит систематически врать в цене
+     * целому классу клиентов.
      *
      * @param  \Illuminate\Support\Collection<int, RequestItem>  $items
      * @return array<int, array<string, mixed>>
      */
-    public function lines($items, float $discountPercent = 0.0): array
+    public function lines($items, float $discountPercent = 0.0, ?Organization $organization = null): array
     {
+        $costPlus = $organization?->pricing_mode === OrganizationPricingMode::CostPlus;
+        $markup = (float) config('services.pricing.cost_plus_markup', 15);
+
         $out = [];
         foreach ($items as $item) {
             $catalog = $item->catalogItem;
             $qty = (float) $item->parsed_qty;
             $catalogPrice = (float) ($catalog?->price ?? 0);
             $priceMin = self::priceMin($catalog);
-            $price = $this->quotations->computeFinalUnitPrice($catalogPrice, $priceMin, $discountPercent);
+
+            if ($costPlus) {
+                // Нет себестоимости — падаем на каталожную, как и ручное КП:
+                // уронить позицию в ноль хуже, чем назвать цену выше.
+                $purchase = self::purchasePrice($catalog);
+                $price = $purchase > 0 ? round($purchase * (1 + $markup / 100), 2) : $catalogPrice;
+            } else {
+                $price = $this->quotations->computeFinalUnitPrice($catalogPrice, $priceMin, $discountPercent);
+            }
 
             $out[] = [
                 'request_item_id' => $item->id,
@@ -160,7 +178,12 @@ class AutoQuoteRuleService
                 'unit' => (string) ($item->parsed_unit ?: 'шт.'),
                 'catalog_price' => $catalogPrice,
                 'price_min' => $priceMin,
-                'discount_percent' => $discountPercent,
+                'discount_percent' => $costPlus ? 0.0 : $discountPercent,
+                // Как получилась цена — чтобы вопрос «откуда 534,59» закрывался
+                // строкой в интерфейсе, а не запросом в базу.
+                'pricing_mode' => $costPlus ? 'cost_plus' : 'standard',
+                'markup_percent' => $costPlus ? $markup : null,
+                'purchase_price' => $costPlus ? self::purchasePrice($catalog) : null,
                 'unit_price' => $price,
                 'total' => round($price * max($qty, 0), 2),
                 'price_actual' => (bool) ($catalog?->is_price_actual ?? false),
@@ -194,9 +217,28 @@ class AutoQuoteRuleService
         return $catalog->price_min !== null ? (float) $catalog->price_min : null;
     }
 
+    /** Закупочная цена позиции — база режима «себестоимость + наценка». */
+    public static function purchasePrice(?CatalogItem $catalog): float
+    {
+        if ($catalog === null) {
+            return 0.0;
+        }
+        if (! array_key_exists('purchase_price', $catalog->getAttributes())) {
+            $catalog->setAttribute(
+                'purchase_price',
+                CatalogItem::query()->whereKey($catalog->getKey())->value('purchase_price'),
+            );
+        }
+
+        return (float) ($catalog->purchase_price ?? 0);
+    }
+
     /**
      * Скидка клиента: карточка организации, а если там пусто — выгрузка скидок
      * из корпоративной базы по ИНН. Та же скидка подставляется в ручное КП.
+     *
+     * В режиме «себестоимость + наценка» скидки нет вовсе — цена считается от
+     * закупочной, и скидка в карточке игнорируется.
      */
     public function discountFor(Request $request): float
     {

@@ -173,7 +173,12 @@
                         {{-- Что просил клиент — чтобы видеть, с чего всё началось --}}
                         <div class="text-[11.5px] text-fg-3">
                             Клиент просил: <span class="mono text-fg-2">{{ $v['lines'][0]['asked'] ?? '—' }}</span>
-                            @if(($v['lines'][0]['discount_percent'] ?? 0) > 0)
+                            @if(($v['lines'][0]['pricing_mode'] ?? '') === 'cost_plus')
+                                <span class="text-fg-4">· спеццена: закупочная {{ $money($v['lines'][0]['purchase_price']) }} ₽
+                                    + {{ rtrim(rtrim(number_format($v['lines'][0]['markup_percent'], 2, ',', ' '), '0'), ',') }}%
+                                    = <b class="text-fg-2">{{ $money($v['lines'][0]['unit_price']) }} ₽</b>
+                                    <span class="text-fg-4">(каталог {{ $money($v['lines'][0]['catalog_price']) }} ₽ не применяется)</span></span>
+                            @elseif(($v['lines'][0]['discount_percent'] ?? 0) > 0)
                                 <span class="text-fg-4">· цена: каталог {{ $money($v['lines'][0]['catalog_price']) }} ₽
                                     − {{ rtrim(rtrim(number_format($v['lines'][0]['discount_percent'], 2, ',', ' '), '0'), ',') }}%
                                     @if(($v['lines'][0]['price_min'] ?? 0) > 0)
