@@ -9,6 +9,8 @@ use App\Models\CatalogItem;
 use App\Models\CatalogPriceChange;
 use App\Models\EmailMessage;
 use App\Models\Organization;
+use App\Models\OutboundQuote;
+use App\Models\Quotation;
 use App\Models\Request;
 use App\Models\RequestItem;
 use App\Services\Clients\ClientDiscountImportService;
