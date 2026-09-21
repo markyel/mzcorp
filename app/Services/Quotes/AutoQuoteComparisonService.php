@@ -2,6 +2,7 @@
 
 namespace App\Services\Quotes;
 
+use App\Enums\DetectorType;
 use App\Models\OutboundQuote;
 use App\Models\Quotation;
 use App\Models\Request;
@@ -171,11 +172,16 @@ class AutoQuoteComparisonService
             ];
         }
 
+        // Тип документа — enum DetectorType: КП (полное или частичное) важнее
+        // счёта, счёт важнее прочего.
         $outbound = OutboundQuote::query()
             ->where('request_id', $request->id)
             ->where('status', OutboundQuote::STATUS_MATCHED)
             ->with(['items.catalogItem:id,sku'])
-            ->orderByRaw("case when document_type = 'quote' then 0 else 1 end")
+            ->orderByRaw("case
+                when document_type like 'outbound_quotation%' then 0
+                when document_type = 'outbound_invoice' then 1
+                else 2 end")
             ->orderByDesc('id')
             ->first();
 
@@ -183,9 +189,13 @@ class AutoQuoteComparisonService
             return null;
         }
 
+        $type = $outbound->document_type instanceof DetectorType
+            ? $outbound->document_type->value
+            : (string) $outbound->document_type;
+
         return [
-            'type' => (string) $outbound->document_type,
-            'label' => $outbound->document_type === 'invoice' ? 'счёт менеджера' : 'КП менеджера',
+            'type' => $type,
+            'label' => $type === DetectorType::OutboundInvoice->value ? 'счёт менеджера' : 'КП менеджера',
             'number' => (string) $outbound->document_number,
             'date' => $outbound->document_date?->format('d.m.Y'),
             'total' => (float) $outbound->total_amount,
