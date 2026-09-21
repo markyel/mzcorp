@@ -3,6 +3,7 @@
 namespace App\Livewire\Direct;
 
 use App\Models\AppSetting;
+use App\Services\Direct\DirectAdPlanService;
 use App\Services\Direct\DirectApiClient;
 use App\Services\Direct\DirectCandidateService;
 use App\Services\Settings\SettingsService;
@@ -62,7 +63,7 @@ class Index extends Component
             'Сколько объявлений держим в Яндекс.Директе одновременно',
         );
 
-        unset($this->queue);
+        unset($this->queue, $this->plan);
         $this->notice = $before === $this->adsLimit
             ? "В работе {$this->adsLimit} позиций."
             : "Было {$before}, стало {$this->adsLimit} позиций в работе.";
@@ -120,7 +121,7 @@ class Index extends Component
     public function refreshQueue(): void
     {
         app(DirectCandidateService::class)->forget();
-        unset($this->queue, $this->readyCount, $this->excluded);
+        unset($this->queue, $this->readyCount, $this->excluded, $this->plan);
         $this->notice = 'Очередь пересобрана.';
     }
 
@@ -129,6 +130,13 @@ class Index extends Component
     public function excluded()
     {
         return app(DirectCandidateService::class)->excluded();
+    }
+
+    /** План публикации: что именно уйдёт в Директ при текущем лимите. */
+    #[Computed]
+    public function plan()
+    {
+        return app(DirectAdPlanService::class)->plan($this->adsLimit);
     }
 
     /**
@@ -140,7 +148,7 @@ class Index extends Component
     {
         $this->ensureAdmin();
         $excluded = app(DirectCandidateService::class)->exclude($sku, $reason, Auth::user());
-        unset($this->queue, $this->readyCount, $this->excluded);
+        unset($this->queue, $this->readyCount, $this->excluded, $this->plan);
 
         $this->notice = $excluded === null
             ? "Позиция {$sku} не найдена в каталоге."
@@ -151,7 +159,7 @@ class Index extends Component
     {
         $this->ensureAdmin();
         app(DirectCandidateService::class)->restore($sku);
-        unset($this->queue, $this->readyCount, $this->excluded);
+        unset($this->queue, $this->readyCount, $this->excluded, $this->plan);
         $this->notice = "{$sku} возвращена в очередь.";
     }
 

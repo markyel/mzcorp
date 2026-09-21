@@ -177,6 +177,69 @@
         </div>
     </div>
 
+    {{-- План публикации --}}
+    @php $plan = $this->plan; $warned = $plan->filter(fn ($p) => $p['warnings'] !== [])->count(); @endphp
+    <div class="ds-card">
+        <div class="ds-card-header flex-wrap">
+            <h3 class="text-[15px] font-semibold text-fg-1">📝 План объявлений</h3>
+            <span class="text-[12px] text-fg-3">что уйдёт в Директ при текущем лимите · пока ничего не создано</span>
+            @if($warned)
+                <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)">
+                    <span class="dot"></span>замечаний: {{ $warned }}
+                </span>
+            @endif
+            <span class="flex-1"></span>
+            <span class="text-[12px] text-fg-3">кампания: <span class="mono text-fg-2">{{ \App\Services\Direct\DirectAdPlanService::campaignName() }}</span></span>
+        </div>
+        <div class="ds-card-body space-y-2">
+            @forelse($plan as $p)
+                <div wire:key="dp-{{ $p['sku'] }}" class="border border-border rounded-md" x-data="{ open: false }">
+                    <button type="button" class="w-full flex flex-wrap items-center gap-2 px-3 py-2 text-left" @click="open = ! open">
+                        <span class="text-fg-4 text-[11px]" x-text="open ? '▾' : '▸'"></span>
+                        <span class="mono text-[12px] text-fg-4">{{ $p['sku'] }}</span>
+                        <span class="text-[13px] text-fg-1">{{ $p['title'] }}</span>
+                        <span class="flex-1"></span>
+                        <span class="text-[11.5px] text-fg-3">фраз: <span class="mono">{{ count($p['keywords']) }}</span></span>
+                        @if($p['warnings'])
+                            <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)">⚠</span>
+                        @endif
+                    </button>
+                    <div x-show="open" x-cloak class="px-3 pb-3 pt-1 border-t border-border-subtle space-y-1.5 text-[12.5px]">
+                        <div><span class="text-fg-3 w-[130px] inline-block">Заголовок</span>{{ $p['title'] }}
+                            <span class="mono text-[11px] text-fg-4">{{ mb_strlen($p['title']) }}/{{ \App\Services\Direct\DirectAdPlanService::TITLE_MAX }}</span></div>
+                        <div><span class="text-fg-3 w-[130px] inline-block">Второй заголовок</span>{{ $p['title2'] }}</div>
+                        <div><span class="text-fg-3 w-[130px] inline-block">Текст</span>{{ $p['text'] }}
+                            <span class="mono text-[11px] text-fg-4">{{ mb_strlen($p['text']) }}/{{ \App\Services\Direct\DirectAdPlanService::TEXT_MAX }}</span></div>
+                        <div><span class="text-fg-3 w-[130px] inline-block align-top">Ссылка</span>
+                            <a href="{{ $p['url'] }}" target="_blank" rel="noopener" class="text-sky-700 hover:underline break-all">{{ \Illuminate\Support\Str::limit($p['url'], 110) }}</a></div>
+                        <div><span class="text-fg-3 w-[130px] inline-block align-top">Фразы</span>
+                            @if($p['keywords'])
+                                <span class="inline-flex flex-wrap gap-1">
+                                    @foreach($p['keywords'] as $kw)
+                                        <span class="chip text-[10.5px]" style="background:var(--neutral-100);color:var(--fg-2)">{{ $kw }}</span>
+                                    @endforeach
+                                </span>
+                            @else
+                                <span class="text-amber-700">нет — у позиции не заполнены коды производителя</span>
+                            @endif
+                        </div>
+                        <div><span class="text-fg-3 w-[130px] inline-block">Группа</span><span class="mono text-[11.5px]">{{ $p['group'] }}</span></div>
+                        @foreach($p['warnings'] as $wmsg)
+                            <div class="text-[12px] text-amber-800">⚠ {{ $wmsg }}</div>
+                        @endforeach
+                    </div>
+                </div>
+            @empty
+                <div class="text-[13px] text-fg-3">Очередь пуста — плану не из чего собираться.</div>
+            @endforelse
+
+            <div class="text-[11.5px] text-fg-4 pt-1">
+                Цена в объявлениях не указывается: на карточке сайта её анонимному посетителю не видно,
+                и расхождение текста со страницей ни к чему. Вместо неё — наличие и срок отгрузки.
+            </div>
+        </div>
+    </div>
+
     {{-- Снятые с рекламы вручную --}}
     @php $excluded = $this->excluded; @endphp
     <div class="ds-card">
