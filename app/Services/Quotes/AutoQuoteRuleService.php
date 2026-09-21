@@ -194,7 +194,12 @@ class AutoQuoteRuleService
                 ->orderBy('id')
                 ->first(['id', 'direction', 'subject', 'body_plain']);
         }
-        if ($source === null || (string) $source->direction !== MailDirection::Inbound->value) {
+        // direction — тоже кастованный enum, сравниваем по значению.
+        $direction = $source?->direction instanceof MailDirection
+            ? $source->direction
+            : MailDirection::tryFrom((string) ($source?->direction ?? ''));
+
+        if ($source === null || $direction !== MailDirection::Inbound) {
             return false;
         }
 
