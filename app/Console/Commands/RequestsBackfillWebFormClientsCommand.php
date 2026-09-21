@@ -2,96 +2,114 @@
 
 namespace App\Console\Commands;
 
+use App\Models\EmailMessage;
 use App\Models\Request;
+use App\Services\Clients\RequestOrganizationResolver;
 use App\Services\Mail\WebFormSubmissionParser;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
- * Бэкфилл реального клиента в заявках с сайта.
+ * Починка клиента у заявок с сайта: в `client_email` стоит адрес самой формы
+ * (order@), а покупатель указан в теле.
  *
- * До WebFormSubmissionParser заявки с order@myzip.ru сохранялись с
- * client_email = order@myzip.ru (технический ящик формы), реальный клиент из
- * тела терялся. Команда перечитывает origin-письмо таких заявок и
- * проставляет настоящие client_email/name/phone/company/address.
+ * Такие заявки попадали в базу, когда письмо превращали в заявку РУКАМИ:
+ * автоматический путь форму разбирает, ручной — нет (исправлено в
+ * EmailToRequestPromoter). Последствия у подмены неочевидные и дорогие: КП
+ * уходит покупателю, а детектор исходящих документов сверяет адресата с
+ * `client_email`, не находит совпадения и не признаёт письмо адресованным
+ * клиенту — документ не распознаётся, статус заявки не двигается, и она висит
+ * «в работе» с уже отправленным КП (кейс M-2026-16283).
  *
- * По умолчанию — только НЕ закрытые заявки (с ними ещё ведётся переписка);
- * --all захватывает и закрытые. Без --apply — dry-run.
- *
- *   php artisan requests:backfill-web-form-clients              # dry-run, open
- *   php artisan requests:backfill-web-form-clients --apply
- *   php artisan requests:backfill-web-form-clients --apply --all
+ * Организацию перепривязываем: по настоящему адресу клиент часто находится в
+ * реестре, а с адресом формы — никогда.
  */
 class RequestsBackfillWebFormClientsCommand extends Command
 {
-    protected $signature = 'requests:backfill-web-form-clients
-        {--apply : Применить изменения (без флага — dry-run)}
-        {--all : Включая закрытые заявки}';
+    protected $signature = 'requests:backfill-webform-clients
+        {--apply : Применить изменения (по умолчанию сухой прогон)}
+        {--limit=500 : Максимум заявок за прогон}';
 
-    protected $description = 'Проставить реального клиента в заявках с сайта (order@myzip.ru → данные из тела).';
+    protected $description = 'Заявки с сайта: подставить реального покупателя вместо адреса формы';
 
-    public function handle(WebFormSubmissionParser $parser): int
+    public function handle(WebFormSubmissionParser $parser, RequestOrganizationResolver $orgResolver): int
     {
         $apply = (bool) $this->option('apply');
-        $relay = $parser->relaySenders();
-        if (empty($relay)) {
-            $this->error('services.mail.web_form_senders пуст — нечего бэкфиллить.');
+        $limit = max(1, (int) $this->option('limit'));
 
-            return self::FAILURE;
-        }
+        $requests = Request::query()
+            ->whereNotNull('email_message_id')
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get();
 
-        $query = Request::with('emailMessage')
-            ->whereIn(DB::raw('LOWER(client_email)'), $relay);
-        if (! $this->option('all')) {
-            $query->whereNotIn('status', ['closed_won', 'closed_lost']);
-        }
+        $fixed = 0;
+        $skipped = 0;
 
-        $requests = $query->orderBy('id')->get();
-        $this->info(sprintf('Кандидатов: %d (mode: %s)', $requests->count(), $apply ? 'APPLY' : 'DRY-RUN'));
-
-        $stats = ['updated' => 0, 'skipped' => 0];
-        foreach ($requests as $req) {
-            $msg = $req->emailMessage;
-            if (! $msg) {
-                $stats['skipped']++;
-                $this->line(sprintf('  · %s — нет origin-письма, skip', $req->internal_code));
+        foreach ($requests as $request) {
+            $message = EmailMessage::find($request->email_message_id);
+            if ($message === null || ! $parser->isWebFormSubmission($message)) {
+                continue;
+            }
+            // Чиним только те, где в заявке стоит адрес отправителя формы:
+            // если менеджер уже поправил клиента руками, не трогаем.
+            if (mb_strtolower(trim((string) $request->client_email)) !== mb_strtolower(trim((string) $message->from_email))) {
                 continue;
             }
 
-            $parsed = $parser->parse($msg);
-            if ($parsed === null) {
-                $stats['skipped']++;
-                $this->line(sprintf('  · %s — не распарсилось тело, skip', $req->internal_code));
+            $parsed = $parser->parse($message);
+            if ($parsed === null || ($parsed['email'] ?? '') === '') {
+                $skipped++;
+                $this->warn("  {$request->internal_code}: форма не разобралась — оставляю как есть");
+
                 continue;
             }
 
             $this->line(sprintf(
-                '  → %s: %s → %s  (%s, %s, %s)',
-                $req->internal_code,
-                $req->client_email,
+                '  %s  %s → %s  (%s)',
+                $request->internal_code,
+                $request->client_email,
                 $parsed['email'],
-                $parsed['name'] ?: '—',
-                $parsed['phone'] ?: '—',
-                $parsed['company'] ?: '—',
+                $parsed['company'] ?: ($parsed['name'] ?: '—'),
             ));
 
             if (! $apply) {
-                $stats['skipped']++;
+                $fixed++;
+
                 continue;
             }
 
-            $req->forceFill([
+            $request->forceFill(array_filter([
                 'client_email' => $parsed['email'],
-                'client_name' => $parsed['name'] ?: $parsed['company'] ?: $req->client_name,
-                'client_phone' => $parsed['phone'],
-                'client_company' => $parsed['company'],
-                'client_address' => $parsed['address'],
-            ])->save();
-            $stats['updated']++;
+                'client_name' => $parsed['name'] ?: ($parsed['company'] ?: $request->client_name),
+                'client_phone' => $parsed['phone'] ?? null,
+                'client_company' => $parsed['company'] ?? null,
+                'client_address' => $parsed['address'] ?? null,
+            ], fn ($v) => $v !== null && $v !== ''))->save();
+
+            // По настоящему адресу организация часто находится — а по адресу
+            // формы не находилась никогда.
+            $orgResolver->attach($request->fresh());
+
+            Log::info('RequestsBackfillWebFormClients: client replaced', [
+                'request_id' => $request->id,
+                'internal_code' => $request->internal_code,
+                'was' => $message->from_email,
+                'now' => $parsed['email'],
+            ]);
+            $fixed++;
         }
 
-        $this->newLine();
-        $this->info(sprintf('Готово. Обновлено: %d, пропущено: %d', $stats['updated'], $stats['skipped']));
+        $this->info(sprintf(
+            '%s заявок: %d%s',
+            $apply ? 'Исправлено' : 'К исправлению',
+            $fixed,
+            $skipped ? ", не разобралось: {$skipped}" : '',
+        ));
+
+        if (! $apply && $fixed > 0) {
+            $this->comment('Сухой прогон. Запусти с --apply, чтобы применить.');
+        }
 
         return self::SUCCESS;
     }

@@ -34,6 +34,7 @@ class EmailToRequestPromoter
         private readonly InternalCodeGenerator $codeGen,
         private readonly RequestOrganizationResolver $orgResolver,
         private readonly ForwardedRequestParser $forwarded,
+        private readonly WebFormSubmissionParser $webForm,
     ) {}
 
     /**
@@ -60,18 +61,17 @@ class EmailToRequestPromoter
             );
         }
 
-        // Пересланная заявка (noreply@) — реальный отправитель в теле, а не From.
-        [$clientEmail, $clientName] = $this->resolveClient($email);
+        // Заявка с сайта или пересылка — реальный клиент в теле, а не в From.
+        $client = $this->resolveClient($email);
+        $clientEmail = (string) $client['client_email'];
 
-        $request = DB::transaction(function () use ($email, $actorUserId, $auditType, $clientEmail, $clientName) {
-            $req = Request::create([
+        $request = DB::transaction(function () use ($email, $actorUserId, $auditType, $client) {
+            $req = Request::create(array_merge([
                 'internal_code' => $this->codeGen->next(),
                 'email_message_id' => $email->id,
                 'status' => RequestStatus::Pending,
-                'client_email' => $clientEmail,
-                'client_name' => $clientName,
                 'subject' => $email->subject,
-            ]);
+            ], $client));
             $email->forceFill(['related_request_id' => $req->id])->save();
 
             // Точная привязка к организации (раздел «Клиенты»), если клиент
@@ -97,9 +97,9 @@ class EmailToRequestPromoter
         ParseRequestItemsJob::dispatch($email->id);
 
         if ($clientEmail !== ($email->from_email ?: '')) {
-            Log::info('EmailToRequestPromoter: forwarded client resolved', [
+            Log::info('EmailToRequestPromoter: real client resolved from body', [
                 'email_message_id' => $email->id,
-                'forwarder_from' => $email->from_email,
+                'relay_from' => $email->from_email,
                 'client_email' => $clientEmail,
             ]);
         }
@@ -116,20 +116,50 @@ class EmailToRequestPromoter
     }
 
     /**
-     * Контакты клиента для заявки: для пересланных писем (noreply@) — реальный
-     * отправитель из блока пересылки, иначе — From.
+     * Контакты клиента для заявки.
      *
-     * @return array{0: string, 1: ?string} [client_email, client_name]
+     * Три случая, и From годится только в третьем:
+     *   · заявка с сайта (order@) — покупатель указан в теле формы;
+     *   · пересланное письмо (noreply@) — отправитель в блоке пересылки;
+     *   · обычное письмо — From.
+     *
+     * Веб-форму здесь разбирать ОБЯЗАТЕЛЬНО, хотя автоматический путь
+     * (IncomingMailProcessor) это уже умеет: письмо могло приехать сюда после
+     * ручного «сделать заявкой», и тогда в client_email оставался адрес самой
+     * формы. Кейс M-2026-16283: КП ушло покупателю, но заявка считала клиентом
+     * order@myzip.ru — из-за этого детектор не признал письмо адресованным
+     * клиенту, документ не распознался и статус остался «в работе».
+     *
+     * @return array<string, mixed> поля клиента для Request::create
      */
     private function resolveClient(EmailMessage $email): array
     {
-        if ($this->forwarded->isForwarded($email)) {
-            $parsed = $this->forwarded->parse($email);
-            if ($parsed !== null) {
-                return [$parsed['email'], $parsed['name'] ?: $email->from_name];
+        if ($this->webForm->isWebFormSubmission($email)) {
+            $parsed = $this->webForm->parse($email);
+            if ($parsed !== null && ($parsed['email'] ?? '') !== '') {
+                return [
+                    'client_email' => $parsed['email'],
+                    'client_name' => $parsed['name'] ?: ($parsed['company'] ?: $email->from_name),
+                    'client_phone' => $parsed['phone'] ?? null,
+                    'client_company' => $parsed['company'] ?? null,
+                    'client_address' => $parsed['address'] ?? null,
+                ];
             }
         }
 
-        return [$email->from_email ?: '', $email->from_name];
+        if ($this->forwarded->isForwarded($email)) {
+            $parsed = $this->forwarded->parse($email);
+            if ($parsed !== null) {
+                return [
+                    'client_email' => $parsed['email'],
+                    'client_name' => $parsed['name'] ?: $email->from_name,
+                ];
+            }
+        }
+
+        return [
+            'client_email' => $email->from_email ?: '',
+            'client_name' => $email->from_name,
+        ];
     }
 }
