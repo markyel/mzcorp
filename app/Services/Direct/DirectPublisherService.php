@@ -267,8 +267,10 @@ class DirectPublisherService
      */
     private function failRow(DirectPublishedAd $record, string $sku, string $step, array $res): array
     {
-        $text = self::errorText($res).' '.self::resultErrors($res['result'] ?? null);
-        $record->last_error = mb_substr(trim($step.': '.$text), 0, 500);
+        $text = trim(self::errorText($res).' '.self::resultErrors($res['result'] ?? null));
+        // Пустая ошибка — сама по себе диагноз: запрос прошёл, а идентификатора
+        // в ответе мы не нашли. Так и пишем, чтобы не гадать по «группа:».
+        $record->last_error = mb_substr($step.': '.($text !== '' ? $text : 'запрос прошёл, но идентификатор в ответе не найден'), 0, 500);
         $record->save();
 
         return ['ok' => false, 'message' => "{$sku}: {$record->last_error}"];

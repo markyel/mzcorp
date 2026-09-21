@@ -358,8 +358,10 @@
         $ads = $this->publishedAds;
         $ops = $this->operations;
         $readyToPublish = $plan->filter(fn ($p) => $p['in_rotation'] && $p['keywords'] !== [])->count();
-        $publishedSkus = $ads->pluck('sku')->all();
-        $left = $plan->filter(fn ($p) => $p['in_rotation'] && $p['keywords'] !== [] && ! in_array($p['sku'], $publishedSkus, true))->count();
+        // «Сделано» — это доведённое до конца объявление, а не просто строка в
+        // таблице: запись заводится и на неудачной попытке, и её надо доделать.
+        $doneSkus = $ads->filter(fn ($a) => $a->isComplete())->pluck('sku')->all();
+        $left = $plan->filter(fn ($p) => $p['in_rotation'] && $p['keywords'] !== [] && ! in_array($p['sku'], $doneSkus, true))->count();
     @endphp
     <div class="ds-card">
         <div class="ds-card-header flex-wrap">
