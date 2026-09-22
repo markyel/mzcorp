@@ -39,7 +39,7 @@ class DirectSyncCommand extends Command
         $report = $sync->run($apply);
 
         $this->info(sprintf(
-            '%s: проверено %d, выключить %d, включить %d, тексты %d, создать %d, на модерацию %d.',
+            '%s: проверено %d, выключить %d, включить %d, тексты %d, создать %d, на модерацию %d, ставок обновлено %d.',
             $report['applied'] ? 'Применено' : 'Предложения',
             $report['checked'],
             count($report['suspend']),
@@ -47,6 +47,7 @@ class DirectSyncCommand extends Command
             count($report['texts']),
             count($report['published']),
             count($report['moderated']),
+            $report['bids_set'] ?? 0,
         ));
 
         foreach ($report['suspend'] as $line) {
@@ -55,7 +56,7 @@ class DirectSyncCommand extends Command
         foreach ($report['resume'] as $line) {
             $this->line('  + '.$line);
         }
-        foreach (['texts' => 'тексты', 'published' => 'создать', 'moderated' => 'модерация', 'fixed' => 'переписать после отказа', 'retired' => 'убрать из кабинета'] as $key => $label) {
+        foreach (['texts' => 'тексты', 'published' => 'создать', 'moderated' => 'модерация', 'fixed' => 'переписать после отказа', 'retired' => 'убрать из кабинета', 'bids' => 'ставки'] as $key => $label) {
             if ($report[$key] !== []) {
                 $this->line('  '.$label.': '.implode(', ', $report[$key]));
             }

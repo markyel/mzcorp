@@ -503,6 +503,7 @@
             <div class="flex flex-wrap items-center gap-3 text-[12px] text-fg-3">
                 <span>готовы к показу: <b class="mono text-fg-1">{{ $sync['ready'] }}</b></span>
                 <span>идут показы: <b class="mono text-fg-1">{{ $sync['onAir'] }}</b></span>
+                <span>ставки: <b class="mono text-fg-1">по аукциону</b>, потолок {{ \App\Services\Direct\DirectBidService::DEFAULT_CAP }} ₽</span>
                 <span class="text-fg-4">
                     потолки за прогон: тексты {{ \App\Services\Direct\DirectSyncService::MAX_TEXTS }},
                     создание {{ \App\Services\Direct\DirectSyncService::MAX_PUBLISH }},
@@ -555,6 +556,9 @@
                     @endif
                     @if($syncReport['moderated'])
                         <div class="text-[12px] text-fg-2">→ на модерацию: <span class="mono">{{ implode(', ', $syncReport['moderated']) }}</span></div>
+                    @endif
+                    @if(($syncReport['bids_set'] ?? 0) > 0)
+                        <div class="text-[12px] text-fg-2">💸 ставок обновлено по аукциону: <span class="mono">{{ $syncReport['bids_set'] }}</span></div>
                     @endif
                     @if($syncReport['retired'] ?? [])
                         <div class="text-[12px] text-fg-2">✕ убрать из кабинета: <span class="mono">{{ implode(', ', $syncReport['retired']) }}</span></div>

@@ -57,6 +57,7 @@ class DirectSyncService
         private readonly DirectCandidateService $candidates,
         private readonly DirectAdPlanService $plan,
         private readonly DirectAdTextService $texts,
+        private readonly DirectBidService $bids,
         private readonly SettingsService $settings,
     ) {}
 
@@ -89,7 +90,7 @@ class DirectSyncService
     /**
      * Прогон. $apply=null — брать режим из настроек.
      *
-     * @return array{applied: bool, checked: int, states: int, suspend: array<int, string>, resume: array<int, string>, texts: array<int, string>, published: array<int, string>, moderated: array<int, string>, fixed: array<int, string>, retired: array<int, string>, attention: array<int, string>, errors: array<int, string>}
+     * @return array{applied: bool, checked: int, states: int, suspend: array<int, string>, resume: array<int, string>, texts: array<int, string>, published: array<int, string>, moderated: array<int, string>, fixed: array<int, string>, retired: array<int, string>, bids: array<int, string>, bids_set: int, attention: array<int, string>, errors: array<int, string>}
      */
     public function run(?bool $apply = null, ?User $by = null): array
     {
@@ -97,7 +98,8 @@ class DirectSyncService
         $report = [
             'applied' => $apply, 'checked' => 0, 'states' => 0,
             'suspend' => [], 'resume' => [], 'texts' => [], 'published' => [],
-            'moderated' => [], 'fixed' => [], 'retired' => [], 'attention' => [], 'errors' => [],
+            'moderated' => [], 'fixed' => [], 'retired' => [], 'bids' => [], 'bids_set' => 0,
+            'attention' => [], 'errors' => [],
         ];
 
         $campaignId = $this->publisher->campaignId();
@@ -208,6 +210,29 @@ class DirectSyncService
             if (! $res['ok']) {
                 $report['errors'][] = $res['message'];
             }
+        }
+
+        // Ставки по аукциону — последним шагом, когда новые фразы уже созданы.
+        // Без этого свежая партия стоит со стартовыми 3 ₽ и в торгах не
+        // участвует: вход в аукцион у наших фраз 7–36 ₽. Потолок ставки
+        // (direct.bid_cap) остаётся единственным ограничителем цены клика.
+        $bidPlan = $this->bids->plan($by);
+        if ($bidPlan['error'] === null) {
+            $changes = array_values(array_filter($bidPlan['rows'], fn ($r) => $r['changes']));
+            $report['bids'] = array_map(
+                fn ($r) => $r['keyword_id'].': '.$r['current'].' → '.$r['wanted'].' ₽',
+                array_slice($changes, 0, 5),
+            );
+            if ($changes !== []) {
+                $res = $this->bids->apply($bidPlan['rows'], $by);
+                $report['bids_set'] = $res['set'];
+            }
+            $overCap = count(array_filter($bidPlan['rows'], fn ($r) => $r['entry'] > $bidPlan['cap']));
+            if ($overCap > 0) {
+                $report['attention'][] = "Фраз дороже потолка {$bidPlan['cap']} ₽: {$overCap} — показов по ним не будет";
+            }
+        } elseif ($bidPlan['error'] !== null) {
+            $report['errors'][] = 'ставки: '.$bidPlan['error'];
         }
 
         // Перечитываем черновики: в списке уже и те, что созданы шагом выше.
