@@ -202,6 +202,16 @@ class DirectAdPlanServiceTest extends TestCase
         $this->assertStringContainsString('ГОСТ', Plan::adTitle($rope));
     }
 
+    public function test_operators_are_not_part_of_an_article(): void
+    {
+        // «+» и ведущий «-» Директ читает как операторы: фраза «p2609+p2611»
+        // отбивается при создании («неправильное использование знака +»).
+        $this->assertSame('p2609 p2611', Plan::normalizeKeyword('P2609+P2611'));
+        $this->assertSame('хо 508', Plan::normalizeKeyword('-ХО 508'));
+        // Дефис внутри кода — часть артикула, его не трогаем.
+        $this->assertSame('xo-508', Plan::normalizeKeyword('XO-508'));
+    }
+
     public function test_keyword_words_are_counted_the_way_direct_counts_them(): void
     {
         // Кейс M07441: по пробелам у нас выходило 4 слова, Директ насчитал 11
