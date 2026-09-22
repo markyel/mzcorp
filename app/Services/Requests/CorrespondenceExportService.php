@@ -174,7 +174,9 @@ class CorrespondenceExportService
     public function supplierFilename(SupplierInquiry $inquiry, string $ext): string
     {
         $name = $inquiry->supplier_name ?: $inquiry->supplier_email ?: ('запрос-'.$inquiry->id);
-        $name = preg_replace('/[^A-Za-zА-Яа-я0-9\- ]+/u', '', (string) $name) ?: 'поставщик';
+        // Точку и собаку оставляем: без имени поставщика в названии файла
+        // остаётся адрес, и «aydinisitanvectaliftcom» читать невозможно.
+        $name = preg_replace('/[^A-Za-zА-Яа-я0-9\-_. @]+/u', '', (string) $name) ?: 'поставщик';
 
         return 'Переписка поставщик '.trim(mb_substr($name, 0, 60)).".{$ext}";
     }
