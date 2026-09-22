@@ -945,6 +945,10 @@ return [
             : 'https://api.direct.yandex.com/json/v5/',
         'oauth_authorize_url' => 'https://oauth.yandex.ru/authorize',
         'oauth_token_url' => 'https://oauth.yandex.ru/token',
+        // Прогноз показов по фразе живёт только в старом Live v4: в v5 частоты
+        // нет вовсе. Без него мы рекламируемся по строкам, которых никто не
+        // набирает — замер 22.09.2026: 274 наши фразы из 382 с нулём показов.
+        'forecast_url' => env('YANDEX_DIRECT_FORECAST_URL', 'https://api.direct.yandex.ru/live/v4/json/'),
 
         // Имя кампании-контейнера: все объявления по складу живут в ней одной.
         'campaign_name' => env('YANDEX_DIRECT_CAMPAIGN_NAME', 'Склад — запчасти (авто)'),

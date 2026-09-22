@@ -565,6 +565,88 @@ class DirectPublisherService
     }
 
     /**
+     * Привести фразы уже созданного объявления к плану.
+     *
+     * Набор фраз меняется не только при переименовании позиции: мы убрали
+     * искусственные «артикул купить» (их никто не набирает) и добавили
+     * тематические — «поручень эскалатора» вместо кода. Без этого шага правка
+     * генератора действует только на новые объявления, а живые остаются с тем,
+     * с чем были созданы. Лишнее гасим, а не удаляем: фраза может вернуться,
+     * а вместе с удалённой фразой пропала бы и её статистика.
+     *
+     * @param  array<int, string>  $wanted
+     * @return array{added: int, suspended: int, message: string}
+     */
+    public function syncKeywords(DirectPublishedAd $ad, array $wanted, ?User $by = null): array
+    {
+        if ($ad->ad_group_id === null || $wanted === []) {
+            return ['added' => 0, 'suspended' => 0, 'message' => ''];
+        }
+
+        $res = $this->call('keywords', 'get', [
+            'SelectionCriteria' => ['AdGroupIds' => [(int) $ad->ad_group_id]],
+            'FieldNames' => ['Id', 'Keyword', 'State'],
+        ], $ad->sku, $by);
+
+        if (! $res['ok']) {
+            return ['added' => 0, 'suspended' => 0, 'message' => $ad->sku.': фразы не прочитаны — '.self::errorText($res)];
+        }
+
+        $live = [];
+        foreach ($res['result']['Keywords'] ?? [] as $keyword) {
+            $phrase = mb_strtolower(trim((string) ($keyword['Keyword'] ?? '')));
+            if ($phrase === '' || str_contains($phrase, 'autotargeting')) {
+                continue;
+            }
+            $live[$phrase] = ['id' => (int) $keyword['Id'], 'state' => (string) ($keyword['State'] ?? '')];
+        }
+
+        $wanted = array_values(array_unique(array_map(fn ($p) => mb_strtolower(trim($p)), $wanted)));
+        $add = array_values(array_diff($wanted, array_keys($live)));
+        $drop = array_values(array_filter(
+            array_keys($live),
+            fn ($phrase) => ! in_array($phrase, $wanted, true) && $live[$phrase]['state'] === 'ON',
+        ));
+
+        $added = 0;
+        if ($add !== []) {
+            $bid = (int) round(self::defaultBid() * 1_000_000);
+            $addRes = $this->call('keywords', 'add', [
+                'Keywords' => array_map(fn ($phrase) => [
+                    'AdGroupId' => (int) $ad->ad_group_id,
+                    'Keyword' => $phrase,
+                    'Bid' => $bid,
+                ], $add),
+            ], $ad->sku, $by);
+
+            $ids = array_values(array_filter(array_map(
+                fn ($r) => (int) ($r['Id'] ?? 0),
+                Arr::get($addRes['result'] ?? [], 'AddResults', []) ?: [],
+            )));
+            $added = count($ids);
+            if ($ids !== []) {
+                $ad->keyword_ids = array_values(array_unique(array_merge($ad->keyword_ids ?? [], $ids)));
+                $ad->save();
+            }
+        }
+
+        $suspended = 0;
+        if ($drop !== []) {
+            $ids = array_map(fn ($phrase) => $live[$phrase]['id'], $drop);
+            $off = $this->call('keywords', 'suspend', ['SelectionCriteria' => ['Ids' => $ids]], $ad->sku, $by);
+            $suspended = $off['ok'] ? count($ids) : 0;
+        }
+
+        return [
+            'added' => $added,
+            'suspended' => $suspended,
+            'message' => $added + $suspended > 0
+                ? $ad->sku.': фраз добавлено '.$added.', выключено '.$suspended
+                : '',
+        ];
+    }
+
+    /**
      * Выключить фразы-дубли внутри кампании.
      *
      * По совпавшей фразе Директ показывает одно объявление рекламодателя

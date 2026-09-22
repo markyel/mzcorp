@@ -52,12 +52,16 @@ class DirectSyncService
     /** Сколько отклонённых переписываем за прогон. */
     public const MAX_FIXES = 5;
 
+    /** Сколько объявлений за прогон приводим по фразам к плану. */
+    public const MAX_KEYWORD_SYNC = 20;
+
     public function __construct(
         private readonly DirectPublisherService $publisher,
         private readonly DirectCandidateService $candidates,
         private readonly DirectAdPlanService $plan,
         private readonly DirectAdTextService $texts,
         private readonly DirectBidService $bids,
+        private readonly DirectDemandService $demand,
         private readonly SettingsService $settings,
     ) {}
 
@@ -99,6 +103,7 @@ class DirectSyncService
             'applied' => $apply, 'checked' => 0, 'states' => 0,
             'suspend' => [], 'resume' => [], 'texts' => [], 'published' => [],
             'moderated' => [], 'fixed' => [], 'retired' => [], 'bids' => [], 'bids_set' => 0, 'deduped' => 0,
+            'keywords' => [], 'demand' => 0,
             'attention' => [], 'errors' => [],
         ];
 
@@ -117,6 +122,16 @@ class DirectSyncService
         $this->candidates->forget();
         $bench = $this->benchSize();
         $queue = $this->candidates->queue($bench)->take($bench);
+
+        // Спрос на тематические фразы — до плана: померенная в этом прогоне
+        // фраза попадает в объявления тем же прогоном, а не следующим.
+        if ($apply) {
+            $candidates = $queue->flatMap(fn ($item) => DirectAdPlanService::themeKeywords($item))->unique()->values()->all();
+            $fresh = $this->demand->measure($this->demand->unknown($candidates));
+            if ($fresh > 0) {
+                $report['demand'] = $fresh;
+            }
+        }
         $queueSkus = $queue->pluck('sku')->map(fn ($s) => (string) $s)->all();
 
         $published = DirectPublishedAd::query()->whereNotNull('ad_id')->where('state', '!=', 'ARCHIVED')->get();
@@ -210,6 +225,25 @@ class DirectSyncService
             if (! $res['ok']) {
                 $report['errors'][] = $res['message'];
             }
+        }
+
+        // Фразы живых объявлений — к плану: генератор меняется (убрали
+        // «артикул купить», добавили тематические), и без этого шага правка
+        // достаётся только новым объявлениям.
+        $refreshed = 0;
+        foreach ($published->take(self::MAX_KEYWORD_SYNC) as $ad) {
+            $row = $planBySku[$ad->sku] ?? null;
+            if ($row === null || ($row['keywords'] ?? []) === []) {
+                continue;
+            }
+            $res = $this->publisher->syncKeywords($ad, $row['keywords'], $by);
+            if ($res['message'] !== '') {
+                $report['keywords'][] = $res['message'];
+                $refreshed++;
+            }
+        }
+        if ($refreshed > 0) {
+            $report['keywords'] = array_slice($report['keywords'], 0, 5);
         }
 
         // Дубли фраз — до ставок: гасим лишние копии, чтобы не платить за то,

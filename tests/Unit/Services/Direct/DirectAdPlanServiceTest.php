@@ -252,13 +252,15 @@ class DirectAdPlanServiceTest extends TestCase
         }
     }
 
-    public function test_keywords_are_codes_plus_buy(): void
+    public function test_keywords_are_the_codes_themselves(): void
     {
         $keywords = Plan::keywords($this->item());
 
         $this->assertContains('506nce', $keywords);
-        $this->assertContains('506nce купить', $keywords);
         $this->assertContains('xo-508', $keywords);
+        // «артикул купить» мы больше не выдумываем: такую строку не набирают,
+        // а место в группе она занимала. Человеческие фразы — themeKeywords().
+        $this->assertNotContains('506nce купить', $keywords);
         $this->assertLessThanOrEqual(Plan::KEYWORDS_PER_GROUP, count($keywords));
     }
 

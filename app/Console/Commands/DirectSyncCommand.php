@@ -56,7 +56,10 @@ class DirectSyncCommand extends Command
         foreach ($report['resume'] as $line) {
             $this->line('  + '.$line);
         }
-        foreach (['texts' => 'тексты', 'published' => 'создать', 'moderated' => 'модерация', 'fixed' => 'переписать после отказа', 'retired' => 'убрать из кабинета', 'bids' => 'ставки'] as $key => $label) {
+        if (($report['demand'] ?? 0) > 0) {
+            $this->line('  спрос померен по фразам: '.$report['demand']);
+        }
+        foreach (['texts' => 'тексты', 'published' => 'создать', 'moderated' => 'модерация', 'fixed' => 'переписать после отказа', 'retired' => 'убрать из кабинета', 'keywords' => 'фразы', 'bids' => 'ставки'] as $key => $label) {
             if ($report[$key] !== []) {
                 $this->line('  '.$label.': '.implode(', ', $report[$key]));
             }

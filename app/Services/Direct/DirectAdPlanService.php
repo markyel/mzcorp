@@ -35,9 +35,19 @@ class DirectAdPlanService
     /** Сколько фраз оставляем группе: больше — размывает статистику позиции. */
     public const KEYWORDS_PER_GROUP = 8;
 
+    /** Сколько слов берём из каталожного типа детали. */
+    public const TYPE_PHRASE_WORDS = 4;
+
+    /** Слова, по которым видно, что фраза про лифт, а не про что угодно. */
+    public const LIFT_WORDS_RE = '/(лифт|эскалатор|траволатор|кабин|шахт|ступен|поручн|поручень|двер)/u';
+
+    /** Сколько тематических фраз добавляем позиции сверх её кодов. */
+    public const THEME_KEYWORDS_PER_GROUP = 2;
+
     public function __construct(
         private readonly DirectCandidateService $candidates,
         private readonly DirectAdTextService $texts,
+        private readonly DirectDemandService $demand,
     ) {}
 
     /**
@@ -61,9 +71,12 @@ class DirectAdPlanService
         // у одной детали в разных исполнениях. Фраза достаётся позиции,
         // стоящей выше в очереди: она денежнее.
         $taken = [];
+        // Спрос на тематические фразы — одним запросом на весь план.
+        $demand = $this->demand->known($items->flatMap(fn ($item) => self::themeKeywords($item))->all());
 
-        return $items->values()->map(function ($item, $i) use ($stored, $limit, $tone, &$taken) {
+        return $items->values()->map(function ($item, $i) use ($stored, $limit, $tone, $demand, &$taken) {
             $row = $this->forItem($item, $stored[(string) $item->sku] ?? null, $i < $limit, $tone);
+            $row['keywords'] = self::withThemes($row['keywords'], self::themeKeywords($item), $demand);
 
             $own = self::claimKeywords($row['keywords'], $taken);
             if ($own !== $row['keywords']) {
@@ -75,6 +88,33 @@ class DirectAdPlanService
 
             return $row;
         });
+    }
+
+    /**
+     * Добавить к кодам тематические фразы, на которые есть спрос.
+     *
+     * Непомеренная фраза не добавляется: пока про неё ничего не известно, она
+     * ничем не лучше кода, а место в группе занимает. Померит конвейер —
+     * попадёт в план следующим прогоном.
+     *
+     * @param  array<int, string>  $codes
+     * @param  array<int, string>  $themes
+     * @param  array<string, int>  $demand  фраза → показов в месяц
+     * @return array<int, string>
+     */
+    public static function withThemes(array $codes, array $themes, array $demand): array
+    {
+        $wanted = array_slice(
+            array_values(array_filter($themes, fn ($phrase) => ($demand[$phrase] ?? 0) > 0)),
+            0,
+            self::THEME_KEYWORDS_PER_GROUP,
+        );
+
+        return array_slice(
+            array_values(array_unique(array_merge($codes, $wanted))),
+            0,
+            self::KEYWORDS_PER_GROUP + self::THEME_KEYWORDS_PER_GROUP,
+        );
     }
 
     /**
@@ -308,18 +348,86 @@ class DirectAdPlanService
         $out = [];
         foreach (self::codes($item) as $code) {
             $phrase = self::normalizeKeyword($code);
-            if ($phrase === null) {
-                continue;
-            }
-            $out[$phrase] = true;
-            // «купить» отсекает читателей инструкций и оставляет покупателей.
-            $withBuy = $phrase.' купить';
-            if (self::normalizeKeyword($withBuy) !== null) {
-                $out[$withBuy] = true;
+            if ($phrase !== null) {
+                $out[$phrase] = true;
             }
         }
 
         return array_slice(array_keys($out), 0, self::KEYWORDS_PER_GROUP);
+    }
+
+    /**
+     * Тематические фразы: то, как деталь называет человек, а не склад.
+     *
+     * Артикул производителя ищут единицы: из 382 наших фраз 274 имеют ноль
+     * показов в месяц, а «поручень эскалатора» — 1 601. Поэтому к кодам добавляем
+     * пару фраз из типа детали и бренда. Слово про лифт обязательно: «контроллер»
+     * без него — это геймпад (1,07 млн показов в месяц), «канат» — верёвка,
+     * «башмак» — обувь. Если в типе детали узла нет, дописываем его сами.
+     *
+     * Спрос по этим фразам меряется отдельно (DirectDemandService) — в план
+     * попадают только те, которые действительно набирают.
+     *
+     * @return array<int, string>
+     */
+    public static function themeKeywords(object $item): array
+    {
+        $type = self::partTypePhrase($item);
+        if ($type === null) {
+            return [];
+        }
+
+        $out = [];
+        foreach ([$type, $type.' '.self::brandWord($item)] as $candidate) {
+            $phrase = self::normalizeKeyword(trim($candidate));
+            if ($phrase !== null && count(preg_split('/\s+/u', $phrase) ?: []) >= 2) {
+                $out[$phrase] = true;
+            }
+        }
+
+        return array_keys($out);
+    }
+
+    /** Тип детали человеческими словами, с узлом лифта. */
+    public static function partTypePhrase(object $item): ?string
+    {
+        $raw = mb_strtolower(trim((string) ($item->part_type ?? '')));
+        if ($raw === '') {
+            return null;
+        }
+
+        // Каталожный тип — это классификатор с перечислениями и пояснениями:
+        // «Башмак, вкладыш башмака направляющих кабины и противовеса».
+        // Человек так не ищет — берём голову до первого перечисления.
+        $head = preg_replace('/\([^)]*\)/u', ' ', $raw) ?? $raw;
+        $head = (string) (preg_split('/[,\/]/u', $head)[0] ?? $head);
+        $head = preg_replace('/\s+и\s+траволатора?\b.*/u', '', $head) ?? $head;
+        $head = trim(preg_replace('/\s+/u', ' ', $head) ?? '');
+        if ($head === '') {
+            return null;
+        }
+
+        $words = preg_split('/\s+/u', $head) ?: [];
+        $head = implode(' ', array_slice($words, 0, self::TYPE_PHRASE_WORDS));
+
+        if (! preg_match(self::LIFT_WORDS_RE, $head)) {
+            $context = mb_strtolower($raw.' '.(string) ($item->unit_name ?? ''));
+            $head .= preg_match('/(эскалатор|траволатор|ступен)/u', $context) ? ' эскалатора' : ' лифта';
+        }
+
+        return $head;
+    }
+
+    /** Бренд одним словом: «ThyssenKrupp Elevator (TKE)» → «thyssenkrupp». */
+    public static function brandWord(object $item): string
+    {
+        $brand = mb_strtolower(trim((string) ($item->brand ?? '')));
+        if ($brand === '') {
+            return '';
+        }
+        $brand = trim(preg_replace('/\s+/u', ' ', preg_replace('/\([^)]*\)/u', ' ', $brand) ?? '') ?? '');
+
+        return (string) (explode(' ', $brand)[0] ?? '');
     }
 
     /**
