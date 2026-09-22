@@ -32,6 +32,15 @@ class DirectDemandService
     /** Как долго верим измеренному значению. */
     public const FRESH_DAYS = 30;
 
+    /** Ключ настройки со списком заказанных, но ещё не прочитанных отчётов. */
+    public const SETTING_PENDING = 'direct.forecast_pending';
+
+    /** «Отчет с прогнозом в процессе подготовки» — ждём следующего прогона. */
+    public const ERROR_NOT_READY = 74;
+
+    /** Сколько ждём заказанный отчёт, прежде чем заказать фразу заново. */
+    public const ORDER_TTL_HOURS = 6;
+
     /**
      * Частота известных фраз: фраза → показов в месяц.
      *
@@ -64,34 +73,77 @@ class DirectDemandService
             return [];
         }
 
-        $fresh = DirectPhraseDemand::query()
+        // Не переспрашиваем ни свежее, ни то, что уже заказано и ждёт отчёта:
+        // иначе каждый час уходил бы новый заказ на те же фразы.
+        $skip = DirectPhraseDemand::query()
             ->whereIn('phrase', $phrases)
-            ->where('checked_at', '>', now()->subDays(self::FRESH_DAYS))
+            ->where(fn ($q) => $q
+                ->where('checked_at', '>', now()->subDays(self::FRESH_DAYS))
+                ->orWhere(fn ($w) => $w->whereNull('checked_at')->where('updated_at', '>', now()->subHours(self::ORDER_TTL_HOURS)))
+            )
             ->pluck('phrase')
             ->all();
 
-        return array_values(array_diff($phrases, $fresh));
+        return array_values(array_diff($phrases, $skip));
     }
 
     /**
-     * Померить и запомнить. Возвращает, сколько фраз удалось измерить.
+     * Забрать готовые отчёты и заказать новые.
+     *
+     * Отчёт готовится не мгновенно — сразу после заказа Директ отвечает
+     * «Отчет с прогнозом в процессе подготовки» (код 74). Поэтому заказ и
+     * чтение разнесены по прогонам: читаем то, что заказали в прошлый час,
+     * и заказываем следующую порцию. Ждать внутри прогона незачем, конвейер
+     * всё равно ходит каждый час.
+     *
+     * Возвращает, сколько фраз измерено в этот раз.
      *
      * @param  array<int, string>  $phrases
      */
     public function measure(array $phrases): int
     {
+        $measured = $this->drainPending();
+
         $phrases = array_slice(array_values(array_unique(array_filter($phrases))), 0, self::MAX_PER_RUN);
         if ($phrases === []) {
-            return 0;
+            return $measured;
         }
 
-        $measured = 0;
+        $pending = $this->pending();
         foreach (array_chunk($phrases, self::CHUNK) as $chunk) {
             $id = $this->order($chunk);
             if ($id === null) {
                 continue;
             }
-            foreach ($this->read($id) as $phrase => $numbers) {
+            $pending[] = $id;
+            // Метка «заказано»: пустая checked_at и свежая updated_at. Без неё
+            // следующий прогон закажет те же фразы ещё раз.
+            foreach ($chunk as $phrase) {
+                DirectPhraseDemand::query()->firstOrCreate(['phrase' => $phrase], ['shows' => 0, 'clicks' => 0]);
+            }
+            DirectPhraseDemand::query()->whereIn('phrase', $chunk)->whereNull('checked_at')->touch();
+        }
+        $this->rememberPending($pending);
+
+        return $measured;
+    }
+
+    /**
+     * Прочитать заказанные ранее отчёты. Неготовые оставляем на следующий раз.
+     */
+    private function drainPending(): int
+    {
+        $left = [];
+        $measured = 0;
+
+        foreach ($this->pending() as $id) {
+            $rows = $this->read($id, $ready);
+            if (! $ready) {
+                $left[] = $id;
+
+                continue;
+            }
+            foreach ($rows as $phrase => $numbers) {
                 DirectPhraseDemand::query()->updateOrCreate(
                     ['phrase' => $phrase],
                     ['shows' => $numbers['shows'], 'clicks' => $numbers['clicks'], 'checked_at' => now()],
@@ -99,8 +151,29 @@ class DirectDemandService
                 $measured++;
             }
         }
+        $this->rememberPending($left);
 
         return $measured;
+    }
+
+    /** @return array<int, int> */
+    private function pending(): array
+    {
+        $raw = app(\App\Services\Settings\SettingsService::class)->get(self::SETTING_PENDING, []);
+
+        return array_values(array_filter(array_map('intval', is_array($raw) ? $raw : [])));
+    }
+
+    /** @param  array<int, int>  $ids */
+    private function rememberPending(array $ids): void
+    {
+        app(\App\Services\Settings\SettingsService::class)->set(
+            self::SETTING_PENDING,
+            array_values(array_unique($ids)),
+            \App\Models\AppSetting::TYPE_JSON,
+            null,
+            'Заказанные отчёты прогноза Директа, которые ещё не прочитаны',
+        );
     }
 
     /** Заказать отчёт. Возвращает его идентификатор. */
@@ -122,15 +195,22 @@ class DirectDemandService
     }
 
     /**
-     * Прочитать готовый отчёт.
+     * Прочитать отчёт. $ready=false — он ещё готовится, вернёмся позже.
      *
      * @return array<string, array{shows: int, clicks: int}>
      */
-    private function read(int $id): array
+    private function read(int $id, ?bool &$ready = null): array
     {
         $res = $this->call('GetForecast', $id);
+        $ready = true;
+
         if (isset($res['error_str'])) {
-            Log::warning('Direct: прогноз не прочитан', ['id' => $id, 'answer' => $res]);
+            // 74 — «Отчет с прогнозом в процессе подготовки», это не ошибка.
+            // 31 — отчёта уже нет, повторять бессмысленно.
+            $ready = (int) ($res['error_code'] ?? 0) !== self::ERROR_NOT_READY;
+            if ($ready) {
+                Log::warning('Direct: прогноз не прочитан', ['id' => $id, 'answer' => $res]);
+            }
 
             return [];
         }
