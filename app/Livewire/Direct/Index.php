@@ -73,6 +73,11 @@ class Index extends Component
     /** Построчный итог последней публикации. */
     public array $publishLog = [];
 
+    /** Потолок ставки за клик и итог последнего опроса аукциона. */
+    public float $bidCap = DirectBidService::DEFAULT_CAP;
+
+    public array $bidPlan = [];
+
     /** Итог последнего прогона синхронизации. */
     public array $syncReport = [];
 
@@ -82,6 +87,7 @@ class Index extends Component
         $this->adsLimit = self::clamp((int) $settings->get(self::SETTING_ADS_LIMIT, self::DEFAULT_ADS_LIMIT));
         $this->benchSize = app(DirectSyncService::class)->benchSize();
         $this->adTone = DirectAdTone::normalize($settings->get(self::SETTING_AD_TONE, DirectAdTone::DEFAULT));
+        $this->bidCap = app(DirectBidService::class)->cap();
     }
 
     public static function clamp(int $value): int
@@ -309,6 +315,56 @@ class Index extends Component
         $saved = $texts->save($item, [$field => $value], DirectAdText::SOURCE_MANUAL, Auth::user(), null, $this->adTone);
         unset($this->plan);
         $this->notice = "{$sku}: сохранено — «{$saved->{$field}}».";
+    }
+
+    /**
+     * Подтянуть ставки по аукциону. Без этого фразы не участвуют в торгах:
+     * выставленные при создании 3 ₽ ниже входа (медиана входа — 12 ₽).
+     */
+    public function refreshBids(DirectBidService $bids, bool $apply = false): void
+    {
+        $this->ensureAdmin();
+        $plan = $bids->plan(Auth::user());
+
+        if ($plan['error'] !== null) {
+            $this->error = $plan['error'];
+
+            return;
+        }
+
+        $this->bidPlan = [
+            'total' => count($plan['rows']),
+            'changes' => count(array_filter($plan['rows'], fn ($r) => $r['changes'])),
+            'cap' => $plan['cap'],
+            'at_cap' => count(array_filter($plan['rows'], fn ($r) => $r['entry'] > $plan['cap'])),
+        ];
+
+        if (! $apply) {
+            $this->notice = "Аукцион опрошен: фраз {$this->bidPlan['total']}, к изменению {$this->bidPlan['changes']}.";
+
+            return;
+        }
+
+        $res = $bids->apply($plan['rows'], Auth::user());
+        unset($this->operations);
+        $this->notice = $res['message'];
+    }
+
+    /** Потолок ставки — единственная защита от дорогого аукциона. */
+    public function saveBidCap(SettingsService $settings): void
+    {
+        $this->ensureAdmin();
+        $this->bidCap = max(1.0, min(1000.0, (float) $this->bidCap));
+
+        $settings->set(
+            DirectBidService::SETTING_CAP,
+            (string) $this->bidCap,
+            AppSetting::TYPE_STRING,
+            Auth::id(),
+            'Потолок ставки за клик в Яндекс.Директе',
+        );
+
+        $this->notice = "Потолок ставки: {$this->bidCap} ₽ за клик.";
     }
 
     /** Создать кампанию-контейнер (остановленную) или подхватить готовую. */

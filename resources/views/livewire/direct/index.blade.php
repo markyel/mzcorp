@@ -421,6 +421,57 @@
     {{-- Автосинхронизация с наличием --}}
     @php $sync = $this->syncState; @endphp
     <div class="ds-card">
+
+    {{-- Ставки по аукциону --}}
+    <div class="ds-card">
+        <div class="ds-card-header flex-wrap">
+            <h3 class="text-[15px] font-semibold text-fg-1">💸 Ставки</h3>
+            <span class="text-[12px] text-fg-3">у каждой фразы свой порог входа — берём самую дешёвую ступень</span>
+            <span class="flex-1"></span>
+            <button type="button" class="btn btn-sm" wire:click="refreshBids"
+                    wire:loading.attr="disabled" wire:target="refreshBids">
+                <span wire:loading.remove wire:target="refreshBids">Опросить аукцион</span>
+                <span wire:loading wire:target="refreshBids">Спрашиваю…</span>
+            </button>
+            @if($bidPlan)
+                <button type="button" class="btn btn-sm btn-primary" wire:click="refreshBids(true)"
+                        wire:loading.attr="disabled" wire:target="refreshBids"
+                        title="Выставить ставки по аукциону, не выше потолка">
+                    Применить ({{ $bidPlan['changes'] }})
+                </button>
+            @endif
+        </div>
+        <div class="ds-card-body space-y-2">
+            <form wire:submit.prevent="saveBidCap" class="flex flex-wrap items-end gap-3">
+                <div>
+                    <label class="block text-[11.5px] text-fg-3 mb-1">Потолок ставки, ₽ за клик</label>
+                    <input type="number" step="0.5" min="1" max="1000" wire:model="bidCap" class="{{ $inp }} w-[120px] mono">
+                </div>
+                <button type="submit" class="btn btn-sm btn-primary">Сохранить</button>
+                <span class="text-[11.5px] text-fg-4 flex-1">
+                    Потолок — единственная защита от дорогого аукциона: по редкой позиции он иногда просит
+                    сотни рублей за клик, и платить их за деталь в тысячу бессмысленно. Фразы, где вход дороже
+                    потолка, остаются без показов — это видно в сводке ниже.
+                </span>
+            </form>
+
+            @if($bidPlan)
+                <div class="flex flex-wrap items-center gap-4 text-[12.5px]">
+                    <span>фраз в кампании: <b class="mono">{{ $bidPlan['total'] }}</b></span>
+                    <span>к изменению: <b class="mono text-fg-1">{{ $bidPlan['changes'] }}</b></span>
+                    @if($bidPlan['at_cap'] > 0)
+                        <span class="text-amber-800">вход дороже потолка: <b class="mono">{{ $bidPlan['at_cap'] }}</b></span>
+                    @endif
+                    <span class="text-fg-4">потолок {{ $bidPlan['cap'] }} ₽</span>
+                </div>
+            @else
+                <div class="text-[12.5px] text-fg-3">
+                    Нажмите «Опросить аукцион» — Директ покажет, сколько стоит вход по каждой нашей фразе.
+                    Ставка ниже входа означает отсутствие показов: именно это и произошло со стартовыми 3 ₽.
+                </div>
+            @endif
+        </div>
+    </div>
         <div class="ds-card-header flex-wrap">
             <h3 class="text-[15px] font-semibold text-fg-1">🔄 Синхронизация с наличием</h3>
             @php
