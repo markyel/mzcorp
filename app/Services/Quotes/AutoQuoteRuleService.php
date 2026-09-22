@@ -82,6 +82,15 @@ class AutoQuoteRuleService
             $items->every(fn ($i) => self::articleInText($i)),
             'проверяем, что артикул не додуман матчингом',
         );
+        $extraSkus = $items->flatMap(fn ($i) => self::foreignSkusInLine($i))->unique()->values();
+        $checks[] = $this->check(
+            'one_article_per_line',
+            'В строке один наш артикул',
+            $extraSkus->isEmpty(),
+            $extraSkus->isEmpty()
+                ? 'позиция не склеена из нескольких'
+                : 'в строке ещё '.$extraSkus->implode(', ').' — клиент просил больше, чем мы посчитали',
+        );
         $checks[] = $this->check(
             'client_wrote',
             'Артикул написал сам клиент',
@@ -404,6 +413,31 @@ class AutoQuoteRuleService
         }
 
         return false;
+    }
+
+    /**
+     * Чужие M-артикулы в строке позиции.
+     *
+     * Парсер иногда складывает в одну строку несколько кодов: кейс
+     * M-2026-16171 — «FAA24350BL2, M00011, M25915», где M00011 и M25915 это
+     * два РАЗНЫХ редуктора. Заявка выглядит однострочной, автомат выдал бы КП
+     * на одну позицию из двух, а менеджер отправил обе. Половина ответа хуже
+     * молчания: клиент считает, что вторую позицию мы не возим.
+     *
+     * @return array<int, string>
+     */
+    public static function foreignSkusInLine(RequestItem $item): array
+    {
+        $own = mb_strtoupper(trim((string) ($item->catalogItem?->sku ?? '')));
+        $text = (string) $item->parsed_article.' '.(string) $item->parsed_name;
+
+        if (! preg_match_all('/\bM\d{4,6}\b/iu', $text, $m)) {
+            return [];
+        }
+
+        $found = array_values(array_unique(array_map('mb_strtoupper', $m[0])));
+
+        return array_values(array_filter($found, fn ($sku) => $sku !== $own));
     }
 
     /**

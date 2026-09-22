@@ -3,7 +3,9 @@
 namespace Tests\Unit\Services\Quotes;
 
 use App\Enums\OrganizationPricingMode;
+use App\Models\CatalogItem;
 use App\Models\Organization;
+use App\Models\RequestItem;
 use App\Services\Quotes\AutoQuoteComparisonService as Cmp;
 use App\Services\Quotes\AutoQuoteRuleService as Rule;
 use Illuminate\Support\Collection;
@@ -90,6 +92,28 @@ class AutoQuoteComparisonTest extends TestCase
         );
 
         $this->assertSame('Спецклиент', $picked?->name);
+    }
+
+    public function test_two_articles_in_one_line_are_spotted(): void
+    {
+        // Кейс M-2026-16171: клиент просил M00011 И M25915, парсер сложил оба
+        // в одну позицию, и заявка выглядела однострочной. Автомат выдал бы
+        // КП на половину запроса.
+        $item = new RequestItem([
+            'parsed_article' => 'FAA24350BL2, M00011, M25915',
+            'parsed_name' => 'Редуктор с мотором AT120 ЛЕВЫЙ',
+        ]);
+        $item->setRelation('catalogItem', new CatalogItem(['sku' => 'M00011']));
+
+        $this->assertSame(['M25915'], Rule::foreignSkusInLine($item));
+    }
+
+    public function test_a_clean_line_has_no_foreign_articles(): void
+    {
+        $item = new RequestItem(['parsed_article' => 'M00011', 'parsed_name' => 'Редуктор AT120']);
+        $item->setRelation('catalogItem', new CatalogItem(['sku' => 'M00011']));
+
+        $this->assertSame([], Rule::foreignSkusInLine($item));
     }
 
     public function test_rule_thresholds_match_the_analysis(): void
