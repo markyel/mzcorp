@@ -190,7 +190,7 @@ class RequestItemParsingService
         ]);
 
         return array_values(array_filter(
-            array_map(fn(array $item) => $this->normalizeParsedItem($item), $items),
+            array_map(fn(array $item) => $this->normalizeParsedItem($item), self::splitMultiArticleItems($items)),
             fn ($i) => $i !== null,
         ));
     }
@@ -294,7 +294,7 @@ class RequestItemParsingService
         ]);
 
         return array_values(array_filter(
-            array_map(fn(array $item) => $this->normalizeParsedItem($item), $items),
+            array_map(fn(array $item) => $this->normalizeParsedItem($item), self::splitMultiArticleItems($items)),
             fn ($i) => $i !== null,
         ));
     }
@@ -410,6 +410,69 @@ class RequestItemParsingService
      * такие отфильтровываются на стороне caller'а (см. callers
      * array_map → array_filter null).
      */
+    /**
+     * Разрезать позицию, в которую попало несколько НАШИХ артикулов.
+     *
+     * Клиент пишет «M00839, M00840 Цепь привода поручня 103 зв+замок», и
+     * парсер иногда отдаёт это одной строкой. Заявка выглядит однострочной,
+     * менеджер видит одну позицию вместо двух, а в КП уезжает половина
+     * запроса (кейсы M-2026-15853, M-2026-16171).
+     *
+     * Режем только по НАШИМ M-кодам: они однозначны и ведут ровно к одной
+     * позиции каталога. OEM-коды в одной строке трогать нельзя — «FAA24350BL2»
+     * рядом с M-кодом это тот же товар, а не второй.
+     *
+     * Количество копируем в каждую строку: сколько чего именно, знает только
+     * автор письма, и додумывать здесь нельзя. Зато количество по фразам
+     * вроде «103 зв» теперь разбирает сама модель (см. ParseItemsPrompt).
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array<int, array<string, mixed>>
+     */
+    public static function splitMultiArticleItems(array $items): array
+    {
+        $out = [];
+
+        foreach ($items as $item) {
+            $codes = self::ownSkusIn((string) ($item['article'] ?? ''));
+            if (count($codes) < 2) {
+                $out[] = $item;
+
+                continue;
+            }
+
+            Log::info('splitMultiArticleItems: одна строка на несколько артикулов', [
+                'article' => mb_substr((string) $item['article'], 0, 80),
+                'codes' => $codes,
+            ]);
+
+            foreach ($codes as $code) {
+                $copy = $item;
+                $copy['article'] = $code;
+                // Помечаем происхождение: позиция получена резкой, и если
+                // количество у строк разное, менеджер увидит это в заметке.
+                $copy['note'] = trim((string) ($item['note'] ?? '').' Из строки «'.mb_substr((string) $item['article'], 0, 60).'»');
+                $out[] = $copy;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Наши артикулы в строке: M + 4–6 цифр, без повторов и в порядке текста.
+     *
+     * @return array<int, string>
+     */
+    public static function ownSkusIn(string $text): array
+    {
+        if (! preg_match_all('/\bM\d{4,6}\b/iu', $text, $m)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_map('mb_strtoupper', $m[0])));
+    }
+
     private function normalizeParsedItem(array $item): ?array
     {
         $rawName = trim((string) ($item['name'] ?? ''));
@@ -1643,7 +1706,7 @@ PROMPT;
                 $normalized['email_attachment_id'] = $attId;
 
                 return $normalized;
-            }, $items),
+            }, self::splitMultiArticleItems($items)),
             fn ($i) => $i !== null,
         ));
 
@@ -1984,7 +2047,7 @@ PROMPT;
                 $normalized['email_attachment_id'] = $attId;
 
                 return $normalized;
-            }, $items),
+            }, self::splitMultiArticleItems($items)),
             fn ($i) => $i !== null,
         ));
 
