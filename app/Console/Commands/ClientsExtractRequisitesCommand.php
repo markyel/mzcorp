@@ -186,7 +186,9 @@ class ClientsExtractRequisitesCommand extends Command
             if (! preg_match('/([^,;:|]{2,90})\s*,?\s*$/u', $before, $mn)) {
                 continue;
             }
-            $name = $this->cleanName($mn[1]);
+            // Отрезаем всё до формы собственности: слева могли остаться хвосты
+            // соседней колонки («… info@mylift.ru ООО«Техкомплект»»).
+            $name = self::fromCompanyForm($this->cleanName($mn[1]));
             if (! self::looksLikeCompany($name) || $this->isJunkName($name)) {
                 continue;
             }
@@ -198,7 +200,7 @@ class ClientsExtractRequisitesCommand extends Command
                 $res['kpp'] = $mk[1];
             }
             if (preg_match('/(?:КПП\D{0,4}\d{9}|ИНН\D{0,4}\d{10,12})\s*,?\s*(.+)$/iu', $tail, $ma)) {
-                $res['address'] = trim(mb_substr(trim($ma[1]), 0, 160), ' ,;');
+                $res['address'] = self::cutAddress($ma[1]);
             }
 
             return $res;
@@ -228,6 +230,30 @@ class ClientsExtractRequisitesCommand extends Command
         }
 
         return $out;
+    }
+
+    /** Формы собственности — по ним опознаём начало названия организации. */
+    private const COMPANY_FORMS = 'ООО|ОАО|ЗАО|ПАО|АО|НАО|ИП|ФГУП|ГУП|МУП|НКО|ТСЖ|УК|СНТ|ЧОУ|ФГБУ|ГБУ|МБУ';
+
+    /** Оставить название с формы собственности: «…@mylift.ru ООО«Х»» → «ООО«Х»». */
+    public static function fromCompanyForm(string $name): string
+    {
+        if (preg_match('/((?:'.self::COMPANY_FORMS.')\W.*)$/u', $name, $m)) {
+            return trim($m[1], " ,;:\t");
+        }
+
+        return $name;
+    }
+
+    /**
+     * Адрес обрывается там, где начинается следующая колонка документа:
+     * «…ком. 12, Заказчик: тел.: …» — всё после подписи уже не адрес.
+     */
+    public static function cutAddress(string $raw): string
+    {
+        $cut = preg_split('/\s*(?:Заказчик|Покупатель|Поставщик|Исполнитель|Карта клиента|Ответственный|тел\.?:|e-?mail)/iu', trim($raw))[0] ?? $raw;
+
+        return trim(mb_substr(trim($cut), 0, 160), " ,;:");
     }
 
     /** Название похоже на организацию: есть форма собственности. */
