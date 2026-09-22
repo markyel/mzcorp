@@ -179,7 +179,10 @@ class ClientsExtractRequisitesCommand extends Command
             if ($inn === $this->ourInn) {
                 continue;
             }
-            $before = mb_substr($flat, max(0, $offset - 120), min($offset, 120));
+            // Смещение указывает на цифры, а перед ними стоит сам маркер
+            // «ИНН» — снимаем его, иначе названием окажется он же.
+            $before = mb_substr($flat, max(0, $offset - 140), min($offset, 140));
+            $before = preg_replace('/[\s,;:]*ИНН\D{0,4}$/iu', '', $before) ?? $before;
             if (! preg_match('/([^,;:|]{2,90})\s*,?\s*$/u', $before, $mn)) {
                 continue;
             }
