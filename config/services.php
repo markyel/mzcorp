@@ -965,7 +965,10 @@ return [
         'default_bid' => (float) env('YANDEX_DIRECT_DEFAULT_BID', 3),
         // Автотаргетинг Директ навязывает и останавливать не даёт — сбиваем
         // ему ставку до минимума, чтобы платить за свои узкие фразы.
-        'autotargeting_bid' => (float) env('YANDEX_DIRECT_AUTOTARGETING_BID', 0.3),
+        // Автотаргетинг подбирает запросы по самой карточке. Пока мы верили в
+        // артикулы, ставка была заградительной (0,3 ₽); замер 22.09.2026
+        // показал, что артикулы не ищут, и автотаргетинг стал рабочим каналом.
+        'autotargeting_bid' => (float) env('YANDEX_DIRECT_AUTOTARGETING_BID', 12),
         'search_strategy' => env('YANDEX_DIRECT_SEARCH_STRATEGY', 'HIGHEST_POSITION'),
 
         /*

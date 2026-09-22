@@ -171,7 +171,7 @@ class DirectPublisherService
 
         $tamed = $this->tameAutotargeting($campaignId, $by);
         if ($tamed > 0) {
-            $messages[] = "Автотаргетингу сбита ставка до ".self::autotargetingBid()." ₽ в {$tamed} группах.";
+            $messages[] = 'Автотаргетингу выставлена ставка '.self::autotargetingBid()." ₽ в {$tamed} группах.";
         }
 
         return ['published' => $published, 'skipped' => $skipped, 'failed' => $failed, 'messages' => $messages];
@@ -526,14 +526,20 @@ class DirectPublisherService
     }
 
     /**
-     * Сбить ставку автотаргетингу до минимума.
+     * Держать у автотаргетинга заданную ставку.
      *
      * Директ добавляет в каждую группу псевдофразу `---autotargeting` с нашей
      * же ставкой и останавливать её запрещает («Автотаргетинг не может быть
-     * остановлен», код 8305). Показы по фразам, которые подбирает Яндекс, —
-     * противоположность замыслу: мы платим за узкие запросы по артикулу.
-     * Остаётся ставка: с минимальной автотаргетинг почти не выигрывает
-     * аукционы, а расход остаётся на наших фразах.
+     * остановлен», код 8305). Сначала мы сбивали её до 0,3 ₽: замысел был
+     * платить только за узкие запросы по артикулу. Замер 22.09.2026 этот
+     * замысел опроверг — по артикулам не ищут вовсе, и автотаргетинг остаётся
+     * единственным, кто вообще способен привести человека на карточку: запросы
+     * он подбирает по ней самой, а не по нашим догадкам. Поэтому ставка стала
+     * рабочей величиной из настроек, и держим её ровно — не только сбиваем,
+     * но и поднимаем, если в кабинете оказалось меньше.
+     *
+     * Аукционной лестницы у псевдофразы нет, так что ставка тут плоская:
+     * `keywordbids.get` отдаёт ступени только для настоящих фраз.
      *
      * @return int сколько псевдофраз поправили
      */
@@ -549,7 +555,7 @@ class DirectPublisherService
         $ids = [];
         foreach ($res['result']['Keywords'] ?? [] as $keyword) {
             if (str_contains((string) ($keyword['Keyword'] ?? ''), 'autotargeting')
-                && (int) ($keyword['Bid'] ?? 0) > $bid) {
+                && (int) ($keyword['Bid'] ?? 0) !== $bid) {
                 $ids[] = (int) $keyword['Id'];
             }
         }
@@ -705,9 +711,14 @@ class DirectPublisherService
             : ['suspended' => 0, 'phrases' => []];
     }
 
+    /** Ключ настройки со ставкой автотаргетинга — правится без выкладки. */
+    public const SETTING_AUTOTARGETING_BID = 'direct.autotargeting_bid';
+
     public static function autotargetingBid(): float
     {
-        return (float) config('services.yandex_direct.autotargeting_bid', 0.3);
+        $stored = app(SettingsService::class)->get(self::SETTING_AUTOTARGETING_BID);
+
+        return max(0.3, (float) ($stored ?? config('services.yandex_direct.autotargeting_bid', 12)));
     }
 
     /**

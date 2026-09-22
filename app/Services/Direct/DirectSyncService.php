@@ -103,7 +103,7 @@ class DirectSyncService
             'applied' => $apply, 'checked' => 0, 'states' => 0,
             'suspend' => [], 'resume' => [], 'texts' => [], 'published' => [],
             'moderated' => [], 'fixed' => [], 'retired' => [], 'bids' => [], 'bids_set' => 0, 'deduped' => 0,
-            'keywords' => [], 'demand' => 0,
+            'keywords' => [], 'demand' => 0, 'autotargeting' => 0,
             'attention' => [], 'errors' => [],
         ];
 
@@ -254,6 +254,14 @@ class DirectSyncService
             $report['deduped'] = $dedupe['suspended'];
             $report['attention'][] = 'Одинаковые фразы у разных позиций: выключено копий '
                 .$dedupe['suspended'].' — по совпавшей фразе Директ показывает только одно наше объявление';
+        }
+
+        // Автотаргетинг держим на заданной ставке каждым прогоном, а не только
+        // при публикации: иначе настройка вступала бы в силу лишь тогда, когда
+        // в кабинете появляется новое объявление.
+        $tamed = $this->publisher->tameAutotargeting($campaignId, $by);
+        if ($tamed > 0) {
+            $report['autotargeting'] = $tamed;
         }
 
         // Ставки по аукциону — последним шагом, когда новые фразы уже созданы.

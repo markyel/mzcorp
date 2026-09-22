@@ -59,6 +59,13 @@ class DirectSyncCommand extends Command
         if (($report['demand'] ?? 0) > 0) {
             $this->line('  спрос померен по фразам: '.$report['demand']);
         }
+        if (($report['autotargeting'] ?? 0) > 0) {
+            $this->line(sprintf(
+                '  автотаргетинг: ставка %s ₽ в %d группах',
+                \App\Services\Direct\DirectPublisherService::autotargetingBid(),
+                $report['autotargeting'],
+            ));
+        }
         foreach (['texts' => 'тексты', 'published' => 'создать', 'moderated' => 'модерация', 'fixed' => 'переписать после отказа', 'retired' => 'убрать из кабинета', 'keywords' => 'фразы', 'bids' => 'ставки'] as $key => $label) {
             if ($report[$key] !== []) {
                 $this->line('  '.$label.': '.implode(', ', $report[$key]));
