@@ -178,11 +178,11 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .trow.unread .from{font-weight:700}
 .mailapp .trow .from .more-to{font-weight:400;color:var(--fg-4)}
 /* Метки: фильтр над списком, чипы в строке, контекстное меню строки. */
-.mailapp .fltbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .mailapp .linkbtn{border:none;background:none;padding:0;cursor:pointer;color:var(--accent);font:inherit;text-decoration:underline}
-.mailapp .unreadchip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 10px;border-radius:999px;cursor:pointer;
-    border:1px solid var(--border-strong);background:var(--bg-surface);color:var(--fg-2);font:500 11.5px/1 var(--font-sans)}
-.mailapp .unreadchip .d{width:7px;height:7px;border-radius:999px;background:var(--border-strong)}
+.mailapp .fhdr-right{display:inline-flex;align-items:center;gap:8px}
+.mailapp .unreadchip{display:inline-flex;align-items:center;gap:5px;height:19px;padding:0 8px;border-radius:999px;cursor:pointer;
+    border:1px solid var(--border-strong);background:var(--bg-surface);color:var(--fg-3);font:500 11px/1 var(--font-sans)}
+.mailapp .unreadchip .d{width:6px;height:6px;border-radius:999px;background:var(--border-strong)}
 .mailapp .unreadchip:hover{border-color:var(--accent);color:var(--fg-1)}
 .mailapp .unreadchip.on{border-color:var(--accent);background:var(--sky-50);color:var(--accent)}
 .mailapp .unreadchip.on .d{background:var(--accent)}
@@ -547,17 +547,6 @@ body.mail-resizing iframe{pointer-events:none}
                 <button class="compose" wire:click="compose({{ (int) $selectedMailboxId }})">Написать</button>
             </div>
 
-            {{-- Срез «только непрочитанные»: такой же фильтр поверх папки, как
-                 метка. Стоит отдельно от меток — метки есть не у всех, а этот
-                 фильтр нужен всегда. --}}
-            <div class="fltbar">
-                <button type="button" class="unreadchip {{ $unreadOnly ? 'on' : '' }}"
-                        wire:click="toggleUnreadOnly"
-                        title="{{ $unreadOnly ? 'Показать все письма' : 'Оставить только непрочитанные' }}">
-                    <span class="d"></span>Только непрочитанные
-                </button>
-            </div>
-
             {{-- Фильтр по меткам: срез поверх текущей папки, письмо остаётся на месте. --}}
             @if(count($this->labels))
                 @php $lcounts = $this->labelCounts; @endphp
@@ -626,7 +615,16 @@ body.mail-resizing iframe{pointer-events:none}
                 @else
                     <span>{{ $this->searchScopeLabel ?? $this->currentFolderLabel }}</span>
                 @endif
-                <span><b>{{ number_format($this->totalCount, 0, '.', ' ') }}</b> писем</span>
+                {{-- Срез «только непрочитанные» стоит у счётчика писем: он же
+                     этот счётчик и меняет, а отдельной строки не стоит. --}}
+                <span class="fhdr-right">
+                    <button type="button" class="unreadchip {{ $unreadOnly ? 'on' : '' }}"
+                            wire:click="toggleUnreadOnly"
+                            title="{{ $unreadOnly ? 'Показать все письма' : 'Оставить только непрочитанные' }}">
+                        <span class="d"></span>{{ $unreadOnly ? 'Только непрочитанные' : 'Непрочитанные' }}
+                    </button>
+                    <span><b>{{ number_format($this->totalCount, 0, '.', ' ') }}</b> писем</span>
+                </span>
             </div>
         </div>
 
