@@ -354,3 +354,15 @@ Schedule::command('clients:extract-requisites --apply --limit=200')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Реестр «Клиенты» из переписки: контакт заводится по адресу заявки, даже если
+// организацию опознать нечем. КП покупательского ИНН не содержит (он только в
+// счёте), поэтому по клиентам, которым мы слали лишь КП, реквизитов нет — но
+// человек с именем и почтой в реестре быть обязан, иначе менеджер не может
+// привязать его к организации руками. Раз в сутки ночью.
+Schedule::command('clients:backfill --apply')
+    ->dailyAt('04:30')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
