@@ -134,10 +134,14 @@ class Index extends Component
         return app(DirectCandidateService::class)->queue($this->planDepth());
     }
 
-    /** Глубина подготовки текстов: ротация плюс ближайший резерв. */
+    /**
+     * Глубина списка — ровно тот резерв, который готовит конвейер: раздел
+     * обещает «держим готовыми N», значит эти N и должны быть на экране.
+     * PREPARE_AHEAD остаётся запасом на случай, если резерв меньше показа.
+     */
     public function planDepth(): int
     {
-        return max(20, $this->adsLimit + self::PREPARE_AHEAD);
+        return max(20, $this->benchSize, $this->adsLimit + self::PREPARE_AHEAD);
     }
 
     #[Computed]
@@ -511,7 +515,11 @@ class Index extends Component
     #[Computed]
     public function publishedAds()
     {
-        return DirectPublishedAd::query()->orderByDesc('id')->limit(50)->get();
+        // Состояние нужно КАЖДОЙ строке списка, а не полусотне свежих: с
+        // лимитом у позиций, созданных раньше, плашка врала «не опубликована»,
+        // и «идут показы» насчитывалось вдвое меньше, чем показывается на деле.
+        // Объявлений столько же, сколько мест в показе плюс резерв — десятки.
+        return DirectPublishedAd::query()->orderByDesc('id')->get();
     }
 
     /** @return \Illuminate\Support\Collection<int, DirectOperation> */
