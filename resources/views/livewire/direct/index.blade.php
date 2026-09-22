@@ -188,6 +188,65 @@
         $plan = $plan->sortByDesc($onAir)->values();
     @endphp
 
+    {{-- Что приносит показы: наши фразы или подбор Яндекса --}}
+    @php $st = $this->stats; @endphp
+    <div class="ds-card">
+        <div class="ds-card-header flex-wrap">
+            <h3 class="text-[15px] font-semibold text-fg-1">📈 Что приносит показы</h3>
+            <span class="text-[12px] text-fg-3">за {{ $st['days'] }} дн.</span>
+        </div>
+        <div class="ds-card-body">
+            @if($st['impressions'] === 0)
+                <p class="text-[12.5px] text-fg-3">
+                    Показов за период нет — либо их правда не было, либо отчёт Директа ещё не догнал
+                    живой счётчик: разрезы отстают на несколько часов, данные тянутся каждый час.
+                </p>
+            @else
+                <div class="flex flex-wrap gap-5 text-[12.5px] text-fg-2 mb-3">
+                    <span>показов: <b class="mono text-fg-1">{{ $st['impressions'] }}</b></span>
+                    <span>из них автотаргетинг:
+                        <b class="mono text-fg-1">{{ $st['auto']['impressions'] }}</b></span>
+                    <span>кликов: <b class="mono text-fg-1">{{ $st['clicks'] }}</b></span>
+                    <span>расход: <b class="mono text-fg-1">{{ number_format($st['cost'], 2, ',', ' ') }} ₽</b></span>
+                </div>
+
+                <div class="grid gap-4 md:grid-cols-2">
+                    <div>
+                        <div class="text-[11.5px] text-fg-4 mb-1">Наши фразы</div>
+                        @forelse($st['phrases'] as $row)
+                            <div class="flex items-baseline gap-2 text-[12.5px] py-[3px] border-b border-border-subtle">
+                                <span class="flex-1 truncate text-fg-1">{{ $row['name'] }}</span>
+                                @if($row['sku'])<span class="mono text-[11px] text-fg-4">{{ $row['sku'] }}</span>@endif
+                                <span class="mono text-fg-2">{{ $row['impressions'] }}</span>
+                                <span class="mono text-fg-4 w-[30px] text-right">{{ $row['clicks'] }}</span>
+                            </div>
+                        @empty
+                            <p class="text-[12px] text-fg-4">Ни одна наша фраза показов пока не дала.</p>
+                        @endforelse
+                    </div>
+                    <div>
+                        <div class="text-[11.5px] text-fg-4 mb-1">
+                            Что люди искали на самом деле — материал для новых фраз
+                        </div>
+                        @forelse($st['queries'] as $row)
+                            <div class="flex items-baseline gap-2 text-[12.5px] py-[3px] border-b border-border-subtle">
+                                <span class="flex-1 truncate text-fg-1">{{ $row['name'] }}</span>
+                                @if($row['auto'])
+                                    <span class="chip text-[10px]" style="background:var(--sky-50);color:var(--sky-700)">подбор</span>
+                                @endif
+                                <span class="mono text-fg-2">{{ $row['impressions'] }}</span>
+                                <span class="mono text-fg-4 w-[30px] text-right">{{ $row['clicks'] }}</span>
+                            </div>
+                        @empty
+                            <p class="text-[12px] text-fg-4">Поисковых запросов в отчёте пока нет.</p>
+                        @endforelse
+                    </div>
+                </div>
+                <p class="text-[11.5px] text-fg-4 mt-2">Столбцы: показы, клики.</p>
+            @endif
+        </div>
+    </div>
+
     <div class="ds-card">
         <div class="ds-card-header flex-wrap">
             <h3 class="text-[15px] font-semibold text-fg-1">📋 Позиции</h3>

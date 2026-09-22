@@ -48,6 +48,9 @@ class Index extends Component
      */
     public const PREPARE_AHEAD = 10;
 
+    /** За сколько дней показываем статистику в разделе. */
+    public const STATS_DAYS = 7;
+
     /** Сколько позиций пишем за одно нажатие — чтобы запрос не висел минутами. */
     public const BULK_LIMIT = 25;
 
@@ -497,6 +500,19 @@ class Index extends Component
             'onAir' => DirectPublishedAd::query()->where('state', 'ON')->count(),
             'last' => app(SettingsService::class)->get(DirectSyncService::SETTING_LAST_RUN),
         ];
+    }
+
+    /**
+     * Что принесло показы: наши фразы или подбор Яндекса, и по каким реальным
+     * запросам пришли люди. Данные кладёт `direct:stats` — сервис отчётов
+     * отстаёт от живого счётчика на часы, поэтому читаем сохранённое.
+     *
+     * @return array<string, mixed>
+     */
+    #[Computed]
+    public function stats(): array
+    {
+        return app(\App\Services\Direct\DirectStatsService::class)->summary(self::STATS_DAYS);
     }
 
     /** Наша кампания глазами Директа: состояние, статус, число объявлений. */
