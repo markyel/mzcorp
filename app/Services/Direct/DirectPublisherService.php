@@ -637,6 +637,11 @@ class DirectPublisherService
             $suspended = $off['ok'] ? count($ids) : 0;
         }
 
+        // Запоминаем набор, к которому привели: по нему конвейер и понимает,
+        // что объявление уже в порядке и трогать его в следующий час не надо.
+        $ad->keywords = $wanted;
+        $ad->save();
+
         return [
             'added' => $added,
             'suspended' => $suspended,

@@ -73,6 +73,25 @@ class DirectPublishedAd extends Model
      *
      * @param  array<string, mixed>  $plan
      */
+    /**
+     * Набор фраз разошёлся с планом — объявление надо привести к нему.
+     *
+     * Порядок не важен: важно, какие фразы показываются.
+     *
+     * @param  array<int, string>  $wanted
+     */
+    public function keywordsDifferFrom(array $wanted): bool
+    {
+        $normalize = function (array $phrases) {
+            $phrases = array_values(array_unique(array_map(fn ($p) => mb_strtolower(trim((string) $p)), $phrases)));
+            sort($phrases);
+
+            return $phrases;
+        };
+
+        return $normalize((array) ($this->keywords ?? [])) !== $normalize($wanted);
+    }
+
     public function differsFrom(array $plan): bool
     {
         foreach (DirectAdText::FIELDS as $field) {

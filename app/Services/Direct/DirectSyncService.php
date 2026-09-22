@@ -230,21 +230,22 @@ class DirectSyncService
         // Фразы живых объявлений — к плану: генератор меняется (убрали
         // «артикул купить», добавили тематические), и без этого шага правка
         // достаётся только новым объявлениям.
-        $refreshed = 0;
-        foreach ($published->take(self::MAX_KEYWORD_SYNC) as $ad) {
+        // Берём те, у кого набор фраз разошёлся с планом: сделанное объявление
+        // из отбора выпадает само, и за несколько прогонов очередь доходит до
+        // всех — в отличие от «первых двадцати», которые брались бы всегда.
+        $needKeywords = $published->filter(function ($ad) use ($planBySku) {
             $row = $planBySku[$ad->sku] ?? null;
-            if ($row === null || ($row['keywords'] ?? []) === []) {
-                continue;
-            }
-            $res = $this->publisher->syncKeywords($ad, $row['keywords'], $by);
+
+            return $row !== null && ($row['keywords'] ?? []) !== [] && $ad->keywordsDifferFrom($row['keywords']);
+        })->take(self::MAX_KEYWORD_SYNC);
+
+        foreach ($needKeywords as $ad) {
+            $res = $this->publisher->syncKeywords($ad, $planBySku[$ad->sku]['keywords'], $by);
             if ($res['message'] !== '') {
                 $report['keywords'][] = $res['message'];
-                $refreshed++;
             }
         }
-        if ($refreshed > 0) {
-            $report['keywords'] = array_slice($report['keywords'], 0, 5);
-        }
+        $report['keywords'] = array_slice($report['keywords'], 0, 5);
 
         // Дубли фраз — до ставок: гасим лишние копии, чтобы не платить за то,
         // что всё равно не покажется, и чтобы аукцион считался по живым фразам.
