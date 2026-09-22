@@ -8,6 +8,7 @@ use App\Models\DirectPublishedAd;
 use App\Models\User;
 use App\Services\Settings\SettingsService;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Создание структуры в Директе: кампания-контейнер, группа на позицию,
@@ -148,7 +149,17 @@ class DirectPublisherService
                 continue;
             }
 
-            $result = $this->publishRow($row, $item, $record, $campaignId, $by, $groups);
+            // Один сбой не должен ронять прогон: ошибка на позиции стоит нам
+            // одной позиции, а не всей синхронизации (кейс 22.09: битый UTF-8
+            // в заголовке прервал публикацию посреди списка).
+            try {
+                $result = $this->publishRow($row, $item, $record, $campaignId, $by, $groups);
+            } catch (\Throwable $e) {
+                Log::error('Direct: позиция не опубликована', [
+                    'sku' => $row['sku'] ?? null, 'error' => $e->getMessage(),
+                ]);
+                $result = ['ok' => false, 'message' => ($row['sku'] ?? '?').': '.mb_substr($e->getMessage(), 0, 140)];
+            }
             $result['ok'] ? $published++ : $failed++;
             if ($result['message'] !== '') {
                 $messages[] = $result['message'];

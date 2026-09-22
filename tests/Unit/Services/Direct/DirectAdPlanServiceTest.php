@@ -67,6 +67,19 @@ class DirectAdPlanServiceTest extends TestCase
         $this->assertSame('Плата (v2)', Plan::tidyTail('Плата (v2)'));
     }
 
+    public function test_cut_title_stays_valid_utf8(): void
+    {
+        // Кейс 22.09: заголовок, обрезанный на букве «р» (d1 80), терял второй
+        // байт в rtrim() со списком многобайтовых тире — Postgres отвергал
+        // строку и ронял весь прогон синхронизации.
+        $title = Plan::adTitle($this->item([
+            'name' => 'ГРЕБЕНКА ЦЕНТРАЛЬНАЯ OTIS 506NCE и XO-508, БЕЗ КРЕПЕЖА, серый цвет опор',
+        ]));
+
+        $this->assertTrue(mb_check_encoding($title, 'UTF-8'), 'заголовок обязан остаться валидным UTF-8');
+        $this->assertLessThanOrEqual(Plan::TITLE_MAX, mb_strlen($title));
+    }
+
     public function test_cut_never_ends_on_a_conjunction_or_preposition(): void
     {
         // Кейс M15556: второй заголовок «Поручень для эскалатора и
