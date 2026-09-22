@@ -2,9 +2,11 @@
 
 namespace App\Livewire\AutoQuote;
 
+use App\Models\AutoQuoteSnapshot;
 use App\Models\Request;
 use App\Services\Quotes\AutoQuoteComparisonService;
 use App\Services\Quotes\AutoQuoteRuleService;
+use App\Services\Quotes\AutoQuoteSnapshotService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
@@ -69,9 +71,19 @@ class Index extends Component
             ->orderByDesc('created_at')
             ->get();
 
+        // Снимки решений: по ним видно, что автомат выдал БЫ ТОГДА, с той
+        // ценой и тем правилом. Свежий расчёт остаётся для заявок, до которых
+        // фиксация ещё не дошла, — и помечается как расчёт «сейчас».
+        $snapshots = AutoQuoteSnapshot::query()
+            ->with('organization')
+            ->whereIn('request_id', $requests->pluck('id'))
+            ->get()
+            ->keyBy('request_id');
+
         $rows = [];
         foreach ($requests as $request) {
-            $verdict = $rule->verdict($request);
+            $snapshot = $snapshots[$request->id] ?? null;
+            $verdict = $snapshot !== null ? $snapshot->toVerdict() : $rule->verdict($request);
             if (! $verdict['eligible']) {
                 continue;
             }
@@ -81,6 +93,8 @@ class Index extends Component
                 'request' => $request,
                 'verdict' => $verdict,
                 'comparison' => $comparison,
+                'snapshot' => $snapshot,
+                'stale_rule' => $snapshot?->isStaleRule(AutoQuoteSnapshotService::RULE_VERSION) ?? false,
                 // Текст клиента рядом с решением автомата: без него по списку
                 // не понять, что именно просили и почему менеджер ответил иначе.
                 'asked_text' => $this->inboundExcerpt($request->id),

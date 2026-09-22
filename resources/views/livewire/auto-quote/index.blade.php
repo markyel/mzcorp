@@ -132,6 +132,17 @@
                                   style="{{ ($v['organization'] ?? null) ? 'background:var(--sky-50);color:var(--sky-700)' : 'background:var(--neutral-100);color:var(--fg-3)' }}">
                                 {{ $v['pricing'] ?? '' }}
                             </span>
+                            {{-- Решение зафиксировано или пересчитано сейчас — это разные вещи. --}}
+                            @if($row['snapshot'] ?? null)
+                                <span class="text-[11px] text-fg-4">
+                                    решение зафиксировано {{ $row['snapshot']->evaluated_at?->format('d.m H:i') }}
+                                    @if($row['stale_rule'] ?? false)
+                                        <span class="text-amber-800">· правило {{ $row['snapshot']->rule_version }}, с тех пор менялось</span>
+                                    @endif
+                                </span>
+                            @else
+                                <span class="text-[11px] text-amber-800">решение пересчитано сейчас — снимка ещё нет</span>
+                            @endif
                             <span>менеджер: <span class="text-fg-2">{{ $r->assignedUser?->name ?? '—' }}</span></span>
                             <span>статус: <span class="text-fg-2">{{ $r->status?->label() ?? $r->status }}</span></span>
                             @if($c['document'])

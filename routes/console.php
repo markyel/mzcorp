@@ -366,3 +366,13 @@ Schedule::command('clients:backfill --apply')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Снимок решения авто-КП по свежим заявкам. Пока выдача холостая, это
+// единственный способ честно измерить правило: цена, скидка и набор проверок
+// фиксируются такими, какими были в момент заявки, и через неделю не
+// пересчитываются задним числом. Каждые 15 минут, догоняя окно в трое суток.
+Schedule::command('auto-quote:snapshot --hours=72')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
