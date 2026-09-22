@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\Role;
 use App\Models\Request as RequestModel;
+use App\Models\SupplierInquiry;
 use App\Services\Requests\CorrespondenceExportService;
 use Illuminate\Http\Request as HttpRequest;
 use Illuminate\Support\Facades\Storage;
