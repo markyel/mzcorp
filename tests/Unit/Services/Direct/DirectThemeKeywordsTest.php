@@ -64,14 +64,24 @@ class DirectThemeKeywordsTest extends TestCase
         $this->assertSame('', Plan::brandWord($this->item(['brand' => ''])));
     }
 
-    public function test_two_phrases_per_position_type_and_type_with_brand(): void
+    public function test_the_phrase_carries_the_brand(): void
     {
         $phrases = Plan::themeKeywords($this->item([
             'part_type' => 'Поручень эскалатора и траволатора',
             'brand' => 'Semperit',
         ]));
 
-        $this->assertSame(['поручень эскалатора', 'поручень эскалатора semperit'], $phrases);
+        // Только с брендом: голый тип детали — общая фраза, её закрывает
+        // отдельная кампания, а эта живёт на конкретной потребности.
+        $this->assertSame(['поручень эскалатора semperit'], $phrases);
+    }
+
+    public function test_without_a_brand_there_is_no_theme_phrase(): void
+    {
+        $this->assertSame([], Plan::themeKeywords($this->item([
+            'part_type' => 'Канат тяговый',
+            'brand' => '',
+        ])));
     }
 
     public function test_only_measured_demand_gets_into_the_plan(): void
