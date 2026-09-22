@@ -236,8 +236,8 @@ body.mail-resizing iframe{pointer-events:none}
 /* Флажок живёт под кружком, а не в строке метаданных: там он терялся среди
    скрепки и номера заявки. Непомеченное письмо флажка не показывает вовсе —
    проступает при наведении на строку, как и галочка выбора слева. */
-.mailapp .trow .avcol{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}
-.mailapp .trow .flagbtn{border:none;background:none;cursor:pointer;font-size:13px;color:var(--fg-4);padding:0;line-height:1;opacity:0;transition:opacity .12s}
+.mailapp .trow .avcol{display:flex;flex-direction:column;align-items:center;gap:7px;min-width:0}
+.mailapp .trow .flagbtn{border:none;background:none;cursor:pointer;font-size:16px;color:var(--fg-4);padding:0;line-height:1;opacity:0;transition:opacity .12s}
 .mailapp .trow:hover .flagbtn{opacity:1}
 .mailapp .trow .flagbtn:hover{color:var(--amber-600)}
 .mailapp .trow .flagbtn.on{color:var(--amber-600);opacity:1}
