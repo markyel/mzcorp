@@ -11,6 +11,7 @@ use App\Services\Direct\DirectAdPlanService;
 use App\Services\Direct\DirectAdTextService;
 use App\Services\Direct\DirectAdTone;
 use App\Services\Direct\DirectApiClient;
+use App\Services\Direct\DirectBidService;
 use App\Services\Direct\DirectCandidateService;
 use App\Services\Direct\DirectPublisherService;
 use App\Services\Direct\DirectSyncService;
