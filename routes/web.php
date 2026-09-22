@@ -257,6 +257,14 @@ Route::middleware('auth')->group(function () {
             return view('invoices.index');
         })->name('invoices.index');
 
+        // Авто-КП — холостой прогон автоматической выдачи: что автомат выдал бы
+        // по заявке и чем это расходится с тем, что ушло клиенту. Ничего не
+        // создаёт и не отправляет, поэтому открыт всем сотрудникам — раздел
+        // лежал в admin-группе, и даже директор получал 403.
+        Route::get('/dashboard/auto-quote', function () {
+            return view('auto-quote.index');
+        })->name('auto-quote.index');
+
         // Раздел «Клиенты» — реестр организаций + контактов (email). Доступен и
         // редактируется всеми ролями (реквизиты/скидки нужны в работе).
         Route::get('/dashboard/clients', function () {
@@ -439,13 +447,6 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/direct', function () {
             return view('direct.index');
         })->name('direct.index');
-
-        // Авто-КП — холостой прогон автоматической выдачи: что автомат выдал бы
-        // по заявке и чем это расходится с тем, что ушло клиенту. Ничего не
-        // создаёт и не отправляет, поэтому открыт всем сотрудникам.
-        Route::get('/dashboard/auto-quote', function () {
-            return view('auto-quote.index');
-        })->name('auto-quote.index');
 
         // Скидки контрагентов — загрузка выгрузки из корпоративной базы.
         // Скидка уходит в карточку организации и оттуда в КП, включая
