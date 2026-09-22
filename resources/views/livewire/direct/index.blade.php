@@ -179,13 +179,21 @@
                 default => ['готово, ждёт кампании', 'background:var(--sky-50);color:var(--sky-700)'],
             };
         };
+
+        // Кто в показе, решает не порядок очереди, а факт: место более денежной
+        // позиции, пока она на модерации, занимает следующая готовая. Поэтому
+        // делим список по состоянию в Директе — иначе строка «идут показы»
+        // оказывается под чертой «в показ не уходят».
+        $onAir = fn ($p) => ($ads[$p['sku']] ?? null)?->state === 'ON';
+        $plan = $plan->sortByDesc($onAir)->values();
     @endphp
 
     <div class="ds-card">
         <div class="ds-card-header flex-wrap">
             <h3 class="text-[15px] font-semibold text-fg-1">📋 Позиции</h3>
             <span class="text-[12px] text-fg-3">
-                первые <b class="mono">{{ $adsLimit }}</b> в показе, готовим <b class="mono">{{ $benchSize }}</b>
+                мест в показе <b class="mono">{{ $adsLimit }}</b>, держим готовыми <b class="mono">{{ $benchSize }}</b>;
+                место занимает следующая позиция очереди, прошедшая модерацию
             </span>
             @if($campaign)
                 <span class="chip text-[10.5px]" style="background:var(--emerald-50);color:var(--emerald-700)">
@@ -265,15 +273,15 @@
             @forelse($plan as $p)
                 @php [$stageLabel, $stageStyle] = $stage($p); $ad = $ads[$p['sku']] ?? null; @endphp
 
-                @if(! $p['in_rotation'] && ($plan[$loop->index - 1]['in_rotation'] ?? false))
+                @if($loop->index > 0 && ! $onAir($p) && $onAir($plan[$loop->index - 1]))
                     <div class="flex items-center gap-2 text-[11px] text-fg-4 py-1" wire:key="dp-line">
                         <span class="flex-1" style="height:1px;background:var(--border-strong)"></span>
-                        <span>ниже — резерв: тексты и модерация заранее, в показ не уходят</span>
+                        <span>ниже — резерв: тексты и модерация готовятся заранее, показов пока нет</span>
                         <span class="flex-1" style="height:1px;background:var(--border-strong)"></span>
                     </div>
                 @endif
 
-                <div wire:key="dp-{{ $p['sku'] }}" class="border border-border rounded-md {{ $p['in_rotation'] ? '' : 'opacity-75' }}"
+                <div wire:key="dp-{{ $p['sku'] }}" class="border border-border rounded-md {{ $onAir($p) ? '' : 'opacity-75' }}"
                      x-data="{ open: false }">
                     <button type="button" class="w-full flex items-center gap-2 px-3 py-2 text-left" @click="open = ! open">
                         <span class="text-fg-4 text-[11px] w-[14px]" x-text="open ? '▾' : '▸'"></span>
