@@ -98,7 +98,7 @@ class DirectSyncService
         $report = [
             'applied' => $apply, 'checked' => 0, 'states' => 0,
             'suspend' => [], 'resume' => [], 'texts' => [], 'published' => [],
-            'moderated' => [], 'fixed' => [], 'retired' => [], 'bids' => [], 'bids_set' => 0,
+            'moderated' => [], 'fixed' => [], 'retired' => [], 'bids' => [], 'bids_set' => 0, 'deduped' => 0,
             'attention' => [], 'errors' => [],
         ];
 
@@ -210,6 +210,15 @@ class DirectSyncService
             if (! $res['ok']) {
                 $report['errors'][] = $res['message'];
             }
+        }
+
+        // Дубли фраз — до ставок: гасим лишние копии, чтобы не платить за то,
+        // что всё равно не покажется, и чтобы аукцион считался по живым фразам.
+        $dedupe = $this->publisher->dedupeKeywords($campaignId, $by);
+        if ($dedupe['suspended'] > 0) {
+            $report['deduped'] = $dedupe['suspended'];
+            $report['attention'][] = 'Одинаковые фразы у разных позиций: выключено копий '
+                .$dedupe['suspended'].' — по совпавшей фразе Директ показывает только одно наше объявление';
         }
 
         // Ставки по аукциону — последним шагом, когда новые фразы уже созданы.

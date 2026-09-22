@@ -29,6 +29,9 @@ class DirectPublisherService
     /** Ключ настройки с идентификатором кампании-контейнера. */
     public const SETTING_CAMPAIGN_ID = 'direct.campaign_id';
 
+    /** Сколько фраз-дублей гасим за прогон — чтобы один вызов не разросся. */
+    public const MAX_DEDUPE = 200;
+
     public function __construct(
         private readonly DirectApiClient $api,
         private readonly SettingsService $settings,
@@ -559,6 +562,60 @@ class DirectPublisherService
         ], null, $by);
 
         return $set['ok'] ? count($ids) : 0;
+    }
+
+    /**
+     * Выключить фразы-дубли внутри кампании.
+     *
+     * По совпавшей фразе Директ показывает одно объявление рекламодателя
+     * (правила показа, п. 3.8) — вторая копия фразы показов не добавляет, зато
+     * отбирает их у первой и путает статистику. Дубли берутся из жизни: одна и
+     * та же деталь встречается в каталоге в нескольких исполнениях с общим
+     * кодом производителя. Оставляем копию в самой ранней группе — позиции
+     * публикуются по очереди, и первая создана самой денежной. Гасим, а не
+     * удаляем: позиция может уйти со склада, и тогда фраза вернётся к соседу.
+     *
+     * @return array{suspended: int, phrases: array<int, string>}
+     */
+    public function dedupeKeywords(int $campaignId, ?User $by = null): array
+    {
+        $res = $this->call('keywords', 'get', [
+            'SelectionCriteria' => ['CampaignIds' => [$campaignId], 'States' => ['ON']],
+            'FieldNames' => ['Id', 'Keyword', 'AdGroupId'],
+        ], null, $by);
+
+        $byPhrase = [];
+        foreach ($res['result']['Keywords'] ?? [] as $keyword) {
+            $phrase = mb_strtolower(trim((string) ($keyword['Keyword'] ?? '')));
+            if ($phrase === '' || str_contains($phrase, 'autotargeting')) {
+                continue;
+            }
+            $byPhrase[$phrase][] = (int) $keyword['Id'];
+        }
+
+        $ids = [];
+        $phrases = [];
+        foreach ($byPhrase as $phrase => $keywordIds) {
+            if (count($keywordIds) < 2) {
+                continue;
+            }
+            sort($keywordIds);
+            array_shift($keywordIds);
+            $ids = array_merge($ids, $keywordIds);
+            $phrases[] = $phrase;
+        }
+        if ($ids === []) {
+            return ['suspended' => 0, 'phrases' => []];
+        }
+
+        $ids = array_slice($ids, 0, self::MAX_DEDUPE);
+        $off = $this->call('keywords', 'suspend', [
+            'SelectionCriteria' => ['Ids' => $ids],
+        ], null, $by);
+
+        return $off['ok']
+            ? ['suspended' => count($ids), 'phrases' => $phrases]
+            : ['suspended' => 0, 'phrases' => []];
     }
 
     public static function autotargetingBid(): float

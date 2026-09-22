@@ -54,12 +54,44 @@ class DirectAdPlanService
         $stored = $this->texts->storedFor($items->pluck('sku')->map(fn ($s) => (string) $s)->all());
         $tone = self::currentTone();
 
-        return $items->values()->map(fn ($item, $i) => $this->forItem(
-            $item,
-            $stored[(string) $item->sku] ?? null,
-            $i < $limit,
-            $tone,
-        ));
+        // Одна фраза — одно объявление. По совпавшей фразе Директ показывает
+        // только одно объявление рекламодателя (правила показа, п. 3.8),
+        // остальные считает дублями, так что вторая позиция с тем же кодом
+        // не добавляет показов — она их отнимает у первой. Коды совпадают
+        // у одной детали в разных исполнениях. Фраза достаётся позиции,
+        // стоящей выше в очереди: она денежнее.
+        $taken = [];
+
+        return $items->values()->map(function ($item, $i) use ($stored, $limit, $tone, &$taken) {
+            $row = $this->forItem($item, $stored[(string) $item->sku] ?? null, $i < $limit, $tone);
+
+            $own = self::claimKeywords($row['keywords'], $taken);
+            if ($own !== $row['keywords']) {
+                $row['warnings'][] = $own === []
+                    ? 'Все коды позиции уже рекламирует более денежная позиция — показывать нечего.'
+                    : 'Часть кодов уже рекламирует более денежная позиция — оставлены только свои.';
+                $row['keywords'] = $own;
+            }
+
+            return $row;
+        });
+    }
+
+    /**
+     * Забрать фразы, ещё никем не занятые, и пометить их занятыми.
+     *
+     * @param  array<int, string>  $keywords
+     * @param  array<string, true>  $taken
+     * @return array<int, string>
+     */
+    public static function claimKeywords(array $keywords, array &$taken): array
+    {
+        $own = array_values(array_filter($keywords, fn ($k) => ! isset($taken[$k])));
+        foreach ($own as $keyword) {
+            $taken[$keyword] = true;
+        }
+
+        return $own;
     }
 
     /**
