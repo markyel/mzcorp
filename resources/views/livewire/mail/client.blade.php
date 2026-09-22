@@ -233,8 +233,14 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .trow .l3{display:flex;align-items:center;gap:6px;margin-top:3px}
 .mailapp .trow .snip{font:400 12px/1.3 var(--font-sans);color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
 .mailapp .trow .metaicons{display:flex;align-items:center;gap:6px;flex-shrink:0}
-.mailapp .trow .flagbtn{border:none;background:none;cursor:pointer;font-size:12px;color:var(--fg-4);padding:0;line-height:1}
-.mailapp .trow .flagbtn.on{color:var(--amber-600)}
+/* Флажок живёт под кружком, а не в строке метаданных: там он терялся среди
+   скрепки и номера заявки. Непомеченное письмо флажка не показывает вовсе —
+   проступает при наведении на строку, как и галочка выбора слева. */
+.mailapp .trow .avcol{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}
+.mailapp .trow .flagbtn{border:none;background:none;cursor:pointer;font-size:13px;color:var(--fg-4);padding:0;line-height:1;opacity:0;transition:opacity .12s}
+.mailapp .trow:hover .flagbtn{opacity:1}
+.mailapp .trow .flagbtn:hover{color:var(--amber-600)}
+.mailapp .trow .flagbtn.on{color:var(--amber-600);opacity:1}
 .mailapp .trow .clip{color:var(--fg-3);font-size:12px}
 .mailapp .trow .reqchip{font:600 10.5px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px}
 .mailapp .trow .onecchip{font:600 10.5px/1.4 var(--font-mono);background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:4px;white-space:nowrap}
@@ -674,7 +680,12 @@ body.mail-resizing iframe{pointer-events:none}
                      @contextmenu.prevent.stop="openMenu({{ $m->id }}, {{ \Illuminate\Support\Js::from($rowLabelIds) }}, $event)">
                     @if($unread)<span class="dot-unread"></span>@endif
                     <span class="chk" @click.stop="toggle({{ $m->id }}, $event)" title="Выбрать (Shift — диапазон, Ctrl+A — все)"></span>
-                    <span class="av {{ $isOrg ? 'org' : '' }}">{{ $initials($partyName, $partyEmail) }}</span>
+                    <div class="avcol">
+                        <span class="av {{ $isOrg ? 'org' : '' }}">{{ $initials($partyName, $partyEmail) }}</span>
+                        <button type="button" class="flagbtn {{ $m->my_flagged_at ? 'on' : '' }}"
+                                wire:click.stop="toggleFlag({{ $m->id }})"
+                                title="{{ $m->my_flagged_at ? 'Снять пометку' : 'Пометить' }}">⚑</button>
+                    </div>
                     <div class="body">
                         <div class="l1">
                             <span class="from" title="{{ $isToParty ? 'Кому: ' : '' }}{{ $partyEmail }}">{{ $toPrefix ? 'Кому: ' : '' }}{{ $partyName ?: $partyEmail }}@if($moreTo) <span class="more-to">+{{ $moreTo }}</span>@endif</span>
@@ -692,8 +703,6 @@ body.mail-resizing iframe{pointer-events:none}
                         <div class="l3">
                             <span class="snip">{{ \Illuminate\Support\Str::limit(trim((string) $m->body_plain), 90) }}</span>
                             <span class="metaicons">
-                                <button type="button" class="flagbtn {{ $m->my_flagged_at ? 'on' : '' }}"
-                                        wire:click.stop="toggleFlag({{ $m->id }})" title="Пометить">⚑</button>
                                 @if($m->attachments_count)<span class="clip">📎</span>@endif
                                 @if($m->mailbox_folder_id && $m->mailbox_folder_id !== $this->customFolderId() && isset($this->folderNames[$m->mailbox_folder_id]))
                                     <span class="fchip" title="Письмо лежит в папке">▸ {{ $this->folderNames[$m->mailbox_folder_id] }}</span>
