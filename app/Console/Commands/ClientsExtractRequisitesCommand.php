@@ -31,7 +31,8 @@ class ClientsExtractRequisitesCommand extends Command
 {
     protected $signature = 'clients:extract-requisites
         {--apply : Реально писать организации/связи}
-        {--limit=0 : Максимум документов за прогон (0 = все необработанные)}';
+        {--limit=0 : Максимум документов за прогон (0 = все необработанные)}
+        {--retry-empty : Перепроверить и те, где покупателя не нашли (после правки парсера)}';
 
     protected $description = 'Достать реквизиты организаций-покупателей из PDF внешних КП/счетов (OutboundQuote)';
 
@@ -48,10 +49,17 @@ class ClientsExtractRequisitesCommand extends Command
         $limit = max(0, (int) $this->option('limit'));
         $this->ourInn = preg_replace('/\D+/', '', (string) config('services.company.inn', '')) ?? '';
 
+        // По умолчанию берём только неразобранные. `--retry-empty` добавляет
+        // те, где покупателя не нашли: после правки парсера их надо прогнать
+        // заново, а уже опознанные — не трогать.
         $base = OutboundQuote::query()
             ->with('request:id,client_email')
             ->whereNotNull('email_attachment_id')
-            ->whereRaw("(payload->>'requisites_extracted') IS NULL");
+            ->when(
+                (bool) $this->option('retry-empty'),
+                fn ($q) => $q->whereRaw("(payload->>'requisites_buyer_inn') IS NULL"),
+                fn ($q) => $q->whereRaw("(payload->>'requisites_extracted') IS NULL"),
+            );
 
         $pending = (clone $base)->count();
         $this->info(sprintf('Необработанных документов: %d. Mode: %s.', $pending, $apply ? 'APPLY' : 'DRY-RUN'));
@@ -118,9 +126,13 @@ class ClientsExtractRequisitesCommand extends Command
             }
         }
 
-        // Пометить обработанным (даже если покупателя не нашли — не парсить заново).
+        // Пометить обработанным. Найденный ИНН тоже пишем: по нему видно, какие
+        // документы стоит перепроверить после правки парсера (--retry-empty).
         $payload = is_array($q->payload) ? $q->payload : [];
         $payload['requisites_extracted'] = true;
+        if (isset($buyer) && $buyer['inn'] !== null) {
+            $payload['requisites_buyer_inn'] = $buyer['inn'];
+        }
         $q->forceFill(['payload' => $payload])->save();
     }
 
@@ -137,8 +149,9 @@ class ClientsExtractRequisitesCommand extends Command
             return $res;
         }
 
-        // 1) Чёткий блок «Покупатель: <Название>, ИНН …, КПП …, <адрес>» (счета 1С).
-        if (preg_match('/Покупатель\s*:?\s*([^,]{2,90})(.{0,200})/iu', $flat, $m)
+        // 1) Чёткий блок «Покупатель|Заказчик: <Название>, ИНН …, КПП …, <адрес>».
+        // «Покупатель» — счета 1С, «Заказчик» — наши КП: реквизиты там тоже есть.
+        if (preg_match('/(?:Покупатель|Заказчик)\s*:?\s*([^,]{2,90})(.{0,200})/iu', $flat, $m)
             && preg_match('/ИНН\D{0,4}(\d{10,12})/iu', $m[2], $mi)
             && $mi[1] !== $this->ourInn) {
             $res['inn'] = $mi[1];
@@ -156,12 +169,71 @@ class ClientsExtractRequisitesCommand extends Command
             return $res;
         }
 
-        // Нет чёткого блока «Покупатель: <Название>, ИНН …» = это НЕ наш
-        // клиентский счёт/КП (входящий счёт поставщика, банковская выписка,
-        // инвойс иностранцу и т.п., пойманные в исходящей почте). Организацию-
-        // покупателя НЕ создаём — иначе реестр забивается мусорными «ИНН N»
-        // без названия (bare-ИНН фолбэк давал 17/18 мусора).
+        // 2) В КП подпись «Заказчик:» стоит в своей колонке, и после
+        // схлопывания пробелов она оказывается ПОСЛЕ названия:
+        // «… ООО«Техкомплект», ИНН 7717296192, КПП … Заказчик: тел.: …».
+        // Ловим по самому ИНН, а название берём слева от него — но только
+        // если оно похоже на организацию (есть форма собственности).
+        // Без этой проверки прежний «голый ИНН» давал 17 мусорных имён из 18.
+        foreach (self::allInns($flat) as [$inn, $offset]) {
+            if ($inn === $this->ourInn) {
+                continue;
+            }
+            $before = mb_substr($flat, max(0, $offset - 120), min($offset, 120));
+            if (! preg_match('/([^,;:|]{2,90})\s*,?\s*$/u', $before, $mn)) {
+                continue;
+            }
+            $name = $this->cleanName($mn[1]);
+            if (! self::looksLikeCompany($name) || $this->isJunkName($name)) {
+                continue;
+            }
+
+            $tail = mb_substr($flat, $offset, 220);
+            $res['inn'] = $inn;
+            $res['name'] = $name;
+            if (preg_match('/КПП\D{0,4}(\d{9})/iu', $tail, $mk)) {
+                $res['kpp'] = $mk[1];
+            }
+            if (preg_match('/(?:КПП\D{0,4}\d{9}|ИНН\D{0,4}\d{10,12})\s*,?\s*(.+)$/iu', $tail, $ma)) {
+                $res['address'] = trim(mb_substr(trim($ma[1]), 0, 160), ' ,;');
+            }
+
+            return $res;
+        }
+
+        // Ни блока, ни организации рядом с ИНН — это не наш клиентский
+        // документ (входящий счёт поставщика, банковская выписка, инвойс
+        // иностранцу), организацию не создаём.
         return $res;
+    }
+
+    /**
+     * Все ИНН текста со смещениями.
+     *
+     * @return array<int, array{0: string, 1: int}>
+     */
+    private static function allInns(string $flat): array
+    {
+        if (! preg_match_all('/ИНН\D{0,4}(\d{10,12})/iu', $flat, $m, PREG_OFFSET_CAPTURE)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($m[1] as $hit) {
+            // preg смещения байтовые — переводим в символьные для mb_substr.
+            $out[] = [$hit[0], mb_strlen(substr($flat, 0, $hit[1]))];
+        }
+
+        return $out;
+    }
+
+    /** Название похоже на организацию: есть форма собственности. */
+    public static function looksLikeCompany(string $name): bool
+    {
+        return preg_match(
+            '/(^|\W)(ООО|ОАО|ЗАО|ПАО|АО|НАО|ИП|ФГУП|ГУП|МУП|НКО|ТСЖ|УК|СНТ|ЧОУ|ФГБУ|ГБУ|МБУ)(\W|$)|общество\s+с\s+ограниченной|индивидуальный\s+предприниматель/iu',
+            $name,
+        ) === 1;
     }
 
     private function cleanName(string $s): string
