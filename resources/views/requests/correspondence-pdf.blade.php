@@ -91,11 +91,14 @@
     </style>
 </head>
 <body>
+    {{-- Шапку задаёт вызывающий: документ один и тот же для переписки с
+         клиентом и с поставщиком, различаются только заголовок и подписи. --}}
     <div class="doc-head">
-        <div class="doc-title">Переписка по заявке {{ $request->internal_code }}</div>
+        <div class="doc-title">{{ $head['title'] }}</div>
         <div class="doc-meta">
-            @if($request->client_name)<span>Клиент: {{ $request->client_name }}</span>@endif
-            @if($request->client_email)<span>{{ $request->client_email }}</span>@endif
+            @foreach($head['meta'] ?? [] as $item)
+                <span>{{ $item }}</span>
+            @endforeach
             <span>Писем: {{ count($messages) }}</span>
             <span>Сформировано: {{ $generatedAt }}</span>
         </div>

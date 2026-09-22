@@ -7,6 +7,7 @@ use App\Enums\MailDirection;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\Request;
+use App\Models\SupplierInquiry;
 use App\Models\User;
 use Dompdf\Dompdf;
 use Dompdf\Options;
@@ -85,10 +86,49 @@ class CorrespondenceExportService
      */
     public function render(Request $request, Collection $thread): string
     {
+        return $this->renderThread([
+            'title' => 'Переписка по заявке '.$request->internal_code,
+            'meta' => array_values(array_filter([
+                $request->client_name ? 'Клиент: '.$request->client_name : null,
+                $request->client_email ?: null,
+            ])),
+        ], $thread);
+    }
+
+    /**
+     * Переписка с поставщиком по запросу расценки — тот же документ, другая
+     * шапка. Снабжение смотрит эти треды чаще менеджеров, и выгрузка им нужна
+     * ровно так же, как по клиенту.
+     *
+     * @param  Collection<int, EmailMessage>  $thread
+     */
+    public function renderSupplier(SupplierInquiry $inquiry, Collection $thread): string
+    {
+        $request = $inquiry->relatedRequest;
+
+        return $this->renderThread([
+            'title' => 'Переписка с поставщиком: '.($inquiry->supplier_name ?: $inquiry->supplier_email),
+            'meta' => array_values(array_filter([
+                $inquiry->supplier_email ?: null,
+                $request?->internal_code ? 'По заявке: '.$request->internal_code : null,
+                $inquiry->rfq_token ? 'Запрос '.$inquiry->rfq_token : null,
+            ])),
+        ], $thread);
+    }
+
+    /**
+     * Общий рендер треда: шапка задаётся вызывающим, остальное одинаково —
+     * письма, вложения, шрифты.
+     *
+     * @param  array{title: string, meta: array<int, string>}  $head
+     * @param  Collection<int, EmailMessage>  $thread
+     */
+    private function renderThread(array $head, Collection $thread): string
+    {
         $messages = $thread->map(fn (EmailMessage $m) => $this->presentMessage($m))->all();
 
         $payload = [
-            'request' => $request,
+            'head' => $head,
             'messages' => $messages,
             'company' => (array) config('services.company'),
             'generatedAt' => now()->setTimezone(config('app.timezone'))->format('d.m.Y H:i'),
@@ -128,6 +168,42 @@ class CorrespondenceExportService
         $code = preg_replace('/[^A-Za-zА-Яа-я0-9\-]+/u', '-', (string) $request->internal_code) ?: 'request';
 
         return "Переписка {$code}.{$ext}";
+    }
+
+    /** Имя файла по запросу поставщику: «Переписка поставщик Фермат.pdf». */
+    public function supplierFilename(SupplierInquiry $inquiry, string $ext): string
+    {
+        $name = $inquiry->supplier_name ?: $inquiry->supplier_email ?: ('запрос-'.$inquiry->id);
+        $name = preg_replace('/[^A-Za-zА-Яа-я0-9\- ]+/u', '', (string) $name) ?: 'поставщик';
+
+        return 'Переписка поставщик '.trim(mb_substr($name, 0, 60)).".{$ext}";
+    }
+
+    /**
+     * Тред запроса поставщику: те же правила, что и у клиентского — без
+     * черновиков, в порядке отправки, с вложениями.
+     *
+     * @param  int[]|null  $ids
+     * @return Collection<int, EmailMessage>
+     */
+    public function buildSupplierThread(SupplierInquiry $inquiry, ?array $ids = null): Collection
+    {
+        $query = EmailMessage::query()
+            ->where('supplier_inquiry_id', $inquiry->id)
+            ->where('is_draft', false)
+            ->with([
+                'attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline,file_path,disk',
+                'mailbox:id,email,name',
+            ])
+            ->orderByRaw('sent_at IS NULL, sent_at ASC')
+            ->orderBy('id');
+
+        if ($ids !== null) {
+            $ids = array_values(array_filter(array_map('intval', $ids)));
+            $query->whereIn('id', $ids ?: [0]);
+        }
+
+        return EmailMessage::dropDuplicateCopies($query->get());
     }
 
     /**

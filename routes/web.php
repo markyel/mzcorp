@@ -292,6 +292,12 @@ Route::middleware('auth')->group(function () {
             return view('suppliers.supplier-edit', ['supplier' => $supplier]);
         })->name('suppliers.registry-edit');
 
+        // Экспорт переписки с поставщиком — тот же документ, что по клиентской
+        // заявке. Объявлен ДО {inquiry}, иначе сегмент пути съест маршрут.
+        Route::get('/dashboard/suppliers/{inquiry}/correspondence/export',
+            [CorrespondencePdfController::class, 'exportSupplier'])
+            ->name('suppliers.correspondence.export');
+
         Route::get('/dashboard/suppliers/{inquiry}', function (SupplierInquiry $inquiry) {
             return view('suppliers.show', ['inquiry' => $inquiry]);
         })->name('suppliers.show');

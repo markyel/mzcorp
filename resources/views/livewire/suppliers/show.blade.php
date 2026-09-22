@@ -127,6 +127,12 @@
         <div class="ds-card-header">
             <h3>Переписка с поставщиком</h3>
             <span class="flex-1"></span>
+            @if($this->threadMessages->isNotEmpty())
+                {{-- Тот же экспорт, что и по клиентской заявке: снабжение читает
+                     эти треды чаще прочих, и выгрузка нужна им так же. --}}
+                <a href="{{ route('suppliers.correspondence.export', $inquiry) }}" class="btn btn-sm"
+                   title="Скачать переписку в PDF (фото встроены; если есть другие вложения — ZIP с PDF и файлами)">⭳ Экспорт в PDF</a>
+            @endif
             <button type="button" wire:click="toggleSort" class="btn btn-sm" title="Порядок сообщений">
                 {{ $threadSort === 'desc' ? '↓ сначала новые' : '↑ сначала старые' }}
             </button>

@@ -58,6 +58,41 @@ class CorrespondencePdfController extends Controller
     }
 
     /**
+     * Экспорт переписки с поставщиком по запросу расценки.
+     *
+     *   GET /dashboard/suppliers/{inquiry}/correspondence/export[?messages=1,2]
+     *
+     * Доступ — как к самой карточке запроса: её открывают все роли, включая
+     * снабжение, которое эти треды и читает чаще прочих. Отдельной проверки
+     * владельца здесь нет: у запроса поставщику нет «своего менеджера» в том
+     * смысле, в каком он есть у клиентской заявки.
+     */
+    public function exportSupplier(HttpRequest $httpRequest, SupplierInquiry $inquiry): Response
+    {
+        abort_unless(auth()->check(), 403);
+
+        $ids = $this->parseMessageIds($httpRequest->query('messages'));
+        $thread = $this->svc->buildSupplierThread($inquiry, $ids);
+
+        if ($thread->isEmpty()) {
+            abort(404, 'Нет писем для экспорта.');
+        }
+
+        $pdf = $this->svc->renderSupplier($inquiry, $thread);
+        $bundle = $this->svc->bundleAttachments($thread);
+
+        if ($bundle->isEmpty()) {
+            return $this->fileResponse($pdf, 'application/pdf', $this->svc->supplierFilename($inquiry, 'pdf'));
+        }
+
+        return $this->fileResponse(
+            $this->buildZipFrom($pdf, $this->svc->supplierFilename($inquiry, 'pdf'), $bundle),
+            'application/zip',
+            $this->svc->supplierFilename($inquiry, 'zip'),
+        );
+    }
+
+    /**
      * @return int[]|null  null → весь тред
      */
     private function parseMessageIds(mixed $raw): ?array
@@ -82,13 +117,24 @@ class CorrespondencePdfController extends Controller
      */
     private function buildZip(string $pdf, RequestModel $request, $bundle): string
     {
+        return $this->buildZipFrom($pdf, $this->svc->filename($request, 'pdf'), $bundle);
+    }
+
+    /**
+     * ZIP: PDF под своим именем + файлы-вложения. Отдельно от заявки — тем же
+     * архивом отдаётся и переписка с поставщиком.
+     *
+     * @param  \Illuminate\Support\Collection<int, \App\Models\EmailAttachment>  $bundle
+     */
+    private function buildZipFrom(string $pdf, string $pdfName, $bundle): string
+    {
         $tmp = tempnam(sys_get_temp_dir(), 'corr_');
         $zip = new \ZipArchive();
         if ($zip->open($tmp, \ZipArchive::OVERWRITE) !== true) {
             abort(500, 'Не удалось создать архив.');
         }
 
-        $zip->addFromString($this->svc->filename($request, 'pdf'), $pdf);
+        $zip->addFromString($pdfName, $pdf);
 
         $i = 0;
         foreach ($bundle as $att) {
