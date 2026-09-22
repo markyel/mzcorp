@@ -66,6 +66,21 @@ class Client extends Component
     #[Url(as: 'label')]
     public ?int $labelId = null;
 
+    /**
+     * Показывать только непрочитанные. Непрочитанное — входящее, у которого
+     * нет отметки о прочтении ИМЕННО у этого человека: в общем ящике письмо,
+     * прочитанное коллегой, для остальных остаётся новым.
+     */
+    #[Url(as: 'unread')]
+    public bool $unreadOnly = false;
+
+    public function toggleUnreadOnly(): void
+    {
+        $this->unreadOnly = ! $this->unreadOnly;
+        $this->notice = null;
+        $this->resetView();
+    }
+
     /** Когда в этой сессии последний раз жали «синхронизировать». */
     public ?string $syncedAt = null;
 
@@ -1089,6 +1104,21 @@ class Client extends Component
                     ->whereColumn('eml.email_message_id', 'email_messages.id')
                     ->where('eml.mail_label_id', $this->labelId);
             });
+        }
+
+        // «Только непрочитанные» — такой же срез поверх папки, как метка.
+        // Исходящие под него не попадают никогда: у своего письма нет и не
+        // может быть отметки о прочтении, а видеть их в этом фильтре незачем.
+        if ($this->unreadOnly && ! $ignoreRequestFilter) {
+            $q->where('email_messages.direction', MailDirection::Inbound)
+                ->where(function (Builder $w) {
+                    $w->whereNull('ustate.read_at');
+                    // Открытое письмо помечается прочитанным в тот же миг —
+                    // исчезать из списка у человека под курсором оно не должно.
+                    if ($this->openId !== null) {
+                        $w->orWhere('email_messages.id', $this->openId);
+                    }
+                });
         }
 
         // Режим «письма заявки»: обе стороны переписки, без папок; ящики — все
