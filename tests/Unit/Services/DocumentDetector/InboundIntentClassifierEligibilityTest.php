@@ -68,6 +68,12 @@ class InboundIntentClassifierEligibilityTest extends TestCase
     public static function eligibleStatuses(): array
     {
         return [
+            // Ранние статусы — чтобы поймать явную отмену ДО отправки КП
+            // (M-2026-4710 «задвоила запрос, закрывайте»). Автоприменяется в
+            // них только decline, за это отвечает EARLY_STATUSES в сервисе.
+            'new' => [RequestStatus::New],
+            'assigned' => [RequestStatus::Assigned],
+            'in_progress' => [RequestStatus::InProgress],
             'quoted' => [RequestStatus::Quoted],
             'under_review' => [RequestStatus::UnderReview],
             'postponed_until' => [RequestStatus::PostponedUntil],
@@ -81,9 +87,6 @@ class InboundIntentClassifierEligibilityTest extends TestCase
     {
         return [
             'pending' => [RequestStatus::Pending],
-            'new' => [RequestStatus::New],
-            'assigned' => [RequestStatus::Assigned],
-            'in_progress' => [RequestStatus::InProgress],
             'paid' => [RequestStatus::Paid],
             'paused' => [RequestStatus::Paused],
             'closed_won' => [RequestStatus::ClosedWon],
