@@ -58,6 +58,11 @@
         $navLinks[] = ['route' => 'requests.index', 'label' => 'Заявки', 'pattern' => 'requests.*'];
         // «Каталог» вынесен в левый rail (resources/views/components/left-rail.blade.php),
         // в горизонтальный топбар не дублируется.
+        // «Авто-КП» — холостой прогон автоматической выдачи: что автомат выдал бы
+        // и чем это расходится с отправленным. Открыт всем: менеджеру полезнее
+        // всех увидеть, где машина согласна с ним, а где нет — это его работа и
+        // его возражения. Раздел ничего не создаёт и никому не отправляет.
+        $navLinks[] = ['route' => 'auto-quote.index', 'label' => 'Авто-КП', 'pattern' => 'auto-quote.*'];
     }
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'mail-rules.index', 'label' => 'Правила почты', 'pattern' => 'mail-rules.*'];
@@ -85,9 +90,6 @@
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'iqot.index', 'label' => 'IQOT', 'pattern' => 'iqot.*'];
         $navLinks[] = ['route' => 'catalog.match-audit', 'label' => 'Аудит матчинга', 'pattern' => 'catalog.match-audit'];
-        // «Авто-КП» — холостой прогон автоматической выдачи КП: сравнение с тем,
-        // что менеджер отправил на самом деле. Ничего не отправляет.
-        $navLinks[] = ['route' => 'auto-quote.index', 'label' => 'Авто-КП', 'pattern' => 'auto-quote.*'];
         // Скидки контрагентов — загрузка выгрузки и просмотр; питают цену в КП.
         $navLinks[] = ['route' => 'client-discounts.index', 'label' => 'Скидки', 'pattern' => 'client-discounts.*'];
     }

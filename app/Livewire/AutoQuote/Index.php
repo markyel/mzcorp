@@ -36,9 +36,14 @@ class Index extends Component
     #[Url]
     public string $kind = 'all';
 
+    /**
+     * Раздел открыт всем сотрудникам: он только показывает, ничего не создаёт
+     * и никому не отправляет. Менеджеру он нужнее прочих — это его заявки и
+     * его цена, и возражения на правило приходят от него.
+     */
     public function mount(): void
     {
-        abort_unless(Auth::user()?->hasAnyRole(['head_of_sales', 'director', 'admin']), 403);
+        abort_unless(Auth::check(), 403);
     }
 
     /**
