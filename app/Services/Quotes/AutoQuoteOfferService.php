@@ -2,7 +2,9 @@
 
 namespace App\Services\Quotes;
 
+use App\Enums\RequestStatus;
 use App\Models\AutoQuoteSnapshot;
+use App\Models\Quotation;
 use App\Models\Request;
 use App\Models\User;
 use App\Services\Mail\OutgoingMailSender;
@@ -53,8 +55,42 @@ class AutoQuoteOfferService
             return null;
         }
 
+        // Цену клиенту уже назвали — предлагать «отправить КП» второй раз
+        // нельзя: менеджер нажмёт и отправит дубль. Дальше по заявке идёт
+        // обычная работа, а новый вариант делается через реестр КП.
+        if (self::alreadyQuoted($request)) {
+            return null;
+        }
+
         return $snapshot;
     }
+
+    /** По заявке уже выдано КП: отправленное предложение или статус. */
+    public static function alreadyQuoted(Request $request): bool
+    {
+        if (in_array($request->status, self::QUOTED_STATUSES, true)) {
+            return true;
+        }
+
+        return Quotation::query()
+            ->where('request_id', $request->id)
+            ->whereIn('status', self::SENT_QUOTATION_STATUSES)
+            ->exists();
+    }
+
+    /** Статусы заявки, в которых цена клиенту уже названа. */
+    private const QUOTED_STATUSES = [
+        RequestStatus::Quoted,
+        RequestStatus::UnderReview,
+        RequestStatus::AwaitingInvoice,
+        RequestStatus::Invoiced,
+        RequestStatus::Paid,
+        RequestStatus::ClosedWon,
+        RequestStatus::ClosedLost,
+    ];
+
+    /** Статусы КП, означающие «клиент это уже получил». */
+    private const SENT_QUOTATION_STATUSES = ['sent', 'accepted', 'rejected'];
 
     /**
      * Есть ли готовое КП у каждой из заявок — одним запросом, для списков.
@@ -69,12 +105,29 @@ class AutoQuoteOfferService
             return collect();
         }
 
+        // Те же отсечения, что и поштучно, но без запроса на каждую строку
+        // списка: заявки с уже названной ценой и с отправленным КП вон.
+        $quotedByStatus = Request::query()
+            ->whereIn('id', $requestIds)
+            ->whereIn('status', array_map(fn (RequestStatus $s) => $s->value, self::QUOTED_STATUSES))
+            ->pluck('id')
+            ->all();
+
+        $quotedByDocument = Quotation::query()
+            ->whereIn('request_id', $requestIds)
+            ->whereIn('status', self::SENT_QUOTATION_STATUSES)
+            ->pluck('request_id')
+            ->all();
+
+        $skip = array_flip(array_merge($quotedByStatus, $quotedByDocument));
+
         return AutoQuoteSnapshot::query()
             ->whereIn('request_id', $requestIds)
             ->where('eligible', true)
             ->where('rule_version', AutoQuoteSnapshotService::RULE_VERSION)
             ->get()
-            ->filter(fn (AutoQuoteSnapshot $s) => ($s->lines ?? []) !== [])
+            ->filter(fn (AutoQuoteSnapshot $s) => ($s->lines ?? []) !== []
+                && ! isset($skip[(int) $s->request_id]))
             ->keyBy('request_id');
     }
 
