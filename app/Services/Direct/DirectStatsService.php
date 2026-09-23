@@ -186,7 +186,10 @@ class DirectStatsService
                 'SelectionCriteria' => (object) [],
                 'FieldNames' => $fields,
                 // Имя постоянное: по нему Директ отдаёт уже заказанный отчёт.
-                'ReportName' => $name.'-'.self::WINDOW_DAYS.'d',
+                // В имени — отпечаток состава полей: Директ хранит отчёт по
+                // имени и на изменившийся набор колонок молча отдаёт старый.
+                // Так мы сутки получали строки без номера кампании.
+                'ReportName' => $name.'-'.self::WINDOW_DAYS.'d-'.substr(md5($type.implode(',', $fields)), 0, 6),
                 'ReportType' => $type,
                 'DateRangeType' => 'LAST_'.self::WINDOW_DAYS.'_DAYS',
                 'Format' => 'TSV',
