@@ -33,6 +33,12 @@ class DirectBidService
     /** За раз ставим не больше — bids.set принимает до 10 000, но баллы. */
     public const MAX_PER_RUN = 500;
 
+    /** Сколько строк отдаёт `keywordbids.get` за один вызов. */
+    public const PAGE = 500;
+
+    /** Предохранитель от бесконечного обхода страниц. */
+    public const MAX_TOTAL = 10000;
+
     public function __construct(
         private readonly DirectPublisherService $publisher,
         private readonly SettingsService $settings,
@@ -60,22 +66,36 @@ class DirectBidService
             return ['rows' => [], 'cap' => $this->cap(), 'target' => $this->targetVolume(), 'error' => 'Кампания ещё не создана.'];
         }
 
-        $res = $this->publisher->call('keywordbids', 'get', [
-            'SelectionCriteria' => ['CampaignIds' => [$campaignId]],
-            'FieldNames' => ['KeywordId', 'AdGroupId', 'ServingStatus'],
-            'SearchFieldNames' => ['Bid', 'AuctionBids'],
-            'Page' => ['Limit' => self::MAX_PER_RUN],
-        ], null, $by);
+        // Страницами: Директ отдаёт не больше 500 строк за вызов, а фраз в
+        // кампании уже больше (каждая группа добавляет свою псевдофразу
+        // автотаргетинга). Без обхода страниц фразы из хвоста никогда не
+        // попадали в план — 72 из них так и остались со стартовыми 3 ₽,
+        // то есть ниже входа в аукцион, и показов не давали.
+        $bids = [];
+        $offset = 0;
+        do {
+            $res = $this->publisher->call('keywordbids', 'get', [
+                'SelectionCriteria' => ['CampaignIds' => [$campaignId]],
+                'FieldNames' => ['KeywordId', 'AdGroupId', 'ServingStatus'],
+                'SearchFieldNames' => ['Bid', 'AuctionBids'],
+                'Page' => ['Limit' => self::PAGE, 'Offset' => $offset],
+            ], null, $by);
 
-        if (! $res['ok']) {
-            return ['rows' => [], 'cap' => $this->cap(), 'target' => $this->targetVolume(), 'error' => DirectPublisherService::errorText($res)];
-        }
+            if (! $res['ok']) {
+                return ['rows' => [], 'cap' => $this->cap(), 'target' => $this->targetVolume(), 'error' => DirectPublisherService::errorText($res)];
+            }
+
+            $page = $res['result']['KeywordBids'] ?? [];
+            $bids = array_merge($bids, $page);
+            // LimitedBy присылают, только пока есть что дочитывать.
+            $offset = (int) ($res['result']['LimitedBy'] ?? 0);
+        } while ($offset > 0 && $page !== [] && count($bids) < self::MAX_TOTAL);
 
         $cap = $this->cap();
         $target = $this->targetVolume();
         $rows = [];
 
-        foreach ($res['result']['KeywordBids'] ?? [] as $k) {
+        foreach ($bids as $k) {
             $tiers = self::tiers($k['Search']['AuctionBids']['AuctionBidItems'] ?? []);
             if ($tiers === []) {
                 continue;
