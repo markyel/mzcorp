@@ -2,12 +2,18 @@
 
 namespace App\Services\Quotes;
 
+use App\Enums\RequestStatus;
 use App\Models\AutoQuoteSnapshot;
+use App\Models\EmailAttachment;
+use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Models\User;
 use App\Services\Mail\EmailDraftService;
 use App\Services\Mail\OutgoingMailSender;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 /**
  * Готовое авто-КП в руках менеджера.
@@ -122,7 +128,47 @@ class AutoQuoteOfferService
         $draft->body_html = nl2br(e($draft->body_plain));
         $draft->save();
 
+        $this->attachPdf($draft, $request, $snapshot, $author);
+
         return $draft;
+    }
+
+    /**
+     * Приложить КП файлом.
+     *
+     * Клиент должен получить документ, а не письмо с табличкой в тексте:
+     * его пересылают снабженцу, печатают, прикладывают к заявке у себя.
+     * Подпись и адрес отправителя подставит отправка — черновик создан от
+     * имени менеджера, а значит уйдёт с его ящика.
+     */
+    private function attachPdf(EmailMessage $draft, Request $request, AutoQuoteSnapshot $snapshot, User $author): void
+    {
+        try {
+            $pdf = app(AutoQuotePdfService::class);
+            $content = $pdf->render($request, $snapshot, $author);
+            $name = $pdf->filename($request);
+
+            $path = sprintf('mail/%d/drafts/%d/%s', $draft->mailbox_id ?? 0, $draft->id, Str::random(8).'_quote.pdf');
+            Storage::disk('local')->put($path, $content);
+
+            EmailAttachment::create([
+                'email_message_id' => $draft->id,
+                'filename' => mb_substr($name, 0, 255),
+                'mime_type' => 'application/pdf',
+                'size_bytes' => strlen($content),
+                'content_id' => null,
+                'file_path' => $path,
+                'disk' => 'local',
+                'is_inline' => false,
+            ]);
+        } catch (\Throwable $e) {
+            // Без файла письмо всё равно имеет смысл: позиции и суммы есть в
+            // тексте. Роняем только вложение, не отправку.
+            Log::error('AutoQuoteOfferService: не удалось собрать PDF предложения', [
+                'request_id' => $request->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
@@ -148,13 +194,48 @@ class AutoQuoteOfferService
         }
 
         // Тот же путь, что и у обычного ответа менеджера: по отправленному
-        // письму поднимутся статус заявки и признак «КП отправлено».
+        // письму поднимутся признаки и сработают детекторы.
         $sent = $result['draft'] ?? $draft;
         $hooks = app(\App\Services\Mail\OutboundReplyHooks::class);
         if (! $hooks->applyPostSendHooks($sent, $author)) {
             $hooks->detectOutboundDocuments($sent);
         }
 
+        $this->markQuoted($request, $author);
+
         return ['ok' => true, 'message' => 'КП отправлено клиенту на '.$request->client_email.'.'];
+    }
+
+    /**
+     * Перевести заявку в «КП отправлено».
+     *
+     * Детектор исходящих документов ставит этот статус по распознанному
+     * вложению — здесь распознавать нечего: мы сами собрали документ с
+     * позициями и суммой и сами его отправили. Ставим прямо, не дожидаясь,
+     * пока разбор догадается.
+     */
+    private function markQuoted(Request $request, User $author): void
+    {
+        $request = $request->fresh();
+        if ($request === null || $request->status === RequestStatus::Quoted) {
+            return;
+        }
+
+        try {
+            app(\App\Services\Request\RequestStateService::class)->transitionTo(
+                $request,
+                RequestStatus::Quoted,
+                $author,
+                ['source' => 'auto_quote_sent'],
+                systemTransition: true,
+            );
+        } catch (\Throwable $e) {
+            // Письмо клиенту уже ушло — статус не повод показывать ошибку.
+            Log::warning('AutoQuoteOfferService: статус «КП отправлено» не выставлен', [
+                'request_id' => $request->id,
+                'from' => $request->status?->value,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }
