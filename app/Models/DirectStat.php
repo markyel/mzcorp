@@ -19,6 +19,9 @@ class DirectStat extends Model
 
     public const KIND_QUERY = 'query';
 
+    /** Итог по кампании за день — имя кампании лежит в name. */
+    public const KIND_CAMPAIGN = 'campaign';
+
     public const TYPE_AUTOTARGETING = 'AUTOTARGETING';
 
     protected $fillable = [

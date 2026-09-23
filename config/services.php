@@ -109,6 +109,9 @@ return [
         // оплату, договор). Не-номенклатурные не рубят unified-путь разбора.
         // Короткая yes/no задача — mini. См. RequestItemParsingService.
         'attachment_relevance_model' => env('OPENAI_ATTACHMENT_RELEVANCE_MODEL', 'gpt-4o-mini'),
+        // Разбор поисковых запросов Директа: наш мир или чужой. Задача на
+        // здравый смысл, не на знание каталога — хватает младшей модели.
+        'direct_query_model' => env('OPENAI_DIRECT_QUERY_MODEL', 'gpt-4o-mini'),
         'attachment_relevance_enabled' => filter_var(env('OPENAI_ATTACHMENT_RELEVANCE_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         // Финальный LLM-консолидатор позиций split-пути (собирает один набор из
         // выдач разных парсеров одной заявки, склеивая дубли photo-vs-text).

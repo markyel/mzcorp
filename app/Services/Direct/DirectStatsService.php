@@ -33,22 +33,27 @@ class DirectStatsService
      */
     public function pull(): array
     {
-        $campaignId = app(DirectPublisherService::class)->campaignId();
-        if ($campaignId === null) {
-            return ['criteria' => 0, 'queries' => 0, 'error' => 'Кампания ещё не создана.'];
-        }
-
         $skuByGroup = DirectPublishedAd::query()
             ->whereNotNull('ad_group_id')
             ->pluck('sku', 'ad_group_id')
             ->all();
 
-        $criteria = $this->report($campaignId, 'mz-criteria', 'CRITERIA_PERFORMANCE_REPORT', [
-            'Date', 'AdGroupId', 'Criteria', 'CriteriaType', 'Impressions', 'Clicks', 'Cost',
+        // Без фильтра по кампании: токен выдан на аккаунт, а мусорный запрос
+        // приходит туда, куда его принесло — смотреть надо всё, что крутится.
+        $criteria = $this->report('mz-criteria', 'CRITERIA_PERFORMANCE_REPORT', [
+            'Date', 'CampaignId', 'AdGroupId', 'Criteria', 'CriteriaType', 'Impressions', 'Clicks', 'Cost',
         ]);
-        $queries = $this->report($campaignId, 'mz-queries', 'SEARCH_QUERY_PERFORMANCE_REPORT', [
-            'Date', 'AdGroupId', 'Query', 'Criteria', 'CriteriaType', 'Impressions', 'Clicks', 'Cost',
+        $queries = $this->report('mz-queries', 'SEARCH_QUERY_PERFORMANCE_REPORT', [
+            'Date', 'CampaignId', 'AdGroupId', 'Query', 'Criteria', 'CriteriaType', 'Impressions', 'Clicks', 'Cost',
         ]);
+        // Итоги по кампаниям приходят отдельным отчётом: разрез по условиям
+        // показа отстаёт сильнее прочих, а видеть расход надо каждый день.
+        $byCampaign = $this->report('mz-campaigns', 'CAMPAIGN_PERFORMANCE_REPORT', [
+            'Date', 'CampaignId', 'CampaignName', 'Impressions', 'Clicks', 'Cost',
+        ]);
+        if ($byCampaign !== null) {
+            $this->store(array_map(fn ($r) => $r + ['Criteria' => $r['CampaignName'] ?? ''], $byCampaign), DirectStat::KIND_CAMPAIGN, []);
+        }
 
         if ($criteria === null && $queries === null) {
             return ['criteria' => 0, 'queries' => 0, 'error' => 'Отчёты ещё готовятся — попробуем в следующий раз.'];
@@ -73,28 +78,45 @@ class DirectStatsService
             ->get();
 
         $criteria = $rows->where('kind', DirectStat::KIND_CRITERIA);
-        $auto = $criteria->filter(fn (DirectStat $r) => $r->isAutotargeting());
+        $queries = $rows->where('kind', DirectStat::KIND_QUERY);
+        // Итог берём из отчёта по кампаниям, а где его ещё нет — из запросов:
+        // разрезы приезжают в разное время, а ноль на экране читается как
+        // «показов нет», хотя они есть.
+        $totals = $rows->where('kind', DirectStat::KIND_CAMPAIGN);
+        $base = $totals->isNotEmpty() ? $totals : ($criteria->isNotEmpty() ? $criteria : $queries);
+        $auto = $queries->filter(fn (DirectStat $r) => $r->isAutotargeting());
 
         return [
             'days' => $days,
-            'impressions' => (int) $criteria->sum('impressions'),
-            'clicks' => (int) $criteria->sum('clicks'),
-            'cost' => (float) $criteria->sum('cost'),
+            'impressions' => (int) $base->sum('impressions'),
+            'clicks' => (int) $base->sum('clicks'),
+            'cost' => (float) $base->sum('cost'),
             'auto' => [
                 'impressions' => (int) $auto->sum('impressions'),
                 'clicks' => (int) $auto->sum('clicks'),
             ],
+            // По кампаниям аккаунта, а не только по нашей.
+            'campaigns' => $totals->groupBy('campaign_id')
+                ->map(fn ($g) => [
+                    'id' => (int) $g->first()->campaign_id,
+                    'name' => (string) $g->first()->name,
+                    'impressions' => (int) $g->sum('impressions'),
+                    'clicks' => (int) $g->sum('clicks'),
+                    'cost' => (float) $g->sum('cost'),
+                    'ours' => (int) $g->first()->campaign_id === (int) app(DirectPublisherService::class)->campaignId(),
+                ])
+                ->sortByDesc('impressions')->values(),
             // Наши фразы — то, что мы придумали сами; по ним видно, оправдались
             // ли догадки про артикулы.
             'phrases' => $criteria->reject(fn (DirectStat $r) => $r->isAutotargeting())
                 ->groupBy('name')
                 ->map(fn ($g) => $this->fold($g))
                 ->sortByDesc('impressions')->take(10)->values(),
-            // Запросы людей — материал для новых фраз.
-            'queries' => $rows->where('kind', DirectStat::KIND_QUERY)
+            // Запросы людей — материал и для новых фраз, и для минус-слов.
+            'queries' => $queries
                 ->groupBy('name')
                 ->map(fn ($g) => $this->fold($g))
-                ->sortByDesc('impressions')->take(15)->values(),
+                ->sortByDesc('impressions')->take(30)->values(),
         ];
     }
 
@@ -107,6 +129,7 @@ class DirectStatsService
         return [
             'name' => (string) $group->first()->name,
             'auto' => $group->first()->isAutotargeting(),
+            'campaign_id' => (int) ($group->first()->campaign_id ?? 0),
             'sku' => $group->pluck('sku')->filter()->unique()->take(3)->implode(', '),
             'impressions' => (int) $group->sum('impressions'),
             'clicks' => (int) $group->sum('clicks'),
@@ -137,6 +160,7 @@ class DirectStatsService
                     'criteria_type' => (string) ($row['CriteriaType'] ?? ''),
                 ],
                 [
+                    'campaign_id' => (int) ($row['CampaignId'] ?? 0) ?: null,
                     'sku' => $skuByGroup[$groupId] ?? null,
                     'impressions' => (int) ($row['Impressions'] ?? 0),
                     'clicks' => (int) ($row['Clicks'] ?? 0),
@@ -155,13 +179,11 @@ class DirectStatsService
      * @param  array<int, string>  $fields
      * @return array<int, array<string, string>>|null
      */
-    private function report(int $campaignId, string $name, string $type, array $fields): ?array
+    private function report(string $name, string $type, array $fields): ?array
     {
         $definition = [
             'params' => [
-                'SelectionCriteria' => ['Filter' => [
-                    ['Field' => 'CampaignId', 'Operator' => 'EQUALS', 'Values' => [(string) $campaignId]],
-                ]],
+                'SelectionCriteria' => (object) [],
                 'FieldNames' => $fields,
                 // Имя постоянное: по нему Директ отдаёт уже заказанный отчёт.
                 'ReportName' => $name.'-'.self::WINDOW_DAYS.'d',

@@ -515,6 +515,54 @@ class Index extends Component
         return app(\App\Services\Direct\DirectStatsService::class)->summary(self::STATS_DAYS);
     }
 
+    /**
+     * Вердикты модели по запросам: чей запрос и что из него вычесть.
+     *
+     * @return \Illuminate\Support\Collection<string, \App\Models\DirectQueryReview>
+     */
+    #[Computed]
+    public function reviews()
+    {
+        return \App\Models\DirectQueryReview::query()->get()->keyBy(fn ($r) => mb_strtolower($r->query));
+    }
+
+    /** Исключить запрос: минус-фраза уходит в ту кампанию, где он показался. */
+    public function excludeQuery(int $reviewId): void
+    {
+        $this->ensureAdmin();
+        $review = \App\Models\DirectQueryReview::query()->find($reviewId);
+        if ($review === null) {
+            return;
+        }
+
+        $res = app(\App\Services\Direct\DirectNegativeService::class)->exclude($review, Auth::user());
+        $res['ok'] ? $this->notice = $res['message'] : $this->error = $res['message'];
+        unset($this->reviews);
+    }
+
+    /** Оставить: запрос наш, минус-фраза не нужна. */
+    public function keepQuery(int $reviewId): void
+    {
+        $this->ensureAdmin();
+        $review = \App\Models\DirectQueryReview::query()->find($reviewId);
+        if ($review === null) {
+            return;
+        }
+
+        app(\App\Services\Direct\DirectNegativeService::class)->keep($review, Auth::user());
+        $this->notice = 'Запрос «'.mb_substr($review->query, 0, 40).'» оставлен как наш.';
+        unset($this->reviews);
+    }
+
+    /** Разобрать новые запросы моделью прямо сейчас. */
+    public function judgeQueries(): void
+    {
+        $this->ensureAdmin();
+        $res = app(\App\Services\Direct\DirectNegativeService::class)->judge();
+        $this->notice = $res['error'] ?? "Разобрано запросов: {$res['judged']}, из них чужих: {$res['foreign']}.";
+        unset($this->reviews);
+    }
+
     /** Наша кампания глазами Директа: состояние, статус, число объявлений. */
     #[Computed]
     public function campaign(): ?array
