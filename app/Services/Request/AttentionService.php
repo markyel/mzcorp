@@ -457,6 +457,13 @@ class AttentionService
                 $this->addBusinessDays($anchor, $this->cfgInt('quoted_first_followup_days', 3)),
                 AttentionReason::SlaBreach,
             ],
+            // Частичное КП — наш долг, а не ожидание клиента: мы обещали
+            // дослать цену. Срок короче, чем у полного КП: две недели на
+            // досылку идут своим чередом, но заявка не должна молча висеть.
+            RequestStatus::PartiallyQuoted => [
+                $this->addBusinessDays($anchor, $this->cfgInt('partially_quoted_days', 3)),
+                AttentionReason::SlaBreach,
+            ],
             RequestStatus::UnderReview => [
                 $this->addBusinessDays($anchor, $this->cfgInt('under_review_days', 3)),
                 AttentionReason::SlaBreach,

@@ -172,14 +172,30 @@ class OutboundReplyHooks
         if (! $request) {
             return;
         }
+
+        // Частичное КП — свой статус: в нём заявку не закрывает автозакрытие
+        // по молчанию клиента, потому что долг на нашей стороне — мы обещали
+        // дослать цену по остальным позициям. Заодно запускаем сам цикл
+        // досылки: отложенные позиции уходят под наблюдение за ценой.
+        $partial = app(\App\Services\Quotations\PartialQuoteService::class);
+        $isPartial = $partial->isPartial($request->fresh(['items']), $quotation->fresh('items'));
+        if ($isPartial) {
+            $partial->start($request->fresh(['items']), $quotation);
+        }
+
         try {
             $this->stateService->transitionTo(
                 $request,
-                RequestStatus::Quoted,
+                $isPartial ? RequestStatus::PartiallyQuoted : RequestStatus::Quoted,
                 $actor,
                 [
                     'event' => 'quotation_sent',
-                    'comment' => sprintf('КП %s v%d отправлено клиенту.', $quotation->internal_code, $quotation->version),
+                    'comment' => sprintf(
+                        '%s %s v%d отправлено клиенту.',
+                        $isPartial ? 'Частичное КП' : 'КП',
+                        $quotation->internal_code,
+                        $quotation->version,
+                    ),
                     'payload' => [
                         'quotation_id' => $quotation->id,
                         'quotation_code' => $quotation->internal_code,

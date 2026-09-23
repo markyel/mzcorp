@@ -449,12 +449,22 @@
                         </div>
                     @endforeach
                 </div>
-                <div class="flex items-center justify-end gap-2">
+                <div class="flex flex-wrap items-center justify-end gap-2">
                     <button type="button" wire:click="cancelStalePrice" class="btn btn-sm">Отмена</button>
+                    {{-- Частичное КП: неоценённые позиции выпадают из документа и
+                         уходят под наблюдение за ценой. Как только 1С их обновит,
+                         система дошлёт клиенту полное предложение сама. --}}
+                    <button type="button"
+                            wire:click="deferStaleItems({{ $stalePriceAckQuotationId }})"
+                            wire:loading.attr="disabled" wire:target="deferStaleItems"
+                            class="btn btn-primary btn-sm"
+                            title="Выдать цену по остальным, а эти позиции дослать, когда появится цена">
+                        Отложить эти позиции
+                    </button>
                     <button type="button"
                             wire:click="sendQuotation({{ $stalePriceAckQuotationId }})"
                             wire:loading.attr="disabled" wire:target="sendQuotation"
-                            class="btn btn-primary btn-sm"
+                            class="btn btn-sm"
                             title="Подтвердить, что цены неактуальны, и всё равно подготовить КП">
                         Всё равно выдать КП
                     </button>

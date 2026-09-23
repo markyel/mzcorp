@@ -31,6 +31,14 @@ enum RequestStatus: string
     case InProgress = 'in_progress';
     case AwaitingClientClarification = 'awaiting_client_clarification';
     case Quoted = 'quoted';
+
+    /**
+     * Часть позиций оценена и выслана клиенту, по остальным ждём цену.
+     *
+     * Отдельный статус, а не оттенок Quoted: в нём заявку нельзя закрывать по
+     * молчанию клиента — долг на нашей стороне, мы обязаны дослать полное КП.
+     */
+    case PartiallyQuoted = 'partially_quoted';
     case UnderReview = 'under_review';
     case PostponedUntil = 'postponed_until';
     case AwaitingInvoice = 'awaiting_invoice';
@@ -49,6 +57,7 @@ enum RequestStatus: string
             self::InProgress => 'В работе',
             self::AwaitingClientClarification => 'Жду клиента',
             self::Quoted => 'КП отправлено',
+            self::PartiallyQuoted => 'Частичное КП',
             self::UnderReview => 'На согласовании',
             self::PostponedUntil => 'Отложена',
             self::AwaitingInvoice => 'Согласован / ждёт счёт',
@@ -75,6 +84,7 @@ enum RequestStatus: string
             self::InProgress => 'chip-info',
             self::AwaitingClientClarification => 'chip-warn',
             self::Quoted => 'chip-ok',
+            self::PartiallyQuoted => 'chip-warn',
             self::UnderReview => 'chip-warn',
             self::PostponedUntil => 'chip-warn',
             self::AwaitingInvoice => 'chip-warn',
@@ -102,6 +112,10 @@ enum RequestStatus: string
     {
         return in_array($this, [
             self::Quoted,
+            // Цену по части позиций клиент уже увидел — просьба «посчитайте
+            // ещё вот это» после такого письма чаще новая сделка, как и после
+            // полного КП.
+            self::PartiallyQuoted,
             self::UnderReview,
             self::AwaitingInvoice,
             self::Invoiced,
@@ -184,6 +198,9 @@ enum RequestStatus: string
     {
         return match ($this) {
             // Реальные milestone'ы — двигают peak.
+            // Частичное КП — веха ниже полного: цену клиент увидел, но наш
+            // долг ещё не закрыт.
+            self::PartiallyQuoted => 4,
             self::Quoted => 5,
             self::UnderReview => 6,
             self::AwaitingInvoice => 7,
@@ -236,22 +253,37 @@ enum RequestStatus: string
             self::New => [
                 self::Assigned, self::InProgress,
                 self::AwaitingClientClarification,
-                self::Quoted, self::AwaitingInvoice, self::Invoiced,
+                self::Quoted, self::PartiallyQuoted,
+                self::AwaitingInvoice, self::Invoiced,
                 self::ClosedWon, self::ClosedLost,
             ],
             self::Assigned => [
                 self::InProgress, self::AwaitingClientClarification,
-                self::Quoted, self::AwaitingInvoice, self::Invoiced,
+                self::Quoted, self::PartiallyQuoted,
+                self::AwaitingInvoice, self::Invoiced,
                 self::ClosedWon, self::ClosedLost,
             ],
             self::InProgress => [
                 self::AwaitingClientClarification,
-                self::Quoted, self::AwaitingInvoice, self::Invoiced,
+                self::Quoted, self::PartiallyQuoted,
+                self::AwaitingInvoice, self::Invoiced,
                 self::ClosedWon, self::ClosedLost,
             ],
             self::AwaitingClientClarification => [
                 self::InProgress,
-                self::Quoted, self::AwaitingInvoice, self::Invoiced,
+                self::Quoted, self::PartiallyQuoted,
+                self::AwaitingInvoice, self::Invoiced,
+                self::ClosedWon, self::ClosedLost,
+            ],
+            // Частичное КП: дальше либо мы дошлём полное (автоматом или
+            // руками) — это Quoted, либо заявка пойдёт обычным путём, если
+            // клиент отреагировал раньше.
+            self::PartiallyQuoted => [
+                self::Quoted,
+                self::UnderReview, self::PostponedUntil,
+                self::AwaitingInvoice, self::Invoiced,
+                self::InProgress,
+                self::AwaitingClientClarification,
                 self::ClosedWon, self::ClosedLost,
             ],
             self::Quoted => [
@@ -268,7 +300,8 @@ enum RequestStatus: string
             ],
             self::PostponedUntil => [
                 self::InProgress,
-                self::Quoted, self::AwaitingInvoice, self::Invoiced,
+                self::Quoted, self::PartiallyQuoted,
+                self::AwaitingInvoice, self::Invoiced,
                 self::ClosedWon, self::ClosedLost,
             ],
             self::AwaitingInvoice => [

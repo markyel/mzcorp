@@ -88,7 +88,7 @@ class QuotationDispatchService
             ."Итого: {total} ₽ (вкл. НДС).\nСрок действия: {valid_until}.\n\nС уважением,\n{sender_name}"
         );
 
-        return strtr($template, [
+        $body = strtr($template, [
             '{client_name}' => $request?->client_name ?: 'коллеги',
             '{internal_code}' => (string) $request?->internal_code,
             '{quotation_code}' => $quotation->internal_code.' v'.$quotation->version,
@@ -96,5 +96,38 @@ class QuotationDispatchService
             '{valid_until}' => $quotation->valid_until?->format('d.m.Y') ?? '—',
             '{sender_name}' => (string) $author->name,
         ]);
+
+        return $request !== null ? $this->withPendingNote($body, $request, $quotation) : $body;
+    }
+
+    /**
+     * Приписка про позиции, оставшиеся без цены.
+     *
+     * В КП уходят только оценённые позиции (решение заказчика): документ не
+     * должен содержать строк без цены. Но молчать о них нельзя — клиент решит,
+     * что половину запроса потеряли. Поэтому перечисляем их в теле письма.
+     */
+    private function withPendingNote(string $body, \App\Models\Request $request, Quotation $quotation): string
+    {
+        $pending = app(PartialQuoteService::class)->pendingItems($request, $quotation);
+        if ($pending->isEmpty()) {
+            return $body;
+        }
+
+        $names = $pending
+            ->map(fn ($item) => trim((string) ($item->parsed_article ?: $item->parsed_name)))
+            ->filter()
+            ->take(10)
+            ->implode(', ');
+
+        $note = "\n\nПо остальным позициям запроса ({$names}) уточняем цену у производителя "
+            ."— вышлем дополненное предложение, как только она будет.";
+
+        // Приписка идёт до подписи, если та в шаблоне есть.
+        $pos = mb_strrpos($body, 'С уважением');
+
+        return $pos === false
+            ? $body.$note
+            : mb_substr($body, 0, $pos).ltrim($note)."\n\n".mb_substr($body, $pos);
     }
 }

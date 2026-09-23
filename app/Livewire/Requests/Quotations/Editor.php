@@ -292,6 +292,43 @@ class Editor extends Component
      * Permission: assigned manager / acting / privileged (через ensureCanEdit).
      * Если КП в финальном статусе (accepted/rejected/cancelled) — отказ.
      */
+    /**
+     * Частичное КП: выкинуть из предложения позиции без актуальной цены и
+     * отправить то, что оценено.
+     *
+     * Отложенные позиции уходят под наблюдение за ценой, заявка встаёт в
+     * «Частичное КП» — в этом статусе её не закрывает автозакрытие по
+     * молчанию клиента, и `quotes:complete-partial` дошлёт полное КП, как
+     * только 1С обновит цены.
+     */
+    public function deferStaleItems(int $quotationId): void
+    {
+        $this->ensureCanEdit();
+
+        $q = $this->request->quotations()->whereKey($quotationId)->with('items')->first();
+        if (! $q || ! $q->status->isEditable()) {
+            $this->dispatch('toast', message: 'КП нельзя править.', type: 'error');
+
+            return;
+        }
+
+        $removed = app(\App\Services\Quotations\PartialQuoteService::class)->trimToPriced($q);
+        $q = $q->fresh('items');
+
+        if ($q->items->isEmpty()) {
+            $this->dispatch('toast', message: 'Ни по одной позиции нет актуальной цены — выдавать нечего.', type: 'error');
+
+            return;
+        }
+
+        // Гейт уже пройден осознанно: неактуальных позиций в КП больше нет.
+        $this->stalePriceItems = [];
+        $this->stalePriceAckQuotationId = null;
+        $this->dispatch('toast', message: "Отложено позиций: {$removed}. Готовлю КП на остальные.", type: 'success');
+
+        $this->sendQuotation($q->id);
+    }
+
     public function sendQuotation(int $quotationId): void
     {
         $this->ensureCanEdit();
