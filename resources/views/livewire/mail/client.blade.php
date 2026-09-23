@@ -294,6 +294,8 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .chead .sortbtn:hover{background:var(--bg-hover);color:var(--fg-1)}
 .mailapp .chead .reqlink{display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:8px 12px;background:var(--violet-50);border:1px solid var(--violet-600);border-radius:var(--r-md);font-size:12.5px}
 .mailapp .chead .reqlink .code{font-family:var(--font-mono);font-weight:600;color:var(--violet-700)}
+/* Письмо без заявки — та же плашка, но нейтральная: это не связь, а её отсутствие. */
+.mailapp .chead .reqlink.promote{background:var(--bg-surface);border-color:var(--border-strong);color:var(--fg-3);gap:12px}
 .mailapp .chead .reqlink .onec{font-family:var(--font-mono);font-weight:600;color:var(--emerald-700);margin-left:6px}
 .mailapp .chead .reqlink .st{color:var(--violet-700)}
 .mailapp .chead .decisions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
@@ -878,6 +880,21 @@ body.mail-resizing iframe{pointer-events:none}
                         <span class="st">· {{ $reqStatus?->label() ?? $req->status }}</span>
                         <span class="spacer"></span>
                         <a href="{{ route('requests.show', $req->id) }}" wire:navigate>Открыть заявку →</a>
+                    </div>
+                @elseif($anchor->direction?->value === 'inbound' && $this->canPromote)
+                    {{-- Письмо не стало заявкой: постпродажа, «не заявка», спорный
+                         разбор. Менеджер видит письмо целиком и решает лучше
+                         автомата — даём ему сказать это одной кнопкой, как в
+                         разделе «Авто-отклонённые». --}}
+                    <div class="reqlink promote">
+                        <span>Заявки по письму нет</span>
+                        <span class="spacer"></span>
+                        <button type="button" class="btn btn-sm btn-primary"
+                                wire:click="promoteToRequest({{ $anchor->id }})"
+                                wire:loading.attr="disabled" wire:target="promoteToRequest"
+                                wire:confirm="Создать заявку из этого письма? Запустится разбор позиций и назначение менеджера.">
+                            Это заявка!
+                        </button>
                     </div>
                 @endif
                 {{-- Журнал решений маршрутизатора по этому письму (mail_decisions): почему оно ушло туда, куда ушло. --}}

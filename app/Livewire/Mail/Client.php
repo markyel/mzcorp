@@ -758,6 +758,66 @@ class Client extends Component
         $this->notice = 'Синхронизация запущена — новые письма появятся в списке в течение полуминуты.';
     }
 
+    /**
+     * Может ли этот человек превратить письмо в заявку.
+     *
+     * Тот же круг, что в «Авто-отклонённых»: РОП, секретарь, директорат,
+     * админ — и сам менеджер, чью почту он читает. Менеджер видит письмо
+     * целиком и понимает про него больше автомата, запрещать ему исправлять
+     * разбор незачем.
+     */
+    #[Computed]
+    public function canPromote(): bool
+    {
+        $user = $this->user();
+
+        return $user !== null && $user->hasAnyRole([
+            \App\Enums\Role::Manager->value,
+            \App\Enums\Role::HeadOfSales->value,
+            \App\Enums\Role::Secretary->value,
+            \App\Enums\Role::Director->value,
+            \App\Enums\Role::Admin->value,
+        ]);
+    }
+
+    /**
+     * «Это заявка!» — система ошиблась (постпродажа, «не заявка», спорный
+     * разбор), а письмо на самом деле клиентский запрос.
+     */
+    public function promoteToRequest(int $messageId): void
+    {
+        if (! $this->canPromote) {
+            return;
+        }
+
+        $email = $this->findAccessible($messageId);
+        if ($email === null) {
+            $this->notice = 'Письмо не найдено или недоступно.';
+
+            return;
+        }
+
+        try {
+            $request = app(\App\Services\Mail\EmailToRequestPromoter::class)
+                ->promote($email, $this->user()?->id, 'manual_create_request_from_mail');
+        } catch (\DomainException $e) {
+            $this->notice = $e->getMessage();
+
+            return;
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Mail\Client: не удалось создать заявку из письма', [
+                'email_message_id' => $messageId,
+                'error' => $e->getMessage(),
+            ]);
+            $this->notice = 'Не удалось создать заявку — подробности в логе.';
+
+            return;
+        }
+
+        unset($this->threads, $this->openThread, $this->openAnchor, $this->autoQuotes);
+        $this->notice = "Создана заявка {$request->internal_code}. Идёт разбор позиций и назначение менеджера.";
+    }
+
     public function toggleFlag(int $id): void
     {
         $email = $this->findAccessible($id);
