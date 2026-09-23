@@ -526,6 +526,25 @@ class Index extends Component
         return \App\Models\DirectQueryReview::query()->get()->keyBy(fn ($r) => mb_strtolower($r->query));
     }
 
+    /**
+     * Чужие запросы, ждущие решения. Отдельно от общего списка: показов у них
+     * единицы, в списке по убыванию показов они уезжают вниз — а это как раз
+     * те строки, ради которых раздел и открывают.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\DirectQueryReview>
+     */
+    #[Computed]
+    public function pendingForeign()
+    {
+        return \App\Models\DirectQueryReview::query()
+            ->whereNull('decision')
+            ->where('verdict', \App\Models\DirectQueryReview::FOREIGN)
+            ->whereNotNull('phrase')
+            ->orderByDesc('impressions')
+            ->limit(25)
+            ->get();
+    }
+
     /** Исключить запрос: минус-фраза уходит в ту кампанию, где он показался. */
     public function excludeQuery(int $reviewId): void
     {
@@ -537,7 +556,7 @@ class Index extends Component
 
         $res = app(\App\Services\Direct\DirectNegativeService::class)->exclude($review, Auth::user());
         $res['ok'] ? $this->notice = $res['message'] : $this->error = $res['message'];
-        unset($this->reviews);
+        unset($this->reviews, $this->pendingForeign);
     }
 
     /** Оставить: запрос наш, минус-фраза не нужна. */
@@ -551,7 +570,7 @@ class Index extends Component
 
         app(\App\Services\Direct\DirectNegativeService::class)->keep($review, Auth::user());
         $this->notice = 'Запрос «'.mb_substr($review->query, 0, 40).'» оставлен как наш.';
-        unset($this->reviews);
+        unset($this->reviews, $this->pendingForeign);
     }
 
     /**
@@ -575,7 +594,7 @@ class Index extends Component
         $this->notice = $on
             ? 'Минус-фразы теперь применяются автоматически — по уверенно чужим запросам.'
             : 'Минус-фразы снова применяются только вручную.';
-        unset($this->reviews);
+        unset($this->reviews, $this->pendingForeign);
     }
 
     /** Разобрать новые запросы моделью прямо сейчас. */
@@ -584,7 +603,7 @@ class Index extends Component
         $this->ensureAdmin();
         $res = app(\App\Services\Direct\DirectNegativeService::class)->judge();
         $this->notice = $res['error'] ?? "Разобрано запросов: {$res['judged']}, из них чужих: {$res['foreign']}.";
-        unset($this->reviews);
+        unset($this->reviews, $this->pendingForeign);
     }
 
     /** Наша кампания глазами Директа: состояние, статус, число объявлений. */

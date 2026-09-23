@@ -235,13 +235,39 @@
                     </div>
                 @endif
 
+                {{-- Чужие запросы — отдельно и сверху: показов у них единицы, и в
+                     общем списке по убыванию показов они уезжают под низ, хотя
+                     это единственные строки, с которыми надо что-то делать. --}}
+                @if($this->pendingForeign->isNotEmpty())
+                    <div class="mb-3 p-2 rounded-md" style="background:var(--red-50)">
+                        <div class="text-[11.5px] text-fg-3 mb-1">
+                            Чужие запросы — можно вычесть ({{ $this->pendingForeign->count() }})
+                        </div>
+                        @foreach($this->pendingForeign as $rv)
+                            <div class="flex items-center gap-2 text-[12.5px] py-[3px]" wire:key="pf-{{ $rv->id }}">
+                                <span class="flex-1 truncate text-fg-1" title="{{ $rv->reason }}">{{ $rv->query }}</span>
+                                <span class="mono text-[11px] text-fg-4">{{ $rv->impressions }}</span>
+                                <button type="button" class="btn btn-xs" wire:click="excludeQuery({{ $rv->id }})"
+                                        title="Добавить минус-фразу в кампанию #{{ $rv->campaign_id }}">− {{ $rv->phrase }}</button>
+                                <button type="button" class="btn btn-xs" wire:click="keepQuery({{ $rv->id }})"
+                                        title="Модель ошиблась, запрос наш">оставить</button>
+                            </div>
+                        @endforeach
+                    </div>
+                @endif
+
                 <div class="grid gap-4 md:grid-cols-2">
                     <div>
-                        <div class="text-[11.5px] text-fg-4 mb-1">Наши фразы</div>
+                        <div class="text-[11.5px] text-fg-4 mb-1">Фразы кампаний аккаунта</div>
                         @forelse($st['phrases'] as $row)
                             <div class="flex items-baseline gap-2 text-[12.5px] py-[3px] border-b border-border-subtle">
                                 <span class="flex-1 truncate text-fg-1">{{ $row['name'] }}</span>
                                 @if($row['sku'])<span class="mono text-[11px] text-fg-4">{{ $row['sku'] }}</span>@endif
+                                {{-- Статистика теперь по всему аккаунту: без номера непонятно,
+                                     чья это фраза — наша или соседней кампании. --}}
+                                @if($row['campaign_id'])
+                                    <span class="mono text-[10.5px] text-fg-4">#{{ substr((string) $row['campaign_id'], -4) }}</span>
+                                @endif
                                 <span class="mono text-fg-2">{{ $row['impressions'] }}</span>
                                 <span class="mono text-fg-4 w-[30px] text-right">{{ $row['clicks'] }}</span>
                             </div>
