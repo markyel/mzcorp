@@ -803,38 +803,48 @@
                  отправлять пересчитанное нельзя. --}}
             @if($this->autoQuote)
                 @php $aq = $this->autoQuote; @endphp
-                <div class="ds-card p-3 text-[12.5px]"
+                <div class="ds-card p-3 text-[12.5px] min-w-0"
                      style="background:var(--emerald-50);border-color:var(--emerald-300)"
                      wire:key="auto-quote-{{ $aq->id }}">
-                    <div class="flex items-start gap-2 mb-2">
-                        <span class="text-[18px] leading-none">🧮</span>
-                        <div class="flex-1">
+                    <div class="flex items-start gap-2 mb-2 min-w-0">
+                        <span class="text-[16px] leading-none">🧮</span>
+                        <div class="flex-1 min-w-0">
                             <b class="text-fg-1">Система подготовила КП</b>
-                            <span class="text-fg-3">
-                                · {{ $aq->pricing }}
-                                · посчитано {{ $aq->evaluated_at?->format('d.m H:i') }}
-                            </span>
+                            <div class="text-[11.5px] text-fg-3">
+                                {{ $aq->pricing }} · посчитано {{ $aq->evaluated_at?->format('d.m H:i') }}
+                            </div>
                         </div>
                     </div>
 
-                    <div class="mb-2">
+                    {{-- Панель действий узкая, поэтому позиция занимает две строки:
+                         название с переносом сверху, числа снизу. Табличная вёрстка
+                         с фиксированными колонками распирала панель и наезжала на
+                         карточку заявки. --}}
+                    <div class="mb-2 min-w-0">
                         @foreach($aq->lines as $line)
-                            <div class="flex items-baseline gap-2 py-[2px] border-b border-border-subtle">
-                                <span class="mono text-[11px] text-fg-4 w-[62px]">{{ $line['sku'] ?? '' }}</span>
-                                <span class="flex-1 truncate text-fg-1">{{ $line['name'] ?? '' }}</span>
-                                <span class="mono text-fg-3">{{ rtrim(rtrim(number_format((float) ($line['qty'] ?? 0), 2, ',', ' '), '0'), ',') }} {{ $line['unit'] ?? 'шт.' }}</span>
-                                <span class="mono text-fg-2 w-[92px] text-right">{{ number_format((float) ($line['unit_price'] ?? 0), 2, ',', ' ') }} ₽</span>
-                                <span class="mono text-fg-1 w-[104px] text-right">{{ number_format((float) ($line['total'] ?? 0), 2, ',', ' ') }} ₽</span>
+                            <div class="py-1 border-b border-border-subtle min-w-0">
+                                <div class="text-fg-1 break-words">
+                                    @if(($line['sku'] ?? '') !== '')
+                                        <span class="mono text-[11px] text-fg-4">{{ $line['sku'] }}</span>
+                                    @endif
+                                    {{ $line['name'] ?? '' }}
+                                </div>
+                                <div class="mono text-[11.5px] text-fg-3">
+                                    {{ rtrim(rtrim(number_format((float) ($line['qty'] ?? 0), 2, ',', ' '), '0'), ',') }}
+                                    {{ $line['unit'] ?? 'шт.' }}
+                                    × {{ number_format((float) ($line['unit_price'] ?? 0), 2, ',', ' ') }} ₽
+                                    = <span class="text-fg-1">{{ number_format((float) ($line['total'] ?? 0), 2, ',', ' ') }} ₽</span>
+                                </div>
                             </div>
                         @endforeach
-                        <div class="flex items-baseline gap-2 pt-1">
-                            <span class="flex-1 text-right text-fg-3">Итого</span>
-                            <span class="mono text-fg-1 w-[104px] text-right"><b>{{ number_format((float) $aq->total, 2, ',', ' ') }} ₽</b></span>
+                        <div class="pt-1 text-right">
+                            <span class="text-fg-3">Итого </span>
+                            <b class="mono text-fg-1">{{ number_format((float) $aq->total, 2, ',', ' ') }} ₽</b>
                         </div>
                     </div>
 
                     @if($canManage)
-                        <div class="flex flex-wrap items-center gap-2">
+                        <div class="flex flex-wrap items-center gap-2 mb-1">
                             <button type="button" class="btn btn-sm btn-primary"
                                     wire:click="sendAutoQuote"
                                     wire:loading.attr="disabled" wire:target="sendAutoQuote"
@@ -842,13 +852,13 @@
                                 Отправить клиенту
                             </button>
                             <button type="button" class="btn btn-sm" wire:click="editAutoQuote">
-                                Открыть письмом и поправить
+                                Поправить письмом
                             </button>
-                            <span class="text-[11.5px] text-fg-3">
-                                Соберётся обычное КП с номером и PDF по шаблону, уйдёт ответом
-                                в тред на {{ $req->client_email ?: '— адреса нет' }} с вашей почты
-                                и подписью; заявка станет «КП отправлено»
-                            </span>
+                        </div>
+                        <div class="text-[11px] text-fg-3 leading-snug break-words">
+                            Соберётся КП с номером и PDF по шаблону, уйдёт ответом в тред
+                            на {{ $req->client_email ?: '— адреса нет' }} с вашей почты и подписью;
+                            заявка станет «КП отправлено».
                         </div>
                     @endif
                 </div>
