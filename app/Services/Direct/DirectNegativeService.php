@@ -330,6 +330,82 @@ class DirectNegativeService
         return ['ok' => true, 'message' => "Минус-фраза «{$phrase}» добавлена в кампанию #{$campaignId}."];
     }
 
+    /**
+     * Вычесть несколько запросов разом.
+     *
+     * По кампании — один вызов на всё: `campaigns.update` перезаписывает
+     * список минус-фраз целиком, поэтому построчная отправка не только тратит
+     * баллы, но и опасна — два запроса подряд затрут правки друг друга.
+     *
+     * @param  iterable<int, DirectQueryReview>  $reviews
+     * @return array{applied: int, messages: array<int, string>}
+     */
+    public function excludeMany(iterable $reviews, ?User $by = null): array
+    {
+        $byCampaign = [];
+        $skipped = [];
+
+        foreach ($reviews as $review) {
+            $phrase = self::cleanPhrase($review->phrase);
+            if ($phrase === null) {
+                $skipped[] = "«{$review->phrase}» задела бы наши же запросы — пропущена.";
+
+                continue;
+            }
+            $campaignId = (int) ($review->campaign_id ?: $this->publisher->campaignId());
+            $byCampaign[$campaignId][$phrase] = $review;
+        }
+
+        $applied = 0;
+        $messages = $skipped;
+
+        foreach ($byCampaign as $campaignId => $picked) {
+            $current = $this->negatives($campaignId, $by);
+            if ($current === null) {
+                $messages[] = "Кампанией #{$campaignId} через API управлять нельзя — добавьте минус-фразы в кабинете.";
+
+                continue;
+            }
+
+            $add = array_values(array_diff(array_keys($picked), $current));
+            if ($add === [] || count($current) + count($add) > self::CAMPAIGN_LIMIT) {
+                if ($add === []) {
+                    foreach ($picked as $review) {
+                        $this->decide($review, DirectQueryReview::EXCLUDED, $by);
+                        $applied++;
+                    }
+                    $messages[] = "В кампании #{$campaignId} эти минус-фразы уже были.";
+                } else {
+                    $messages[] = "В кампании #{$campaignId} не хватает места под минус-фразы — предел Директа.";
+                }
+
+                continue;
+            }
+
+            $res = $this->publisher->call('campaigns', 'update', [
+                'Campaigns' => [[
+                    'Id' => $campaignId,
+                    'NegativeKeywords' => ['Items' => array_values(array_merge($current, $add))],
+                ]],
+            ], null, $by);
+
+            $errors = $res['ok'] ? DirectPublisherService::resultErrors($res['result'] ?? null) : DirectPublisherService::errorText($res);
+            if ($errors !== '') {
+                $messages[] = "Кампания #{$campaignId}: {$errors}";
+
+                continue;
+            }
+
+            foreach ($picked as $review) {
+                $this->decide($review, DirectQueryReview::EXCLUDED, $by);
+                $applied++;
+            }
+            $messages[] = "Кампания #{$campaignId}: добавлено минус-фраз ".count($add).'.';
+        }
+
+        return ['applied' => $applied, 'messages' => $messages];
+    }
+
     /** Оставить как есть: запрос наш или человек так решил. */
     public function keep(DirectQueryReview $review, ?User $by = null): void
     {
@@ -403,8 +479,6 @@ class DirectNegativeService
             return ['applied' => 0, 'messages' => []];
         }
 
-        $applied = 0;
-        $messages = [];
         $pending = DirectQueryReview::query()
             ->whereNull('decision')
             ->where('verdict', DirectQueryReview::FOREIGN)
@@ -413,14 +487,8 @@ class DirectNegativeService
             ->limit(20)
             ->get();
 
-        foreach ($pending as $review) {
-            $res = $this->exclude($review, $by);
-            if ($res['ok']) {
-                $applied++;
-            }
-            $messages[] = $res['message'];
-        }
+        $res = $this->excludeMany($pending, $by);
 
-        return ['applied' => $applied, 'messages' => array_slice($messages, 0, 5)];
+        return ['applied' => $res['applied'], 'messages' => array_slice($res['messages'], 0, 5)];
     }
 }

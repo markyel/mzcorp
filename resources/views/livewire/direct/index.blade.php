@@ -240,11 +240,24 @@
                      это единственные строки, с которыми надо что-то делать. --}}
                 @if($this->pendingForeign->isNotEmpty())
                     <div class="mb-3 p-2 rounded-md" style="background:var(--red-50)">
-                        <div class="text-[11.5px] text-fg-3 mb-1">
-                            Чужие запросы — можно вычесть ({{ $this->pendingForeign->count() }})
+                        <div class="flex items-center flex-wrap gap-2 mb-1">
+                            <span class="text-[11.5px] text-fg-3 flex-1">
+                                Чужие запросы — можно вычесть ({{ $this->pendingForeign->count() }})
+                            </span>
+                            @if($pickedQueries)
+                                <span class="text-[11.5px] text-fg-3">отмечено {{ count($pickedQueries) }}</span>
+                                <button type="button" class="btn btn-xs btn-primary" wire:click="excludePicked"
+                                        wire:loading.attr="disabled" wire:target="excludePicked">Вычесть отмеченные</button>
+                                <button type="button" class="btn btn-xs" wire:click="keepPicked">Оставить отмеченные</button>
+                                <button type="button" class="btn btn-xs" wire:click="clearPickedQueries">снять</button>
+                            @else
+                                <button type="button" class="btn btn-xs" wire:click="pickAllQueries">отметить все</button>
+                            @endif
                         </div>
                         @foreach($this->pendingForeign as $rv)
                             <div class="flex items-center gap-2 text-[12.5px] py-[3px]" wire:key="pf-{{ $rv->id }}">
+                                <input type="checkbox" value="{{ $rv->id }}" wire:model.live="pickedQueries"
+                                       class="shrink-0" title="Отметить для массового действия">
                                 <span class="flex-1 truncate text-fg-1" title="{{ $rv->reason }}">{{ $rv->query }}</span>
                                 <span class="mono text-[11px] text-fg-4">{{ $rv->impressions }}</span>
                                 <button type="button" class="btn btn-xs" wire:click="excludeQuery({{ $rv->id }})"
@@ -253,6 +266,10 @@
                                         title="Модель ошиблась, запрос наш">оставить</button>
                             </div>
                         @endforeach
+                        <p class="text-[11px] text-fg-4 mt-1">
+                            Минус-фразы уходят одной правкой на кампанию. Перед «вычесть все» стоит
+                            пробежать список глазами: модель ошибается в обе стороны.
+                        </p>
                     </div>
                 @endif
 

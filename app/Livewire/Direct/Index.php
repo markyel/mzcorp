@@ -545,6 +545,56 @@ class Index extends Component
             ->get();
     }
 
+    /** Отмеченные галочками запросы (идентификаторы вердиктов). */
+    public array $pickedQueries = [];
+
+    /** Отметить все чужие запросы разом — обычный случай при разборе. */
+    public function pickAllQueries(): void
+    {
+        $this->pickedQueries = $this->pendingForeign->pluck('id')->map(fn ($id) => (string) $id)->all();
+    }
+
+    public function clearPickedQueries(): void
+    {
+        $this->pickedQueries = [];
+    }
+
+    /**
+     * Вычесть отмеченные. Одна правка на кампанию: Директ перезаписывает
+     * список минус-фраз целиком, и построчная отправка затирала бы сама себя.
+     */
+    public function excludePicked(): void
+    {
+        $this->ensureAdmin();
+        $reviews = \App\Models\DirectQueryReview::query()->whereKey($this->pickedQueries)->get();
+        if ($reviews->isEmpty()) {
+            $this->notice = 'Не отмечено ни одного запроса.';
+
+            return;
+        }
+
+        $res = app(\App\Services\Direct\DirectNegativeService::class)->excludeMany($reviews, Auth::user());
+        $this->notice = "Вычтено запросов: {$res['applied']}. ".implode(' ', array_slice($res['messages'], 0, 3));
+        $this->pickedQueries = [];
+        unset($this->reviews, $this->pendingForeign);
+    }
+
+    /** Оставить отмеченные: модель ошиблась, запросы наши. */
+    public function keepPicked(): void
+    {
+        $this->ensureAdmin();
+        $negatives = app(\App\Services\Direct\DirectNegativeService::class);
+        $reviews = \App\Models\DirectQueryReview::query()->whereKey($this->pickedQueries)->get();
+
+        foreach ($reviews as $review) {
+            $negatives->keep($review, Auth::user());
+        }
+
+        $this->notice = 'Оставлено как наши: '.$reviews->count().'.';
+        $this->pickedQueries = [];
+        unset($this->reviews, $this->pendingForeign);
+    }
+
     /** Исключить запрос: минус-фраза уходит в ту кампанию, где он показался. */
     public function excludeQuery(int $reviewId): void
     {
