@@ -801,6 +801,23 @@
             {{-- Готовое авто-КП: система посчитала предложение по этой заявке.
                  Показываем ровно то, что уйдёт письмом, — проверять одно, а
                  отправлять пересчитанное нельзя. --}}
+            {{-- Итог прошлой отправки: страница после успеха перезагружается,
+                 и без этой строки человек не узнал бы, что письмо ушло. --}}
+            @if(session('status'))
+                <div class="ds-card p-2 text-[12px]"
+                     style="background:var(--emerald-50);border-color:var(--emerald-300)">
+                    ✓ {{ session('status') }}
+                </div>
+            @endif
+            @if($autoQuoteNotice)
+                <div class="ds-card p-2 text-[12px]"
+                     style="{{ $autoQuoteFailed
+                        ? 'background:var(--red-50);border-color:var(--red-300)'
+                        : 'background:var(--emerald-50);border-color:var(--emerald-300)' }}">
+                    {{ $autoQuoteFailed ? '✕' : '✓' }} {{ $autoQuoteNotice }}
+                </div>
+            @endif
+
             @if($this->autoQuote)
                 @php $aq = $this->autoQuote; @endphp
                 <div class="ds-card p-3 text-[12.5px] min-w-0"

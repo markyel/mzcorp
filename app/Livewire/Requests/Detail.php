@@ -1653,19 +1653,42 @@ class Detail extends Component
         return app(\App\Services\Quotes\AutoQuoteOfferService::class)->readyFor($this->request);
     }
 
-    /** Отправить готовое авто-КП клиенту. */
-    public function sendAutoQuote(): void
+    /** Что сказать про последнюю попытку отправить авто-КП. */
+    public ?string $autoQuoteNotice = null;
+
+    public bool $autoQuoteFailed = false;
+
+    /**
+     * Отправить готовое авто-КП клиенту.
+     *
+     * При успехе перезагружаем страницу: письмо должно появиться в переписке
+     * и статус заявки смениться на глазах. Тред живёт в public-свойстве,
+     * загруженном в mount, — сам он не обновится, и кнопка выглядела бы
+     * бесполезной, хотя письмо уже ушло (так и случилось на M-2026-16490).
+     */
+    public function sendAutoQuote()
     {
         $user = auth()->user();
         if ($user === null || ! $this->canSendMail()) {
-            session()->flash('error', 'Отправлять письма по заявке может назначенный менеджер, делегат или админ/РОП/директорат.');
+            $this->autoQuoteFailed = true;
+            $this->autoQuoteNotice = 'Отправлять письма по заявке может назначенный менеджер, делегат или админ/РОП/директорат.';
 
-            return;
+            return null;
         }
 
         $res = app(\App\Services\Quotes\AutoQuoteOfferService::class)->send($this->request->fresh(), $user);
-        session()->flash($res['ok'] ? 'status' : 'error', $res['message']);
         unset($this->autoQuote);
+
+        if (! $res['ok']) {
+            $this->autoQuoteFailed = true;
+            $this->autoQuoteNotice = $res['message'];
+
+            return null;
+        }
+
+        session()->flash('status', $res['message']);
+
+        return $this->redirect(route('requests.show', $this->request->id).'?tab=thread', navigate: false);
     }
 
     /** Открыть авто-КП письмом — если менеджер хочет поправить текст. */
@@ -1681,7 +1704,8 @@ class Detail extends Component
             ->draft($this->request, $snapshot, $user);
 
         if ($draftId === null) {
-            session()->flash('error', 'Не удалось собрать письмо с КП — подробности в логе.');
+            $this->autoQuoteFailed = true;
+            $this->autoQuoteNotice = 'Не удалось собрать письмо с КП — подробности в логе.';
 
             return;
         }
