@@ -255,6 +255,13 @@
                             <span class="text-[11.5px] text-fg-4 flex-1">
                                 Что люди искали на самом деле — и чей это запрос
                             </span>
+                            @php $auto = app(\App\Services\Direct\DirectNegativeService::class)->autoEnabled(); @endphp
+                            <button type="button" class="btn btn-xs" wire:click="toggleNegativesAuto"
+                                    title="{{ $auto
+                                        ? 'Сейчас уверенно чужие запросы вычитаются сами'
+                                        : 'Сейчас каждая минус-фраза ждёт вашей кнопки' }}">
+                                {{ $auto ? 'авто: вкл' : 'авто: выкл' }}
+                            </button>
                             <button type="button" class="btn btn-xs" wire:click="judgeQueries"
                                     wire:loading.attr="disabled" wire:target="judgeQueries">Разобрать новые</button>
                         </div>

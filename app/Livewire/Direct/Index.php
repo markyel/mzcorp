@@ -554,6 +554,30 @@ class Index extends Component
         unset($this->reviews);
     }
 
+    /**
+     * Автоматический режим минус-фраз: применять уверенные «чужие» вердикты
+     * без человека. По умолчанию выключен — ошибочная минус-фраза выключает
+     * живой трафик молча, и заметить это можно только по отсутствию показов.
+     */
+    public function toggleNegativesAuto(SettingsService $settings): void
+    {
+        $this->ensureAdmin();
+        $on = ! app(\App\Services\Direct\DirectNegativeService::class)->autoEnabled();
+
+        $settings->set(
+            \App\Services\Direct\DirectNegativeService::SETTING_AUTO,
+            $on,
+            AppSetting::TYPE_BOOL,
+            Auth::id(),
+            'Применять минус-фразы Директа автоматически, без подтверждения',
+        );
+
+        $this->notice = $on
+            ? 'Минус-фразы теперь применяются автоматически — по уверенно чужим запросам.'
+            : 'Минус-фразы снова применяются только вручную.';
+        unset($this->reviews);
+    }
+
     /** Разобрать новые запросы моделью прямо сейчас. */
     public function judgeQueries(): void
     {
