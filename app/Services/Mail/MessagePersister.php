@@ -838,7 +838,9 @@ class MessagePersister
             $name = isset($addr->personal) ? $this->decodeMimeHeader((string) $addr->personal) : null;
             $result[] = [
                 'email' => $clean['email'],
-                'name' => $name !== null && trim($name) !== '' ? $name : $clean['name'],
+                'name' => $name !== null && trim($name) !== ''
+                    ? $name
+                    : ($clean['name'] !== null ? $this->decodeMimeHeader($clean['name']) : null),
             ];
         }
 
@@ -877,8 +879,11 @@ class MessagePersister
 
         return [
             'email' => $clean['email'],
-            // Имя из того же кривого заголовка — лучше, чем ничего.
-            'name' => $name !== null && trim($name) !== '' ? $name : $clean['name'],
+            // Имя из того же кривого заголовка — лучше, чем ничего, но его
+            // ещё надо раскодировать: там оно лежит как «=?koi8-r?B?…?=».
+            'name' => $name !== null && trim($name) !== ''
+                ? $name
+                : ($clean['name'] !== null ? $this->decodeMimeHeader($clean['name']) : null),
         ];
     }
 
