@@ -176,20 +176,40 @@ class DirectNegativeService
         if (count($words) > 3) {
             return null;
         }
-        // Слова нашего же мира минус-словом быть не могут: такой минус выключит
+        // Слова нашего мира минус-фразой быть не могут: такой минус выключит
         // живые запросы, и узнать об этом будет неоткуда — показы просто
         // перестанут приходить. Модель это правило нарушает: на «артикул
         // масленки для сервиса» она предложила «масленки», а масленка
         // направляющих у нас в каталоге есть.
-        foreach ($stems ?? self::protectedStems() as $stem) {
-            foreach ($words as $word) {
+        //
+        // Два уровня, потому что минус-фраза из нескольких слов вычитает
+        // только совпадение ВСЕХ слов сразу и потому куда безопаснее:
+        //  • ядро («лифт», «эскалатор», марки) запрещено в любом виде —
+        //    «лифт запчасти» минус-фразой быть не должно;
+        //  • слово из каталога («блок», «плата», «масленка») запрещено
+        //    в одиночку, но «блок питания» вычесть можно: вместе эти два
+        //    слова наш товар не описывают.
+        $isProtected = function (string $word) use ($stems): bool {
+            foreach ($stems ?? self::protectedStems() as $stem) {
                 if (mb_strpos($word, $stem) === 0) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        foreach ($words as $word) {
+            foreach (self::CORE_WORDS as $core) {
+                if (mb_strpos($word, $core) === 0) {
                     return null;
                 }
             }
         }
 
-        return $phrase;
+        $free = array_filter($words, fn ($word) => ! $isProtected($word));
+
+        return $free === [] ? null : $phrase;
     }
 
     /**

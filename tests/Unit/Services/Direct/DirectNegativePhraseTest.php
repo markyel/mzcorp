@@ -18,15 +18,29 @@ class DirectNegativePhraseTest extends TestCase
     /** Основы, как их отдаёт каталог: по четыре буквы на слово. */
     private array $stems = ['лифт', 'эска', 'пору', 'реме', 'ремн', 'плат', 'масл', 'otis'];
 
-    public function test_a_word_from_our_own_world_never_becomes_a_minus(): void
+    public function test_our_own_word_alone_never_becomes_a_minus(): void
     {
         // Совпадение слова и есть причина мусора: «поручень» бывает у
         // эскалатора и в ванной. Вычесть его — остаться без своих запросов.
         $this->assertNull(Negatives::cleanPhrase('поручень', $this->stems));
-        $this->assertNull(Negatives::cleanPhrase('поручни для ванной', $this->stems));
-        $this->assertNull(Negatives::cleanPhrase('ремень зубчатый', $this->stems));
         $this->assertNull(Negatives::cleanPhrase('плата', $this->stems));
-        $this->assertNull(Negatives::cleanPhrase('otis', $this->stems));
+        $this->assertNull(Negatives::cleanPhrase('ремень зубчатый', $this->stems), 'оба слова наши');
+    }
+
+    public function test_the_core_of_our_world_is_forbidden_even_in_a_pair(): void
+    {
+        // Минус-фраза «лифт запчасти» выключила бы ровно то, ради чего реклама
+        // и существует, хотя «запчасти» само по себе слово не наше.
+        $this->assertNull(Negatives::cleanPhrase('лифт запчасти', $this->stems));
+        $this->assertNull(Negatives::cleanPhrase('otis каталог', $this->stems));
+    }
+
+    public function test_a_pair_where_only_one_word_is_ours_is_allowed(): void
+    {
+        // «Блок» у нас есть (блок управления), «блок питания» — нет: вместе
+        // эти слова описывают чужой товар, а минус-фраза требует обоих сразу.
+        $this->assertSame('блок питания', Negatives::cleanPhrase('блок питания', ['блок', 'плат']));
+        $this->assertSame('поручни для ванной', Negatives::cleanPhrase('поручни для ванной', $this->stems));
     }
 
     public function test_the_stem_covers_other_endings_of_the_same_word(): void
