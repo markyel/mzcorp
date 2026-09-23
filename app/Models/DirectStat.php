@@ -25,7 +25,7 @@ class DirectStat extends Model
     public const TYPE_AUTOTARGETING = 'AUTOTARGETING';
 
     protected $fillable = [
-        'date', 'kind', 'criteria_type', 'name', 'matched', 'sku',
+        'date', 'kind', 'campaign_id', 'criteria_type', 'name', 'matched', 'sku',
         'impressions', 'clicks', 'cost',
     ];
 
