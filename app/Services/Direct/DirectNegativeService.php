@@ -292,7 +292,11 @@ class DirectNegativeService
 
         $current = $this->negatives($campaignId, $by);
         if ($current === null) {
-            return ['ok' => false, 'message' => 'Не удалось прочитать минус-фразы кампании.'];
+            return [
+                'ok' => false,
+                'message' => "Кампанией #{$campaignId} через API управлять нельзя — её не отдаёт даже на чтение "
+                    .'(так устроены кампании Мастера кампаний). Минус-фразу добавьте в кабинете Директа.',
+            ];
         }
         if (in_array($phrase, $current, true)) {
             $this->decide($review, DirectQueryReview::EXCLUDED, $by);
@@ -355,11 +359,34 @@ class DirectNegativeService
         }
 
         $campaign = ($res['result']['Campaigns'] ?? [])[0] ?? null;
+        if ($campaign === null) {
+            // Кампании, созданные Мастером кампаний («Товарная кампания…»),
+            // API v5 не отдаёт вовсе: запрос проходит, список пустой.
+            // Статистику по ним отчёты дают, а управлять можно только руками.
+            return null;
+        }
 
         return array_values(array_filter(array_map(
             fn ($p) => mb_strtolower(trim((string) $p)),
             $campaign['NegativeKeywords']['Items'] ?? [],
         )));
+    }
+
+    /**
+     * Кампании аккаунта, которыми мы вообще можем управлять через API.
+     *
+     * @return array<int, int>
+     */
+    public function manageable(): array
+    {
+        return Cache::remember('direct:manageable-campaigns', 600, function () {
+            $res = $this->publisher->call('campaigns', 'get', [
+                'SelectionCriteria' => (object) [],
+                'FieldNames' => ['Id'],
+            ]);
+
+            return array_map(fn ($c) => (int) $c['Id'], $res['result']['Campaigns'] ?? []);
+        });
     }
 
     /**

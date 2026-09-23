@@ -210,6 +210,31 @@
                     <span>расход: <b class="mono text-fg-1">{{ number_format($st['cost'], 2, ',', ' ') }} ₽</b></span>
                 </div>
 
+                {{-- Аккаунт целиком: мусорный запрос приходит туда, куда его принесло. --}}
+                @if($st['campaigns']->isNotEmpty())
+                    @php $manageable = app(\App\Services\Direct\DirectNegativeService::class)->manageable(); @endphp
+                    <div class="mb-3">
+                        <div class="text-[11.5px] text-fg-4 mb-1">Кампании аккаунта</div>
+                        @foreach($st['campaigns'] as $c)
+                            <div class="flex items-baseline gap-2 text-[12.5px] py-[3px] border-b border-border-subtle">
+                                <span class="mono text-[11px] text-fg-4">#{{ $c['id'] }}</span>
+                                <span class="flex-1 truncate text-fg-1">{{ $c['name'] }}</span>
+                                @if($c['ours'])
+                                    <span class="chip text-[10px]" style="background:var(--emerald-50);color:var(--emerald-700)">наша</span>
+                                @endif
+                                @if(! in_array($c['id'], $manageable, true))
+                                    <span class="chip text-[10px]" style="background:var(--neutral-100);color:var(--fg-3)"
+                                          title="API Директа такие кампании не отдаёт — только статистика, минус-фразы добавляются в кабинете">только чтение</span>
+                                @endif
+                                <span class="mono text-fg-2 w-[56px] text-right">{{ $c['impressions'] }}</span>
+                                <span class="mono text-fg-4 w-[40px] text-right">{{ $c['clicks'] }}</span>
+                                <span class="mono text-fg-4 w-[86px] text-right">{{ number_format($c['cost'], 2, ',', ' ') }} ₽</span>
+                            </div>
+                        @endforeach
+                        <p class="text-[11px] text-fg-4 mt-1">Столбцы: показы, клики, расход.</p>
+                    </div>
+                @endif
+
                 <div class="grid gap-4 md:grid-cols-2">
                     <div>
                         <div class="text-[11.5px] text-fg-4 mb-1">Наши фразы</div>
@@ -225,12 +250,38 @@
                         @endforelse
                     </div>
                     <div>
-                        <div class="text-[11.5px] text-fg-4 mb-1">
-                            Что люди искали на самом деле — материал для новых фраз
+                        @php $reviews = $this->reviews; @endphp
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-[11.5px] text-fg-4 flex-1">
+                                Что люди искали на самом деле — и чей это запрос
+                            </span>
+                            <button type="button" class="btn btn-xs" wire:click="judgeQueries"
+                                    wire:loading.attr="disabled" wire:target="judgeQueries">Разобрать новые</button>
                         </div>
                         @forelse($st['queries'] as $row)
-                            <div class="flex items-baseline gap-2 text-[12.5px] py-[3px] border-b border-border-subtle">
-                                <span class="flex-1 truncate text-fg-1">{{ $row['name'] }}</span>
+                            @php $rv = $reviews[mb_strtolower($row['name'])] ?? null; @endphp
+                            <div class="flex items-baseline gap-2 text-[12.5px] py-[3px] border-b border-border-subtle"
+                                 wire:key="q-{{ md5($row['name']) }}">
+                                <span class="flex-1 truncate text-fg-1" title="{{ $rv?->reason }}">{{ $row['name'] }}</span>
+
+                                @if($rv?->decision === \App\Models\DirectQueryReview::EXCLUDED)
+                                    <span class="chip text-[10px]" style="background:var(--neutral-100);color:var(--fg-3)">исключён</span>
+                                @elseif($rv?->decision === \App\Models\DirectQueryReview::KEPT)
+                                    <span class="chip text-[10px]" style="background:var(--emerald-50);color:var(--emerald-700)">наш</span>
+                                @elseif($rv?->verdict === \App\Models\DirectQueryReview::FOREIGN)
+                                    <span class="chip text-[10px]" style="background:var(--red-50);color:var(--red-700)"
+                                          title="{{ $rv->reason }}">чужой</span>
+                                    <button type="button" class="btn btn-xs" wire:click="excludeQuery({{ $rv->id }})"
+                                            title="Добавить минус-фразу «{{ $rv->phrase }}» в кампанию">− {{ $rv->phrase }}</button>
+                                    <button type="button" class="btn btn-xs" wire:click="keepQuery({{ $rv->id }})"
+                                            title="Оставить: запрос всё-таки наш">оставить</button>
+                                @elseif($rv?->verdict === \App\Models\DirectQueryReview::OURS)
+                                    <span class="chip text-[10px]" style="background:var(--emerald-50);color:var(--emerald-700)">наш</span>
+                                @elseif($rv !== null)
+                                    <span class="chip text-[10px]" style="background:var(--amber-50);color:var(--amber-800)"
+                                          title="{{ $rv->reason }}">не уверена</span>
+                                @endif
+
                                 @if($row['auto'])
                                     <span class="chip text-[10px]" style="background:var(--sky-50);color:var(--sky-700)">подбор</span>
                                 @endif
@@ -242,7 +293,10 @@
                         @endforelse
                     </div>
                 </div>
-                <p class="text-[11.5px] text-fg-4 mt-2">Столбцы: показы, клики.</p>
+                <p class="text-[11.5px] text-fg-4 mt-2">
+                    Столбцы: показы, клики. Минус-фраза уходит в ту кампанию, где запрос показался;
+                    слова нашего мира («лифт», «поручень», «ремень» и подобные) минус-фразой стать не могут.
+                </p>
             @endif
         </div>
     </div>
