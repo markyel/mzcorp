@@ -192,19 +192,10 @@ class ManagerUnavailabilityService
                         continue;
                     }
 
-                    // Round-robin: считаем active delegations per acting в этом
-                    // батче, отдаём кому меньше.
-                    $loadByActing = RequestDelegation::query()
-                        ->whereIn('acting_user_id', $available->pluck('id'))
-                        ->whereNull('ended_at')
-                        ->selectRaw('acting_user_id, COUNT(*) as c')
-                        ->groupBy('acting_user_id')
-                        ->pluck('c', 'acting_user_id');
-
-                    $actingId = $available
-                        ->sortBy(fn ($u) => (int) ($loadByActing[$u->id] ?? 0))
-                        ->first()
-                        ->id;
+                    // Кому передать: пропорционально проценту нагрузки —
+                    // пересчитываем на каждой заявке, чтобы раздача внутри
+                    // одного отсутствия шла по очереди, а не вся одному.
+                    $actingId = self::pickActing($available);
 
                     DB::transaction(function () use ($req, $unavailable, $actingId, $byUser, $reasonText) {
                         RequestDelegation::create([
@@ -255,6 +246,41 @@ class ManagerUnavailabilityService
      * Идемпотентно (active delegation уже есть → no-op). Возвращает acting_user_id
      * или null (не open / нет доступных / уже делегирована).
      */
+    /**
+     * Кому отдать заявку отсутствующего — пропорционально проценту нагрузки.
+     *
+     * Раньше брали просто того, у кого меньше активных делегаций. При разных
+     * процентах это неверно: менеджер на четверти ставки получал столько же,
+     * сколько полный. Считаем «додано относительно своей доли» и берём того,
+     * кому додано меньше всех; при равенстве — у кого доля больше.
+     *
+     * @param  \Illuminate\Support\Collection<int, User>  $available
+     */
+    public static function pickActing($available): int
+    {
+        $loadByActing = RequestDelegation::query()
+            ->whereIn('acting_user_id', $available->pluck('id'))
+            ->whereNull('ended_at')
+            ->selectRaw('acting_user_id, COUNT(*) as c')
+            ->groupBy('acting_user_id')
+            ->pluck('c', 'acting_user_id');
+
+        $share = fn (User $u) => max(1, min(500, (int) ($u->load_weight ?? 100))) / 100.0;
+        $fill = fn (User $u) => (int) ($loadByActing[$u->id] ?? 0) / $share($u);
+
+        return (int) $available
+            ->sort(function (User $a, User $b) use ($fill, $share) {
+                if (abs($fill($a) - $fill($b)) > 1e-9) {
+                    return $fill($a) <=> $fill($b);
+                }
+
+                // Никому ничего не додано — первым берёт тот, чья доля больше.
+                return $share($b) <=> $share($a);
+            })
+            ->first()
+            ->id;
+    }
+
     public function delegateOne(Request $req, User $unavailable, ?User $byUser = null): ?int
     {
         if (! $req->status->isOpenForAssignment()) {
@@ -276,17 +302,7 @@ class ManagerUnavailabilityService
             return null;
         }
 
-        // Round-robin: наименее загруженный по активным делегациям.
-        $loadByActing = RequestDelegation::query()
-            ->whereIn('acting_user_id', $available->pluck('id'))
-            ->whereNull('ended_at')
-            ->selectRaw('acting_user_id, COUNT(*) as c')
-            ->groupBy('acting_user_id')
-            ->pluck('c', 'acting_user_id');
-        $actingId = (int) $available
-            ->sortBy(fn ($u) => (int) ($loadByActing[$u->id] ?? 0))
-            ->first()
-            ->id;
+        $actingId = self::pickActing($available);
 
         $reasonText = sprintf(
             'Отсутствие %s (%s) до %s',

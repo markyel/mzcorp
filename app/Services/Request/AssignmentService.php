@@ -63,6 +63,34 @@ use Illuminate\Support\Facades\DB;
  */
 class AssignmentService
 {
+    /** Ключ настройки «каким правилом раздаём заявки». */
+    public const SETTING_MODE = 'assignment.mode';
+
+    /** Умный режим: sticky-привязки плюс микс нагрузки и скорости. */
+    public const MODE_SMART = 'smart';
+
+    /**
+     * Простой пропорциональный: по очереди, с оглядкой только на процент
+     * нагрузки менеджера. Ни sticky, ни скорость закрытия, ни потолок
+     * сложности не участвуют — заказчик включает этот режим именно тогда,
+     * когда хочет ровного потока без «умных» поправок.
+     */
+    public const MODE_PROPORTIONAL = 'proportional';
+
+    public static function modeLabel(string $mode): string
+    {
+        return $mode === self::MODE_PROPORTIONAL
+            ? 'пропорциональный'
+            : 'sticky и балансировка';
+    }
+
+    public function mode(): string
+    {
+        $mode = (string) app(\App\Services\Settings\SettingsService::class)->get(self::SETTING_MODE, self::MODE_SMART);
+
+        return $mode === self::MODE_PROPORTIONAL ? self::MODE_PROPORTIONAL : self::MODE_SMART;
+    }
+
     public function __construct(
         private readonly AttentionService $attention,
         private readonly RequestActivityService $activity,
@@ -86,6 +114,22 @@ class AssignmentService
         $managers = User::role(RoleEnum::requestHandlerRoles())->available()->get();
         if ($managers->isEmpty()) {
             return null;
+        }
+
+        // Пропорциональный режим: никаких привязок, только доля нагрузки.
+        // Ветка стоит перед sticky, потому что sticky здесь не «сильнее» —
+        // его в этом режиме нет вовсе.
+        if ($this->mode() === self::MODE_PROPORTIONAL) {
+            $share = $this->pickProportionalManager($managers);
+            $manager = $share['user'] ?? null;
+            $reason = $share
+                ? 'auto_proportional:'.json_encode(
+                    ['share' => $share['shares'], 'today' => $share['today']],
+                    JSON_UNESCAPED_UNICODE,
+                )
+                : 'auto_proportional';
+
+            return $this->commit($request, $manager, $reason, $byUserId);
         }
 
         $sticky = $this->pickStickyManager($request, $managers);
@@ -123,6 +167,16 @@ class AssignmentService
                 : 'auto_round_robin';
         }
 
+        return $this->commit($request, $manager, $reason, $byUserId);
+    }
+
+    /**
+     * Записать назначение и всё, что за ним следует: журнал, «внимание»,
+     * уведомление менеджеру, доставку письма в его ящик и письмо клиенту.
+     * Шаг общий для всех режимов раздачи — различается только выбор менеджера.
+     */
+    private function commit(Request $request, ?User $manager, string $reason, ?int $byUserId): ?User
+    {
         if (! $manager) {
             return null;
         }
@@ -214,6 +268,71 @@ class AssignmentService
         }
 
         return $manager;
+    }
+
+    /**
+     * Пропорциональная раздача: по очереди, с оглядкой только на процент
+     * нагрузки (`users.load_weight`).
+     *
+     * Никаких поправок на скорость закрытия, текущую загрузку и потолок
+     * сложности: режим включают именно тогда, когда нужен ровный поток и
+     * предсказуемость, а не оптимизация. Очередь считается по назначенным
+     * сегодня: берём того, кому меньше всех «додано» относительно его доли.
+     * Недоступные менеджеры в список не попадают — их отсеял вызывающий.
+     *
+     * @param  Collection<int, User>  $managers
+     * @return array{user: User, shares: array<int, float>, today: array<int, int>}|null
+     */
+    private function pickProportionalManager(Collection $managers): ?array
+    {
+        if ($managers->isEmpty()) {
+            return null;
+        }
+
+        $ids = $managers->pluck('id');
+        $todayByUser = Request::query()
+            ->whereIn('assigned_user_id', $ids)
+            ->where('assigned_at', '>=', now()->startOfDay())
+            ->groupBy('assigned_user_id')
+            ->selectRaw('assigned_user_id, COUNT(*) AS today')
+            ->pluck('today', 'assigned_user_id');
+
+        $lastByUser = Request::query()
+            ->whereIn('assigned_user_id', $ids)
+            ->whereNotNull('assigned_at')
+            ->groupBy('assigned_user_id')
+            ->selectRaw('assigned_user_id, MAX(assigned_at) AS last_assigned_at')
+            ->pluck('last_assigned_at', 'assigned_user_id');
+
+        $weights = $managers->mapWithKeys(fn (User $u) => [
+            $u->id => max(1, min(500, (int) ($u->load_weight ?? 100))) / 100.0,
+        ]);
+        $sum = max(1e-9, (float) $weights->sum());
+
+        $candidates = $managers->map(function (User $u) use ($weights, $sum, $todayByUser, $lastByUser) {
+            $share = $weights[$u->id] / $sum;
+            $today = (int) ($todayByUser[$u->id] ?? 0);
+
+            return [
+                'user' => $u,
+                'target_weight' => $share,
+                'today' => $today,
+                // Чем меньше fill, тем сильнее менеджеру недодано сегодня.
+                'fill' => $today / max($share, 1e-9),
+                'last_assigned_at' => $lastByUser[$u->id] ?? null,
+            ];
+        })->values();
+
+        $manager = $this->pickBySmoothShare($candidates);
+        if (! $manager) {
+            return null;
+        }
+
+        return [
+            'user' => $manager,
+            'shares' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => round($c['target_weight'], 4)])->all(),
+            'today' => $candidates->mapWithKeys(fn ($c) => [$c['user']->id => $c['today']])->all(),
+        ];
     }
 
     /**

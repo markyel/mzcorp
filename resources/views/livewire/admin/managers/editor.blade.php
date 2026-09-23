@@ -54,7 +54,14 @@
                     </div>
                     @error('loadWeight') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
                     <div class="text-[11.5px] text-fg-3 mt-1">
-                        100 — норма; 50 — в 2 раза меньше заявок; 200 — в 2 раза больше. Применяется на стадии round-robin (sticky-правила «один клиент = один менеджер» имеют приоритет).
+                        100 — норма; 50 — в 2 раза меньше заявок; 200 — в 2 раза больше.
+                        @if(app(\App\Services\Request\AssignmentService::class)->mode() === \App\Services\Request\AssignmentService::MODE_PROPORTIONAL)
+                            Сейчас включён пропорциональный режим — этот процент единственное,
+                            чем определяется раздача.
+                        @else
+                            Применяется на стадии round-robin (sticky-правила «один клиент = один
+                            менеджер» имеют приоритет). Режим раздачи переключается в «Настройках».
+                        @endif
                     </div>
                 </div>
 
