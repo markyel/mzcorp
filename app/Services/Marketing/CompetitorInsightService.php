@@ -74,8 +74,13 @@ class CompetitorInsightService
             return ['ok' => false, 'count' => 0, 'message' => 'Модель ответила не по форме — попробуйте ещё раз.'];
         }
 
-        $known = $competitor->insights()->pluck('statement')
-            ->map(fn ($s) => $this->fingerprint((string) $s))->all();
+        // Уже показанное человеку не предлагаем второй раз. Сверяем и формулировку,
+        // и цитату: модель охотно пересказывает один и тот же отзыв другими словами.
+        $known = [];
+        foreach ($competitor->insights()->get(['kind', 'statement', 'evidence']) as $seen) {
+            $known[] = $seen->kind.'|'.$this->fingerprint((string) $seen->statement);
+            $known[] = $seen->kind.'|'.$this->fingerprint((string) $seen->evidence);
+        }
 
         $created = 0;
         foreach ([CompetitorInsight::KIND_ADVANTAGE => 'advantages', CompetitorInsight::KIND_WEAKNESS => 'weaknesses'] as $kind => $key) {
@@ -85,11 +90,11 @@ class CompetitorInsightService
                 if ($statement === '' || $evidence === '') {
                     continue;
                 }
-                // Второй разбор не должен повторять то, что человек уже видел.
-                if (in_array($this->fingerprint($statement), $known, true)) {
+                $keys = [$kind.'|'.$this->fingerprint($statement), $kind.'|'.$this->fingerprint($evidence)];
+                if (array_intersect($keys, $known) !== []) {
                     continue;
                 }
-                $known[] = $this->fingerprint($statement);
+                $known = array_merge($known, $keys);
 
                 $competitor->insights()->create([
                     'kind' => $kind,
