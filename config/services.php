@@ -112,6 +112,10 @@ return [
         // Разбор поисковых запросов Директа: наш мир или чужой. Задача на
         // здравый смысл, не на знание каталога — хватает младшей модели.
         'direct_query_model' => env('OPENAI_DIRECT_QUERY_MODEL', 'gpt-4o-mini'),
+        // Сверка маркетинговых материалов с медиапрофилем: нужна работа с
+        // длинным текстом и аккуратная правка — младшая модель здесь врёт
+        // цитатами и переписывает смысл, поэтому старшая.
+        'media_profile_model' => env('OPENAI_MEDIA_PROFILE_MODEL', 'gpt-4o'),
         'attachment_relevance_enabled' => filter_var(env('OPENAI_ATTACHMENT_RELEVANCE_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         // Финальный LLM-консолидатор позиций split-пути (собирает один набор из
         // выдач разных парсеров одной заявки, склеивая дубли photo-vs-text).

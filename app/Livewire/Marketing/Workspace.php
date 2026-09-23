@@ -28,7 +28,7 @@ use Livewire\Component;
  */
 class Workspace extends Component
 {
-    public const TABS = ['access', 'contacts', 'plan', 'log', 'report', 'profile'];
+    public const TABS = ['access', 'contacts', 'plan', 'log', 'report', 'profile', 'review'];
 
     #[Url(as: 'tab', except: 'access')]
     public string $tab = 'access';
@@ -246,6 +246,79 @@ class Workspace extends Component
         \App\Models\MediaProfileEntry::where('id', $id)->delete();
         $this->flashMessage = 'Запись удалена.';
         unset($this->profileEntries);
+    }
+
+    /* ---------------------- Проверка материалов ---------------------- */
+
+    public string $mvKind = 'news';
+
+    public string $mvTitle = '';
+
+    public string $mvText = '';
+
+    /** Разбор, открытый на экране. */
+    public ?int $mvReviewId = null;
+
+    #[Computed]
+    public function mvReview(): ?\App\Models\MediaProfileReview
+    {
+        return $this->mvReviewId ? \App\Models\MediaProfileReview::find($this->mvReviewId) : null;
+    }
+
+    /** @return \Illuminate\Support\Collection<int, \App\Models\MediaProfileReview> */
+    #[Computed]
+    public function mvHistory()
+    {
+        return \App\Models\MediaProfileReview::query()
+            ->with('author:id,name')
+            ->orderByDesc('id')
+            ->limit(15)
+            ->get();
+    }
+
+    public function runMaterialReview(): void
+    {
+        $this->flashMessage = null;
+        $this->flashError = null;
+
+        $res = app(\App\Services\Marketing\MediaProfileReviewService::class)
+            ->review($this->mvKind, $this->mvText, $this->mvTitle, auth()->user());
+
+        if (! $res['ok']) {
+            $this->flashError = $res['message'];
+
+            return;
+        }
+
+        $this->mvReviewId = $res['review']->id;
+        $this->flashMessage = $res['message'] !== '' ? $res['message'] : 'Материал проверен.';
+        unset($this->mvReview, $this->mvHistory);
+    }
+
+    public function openMaterialReview(int $id): void
+    {
+        $review = \App\Models\MediaProfileReview::find($id);
+        if ($review === null) {
+            return;
+        }
+
+        $this->mvReviewId = $review->id;
+        $this->mvKind = $review->kind;
+        $this->mvTitle = (string) $review->title;
+        $this->mvText = (string) $review->source_text;
+        unset($this->mvReview);
+    }
+
+    /** Взять правку в работу: переписанный текст становится исходным. */
+    public function acceptRewrite(): void
+    {
+        $review = $this->mvReview;
+        if ($review?->rewritten_text === null) {
+            return;
+        }
+
+        $this->mvText = (string) $review->rewritten_text;
+        $this->flashMessage = 'Правка перенесена в поле материала — можно проверить ещё раз или забрать текст.';
     }
 
     public function setTab(string $tab): void

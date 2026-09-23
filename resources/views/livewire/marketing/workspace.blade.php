@@ -28,6 +28,7 @@
                     'log' => ['✅ Журнал работ', $sum['work']],
                     'report' => ['📄 Отчёт', null],
                     'profile' => ['🎭 Медиапрофиль', $this->profileEntries->flatten()->count()],
+                    'review' => ['🔍 Проверка материалов', null],
                 ];
             @endphp
             <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden text-[12.5px]">
@@ -663,5 +664,120 @@
                 считать пожеланием. Архивная запись остаётся в истории, но в проверку не идёт.
             </div>
         </div>
+    @endif
+
+    {{-- ─────────────── Проверка материалов ───────────────
+         Материал проходит через медиапрофиль: требования берутся только из
+         него, замечания привязаны к цитатам, правка возвращается целым
+         текстом. Выдумывать факты модели запрещено — цены и сроки берутся
+         только из исходника. --}}
+    @if($tab === 'review')
+        @php $review = $this->mvReview; @endphp
+        <div class="ds-card">
+            <div class="ds-card-header flex-wrap">
+                <h3 class="text-[15px] font-semibold text-fg-1">🔍 Проверка материала по медиапрофилю</h3>
+                <span class="text-[12px] text-fg-3">новость, рассылка, буклет — сверяем со своим образом</span>
+            </div>
+            <div class="ds-card-body">
+                <div class="flex flex-wrap items-center gap-2 mb-2">
+                    <select wire:model="mvKind"
+                            class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px]">
+                        @foreach(\App\Models\MediaProfileReview::KINDS as $k => $label)
+                            <option value="{{ $k }}">{{ $label }}</option>
+                        @endforeach
+                    </select>
+                    <input type="text" wire:model="mvTitle" placeholder="Название материала (необязательно)"
+                           class="flex-1 min-w-[220px] h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px]">
+                    <button type="button" class="btn btn-sm btn-primary" wire:click="runMaterialReview"
+                            wire:loading.attr="disabled" wire:target="runMaterialReview">
+                        <span wire:loading.remove wire:target="runMaterialReview">Проверить</span>
+                        <span wire:loading wire:target="runMaterialReview">Читаю…</span>
+                    </button>
+                </div>
+
+                <textarea wire:model="mvText" rows="12" placeholder="Вставьте текст материала"
+                          class="w-full px-3 py-2 border border-border rounded-md bg-surface text-[13px] leading-relaxed"></textarea>
+
+                @if($review)
+                    <div class="mt-3 grid gap-3 md:grid-cols-2">
+                        <div>
+                            <div class="text-[12px] text-fg-3 mb-1">
+                                Замечания:
+                                <b class="text-fg-1">{{ $review->strictCount() }}</b> обязательных,
+                                <b class="text-fg-1">{{ $review->softCount() }}</b> пожеланий
+                            </div>
+                            @forelse($review->issues ?? [] as $issue)
+                                <div class="ds-card p-2 mb-2 text-[12.5px]"
+                                     style="{{ ($issue['severity'] ?? '') === 'strict'
+                                        ? 'background:var(--red-50);border-color:var(--red-300)'
+                                        : 'background:var(--amber-50);border-color:var(--amber-300)' }}">
+                                    <div class="flex items-baseline gap-2">
+                                        <b class="text-fg-1">{{ $issue['facet_label'] ?? '—' }}</b>
+                                        <span class="text-[11px] text-fg-3">
+                                            {{ ($issue['severity'] ?? '') === 'strict' ? 'обязательное' : 'пожелание' }}
+                                        </span>
+                                    </div>
+                                    @if(($issue['quote'] ?? '') !== '')
+                                        <div class="text-[12px] text-fg-2 italic break-words">«{{ $issue['quote'] }}»</div>
+                                    @endif
+                                    <div class="text-fg-1 break-words">{{ $issue['problem'] ?? '' }}</div>
+                                    @if(($issue['fix'] ?? '') !== '')
+                                        <div class="text-[12px] text-fg-3 break-words">→ {{ $issue['fix'] }}</div>
+                                    @endif
+                                </div>
+                            @empty
+                                <div class="ds-card p-2 text-[12.5px]"
+                                     style="background:var(--emerald-50);border-color:var(--emerald-300)">
+                                    Материал профилю соответствует — замечаний нет.
+                                </div>
+                            @endforelse
+                        </div>
+
+                        <div>
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="text-[12px] text-fg-3 flex-1">Материал с правками</span>
+                                @if($review->rewritten_text)
+                                    <button type="button" class="btn btn-xs" wire:click="acceptRewrite">
+                                        Перенести в поле выше
+                                    </button>
+                                @endif
+                            </div>
+                            <textarea rows="14" readonly
+                                      class="w-full px-3 py-2 border border-border rounded-md bg-surface text-[13px] leading-relaxed"
+                            >{{ $review->rewritten_text ?? 'Модель правок не предложила.' }}</textarea>
+                            <div class="text-[11px] text-fg-4 mt-1">
+                                Цены, сроки и обещания модель брать из воздуха не может — если для правки
+                                нужен новый факт, она оставит «[уточнить]» и скажет об этом замечанием.
+                            </div>
+                        </div>
+                    </div>
+                @endif
+            </div>
+        </div>
+
+        @if($this->mvHistory->isNotEmpty())
+            <div class="ds-card">
+                <div class="ds-card-header">
+                    <h3 class="text-[15px] font-semibold text-fg-1">Последние проверки</h3>
+                    <span class="text-[12px] text-fg-3">повторяющиеся замечания — повод дополнить профиль, а не текст</span>
+                </div>
+                <div class="ds-card-body">
+                    @foreach($this->mvHistory as $r)
+                        <div class="flex items-baseline gap-2 py-1 border-b border-border-subtle text-[12.5px]"
+                             wire:key="mvr-{{ $r->id }}">
+                            <span class="chip text-[10px]" style="background:var(--neutral-100);color:var(--fg-3)">{{ $r->kindLabel() }}</span>
+                            <span class="flex-1 truncate text-fg-1">
+                                {{ $r->title ?: \Illuminate\Support\Str::limit(trim($r->source_text), 70) }}
+                            </span>
+                            <span class="mono text-[11px] {{ $r->strictCount() > 0 ? 'text-[var(--red-700)]' : 'text-fg-4' }}">
+                                {{ $r->strictCount() }} / {{ $r->softCount() }}
+                            </span>
+                            <span class="text-[11px] text-fg-4">{{ $r->author?->name }} · {{ $r->created_at?->format('d.m H:i') }}</span>
+                            <button type="button" class="btn btn-xs" wire:click="openMaterialReview({{ $r->id }})">открыть</button>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        @endif
     @endif
 </div>
