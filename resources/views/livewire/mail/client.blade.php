@@ -881,7 +881,9 @@ body.mail-resizing iframe{pointer-events:none}
                         <span class="spacer"></span>
                         <a href="{{ route('requests.show', $req->id) }}" wire:navigate>Открыть заявку →</a>
                     </div>
-                @elseif($anchor->direction?->value === 'inbound' && $this->canPromote)
+                @elseif($anchor->direction?->value === 'inbound'
+                    && $this->canPromote
+                    && ! $anchor->mailbox?->isProcurementMailbox())
                     {{-- Письмо не стало заявкой: постпродажа, «не заявка», спорный
                          разбор. Менеджер видит письмо целиком и решает лучше
                          автомата — даём ему сказать это одной кнопкой, как в

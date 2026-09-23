@@ -797,6 +797,14 @@ class Client extends Component
             return;
         }
 
+        // Ящик снабжения — вся его входящая это переписка с поставщиками.
+        // Клиентскую заявку из неё делать нельзя ни автоматом, ни руками.
+        if ($email->mailbox?->isProcurementMailbox()) {
+            $this->notice = 'Это ящик снабжения — из переписки с поставщиком клиентская заявка не создаётся.';
+
+            return;
+        }
+
         try {
             $request = app(\App\Services\Mail\EmailToRequestPromoter::class)
                 ->promote($email, $this->user()?->id, 'manual_create_request_from_mail');
