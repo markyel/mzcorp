@@ -110,6 +110,22 @@ class AutoQuoteRuleService
             $items->every(fn ($i) => (float) $i->parsed_qty > 0),
             'без количества считать нечего',
         );
+        // Мерная позиция без выбранной единицы расчёта — не «мелочь», а
+        // разница в порядок. M-2026-16956: «M12087 73 метра — 3 бухты».
+        // Посчитали 3 × 995,55 = 2 986 ₽, хотя цена каталога — за метр, и
+        // честная сумма 3 × 73 × 995,55 ≈ 218 000 ₽. Единицы измерения в
+        // каталоге нет (поле units хранит узел лифта), угадать её нельзя —
+        // значит такую позицию считает человек.
+        $measured = $items->filter(fn (RequestItem $i) => $i->isMeasured() && ! $i->billing_unit);
+        $checks[] = $this->check(
+            'measured_unit',
+            'Нет мерных позиций без единицы расчёта',
+            $measured->isEmpty(),
+            $measured->isEmpty()
+                ? 'штучные позиции — цена за штуку'
+                : 'клиент указал длину ('.$measured->first()->parsed_length.' '
+                    .$measured->first()->parsed_length_unit.'): за штуку или за метр — решает менеджер',
+        );
         $checks[] = $this->check(
             'no_notes',
             'Нет уточнений в позициях',
@@ -189,7 +205,9 @@ class AutoQuoteRuleService
         $out = [];
         foreach ($items as $item) {
             $catalog = $item->catalogItem;
-            $qty = (float) $item->parsed_qty;
+            // Ровно то количество, по которому считает карточка заявки:
+            // у мерной позиции с выбранной единицей это qty × длина.
+            $qty = $item->effectiveQty();
             $catalogPrice = (float) ($catalog?->price ?? 0);
             $priceMin = self::priceMin($catalog);
 
@@ -208,7 +226,9 @@ class AutoQuoteRuleService
                 'name' => (string) ($catalog?->name ?? $item->parsed_name),
                 'asked' => trim((string) ($item->parsed_article ?: $item->parsed_name)),
                 'qty' => $qty,
-                'unit' => (string) ($item->parsed_unit ?: 'шт.'),
+                // Единица та же, по которой посчитано количество: у мерной
+                // позиции в КП должны стоять метры, а не «3 шт.» на 219 м.
+                'unit' => (string) ($item->effectiveUnit() ?: 'шт.'),
                 'catalog_price' => $catalogPrice,
                 'price_min' => $priceMin,
                 'discount_percent' => $costPlus ? 0.0 : $discountPercent,
