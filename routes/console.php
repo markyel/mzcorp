@@ -14,10 +14,22 @@ Artisan::command('inspire', function () {
 | --------------------------------------------------------------------------
 */
 
-// Foundation §1: «Старт — polling каждые 1-2 минуты». Идём с 2 минутами.
-// withoutOverlapping предотвращает накладку, если предыдущий запуск ещё идёт.
-Schedule::command('mail:sync')
-    ->everyTwoMinutes()
+// Foundation §1: «Старт — polling каждые 1-2 минуты».
+//
+// Входящие — каждую минуту, отправленные — раз в шесть минут. Раньше оба
+// ящика синхронизировались вместе каждые две минуты, и этого едва хватало:
+// один проход — 13 ящиков × 2 папки × ~17 с ≈ 440 с работы, а на четырёх
+// воркерах это почти две минуты. Письмо ждало очереди дольше, чем самого
+// IMAP. «Отправленные» такой спешки не требуют — их пишем мы сами, и в
+// списке они появляются сразу из базы.
+Schedule::command('mail:sync --folder=inbox')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
+Schedule::command('mail:sync --folder=sent')
+    ->cron('*/6 * * * *')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();

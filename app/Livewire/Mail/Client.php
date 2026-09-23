@@ -716,6 +716,23 @@ class Client extends Component
      * в 2 минуты (mail:sync в расписании), но иногда ждать нельзя. Троттл —
      * чтобы кнопка не превращалась в способ забить очередь.
      */
+    /** До этого момента список обновляется часто — сразу после кнопки синка. */
+    public ?int $fastPollUntil = null;
+
+    /** Сколько секунд держим частый шаг после нажатия. */
+    private const FAST_POLL_SECONDS = 30;
+
+    /**
+     * Шаг автообновления списка. Обычно 30 секунд, сразу после запуска
+     * синхронизации — 3: ящик читается около 17 секунд, и при редком шаге
+     * нажавший кнопку человек видит результат много позже, чем он готов.
+     */
+    #[Computed]
+    public function pollInterval(): string
+    {
+        return $this->fastPollUntil !== null && $this->fastPollUntil > time() ? '3s' : '30s';
+    }
+
     public function syncNow(): void
     {
         $mailboxId = (int) $this->selectedMailboxId;
@@ -734,7 +751,11 @@ class Client extends Component
             dispatch(new SyncMailboxFolderJob($mailboxId, $folderType));
         }
         $this->syncedAt = now()->format('H:i');
-        $this->notice = 'Синхронизация запущена — новые письма появятся в списке через несколько секунд.';
+        // Полминуты обновляем список часто: ящик читается около 17 секунд, и
+        // при обычном шаге результат нажатия был бы виден сильно позже.
+        $this->fastPollUntil = time() + self::FAST_POLL_SECONDS;
+        unset($this->pollInterval);
+        $this->notice = 'Синхронизация запущена — новые письма появятся в списке в течение полуминуты.';
     }
 
     public function toggleFlag(int $id): void

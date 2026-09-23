@@ -79,10 +79,16 @@ class MailSyncCommand extends Command
                     $this->option('sync') ? dispatch_sync($foldersJob) : dispatch($foldersJob);
                     $count++;
                 }
-                // Флаги \Seen — дёшево (FETCH FLAGS по окну 14 дней), каждый цикл.
-                $seenJob = new \App\Jobs\Mail\PullImapSeenFlagsJob($mailbox->id);
-                $this->option('sync') ? dispatch_sync($seenJob) : dispatch($seenJob);
-                $count++;
+                // Флаги \Seen — FETCH FLAGS по окну 14 дней, дёшево по данным,
+                // но это отдельный IMAP-логин. Входящие теперь синхронизируются
+                // каждую минуту, а флаги такой частоты не стоят — держим свой
+                // интервал, чтобы не удваивать число подключений к Яндексу.
+                $seenInterval = max(1, (int) config('services.mail.seen_sync_interval_minutes', 2));
+                if ($this->option('sync') || \Illuminate\Support\Facades\Cache::add('seen-sync-throttle:'.$mailbox->id, 1, now()->addMinutes($seenInterval))) {
+                    $seenJob = new \App\Jobs\Mail\PullImapSeenFlagsJob($mailbox->id);
+                    $this->option('sync') ? dispatch_sync($seenJob) : dispatch($seenJob);
+                    $count++;
+                }
             }
         }
 
