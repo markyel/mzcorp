@@ -8,6 +8,8 @@ use App\Models\User;
 use App\Prompts\Direct\JudgeSearchQueriesPrompt;
 use App\Services\AI\OpenAIChatService;
 use App\Services\Settings\SettingsService;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -161,7 +163,7 @@ class DirectNegativeService
     /**
      * Минус-фраза: чистим до того, что Директ примет, и отсекаем опасное.
      */
-    public static function cleanPhrase(mixed $raw): ?string
+    public static function cleanPhrase(mixed $raw, ?array $stems = null): ?string
     {
         if (! is_string($raw)) {
             return null;
@@ -170,30 +172,84 @@ class DirectNegativeService
         if ($phrase === '' || mb_strlen($phrase) < 3) {
             return null;
         }
-        if (count(preg_split('/\s+/u', $phrase) ?: []) > 3) {
+        $words = preg_split('/\s+/u', $phrase) ?: [];
+        if (count($words) > 3) {
             return null;
         }
         // Слова нашего же мира минус-словом быть не могут: такой минус выключит
         // живые запросы, и узнать об этом будет неоткуда — показы просто
-        // перестанут приходить.
-        foreach (self::PROTECTED_WORDS as $word) {
-            if (preg_match('/(^|\s)'.preg_quote($word, '/').'/u', $phrase)) {
-                return null;
+        // перестанут приходить. Модель это правило нарушает: на «артикул
+        // масленки для сервиса» она предложила «масленки», а масленка
+        // направляющих у нас в каталоге есть.
+        foreach ($stems ?? self::protectedStems() as $stem) {
+            foreach ($words as $word) {
+                if (mb_strpos($word, $stem) === 0) {
+                    return null;
+                }
             }
         }
 
         return $phrase;
     }
 
-    /** Слова, которые встречаются в наших же запросах. */
-    private const PROTECTED_WORDS = [
-        'лифт', 'эскалатор', 'траволатор', 'подъёмник', 'подъемник',
-        'поручень', 'поручни', 'ступен', 'гребен', 'гребён', 'балюстрад',
-        'цепь', 'цепи', 'ремень', 'ремни', 'направляющ', 'башмак', 'вкладыш',
-        'привод', 'лебед', 'лебёд', 'редуктор', 'станц', 'плата', 'платы',
-        'энкодер', 'датчик', 'фотозавес', 'кнопка', 'кнопки', 'канат',
-        'ролик', 'шкив', 'микровыключател', 'двер', 'кабин', 'шахт',
-        'otis', 'kone', 'schindler', 'thyssen', 'sigma', 'fermator', 'wittur',
+    /**
+     * Основы слов, которые защищены от превращения в минус-фразу: ядро нашего
+     * словаря плюс всё, чем каталог называет рекламируемые детали. Из каталога
+     * — чтобы список не устаревал молча вместе с ассортиментом.
+     *
+     * @return array<int, string>
+     */
+    public static function protectedStems(): array
+    {
+        try {
+            return self::stemsFromCatalog();
+        } catch (\Throwable $e) {
+            Log::warning('Direct: словарь защищённых слов не собран', ['error' => $e->getMessage()]);
+
+            return self::CORE_WORDS;
+        }
+    }
+
+    /** @return array<int, string> */
+    private static function stemsFromCatalog(): array
+    {
+        return Cache::remember('direct:protected-stems', 3600, function () {
+            $stems = self::CORE_WORDS;
+
+            $types = DB::table('catalog_items')
+                ->where('is_active', true)
+                ->where('stock_available', '>', 0)
+                ->whereNotNull('part_type')
+                ->distinct()
+                ->pluck('part_type');
+
+            foreach ($types as $type) {
+                foreach (preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower((string) $type)) ?: [] as $word) {
+                    if (mb_strlen($word) >= 5) {
+                        $stems[] = mb_substr($word, 0, self::STEM);
+                    }
+                }
+            }
+
+            return array_values(array_unique(array_map(fn ($s) => mb_substr($s, 0, self::STEM), $stems)));
+        });
+    }
+
+    /**
+     * Длина основы. Четыре буквы, а не всё слово: «поручень» и «поручни»
+     * расходятся на пятой букве, «масленка» и «масленки» — на седьмой.
+     * Перестраховка дешева (минус-фраза просто не применится и человек решит
+     * сам), недостача — нет: лишний минус молча выключает живые запросы.
+     */
+    private const STEM = 4;
+
+    /** Ядро: слова нашего мира, которых может не быть в типах деталей. */
+    private const CORE_WORDS = [
+        'лифт', 'эска', 'трав', 'подъ', 'otis', 'kone', 'schi', 'thys',
+        'sigm', 'ferm', 'witt', 'моги', 'щлз', 'кмз', 'шахт', 'каби', 'двер',
+        // Беглая гласная: «ремень» и «ремни» не имеют общей основы даже в
+        // четыре буквы, поэтому обе формы перечислены руками.
+        'реме', 'ремн',
     ];
 
     /**
@@ -203,9 +259,11 @@ class DirectNegativeService
      */
     public function exclude(DirectQueryReview $review, ?User $by = null): array
     {
-        $phrase = $review->phrase;
+        // Проверяем ещё раз перед самой записью: вердикт мог быть вынесен до
+        // того, как позиция появилась в каталоге и её слово стало нашим.
+        $phrase = self::cleanPhrase($review->phrase);
         if ($phrase === null) {
-            return ['ok' => false, 'message' => 'У запроса нет минус-фразы — исключать нечем.'];
+            return ['ok' => false, 'message' => 'Эта минус-фраза задела бы наши же запросы — не применяю.'];
         }
         $campaignId = (int) ($review->campaign_id ?: $this->publisher->campaignId());
         if ($campaignId <= 0) {
