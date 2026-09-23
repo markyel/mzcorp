@@ -12,11 +12,13 @@ use App\Models\MarketingContact;
 use App\Models\MarketingEntry;
 use App\Models\MarketingReport;
 use App\Models\MarketingService;
+use App\Models\MarketPosition;
 use App\Models\MediaProfileEntry;
 use App\Models\MediaProfileGuide;
 use App\Models\MediaProfileReview;
 use App\Services\Marketing\CompetitorInsightService;
 use App\Services\Marketing\MarketingReportService;
+use App\Services\Marketing\MarketPositionService;
 use App\Services\Marketing\MediaProfileGuideService;
 use App\Services\Marketing\MediaProfileReviewService;
 use Illuminate\Support\Carbon;
@@ -411,6 +413,9 @@ class Workspace extends Component
 
     public string $coNotes = '';
 
+    /** Своя карточка — точка отсчёта в сравнении, её не разбирают. */
+    public bool $coSelf = false;
+
     /** id конкурента, для которого открыта форма вставки отзывов. */
     public ?int $revFor = null;
 
@@ -435,9 +440,27 @@ class Workspace extends Component
         return Competitor::query()
             ->withCount(['reviews as collected_reviews_count'])
             ->with(['reviews' => fn ($q) => $q->orderBy('id')])
+            ->orderByDesc('is_self')
             ->orderByDesc('is_active')
             ->orderBy('name')
             ->get();
+    }
+
+    /** Сводка «где мы среди всех» — последняя собранная. */
+    #[Computed]
+    public function marketPosition(): ?MarketPosition
+    {
+        return app(MarketPositionService::class)->latest();
+    }
+
+    public function buildMarketPosition(): void
+    {
+        $this->flashMessage = null;
+        $this->flashError = null;
+
+        $res = app(MarketPositionService::class)->build(auth()->user());
+        $res['ok'] ? $this->flashMessage = $res['message'] : $this->flashError = $res['message'];
+        unset($this->marketPosition);
     }
 
     /**
@@ -475,6 +498,7 @@ class Workspace extends Component
         $this->coRatings = '';
         $this->coReviews = '';
         $this->coNotes = '';
+        $this->coSelf = false;
     }
 
     public function editCompetitor(int $id): void
@@ -494,6 +518,7 @@ class Workspace extends Component
         $this->coRatings = $competitor->ratings_count !== null ? (string) $competitor->ratings_count : '';
         $this->coReviews = $competitor->reviews_count !== null ? (string) $competitor->reviews_count : '';
         $this->coNotes = (string) $competitor->notes;
+        $this->coSelf = (bool) $competitor->is_self;
     }
 
     public function cancelCompetitor(): void
@@ -511,7 +536,7 @@ class Workspace extends Component
             return;
         }
 
-        Competitor::updateOrCreate(
+        $saved = Competitor::updateOrCreate(
             ['id' => $this->coEditId],
             [
                 'name' => mb_substr($name, 0, 160),
@@ -522,9 +547,18 @@ class Workspace extends Component
                 'ratings_count' => ctype_digit(trim($this->coRatings)) ? (int) $this->coRatings : null,
                 'reviews_count' => ctype_digit(trim($this->coReviews)) ? (int) $this->coReviews : null,
                 'notes' => trim($this->coNotes) !== '' ? trim($this->coNotes) : null,
+                'is_self' => $this->coSelf,
                 'created_by_user_id' => $this->coEditId ? null : auth()->id(),
             ] + ($this->coEditId ? [] : ['is_active' => true]),
         );
+
+        // Мы в сравнении одни: иначе таблица получит две точки отсчёта.
+        if ($this->coSelf) {
+            Competitor::query()
+                ->where('is_self', true)
+                ->where('id', '!=', $saved->id)
+                ->update(['is_self' => false]);
+        }
 
         $this->flashMessage = $this->coEditId ? 'Конкурент обновлён.' : 'Конкурент добавлен. Дальше — отзывы.';
         $this->cancelCompetitor();

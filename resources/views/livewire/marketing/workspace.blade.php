@@ -923,6 +923,81 @@
 
     {{-- =========================== КОНКУРЕНТЫ =========================== --}}
     @if($tab === 'competitors')
+        @php
+            $cards = $this->competitors;
+            $me = $cards->firstWhere('is_self', true);
+            $pos = $this->marketPosition;
+        @endphp
+
+        {{-- Позиция: все карточки одной линейкой, своя — точкой отсчёта. --}}
+        <div class="ds-card">
+            <div class="ds-card-header flex-wrap">
+                <h3 class="text-[15px] font-semibold text-fg-1">📊 Наша позиция</h3>
+                <span class="text-[12px] text-fg-3">все конкуренты сразу: что считается нормой, где мы впереди, где отстаём</span>
+                <span class="flex-1"></span>
+                <button type="button" class="btn btn-sm" wire:click="buildMarketPosition"
+                        wire:loading.attr="disabled" wire:target="buildMarketPosition">
+                    <span wire:loading.remove wire:target="buildMarketPosition">{{ $pos ? 'Пересобрать сводку' : 'Собрать сводку' }}</span>
+                    <span wire:loading wire:target="buildMarketPosition">Собираю…</span>
+                </button>
+            </div>
+
+            <div class="ds-card-body">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-[12.5px]">
+                        <thead>
+                            <tr class="text-left text-[11.5px] text-fg-3 border-b border-border-subtle">
+                                <th class="py-1 pr-3 font-medium">Компания</th>
+                                <th class="py-1 pr-3 font-medium">Площадка</th>
+                                <th class="py-1 pr-3 font-medium text-right">Рейтинг</th>
+                                <th class="py-1 pr-3 font-medium text-right">Оценок</th>
+                                <th class="py-1 pr-3 font-medium text-right">Отзывов</th>
+                                <th class="py-1 font-medium text-right">Собрано</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($cards as $row)
+                                <tr class="border-b border-border-subtle last:border-b-0" wire:key="cmp-{{ $row->id }}">
+                                    <td class="py-1.5 pr-3">
+                                        <b class="{{ $row->is_self ? 'text-fg-1' : 'font-normal text-fg-2' }}">{{ $row->name }}</b>
+                                        @if($row->is_self)
+                                            <span class="chip text-[10px] ml-1" style="background:var(--accent-soft, var(--emerald-50));color:var(--emerald-700)">мы</span>
+                                        @endif
+                                    </td>
+                                    <td class="py-1.5 pr-3 text-fg-3">{{ $row->platformLabel() }}</td>
+                                    <td class="py-1.5 pr-3 text-right mono">{{ $row->rating !== null ? number_format($row->rating, 1, ',', '') : '—' }}</td>
+                                    <td class="py-1.5 pr-3 text-right mono">{{ $row->ratings_count ?? '—' }}</td>
+                                    <td class="py-1.5 pr-3 text-right mono">{{ $row->reviews_count ?? '—' }}</td>
+                                    <td class="py-1.5 text-right mono text-fg-3">{{ $row->collected_reviews_count }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+
+                @unless($me)
+                    <p class="text-[11.5px] text-fg-4 mt-2">
+                        Своей карточки нет — заведите её и отметьте как нашу, иначе сравнивать не с чем.
+                    </p>
+                @endunless
+
+                @if($pos)
+                    <div class="text-[11.5px] text-fg-4 mt-3 mb-1">
+                        собрана {{ $pos->created_at?->format('d.m.Y H:i') }}
+                        по {{ $pos->competitors_count }} конкурентам и {{ $pos->reviews_count }} отзывам{{ $pos->author ? ', '.$pos->author->name : '' }}
+                    </div>
+                    <textarea rows="22" readonly
+                              class="w-full px-3 py-2 border border-border rounded-md bg-surface text-[12.5px] leading-relaxed"
+                    >{{ $pos->body }}</textarea>
+                @else
+                    <p class="text-[12.5px] text-fg-3 mt-3">
+                        Сводки ещё нет. Она собирается из тех же карточек и отзывов, что ниже, плюс медиапрофиль
+                        и открытые претензии клиентов — и ничего сверх них не добавляет.
+                    </p>
+                @endif
+            </div>
+        </div>
+
         <div class="ds-card">
             <div class="ds-card-header flex-wrap">
                 <h3 class="text-[15px] font-semibold text-fg-1">🎯 Конкуренты</h3>
@@ -956,6 +1031,9 @@
                     <textarea wire:model="coNotes" rows="2" class="{{ $area }}"
                               placeholder="Чем занимается, чем силён, что заявляет на сайте"></textarea>
                     <div class="flex items-center gap-2 mt-2">
+                        <label class="flex items-center gap-1 text-[11.5px] text-fg-2" title="Точка отсчёта в сравнении: такую карточку не разбирают на «чем мы лучше»">
+                            <input type="checkbox" wire:model="coSelf"> это мы
+                        </label>
                         <span class="flex-1 text-[11.5px] text-fg-4">Рейтинг и счётчики — витрина площадки на день сбора, обновляйте вручную.</span>
                         <button type="button" class="btn btn-sm" wire:click="cancelCompetitor">Отмена</button>
                         <button type="button" class="btn btn-sm btn-primary" wire:click="saveCompetitor">Сохранить</button>
@@ -964,7 +1042,7 @@
             @endif
 
             <div class="ds-card-body space-y-3">
-                @forelse($this->competitors as $co)
+                @forelse($cards as $co)
                     @php
                         $open = $coOpen[$co->id] ?? false;
                         $rows = $this->competitorInsights[$co->id] ?? collect();
@@ -974,6 +1052,9 @@
                     <div class="ds-card p-3" wire:key="co-{{ $co->id }}" style="{{ $co->is_active ? '' : 'opacity:.55' }}">
                         <div class="flex flex-wrap items-baseline gap-2">
                             <b class="text-[13.5px] text-fg-1">{{ $co->name }}</b>
+                            @if($co->is_self)
+                                <span class="chip text-[10px]" style="background:var(--emerald-50);color:var(--emerald-700)">это мы</span>
+                            @endif
                             @if($co->site)
                                 <a href="{{ \Illuminate\Support\Str::startsWith($co->site, 'http') ? $co->site : 'https://'.$co->site }}"
                                    target="_blank" rel="noopener" class="text-[11.5px] text-fg-3 underline">{{ $co->site }}</a>
@@ -999,11 +1080,13 @@
                                 {{ $open ? 'свернуть' : 'отзывы и выводы' }}
                             </button>
                             <button type="button" class="btn btn-xs" wire:click="startReviews({{ $co->id }})">вставить отзывы</button>
-                            <button type="button" class="btn btn-xs btn-primary" wire:click="runCompetitorInsights({{ $co->id }})"
-                                    wire:loading.attr="disabled" wire:target="runCompetitorInsights({{ $co->id }})">
-                                <span wire:loading.remove wire:target="runCompetitorInsights({{ $co->id }})">разобрать</span>
-                                <span wire:loading wire:target="runCompetitorInsights({{ $co->id }})">разбираю…</span>
-                            </button>
+                            @unless($co->is_self)
+                                <button type="button" class="btn btn-xs btn-primary" wire:click="runCompetitorInsights({{ $co->id }})"
+                                        wire:loading.attr="disabled" wire:target="runCompetitorInsights({{ $co->id }})">
+                                    <span wire:loading.remove wire:target="runCompetitorInsights({{ $co->id }})">разобрать</span>
+                                    <span wire:loading wire:target="runCompetitorInsights({{ $co->id }})">разбираю…</span>
+                                </button>
+                            @endunless
                             <span class="flex-1"></span>
                             @if($rows->where('status', 'new')->count())
                                 <span class="chip text-[10px]" style="background:var(--amber-100);color:var(--amber-800)">

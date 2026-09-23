@@ -34,6 +34,10 @@ class CompetitorInsightService
      */
     public function extract(Competitor $competitor, ?User $author): array
     {
+        if ($competitor->is_self) {
+            return ['ok' => false, 'count' => 0, 'message' => 'Это наша карточка — с собой не сравниваемся.'];
+        }
+
         $reviews = $competitor->reviewsBrief(self::MAX_REVIEWS);
         if (trim($reviews) === '') {
             return ['ok' => false, 'count' => 0, 'message' => 'У конкурента нет отзывов — разбирать нечего.'];

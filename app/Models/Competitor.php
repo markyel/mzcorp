@@ -26,7 +26,7 @@ class Competitor extends Model
     protected $fillable = [
         'name', 'site', 'platform', 'platform_url',
         'rating', 'ratings_count', 'reviews_count',
-        'notes', 'is_active', 'created_by_user_id',
+        'notes', 'is_active', 'is_self', 'created_by_user_id',
     ];
 
     protected $casts = [
@@ -34,6 +34,7 @@ class Competitor extends Model
         'ratings_count' => 'integer',
         'reviews_count' => 'integer',
         'is_active' => 'boolean',
+        'is_self' => 'boolean',
     ];
 
     public function reviews(): HasMany
