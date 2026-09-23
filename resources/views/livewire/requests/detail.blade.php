@@ -798,6 +798,60 @@
                         return (float) ($s->confidence ?? 0) < 0.7;
                     });
             @endphp
+            {{-- Готовое авто-КП: система посчитала предложение по этой заявке.
+                 Показываем ровно то, что уйдёт письмом, — проверять одно, а
+                 отправлять пересчитанное нельзя. --}}
+            @if($this->autoQuote)
+                @php $aq = $this->autoQuote; @endphp
+                <div class="ds-card p-3 text-[12.5px]"
+                     style="background:var(--emerald-50);border-color:var(--emerald-300)"
+                     wire:key="auto-quote-{{ $aq->id }}">
+                    <div class="flex items-start gap-2 mb-2">
+                        <span class="text-[18px] leading-none">🧮</span>
+                        <div class="flex-1">
+                            <b class="text-fg-1">Система подготовила КП</b>
+                            <span class="text-fg-3">
+                                · {{ $aq->pricing }}
+                                · посчитано {{ $aq->evaluated_at?->format('d.m H:i') }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        @foreach($aq->lines as $line)
+                            <div class="flex items-baseline gap-2 py-[2px] border-b border-border-subtle">
+                                <span class="mono text-[11px] text-fg-4 w-[62px]">{{ $line['sku'] ?? '' }}</span>
+                                <span class="flex-1 truncate text-fg-1">{{ $line['name'] ?? '' }}</span>
+                                <span class="mono text-fg-3">{{ rtrim(rtrim(number_format((float) ($line['qty'] ?? 0), 2, ',', ' '), '0'), ',') }} {{ $line['unit'] ?? 'шт.' }}</span>
+                                <span class="mono text-fg-2 w-[92px] text-right">{{ number_format((float) ($line['unit_price'] ?? 0), 2, ',', ' ') }} ₽</span>
+                                <span class="mono text-fg-1 w-[104px] text-right">{{ number_format((float) ($line['total'] ?? 0), 2, ',', ' ') }} ₽</span>
+                            </div>
+                        @endforeach
+                        <div class="flex items-baseline gap-2 pt-1">
+                            <span class="flex-1 text-right text-fg-3">Итого</span>
+                            <span class="mono text-fg-1 w-[104px] text-right"><b>{{ number_format((float) $aq->total, 2, ',', ' ') }} ₽</b></span>
+                        </div>
+                    </div>
+
+                    @if($canManage)
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button type="button" class="btn btn-sm btn-primary"
+                                    wire:click="sendAutoQuote"
+                                    wire:loading.attr="disabled" wire:target="sendAutoQuote"
+                                    wire:confirm="Отправить это КП клиенту на {{ $req->client_email }}?">
+                                Отправить клиенту
+                            </button>
+                            <button type="button" class="btn btn-sm" wire:click="editAutoQuote">
+                                Открыть письмом и поправить
+                            </button>
+                            <span class="text-[11.5px] text-fg-3">
+                                Уйдёт на {{ $req->client_email ?: '— адреса нет' }}
+                            </span>
+                        </div>
+                    @endif
+                </div>
+            @endif
+
             @if($aiSuggestions->isNotEmpty() && $canManage)
                 @foreach($aiSuggestions as $sugg)
                     @php

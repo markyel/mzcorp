@@ -271,6 +271,8 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .trow.awaiting-inv .snip{color:var(--amber-600,#d97706)}
 .mailapp .trow.awaiting-inv{box-shadow:inset 3px 0 0 var(--amber-600,#d97706)}
 .mailapp .trow .rubchip{font:700 11px/1.4 var(--font-sans);background:var(--amber-50,#fff7ed);color:var(--amber-700,#b45309);padding:1px 6px;border-radius:4px;white-space:nowrap}
+/* «КП готово» — система посчитала предложение, его осталось проверить. */
+.mailapp .trow .aqchip{font:600 10.5px/1.4 var(--font-sans);background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:4px;white-space:nowrap}
 .mailapp .trow .catchip{font:500 10.5px/1.3 var(--font-sans);padding:1px 6px;border-radius:999px}
 .mailapp .trow .catchip.kp{background:var(--sky-50);color:var(--sky-700)}
 .mailapp .trow .catchip.invoice{background:var(--emerald-50);color:var(--emerald-700)}
@@ -674,6 +676,7 @@ body.mail-resizing iframe{pointer-events:none}
         </div>
 
         <div class="threads">
+            @php $autoQuotes = $this->autoQuotes; @endphp
             @forelse($this->threads->take($perPage) as $m)
                 @php
                     $unread = $m->my_read_at === null && $m->direction?->value === 'inbound';
@@ -729,6 +732,11 @@ body.mail-resizing iframe{pointer-events:none}
                                 @endif
                                 @if($m->related_request_id && $m->relatedRequest)
                                     @if($awaitingInv)<span class="rubchip" title="Клиент ждёт счёт — счёт ещё не выставлен">₽</span>@endif
+                                    {{-- Система уже посчитала КП по этой заявке: открыть и отправить. --}}
+                                    @if(isset($autoQuotes[$m->related_request_id]))
+                                        <span class="aqchip"
+                                              title="Система подготовила КП на {{ number_format((float) $autoQuotes[$m->related_request_id]->total, 2, ',', ' ') }} ₽ — проверить и отправить в карточке заявки">КП готово</span>
+                                    @endif
                                     <span class="reqchip">{{ $m->relatedRequest->internal_code }}</span>
                                     @if($m->relatedRequest->onec_number)<span class="onecchip" title="Номер заявки/КП в 1С">1С {{ $m->relatedRequest->onec_number }}</span>@endif
                                 @elseif($cat)

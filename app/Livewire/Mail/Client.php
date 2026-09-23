@@ -950,6 +950,20 @@ class Client extends Component
             ->get();
     }
 
+    /**
+     * По каким заявкам из списка система уже посчитала КП. Метка в строке —
+     * чтобы менеджер видел это в почте, не открывая заявку.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\AutoQuoteSnapshot>
+     */
+    #[Computed]
+    public function autoQuotes()
+    {
+        return app(\App\Services\Quotes\AutoQuoteOfferService::class)->readyForMany(
+            $this->threads->pluck('related_request_id')->filter()->map(fn ($id) => (int) $id)->all(),
+        );
+    }
+
     #[Computed]
     public function hasMore(): bool
     {

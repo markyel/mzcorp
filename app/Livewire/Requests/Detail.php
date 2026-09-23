@@ -1641,6 +1641,72 @@ class Detail extends Component
      *
      * @return \Illuminate\Database\Eloquent\Collection<int, AiDecision>
      */
+    /**
+     * Готовое авто-КП по этой заявке, если система его посчитала.
+     *
+     * Показываем менеджеру то, что уже заморожено снимком, — и отправляем
+     * ровно это: проверять одно, а отправлять пересчитанное нельзя.
+     */
+    #[Computed]
+    public function autoQuote(): ?\App\Models\AutoQuoteSnapshot
+    {
+        return app(\App\Services\Quotes\AutoQuoteOfferService::class)->readyFor($this->request);
+    }
+
+    /** Отправить готовое авто-КП клиенту. */
+    public function sendAutoQuote(): void
+    {
+        $user = auth()->user();
+        if ($user === null || ! $this->canSendMail()) {
+            session()->flash('error', 'Отправлять письма по заявке может назначенный менеджер, делегат или админ/РОП/директорат.');
+
+            return;
+        }
+
+        $res = app(\App\Services\Quotes\AutoQuoteOfferService::class)->send($this->request->fresh(), $user);
+        session()->flash($res['ok'] ? 'status' : 'error', $res['message']);
+        unset($this->autoQuote);
+    }
+
+    /** Открыть авто-КП письмом — если менеджер хочет поправить текст. */
+    public function editAutoQuote(): void
+    {
+        $user = auth()->user();
+        $snapshot = $this->autoQuote;
+        if ($user === null || $snapshot === null || ! $this->canSendMail()) {
+            return;
+        }
+
+        $draft = app(\App\Services\Quotes\AutoQuoteOfferService::class)
+            ->draft($this->request, $snapshot, $user);
+
+        $this->dispatch('open-draft', draftId: $draft->id, requestId: $this->request->id);
+    }
+
+    /**
+     * Тот же круг, что и у обычного ответа: владелец заявки, делегат на время
+     * отсутствия, админ/РОП/директорат.
+     */
+    private function canSendMail(): bool
+    {
+        $user = auth()->user();
+        if ($user === null) {
+            return false;
+        }
+        if ($this->request->assigned_user_id === $user->id) {
+            return true;
+        }
+        if (method_exists($this->request, 'isDelegatedTo') && $this->request->isDelegatedTo($user)) {
+            return true;
+        }
+
+        return $user->hasAnyRole([
+            \App\Enums\Role::Admin->value,
+            \App\Enums\Role::HeadOfSales->value,
+            \App\Enums\Role::Director->value,
+        ]);
+    }
+
     #[Computed]
     public function pendingAiDecisions()
     {
