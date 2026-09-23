@@ -1070,18 +1070,43 @@ class MessagePersister
     private function bodyPlainWithHtmlFallback($msg): string
     {
         $plain = $this->cleanString((string) $msg->getTextBody());
-        if (trim($plain) !== '') {
+        $html = (string) $msg->getHTMLBody();
+
+        // Текстовая часть бывает мусорной: отправитель делает её наивным
+        // стриппингом тегов, и в неё попадает содержимое <style>. Письмо
+        // Liftway «Просим выставить счёт» начиналось двумя тысячами символов
+        // CSS, а сам запрос шёл после них — классификатор видел только CSS и
+        // тему, и записал заявку в постпродажу. Если в plain есть CSS, а HTML
+        // у письма есть, чистим HTML сами.
+        if (trim($plain) !== '' && ! (self::looksLikeCss($plain) && trim($html) !== '')) {
             return $plain;
         }
-        $html = (string) $msg->getHTMLBody();
         if (trim($html) === '') {
             return $plain;
         }
         try {
-            return $this->cleanString(app(\App\Services\Mail\EmailTextCleanerService::class)->htmlToText($html));
+            $fromHtml = $this->cleanString(app(\App\Services\Mail\EmailTextCleanerService::class)->htmlToText($html));
         } catch (\Throwable $e) {
-            return $this->cleanString(trim(strip_tags($html)));
+            $fromHtml = $this->cleanString(trim(strip_tags($html)));
         }
+
+        // Если из HTML ничего осмысленного не вышло, лучше мусорный plain,
+        // чем пустое тело: по нему хотя бы ищется.
+        return trim($fromHtml) !== '' ? $fromHtml : $plain;
+    }
+
+    /**
+     * Похоже ли на таблицу стилей, а не на письмо.
+     *
+     * Ищем то, чего в человеческом тексте не бывает: объявления вида
+     * `свойство:значение;` внутри фигурных скобок. Одного-двух мало —
+     * в письме могут оказаться и скобки, и двоеточия; счёт от трёх.
+     */
+    public static function looksLikeCss(string $text): bool
+    {
+        $head = mb_substr($text, 0, 4000);
+
+        return preg_match_all('/\{[^{}]*[a-z-]+\s*:\s*[^{};]+;[^{}]*\}/iu', $head) >= 3;
     }
 
     /**
