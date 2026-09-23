@@ -664,6 +664,46 @@
                 считать пожеланием. Архивная запись остаётся в истории, но в проверку не идёт.
             </div>
         </div>
+
+        {{-- Памятка: профиль, изложенный по жанрам для человека. Её отдают
+             копирайтеру или подрядчику — в отличие от списка утверждений,
+             который удобен машине. --}}
+        @php $guide = $this->styleGuide; @endphp
+        <div class="ds-card">
+            <div class="ds-card-header flex-wrap">
+                <h3 class="text-[15px] font-semibold text-fg-1">📘 Памятка по стилю</h3>
+                <span class="text-[12px] text-fg-3">
+                    профиль по жанрам: позиционирование, новости, объявления, рассылки, буклеты
+                </span>
+                <span class="flex-1"></span>
+                @if($guide && ! $guide->isFresh())
+                    <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)">
+                        профиль изменился после сборки
+                    </span>
+                @endif
+                <button type="button" class="btn btn-sm" wire:click="buildStyleGuide"
+                        wire:loading.attr="disabled" wire:target="buildStyleGuide">
+                    <span wire:loading.remove wire:target="buildStyleGuide">{{ $guide ? 'Пересобрать' : 'Собрать памятку' }}</span>
+                    <span wire:loading wire:target="buildStyleGuide">Собираю…</span>
+                </button>
+            </div>
+            <div class="ds-card-body">
+                @if($guide)
+                    <div class="text-[11.5px] text-fg-4 mb-2">
+                        собрана {{ $guide->created_at?->format('d.m.Y H:i') }}
+                        из {{ $guide->entries_count }} утверждений{{ $guide->author ? ', '.$guide->author->name : '' }}
+                    </div>
+                    <textarea rows="20" readonly
+                              class="w-full px-3 py-2 border border-border rounded-md bg-surface text-[12.5px] leading-relaxed"
+                    >{{ $guide->body }}</textarea>
+                @else
+                    <p class="text-[12.5px] text-fg-3">
+                        Памятки ещё нет. Она собирается из тех же утверждений, по которым идёт проверка
+                        материалов, — и ничего сверх них не добавляет.
+                    </p>
+                @endif
+            </div>
+        </div>
     @endif
 
     {{-- ─────────────── Проверка материалов ───────────────

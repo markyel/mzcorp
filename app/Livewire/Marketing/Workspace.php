@@ -248,6 +248,23 @@ class Workspace extends Component
         unset($this->profileEntries);
     }
 
+    /** Памятка по стилю, собранная из профиля. */
+    #[Computed]
+    public function styleGuide(): ?\App\Models\MediaProfileGuide
+    {
+        return app(\App\Services\Marketing\MediaProfileGuideService::class)->latest();
+    }
+
+    public function buildStyleGuide(): void
+    {
+        $this->flashMessage = null;
+        $this->flashError = null;
+
+        $res = app(\App\Services\Marketing\MediaProfileGuideService::class)->build(auth()->user());
+        $res['ok'] ? $this->flashMessage = $res['message'] : $this->flashError = $res['message'];
+        unset($this->styleGuide);
+    }
+
     /* ---------------------- Проверка материалов ---------------------- */
 
     public string $mvKind = 'news';
