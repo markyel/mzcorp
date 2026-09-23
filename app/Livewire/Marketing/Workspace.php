@@ -28,7 +28,7 @@ use Livewire\Component;
  */
 class Workspace extends Component
 {
-    public const TABS = ['access', 'contacts', 'plan', 'log', 'report'];
+    public const TABS = ['access', 'contacts', 'plan', 'log', 'report', 'profile'];
 
     #[Url(as: 'tab', except: 'access')]
     public string $tab = 'access';
@@ -141,6 +141,111 @@ class Workspace extends Component
         if ($this->tab === 'report') {
             $this->loadReport();
         }
+    }
+
+    /* ------------------------- Медиапрофиль -------------------------- */
+
+    /** Открытая форма записи медиапрофиля: null — форма закрыта. */
+    public ?string $profileFacet = null;
+
+    public ?int $profileEditId = null;
+
+    public string $pStatement = '';
+
+    public string $pDetails = '';
+
+    public bool $pStrict = false;
+
+    /**
+     * Записи профиля по граням.
+     *
+     * @return \Illuminate\Support\Collection<string, \Illuminate\Support\Collection<int, \App\Models\MediaProfileEntry>>
+     */
+    #[Computed]
+    public function profileEntries()
+    {
+        return \App\Models\MediaProfileEntry::query()
+            ->with('author:id,name')
+            ->orderBy('position')
+            ->orderBy('id')
+            ->get()
+            ->groupBy(fn ($e) => $e->facet->value);
+    }
+
+    public function startProfileEntry(string $facet): void
+    {
+        $this->profileFacet = \App\Enums\MediaProfileFacet::tryFrom($facet)?->value;
+        $this->profileEditId = null;
+        $this->pStatement = '';
+        $this->pDetails = '';
+        $this->pStrict = false;
+    }
+
+    public function editProfileEntry(int $id): void
+    {
+        $entry = \App\Models\MediaProfileEntry::find($id);
+        if ($entry === null) {
+            return;
+        }
+
+        $this->profileFacet = $entry->facet->value;
+        $this->profileEditId = $entry->id;
+        $this->pStatement = (string) $entry->statement;
+        $this->pDetails = (string) $entry->details;
+        $this->pStrict = (bool) $entry->is_strict;
+    }
+
+    public function cancelProfileEntry(): void
+    {
+        $this->profileFacet = null;
+        $this->profileEditId = null;
+    }
+
+    public function saveProfileEntry(): void
+    {
+        $facet = \App\Enums\MediaProfileFacet::tryFrom((string) $this->profileFacet);
+        $statement = trim($this->pStatement);
+
+        if ($facet === null || $statement === '') {
+            $this->flashError = 'Нужна рубрика и само утверждение.';
+
+            return;
+        }
+
+        \App\Models\MediaProfileEntry::updateOrCreate(
+            ['id' => $this->profileEditId],
+            [
+                'facet' => $facet->value,
+                'statement' => mb_substr($statement, 0, 500),
+                'details' => trim($this->pDetails) !== '' ? trim($this->pDetails) : null,
+                'is_strict' => $this->pStrict,
+                'is_active' => true,
+                'created_by_user_id' => $this->profileEditId ? null : auth()->id(),
+            ] + ($this->profileEditId ? [] : ['position' => 0]),
+        );
+
+        $this->flashMessage = $this->profileEditId ? 'Запись обновлена.' : 'Запись добавлена в медиапрофиль.';
+        $this->cancelProfileEntry();
+        unset($this->profileEntries);
+    }
+
+    /** Убрать из профиля: запись перестаёт участвовать в проверке материалов. */
+    public function toggleProfileEntry(int $id): void
+    {
+        $entry = \App\Models\MediaProfileEntry::find($id);
+        if ($entry === null) {
+            return;
+        }
+
+        $entry->forceFill(['is_active' => ! $entry->is_active])->save();
+        unset($this->profileEntries);
+    }
+
+    public function deleteProfileEntry(int $id): void
+    {
+        \App\Models\MediaProfileEntry::where('id', $id)->delete();
+        $this->flashMessage = 'Запись удалена.';
+        unset($this->profileEntries);
     }
 
     public function setTab(string $tab): void

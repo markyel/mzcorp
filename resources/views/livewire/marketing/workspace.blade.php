@@ -27,6 +27,7 @@
                     'plan' => ['🗒 План и заметки', $sum['plan'] + $sum['note']],
                     'log' => ['✅ Журнал работ', $sum['work']],
                     'report' => ['📄 Отчёт', null],
+                    'profile' => ['🎭 Медиапрофиль', $this->profileEntries->flatten()->count()],
                 ];
             @endphp
             <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden text-[12.5px]">
@@ -579,6 +580,87 @@
                         <button type="button" wire:click="saveReport" class="btn btn-sm btn-primary">Сохранить отчёт</button>
                     @endif
                 </div>
+            </div>
+        </div>
+    @endif
+
+    {{-- ─────────────── Медиапрофиль ───────────────
+         Копилка утверждений о компании, из которых складывается рекламный
+         образ. Рубрики выбраны так, чтобы каждая давала проверяемое
+         требование к тексту: через них потом пойдут новости, рассылки и
+         буклеты. Поэтому у записи есть короткое утверждение (оно и
+         проверяется) и пояснение — примеры и оговорки для человека. --}}
+    @if($tab === 'profile')
+        @php $entries = $this->profileEntries; @endphp
+        <div class="ds-card">
+            <div class="ds-card-header">
+                <h3 class="text-[15px] font-semibold text-fg-1">🎭 Медиапрофиль компании</h3>
+                <span class="text-[12px] text-fg-3">
+                    из чего складывается наш рекламный образ — и по чему потом сверяются материалы
+                </span>
+            </div>
+            <div class="ds-card-body grid gap-4 md:grid-cols-2">
+                @foreach(\App\Enums\MediaProfileFacet::ordered() as $facet)
+                    @php $rows = $entries[$facet->value] ?? collect(); @endphp
+                    <div class="ds-card p-3">
+                        <div class="flex items-baseline gap-2 mb-1">
+                            <span>{{ $facet->icon() }}</span>
+                            <b class="text-[13px] text-fg-1">{{ $facet->label() }}</b>
+                            <span class="mono text-[11px] text-fg-4">{{ $rows->count() }}</span>
+                            <span class="flex-1"></span>
+                            <button type="button" class="btn btn-xs"
+                                    wire:click="startProfileEntry('{{ $facet->value }}')">добавить</button>
+                        </div>
+                        <div class="text-[11px] text-fg-4 mb-2">{{ $facet->hint() }}</div>
+
+                        @forelse($rows as $entry)
+                            <div class="py-1 border-t border-border-subtle text-[12.5px] {{ $entry->is_active ? '' : 'opacity-50' }}"
+                                 wire:key="mp-{{ $entry->id }}">
+                                <div class="flex items-baseline gap-2">
+                                    @if($entry->is_strict)
+                                        <span class="chip text-[10px]" style="background:var(--red-50);color:var(--red-700)"
+                                              title="Обязательное требование — материал без него не выпускаем">строго</span>
+                                    @endif
+                                    <span class="flex-1 text-fg-1 break-words">{{ $entry->statement }}</span>
+                                    <button type="button" class="btn btn-xs" wire:click="editProfileEntry({{ $entry->id }})">правка</button>
+                                    <button type="button" class="btn btn-xs" wire:click="toggleProfileEntry({{ $entry->id }})"
+                                            title="{{ $entry->is_active ? 'Убрать из проверки материалов' : 'Вернуть в проверку' }}">
+                                        {{ $entry->is_active ? 'в архив' : 'вернуть' }}
+                                    </button>
+                                </div>
+                                @if($entry->details)
+                                    <div class="text-[11.5px] text-fg-3 break-words">{{ $entry->details }}</div>
+                                @endif
+                                <div class="text-[10.5px] text-fg-4">
+                                    {{ $entry->author?->name ?? 'система' }} · {{ $entry->created_at?->format('d.m.Y') }}
+                                </div>
+                            </div>
+                        @empty
+                            <div class="text-[12px] text-fg-4 py-1">Пока пусто.</div>
+                        @endforelse
+
+                        @if($profileFacet === $facet->value)
+                            <div class="mt-2 pt-2 border-t border-border">
+                                <input type="text" wire:model="pStatement" placeholder="Утверждение — коротко и проверяемо"
+                                       class="w-full h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] mb-1">
+                                <textarea wire:model="pDetails" rows="2" placeholder="Пояснение: примеры, оговорки, откуда взялось"
+                                          class="w-full px-2 py-1 border border-border rounded-md bg-surface text-[12px] mb-1"></textarea>
+                                <div class="flex items-center gap-2">
+                                    <label class="flex items-center gap-1 text-[11.5px] text-fg-2">
+                                        <input type="checkbox" wire:model="pStrict"> обязательное требование
+                                    </label>
+                                    <span class="flex-1"></span>
+                                    <button type="button" class="btn btn-xs" wire:click="cancelProfileEntry">отмена</button>
+                                    <button type="button" class="btn btn-xs btn-primary" wire:click="saveProfileEntry">сохранить</button>
+                                </div>
+                            </div>
+                        @endif
+                    </div>
+                @endforeach
+            </div>
+            <div class="ds-card-body pt-0 text-[11.5px] text-fg-3">
+                «Строго» — то, нарушение чего в материале недопустимо; остальное система будет
+                считать пожеланием. Архивная запись остаётся в истории, но в проверку не идёт.
             </div>
         </div>
     @endif
