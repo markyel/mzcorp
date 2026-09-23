@@ -4,6 +4,7 @@ namespace App\Services\Mail\Routing;
 
 use App\Services\Mail\Routing\Handlers\BlocklistHandler;
 use App\Services\Mail\Routing\Handlers\CategorizeHandler;
+use App\Services\Mail\Routing\Handlers\CitedQuoteLinkHandler;
 use App\Services\Mail\Routing\Handlers\ClosedWonThreadHandler;
 use App\Services\Mail\Routing\Handlers\CreateRequestHandler;
 use App\Services\Mail\Routing\Handlers\CrossMailboxCopyHandler;
@@ -46,6 +47,10 @@ final class RoutingPipeline
         ClosedWonThreadHandler::class,
         PostSaleOrderHandler::class,
         LinkedThreadHandler::class,
+        // Перед созданием заявки: если клиент прислал обратно наше КП, у нас
+        // есть точный адрес — заявка, по которой этот документ выдан. Работа
+        // продолжается в ней, а не начинается заново (M-2026-15434/15464).
+        CitedQuoteLinkHandler::class,
         CreateRequestHandler::class,
     ];
 
