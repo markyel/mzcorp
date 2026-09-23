@@ -369,6 +369,35 @@ class InboundReplyLinker
      * scope / только дубль-копия). ParseRequestItemsJob использует это, чтобы
      * не плодить пустую заявку из reply в уже закрытый тред.
      */
+    /**
+     * Письмо-родитель у нас есть, но заявки у него пока нет.
+     *
+     * Так бывает, когда исходное письмо клиента задержалось в разборе (сбой
+     * OpenAI, долгая очередь), а ответ уже пришёл. Кейс M-2026-15434 /
+     * M-2026-15464: клиент прислал обратно наше КП 10.09 в 15:53, заявка по
+     * его же первому письму появилась только в 23:42 — ответ не к чему было
+     * прицепить, и он завёл вторую заявку по той же сделке.
+     *
+     * В таком случае заявку по ответу создавать нельзя: родитель вот-вот
+     * получит свою, и `mail:relink-deferred` прицепит ответ к ней.
+     */
+    public function parentAwaitingRequest(EmailMessage $message): bool
+    {
+        $candidateIds = $this->collectCandidateMessageIds($message);
+        if ($candidateIds === []) {
+            return false;
+        }
+
+        return EmailMessage::query()
+            ->whereIn('message_id', $candidateIds)
+            ->where('id', '!=', $message->id)
+            ->whereNull('related_request_id')
+            // Ждём недолго: если родитель за сутки заявкой не стал, ответ
+            // должен жить своей — потерять письмо хуже, чем задвоить.
+            ->where('created_at', '>=', now()->subDay())
+            ->exists();
+    }
+
     public function findHeaderParentRequest(EmailMessage $message): ?Request
     {
         $candidateIds = $this->collectCandidateMessageIds($message);

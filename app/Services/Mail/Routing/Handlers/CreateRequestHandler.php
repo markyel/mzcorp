@@ -27,8 +27,10 @@ final class CreateRequestHandler implements InboundRoutingHandler
         EmailCategory::ThreadReply->value,
     ];
 
-    public function __construct(private readonly IncomingMailProcessor $incoming)
-    {
+    public function __construct(
+        private readonly IncomingMailProcessor $incoming,
+        private readonly \App\Services\Mail\InboundReplyLinker $linker,
+    ) {
     }
 
     public function handle(RoutingContext $ctx): ?RoutingDecision
@@ -41,6 +43,16 @@ final class CreateRequestHandler implements InboundRoutingHandler
 
         if (! in_array($message->category, self::CREATE_CATEGORIES, true)) {
             return new RoutingDecision('not_a_request', null, [], runRules: true);
+        }
+
+        // Ответ в переписке, чьё письмо-родитель у нас есть, но заявки у него
+        // ещё нет: исходное письмо задержалось в разборе. Заводить вторую
+        // заявку по той же сделке нельзя — ждём, пока родитель получит свою,
+        // и `mail:relink-deferred` прицепит этот ответ к ней. Кейс
+        // M-2026-15434 / M-2026-15464: клиент вернул наше КП раньше, чем его
+        // же первое письмо стало заявкой, и сделка раздвоилась.
+        if ($this->linker->parentAwaitingRequest($message)) {
+            return new RoutingDecision('reply_awaits_parent', null, [], runRules: true);
         }
 
         $processed = $this->incoming->processIfRequest($message);
