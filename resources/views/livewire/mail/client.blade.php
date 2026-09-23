@@ -883,7 +883,8 @@ body.mail-resizing iframe{pointer-events:none}
                     </div>
                 @elseif($anchor->direction?->value === 'inbound'
                     && $this->canPromote
-                    && ! $anchor->mailbox?->isProcurementMailbox())
+                    && ! $anchor->mailbox?->isProcurementMailbox()
+                    && ! app(\App\Services\Mail\SupplierCcInboxService::class)->isRfqInboxMessage($anchor))
                     {{-- Письмо не стало заявкой: постпродажа, «не заявка», спорный
                          разбор. Менеджер видит письмо целиком и решает лучше
                          автомата — даём ему сказать это одной кнопкой, как в
