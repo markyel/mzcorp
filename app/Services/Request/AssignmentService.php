@@ -139,6 +139,23 @@ class AssignmentService
                 );
             }
 
+            // Одна и та же заявка от разных покупателей — одному менеджеру:
+            // такие приходят от торгующих между собой контор по одному
+            // конечному объекту, и разбирать их дважды разным людям — двойная
+            // работа и два разных ответа одному и тому же спросу.
+            $twin = $this->pickTwinManager($request, $managers);
+            if ($twin) {
+                return $this->commit(
+                    $request,
+                    $twin['user'],
+                    'auto_twin:'.json_encode(
+                        ['fingerprint' => $twin['fingerprint'], 'linked' => $twin['linked']],
+                        JSON_UNESCAPED_UNICODE,
+                    ),
+                    $byUserId,
+                );
+            }
+
             $share = $this->pickProportionalManager($managers);
             $manager = $share['user'] ?? null;
             $reason = $share
@@ -287,6 +304,102 @@ class AssignmentService
         }
 
         return $manager;
+    }
+
+    /** За сколько дней ищем заявку-близнеца по составу. */
+    public const TWIN_WINDOW_DAYS = 14;
+
+    /**
+     * Отпечаток состава заявки: что именно в ней просят, без количеств,
+     * порядка и формулировок.
+     *
+     * Позиция опознаётся по каталожному товару, если он резолвлен, иначе по
+     * нормализованному артикулу, иначе по нормализованному названию. Пустые
+     * позиции выбрасываем: заявка из одних «нужна консультация» близнецов не
+     * имеет. Null — состав не на чем сравнивать.
+     */
+    public static function compositionFingerprint(Request $request): ?string
+    {
+        $keys = [];
+
+        foreach ($request->items as $item) {
+            if ($item->catalog_item_id) {
+                $keys[] = 'c'.(int) $item->catalog_item_id;
+
+                continue;
+            }
+            $article = ItemTokenizer::normalize($item->article ?? null);
+            if ($article !== '') {
+                $keys[] = 'a'.$article;
+
+                continue;
+            }
+            $name = ItemTokenizer::normalize($item->name ?? null);
+            if ($name !== '') {
+                $keys[] = 'n'.$name;
+            }
+        }
+
+        $keys = array_values(array_unique($keys));
+        if ($keys === []) {
+            return null;
+        }
+        sort($keys);
+
+        return md5(implode('|', $keys));
+    }
+
+    /**
+     * Менеджер заявки с тем же составом.
+     *
+     * Совпадать должен ВЕСЬ состав, а не отдельная позиция: пересечение по
+     * одной детали — это обычное дело (поручень просят все), и на нём sticky
+     * уже работает в умном режиме. Здесь нас интересует другое — когда два
+     * покупателя прислали одну и ту же заявку целиком.
+     *
+     * Ищем среди заявок за последние две недели у доступных менеджеров: у
+     * старых заявок ответ уже отправлен, и «одному менеджеру» смысла не имеет.
+     *
+     * @param  Collection<int, User>  $managers
+     * @return array{user: User, fingerprint: string, linked: array<int, int>}|null
+     */
+    private function pickTwinManager(Request $request, Collection $managers): ?array
+    {
+        $fingerprint = self::compositionFingerprint($request);
+        if ($fingerprint === null) {
+            return null;
+        }
+
+        $openStatuses = array_map(
+            fn (RequestStatus $s) => $s->value,
+            array_filter(RequestStatus::cases(), fn (RequestStatus $s) => $s->isOpenForAssignment()),
+        );
+
+        $candidates = Request::query()
+            ->with('items:id,request_id,catalog_item_id,article,name')
+            ->whereIn('assigned_user_id', $managers->pluck('id'))
+            ->whereIn('status', $openStatuses)
+            ->where('id', '!=', $request->id)
+            ->where('created_at', '>=', now()->subDays(self::TWIN_WINDOW_DAYS))
+            ->orderByDesc('created_at')
+            ->limit(500)
+            ->get(['id', 'assigned_user_id', 'created_at']);
+
+        foreach ($candidates as $candidate) {
+            if (self::compositionFingerprint($candidate) !== $fingerprint) {
+                continue;
+            }
+            $manager = $managers->firstWhere('id', (int) $candidate->assigned_user_id);
+            if ($manager) {
+                return [
+                    'user' => $manager,
+                    'fingerprint' => substr($fingerprint, 0, 8),
+                    'linked' => [(int) $candidate->id],
+                ];
+            }
+        }
+
+        return null;
     }
 
     /**
