@@ -820,64 +820,71 @@
 
             @if($this->autoQuote)
                 @php $aq = $this->autoQuote; @endphp
+                {{-- Панель действий бывает и узкой, и во всю ширину экрана.
+                     Держим содержимое в колонке фиксированной ширины: иначе на
+                     широком экране строки растягиваются от края до края и блок
+                     выглядит развалившимся, а на узком — распирает панель. --}}
                 <div class="ds-card p-3 text-[12.5px] min-w-0"
                      style="background:var(--emerald-50);border-color:var(--emerald-300)"
                      wire:key="auto-quote-{{ $aq->id }}">
-                    <div class="flex items-start gap-2 mb-2 min-w-0">
-                        <span class="text-[16px] leading-none">🧮</span>
-                        <div class="flex-1 min-w-0">
-                            <b class="text-fg-1">Система подготовила КП</b>
-                            <div class="text-[11.5px] text-fg-3">
-                                {{ $aq->pricing }} · посчитано {{ $aq->evaluated_at?->format('d.m H:i') }}
-                            </div>
-                        </div>
-                    </div>
-
-                    {{-- Панель действий узкая, поэтому позиция занимает две строки:
-                         название с переносом сверху, числа снизу. Табличная вёрстка
-                         с фиксированными колонками распирала панель и наезжала на
-                         карточку заявки. --}}
-                    <div class="mb-2 min-w-0">
-                        @foreach($aq->lines as $line)
-                            <div class="py-1 border-b border-border-subtle min-w-0">
-                                <div class="text-fg-1 break-words">
-                                    @if(($line['sku'] ?? '') !== '')
-                                        <span class="mono text-[11px] text-fg-4">{{ $line['sku'] }}</span>
-                                    @endif
-                                    {{ $line['name'] ?? '' }}
-                                </div>
-                                <div class="mono text-[11.5px] text-fg-3">
-                                    {{ rtrim(rtrim(number_format((float) ($line['qty'] ?? 0), 2, ',', ' '), '0'), ',') }}
-                                    {{ $line['unit'] ?? 'шт.' }}
-                                    × {{ number_format((float) ($line['unit_price'] ?? 0), 2, ',', ' ') }} ₽
-                                    = <span class="text-fg-1">{{ number_format((float) ($line['total'] ?? 0), 2, ',', ' ') }} ₽</span>
+                    <div class="max-w-[560px] min-w-0">
+                        <div class="flex items-start gap-2 mb-2 min-w-0">
+                            <span class="text-[15px] leading-none mt-[1px]">🧮</span>
+                            <div class="flex-1 min-w-0">
+                                <b class="text-fg-1">Система подготовила КП</b>
+                                <div class="text-[11px] text-fg-3 truncate"
+                                     title="{{ $aq->pricing }}">
+                                    {{ $aq->pricing }} · посчитано {{ $aq->evaluated_at?->format('d.m H:i') }}
                                 </div>
                             </div>
-                        @endforeach
-                        <div class="pt-1 text-right">
-                            <span class="text-fg-3">Итого </span>
-                            <b class="mono text-fg-1">{{ number_format((float) $aq->total, 2, ',', ' ') }} ₽</b>
                         </div>
-                    </div>
 
-                    @if($canManage)
-                        <div class="flex flex-wrap items-center gap-2 mb-1">
-                            <button type="button" class="btn btn-sm btn-primary"
-                                    wire:click="sendAutoQuote"
-                                    wire:loading.attr="disabled" wire:target="sendAutoQuote"
-                                    wire:confirm="Отправить это КП клиенту на {{ $req->client_email }}?">
-                                Отправить клиенту
-                            </button>
-                            <button type="button" class="btn btn-sm" wire:click="editAutoQuote">
-                                Поправить письмом
-                            </button>
-                        </div>
-                        <div class="text-[11px] text-fg-3 leading-snug break-words">
-                            Соберётся КП с номером и PDF по шаблону, уйдёт ответом в тред
-                            на {{ $req->client_email ?: '— адреса нет' }} с вашей почты и подписью;
-                            заявка станет «КП отправлено».
-                        </div>
-                    @endif
+                        <table class="w-full border-collapse mb-2">
+                            @foreach($aq->lines as $line)
+                                <tr class="align-baseline">
+                                    <td class="py-[3px] pr-2 text-fg-1 break-words">
+                                        @if(($line['sku'] ?? '') !== '')
+                                            <span class="mono text-[11px] text-fg-4">{{ $line['sku'] }}</span>
+                                        @endif
+                                        {{ $line['name'] ?? '' }}
+                                        <div class="mono text-[11px] text-fg-4">
+                                            {{ rtrim(rtrim(number_format((float) ($line['qty'] ?? 0), 2, ',', ' '), '0'), ',') }}
+                                            {{ $line['unit'] ?? 'шт.' }}
+                                            × {{ number_format((float) ($line['unit_price'] ?? 0), 2, ',', ' ') }} ₽
+                                        </div>
+                                    </td>
+                                    <td class="py-[3px] mono text-right whitespace-nowrap text-fg-1 w-[1%]">
+                                        {{ number_format((float) ($line['total'] ?? 0), 2, ',', ' ') }} ₽
+                                    </td>
+                                </tr>
+                            @endforeach
+                            <tr>
+                                <td class="pt-2 text-fg-3 border-t border-border-subtle">Итого</td>
+                                <td class="pt-2 mono text-right whitespace-nowrap border-t border-border-subtle">
+                                    <b class="text-fg-1">{{ number_format((float) $aq->total, 2, ',', ' ') }} ₽</b>
+                                </td>
+                            </tr>
+                        </table>
+
+                        @if($canManage)
+                            <div class="flex flex-wrap items-center gap-2 mb-1">
+                                <button type="button" class="btn btn-sm btn-primary"
+                                        wire:click="sendAutoQuote"
+                                        wire:loading.attr="disabled" wire:target="sendAutoQuote"
+                                        wire:confirm="Отправить это КП клиенту на {{ $req->client_email }}?">
+                                    Отправить клиенту
+                                </button>
+                                <button type="button" class="btn btn-sm" wire:click="editAutoQuote">
+                                    Поправить письмом
+                                </button>
+                            </div>
+                            <div class="text-[11px] text-fg-3 leading-snug">
+                                КП с номером и PDF по шаблону уйдёт ответом в тред
+                                на {{ $req->client_email ?: '— адреса нет' }};
+                                заявка станет «КП отправлено».
+                            </div>
+                        @endif
+                    </div>
                 </div>
             @endif
 
