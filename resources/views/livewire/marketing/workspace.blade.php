@@ -29,6 +29,7 @@
                     'report' => ['📄 Отчёт', null],
                     'profile' => ['🎭 Медиапрофиль', $this->profileEntries->flatten()->count()],
                     'review' => ['🔍 Проверка материалов', null],
+                    'feedback' => ['💬 Обратная связь', $this->feedbackOpenCount],
                 ];
             @endphp
             <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden text-[12.5px]">
@@ -819,5 +820,103 @@
                 </div>
             </div>
         @endif
+    @endif
+
+    {{-- ─────────────── Обратная связь ───────────────
+         Здесь живёт то, что требует управленческого решения: «долго отвечаете
+         на почту», «сложно попасть на склад». Хорошее из отзывов сюда не
+         складываем — ему место в медиапрофиле, откуда оно работает на образ.
+         Отзыв без решения — просто жалоба, поэтому у записи есть вывод,
+         ответственный и состояние. --}}
+    @if($tab === 'feedback')
+        <div class="ds-card">
+            <div class="ds-card-header flex-wrap">
+                <h3 class="text-[15px] font-semibold text-fg-1">💬 Обратная связь клиентов</h3>
+                <span class="text-[12px] text-fg-3">что клиенты говорят о работе с нами — и что мы с этим сделали</span>
+                <span class="flex-1"></span>
+                <label class="flex items-center gap-1 text-[11.5px] text-fg-2">
+                    <input type="checkbox" wire:model.live="fbShowClosed"> показывать закрытые
+                </label>
+                <button type="button" class="btn btn-sm btn-primary" wire:click="startFeedback">Записать отзыв</button>
+            </div>
+
+            @if($fbForm)
+                <div class="ds-card-body border-b border-border-subtle">
+                    <div class="grid gap-2 md:grid-cols-4 mb-2">
+                        <select wire:model="fbSource" class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px]">
+                            @foreach(\App\Models\ClientFeedback::SOURCES as $k => $label)
+                                <option value="{{ $k }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
+                        <input type="text" wire:model="fbClient" placeholder="Кто сказал: компания, имя, адрес"
+                               class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px]">
+                        <input type="text" wire:model="fbTopic" placeholder="О чём: почта, склад, сроки, цены"
+                               class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px]">
+                        <input type="text" wire:model="fbUrl" placeholder="Ссылка на источник (если есть)"
+                               class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px]">
+                    </div>
+                    <textarea wire:model="fbQuote" rows="3" placeholder="Слова клиента как есть, без пересказа"
+                              class="w-full px-3 py-2 border border-border rounded-md bg-surface text-[12.5px]"></textarea>
+                    <div class="flex items-center gap-2 mt-2">
+                        <span class="flex-1 text-[11.5px] text-fg-4">
+                            Записывайте дословно: пересказ теряет то, из-за чего клиент написал.
+                        </span>
+                        <button type="button" class="btn btn-sm" wire:click="cancelFeedback">Отмена</button>
+                        <button type="button" class="btn btn-sm btn-primary" wire:click="saveFeedback">Сохранить</button>
+                    </div>
+                </div>
+            @endif
+
+            <div class="ds-card-body">
+                @forelse($this->feedback as $fb)
+                    <div class="ds-card p-3 mb-2" wire:key="fb-{{ $fb->id }}"
+                         style="{{ $fb->isOpen() ? 'background:var(--amber-50);border-color:var(--amber-300)' : '' }}">
+                        <div class="flex flex-wrap items-baseline gap-2 mb-1 text-[11.5px] text-fg-3">
+                            <span class="chip text-[10px]" style="background:var(--neutral-100);color:var(--fg-3)">{{ $fb->sourceLabel() }}</span>
+                            @if($fb->client)<b class="text-fg-1">{{ $fb->client }}</b>@endif
+                            @if($fb->topic)<span>· {{ $fb->topic }}</span>@endif
+                            <span>· {{ $fb->created_at?->format('d.m.Y') }}</span>
+                            @if($fb->source_url)
+                                <a href="{{ $fb->source_url }}" target="_blank" rel="noopener" class="underline">источник</a>
+                            @endif
+                            <span class="flex-1"></span>
+                            <span class="chip text-[10px]"
+                                  style="{{ $fb->isOpen()
+                                    ? 'background:var(--amber-100);color:var(--amber-800)'
+                                    : 'background:var(--emerald-50);color:var(--emerald-700)' }}">{{ $fb->statusLabel() }}</span>
+                        </div>
+
+                        <div class="text-[13px] text-fg-1 italic break-words mb-2">«{{ $fb->quote }}»</div>
+
+                        @if($fb->decision)
+                            <div class="text-[12.5px] text-fg-2 break-words mb-2">
+                                <b>Решение:</b> {{ $fb->decision }}
+                                @if($fb->owner) · {{ $fb->owner->name }}@endif
+                                @if($fb->resolved_at) · {{ $fb->resolved_at->format('d.m.Y') }}@endif
+                            </div>
+                        @endif
+
+                        @if($fb->isOpen())
+                            <div class="flex flex-wrap items-center gap-2">
+                                <input type="text" wire:model="fbDecision.{{ $fb->id }}"
+                                       placeholder="Что меняем в работе"
+                                       class="flex-1 min-w-[220px] h-[30px] px-2 border border-border rounded-md bg-surface text-[12px]">
+                                <button type="button" class="btn btn-xs" wire:click="saveFeedbackDecision({{ $fb->id }})">записать решение</button>
+                                @if($fb->status === 'new')
+                                    <button type="button" class="btn btn-xs" wire:click="setFeedbackStatus({{ $fb->id }}, 'in_progress')">взять в работу</button>
+                                @endif
+                                <button type="button" class="btn btn-xs btn-primary" wire:click="setFeedbackStatus({{ $fb->id }}, 'done')">сделано</button>
+                                <button type="button" class="btn btn-xs" wire:click="setFeedbackStatus({{ $fb->id }}, 'rejected')"
+                                        title="Менять не будем — причина в решении">отклонить</button>
+                            </div>
+                        @endif
+                    </div>
+                @empty
+                    <p class="text-[12.5px] text-fg-3">
+                        {{ $fbShowClosed ? 'Записей пока нет.' : 'Открытых записей нет — всё, что приходило, уже разобрано.' }}
+                    </p>
+                @endforelse
+            </div>
+        </div>
     @endif
 </div>

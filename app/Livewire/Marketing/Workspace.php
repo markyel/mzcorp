@@ -28,7 +28,7 @@ use Livewire\Component;
  */
 class Workspace extends Component
 {
-    public const TABS = ['access', 'contacts', 'plan', 'log', 'report', 'profile', 'review'];
+    public const TABS = ['access', 'contacts', 'plan', 'log', 'report', 'profile', 'review', 'feedback'];
 
     #[Url(as: 'tab', except: 'access')]
     public string $tab = 'access';
@@ -246,6 +246,119 @@ class Workspace extends Component
         \App\Models\MediaProfileEntry::where('id', $id)->delete();
         $this->flashMessage = 'Запись удалена.';
         unset($this->profileEntries);
+    }
+
+    /* ---------------------- Обратная связь --------------------------- */
+
+    public bool $fbForm = false;
+
+    public ?int $fbEditId = null;
+
+    public string $fbSource = 'email';
+
+    public string $fbClient = '';
+
+    public string $fbQuote = '';
+
+    public string $fbTopic = '';
+
+    public string $fbUrl = '';
+
+    /** Показывать ли закрытые: по умолчанию видно то, что требует решения. */
+    public bool $fbShowClosed = false;
+
+    /** @return \Illuminate\Support\Collection<int, \App\Models\ClientFeedback> */
+    #[Computed]
+    public function feedback()
+    {
+        return \App\Models\ClientFeedback::query()
+            ->with(['owner:id,name', 'author:id,name'])
+            ->when(! $this->fbShowClosed, fn ($q) => $q->whereIn('status', ['new', 'in_progress']))
+            ->orderByRaw("case status when 'new' then 0 when 'in_progress' then 1 else 2 end")
+            ->orderByDesc('id')
+            ->get();
+    }
+
+    #[Computed]
+    public function feedbackOpenCount(): int
+    {
+        return \App\Models\ClientFeedback::query()->whereIn('status', ['new', 'in_progress'])->count();
+    }
+
+    public function startFeedback(): void
+    {
+        $this->fbForm = true;
+        $this->fbEditId = null;
+        $this->fbSource = 'email';
+        $this->fbClient = '';
+        $this->fbQuote = '';
+        $this->fbTopic = '';
+        $this->fbUrl = '';
+    }
+
+    public function cancelFeedback(): void
+    {
+        $this->fbForm = false;
+        $this->fbEditId = null;
+    }
+
+    public function saveFeedback(): void
+    {
+        $quote = trim($this->fbQuote);
+        if ($quote === '') {
+            $this->flashError = 'Нужны слова клиента — без них запись бессмысленна.';
+
+            return;
+        }
+
+        \App\Models\ClientFeedback::updateOrCreate(
+            ['id' => $this->fbEditId],
+            [
+                'source' => array_key_exists($this->fbSource, \App\Models\ClientFeedback::SOURCES) ? $this->fbSource : 'other',
+                'source_url' => trim($this->fbUrl) !== '' ? mb_substr(trim($this->fbUrl), 0, 500) : null,
+                'client' => trim($this->fbClient) !== '' ? mb_substr(trim($this->fbClient), 0, 255) : null,
+                'quote' => $quote,
+                'topic' => trim($this->fbTopic) !== '' ? mb_substr(trim($this->fbTopic), 0, 64) : null,
+                'created_by_user_id' => $this->fbEditId ? null : auth()->id(),
+            ] + ($this->fbEditId ? [] : ['status' => 'new']),
+        );
+
+        $this->flashMessage = 'Отзыв записан. Дальше — решение: что меняем в работе.';
+        $this->cancelFeedback();
+        unset($this->feedback, $this->feedbackOpenCount);
+    }
+
+    /** Взять в работу / закрыть с решением / отклонить с причиной. */
+    public function setFeedbackStatus(int $id, string $status, string $decision = ''): void
+    {
+        $item = \App\Models\ClientFeedback::find($id);
+        if ($item === null || ! array_key_exists($status, \App\Models\ClientFeedback::STATUSES)) {
+            return;
+        }
+
+        $item->forceFill([
+            'status' => $status,
+            'decision' => trim($decision) !== '' ? trim($decision) : $item->decision,
+            'owner_user_id' => $status === 'in_progress' ? ($item->owner_user_id ?? auth()->id()) : $item->owner_user_id,
+            'resolved_at' => in_array($status, ['done', 'rejected'], true) ? now() : null,
+        ])->save();
+
+        unset($this->feedback, $this->feedbackOpenCount);
+    }
+
+    /** Решение по отзыву — что именно меняем. */
+    public array $fbDecision = [];
+
+    public function saveFeedbackDecision(int $id): void
+    {
+        $item = \App\Models\ClientFeedback::find($id);
+        if ($item === null) {
+            return;
+        }
+
+        $item->forceFill(['decision' => trim((string) ($this->fbDecision[$id] ?? '')) ?: null])->save();
+        $this->flashMessage = 'Решение записано.';
+        unset($this->feedback);
     }
 
     /** Памятка по стилю, собранная из профиля. */
