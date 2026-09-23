@@ -831,13 +831,14 @@ class MessagePersister
             if (! is_object($addr)) {
                 continue;
             }
-            $email = (string) ($addr->mail ?? '');
-            if ($email === '') {
+            $clean = self::cleanAddress((string) ($addr->mail ?? ''));
+            if ($clean === null) {
                 continue;
             }
+            $name = isset($addr->personal) ? $this->decodeMimeHeader((string) $addr->personal) : null;
             $result[] = [
-                'email' => $email,
-                'name' => isset($addr->personal) ? $this->decodeMimeHeader((string) $addr->personal) : null,
+                'email' => $clean['email'],
+                'name' => $name !== null && trim($name) !== '' ? $name : $clean['name'],
             ];
         }
 
@@ -862,10 +863,58 @@ class MessagePersister
             return null;
         }
 
+        // Разборщик адресов спотыкается о кривой заголовок и отдаёт его
+        // целиком: у заявки M-2026-16937 в адресе оказалось
+        // «=?koi8-r?B?…?=<s.zagudaeva@central-gr.ru» — имя в кодировке,
+        // слепленное с адресом без пробела и без закрывающей скобки. Письма
+        // на такой «адрес» не уходят, а менеджер видит обычную заявку.
+        $clean = self::cleanAddress($email);
+        if ($clean === null) {
+            return null;
+        }
+
+        $name = isset($first->personal) ? $this->decodeMimeHeader((string) $first->personal) : null;
+
         return [
-            'email' => $email,
-            'name' => isset($first->personal) ? $this->decodeMimeHeader((string) $first->personal) : null,
+            'email' => $clean['email'],
+            // Имя из того же кривого заголовка — лучше, чем ничего.
+            'name' => $name !== null && trim($name) !== '' ? $name : $clean['name'],
         ];
+    }
+
+    /**
+     * Вытащить настоящий адрес из того, что пришло в заголовке.
+     *
+     * @return array{email: string, name: ?string}|null null — адреса там нет
+     */
+    public static function cleanAddress(string $raw): ?array
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return null;
+        }
+
+        // Нормальный случай: разборщик уже отдал чистый адрес.
+        if (filter_var($raw, FILTER_VALIDATE_EMAIL)) {
+            return ['email' => $raw, 'name' => null];
+        }
+
+        $name = null;
+        // «Имя <адрес>» или «Имя<адрес» — закрывающей скобки может не быть.
+        if (preg_match('/^(?<name>.*?)<(?<email>[^<>]+)>?$/s', $raw, $m) === 1) {
+            $name = trim($m['name']) !== '' ? trim($m['name']) : null;
+            $raw = trim($m['email']);
+        }
+
+        if (! filter_var($raw, FILTER_VALIDATE_EMAIL)) {
+            // Последняя попытка: выкусить что-то похожее на адрес.
+            if (preg_match('/[\p{L}\p{N}._%+\-]+@[\p{L}\p{N}.\-]+\.[\p{L}]{2,}/u', $raw, $m) !== 1) {
+                return null;
+            }
+            $raw = $m[0];
+        }
+
+        return ['email' => $raw, 'name' => $name];
     }
 
     /**
