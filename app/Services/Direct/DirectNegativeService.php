@@ -245,7 +245,10 @@ class DirectNegativeService
 
             foreach ($types as $type) {
                 foreach (preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower((string) $type)) ?: [] as $word) {
-                    if (mb_strlen($word) >= 5) {
+                    // Ровно с длины основы, а не длиннее: «реле» — четыре
+                    // буквы, и мы их продаём (реле времени, контроля фаз).
+                    // С порогом в пять модель предложила «реле» минус-словом.
+                    if (mb_strlen($word) >= self::STEM) {
                         $stems[] = mb_substr($word, 0, self::STEM);
                     }
                 }
