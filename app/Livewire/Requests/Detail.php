@@ -1653,6 +1653,44 @@ class Detail extends Component
         return app(\App\Services\Quotes\AutoQuoteOfferService::class)->readyFor($this->request);
     }
 
+    /**
+     * Состояние досылки полного КП: сколько позиций ждём, до какого числа,
+     * не остановлена ли. null — заявка не в частичном КП.
+     *
+     * @return array<string, mixed>|null
+     */
+    #[Computed]
+    public function partialQuote(): ?array
+    {
+        return app(\App\Services\Quotations\PartialQuoteService::class)->state($this->request);
+    }
+
+    /** Остановить досылку: клиент передумал, ушёл или решил вопрос иначе. */
+    public function stopPartialQuote(): void
+    {
+        if (! $this->canSendMail()) {
+            return;
+        }
+
+        app(\App\Services\Quotations\PartialQuoteService::class)->stop($this->request, auth()->user());
+        unset($this->partialQuote);
+        $this->autoQuoteFailed = false;
+        $this->autoQuoteNotice = 'Досылка полного КП остановлена. Статус заявки не менялся — переведите её вручную, если работа по ней закончена.';
+    }
+
+    /** Вернуть досылку, если остановили по ошибке. */
+    public function resumePartialQuote(): void
+    {
+        if (! $this->canSendMail()) {
+            return;
+        }
+
+        app(\App\Services\Quotations\PartialQuoteService::class)->resume($this->request);
+        unset($this->partialQuote);
+        $this->autoQuoteFailed = false;
+        $this->autoQuoteNotice = 'Досылка полного КП возобновлена.';
+    }
+
     /** Что сказать про последнюю попытку отправить авто-КП. */
     public ?string $autoQuoteNotice = null;
 

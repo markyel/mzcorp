@@ -818,6 +818,45 @@
                 </div>
             @endif
 
+            {{-- Досылка полного КП: что ждём и до какого числа. Менеджер должен
+                 иметь возможность её прекратить — клиент мог передумать или
+                 решить вопрос в другом месте, не дождавшись второй половины. --}}
+            @if($this->partialQuote)
+                @php $pq = $this->partialQuote; @endphp
+                <div class="ds-card p-3 text-[12.5px]"
+                     style="background:var(--amber-50);border-color:var(--amber-300)">
+                    <div class="max-w-[560px]">
+                        <b class="text-fg-1">Частичное КП: ждём цену</b>
+                        <div class="text-[11.5px] text-fg-2 mt-1">
+                            @if($pq['stopped'])
+                                Досылка остановлена — полное КП автоматически не уйдёт.
+                            @elseif($pq['expired'])
+                                Две недели на досылку вышли — дальше только вручную.
+                            @else
+                                Позиций без цены: <b class="mono">{{ $pq['pending'] }}</b>@if($pq['priced'] > 0),
+                                из них уже подорожали в 1С: <b class="mono">{{ $pq['priced'] }}</b>@endif.
+                                Полное КП уйдёт само, как только цена появится у всех;
+                                частями — не чаще раза в два дня, до {{ $pq['until']->format('d.m.Y') }}.
+                            @endif
+                        </div>
+                        @if($canManage)
+                            <div class="flex flex-wrap items-center gap-2 mt-2">
+                                @if($pq['stopped'])
+                                    <button type="button" class="btn btn-xs" wire:click="resumePartialQuote">
+                                        Возобновить досылку
+                                    </button>
+                                @elseif(! $pq['expired'])
+                                    <button type="button" class="btn btn-xs" wire:click="stopPartialQuote"
+                                            wire:confirm="Остановить досылку полного КП по этой заявке?">
+                                        Остановить досылку
+                                    </button>
+                                @endif
+                            </div>
+                        @endif
+                    </div>
+                </div>
+            @endif
+
             @if($this->autoQuote)
                 @php $aq = $this->autoQuote; @endphp
                 {{-- Панель действий бывает и узкой, и во всю ширину экрана.

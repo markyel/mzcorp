@@ -114,6 +114,10 @@ class Request extends Model
             'last_activity_at' => 'datetime',
             'last_activity_type' => \App\Enums\RequestActivityType::class,
             'price_refresh_state' => \App\Enums\PriceRefreshState::class,
+            // Отложенное КП: когда выдали частичное и когда менеджер остановил
+            // досылку полного (см. PartialQuoteService).
+            'partial_quote_started_at' => 'datetime',
+            'partial_quote_stopped_at' => 'datetime',
             'merged_into_id' => 'integer',
             'merged_at' => 'datetime',
             'organization_id' => 'integer',

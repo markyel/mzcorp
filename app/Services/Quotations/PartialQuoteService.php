@@ -128,6 +128,64 @@ class PartialQuoteService
     }
 
     /**
+     * Остановить досылку.
+     *
+     * Клиент мог передумать или уйти, не дождавшись второй половины, — тогда
+     * автоматическое письмо будет не помощью, а помехой. Статус заявки не
+     * трогаем: что с ней делать дальше, решает менеджер.
+     */
+    public function stop(Request $request, ?User $by = null): void
+    {
+        if ($request->partial_quote_stopped_at !== null) {
+            return;
+        }
+
+        $request->forceFill(['partial_quote_stopped_at' => now()])->save();
+
+        Log::info('PartialQuoteService: досылка остановлена', [
+            'request_id' => $request->id,
+            'by_user_id' => $by?->id,
+        ]);
+    }
+
+    /** Вернуть заявку в очередь на досылку. */
+    public function resume(Request $request): void
+    {
+        if ($request->partial_quote_stopped_at === null) {
+            return;
+        }
+
+        $request->forceFill(['partial_quote_stopped_at' => null])->save();
+    }
+
+    public function isStopped(Request $request): bool
+    {
+        return $request->partial_quote_stopped_at !== null;
+    }
+
+    /**
+     * Что показать менеджеру в карточке. null — досылки по заявке нет.
+     *
+     * @return array{pending: int, priced: int, until: \Illuminate\Support\Carbon, stopped: bool, expired: bool}|null
+     */
+    public function state(Request $request): ?array
+    {
+        if ($request->status !== RequestStatus::PartiallyQuoted || $request->partial_quote_started_at === null) {
+            return null;
+        }
+
+        $watched = $this->watchedItems($request);
+
+        return [
+            'pending' => $watched->count(),
+            'priced' => $watched->filter(fn (RequestItem $i) => $this->hasPrice($i))->count(),
+            'until' => $request->partial_quote_started_at->copy()->addDays(self::WINDOW_DAYS),
+            'stopped' => $this->isStopped($request),
+            'expired' => $this->windowExpired($request),
+        ];
+    }
+
+    /**
      * Что мешает дослать прямо сейчас. null — можно слать.
      *
      * Полное КП уходит, как только цена появилась у ВСЕХ отложенных позиций.
@@ -138,6 +196,9 @@ class PartialQuoteService
     {
         if ($request->status !== RequestStatus::PartiallyQuoted) {
             return 'заявка уже не в статусе частичного КП';
+        }
+        if ($this->isStopped($request)) {
+            return 'досылку остановил менеджер';
         }
         if ($this->windowExpired($request)) {
             return 'вышли две недели на досылку';
@@ -206,6 +267,7 @@ class PartialQuoteService
         return Request::query()
             ->where('status', RequestStatus::PartiallyQuoted->value)
             ->whereNotNull('partial_quote_started_at')
+            ->whereNull('partial_quote_stopped_at')
             ->where('partial_quote_started_at', '>=', now()->subDays(self::WINDOW_DAYS))
             ->with(['items.catalogItem:id,price,is_price_actual', 'assignedUser'])
             ->orderBy('partial_quote_started_at')
