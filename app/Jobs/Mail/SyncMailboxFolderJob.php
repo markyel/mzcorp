@@ -428,13 +428,40 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
 
                 // Phase 1.5: применить правила маршрутизации к свежесохранённому
                 // inbound-письму. Outbound (Sent) пропускаются внутри MailRouter.
+                // Разбор письма фиксируем в журнале решений ВСЕГДА — и когда
+                // он упал, и когда прошёл молча. Иначе письмо, не ставшее
+                // заявкой при получении, не отличить от письма, которого
+                // разбор не коснулся вовсе: заявка появляется через сутки
+                // догоняющим прогоном, а почему — восстановить уже нечем
+                // (кейс M-2026-15464, логи к тому времени ротированы).
                 try {
                     app(\App\Services\Mail\MailRouter::class)->route($email);
+
+                    if ($email->direction === \App\Enums\MailDirection::Inbound
+                        && ! \App\Models\MailDecision::query()->where('email_message_id', $email->id)->exists()) {
+                        app(\App\Services\Mail\MailDecisionRecorder::class)->record(
+                            $email,
+                            'ingest_silent',
+                            null,
+                            ['reason' => 'Маршрутизатор отработал, не приняв решения по письму'],
+                        );
+                    }
                 } catch (\Throwable $routeError) {
                     Log::error('MailRouter failed', [
                         'email_message_id' => $email->id,
                         'error' => $routeError->getMessage(),
                     ]);
+
+                    try {
+                        app(\App\Services\Mail\MailDecisionRecorder::class)->record(
+                            $email,
+                            'router_failed',
+                            null,
+                            ['reason' => 'Разбор письма упал: '.mb_substr($routeError->getMessage(), 0, 200)],
+                        );
+                    } catch (\Throwable $ignore) {
+                        // Журнал — не повод ронять синхронизацию.
+                    }
                 }
             } catch (\Throwable $e) {
                 Log::error('Failed to persist message', [
