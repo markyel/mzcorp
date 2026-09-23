@@ -276,30 +276,24 @@ class Editor extends Component
      * Phase 4: «📨 Отправить КП клиенту».
      *
      * Что делает:
-     *  1. Генерирует PDF через QuotationPdfService::render и сохраняет его
-     *     в storage/app/quotations/{q.id}_v{q.version}.pdf (idempotent —
-     *     если файл уже есть, переиспользует).
-     *  2. Ищет последнее inbound-письмо клиента в этой заявке. Если есть —
-     *     создаёт reply-draft (сохраняет thread по In-Reply-To/References),
-     *     иначе — compose-draft с темой `[M-YYYY-NNNN] subject`.
-     *  3. Заполняет body draft'а из шаблона (config('services.quotations.email_body_template')).
-     *  4. Создаёт EmailAttachment с PDF + прописывает marker
+     *  1. Гейт неактуальных цен — требует осознанного подтверждения.
+     *  2. QuotationDispatchService::prepareDraft — PDF по шаблону в storage,
+     *     ответ в треде клиента (или новое письмо, если отвечать не на что),
+     *     текст по шаблону из настроек и marker
      *     `{type: 'quotation_sent', quotation_id: N}` в `detected_artifacts`.
-     *     Post-send hook в ComposeForm::applyPostSendHooks подхватит marker:
-     *       - Quotation::markSent() — status=sent + sent_at + sent_email_message_id
-     *       - Request → Quoted через RequestStateService
-     *  5. Дисптачит `quotation-send-ready` → Detail переключает таб на
+     *     Post-send hook подхватит marker: Quotation::markSent() и
+     *     Request → Quoted через RequestStateService.
+     *     Тот же сервис вызывает кнопка авто-КП — документ и письмо у клиента
+     *     одинаковые, кто бы их ни собрал.
+     *  3. Дисптачит `quotation-send-ready` → Detail переключает таб на
      *     «Переписка» + диспатчит `open-draft` → ComposeForm раскрывает draft.
      *     Менеджер может править recipients/body перед отправкой.
      *
      * Permission: assigned manager / acting / privileged (через ensureCanEdit).
      * Если КП в финальном статусе (accepted/rejected/cancelled) — отказ.
      */
-    public function sendQuotation(
-        int $quotationId,
-        \App\Services\Quotations\QuotationPdfService $pdfSvc,
-        \App\Services\Mail\EmailDraftService $draftSvc,
-    ): void {
+    public function sendQuotation(int $quotationId): void
+    {
         $this->ensureCanEdit();
 
         $q = $this->request->quotations()->whereKey($quotationId)->with('items')->first();
@@ -332,82 +326,24 @@ class Editor extends Component
         $this->stalePriceItems = [];
         $this->stalePriceAckQuotationId = null;
 
-        // 1. PDF binary → storage.
+        // PDF, черновик в треде, шаблонный текст и marker для post-send hook —
+        // один путь на все способы выдачи КП (QuotationDispatchService), чтобы
+        // клиент получал один и тот же документ хоть руками, хоть автоматом.
         try {
-            $pdfBinary = $pdfSvc->render($q, isolated: true);
+            $prepared = app(\App\Services\Quotations\QuotationDispatchService::class)
+                ->prepareDraft($q, auth()->user());
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Editor::sendQuotation: PDF render failed', [
+            \Illuminate\Support\Facades\Log::error('Editor::sendQuotation: не удалось подготовить письмо', [
                 'quotation_id' => $q->id,
                 'error' => $e->getMessage(),
             ]);
-            $this->dispatch('toast', message: 'Ошибка генерации PDF: ' . $e->getMessage(), type: 'error');
+            $this->dispatch('toast', message: 'Не удалось подготовить письмо: '.$e->getMessage(), type: 'error');
+
             return;
         }
-        $filename = $pdfSvc->filename($q);
-        $relativePath = sprintf('quotations/%d_v%d.pdf', $q->id, $q->version);
-        \Illuminate\Support\Facades\Storage::disk('local')->put($relativePath, $pdfBinary);
+        $draft = $prepared['draft'];
 
-        // 2. Найти last inbound-письмо клиента (для thread-reply).
-        $lastInbound = \App\Models\EmailMessage::query()
-            ->where('related_request_id', $this->request->id)
-            ->where('direction', \App\Enums\MailDirection::Inbound->value)
-            ->where('is_draft', false)
-            ->orderByDesc('id')
-            ->first();
-
-        // 3. Создать draft.
-        try {
-            $draft = $lastInbound
-                ? $draftSvc->createReply($this->request, $lastInbound, auth()->user(), replyAll: false)
-                : $draftSvc->createCompose($this->request, auth()->user());
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Editor::sendQuotation: createDraft failed', [
-                'quotation_id' => $q->id,
-                'error' => $e->getMessage(),
-            ]);
-            $this->dispatch('toast', message: 'Не удалось создать черновик: ' . $e->getMessage(), type: 'error');
-            return;
-        }
-
-        // 4. Body из шаблона + marker для post-send hook.
-        $template = (string) config(
-            'services.quotations.email_body_template',
-            "Здравствуйте, {client_name}!\n\nВысылаем коммерческое предложение по запросу {internal_code}.\nИтого: {total} ₽ (вкл. НДС).\nСрок действия: {valid_until}.\n\nС уважением,\n{sender_name}"
-        );
-        $body = strtr($template, [
-            '{client_name}' => $this->request->client_name ?: 'коллеги',
-            '{internal_code}' => $this->request->internal_code,
-            '{quotation_code}' => $q->internal_code . ' v' . $q->version,
-            '{total}' => number_format((float) $q->total, 2, '.', ' '),
-            '{valid_until}' => $q->valid_until?->format('d.m.Y') ?? '—',
-            '{sender_name}' => auth()->user()->name ?? '',
-        ]);
-
-        $artifacts = is_array($draft->detected_artifacts ?? null) ? $draft->detected_artifacts : [];
-        $artifacts[] = [
-            'type' => 'quotation_sent',
-            'quotation_id' => $q->id,
-            'transition_to_status' => 'quoted',
-            'pdf_path' => $relativePath,
-        ];
-
-        $draft->forceFill([
-            'body_plain' => $body,
-            'detected_artifacts' => $artifacts,
-        ])->save();
-
-        // 5. Attach PDF.
-        $draft->attachments()->create([
-            'filename' => $filename,
-            'mime_type' => 'application/pdf',
-            'size_bytes' => strlen($pdfBinary),
-            'content_id' => null,
-            'file_path' => $relativePath,
-            'disk' => 'local',
-            'is_inline' => false,
-        ]);
-
-        // 6. Открыть draft в Compose-табе (через Detail listener).
+        // Открыть draft в Compose-табе (через Detail listener).
         $this->dispatch('quotation-send-ready', draftId: $draft->id, requestId: $this->request->id);
         $this->dispatch('toast', message: "Черновик готов: {$q->internal_code} v{$q->version}. Проверьте и отправьте.", type: 'success');
     }

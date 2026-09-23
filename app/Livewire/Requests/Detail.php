@@ -1677,10 +1677,16 @@ class Detail extends Component
             return;
         }
 
-        $draft = app(\App\Services\Quotes\AutoQuoteOfferService::class)
+        $draftId = app(\App\Services\Quotes\AutoQuoteOfferService::class)
             ->draft($this->request, $snapshot, $user);
 
-        $this->dispatch('open-draft', draftId: $draft->id, requestId: $this->request->id);
+        if ($draftId === null) {
+            session()->flash('error', 'Не удалось собрать письмо с КП — подробности в логе.');
+
+            return;
+        }
+
+        $this->dispatch('open-draft', draftId: $draftId, requestId: $this->request->id);
     }
 
     /**

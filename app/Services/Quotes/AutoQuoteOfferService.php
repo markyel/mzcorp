@@ -2,43 +2,45 @@
 
 namespace App\Services\Quotes;
 
-use App\Enums\RequestStatus;
 use App\Models\AutoQuoteSnapshot;
-use App\Models\EmailAttachment;
-use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Models\User;
-use App\Services\Mail\EmailDraftService;
 use App\Services\Mail\OutgoingMailSender;
+use App\Services\Quotations\QuotationDispatchService;
+use App\Services\Quotations\QuotationService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 /**
  * Готовое авто-КП в руках менеджера.
  *
  * Считает и замораживает предложение отдельный конвейер
- * (AutoQuoteSnapshotService, раз в 15 минут). Здесь — то, что видит человек:
- * есть ли по заявке готовое КП, как оно выглядит письмом и отправка его
- * клиенту одним действием.
+ * (AutoQuoteSnapshotService). Здесь — то, что видит человек: есть ли по заявке
+ * готовое КП и отправка его клиенту одним действием.
  *
- * Отправляем только то, что показали. Менеджер видит позиции и суммы на
- * экране, жмёт кнопку — уходит ровно этот текст: письмо собирается из того же
- * снимка, а не пересчитывается заново. Иначе «проверил одно, отправил другое».
+ * Документ, письмо и статусы — тем же путём, что у КП, собранного руками:
+ * QuotationService создаёт КП по позициям заявки, QuotationDispatchService
+ * делает PDF по шаблону, кладёт его в ответ в треде и ставит пометку, по
+ * которой post-send hook переведёт КП в «отправлено», а заявку — в «КП
+ * отправлено». Своего документа у авто-КП нет и быть не должно: клиент не
+ * должен по виду письма понимать, робот ему ответил или менеджер.
  */
 class AutoQuoteOfferService
 {
+    /** Насколько сумма собранного КП может разойтись со снимком, рублей. */
+    public const TOTAL_TOLERANCE = 0.05;
+
     public function __construct(
-        private readonly EmailDraftService $drafts,
+        private readonly QuotationService $quotations,
+        private readonly QuotationDispatchService $dispatch,
         private readonly OutgoingMailSender $sender,
     ) {}
 
     /**
      * Готовое предложение по заявке, если оно есть.
      *
-     * Годится только «зелёный» снимок текущей версии правил: если правила
-     * с тех пор переписали, показывать старое решение как готовое нельзя.
+     * Годится только «зелёный» снимок текущей версии правил: если правила с
+     * тех пор переписали, показывать старое решение как готовое нельзя.
      */
     public function readyFor(Request $request): ?AutoQuoteSnapshot
     {
@@ -76,99 +78,35 @@ class AutoQuoteOfferService
             ->keyBy('request_id');
     }
 
-    /** Тема письма с предложением. */
-    public function subject(Request $request): string
-    {
-        return 'Коммерческое предложение по заявке '.$request->internal_code;
-    }
-
     /**
-     * Тело письма: то же, что показано менеджеру на экране.
-     */
-    public function body(Request $request, AutoQuoteSnapshot $snapshot): string
-    {
-        $lines = [];
-        $lines[] = 'Здравствуйте!';
-        $lines[] = '';
-        $lines[] = 'По вашему запросу предлагаем:';
-        $lines[] = '';
-
-        foreach ($snapshot->lines as $i => $line) {
-            $qty = rtrim(rtrim(number_format((float) ($line['qty'] ?? 0), 2, ',', ' '), '0'), ',');
-            $lines[] = sprintf(
-                '%d. %s%s — %s %s × %s ₽ = %s ₽',
-                $i + 1,
-                (string) ($line['name'] ?? ''),
-                ($line['sku'] ?? '') !== '' ? ' (арт. '.$line['sku'].')' : '',
-                $qty,
-                (string) ($line['unit'] ?? 'шт.'),
-                number_format((float) ($line['unit_price'] ?? 0), 2, ',', ' '),
-                number_format((float) ($line['total'] ?? 0), 2, ',', ' '),
-            );
-        }
-
-        $lines[] = '';
-        $lines[] = 'Итого: '.number_format((float) $snapshot->total, 2, ',', ' ').' ₽';
-        $lines[] = '';
-        $lines[] = 'Товар на складе, счёт выставим в день обращения.';
-        $lines[] = 'Готовы ответить на вопросы и подготовить счёт.';
-
-        return implode("\n", $lines);
-    }
-
-    /**
-     * Создать черновик письма с предложением — для правки перед отправкой.
-     */
-    public function draft(Request $request, AutoQuoteSnapshot $snapshot, User $author)
-    {
-        $draft = $this->drafts->createCompose($request, $author);
-
-        $draft->subject = $this->subject($request);
-        $draft->body_plain = $this->body($request, $snapshot);
-        $draft->body_html = nl2br(e($draft->body_plain));
-        $draft->save();
-
-        $this->attachPdf($draft, $request, $snapshot, $author);
-
-        return $draft;
-    }
-
-    /**
-     * Приложить КП файлом.
+     * Собрать КП по заявке — обычное, в реестре КП, с номером и версией.
      *
-     * Клиент должен получить документ, а не письмо с табличкой в тексте:
-     * его пересылают снабженцу, печатают, прикладывают к заявке у себя.
-     * Подпись и адрес отправителя подставит отправка — черновик создан от
-     * имени менеджера, а значит уйдёт с его ящика.
+     * Сумма сверяется со снимком, который менеджер видел на экране: если
+     * разошлась (цену в каталоге успели поменять), отправлять нельзя —
+     * человек одобрил другую цифру.
+     *
+     * @return array{ok: bool, message: string, quotation: ?\App\Models\Quotation}
      */
-    private function attachPdf(EmailMessage $draft, Request $request, AutoQuoteSnapshot $snapshot, User $author): void
+    public function buildQuotation(Request $request, AutoQuoteSnapshot $snapshot, User $author): array
     {
-        try {
-            $pdf = app(AutoQuotePdfService::class);
-            $content = $pdf->render($request, $snapshot, $author);
-            $name = $pdf->filename($request);
+        $quotation = $this->quotations->createDraft($request, $author);
 
-            $path = sprintf('mail/%d/drafts/%d/%s', $draft->mailbox_id ?? 0, $draft->id, Str::random(8).'_quote.pdf');
-            Storage::disk('local')->put($path, $content);
-
-            EmailAttachment::create([
-                'email_message_id' => $draft->id,
-                'filename' => mb_substr($name, 0, 255),
-                'mime_type' => 'application/pdf',
-                'size_bytes' => strlen($content),
-                'content_id' => null,
-                'file_path' => $path,
-                'disk' => 'local',
-                'is_inline' => false,
-            ]);
-        } catch (\Throwable $e) {
-            // Без файла письмо всё равно имеет смысл: позиции и суммы есть в
-            // тексте. Роняем только вложение, не отправку.
-            Log::error('AutoQuoteOfferService: не удалось собрать PDF предложения', [
-                'request_id' => $request->id,
-                'error' => $e->getMessage(),
-            ]);
+        $diff = abs((float) $quotation->total - (float) $snapshot->total);
+        if ($diff > self::TOTAL_TOLERANCE) {
+            return [
+                'ok' => false,
+                'quotation' => $quotation,
+                'message' => sprintf(
+                    'Сумма изменилась с момента расчёта: на экране %s ₽, в собранном КП %s ₽. '
+                    .'КП %s создано черновиком — проверьте его и отправьте вручную.',
+                    number_format((float) $snapshot->total, 2, ',', ' '),
+                    number_format((float) $quotation->total, 2, ',', ' '),
+                    $quotation->internal_code,
+                ),
+            ];
         }
+
+        return ['ok' => true, 'quotation' => $quotation, 'message' => ''];
     }
 
     /**
@@ -186,56 +124,63 @@ class AutoQuoteOfferService
             return ['ok' => false, 'message' => 'У заявки нет адреса клиента — отправлять некуда.'];
         }
 
-        $draft = $this->draft($request, $snapshot, $author);
-        $result = $this->sender->sendDraft($draft->id);
-
-        if (! ($result['success'] ?? false)) {
-            return ['ok' => false, 'message' => 'Письмо не ушло: '.(string) ($result['error'] ?? 'неизвестная ошибка')];
+        $built = $this->buildQuotation($request, $snapshot, $author);
+        if (! $built['ok']) {
+            return ['ok' => false, 'message' => $built['message']];
         }
 
-        // Тот же путь, что и у обычного ответа менеджера: по отправленному
-        // письму поднимутся признаки и сработают детекторы.
-        $sent = $result['draft'] ?? $draft;
+        try {
+            $prepared = $this->dispatch->prepareDraft($built['quotation'], $author);
+        } catch (\Throwable $e) {
+            Log::error('AutoQuoteOfferService: письмо с КП не собрано', [
+                'request_id' => $request->id,
+                'quotation_id' => $built['quotation']->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return ['ok' => false, 'message' => 'Не удалось собрать письмо с КП: '.$e->getMessage()];
+        }
+
+        $result = $this->sender->sendDraft($prepared['draft']->id);
+        if (! ($result['success'] ?? false)) {
+            return [
+                'ok' => false,
+                'message' => 'Письмо не ушло: '.(string) ($result['error'] ?? 'неизвестная ошибка')
+                    .'. КП '.$built['quotation']->internal_code.' осталось черновиком.',
+            ];
+        }
+
+        // Тот же post-send hook, что у ручной отправки: по пометке
+        // quotation_sent КП станет «отправлено», а заявка — «КП отправлено».
+        $sent = $result['draft'] ?? $prepared['draft'];
         $hooks = app(\App\Services\Mail\OutboundReplyHooks::class);
         if (! $hooks->applyPostSendHooks($sent, $author)) {
             $hooks->detectOutboundDocuments($sent);
         }
 
-        $this->markQuoted($request, $author);
-
-        return ['ok' => true, 'message' => 'КП отправлено клиенту на '.$request->client_email.'.'];
+        return [
+            'ok' => true,
+            'message' => 'КП '.$built['quotation']->internal_code.' отправлено на '.$request->client_email.'.',
+        ];
     }
 
     /**
-     * Перевести заявку в «КП отправлено».
-     *
-     * Детектор исходящих документов ставит этот статус по распознанному
-     * вложению — здесь распознавать нечего: мы сами собрали документ с
-     * позициями и суммой и сами его отправили. Ставим прямо, не дожидаясь,
-     * пока разбор догадается.
+     * Собрать КП и черновик письма, не отправляя, — если менеджер хочет
+     * поправить текст. Возвращает идентификатор черновика.
      */
-    private function markQuoted(Request $request, User $author): void
+    public function draft(Request $request, AutoQuoteSnapshot $snapshot, User $author): ?int
     {
-        $request = $request->fresh();
-        if ($request === null || $request->status === RequestStatus::Quoted) {
-            return;
-        }
+        $built = $this->buildQuotation($request, $snapshot, $author);
 
         try {
-            app(\App\Services\Request\RequestStateService::class)->transitionTo(
-                $request,
-                RequestStatus::Quoted,
-                $author,
-                ['source' => 'auto_quote_sent'],
-                systemTransition: true,
-            );
+            return $this->dispatch->prepareDraft($built['quotation'], $author)['draft']->id;
         } catch (\Throwable $e) {
-            // Письмо клиенту уже ушло — статус не повод показывать ошибку.
-            Log::warning('AutoQuoteOfferService: статус «КП отправлено» не выставлен', [
+            Log::error('AutoQuoteOfferService: черновик КП не собран', [
                 'request_id' => $request->id,
-                'from' => $request->status?->value,
                 'error' => $e->getMessage(),
             ]);
+
+            return null;
         }
     }
 }
