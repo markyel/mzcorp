@@ -328,13 +328,13 @@ class AssignmentService
 
                 continue;
             }
-            $article = ItemTokenizer::normalize($item->article ?? null);
+            $article = ItemTokenizer::normalize($item->parsed_article ?? null);
             if ($article !== '') {
                 $keys[] = 'a'.$article;
 
                 continue;
             }
-            $name = ItemTokenizer::normalize($item->name ?? null);
+            $name = ItemTokenizer::normalize($item->parsed_name ?? null);
             if ($name !== '') {
                 $keys[] = 'n'.$name;
             }
@@ -376,7 +376,7 @@ class AssignmentService
         );
 
         $candidates = Request::query()
-            ->with('items:id,request_id,catalog_item_id,article,name')
+            ->with('items:id,request_id,catalog_item_id,parsed_article,parsed_name')
             ->whereIn('assigned_user_id', $managers->pluck('id'))
             ->whereIn('status', $openStatuses)
             ->where('id', '!=', $request->id)

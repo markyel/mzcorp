@@ -25,8 +25,8 @@ class CompositionFingerprintTest extends TestCase
         $request->setRelation('items', new EloquentCollection(array_map(function (array $row) {
             $item = new RequestItem;
             $item->catalog_item_id = $row['catalog_item_id'] ?? null;
-            $item->article = $row['article'] ?? null;
-            $item->name = $row['name'] ?? null;
+            $item->parsed_article = $row['article'] ?? null;
+            $item->parsed_name = $row['name'] ?? null;
 
             return $item;
         }, $items)));
