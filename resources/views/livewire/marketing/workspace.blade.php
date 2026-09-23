@@ -30,6 +30,7 @@
                     'profile' => ['🎭 Медиапрофиль', $this->profileEntries->flatten()->count()],
                     'review' => ['🔍 Проверка материалов', null],
                     'feedback' => ['💬 Обратная связь', $this->feedbackOpenCount],
+                    'competitors' => ['🎯 Конкуренты', $this->competitorNewCount ?: null],
                 ];
             @endphp
             <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden text-[12.5px]">
@@ -914,6 +915,164 @@
                 @empty
                     <p class="text-[12.5px] text-fg-3">
                         {{ $fbShowClosed ? 'Записей пока нет.' : 'Открытых записей нет — всё, что приходило, уже разобрано.' }}
+                    </p>
+                @endforelse
+            </div>
+        </div>
+    @endif
+
+    {{-- =========================== КОНКУРЕНТЫ =========================== --}}
+    @if($tab === 'competitors')
+        <div class="ds-card">
+            <div class="ds-card-header flex-wrap">
+                <h3 class="text-[15px] font-semibold text-fg-1">🎯 Конкуренты</h3>
+                <span class="text-[12px] text-fg-3">чужие отзывы: чем мы лучше — в профиль, чем мы хуже — в работу</span>
+                <span class="flex-1"></span>
+                <label class="flex items-center gap-1 text-[11.5px] text-fg-2">
+                    <input type="checkbox" wire:model.live="coShowClosed"> показывать разобранные выводы
+                </label>
+                <button type="button" class="btn btn-sm btn-primary" wire:click="startCompetitor">Добавить конкурента</button>
+            </div>
+
+            @if($coForm)
+                <div class="ds-card-body border-b border-border-subtle">
+                    <div class="grid gap-2 md:grid-cols-3 mb-2">
+                        <input type="text" wire:model="coName" placeholder="Название" class="{{ $inp }}">
+                        <input type="text" wire:model="coSite" placeholder="Сайт" class="{{ $inp }}">
+                        <select wire:model="coPlatform" class="{{ $inp }}">
+                            @foreach(\App\Models\Competitor::PLATFORMS as $k => $label)
+                                <option value="{{ $k }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="grid gap-2 md:grid-cols-4 mb-2">
+                        <input type="text" wire:model="coPlatformUrl" placeholder="Ссылка на отзывы" class="{{ $inp }} md:col-span-2">
+                        <input type="text" wire:model="coRating" placeholder="Рейтинг: 4,9" class="{{ $inp }}">
+                        <div class="grid grid-cols-2 gap-2">
+                            <input type="text" wire:model="coRatings" placeholder="оценок" class="{{ $inp }}">
+                            <input type="text" wire:model="coReviews" placeholder="отзывов" class="{{ $inp }}">
+                        </div>
+                    </div>
+                    <textarea wire:model="coNotes" rows="2" class="{{ $area }}"
+                              placeholder="Чем занимается, чем силён, что заявляет на сайте"></textarea>
+                    <div class="flex items-center gap-2 mt-2">
+                        <span class="flex-1 text-[11.5px] text-fg-4">Рейтинг и счётчики — витрина площадки на день сбора, обновляйте вручную.</span>
+                        <button type="button" class="btn btn-sm" wire:click="cancelCompetitor">Отмена</button>
+                        <button type="button" class="btn btn-sm btn-primary" wire:click="saveCompetitor">Сохранить</button>
+                    </div>
+                </div>
+            @endif
+
+            <div class="ds-card-body space-y-3">
+                @forelse($this->competitors as $co)
+                    @php
+                        $open = $coOpen[$co->id] ?? false;
+                        $rows = $this->competitorInsights[$co->id] ?? collect();
+                        $pros = $rows->where('kind', \App\Models\CompetitorInsight::KIND_ADVANTAGE);
+                        $cons = $rows->where('kind', \App\Models\CompetitorInsight::KIND_WEAKNESS);
+                    @endphp
+                    <div class="ds-card p-3" wire:key="co-{{ $co->id }}" style="{{ $co->is_active ? '' : 'opacity:.55' }}">
+                        <div class="flex flex-wrap items-baseline gap-2">
+                            <b class="text-[13.5px] text-fg-1">{{ $co->name }}</b>
+                            @if($co->site)
+                                <a href="{{ \Illuminate\Support\Str::startsWith($co->site, 'http') ? $co->site : 'https://'.$co->site }}"
+                                   target="_blank" rel="noopener" class="text-[11.5px] text-fg-3 underline">{{ $co->site }}</a>
+                            @endif
+                            @if($co->scoreLine() !== '')
+                                <span class="chip text-[10px]" style="background:var(--emerald-50);color:var(--emerald-700)">
+                                    {{ $co->platformLabel() }}: {{ $co->scoreLine() }}
+                                </span>
+                            @endif
+                            @if($co->platform_url)
+                                <a href="{{ $co->platform_url }}" target="_blank" rel="noopener" class="text-[11.5px] underline">отзывы</a>
+                            @endif
+                            <span class="flex-1"></span>
+                            <span class="text-[11.5px] text-fg-3 mono">собрано: {{ $co->collected_reviews_count }}</span>
+                        </div>
+
+                        @if($co->notes)
+                            <div class="text-[12.5px] text-fg-2 mt-1 break-words">{{ $co->notes }}</div>
+                        @endif
+
+                        <div class="flex flex-wrap items-center gap-2 mt-2">
+                            <button type="button" class="btn btn-xs" wire:click="toggleCompetitorCard({{ $co->id }})">
+                                {{ $open ? 'свернуть' : 'отзывы и выводы' }}
+                            </button>
+                            <button type="button" class="btn btn-xs" wire:click="startReviews({{ $co->id }})">вставить отзывы</button>
+                            <button type="button" class="btn btn-xs btn-primary" wire:click="runCompetitorInsights({{ $co->id }})"
+                                    wire:loading.attr="disabled" wire:target="runCompetitorInsights({{ $co->id }})">
+                                <span wire:loading.remove wire:target="runCompetitorInsights({{ $co->id }})">разобрать</span>
+                                <span wire:loading wire:target="runCompetitorInsights({{ $co->id }})">разбираю…</span>
+                            </button>
+                            <span class="flex-1"></span>
+                            @if($rows->where('status', 'new')->count())
+                                <span class="chip text-[10px]" style="background:var(--amber-100);color:var(--amber-800)">
+                                    новых выводов: {{ $rows->where('status', 'new')->count() }}
+                                </span>
+                            @endif
+                            <button type="button" class="btn btn-xs" wire:click="editCompetitor({{ $co->id }})">править</button>
+                            <button type="button" class="btn btn-xs" wire:click="toggleCompetitor({{ $co->id }})">
+                                {{ $co->is_active ? 'в архив' : 'вернуть' }}
+                            </button>
+                            <button type="button" class="btn btn-xs" wire:click="deleteCompetitor({{ $co->id }})"
+                                    wire:confirm="Удалить конкурента вместе с отзывами?">удалить</button>
+                        </div>
+
+                        @if($revFor === $co->id)
+                            <div class="mt-3 p-2 rounded-md border border-border-subtle">
+                                <div class="grid gap-2 md:grid-cols-2 mb-2">
+                                    <input type="text" wire:model="revSource" placeholder="Площадка" class="{{ $inp }}">
+                                    <input type="text" wire:model="revUrl" placeholder="Ссылка на страницу отзывов" class="{{ $inp }}">
+                                </div>
+                                <textarea wire:model="revText" rows="8" class="{{ $area }}"
+                                          placeholder="Вставьте отзывы как есть. Один отзыв от другого отделяется пустой строкой."></textarea>
+                                <div class="flex items-center gap-2 mt-2">
+                                    <span class="flex-1 text-[11.5px] text-fg-4">Дословно: пересказ теряет то, из-за чего клиент писал.</span>
+                                    <button type="button" class="btn btn-xs" wire:click="cancelReviews">Отмена</button>
+                                    <button type="button" class="btn btn-xs btn-primary" wire:click="saveReviews">Сохранить отзывы</button>
+                                </div>
+                            </div>
+                        @endif
+
+                        @if($open)
+                            <div class="mt-3 grid gap-3 lg:grid-cols-2">
+                                <div>
+                                    <div class="text-[11.5px] text-fg-3 mb-1">Отзывы ({{ $co->reviews->count() }})</div>
+                                    @forelse($co->reviews as $rev)
+                                        <div class="flex items-start gap-2 mb-1.5" wire:key="rev-{{ $rev->id }}">
+                                            <div class="flex-1 text-[12.5px] text-fg-2 italic break-words">«{{ $rev->quote }}»</div>
+                                            <button type="button" class="btn btn-xs" wire:click="deleteReview({{ $rev->id }})" title="Убрать">×</button>
+                                        </div>
+                                    @empty
+                                        <p class="text-[12.5px] text-fg-3">Отзывов пока нет — вставьте их, и можно разбирать.</p>
+                                    @endforelse
+                                </div>
+
+                                <div class="space-y-2">
+                                    <div>
+                                        <div class="text-[11.5px] text-fg-3 mb-1">Чем мы лучше — кандидаты в медиапрофиль</div>
+                                        @forelse($pros as $ins)
+                                            @include('livewire.marketing.partials.insight', ['ins' => $ins])
+                                        @empty
+                                            <p class="text-[12.5px] text-fg-3">Пока пусто.</p>
+                                        @endforelse
+                                    </div>
+                                    <div>
+                                        <div class="text-[11.5px] text-fg-3 mb-1">Чем мы хуже — кандидаты в обратную связь</div>
+                                        @forelse($cons as $ins)
+                                            @include('livewire.marketing.partials.insight', ['ins' => $ins])
+                                        @empty
+                                            <p class="text-[12.5px] text-fg-3">Пока пусто.</p>
+                                        @endforelse
+                                    </div>
+                                </div>
+                            </div>
+                        @endif
+                    </div>
+                @empty
+                    <p class="text-[12.5px] text-fg-3">
+                        Конкурентов пока нет. Добавьте карточку, вставьте отзывы с площадки — дальше разбор предложит,
+                        что из этого стоит выпятить в рекламе, а что взять на заметку.
                     </p>
                 @endforelse
             </div>

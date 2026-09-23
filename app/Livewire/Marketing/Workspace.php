@@ -3,11 +3,22 @@
 namespace App\Livewire\Marketing;
 
 use App\Enums\MarketingSection;
+use App\Enums\MediaProfileFacet;
+use App\Models\ClientFeedback;
+use App\Models\Competitor;
+use App\Models\CompetitorInsight;
+use App\Models\CompetitorReview;
 use App\Models\MarketingContact;
 use App\Models\MarketingEntry;
 use App\Models\MarketingReport;
 use App\Models\MarketingService;
+use App\Models\MediaProfileEntry;
+use App\Models\MediaProfileGuide;
+use App\Models\MediaProfileReview;
+use App\Services\Marketing\CompetitorInsightService;
 use App\Services\Marketing\MarketingReportService;
+use App\Services\Marketing\MediaProfileGuideService;
+use App\Services\Marketing\MediaProfileReviewService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -28,7 +39,7 @@ use Livewire\Component;
  */
 class Workspace extends Component
 {
-    public const TABS = ['access', 'contacts', 'plan', 'log', 'report', 'profile', 'review', 'feedback'];
+    public const TABS = ['access', 'contacts', 'plan', 'log', 'report', 'profile', 'review', 'feedback', 'competitors'];
 
     #[Url(as: 'tab', except: 'access')]
     public string $tab = 'access';
@@ -159,12 +170,12 @@ class Workspace extends Component
     /**
      * Записи профиля по граням.
      *
-     * @return \Illuminate\Support\Collection<string, \Illuminate\Support\Collection<int, \App\Models\MediaProfileEntry>>
+     * @return Collection<string, Collection<int, MediaProfileEntry>>
      */
     #[Computed]
     public function profileEntries()
     {
-        return \App\Models\MediaProfileEntry::query()
+        return MediaProfileEntry::query()
             ->with('author:id,name')
             ->orderBy('position')
             ->orderBy('id')
@@ -174,7 +185,7 @@ class Workspace extends Component
 
     public function startProfileEntry(string $facet): void
     {
-        $this->profileFacet = \App\Enums\MediaProfileFacet::tryFrom($facet)?->value;
+        $this->profileFacet = MediaProfileFacet::tryFrom($facet)?->value;
         $this->profileEditId = null;
         $this->pStatement = '';
         $this->pDetails = '';
@@ -183,7 +194,7 @@ class Workspace extends Component
 
     public function editProfileEntry(int $id): void
     {
-        $entry = \App\Models\MediaProfileEntry::find($id);
+        $entry = MediaProfileEntry::find($id);
         if ($entry === null) {
             return;
         }
@@ -203,7 +214,7 @@ class Workspace extends Component
 
     public function saveProfileEntry(): void
     {
-        $facet = \App\Enums\MediaProfileFacet::tryFrom((string) $this->profileFacet);
+        $facet = MediaProfileFacet::tryFrom((string) $this->profileFacet);
         $statement = trim($this->pStatement);
 
         if ($facet === null || $statement === '') {
@@ -212,7 +223,7 @@ class Workspace extends Component
             return;
         }
 
-        \App\Models\MediaProfileEntry::updateOrCreate(
+        MediaProfileEntry::updateOrCreate(
             ['id' => $this->profileEditId],
             [
                 'facet' => $facet->value,
@@ -232,7 +243,7 @@ class Workspace extends Component
     /** Убрать из профиля: запись перестаёт участвовать в проверке материалов. */
     public function toggleProfileEntry(int $id): void
     {
-        $entry = \App\Models\MediaProfileEntry::find($id);
+        $entry = MediaProfileEntry::find($id);
         if ($entry === null) {
             return;
         }
@@ -243,7 +254,7 @@ class Workspace extends Component
 
     public function deleteProfileEntry(int $id): void
     {
-        \App\Models\MediaProfileEntry::where('id', $id)->delete();
+        MediaProfileEntry::where('id', $id)->delete();
         $this->flashMessage = 'Запись удалена.';
         unset($this->profileEntries);
     }
@@ -267,11 +278,11 @@ class Workspace extends Component
     /** Показывать ли закрытые: по умолчанию видно то, что требует решения. */
     public bool $fbShowClosed = false;
 
-    /** @return \Illuminate\Support\Collection<int, \App\Models\ClientFeedback> */
+    /** @return Collection<int, ClientFeedback> */
     #[Computed]
     public function feedback()
     {
-        return \App\Models\ClientFeedback::query()
+        return ClientFeedback::query()
             ->with(['owner:id,name', 'author:id,name'])
             ->when(! $this->fbShowClosed, fn ($q) => $q->whereIn('status', ['new', 'in_progress']))
             ->orderByRaw("case status when 'new' then 0 when 'in_progress' then 1 else 2 end")
@@ -282,7 +293,7 @@ class Workspace extends Component
     #[Computed]
     public function feedbackOpenCount(): int
     {
-        return \App\Models\ClientFeedback::query()->whereIn('status', ['new', 'in_progress'])->count();
+        return ClientFeedback::query()->whereIn('status', ['new', 'in_progress'])->count();
     }
 
     public function startFeedback(): void
@@ -311,10 +322,10 @@ class Workspace extends Component
             return;
         }
 
-        \App\Models\ClientFeedback::updateOrCreate(
+        ClientFeedback::updateOrCreate(
             ['id' => $this->fbEditId],
             [
-                'source' => array_key_exists($this->fbSource, \App\Models\ClientFeedback::SOURCES) ? $this->fbSource : 'other',
+                'source' => array_key_exists($this->fbSource, ClientFeedback::SOURCES) ? $this->fbSource : 'other',
                 'source_url' => trim($this->fbUrl) !== '' ? mb_substr(trim($this->fbUrl), 0, 500) : null,
                 'client' => trim($this->fbClient) !== '' ? mb_substr(trim($this->fbClient), 0, 255) : null,
                 'quote' => $quote,
@@ -331,8 +342,8 @@ class Workspace extends Component
     /** Взять в работу / закрыть с решением / отклонить с причиной. */
     public function setFeedbackStatus(int $id, string $status, string $decision = ''): void
     {
-        $item = \App\Models\ClientFeedback::find($id);
-        if ($item === null || ! array_key_exists($status, \App\Models\ClientFeedback::STATUSES)) {
+        $item = ClientFeedback::find($id);
+        if ($item === null || ! array_key_exists($status, ClientFeedback::STATUSES)) {
             return;
         }
 
@@ -351,7 +362,7 @@ class Workspace extends Component
 
     public function saveFeedbackDecision(int $id): void
     {
-        $item = \App\Models\ClientFeedback::find($id);
+        $item = ClientFeedback::find($id);
         if ($item === null) {
             return;
         }
@@ -363,9 +374,9 @@ class Workspace extends Component
 
     /** Памятка по стилю, собранная из профиля. */
     #[Computed]
-    public function styleGuide(): ?\App\Models\MediaProfileGuide
+    public function styleGuide(): ?MediaProfileGuide
     {
-        return app(\App\Services\Marketing\MediaProfileGuideService::class)->latest();
+        return app(MediaProfileGuideService::class)->latest();
     }
 
     public function buildStyleGuide(): void
@@ -373,9 +384,279 @@ class Workspace extends Component
         $this->flashMessage = null;
         $this->flashError = null;
 
-        $res = app(\App\Services\Marketing\MediaProfileGuideService::class)->build(auth()->user());
+        $res = app(MediaProfileGuideService::class)->build(auth()->user());
         $res['ok'] ? $this->flashMessage = $res['message'] : $this->flashError = $res['message'];
         unset($this->styleGuide);
+    }
+
+    /* ------------------------- Конкуренты ---------------------------- */
+
+    public bool $coForm = false;
+
+    public ?int $coEditId = null;
+
+    public string $coName = '';
+
+    public string $coSite = '';
+
+    public string $coPlatform = 'yandex_maps';
+
+    public string $coPlatformUrl = '';
+
+    public string $coRating = '';
+
+    public string $coRatings = '';
+
+    public string $coReviews = '';
+
+    public string $coNotes = '';
+
+    /** id конкурента, для которого открыта форма вставки отзывов. */
+    public ?int $revFor = null;
+
+    public string $revSource = '';
+
+    public string $revUrl = '';
+
+    public string $revText = '';
+
+    /** Какие карточки раскрыты: отзывы длинные, по умолчанию свёрнуты. */
+    public array $coOpen = [];
+
+    /** Показывать ли разобранные выводы. */
+    public bool $coShowClosed = false;
+
+    /** @return Collection<int, Competitor> */
+    #[Computed]
+    public function competitors()
+    {
+        // Счётчик собранных отзывов нельзя звать reviews_count: так называется
+        // колонка с витриной площадки, и withCount её бы затёр.
+        return Competitor::query()
+            ->withCount(['reviews as collected_reviews_count'])
+            ->with(['reviews' => fn ($q) => $q->orderBy('id')])
+            ->orderByDesc('is_active')
+            ->orderBy('name')
+            ->get();
+    }
+
+    /**
+     * Выводы по конкурентам, сгруппированные по карточке.
+     *
+     * @return Collection<int, Collection<int, CompetitorInsight>>
+     */
+    #[Computed]
+    public function competitorInsights()
+    {
+        return CompetitorInsight::query()
+            ->when(! $this->coShowClosed, fn ($q) => $q->where('status', 'new'))
+            ->orderByRaw("case status when 'new' then 0 else 1 end")
+            ->orderBy('kind')
+            ->orderByDesc('id')
+            ->get()
+            ->groupBy('competitor_id');
+    }
+
+    #[Computed]
+    public function competitorNewCount(): int
+    {
+        return CompetitorInsight::query()->where('status', 'new')->count();
+    }
+
+    public function startCompetitor(): void
+    {
+        $this->coForm = true;
+        $this->coEditId = null;
+        $this->coName = '';
+        $this->coSite = '';
+        $this->coPlatform = 'yandex_maps';
+        $this->coPlatformUrl = '';
+        $this->coRating = '';
+        $this->coRatings = '';
+        $this->coReviews = '';
+        $this->coNotes = '';
+    }
+
+    public function editCompetitor(int $id): void
+    {
+        $competitor = Competitor::find($id);
+        if ($competitor === null) {
+            return;
+        }
+
+        $this->coForm = true;
+        $this->coEditId = $competitor->id;
+        $this->coName = (string) $competitor->name;
+        $this->coSite = (string) $competitor->site;
+        $this->coPlatform = (string) ($competitor->platform ?: 'other');
+        $this->coPlatformUrl = (string) $competitor->platform_url;
+        $this->coRating = $competitor->rating !== null ? (string) $competitor->rating : '';
+        $this->coRatings = $competitor->ratings_count !== null ? (string) $competitor->ratings_count : '';
+        $this->coReviews = $competitor->reviews_count !== null ? (string) $competitor->reviews_count : '';
+        $this->coNotes = (string) $competitor->notes;
+    }
+
+    public function cancelCompetitor(): void
+    {
+        $this->coForm = false;
+        $this->coEditId = null;
+    }
+
+    public function saveCompetitor(): void
+    {
+        $name = trim($this->coName);
+        if ($name === '') {
+            $this->flashError = 'Нужно название конкурента.';
+
+            return;
+        }
+
+        Competitor::updateOrCreate(
+            ['id' => $this->coEditId],
+            [
+                'name' => mb_substr($name, 0, 160),
+                'site' => trim($this->coSite) !== '' ? mb_substr(trim($this->coSite), 0, 255) : null,
+                'platform' => array_key_exists($this->coPlatform, Competitor::PLATFORMS) ? $this->coPlatform : 'other',
+                'platform_url' => trim($this->coPlatformUrl) !== '' ? mb_substr(trim($this->coPlatformUrl), 0, 500) : null,
+                'rating' => is_numeric(str_replace(',', '.', $this->coRating)) ? (float) str_replace(',', '.', $this->coRating) : null,
+                'ratings_count' => ctype_digit(trim($this->coRatings)) ? (int) $this->coRatings : null,
+                'reviews_count' => ctype_digit(trim($this->coReviews)) ? (int) $this->coReviews : null,
+                'notes' => trim($this->coNotes) !== '' ? trim($this->coNotes) : null,
+                'created_by_user_id' => $this->coEditId ? null : auth()->id(),
+            ] + ($this->coEditId ? [] : ['is_active' => true]),
+        );
+
+        $this->flashMessage = $this->coEditId ? 'Конкурент обновлён.' : 'Конкурент добавлен. Дальше — отзывы.';
+        $this->cancelCompetitor();
+        unset($this->competitors);
+    }
+
+    public function toggleCompetitor(int $id): void
+    {
+        $competitor = Competitor::find($id);
+        if ($competitor === null) {
+            return;
+        }
+
+        $competitor->forceFill(['is_active' => ! $competitor->is_active])->save();
+        unset($this->competitors);
+    }
+
+    public function deleteCompetitor(int $id): void
+    {
+        Competitor::where('id', $id)->delete();
+        $this->flashMessage = 'Конкурент удалён вместе с отзывами.';
+        unset($this->competitors, $this->competitorInsights, $this->competitorNewCount);
+    }
+
+    public function toggleCompetitorCard(int $id): void
+    {
+        $this->coOpen[$id] = ! ($this->coOpen[$id] ?? false);
+    }
+
+    public function startReviews(int $id): void
+    {
+        $competitor = Competitor::find($id);
+        if ($competitor === null) {
+            return;
+        }
+
+        $this->revFor = $id;
+        $this->revSource = $competitor->platformLabel();
+        $this->revUrl = (string) $competitor->platform_url;
+        $this->revText = '';
+        $this->coOpen[$id] = true;
+    }
+
+    public function cancelReviews(): void
+    {
+        $this->revFor = null;
+        $this->revText = '';
+    }
+
+    /**
+     * Вставка пачкой: отзывы разделяются пустой строкой.
+     *
+     * Так их и копируют с площадки — переносить полсотни отзывов по одному
+     * никто не станет, а пустая строка есть в любом таком копипасте.
+     */
+    public function saveReviews(): void
+    {
+        $competitor = Competitor::find($this->revFor);
+        if ($competitor === null) {
+            return;
+        }
+
+        $chunks = preg_split('~\R\s*\R~u', trim($this->revText)) ?: [];
+        $added = 0;
+
+        foreach ($chunks as $chunk) {
+            $quote = trim((string) $chunk);
+            if (mb_strlen($quote) < 10) {
+                continue;
+            }
+
+            $competitor->reviews()->create([
+                'source' => trim($this->revSource) !== '' ? mb_substr(trim($this->revSource), 0, 64) : null,
+                'source_url' => trim($this->revUrl) !== '' ? mb_substr(trim($this->revUrl), 0, 500) : null,
+                'quote' => mb_substr($quote, 0, 4000),
+                'created_by_user_id' => auth()->id(),
+            ]);
+            $added++;
+        }
+
+        $this->flashMessage = $added > 0
+            ? 'Добавлено отзывов: '.$added.'. Можно разбирать.'
+            : 'Ничего не добавлено — отзывы разделяются пустой строкой.';
+        $this->cancelReviews();
+        unset($this->competitors);
+    }
+
+    public function deleteReview(int $id): void
+    {
+        CompetitorReview::where('id', $id)->delete();
+        unset($this->competitors);
+    }
+
+    public function runCompetitorInsights(int $id): void
+    {
+        $this->flashMessage = null;
+        $this->flashError = null;
+
+        $competitor = Competitor::find($id);
+        if ($competitor === null) {
+            return;
+        }
+
+        $res = app(CompetitorInsightService::class)->extract($competitor, auth()->user());
+        $res['ok'] ? $this->flashMessage = $res['message'] : $this->flashError = $res['message'];
+        $this->coOpen[$id] = true;
+        unset($this->competitors, $this->competitorInsights, $this->competitorNewCount);
+    }
+
+    public function acceptInsight(int $id): void
+    {
+        $this->flashMessage = null;
+        $this->flashError = null;
+
+        $insight = CompetitorInsight::with('competitor')->find($id);
+        if ($insight === null) {
+            return;
+        }
+
+        $res = app(CompetitorInsightService::class)->accept($insight, auth()->user());
+        $res['ok'] ? $this->flashMessage = $res['message'] : $this->flashError = $res['message'];
+        unset($this->competitorInsights, $this->competitorNewCount, $this->profileEntries, $this->feedback, $this->feedbackOpenCount);
+    }
+
+    public function dismissInsight(int $id): void
+    {
+        $insight = CompetitorInsight::find($id);
+        if ($insight !== null) {
+            app(CompetitorInsightService::class)->dismiss($insight);
+        }
+
+        unset($this->competitorInsights, $this->competitorNewCount);
     }
 
     /* ---------------------- Проверка материалов ---------------------- */
@@ -390,16 +671,16 @@ class Workspace extends Component
     public ?int $mvReviewId = null;
 
     #[Computed]
-    public function mvReview(): ?\App\Models\MediaProfileReview
+    public function mvReview(): ?MediaProfileReview
     {
-        return $this->mvReviewId ? \App\Models\MediaProfileReview::find($this->mvReviewId) : null;
+        return $this->mvReviewId ? MediaProfileReview::find($this->mvReviewId) : null;
     }
 
-    /** @return \Illuminate\Support\Collection<int, \App\Models\MediaProfileReview> */
+    /** @return Collection<int, MediaProfileReview> */
     #[Computed]
     public function mvHistory()
     {
-        return \App\Models\MediaProfileReview::query()
+        return MediaProfileReview::query()
             ->with('author:id,name')
             ->orderByDesc('id')
             ->limit(15)
@@ -411,7 +692,7 @@ class Workspace extends Component
         $this->flashMessage = null;
         $this->flashError = null;
 
-        $res = app(\App\Services\Marketing\MediaProfileReviewService::class)
+        $res = app(MediaProfileReviewService::class)
             ->review($this->mvKind, $this->mvText, $this->mvTitle, auth()->user());
 
         if (! $res['ok']) {
@@ -427,7 +708,7 @@ class Workspace extends Component
 
     public function openMaterialReview(int $id): void
     {
-        $review = \App\Models\MediaProfileReview::find($id);
+        $review = MediaProfileReview::find($id);
         if ($review === null) {
             return;
         }

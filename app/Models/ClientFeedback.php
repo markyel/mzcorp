@@ -21,6 +21,7 @@ class ClientFeedback extends Model
         'call' => 'Звонок',
         'meeting' => 'Встреча',
         'survey' => 'Опрос',
+        'competitor' => 'Отзывы конкурента',
         'other' => 'Другое',
     ];
 
