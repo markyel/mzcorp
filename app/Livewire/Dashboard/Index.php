@@ -933,7 +933,7 @@ class Index extends Component
      *
      * @return array{
      *   received: array{total:int, by_complexity: array<string,int>},
-     *   quotes: array{count:int, amount:float, by_complexity: array<string,int>},
+     *   quotes: array{count:int, requests:int, amount:float, by_complexity: array<string,int>},
      *   waiting_quote: array{full:int, partial:int},
      *   waiting_invoice: array{count:int, amount:float},
      *   invoiced: array{count:int, amount:float},
@@ -967,7 +967,8 @@ class Index extends Component
             ->whereRaw('COALESCE(em.sent_at, oq.created_at) BETWEEN ? AND ?', [$from, $to])
             ->when($mine, fn ($q) => $q->where('r.assigned_user_id', $mine))
             ->groupBy('r.complexity_level')
-            ->selectRaw('r.complexity_level, COUNT(*) AS c, COALESCE(SUM(oq.total_amount), 0) AS s')
+            ->selectRaw('r.complexity_level, COUNT(*) AS c, COUNT(DISTINCT oq.request_id) AS reqs,
+                         COALESCE(SUM(oq.total_amount), 0) AS s')
             ->get();
 
         // ── 3. Ждут КП, а цены уже есть: полностью — по всем активным позициям,
@@ -1046,6 +1047,10 @@ class Index extends Component
             ],
             'quotes' => [
                 'count' => (int) $quoteRows->sum('c'),
+                // Заявок меньше, чем документов: по одной заявке уходит и
+                // пересчёт, и досыл частичного. Разница объясняет, почему
+                // воронка ниже показывает своё число.
+                'requests' => (int) $quoteRows->sum('reqs'),
                 'amount' => (float) $quoteRows->sum('s'),
                 'by_complexity' => $this->byComplexity($quoteRows->pluck('c', 'complexity_level')->all()),
             ],

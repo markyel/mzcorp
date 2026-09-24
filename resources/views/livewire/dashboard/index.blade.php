@@ -206,9 +206,12 @@
                 <div class="rounded-md border border-border p-3">
                     <div class="text-[10.5px] uppercase tracking-wider text-fg-3">Отправлено КП</div>
                     <div class="flex items-baseline gap-2">
-                        <span class="mono tnum text-[22px] font-semibold text-fg-1 leading-tight">{{ $rep['quotes']['count'] }}</span>
+                        <span class="mono tnum text-[22px] font-semibold text-fg-1 leading-tight"
+                              title="Документов: по одной заявке может уйти несколько">{{ $rep['quotes']['count'] }}</span>
+                        <span class="text-[11.5px] text-fg-3">документов</span>
                         <span class="mono tnum text-[12.5px] text-fg-2">на {{ $money($rep['quotes']['amount']) }} ₽</span>
                     </div>
+                    <div class="text-[11px] text-fg-3">по {{ $rep['quotes']['requests'] }} заявкам</div>
                     <div class="text-[11px] text-fg-3 mt-1">
                         {{ $cx($rep['quotes']['by_complexity']) ? implode(' · ', $cx($rep['quotes']['by_complexity'])) : 'по сложности данных нет' }}
                     </div>
@@ -277,7 +280,8 @@
 
             <div class="text-[10.5px] text-fg-4 mt-3">
                 Получено — заявки, созданные в окне. КП — отправленные документы (по дате письма,
-                а не по дате разбора), одна заявка может дать несколько. «Выставлено» — по дате счёта,
+                а не по дате разбора), одна заявка может дать несколько; в воронке ниже считаются
+                не документы, а заявки, дошедшие до статуса «КП отправлено», — числа не обязаны совпадать. «Выставлено» — по дате счёта,
                 «Оплачено» — по дате оплаты, поэтому в оплаченных бывают счета прошлых недель;
                 в разделе «Счета» период фильтрует по дате выставления, и там цифра другая.
                 Суммы везде — суммы счетов. Две нижние карточки периодом не управляются: это очередь на сейчас.
