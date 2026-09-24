@@ -2,25 +2,35 @@
 
 namespace App\Livewire\Mail;
 
+use App\Enums\MailboxType;
 use App\Enums\MailDirection;
 use App\Enums\MailFolder;
 use App\Enums\Role;
 use App\Jobs\Mail\SyncMailboxFolderJob;
 use App\Livewire\Concerns\RendersEmailBody;
+use App\Models\AutoQuoteSnapshot;
 use App\Models\EmailMessage;
-use App\Models\MailLabel;
-use App\Models\User;
+use App\Models\Mailbox;
 use App\Models\MailboxFolder;
+use App\Models\MailLabel;
+use App\Models\Request;
+use App\Models\User;
 use App\Services\Mail\EmailDraftService;
+use App\Services\Mail\EmailToRequestPromoter;
+use App\Services\Mail\ImapFolderSyncService;
 use App\Services\Mail\ImapSeenSyncService;
 use App\Services\Mail\MailboxAccessService;
 use App\Services\Mail\MailboxFolderService;
 use App\Services\Mail\MailReadService;
+use App\Services\Mail\MailReassignArchiverService;
 use App\Services\Mail\MessageLabelService;
 use App\Services\Mail\SharedMailService;
+use App\Services\Mail\SupplierCcInboxService;
+use App\Services\Quotes\AutoQuoteOfferService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
@@ -202,7 +212,7 @@ class Client extends Component
         if ($customId !== null) {
             $custom = $this->accessibleFolder($customId);
             $this->folder = ($custom && (int) $custom->mailbox_id === (int) $this->selectedMailboxId)
-                ? 'f:' . $customId
+                ? 'f:'.$customId
                 : MailFolder::Inbox->value;
         } else {
             $this->folder = MailFolder::tryFromOrDefault($folder)->value;
@@ -221,6 +231,27 @@ class Client extends Component
         }
     }
 
+    /**
+     * Клик по чипу заявки в списке: оставить только письма этой заявки.
+     *
+     * Срезы, которые сейчас стоят поверх папки (метка, «только непрочитанные»,
+     * поиск), снимаем: человек просит переписку целиком, а не её остаток после
+     * фильтров — иначе половина писем заявки молча не покажется.
+     */
+    public function filterByRequest(int $requestId): void
+    {
+        if ($requestId <= 0) {
+            return;
+        }
+
+        $this->requestId = $requestId;
+        $this->search = '';
+        $this->labelId = null;
+        $this->unreadOnly = false;
+        $this->notice = null;
+        $this->resetView();
+    }
+
     /** Снять фильтр «письма заявки» (крестик в шапке списка). */
     public function clearRequestFilter(): void
     {
@@ -230,13 +261,13 @@ class Client extends Component
 
     /** Заявка, по которой отфильтрован список (null — обычный режим). */
     #[Computed]
-    public function filterRequest(): ?\App\Models\Request
+    public function filterRequest(): ?Request
     {
         if (! $this->requestId) {
             return null;
         }
 
-        return \App\Models\Request::query()->find($this->requestId, ['id', 'internal_code', 'status', 'subject', 'onec_number']);
+        return Request::query()->find($this->requestId, ['id', 'internal_code', 'status', 'subject', 'onec_number']);
     }
 
     public function loadMore(): void
@@ -293,7 +324,7 @@ class Client extends Component
      * состояние владельца — визуально не меняется ничего.
      *
      * @param  list<int>  $ids
-     * @return array<int, list<int>>  user_id => id писем
+     * @return array<int, list<int>> user_id => id писем
      */
     private function groupByStateUser(array $ids): array
     {
@@ -439,7 +470,7 @@ class Client extends Component
         }
         $name = $folder->name;
         $moved = app(MailboxFolderService::class)->delete($folder, $this->user());
-        if ($this->folder === 'f:' . $folderId) {
+        if ($this->folder === 'f:'.$folderId) {
             $this->folder = MailFolder::Inbox->value;
             $this->resetView();
         }
@@ -506,20 +537,20 @@ class Client extends Component
         }
         $fid = MailboxFolder::idFromKey($this->searchIn);
         if ($fid !== null) {
-            return 'Поиск · ' . ($this->folderNames[$fid] ?? 'папка');
+            return 'Поиск · '.($this->folderNames[$fid] ?? 'папка');
         }
 
         return 'Поиск · все папки';
     }
 
-    private function selectedMailbox(): ?\App\Models\Mailbox
+    private function selectedMailbox(): ?Mailbox
     {
         if (! $this->selectedMailboxId
             || ! app(MailboxAccessService::class)->canAccessMailbox($this->user(), $this->selectedMailboxId)) {
             return null;
         }
 
-        return \App\Models\Mailbox::query()->find($this->selectedMailboxId);
+        return Mailbox::query()->find($this->selectedMailboxId);
     }
 
     private function accessibleFolder(int $folderId): ?MailboxFolder
@@ -551,7 +582,7 @@ class Client extends Component
         // кнопка. Если список пришёл, а после проверки доступа опустел —
         // оставляем след, иначе такое не диагностируется.
         if ($allowed === []) {
-            \Illuminate\Support\Facades\Log::info('Mail\Client: bulk action got no accessible ids', [
+            Log::info('Mail\Client: bulk action got no accessible ids', [
                 'user_id' => $this->user()?->id,
                 'requested' => count($ids),
             ]);
@@ -740,7 +771,7 @@ class Client extends Component
             return;
         }
 
-        $key = 'mail-sync-now:' . $mailboxId;
+        $key = 'mail-sync-now:'.$mailboxId;
         if (! Cache::add($key, 1, now()->addSeconds(self::SYNC_THROTTLE_SECONDS))) {
             $this->notice = 'Синхронизация уже идёт — подождите несколько секунд.';
 
@@ -772,11 +803,11 @@ class Client extends Component
         $user = $this->user();
 
         return $user !== null && $user->hasAnyRole([
-            \App\Enums\Role::Manager->value,
-            \App\Enums\Role::HeadOfSales->value,
-            \App\Enums\Role::Secretary->value,
-            \App\Enums\Role::Director->value,
-            \App\Enums\Role::Admin->value,
+            Role::Manager->value,
+            Role::HeadOfSales->value,
+            Role::Secretary->value,
+            Role::Director->value,
+            Role::Admin->value,
         ]);
     }
 
@@ -801,21 +832,21 @@ class Client extends Component
         // руками: личный ящик снабженца и общий rfq@, куда идут копии внешних
         // запросов, оба минуют клиентский конвейер по этой же причине.
         if ($email->mailbox?->isProcurementMailbox()
-            || app(\App\Services\Mail\SupplierCcInboxService::class)->isRfqInboxMessage($email)) {
+            || app(SupplierCcInboxService::class)->isRfqInboxMessage($email)) {
             $this->notice = 'Это переписка с поставщиком — клиентская заявка из неё не создаётся.';
 
             return;
         }
 
         try {
-            $request = app(\App\Services\Mail\EmailToRequestPromoter::class)
+            $request = app(EmailToRequestPromoter::class)
                 ->promote($email, $this->user()?->id, 'manual_create_request_from_mail');
         } catch (\DomainException $e) {
             $this->notice = $e->getMessage();
 
             return;
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Mail\Client: не удалось создать заявку из письма', [
+            Log::error('Mail\Client: не удалось создать заявку из письма', [
                 'email_message_id' => $messageId,
                 'error' => $e->getMessage(),
             ]);
@@ -1024,12 +1055,12 @@ class Client extends Component
      * По каким заявкам из списка система уже посчитала КП. Метка в строке —
      * чтобы менеджер видел это в почте, не открывая заявку.
      *
-     * @return \Illuminate\Support\Collection<int, \App\Models\AutoQuoteSnapshot>
+     * @return Collection<int, AutoQuoteSnapshot>
      */
     #[Computed]
     public function autoQuotes()
     {
-        return app(\App\Services\Quotes\AutoQuoteOfferService::class)->readyForMany(
+        return app(AutoQuoteOfferService::class)->readyForMany(
             $this->threads->pluck('related_request_id')->filter()->map(fn ($id) => (int) $id)->all(),
         );
     }
@@ -1113,8 +1144,8 @@ class Client extends Component
      */
     private function hideGoneFromServer(Builder $q, array $mailboxIds): void
     {
-        $sync = app(\App\Services\Mail\ImapFolderSyncService::class);
-        $synced = \App\Models\Mailbox::query()->whereIn('id', $mailboxIds)->get()
+        $sync = app(ImapFolderSyncService::class);
+        $synced = Mailbox::query()->whereIn('id', $mailboxIds)->get()
             ->filter(fn ($m) => $sync->isServerSynced($m))
             ->pluck('id')->map(fn ($id) => (int) $id)->all();
         if ($synced === []) {
@@ -1135,7 +1166,7 @@ class Client extends Component
      */
     private function hideReassignedCopies(Builder $q): void
     {
-        $q->whereNotIn('email_messages.folder', \App\Services\Mail\MailReassignArchiverService::archivePaths());
+        $q->whereNotIn('email_messages.folder', MailReassignArchiverService::archivePaths());
     }
 
     /**
@@ -1145,14 +1176,14 @@ class Client extends Component
      * у общих и делегированных без владельца — текущего пользователя.
      *
      * @param  list<int>  $mailboxIds
-     * @return array<int,int>  mailbox_id => user_id
+     * @return array<int,int> mailbox_id => user_id
      */
     private function readStateUserByMailbox(array $mailboxIds): array
     {
         $uid = (int) $this->user()->id;
-        $owners = \App\Models\Mailbox::query()
+        $owners = Mailbox::query()
             ->whereIn('id', $mailboxIds)
-            ->where('type', \App\Enums\MailboxType::Personal->value)
+            ->where('type', MailboxType::Personal->value)
             ->whereNotNull('owner_user_id')
             ->pluck('owner_user_id', 'id');
 
@@ -1327,6 +1358,7 @@ class Client extends Component
         if ($mailboxIds === []) {
             return [];
         }
+
         // Бейдж ящика = то, что физически лежит в ЭТОМ ящике (как и список при
         // выборе одного ящика), поэтому копии здесь не прячем: копия и её
         // оригинал никогда не лежат в одном ящике.

@@ -253,7 +253,8 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .trow .flagbtn:hover{color:var(--amber-600)}
 .mailapp .trow .flagbtn.on{color:var(--amber-600);opacity:1}
 .mailapp .trow .clip{color:var(--fg-3);font-size:12px}
-.mailapp .trow .reqchip{font:600 10.5px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px}
+.mailapp .trow .reqchip{font:600 10.5px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px;border:0;cursor:pointer}
+.mailapp .trow .reqchip:hover{background:var(--violet-100);text-decoration:underline}
 .mailapp .trow .onecchip{font:600 10.5px/1.4 var(--font-mono);background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:4px;white-space:nowrap}
 /* Шапка списка в режиме «письма заявки» (?request=). */
 .mailapp .sscope{display:flex;align-items:center;gap:6px;font:400 11.5px/1 var(--font-sans);color:var(--fg-3)}
@@ -739,7 +740,10 @@ body.mail-resizing iframe{pointer-events:none}
                                         <span class="aqchip"
                                               title="Система подготовила КП на {{ number_format((float) $autoQuotes[$m->related_request_id]->total, 2, ',', ' ') }} ₽ — проверить и отправить в карточке заявки">КП готово</span>
                                     @endif
-                                    <span class="reqchip">{{ $m->relatedRequest->internal_code }}</span>
+                                    {{-- Чип заявки — кнопка: отсюда видна вся переписка по ней,
+                                         а не только то письмо, что попалось в папке. --}}
+                                    <button type="button" class="reqchip" wire:click.stop="filterByRequest({{ $m->related_request_id }})"
+                                            title="Показать все письма заявки {{ $m->relatedRequest->internal_code }}">{{ $m->relatedRequest->internal_code }}</button>
                                     @if($m->relatedRequest->onec_number)<span class="onecchip" title="Номер заявки/КП в 1С">1С {{ $m->relatedRequest->onec_number }}</span>@endif
                                 @elseif($cat)
                                     <span class="catchip {{ $cat[1] }}">{{ $cat[0] }}</span>
