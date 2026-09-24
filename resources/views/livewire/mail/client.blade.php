@@ -1047,7 +1047,7 @@ body.mail-resizing iframe{pointer-events:none}
                                                 if(!d||!d.body||(d.URL||'')==='about:blank')return false;
                                                 if($el._mlDoc===d)return true;$el._mlDoc=d;
                                                 d.querySelectorAll('a[href]').forEach(a=>{a.target='_blank';a.rel='noopener noreferrer'});
-                                                const s=d.createElement('style');s.textContent='html,body{margin:0;padding:0}body{padding:6px 8px;font:13px/1.55 system-ui,Segoe UI,Inter,sans-serif;color:#0a0a0a;word-break:break-word}img{max-width:100%;height:auto}img[data-cid-missing]{width:14px!important;height:14px!important;opacity:.35}';
+                                                const s=d.createElement('style');s.textContent='html,body{margin:0;padding:0}body{padding:6px 8px;font:13px/1.55 system-ui,Segoe UI,Inter,sans-serif;color:#0a0a0a;word-break:break-word}img{max-width:100%;height:auto}img[data-cid-missing]{width:14px!important;height:14px!important;opacity:.35}table{max-width:100%!important}td,th{word-break:break-word}';
                                                 (d.head||d.documentElement).appendChild(s);
                                                 try{new ResizeObserver(fit).observe(d.documentElement)}catch(e){}
                                                 d.addEventListener('toggle',fit,true);fit();
