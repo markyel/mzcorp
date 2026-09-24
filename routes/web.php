@@ -454,13 +454,15 @@ Route::middleware('auth')->group(function () {
             return view('direct.index');
         })->name('direct.index');
 
-        // Скидки контрагентов — загрузка выгрузки из корпоративной базы.
-        // Скидка уходит в карточку организации и оттуда в КП, включая
-        // автоматическое. Доступ проверяется в компоненте (РОП+).
-        Route::get('/dashboard/client-discounts', function () {
-            return view('clients.discounts');
-        })->name('client-discounts.index');
     });
+
+    // Скидки контрагентов — загрузка выгрузки из корпоративной базы. Скидка
+    // уходит в карточку организации и оттуда в КП, включая автоматическое.
+    // Раздел задумывался «РОП и выше», и компонент так и проверяет, но сам
+    // роут лежал в admin-группе — РОП с директором упирались в 403.
+    Route::get('/dashboard/client-discounts', function () {
+        return view('clients.discounts');
+    })->middleware('role:head_of_sales,director,admin')->name('client-discounts.index');
 
     // Документация — рукописные гайды по ролям (resources/docs/{section}/*.md).
     // Доступ к разделам фильтруется DocsService по ролям пользователя; admin видит всё.
