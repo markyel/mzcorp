@@ -81,6 +81,12 @@ class MediaPlan extends Component
     /** Выбор канала при генерации черновика по теме. */
     public array $draftChannel = [];
 
+    /**
+     * Факты сегодняшнего повода, введённые руками: что произошло, где, когда.
+     * Обязательны для новостей — без них материал пришлось бы выдумывать.
+     */
+    public array $draftNote = [];
+
     public bool $showArchive = false;
 
     public function mount(): void
@@ -432,7 +438,12 @@ class MediaPlan extends Component
             return;
         }
 
-        $res = app(MediaMaterialService::class)->draft($topic, $channel, auth()->user());
+        $res = app(MediaMaterialService::class)->draft(
+            $topic,
+            $channel,
+            auth()->user(),
+            (string) ($this->draftNote[$topicId] ?? ''),
+        );
         if (! $res['ok']) {
             $this->error = $res['message'];
 
@@ -440,6 +451,7 @@ class MediaPlan extends Component
         }
 
         $this->flash = $res['message'];
+        $this->draftNote[$topicId] = '';
         $this->openPublication((int) $res['publication']->id);
         unset($this->publications, $this->topics, $this->dueTopics);
     }

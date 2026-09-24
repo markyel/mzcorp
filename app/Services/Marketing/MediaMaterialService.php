@@ -33,8 +33,22 @@ class MediaMaterialService
     /**
      * @return array{ok: bool, publication: ?MediaPublication, message: string}
      */
-    public function draft(MediaTopic $topic, MediaChannel $channel, ?User $author): array
+    public function draft(MediaTopic $topic, MediaChannel $channel, ?User $author, ?string $note = null): array
     {
+        $note = trim((string) $note);
+
+        // Новость без повода — это выдумка. Бриф темы говорит, КАК писать
+        // новости, но не ЧТО произошло: про выставку, склад или изменение в
+        // работе система знать не может, и сочинять ей тут нечего.
+        if ($topic->source === 'news' && $note === '') {
+            return [
+                'ok' => false,
+                'publication' => null,
+                'message' => 'Напишите в поле рядом, что произошло: событие, дата, место, участники. '
+                    .'Без повода новость получится выдуманной.',
+            ];
+        }
+
         $profile = MediaProfileEntry::asBrief();
         if ($profile === '') {
             return ['ok' => false, 'publication' => null, 'message' => 'Медиапрофиль пуст — писать не от чего.'];
@@ -44,6 +58,14 @@ class MediaMaterialService
         // Ключ выпуска есть у серийных тем: по нему в следующий раз берётся
         // следующая категория, а не та же самая.
         ['key' => $subjectKey, 'facts' => $data] = $this->data->factsWithKey($topic);
+
+        // То, что редактор написал руками, идёт первым и с пометкой: это факты
+        // сегодняшнего повода, и они важнее любых посчитанных.
+        if ($note !== '') {
+            $data = "ЧТО ПРОИЗОШЛО (со слов редактора, это главные факты материала):\n".$note
+                .($data !== '' ? "\n\n".$data : '');
+        }
+
         if ($data === '' && $this->data->isDataDriven($topic)) {
             return [
                 'ok' => false,
