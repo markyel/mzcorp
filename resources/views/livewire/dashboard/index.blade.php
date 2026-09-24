@@ -197,7 +197,13 @@
                 {{-- 1 --}}
                 <div class="rounded-md border border-border p-3">
                     <div class="text-[10.5px] uppercase tracking-wider text-fg-3">Получено заявок</div>
-                    <div class="mono tnum text-[22px] font-semibold text-fg-1 leading-tight">{{ $rep['received']['total'] }}</div>
+                    <div class="flex items-baseline gap-2">
+                        <span class="mono tnum text-[22px] font-semibold text-fg-1 leading-tight">{{ $rep['received']['total'] }}</span>
+                        <span class="text-[11.5px] text-fg-3"
+                              title="Заявка того же состава, что уже открытая: распределитель отдал её тому же менеджеру">
+                            из них <b class="mono tnum text-fg-2">{{ $rep['received']['twins'] }}</b> близнецов
+                        </span>
+                    </div>
                     <div class="text-[11px] text-fg-3 mt-1">
                         {{ $cx($rep['received']['by_complexity']) ? implode(' · ', $cx($rep['received']['by_complexity'])) : 'по сложности данных нет' }}
                     </div>

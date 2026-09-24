@@ -17,6 +17,7 @@ use App\Models\ClientNotificationSent;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use App\Models\Request;
+use App\Models\RequestAssignment;
 use App\Models\RequestStateChange;
 use App\Models\RoutedMail;
 use App\Models\User;
@@ -932,7 +933,7 @@ class Index extends Component
      * КП, выданном вечером, может появиться на следующий день.
      *
      * @return array{
-     *   received: array{total:int, by_complexity: array<string,int>},
+     *   received: array{total:int, twins:int, by_complexity: array<string,int>},
      *   quotes: array{count:int, requests:int, amount:float, by_complexity: array<string,int>},
      *   waiting_quote: array{full:int, partial:int},
      *   waiting_invoice: array{count:int, amount:float},
@@ -953,6 +954,20 @@ class Index extends Component
             ->selectRaw('complexity_level, COUNT(*) AS c')
             ->groupBy('complexity_level')
             ->pluck('c', 'complexity_level');
+
+        // Близнецы — заявки того же состава, что уже открытая у нас: разные
+        // покупатели прислали один и тот же спрос по одному объекту. Считаем
+        // не «похожесть задним числом», а вердикт распределителя — он один
+        // умеет сказать, что заявка признана повтором и отдана тому же
+        // менеджеру (reason auto_twin).
+        $twins = RequestAssignment::query()
+            ->where('reason', 'like', 'auto_twin%')
+            ->whereIn('request_id', Request::query()
+                ->whereBetween('created_at', [$from, $to])
+                ->when($mine, fn ($q) => $q->where('assigned_user_id', $mine))
+                ->select('id'))
+            ->distinct()
+            ->count('request_id');
 
         // ── 2. Отправленные КП: документы, а не заявки — за день их может быть
         // несколько по одной заявке (досыл частичного, пересчёт).
@@ -1043,6 +1058,7 @@ class Index extends Component
         return [
             'received' => [
                 'total' => (int) $receivedRows->sum(),
+                'twins' => $twins,
                 'by_complexity' => $this->byComplexity($receivedRows->all()),
             ],
             'quotes' => [
