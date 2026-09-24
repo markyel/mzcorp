@@ -168,6 +168,116 @@
         </div>
     @endif
 
+    {{-- ───────── Сводка за период: шесть цифр в одном месте ─────────
+         Первый ряд — события за выбранное окно, второй — состояние очереди
+         на сейчас. Смешивать их в одном ряду нельзя: «получено за день» и
+         «ждёт счёт» отвечают на разные вопросы. --}}
+    @php
+        $rep = $this->periodReport;
+        $money = fn ($v) => number_format((float) $v, 0, ',', ' ');
+        $cx = function (array $by) {
+            $out = [];
+            foreach (\App\Enums\ComplexityLevel::cases() as $lv) {
+                $n = (int) ($by[$lv->value] ?? 0);
+                if ($n > 0) {
+                    $out[] = $lv->shortLabel().' '.$n;
+                }
+            }
+            return $out;
+        };
+    @endphp
+    <div class="ds-card">
+        <div class="ds-card-header">
+            <h3>Отчёт · {{ $this->periodLabel }}</h3>
+            <span class="flex-1"></span>
+            <span class="text-[11.5px] text-fg-3">период меняется переключателем вверху страницы</span>
+        </div>
+        <div class="ds-card-body">
+            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {{-- 1 --}}
+                <div class="rounded-md border border-border p-3">
+                    <div class="text-[10.5px] uppercase tracking-wider text-fg-3">Получено заявок</div>
+                    <div class="mono tnum text-[22px] font-semibold text-fg-1 leading-tight">{{ $rep['received']['total'] }}</div>
+                    <div class="text-[11px] text-fg-3 mt-1">
+                        {{ $cx($rep['received']['by_complexity']) ? implode(' · ', $cx($rep['received']['by_complexity'])) : 'по сложности данных нет' }}
+                    </div>
+                </div>
+                {{-- 2 --}}
+                <div class="rounded-md border border-border p-3">
+                    <div class="text-[10.5px] uppercase tracking-wider text-fg-3">Отправлено КП</div>
+                    <div class="flex items-baseline gap-2">
+                        <span class="mono tnum text-[22px] font-semibold text-fg-1 leading-tight">{{ $rep['quotes']['count'] }}</span>
+                        <span class="mono tnum text-[12.5px] text-fg-2">на {{ $money($rep['quotes']['amount']) }} ₽</span>
+                    </div>
+                    <div class="text-[11px] text-fg-3 mt-1">
+                        {{ $cx($rep['quotes']['by_complexity']) ? implode(' · ', $cx($rep['quotes']['by_complexity'])) : 'по сложности данных нет' }}
+                    </div>
+                </div>
+                {{-- 5 --}}
+                <div class="rounded-md border border-border p-3">
+                    <div class="text-[10.5px] uppercase tracking-wider text-fg-3">Выставлено счетов</div>
+                    <div class="flex items-baseline gap-2">
+                        <span class="mono tnum text-[22px] font-semibold text-fg-1 leading-tight">{{ $rep['invoiced']['count'] }}</span>
+                        <span class="mono tnum text-[12.5px] text-fg-2">на {{ $money($rep['invoiced']['amount']) }} ₽</span>
+                    </div>
+                    <div class="text-[11px] text-fg-3 mt-1">без отозванных</div>
+                </div>
+                {{-- 6 --}}
+                <div class="rounded-md border border-border p-3" style="background:var(--emerald-50)">
+                    <div class="text-[10.5px] uppercase tracking-wider text-emerald-700">Оплачено счетов</div>
+                    <div class="flex items-baseline gap-2">
+                        <span class="mono tnum text-[22px] font-semibold text-emerald-700 leading-tight">{{ $rep['paid']['count'] }}</span>
+                        <span class="mono tnum text-[12.5px] text-emerald-700">на {{ $money($rep['paid']['amount']) }} ₽</span>
+                    </div>
+                    <div class="text-[11px] text-fg-3 mt-1">по дате оплаты</div>
+                </div>
+            </div>
+
+            <div class="grid gap-3 sm:grid-cols-2 mt-3">
+                {{-- 3 --}}
+                <div class="rounded-md border border-border p-3">
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-[10.5px] uppercase tracking-wider text-fg-3">Ждут КП, цены есть</span>
+                        <span class="chip text-[10px]" style="background:var(--neutral-100);color:var(--fg-3)">сейчас</span>
+                    </div>
+                    <div class="flex items-baseline gap-4 mt-1">
+                        <span>
+                            <span class="mono tnum text-[22px] font-semibold text-fg-1">{{ $rep['waiting_quote']['full'] }}</span>
+                            <span class="text-[11.5px] text-fg-3">полностью</span>
+                        </span>
+                        <span>
+                            <span class="mono tnum text-[22px] font-semibold text-amber-700">{{ $rep['waiting_quote']['partial'] }}</span>
+                            <span class="text-[11.5px] text-fg-3">частично</span>
+                        </span>
+                    </div>
+                    <div class="text-[11px] text-fg-3 mt-1">
+                        КП ещё не выдано, а цены по позициям уже актуальны — это очередь на выдачу
+                    </div>
+                </div>
+                {{-- 4 --}}
+                <div class="rounded-md border border-border p-3">
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-[10.5px] uppercase tracking-wider text-fg-3">КП ждут счёт</span>
+                        <span class="chip text-[10px]" style="background:var(--neutral-100);color:var(--fg-3)">сейчас</span>
+                    </div>
+                    <div class="flex items-baseline gap-2 mt-1">
+                        <span class="mono tnum text-[22px] font-semibold text-fg-1">{{ $rep['waiting_invoice']['count'] }}</span>
+                        <span class="mono tnum text-[12.5px] text-fg-2">на {{ $money($rep['waiting_invoice']['amount']) }} ₽</span>
+                    </div>
+                    <div class="text-[11px] text-fg-3 mt-1">
+                        статус «Согласован / ждёт счёт», сумма — по последнему КП заявки
+                    </div>
+                </div>
+            </div>
+
+            <div class="text-[10.5px] text-fg-4 mt-3">
+                Получено — заявки, созданные в окне. КП — отправленные документы (по дате письма,
+                а не по дате разбора), одна заявка может дать несколько. Счета — выставленные и
+                оплаченные в окне. Две нижние карточки периодом не управляются: это очередь на сейчас.
+            </div>
+        </div>
+    </div>
+
     {{-- ───────── Funnel + conversion (за период) ─────────
          received → quoted → won/lost.
          quote_rate = quoted/received, conversion = won/(won+lost). --}}

@@ -3,18 +3,26 @@
 namespace App\Livewire\Dashboard;
 
 use App\Enums\AiDecisionStatus;
+use App\Enums\AttentionReason;
+use App\Enums\ClientNotificationType;
+use App\Enums\ComplexityLevel;
 use App\Enums\DetectorType;
 use App\Enums\EmailCategory;
+use App\Enums\MatchPath;
 use App\Enums\RequestStatus;
 use App\Enums\Role as RoleEnum;
 use App\Models\AiDecision;
+use App\Models\ChangelogEntry;
+use App\Models\ClientNotificationSent;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use App\Models\Request;
 use App\Models\RequestStateChange;
 use App\Models\RoutedMail;
 use App\Models\User;
+use App\Services\Analytics\ManagerAnalyticsService;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
@@ -156,14 +164,16 @@ class Index extends Component
             try {
                 $from = CarbonImmutable::createFromFormat('Y-m-d', $this->customFrom);
                 $to = CarbonImmutable::createFromFormat('Y-m-d', $this->customTo);
-                return $from->format('d.m') . ' – ' . $to->format('d.m.Y');
+
+                return $from->format('d.m').' – '.$to->format('d.m.Y');
             } catch (\Throwable) {
                 return 'произвольный';
             }
         }
+
         return $this->periodDays === 1
             ? 'сегодня'
-            : $this->periodDays . ' дн.';
+            : $this->periodDays.' дн.';
     }
 
     /**
@@ -190,6 +200,7 @@ class Index extends Component
                     ->startOfDay();
                 $to = CarbonImmutable::createFromFormat('Y-m-d', $this->customTo, 'Europe/Moscow')
                     ->endOfDay();
+
                 return [$from, $to];
             } catch (\Throwable) {
                 // fallthrough to preset
@@ -201,6 +212,7 @@ class Index extends Component
                 CarbonImmutable::now('Europe/Moscow'),
             ];
         }
+
         return [
             CarbonImmutable::now()->subDays($this->periodDays),
             CarbonImmutable::now(),
@@ -294,11 +306,13 @@ class Index extends Component
             try {
                 $from = CarbonImmutable::createFromFormat('Y-m-d', $this->sparklineFrom);
                 $to = CarbonImmutable::createFromFormat('Y-m-d', $this->sparklineTo);
-                return $from->format('d.m') . ' – ' . $to->format('d.m.Y');
+
+                return $from->format('d.m').' – '.$to->format('d.m.Y');
             } catch (\Throwable) {
                 // fallthrough
             }
         }
+
         return 'текущая загрузка';
     }
 
@@ -308,7 +322,7 @@ class Index extends Component
      *   - yesterday → [yesterday 00:00, 1 day]
      *   - custom → [from 00:00, ceil(to - from) + 1 days]
      *
-     * @return array{0: CarbonImmutable, 1: int}  start (МСК 00:00), кол-во дней
+     * @return array{0: CarbonImmutable, 1: int} start (МСК 00:00), кол-во дней
      */
     private function sparklineWindow(): array
     {
@@ -324,12 +338,14 @@ class Index extends Component
                     $days = $from->diffInDays($to) + 1;
                     // Защита от слишком длинных диапазонов в sparkline (UI cramps на 100+).
                     $days = (int) min(366, max(1, $days));
+
                     return [$from, $days];
                 }
             } catch (\Throwable) {
                 // fallthrough to today
             }
         }
+
         // today (default)
         return [$todayMsk, 1];
     }
@@ -363,7 +379,7 @@ class Index extends Component
     #[Computed]
     public function latestUpdates()
     {
-        return \App\Models\ChangelogEntry::query()
+        return ChangelogEntry::query()
             ->published()
             ->latest('published_at')
             ->limit(3)
@@ -374,7 +390,7 @@ class Index extends Component
      * Менеджеры для фильтра круговой диаграммы (роли, обрабатывающие
      * заявки). Активные пользователи, отсортированы по имени.
      *
-     * @return \Illuminate\Support\Collection<int, User>
+     * @return Collection<int, User>
      */
     #[Computed]
     public function statusChartManagers()
@@ -501,7 +517,7 @@ class Index extends Component
         // тоже level=1, но это не просрочка → берём только reason=sla_breach.
         $overdue = (clone $base)
             ->where('attention_level', 1)
-            ->where('attention_reason', \App\Enums\AttentionReason::SlaBreach->value)
+            ->where('attention_reason', AttentionReason::SlaBreach->value)
             ->whereNotIn('status', $silent)
             ->count();
         $dueToday = (clone $base)
@@ -632,7 +648,7 @@ class Index extends Component
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, Mailbox>
+     * @return Collection<int, Mailbox>
      */
     #[Computed]
     public function mailboxes()
@@ -681,9 +697,9 @@ class Index extends Component
             ->selectRaw("
                 assigned_user_id,
                 COUNT(*) AS total,
-                COUNT(*) FILTER (WHERE status = '" . RequestStatus::New->value . "') AS new_count,
-                COALESCE(SUM(complexity_score) FILTER (WHERE status IN ('" . implode("','", $active) . "')), 0) AS active_complexity,
-                COUNT(*) FILTER (WHERE complexity_level IN ('hard', 'very_hard') AND status IN ('" . implode("','", $active) . "')) AS hard_count
+                COUNT(*) FILTER (WHERE status = '".RequestStatus::New->value."') AS new_count,
+                COALESCE(SUM(complexity_score) FILTER (WHERE status IN ('".implode("','", $active)."')), 0) AS active_complexity,
+                COUNT(*) FILTER (WHERE complexity_level IN ('hard', 'very_hard') AND status IN ('".implode("','", $active)."')) AS hard_count
             ")
             ->get()
             ->keyBy('assigned_user_id');
@@ -781,8 +797,9 @@ class Index extends Component
             ->get()
             ->keyBy('path');
 
-        return collect(\App\Enums\MatchPath::cases())->map(function ($mp) use ($aggregated) {
+        return collect(MatchPath::cases())->map(function ($mp) use ($aggregated) {
             $row = $aggregated->get($mp->value);
+
             return [
                 'path' => $mp->value,
                 'label' => $mp->label(),
@@ -901,6 +918,162 @@ class Index extends Component
     }
 
     /**
+     * Сводный отчёт за выбранный день или период — шесть цифр, на которые
+     * смотрят каждое утро. Часть из них раньше приходилось собирать глазами по
+     * разным блокам дашборда; здесь они рядом и посчитаны по одному окну.
+     *
+     * Что period-зависимо, а что снимок «на сейчас» — принципиально разное:
+     *   received / quotes / invoiced / paid — события ЗА ОКНО;
+     *   waiting_quote / waiting_invoice     — состояние очереди СЕЙЧАС.
+     * В UI снимки помечены отдельно, иначе цифры не сходятся с ожиданием.
+     *
+     * Момент отправки КП берём по письму (email_messages.sent_at), а не по
+     * created_at записи: детектор разбирает исходящие не мгновенно, и запись о
+     * КП, выданном вечером, может появиться на следующий день.
+     *
+     * @return array{
+     *   received: array{total:int, by_complexity: array<string,int>},
+     *   quotes: array{count:int, amount:float, by_complexity: array<string,int>},
+     *   waiting_quote: array{full:int, partial:int},
+     *   waiting_invoice: array{count:int, amount:float},
+     *   invoiced: array{count:int, amount:float},
+     *   paid: array{count:int, amount:float}
+     * }
+     */
+    #[Computed]
+    public function periodReport(): array
+    {
+        [$from, $to] = $this->periodRange();
+        $mine = $this->isPrivileged ? null : (int) auth()->id();
+
+        // ── 1. Получено заявок + разбивка по сложности.
+        $receivedRows = Request::query()
+            ->whereBetween('created_at', [$from, $to])
+            ->when($mine, fn ($q) => $q->where('assigned_user_id', $mine))
+            ->selectRaw('complexity_level, COUNT(*) AS c')
+            ->groupBy('complexity_level')
+            ->pluck('c', 'complexity_level');
+
+        // ── 2. Отправленные КП: документы, а не заявки — за день их может быть
+        // несколько по одной заявке (досыл частичного, пересчёт).
+        $quoteTypes = [
+            DetectorType::OutboundQuotationFull->value,
+            DetectorType::OutboundQuotationPartial->value,
+        ];
+        $quoteRows = DB::table('outbound_quotes as oq')
+            ->join('requests as r', 'r.id', '=', 'oq.request_id')
+            ->leftJoin('email_messages as em', 'em.id', '=', 'oq.email_message_id')
+            ->whereIn('oq.document_type', $quoteTypes)
+            ->whereRaw('COALESCE(em.sent_at, oq.created_at) BETWEEN ? AND ?', [$from, $to])
+            ->when($mine, fn ($q) => $q->where('r.assigned_user_id', $mine))
+            ->groupBy('r.complexity_level')
+            ->selectRaw('r.complexity_level, COUNT(*) AS c, COALESCE(SUM(oq.total_amount), 0) AS s')
+            ->get();
+
+        // ── 3. Ждут КП, а цены уже есть: полностью — по всем активным позициям,
+        // частично — хотя бы по одной. Цена считается годной только пока
+        // catalog_items.is_price_actual = true: просроченную в КП не ставим.
+        $preQuote = [
+            RequestStatus::New->value,
+            RequestStatus::Assigned->value,
+            RequestStatus::InProgress->value,
+            RequestStatus::AwaitingClientClarification->value,
+        ];
+        $waitingQuote = DB::selectOne(
+            'SELECT
+                COUNT(*) FILTER (WHERE priced = total) AS full_priced,
+                COUNT(*) FILTER (WHERE priced > 0 AND priced < total) AS part_priced
+             FROM (
+                SELECT r.id,
+                       COUNT(*) AS total,
+                       COUNT(*) FILTER (WHERE ri.catalog_item_id IS NOT NULL AND ci.is_price_actual) AS priced
+                FROM requests r
+                JOIN request_items ri ON ri.request_id = r.id AND ri.is_active
+                LEFT JOIN catalog_items ci ON ci.id = ri.catalog_item_id
+                WHERE r.status = ANY(?) '.($mine ? 'AND r.assigned_user_id = '.$mine.' ' : '').'
+                GROUP BY r.id
+             ) t',
+            ['{'.implode(',', $preQuote).'}'],
+        );
+
+        // ── 4. КП выдано, ждём счёт. Сумма — по последнему КП заявки: именно
+        // его согласовали, предыдущие версии в деньгах уже не участвуют.
+        $waitingInvoice = DB::selectOne(
+            'SELECT COUNT(*) AS c, COALESCE(SUM(q.total_amount), 0) AS s
+             FROM requests r
+             LEFT JOIN LATERAL (
+                SELECT oq.total_amount FROM outbound_quotes oq
+                WHERE oq.request_id = r.id AND oq.document_type = ANY(?)
+                ORDER BY oq.id DESC LIMIT 1
+             ) q ON TRUE
+             WHERE r.status = ? '.($mine ? 'AND r.assigned_user_id = '.$mine : ''),
+            ['{'.implode(',', $quoteTypes).'}', RequestStatus::AwaitingInvoice->value],
+        );
+
+        // ── 5–6. Счета: выставленные за окно и оплаченные за окно. Отменённые
+        // из «выставлено» убираем — счёт, который отозвали, деньгами не был.
+        $invoices = fn () => DB::table('invoices as i')
+            ->join('requests as r', 'r.id', '=', 'i.request_id')
+            ->when($mine, fn ($q) => $q->where('r.assigned_user_id', $mine));
+
+        $issued = $invoices()
+            ->whereBetween('i.issued_at', [$from, $to])
+            ->whereNull('i.cancelled_at')
+            ->selectRaw('COUNT(*) AS c, COALESCE(SUM(i.amount_snapshot), 0) AS s')
+            ->first();
+
+        $paid = $invoices()
+            ->whereBetween('i.paid_at', [$from, $to])
+            ->selectRaw('COUNT(*) AS c, COALESCE(SUM(COALESCE(i.paid_amount, i.amount_snapshot)), 0) AS s')
+            ->first();
+
+        return [
+            'received' => [
+                'total' => (int) $receivedRows->sum(),
+                'by_complexity' => $this->byComplexity($receivedRows->all()),
+            ],
+            'quotes' => [
+                'count' => (int) $quoteRows->sum('c'),
+                'amount' => (float) $quoteRows->sum('s'),
+                'by_complexity' => $this->byComplexity($quoteRows->pluck('c', 'complexity_level')->all()),
+            ],
+            'waiting_quote' => [
+                'full' => (int) ($waitingQuote->full_priced ?? 0),
+                'partial' => (int) ($waitingQuote->part_priced ?? 0),
+            ],
+            'waiting_invoice' => [
+                'count' => (int) ($waitingInvoice->c ?? 0),
+                'amount' => (float) ($waitingInvoice->s ?? 0),
+            ],
+            'invoiced' => ['count' => (int) ($issued->c ?? 0), 'amount' => (float) ($issued->s ?? 0)],
+            'paid' => ['count' => (int) ($paid->c ?? 0), 'amount' => (float) ($paid->s ?? 0)],
+        ];
+    }
+
+    /**
+     * Четыре уровня сложности в фиксированном порядке, «средние» — это normal.
+     *
+     * @param  array<string|null, int|string>  $counts
+     * @return array<string, int>
+     */
+    private function byComplexity(array $counts): array
+    {
+        $out = [];
+        foreach (ComplexityLevel::cases() as $level) {
+            $out[$level->value] = (int) ($counts[$level->value] ?? 0);
+        }
+        // Заявки без проставленного уровня существуют (старые, ручные) — их
+        // прячем в «средние»: иначе сумма по колонкам не сойдётся с итогом.
+        $known = array_sum($out);
+        $all = (int) array_sum(array_map('intval', $counts));
+        if ($all > $known) {
+            $out[ComplexityLevel::Normal->value] += $all - $known;
+        }
+
+        return $out;
+    }
+
+    /**
      * Воронка за выбранный период: received → quoted → won/lost + conversion.
      *
      * received = заявки с created_at в периоде (новые письма / ручные).
@@ -918,7 +1091,7 @@ class Index extends Component
     {
         if (! $this->isPrivileged) {
             return ['received' => 0, 'quoted' => 0, 'won' => 0, 'lost' => 0,
-                    'quote_rate' => null, 'conversion' => null];
+                'quote_rate' => null, 'conversion' => null];
         }
         [$from, $to] = $this->periodRange();
 
@@ -1161,7 +1334,7 @@ class Index extends Component
             ->get()
             ->keyBy('assigned_user_id');
 
-        $infoMailboxId = \App\Models\Mailbox::query()
+        $infoMailboxId = Mailbox::query()
             ->whereRaw('LOWER(email) = ?', ['info@myzip.ru'])
             ->value('id');
 
@@ -1251,7 +1424,7 @@ class Index extends Component
 
         // info@ через тот же window: связываем request_assignment.request_id
         // → requests.email_message_id → email_messages.mailbox_id.
-        $infoMailboxId = \App\Models\Mailbox::query()
+        $infoMailboxId = Mailbox::query()
             ->whereRaw('LOWER(email) = ?', ['info@myzip.ru'])
             ->value('id');
 
@@ -1307,7 +1480,7 @@ class Index extends Component
         }
         [$from, $to] = $this->periodRange();
 
-        return app(\App\Services\Analytics\ManagerAnalyticsService::class)->closedDynamics($from, $to);
+        return app(ManagerAnalyticsService::class)->closedDynamics($from, $to);
     }
 
     /**
@@ -1322,7 +1495,7 @@ class Index extends Component
         }
         [$from, $to] = $this->periodRange();
 
-        return app(\App\Services\Analytics\ManagerAnalyticsService::class)->wonLostByManager($from, $to);
+        return app(ManagerAnalyticsService::class)->wonLostByManager($from, $to);
     }
 
     /**
@@ -1340,8 +1513,8 @@ class Index extends Component
             return ['total' => 0, 'revived' => 0, 'silence' => 0, 'declined' => 0, 'rows' => []];
         }
 
-        $base = \App\Models\ClientNotificationSent::query()
-            ->where('type', \App\Enums\ClientNotificationType::RevivalOffer->value);
+        $base = ClientNotificationSent::query()
+            ->where('type', ClientNotificationType::RevivalOffer->value);
 
         $total = (clone $base)->count();
         $revived = (clone $base)->where('response_intent', 'positive')->count();
