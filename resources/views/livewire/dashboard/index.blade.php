@@ -175,6 +175,18 @@
     @php
         $rep = $this->periodReport;
         $money = fn ($v) => number_format((float) $v, 0, ',', ' ');
+        // Локаль приложения английская, trans_choice тут не помощник.
+        $plural = function (int $n, string $one, string $few, string $many) {
+            $n = abs($n) % 100;
+            if ($n >= 11 && $n <= 19) {
+                return $many;
+            }
+            return match ($n % 10) {
+                1 => $one,
+                2, 3, 4 => $few,
+                default => $many,
+            };
+        };
         $cx = function (array $by) {
             $out = [];
             foreach (\App\Enums\ComplexityLevel::cases() as $lv) {
@@ -201,7 +213,8 @@
                         <span class="mono tnum text-[22px] font-semibold text-fg-1 leading-tight">{{ $rep['received']['total'] }}</span>
                         <span class="text-[11.5px] text-fg-3"
                               title="Заявка того же состава, что уже открытая: распределитель отдал её тому же менеджеру">
-                            из них <b class="mono tnum text-fg-2">{{ $rep['received']['twins'] }}</b> близнецов
+                            из них <b class="mono tnum text-fg-2">{{ $rep['received']['twins'] }}</b>
+                            {{ $plural($rep['received']['twins'], 'близнец', 'близнеца', 'близнецов') }}
                         </span>
                     </div>
                     <div class="text-[11px] text-fg-3 mt-1">
