@@ -31,6 +31,7 @@
                     'review' => ['🔍 Проверка материалов', null],
                     'feedback' => ['💬 Обратная связь', $this->feedbackOpenCount],
                     'competitors' => ['🎯 Конкуренты', $this->competitorNewCount ?: null],
+                    'media' => ['📡 Медиаплан', null],
                 ];
             @endphp
             <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden text-[12.5px]">
@@ -1160,5 +1161,10 @@
                 @endforelse
             </div>
         </div>
+    @endif
+
+    {{-- =========================== МЕДИАПЛАН =========================== --}}
+    @if($tab === 'media')
+        <livewire:marketing.media-plan />
     @endif
 </div>

@@ -41,7 +41,7 @@ use Livewire\Component;
  */
 class Workspace extends Component
 {
-    public const TABS = ['access', 'contacts', 'plan', 'log', 'report', 'profile', 'review', 'feedback', 'competitors'];
+    public const TABS = ['access', 'contacts', 'plan', 'log', 'report', 'profile', 'review', 'feedback', 'competitors', 'media'];
 
     #[Url(as: 'tab', except: 'access')]
     public string $tab = 'access';
