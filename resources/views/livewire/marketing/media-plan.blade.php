@@ -288,6 +288,25 @@
                 </div>
                 <textarea wire:model="pubBody" rows="14" class="{{ $area }} leading-relaxed"></textarea>
 
+                {{-- Фото позиций: в ВК уходят вложениями, в Telegram альбомом. --}}
+                @if($pub->images())
+                    <div class="mt-2">
+                        <div class="text-[11.5px] text-fg-3 mb-1">
+                            Фото в публикации: {{ count($pub->images()) }} — уйдут вместе с текстом, лишние уберите
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            @foreach($pub->images() as $img)
+                                <div class="relative" wire:key="img-{{ md5($img) }}">
+                                    <img src="{{ $img }}" alt="" loading="lazy"
+                                         class="w-[84px] h-[84px] object-cover rounded-md border border-border bg-surface">
+                                    <button type="button" class="btn btn-xs absolute -top-1 -right-1"
+                                            wire:click="dropImage(@js($img))" title="Убрать из публикации">×</button>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                @endif
+
                 @if($pub->review)
                     @php $issues = is_array($pub->review->issues) ? $pub->review->issues : []; @endphp
                     <div class="mt-2 p-2 rounded-md border border-border-subtle">

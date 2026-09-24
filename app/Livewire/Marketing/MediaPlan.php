@@ -537,6 +537,22 @@ class MediaPlan extends Component
         $this->pubPlannedFor = $pub->planned_for?->toDateString() ?? '';
     }
 
+    /** Убрать картинку из публикации: в ленту уйдут только оставшиеся. */
+    public function dropImage(string $url): void
+    {
+        $this->ensureAdmin();
+        $pub = MediaPublication::find($this->pubId);
+        if ($pub === null) {
+            return;
+        }
+
+        $left = array_values(array_filter($pub->images(), fn ($u) => $u !== $url));
+        $pub->forceFill(['image_urls' => $left ?: null])->save();
+
+        $this->flash = 'Картинка убрана.';
+        unset($this->openPub);
+    }
+
     public function closePublication(): void
     {
         $this->pubId = null;

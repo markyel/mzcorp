@@ -24,13 +24,20 @@ class MediaPublication extends Model
     protected $fillable = [
         'media_topic_id', 'media_channel_id', 'title', 'body', 'status',
         'planned_for', 'published_at', 'url', 'model', 'subject_key', 'external_id',
-        'media_profile_review_id', 'created_by_user_id',
+        'media_profile_review_id', 'created_by_user_id', 'image_urls',
     ];
 
     protected $casts = [
         'planned_for' => 'date',
         'published_at' => 'datetime',
+        'image_urls' => 'array',
     ];
+
+    /** @return list<string> */
+    public function images(): array
+    {
+        return array_values(array_filter((array) ($this->image_urls ?? []), 'is_string'));
+    }
 
     public function topic(): BelongsTo
     {

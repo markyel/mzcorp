@@ -123,6 +123,9 @@ class MediaMaterialService
             'title' => mb_substr(trim((string) ($parsed['title'] ?? $topic->title)), 0, 300),
             'body' => $body,
             'subject_key' => $subjectKey,
+            // Фото позиций — для ассортиментных тем. Редактор увидит их в
+            // карточке и сможет убрать лишние до публикации.
+            'image_urls' => $this->data->photosFor($topic) ?: null,
             'status' => 'draft',
             'planned_for' => $topic->next_due_on ?? now()->toDateString(),
             'model' => $model,

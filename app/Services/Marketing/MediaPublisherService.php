@@ -30,6 +30,9 @@ class MediaPublisherService
 
     private const TIMEOUT = 20;
 
+    /** Столько картинок вмещает альбом Telegram; ВК ограничивает стену десятью вложениями. */
+    private const MAX_PHOTOS = 10;
+
     /**
      * @return array{ok: bool, message: string, url: ?string}
      */
@@ -58,9 +61,11 @@ class MediaPublisherService
 
         $text = $this->text($publication);
 
+        $images = $publication->images();
+
         $res = match ($channel->kind) {
-            'vk' => $this->postToVk($channel, $text),
-            'telegram' => $this->postToTelegram($channel, $text),
+            'vk' => $this->postToVk($channel, $text, $images),
+            'telegram' => $this->postToTelegram($channel, $text, $images),
             default => ['ok' => false, 'message' => 'Канал не поддержан.', 'url' => null, 'external_id' => null],
         };
 
@@ -271,16 +276,18 @@ class MediaPublisherService
     /**
      * @return array{ok: bool, message: string, url: ?string, external_id: ?string}
      */
-    private function postToVk(MediaChannel $channel, string $text): array
+    private function postToVk(MediaChannel $channel, string $text, array $images = []): array
     {
         // owner_id сообщества отрицательный: -123456. Принимаем и с минусом, и без.
         $ownerId = '-'.ltrim((string) $channel->secret('owner_id'), '-');
+        $attachments = $images !== [] ? $this->uploadVkPhotos($channel, $ownerId, $images) : [];
 
         try {
             $r = Http::timeout(self::TIMEOUT)->asForm()->post('https://api.vk.com/method/wall.post', [
                 'owner_id' => $ownerId,
                 'from_group' => 1,
                 'message' => $text,
+                'attachments' => $attachments !== [] ? implode(',', $attachments) : null,
                 'access_token' => $channel->secret('access_token'),
                 'v' => self::VK_API_VERSION,
             ])->json();
@@ -311,14 +318,117 @@ class MediaPublisherService
     }
 
     /**
+     * Фотографии для стены ВК: скачать с нашего сайта и залить на их сервер.
+     *
+     * Ссылку на картинку ВК не принимает — только загруженное фото. Порядок
+     * жёсткий: получить адрес сервера, отправить файл, сохранить, получить
+     * attachment вида photo-123_456. Одна неудачная картинка не должна ронять
+     * публикацию, поэтому каждую ведём отдельно и молча пропускаем сбойные.
+     *
+     * @param  list<string>  $images
+     * @return list<string>
+     */
+    private function uploadVkPhotos(MediaChannel $channel, string $ownerId, array $images): array
+    {
+        $token = (string) $channel->secret('access_token');
+        $groupId = ltrim($ownerId, '-');
+        $out = [];
+
+        foreach (array_slice($images, 0, self::MAX_PHOTOS) as $url) {
+            try {
+                $server = Http::timeout(self::TIMEOUT)->asForm()
+                    ->post('https://api.vk.com/method/photos.getWallUploadServer', [
+                        'group_id' => $groupId,
+                        'access_token' => $token,
+                        'v' => self::VK_API_VERSION,
+                    ])->json();
+
+                $uploadUrl = $server['response']['upload_url'] ?? null;
+                if ($uploadUrl === null) {
+                    continue;
+                }
+
+                $file = Http::timeout(self::TIMEOUT)->get($url);
+                if (! $file->successful() || $file->body() === '') {
+                    continue;
+                }
+
+                $uploaded = Http::timeout(self::TIMEOUT)
+                    ->attach('photo', $file->body(), 'photo.jpg')
+                    ->post($uploadUrl)
+                    ->json();
+
+                $saved = Http::timeout(self::TIMEOUT)->asForm()
+                    ->post('https://api.vk.com/method/photos.saveWallPhoto', [
+                        'group_id' => $groupId,
+                        'photo' => $uploaded['photo'] ?? '',
+                        'server' => $uploaded['server'] ?? '',
+                        'hash' => $uploaded['hash'] ?? '',
+                        'access_token' => $token,
+                        'v' => self::VK_API_VERSION,
+                    ])->json();
+
+                $photo = $saved['response'][0] ?? null;
+                if ($photo === null) {
+                    continue;
+                }
+                $out[] = 'photo'.$photo['owner_id'].'_'.$photo['id'];
+            } catch (\Throwable $e) {
+                Log::warning('MediaPublisherService: vk photo upload failed (non-fatal)', [
+                    'channel_id' => $channel->id,
+                    'photo_url' => $url,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  list<string>  $images
      * @return array{ok: bool, message: string, url: ?string, external_id: ?string}
      */
-    private function postToTelegram(MediaChannel $channel, string $text): array
+    private function postToTelegram(MediaChannel $channel, string $text, array $images = []): array
     {
+        $api = 'https://api.telegram.org/bot'.$channel->secret('bot_token').'/';
+        $chatId = $channel->secret('chat_id');
+
         try {
+            // С картинками пост уходит альбомом. Подпись у альбома всего 1024
+            // знака — если текст длиннее, шлём альбом без подписи, а текст
+            // отдельным сообщением следом: обрезать материал ради формата нельзя.
+            if ($images !== []) {
+                $fits = mb_strlen($text) <= 1024;
+                $media = [];
+                foreach (array_slice($images, 0, self::MAX_PHOTOS) as $i => $url) {
+                    $media[] = array_filter([
+                        'type' => 'photo',
+                        'media' => $url,
+                        'caption' => $i === 0 && $fits ? $text : null,
+                    ]);
+                }
+
+                $album = Http::timeout(self::TIMEOUT)->post($api.'sendMediaGroup', [
+                    'chat_id' => $chatId,
+                    'media' => json_encode($media, JSON_UNESCAPED_UNICODE),
+                ])->json();
+
+                if (! ($album['ok'] ?? false)) {
+                    Log::warning('MediaPublisherService: telegram album failed, falling back to text', [
+                        'channel_id' => $channel->id,
+                        'error' => $album['description'] ?? 'unknown',
+                    ]);
+                } elseif ($fits) {
+                    $first = $album['result'][0]['message_id'] ?? null;
+
+                    return $this->telegramResult($channel, $first);
+                }
+            }
+
             $r = Http::timeout(self::TIMEOUT)
-                ->post('https://api.telegram.org/bot'.$channel->secret('bot_token').'/sendMessage', [
-                    'chat_id' => $channel->secret('chat_id'),
+                ->post($api.'sendMessage', [
+                    'chat_id' => $chatId,
                     'text' => mb_substr($text, 0, 4096),
                     'disable_web_page_preview' => true,
                 ])->json();
@@ -330,7 +440,18 @@ class MediaPublisherService
             return ['ok' => false, 'message' => 'Telegram: '.($r['description'] ?? 'ошибка'), 'url' => null, 'external_id' => null];
         }
 
-        $messageId = (string) ($r['result']['message_id'] ?? '');
+        return $this->telegramResult($channel, $r['result']['message_id'] ?? null);
+    }
+
+    /**
+     * Ссылка на пост канала собирается из короткого имени и номера сообщения;
+     * у приватного канала её нет — тогда остаётся только id.
+     *
+     * @return array{ok: bool, message: string, url: ?string, external_id: ?string}
+     */
+    private function telegramResult(MediaChannel $channel, int|string|null $messageId): array
+    {
+        $messageId = (string) ($messageId ?? '');
         $chat = (string) $channel->secret('chat_id');
         $url = str_starts_with($chat, '@') && $messageId !== ''
             ? 'https://t.me/'.ltrim($chat, '@').'/'.$messageId

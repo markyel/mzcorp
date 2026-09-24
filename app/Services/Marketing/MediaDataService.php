@@ -74,6 +74,58 @@ class MediaDataService
         };
     }
 
+    /** Больше десяти картинок не берём: столько же максимум в альбоме Telegram. */
+    public const MAX_PHOTOS = 10;
+
+    /**
+     * Фотографии позиций для ассортиментного поста.
+     *
+     * Список деталей без картинок читается как прайс-лист: «поручень резиновый
+     * Schindler SDS» ничего не говорит человеку, который ищет деталь глазами.
+     * Берём фото ровно тех позиций, о которых пост, в том же порядке.
+     *
+     * @return list<string>
+     */
+    public function photosFor(MediaTopic $topic): array
+    {
+        $days = max(1, (int) ($topic->cadence_days ?: self::DEFAULT_WINDOW_DAYS));
+
+        $rows = match ($topic->source) {
+            'catalog_new' => DB::table('catalog_items')
+                ->where('is_active', true)
+                ->where('created_at', '>=', now()->subDays($days))
+                ->orderByDesc('created_at'),
+            'catalog_price' => DB::table('catalog_items as ci')
+                ->join('catalog_price_changes as pc', 'pc.catalog_item_id', '=', 'ci.id')
+                ->where('pc.created_at', '>=', now()->subDays($days))
+                ->whereColumn('pc.new_price', '<', 'pc.old_price')
+                ->where('ci.is_active', true)
+                ->orderByRaw('(pc.old_price - pc.new_price) / NULLIF(pc.old_price, 0) DESC')
+                ->select('ci.photo_url'),
+            'stock_arrivals' => DB::table('catalog_items')
+                ->where('is_active', true)
+                ->where('stock_available', '>', 0)
+                ->where('last_imported_at', '>=', now()->subDays($days))
+                ->where('created_at', '<', now()->subDays($days))
+                ->orderByDesc('stock_available'),
+            default => null,
+        };
+
+        if ($rows === null) {
+            return [];
+        }
+
+        return $rows
+            ->whereNotNull('photo_url')
+            ->where('photo_url', '!=', '')
+            ->limit(self::MAX_ITEMS)
+            ->pluck('photo_url')
+            ->unique()
+            ->take(self::MAX_PHOTOS)
+            ->values()
+            ->all();
+    }
+
     /**
      * Короткое имя позиции для ленты.
      *
