@@ -418,3 +418,14 @@ Schedule::command('auto-quote:snapshot --hours=72')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Медиаплан: темам с регулярностью раз в сутки пишутся черновики, и там, где
+// канал разрешил автопубликацию, материал сразу уходит на площадку. Утро
+// рабочего дня: если материал лёг в «Черновик», у маркетинга есть день, чтобы
+// его выпустить руками. См. MediaAutopilotService.
+Schedule::command('media:autopilot')
+    ->dailyAt('09:15')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();

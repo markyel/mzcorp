@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Crypt;
 
 /**
  * Канал связи с аудиторией: где мы говорим.
@@ -27,11 +28,14 @@ class MediaChannel extends Model
     protected $fillable = [
         'name', 'kind', 'url', 'handle', 'owner_user_id',
         'posts_per_week', 'is_active', 'notes',
+        'auto_publish', 'last_posted_at', 'last_error',
     ];
 
     protected $casts = [
         'posts_per_week' => 'integer',
         'is_active' => 'boolean',
+        'auto_publish' => 'boolean',
+        'last_posted_at' => 'datetime',
     ];
 
     public function owner(): BelongsTo
@@ -47,6 +51,67 @@ class MediaChannel extends Model
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+
+    protected $hidden = ['encrypted_secrets'];
+
+    /**
+     * Доступ к площадке: токен и идентификатор места публикации.
+     * Хранится шифрованным, как креды в разделе «Доступы».
+     *
+     * @return array<string, string>
+     */
+    public function secrets(): array
+    {
+        if (! $this->encrypted_secrets) {
+            return [];
+        }
+
+        try {
+            $parsed = json_decode(Crypt::decryptString($this->encrypted_secrets), true);
+
+            return is_array($parsed) ? $parsed : [];
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    public function writeSecrets(array $secrets): void
+    {
+        $clean = [];
+        foreach ($secrets as $k => $v) {
+            $v = is_string($v) ? trim($v) : $v;
+            if ($v !== null && $v !== '') {
+                $clean[$k] = $v;
+            }
+        }
+
+        $this->encrypted_secrets = $clean === []
+            ? null
+            : Crypt::encryptString(json_encode($clean, JSON_UNESCAPED_UNICODE));
+    }
+
+    public function secret(string $key): ?string
+    {
+        $v = $this->secrets()[$key] ?? null;
+
+        return is_string($v) && $v !== '' ? $v : null;
+    }
+
+    /** Канал, в который система умеет публиковать сама. */
+    public function isPostable(): bool
+    {
+        return in_array($this->kind, ['vk', 'telegram'], true);
+    }
+
+    /** Доступ настроен: есть токен и адрес места публикации. */
+    public function isConnected(): bool
+    {
+        return match ($this->kind) {
+            'vk' => $this->secret('access_token') !== null && $this->secret('owner_id') !== null,
+            'telegram' => $this->secret('bot_token') !== null && $this->secret('chat_id') !== null,
+            default => false,
+        };
     }
 
     public function kindLabel(): string

@@ -56,13 +56,66 @@
                     @if($ch->posts_per_week)
                         <span class="text-[11.5px] text-fg-3">план {{ $ch->posts_per_week }}/нед</span>
                     @endif
+                    @if($ch->isPostable())
+                        <span class="chip text-[10px]"
+                              style="{{ $ch->isConnected()
+                                ? 'background:var(--emerald-50);color:var(--emerald-700)'
+                                : 'background:var(--amber-50);color:var(--amber-800)' }}"
+                              title="{{ $ch->isConnected() ? 'Доступ настроен' : 'Доступ не заполнен — публиковать нечем' }}">
+                            {{ $ch->isConnected() ? 'подключён' : 'нет доступа' }}
+                        </span>
+                        @if($ch->auto_publish)
+                            <span class="chip text-[10px]" style="background:var(--sky-50);color:var(--sky-700)"
+                                  title="Материалы по регулярным темам уходят сюда без просмотра">авто</span>
+                        @endif
+                    @endif
                     <span class="flex-1"></span>
+                    @if($ch->last_error)
+                        <span class="text-[11px] text-amber-800" title="{{ $ch->last_error }}">ошибка площадки</span>
+                    @endif
+                    @if($ch->last_posted_at)
+                        <span class="text-[11px] text-fg-4">последняя {{ $ch->last_posted_at->format('d.m H:i') }}</span>
+                    @endif
                     <span class="text-[11.5px] text-fg-3 mono">опубликовано: {{ $ch->published_count }}</span>
+                    @if($ch->isPostable())
+                        <button type="button" class="btn btn-xs" wire:click="startCredentials({{ $ch->id }})">доступ</button>
+                        <button type="button" class="btn btn-xs" wire:click="checkChannel({{ $ch->id }})"
+                                wire:loading.attr="disabled" wire:target="checkChannel({{ $ch->id }})">связь</button>
+                        <button type="button" class="btn btn-xs {{ $ch->auto_publish ? 'btn-primary' : '' }}"
+                                wire:click="toggleAutoPublish({{ $ch->id }})"
+                                wire:confirm="{{ $ch->auto_publish
+                                    ? 'Выключить автопубликацию? Материалы будут ждать вашей кнопки.'
+                                    : 'Включить автопубликацию? Материалы по регулярным темам будут уходить в ленту без просмотра.' }}">
+                            авто: {{ $ch->auto_publish ? 'вкл' : 'выкл' }}
+                        </button>
+                    @endif
                     <button type="button" class="btn btn-xs" wire:click="editChannel({{ $ch->id }})">править</button>
                     <button type="button" class="btn btn-xs" wire:click="toggleChannel({{ $ch->id }})">
                         {{ $ch->is_active ? 'в архив' : 'вернуть' }}
                     </button>
                 </div>
+
+                @if($credFor === $ch->id)
+                    <div class="p-2 mb-2 rounded-md border border-border-subtle" wire:key="cred-{{ $ch->id }}">
+                        <div class="grid gap-2 md:grid-cols-2 mb-2">
+                            <input type="password" wire:model="credToken" autocomplete="new-password"
+                                   placeholder="{{ $ch->kind === 'vk' ? 'Токен сообщества (права wall)' : 'Токен бота' }}"
+                                   class="{{ $inp }}">
+                            <input type="text" wire:model="credTarget"
+                                   placeholder="{{ $ch->kind === 'vk' ? 'id сообщества, например 123456' : '@канал или chat_id' }}"
+                                   class="{{ $inp }}">
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="flex-1 text-[11px] text-fg-4">
+                                {{ $ch->kind === 'vk'
+                                    ? 'Токен сообщества берётся в «Управление → Работа с API → Ключи доступа», нужны права «Стена». Хранится зашифрованным и на экран не возвращается.'
+                                    : 'Бот должен быть администратором канала с правом публикации. Токен хранится зашифрованным.' }}
+                            </span>
+                            <button type="button" class="btn btn-xs" wire:click="cancelCredentials">Отмена</button>
+                            <button type="button" class="btn btn-xs btn-primary" wire:click="saveCredentials">Сохранить</button>
+                        </div>
+                    </div>
+                @endif
             @empty
                 <p class="text-[12.5px] text-fg-3">
                     Каналов пока нет. Заведите те, что уже есть: Директ, рассылку, блок в письмах, Телеграм,
@@ -221,8 +274,20 @@
                         <span wire:loading wire:target="checkPublication">проверяю…</span>
                     </button>
                     <button type="button" class="btn btn-xs" wire:click="setStatus({{ $pub->id }}, 'approved')">согласовано</button>
-                    <button type="button" class="btn btn-xs btn-primary" wire:click="setStatus({{ $pub->id }}, 'published')"
-                            title="Отметить, что материал размещён — ссылку впишите слева">опубликовано</button>
+                    @if($pub->channel?->isPostable())
+                        <button type="button" class="btn btn-xs btn-primary" wire:click="publishNow({{ $pub->id }})"
+                                wire:loading.attr="disabled" wire:target="publishNow({{ $pub->id }})"
+                                wire:confirm="Разместить материал в «{{ $pub->channel->name }}» прямо сейчас? Отменить публикацию из системы нельзя."
+                                @disabled(! $pub->channel->isConnected())
+                                title="{{ $pub->channel->isConnected()
+                                    ? 'Отправить в канал через API'
+                                    : 'У канала не заполнен доступ' }}">
+                            <span wire:loading.remove wire:target="publishNow({{ $pub->id }})">опубликовать в {{ $pub->channel->kindLabel() }}</span>
+                            <span wire:loading wire:target="publishNow({{ $pub->id }})">публикую…</span>
+                        </button>
+                    @endif
+                    <button type="button" class="btn btn-xs" wire:click="setStatus({{ $pub->id }}, 'published')"
+                            title="Отметить, что материал размещён вручную — ссылку впишите слева">отметить опубликованным</button>
                     <button type="button" class="btn btn-xs" wire:click="setStatus({{ $pub->id }}, 'rejected')">отклонить</button>
                 </div>
             </div>
@@ -255,9 +320,10 @@
 
     <div class="ds-card">
         <div class="ds-card-body text-[11.5px] text-fg-4">
-            Публикация наружу отсюда не уходит: материал готовится, проверяется по медиапрофилю и согласуется,
-            а размещает его человек и отмечает ссылкой. Автопостинг в ВК и Дзен — следующий шаг, ему нужны
-            ключи доступа и отдельное решение о том, что публикуется без просмотра.
+            Раз в сутки в 9:15 система пишет черновики темам, которым пора, и публикует их в каналы с
+            включённой автопубликацией; остальные ждут вашей кнопки. Публиковать через API умеем во
+            ВКонтакте и Telegram. У Дзена открытого API публикаций нет — туда материал переносится руками
+            и отмечается ссылкой; это ограничение площадки, а не недоделка.
         </div>
     </div>
 </div>

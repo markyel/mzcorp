@@ -8,6 +8,7 @@ use App\Models\MediaTopic;
 use App\Services\Marketing\MediaDataService;
 use App\Services\Marketing\MediaMaterialService;
 use App\Services\Marketing\MediaProfileReviewService;
+use App\Services\Marketing\MediaPublisherService;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -210,6 +211,121 @@ class MediaPlan extends Component
             $ch->forceFill(['is_active' => ! $ch->is_active])->save();
         }
         unset($this->channels);
+    }
+
+    /* --------------------------- Доступ канала -------------------------- */
+
+    /** id канала, у которого открыта форма доступа. */
+    public ?int $credFor = null;
+
+    public string $credToken = '';
+
+    public string $credTarget = '';
+
+    public function startCredentials(int $id): void
+    {
+        $ch = MediaChannel::find($id);
+        if ($ch === null) {
+            return;
+        }
+
+        $this->credFor = $id;
+        // Токен не показываем: он уже сохранён, а на экране ему делать нечего.
+        $this->credToken = '';
+        $this->credTarget = (string) ($ch->kind === 'vk' ? $ch->secret('owner_id') : $ch->secret('chat_id'));
+    }
+
+    public function cancelCredentials(): void
+    {
+        $this->credFor = null;
+        $this->credToken = '';
+        $this->credTarget = '';
+    }
+
+    public function saveCredentials(): void
+    {
+        $this->ensureAdmin();
+        $ch = MediaChannel::find($this->credFor);
+        if ($ch === null) {
+            return;
+        }
+
+        $secrets = $ch->secrets();
+        $tokenKey = $ch->kind === 'vk' ? 'access_token' : 'bot_token';
+        $targetKey = $ch->kind === 'vk' ? 'owner_id' : 'chat_id';
+
+        if (trim($this->credToken) !== '') {
+            $secrets[$tokenKey] = trim($this->credToken);
+        }
+        if (trim($this->credTarget) !== '') {
+            $secrets[$targetKey] = trim($this->credTarget);
+        }
+
+        $ch->writeSecrets($secrets);
+        $ch->save();
+
+        $this->flash = 'Доступ сохранён. Проверьте связь — публикация пойдёт только после этого.';
+        $this->cancelCredentials();
+        unset($this->channels);
+    }
+
+    /** Проверка связи с площадкой — без публикации. */
+    public function checkChannel(int $id): void
+    {
+        $this->ensureAdmin();
+        $this->flash = null;
+        $this->error = null;
+
+        $ch = MediaChannel::find($id);
+        if ($ch === null) {
+            return;
+        }
+
+        $res = app(MediaPublisherService::class)->check($ch);
+        $res['ok'] ? $this->flash = $res['message'] : $this->error = $res['message'];
+        unset($this->channels);
+    }
+
+    /**
+     * Тумблер автопубликации. Включение — сознательное действие: с этого момента
+     * материал по регулярной теме уйдёт в ленту без просмотра человеком.
+     */
+    public function toggleAutoPublish(int $id): void
+    {
+        $this->ensureAdmin();
+        $ch = MediaChannel::find($id);
+        if ($ch === null) {
+            return;
+        }
+
+        if (! $ch->auto_publish && ! $ch->isConnected()) {
+            $this->error = 'Сначала заполните доступ к каналу.';
+
+            return;
+        }
+
+        $ch->forceFill(['auto_publish' => ! $ch->auto_publish])->save();
+        $this->flash = $ch->auto_publish
+            ? 'Автопубликация включена: материалы по регулярным темам будут уходить в «'.$ch->name.'» сами.'
+            : 'Автопубликация выключена: материалы будут ждать вашей кнопки.';
+        unset($this->channels);
+    }
+
+    /** Разместить материал в его канале. */
+    public function publishNow(int $id): void
+    {
+        $this->ensureAdmin();
+        $this->flash = null;
+        $this->error = null;
+
+        $pub = MediaPublication::with('channel')->find($id);
+        if ($pub === null) {
+            return;
+        }
+
+        $res = app(MediaPublisherService::class)->publish($pub);
+        $res['ok'] ? $this->flash = $res['message'].($res['url'] ? ' '.$res['url'] : '') : $this->error = $res['message'];
+        unset($this->publications, $this->channels);
     }
 
     /* ------------------------------ Темы ------------------------------- */
