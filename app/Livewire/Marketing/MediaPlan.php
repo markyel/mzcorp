@@ -572,7 +572,12 @@ class MediaPlan extends Component
     #[Computed]
     public function openPub(): ?MediaPublication
     {
-        return $this->pubId ? MediaPublication::with(['review', 'topic:id,title', 'channel:id,name,kind'])->find($this->pubId) : null;
+        // Канал берём целиком: в урезанной выборке (id,name,kind) нет колонки с
+        // доступом, и isConnected() отвечал «нет доступа» у настроенного канала —
+        // кнопка публикации гасла при зелёном чипе «подключён» в списке.
+        return $this->pubId
+            ? MediaPublication::with(['review', 'topic:id,title', 'channel'])->find($this->pubId)
+            : null;
     }
 
     public function sourceNote(string $source): string
