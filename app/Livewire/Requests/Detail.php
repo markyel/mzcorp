@@ -185,7 +185,18 @@ class Detail extends Component
         // (редкие письма без Date header) уходят в конец.
         // Phase 1.9: visibleTo фильтрует чужие черновики (свои показываются).
         $thread = EmailMessage::query()
-            ->where('related_request_id', $this->request->id)
+            ->where(function ($q) {
+                $q->where('related_request_id', $this->request->id);
+                // Заявка-наследник заведена по письму родителя: письмо осталось
+                // в треде родителя (одно письмо может породить несколько
+                // наследников, переклеивать его нельзя), но без него карточка
+                // наследника выглядит пустой — основание работы не видно.
+                // Только для наследников: у обычной заявки письмо-основание и
+                // так привязано, а у разъединённой оно законно уехало в другую.
+                if ($this->request->inheritance_parent_id && $this->request->email_message_id) {
+                    $q->orWhere('id', $this->request->email_message_id);
+                }
+            })
             // Переписка с ПОСТАВЩИКОМ, ПРИВЯЗАННАЯ к инквайри (supplier_inquiry_id),
             // живёт в табе «Поставщики» и в клиентский тред не попадает. НО письма
             // rfq@mzcorp.ru CC / супплаер-реплаи без инквайри (supplier_inquiry_id

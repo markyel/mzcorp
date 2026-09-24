@@ -336,6 +336,30 @@ class Client extends Component
         return null;
     }
 
+    /**
+     * Заявки, заведённые ПО этому письму помимо той, к которой оно привязано.
+     *
+     * По письму родителя заводят наследников: письмо остаётся в треде родителя
+     * (и чип в списке ведёт туда — это правда), но менеджеру, которому передали
+     * продолжение работы, нужна ссылка именно на его заявку.
+     *
+     * @return Collection<int, Request>
+     */
+    #[Computed]
+    public function letterSuccessors()
+    {
+        $anchor = $this->openAnchor;
+        if ($anchor === null) {
+            return collect();
+        }
+
+        return Request::query()
+            ->where('email_message_id', $anchor->id)
+            ->when($anchor->related_request_id, fn ($q) => $q->where('id', '!=', $anchor->related_request_id))
+            ->orderBy('id')
+            ->get(['id', 'internal_code', 'status', 'assigned_user_id']);
+    }
+
     public function loadMore(): void
     {
         $this->perPage += self::PER_PAGE_STEP;

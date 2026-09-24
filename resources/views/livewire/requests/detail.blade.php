@@ -1649,6 +1649,13 @@
                                                 ⎘ заявка по письму
                                             </button>
                                         @endif
+                                        {{-- Письмо-основание наследника живёт в треде родителя:
+                                             показываем его здесь и честно говорим, чьё оно. --}}
+                                        @if((int) $msg->related_request_id !== (int) $req->id)
+                                            <span class="chip chip-warn" title="Письмо лежит в переписке родительской заявки — эта заявка заведена по нему">
+                                                <span class="dot"></span>письмо родителя
+                                            </span>
+                                        @endif
                                         @if($isOutbound)
                                             <span class="chip chip-info"><span class="dot"></span>исходящее</span>
                                         @elseif($catLabel)

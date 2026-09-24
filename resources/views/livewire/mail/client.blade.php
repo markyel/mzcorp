@@ -944,6 +944,24 @@ body.mail-resizing iframe{pointer-events:none}
                         </button>
                     </div>
                 @endif
+
+                {{-- По этому письму завели наследников: работу продолжают в другой
+                     заявке, и менеджеру нужна ссылка именно на неё. --}}
+                @if($this->letterSuccessors->isNotEmpty())
+                    <div class="reqlink hinted" title="Заявки, заведённые по этому письму">
+                        <span>{{ $this->letterSuccessors->count() === 1 ? 'По письму заведена заявка' : 'По письму заведены заявки' }}</span>
+                        @foreach($this->letterSuccessors as $succ)
+                            @php
+                                $sStatus = $succ->status instanceof \App\Enums\RequestStatus
+                                    ? $succ->status
+                                    : \App\Enums\RequestStatus::tryFrom((string) $succ->status);
+                            @endphp
+                            <a href="{{ route('requests.show', $succ->id) }}" wire:navigate class="code"
+                               title="{{ $sStatus?->label() ?? '' }}">{{ $succ->internal_code }}</a>
+                        @endforeach
+                    </div>
+                @endif
+
                 {{-- Журнал решений маршрутизатора по этому письму (mail_decisions): почему оно ушло туда, куда ушло. --}}
                 @php $decisions = $anchor->direction?->value === 'inbound' ? $anchor->decisions()->limit(3)->get() : collect(); @endphp
                 @if($decisions->isNotEmpty())
