@@ -205,8 +205,8 @@ class MediaDataService
         ];
 
         if ($top->isNotEmpty()) {
-            $lines[] = 'Чаще всего уточняли по категориям: '
-                .$top->map(fn ($r) => trim((string) $r->category).' ('.$r->c.')')->implode(', ').'.';
+            $lines[] = 'Чаще всего уточняли позиции этих категорий: '
+                .$top->map(fn ($r) => trim((string) $r->category).' — '.$r->c.' позиций')->implode(', ').'.';
         }
 
         return implode("\n", $lines);
