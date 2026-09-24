@@ -2,11 +2,17 @@
 
 namespace App\Services\Mail;
 
+use App\Enums\RequestStatus;
+use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\Request;
+use App\Models\RequestStateChange;
+use App\Services\Request\AttentionService;
+use App\Services\Request\RequestStateService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Smalot\PdfParser\Parser;
 
 /**
  * Детектор «клиент цитирует наш КП/счёт».
@@ -38,15 +44,41 @@ class CitedOutboundQuoteRouter
     /** Контекст «счёт/КП/оплата» в тексте письма (гейт матчинга номера). */
     private const KEYWORD_RE = '/сч[её]т|на\s+оплат|коммерческое\s+предложение|\bкп\b|invoice|инвойс/iu';
 
-    /** Числа-кандидаты: 5–8 цифр (наши document_number обычно 6). */
+    /**
+     * Числа-кандидаты: 5–8 цифр (наши document_number обычно 6).
+     *
+     * Границ сознательно нет. Пробовал ограничить буквами (чтобы не ловить
+     * середину артикула FAA24350BL2) — корпус из 542 писем разошёлся в 39
+     * местах: номера в реальных письмах стоят вплотную к буквам и служебным
+     * знакам чаще, чем кажется. Лишние кандидаты безвредны: они всё равно
+     * сверяются с таблицей наших документов.
+     */
     private const NUMBER_RE = '/\d{5,8}/';
+
+    /**
+     * Контекст, в котором шестизначное число — не номер документа, а адрес.
+     *
+     * Кейс M-2026-3642: клиент ООО «Санаторий Русь» прислал новую заявку, а в
+     * подписи стоял почтовый индекс «Россия, 357600, Ставропольский край» —
+     * ровно номер нашего счёта по чужой закрытой сделке трёхмесячной давности.
+     * Письмо приклеилось к ней как постпродажа.
+     *
+     * Требовать маркер «счёт/№» рядом с числом нельзя: в цитате нашего письма
+     * номер стоит просто в теме («Тема: 368531 Re: Заявка …»), и корпус из 542
+     * писем на такой строгости разошёлся в 134 местах. Поэтому глушим узко —
+     * только адресный контекст вокруг числа.
+     */
+    /** Что стоит прямо перед индексом: «Россия, 357600». */
+    private const ADDRESS_BEFORE_RE = '/(?:росси[яи]|\bрф)\s*,?\s*$/iu';
+
+    /** Что идёт сразу после индекса: «357600, Ставропольский край», «357600, г. Ессентуки». */
+    private const ADDRESS_AFTER_RE = '/^\s*,?\s*(?:г\.|город|пос\.|с\.|обл\.|область|респ|[А-ЯЁ][а-яё-]+\s+(?:кра[йя]|обл|респ))/u';
 
     private const MAX_PDF_BYTES = 8 * 1024 * 1024;
 
     public function __construct(
-        private readonly EmailTextCleanerService $cleaner = new EmailTextCleanerService(),
-    ) {
-    }
+        private readonly EmailTextCleanerService $cleaner = new EmailTextCleanerService,
+    ) {}
 
     /**
      * @return array{request: Request, document_number: string, total: float, source: string, invoice_intent: bool}|null
@@ -62,7 +94,7 @@ class CitedOutboundQuoteRouter
             return null;
         }
 
-        $text = mb_strtolower((string) $message->subject . "\n" . (string) $message->body_plain);
+        $text = mb_strtolower((string) $message->subject."\n".(string) $message->body_plain);
         $keywordHit = preg_match(self::KEYWORD_RE, $text) === 1;
         if (! $keywordHit && ! $hasAttachmentSource) {
             // Числа без контекста счёта/КП и не из вложения — не доверяем.
@@ -122,7 +154,7 @@ class CitedOutboundQuoteRouter
      */
     public function hasInvoiceIntent(string $subject, string $ownBody): bool
     {
-        return (new InvoiceMentionMatcher)->requestsInvoiceOrIntendsToPay($subject . "\n" . $ownBody);
+        return (new InvoiceMentionMatcher)->requestsInvoiceOrIntendsToPay($subject."\n".$ownBody);
     }
 
     /**
@@ -144,9 +176,9 @@ class CitedOutboundQuoteRouter
 
         // Заявка закрыта потерей (клиент молчал, теперь вернулся за счётом) →
         // реанимируем. reanimate() работает только из closed_lost.
-        if ($request->status === \App\Enums\RequestStatus::ClosedLost) {
+        if ($request->status === RequestStatus::ClosedLost) {
             try {
-                $request = app(\App\Services\Request\RequestStateService::class)->reanimate(
+                $request = app(RequestStateService::class)->reanimate(
                     $request,
                     null,
                     $message,
@@ -167,10 +199,10 @@ class CitedOutboundQuoteRouter
         // (invoice_intent). Цитирует КП с вопросом («а с резьбой М10 есть?»,
         // M-2026-12166) — письмо привязываем, статус не трогаем.
         $skip = [
-            \App\Enums\RequestStatus::AwaitingInvoice,
-            \App\Enums\RequestStatus::Invoiced,
-            \App\Enums\RequestStatus::Paid,
-            \App\Enums\RequestStatus::ClosedWon,
+            RequestStatus::AwaitingInvoice,
+            RequestStatus::Invoiced,
+            RequestStatus::Paid,
+            RequestStatus::ClosedWon,
         ];
         $invoiceIntent = (bool) ($cited['invoice_intent'] ?? true);
         if (! $invoiceIntent) {
@@ -182,12 +214,12 @@ class CitedOutboundQuoteRouter
         }
         if ($invoiceIntent && ! in_array($request->status, $skip, true)) {
             $from = $request->status->value;
-            $request->status = \App\Enums\RequestStatus::AwaitingInvoice;
+            $request->status = RequestStatus::AwaitingInvoice;
             $request->save();
-            \App\Models\RequestStateChange::create([
+            RequestStateChange::create([
                 'request_id' => $request->id,
                 'from_status' => $from,
-                'to_status' => \App\Enums\RequestStatus::AwaitingInvoice->value,
+                'to_status' => RequestStatus::AwaitingInvoice->value,
                 'by_user_id' => null,
                 'event' => 'invoice_requested_cited_quote',
                 'comment' => sprintf('Клиент процитировал КП %s и запросил счёт (маршрут по номеру КП, %s)', $docNo, $cited['source']),
@@ -198,7 +230,7 @@ class CitedOutboundQuoteRouter
                 ],
             ]);
             try {
-                app(\App\Services\Request\AttentionService::class)->recompute($request->fresh());
+                app(AttentionService::class)->recompute($request->fresh());
             } catch (\Throwable $e) {
                 Log::info('MailRouter: attention recompute after cited-quote route failed (non-fatal)', [
                     'request_id' => $request->id,
@@ -220,12 +252,17 @@ class CitedOutboundQuoteRouter
     /**
      * Числа-кандидаты из темы/тела/имён вложений/текста PDF-вложений.
      *
-     * @return array{0: array<int,string>, 1: bool}  [числа, был ли источник-вложение]
+     * @return array{0: array<int,string>, 1: bool} [числа, был ли источник-вложение]
      */
     private function collectCandidates(EmailMessage $message): array
     {
-        $texts = [(string) $message->subject, (string) $message->body_plain];
+        // Тема — свободно: наши же письма выглядят как «368531 Re: Заявка …»,
+        // а адресов и реквизитов в теме не бывает.
+        $texts = [(string) $message->subject];
         $hasAttachmentSource = false;
+
+        // Тело — всё, кроме чисел в адресной строке (индекс почты).
+        $texts = array_merge($texts, $this->numbersOutsideAddresses((string) $message->body_plain));
 
         foreach ($message->attachments as $att) {
             $fn = (string) $att->filename;
@@ -247,8 +284,48 @@ class CitedOutboundQuoteRouter
         return [array_values(array_unique($m[0] ?? [])), $hasAttachmentSource];
     }
 
+    /**
+     * Числа из тела письма, кроме стоящих в адресе.
+     *
+     * Смотрим окно вокруг числа: если рядом «Россия», «край», «ул.» — это
+     * индекс из подписи, а не номер счёта. Окно небольшое (±60 знаков): адрес
+     * пишется одной строкой, а упоминание документа в том же предложении, что
+     * и город, встречается редко.
+     *
+     * @return list<string>
+     */
+    private function numbersOutsideAddresses(string $body): array
+    {
+        if (trim($body) === '') {
+            return [];
+        }
+
+        if (! preg_match_all(self::NUMBER_RE, $body, $m, PREG_OFFSET_CAPTURE)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($m[0] as [$number, $offset]) {
+            // Куски режутся по байтам и могут начаться с половины буквы —
+            // regex с /u на битой строке молча не сработает. Чиним кодировку.
+            $before = mb_convert_encoding(substr($body, max(0, $offset - 24), min(24, $offset)), 'UTF-8', 'UTF-8');
+            $after = mb_convert_encoding(substr($body, $offset + strlen($number), 28), 'UTF-8', 'UTF-8');
+
+            $isPostalIndex = strlen($number) === 6
+                && (preg_match(self::ADDRESS_BEFORE_RE, $before) === 1
+                    || preg_match(self::ADDRESS_AFTER_RE, $after) === 1);
+            if ($isPostalIndex) {
+                continue;
+            }
+
+            $out[] = $number;
+        }
+
+        return $out;
+    }
+
     /** Текст-слой PDF-вложения (Smalot). '' если не PDF/большой/сбой. */
-    private function attachmentPdfText(\App\Models\EmailAttachment $att): string
+    private function attachmentPdfText(EmailAttachment $att): string
     {
         $mime = (string) $att->mime_type;
         $fn = mb_strtolower((string) $att->filename);
@@ -262,7 +339,7 @@ class CitedOutboundQuoteRouter
                 return '';
             }
 
-            return (string) (new \Smalot\PdfParser\Parser())->parseFile($path)->getText();
+            return (string) (new Parser)->parseFile($path)->getText();
         } catch (\Throwable $e) {
             Log::warning('CitedOutboundQuoteRouter: pdf text extract failed (non-fatal)', [
                 'attachment_id' => $att->id,
