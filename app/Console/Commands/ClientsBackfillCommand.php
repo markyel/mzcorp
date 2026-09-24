@@ -2,12 +2,15 @@
 
 namespace App\Console\Commands;
 
+use App\Models\AppSetting;
 use App\Models\ClientContact;
 use App\Models\Organization;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
 use App\Services\Clients\RequestOrganizationResolver;
+use App\Services\Settings\SettingsService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
 
 /**
  * Бэкфилл реестра «Клиенты» из накопленных данных:
@@ -26,7 +29,9 @@ use Illuminate\Console\Command;
  */
 class ClientsBackfillCommand extends Command
 {
-    protected $signature = 'clients:backfill {--apply : Реально писать в реестр (без флага — оценка)}';
+    protected $signature = 'clients:backfill
+        {--apply : Реально писать в реестр (без флага — оценка)}
+        {--full : Обойти все данные, а не только изменившиеся с прошлого прогона}';
 
     protected $description = 'Заполнить реестр «Клиенты» (организации + контакты + связи) из заявок и КП';
 
@@ -36,6 +41,57 @@ class ClientsBackfillCommand extends Command
     public function __construct(private readonly RequestOrganizationResolver $orgResolver)
     {
         parent::__construct();
+    }
+
+    /**
+     * Ключ водяного знака: до какого момента данные уже разобраны.
+     * Хранится как обычная настройка, чтобы РОП видел её в разделе настроек.
+     */
+    private const SINCE_KEY = 'clients.backfill_since';
+
+    /**
+     * Нахлёст окна: заявку могли дописать (реквизиты, компания) сразу после
+     * прогона. Сутки — с запасом, а объём всё равно на два порядка меньше
+     * полного обхода.
+     */
+    private const OVERLAP_HOURS = 24;
+
+    /**
+     * С какого момента смотреть данные.
+     *
+     * Полный обход каждую ночь не нужен и вреден: команда задумывалась как
+     * разовый бэкфилл, а в расписании начала каждую ночь заново применять
+     * решения многолетней давности — в том числе воскрешать связи, снятые
+     * руками. Теперь берём только то, что изменилось с прошлого прогона;
+     * `--full` возвращает прежнее поведение (после правок разборщика).
+     */
+    private function since(): ?Carbon
+    {
+        if ((bool) $this->option('full')) {
+            return null;
+        }
+
+        $saved = app_setting(self::SINCE_KEY);
+        if (! $saved) {
+            return null;
+        }
+
+        try {
+            return Carbon::parse((string) $saved)->subHours(self::OVERLAP_HOURS);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function rememberRun(Carbon $startedAt): void
+    {
+        app(SettingsService::class)->set(
+            self::SINCE_KEY,
+            $startedAt->toIso8601String(),
+            AppSetting::TYPE_STRING,
+            null,
+            'Клиенты: до какого момента реестр уже собран из заявок и КП',
+        );
     }
 
     public function handle(): int
@@ -51,11 +107,17 @@ class ClientsBackfillCommand extends Command
         }
 
         $stats = ['contacts' => 0, 'orgs' => 0, 'links' => 0];
+        $startedAt = now();
+        $since = $this->since();
+        $this->info($since
+            ? 'Разбираем изменения с '.$since->format('d.m.Y H:i').' (полный обход — ключ --full).'
+            : 'Полный обход всех данных.');
 
         // 1) Контакты из заявок (внешние email). Идём от свежих к старым, чтобы
         //    при создании контакта взять самое свежее ФИО/телефон.
         RequestModel::query()
             ->whereNotNull('client_email')->where('client_email', '!=', '')
+            ->when($since, fn ($q) => $q->where('updated_at', '>=', $since))
             ->orderByDesc('id')
             ->chunkById(500, function ($chunk) use (&$stats) {
                 foreach ($chunk as $r) {
@@ -84,6 +146,7 @@ class ClientsBackfillCommand extends Command
                 $q->where(fn ($w) => $w->whereNotNull('recipient_inn')->where('recipient_inn', '!=', ''))
                     ->orWhere(fn ($w) => $w->whereNotNull('recipient_name')->where('recipient_name', '!=', ''));
             })
+            ->when($since, fn ($q) => $q->where('updated_at', '>=', $since))
             ->with('request:id,client_email')
             ->orderBy('id')
             ->chunkById(300, function ($chunk) use (&$stats) {
@@ -113,6 +176,7 @@ class ClientsBackfillCommand extends Command
         RequestModel::query()
             ->whereNotNull('client_company')->where('client_company', '!=', '')
             ->whereNotNull('client_email')->where('client_email', '!=', '')
+            ->when($since, fn ($q) => $q->where('updated_at', '>=', $since))
             ->orderBy('id')
             ->chunkById(500, function ($chunk) use (&$stats) {
                 foreach ($chunk as $r) {
@@ -133,6 +197,10 @@ class ClientsBackfillCommand extends Command
         //    кандидаты (email ровно с одной организацией / совпадение
         //    client_company), неоднозначные остаются null.
         $stats['requests_linked'] = $this->linkRequestsToOrgs();
+
+        // Водяной знак ставим на момент СТАРТА: всё, что появилось за время
+        // прогона, попадёт в следующий (с нахлёстом), а не потеряется.
+        $this->rememberRun($startedAt);
 
         $this->newLine();
         $this->table(['metric', 'value'], collect($stats)->map(fn ($v, $k) => [$k, (string) $v])->values()->all());
