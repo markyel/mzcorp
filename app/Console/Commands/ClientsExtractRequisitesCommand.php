@@ -39,6 +39,18 @@ class ClientsExtractRequisitesCommand extends Command
 
     private string $ourInn = '';
 
+    /**
+     * Все наши ИНН, от которых мы продаём.
+     *
+     * Их в документах может быть несколько: счёт физлицу выписывается от
+     * второго юрлица (ИП), и покупателем оно не является. Пока проверялся
+     * один ИНН, разбор заводил наше же ИП в реестр клиентов и цеплял его к
+     * адресам заказчиков — заявки M-2026-12806, 12289, 13489.
+     *
+     * @var array<int, string>
+     */
+    private array $ourInns = [];
+
     public function __construct(private readonly RequestOrganizationResolver $orgResolver)
     {
         parent::__construct();
@@ -49,6 +61,10 @@ class ClientsExtractRequisitesCommand extends Command
         $apply = (bool) $this->option('apply');
         $limit = max(0, (int) $this->option('limit'));
         $this->ourInn = preg_replace('/\D+/', '', (string) config('services.company.inn', '')) ?? '';
+        $this->ourInns = array_values(array_unique(array_filter(array_merge(
+            [$this->ourInn],
+            (array) config('services.company.own_inns', []),
+        ))));
 
         // По умолчанию берём только неразобранные. `--retry-empty` добавляет
         // те, где покупателя не нашли: после правки парсера их надо прогнать
@@ -154,7 +170,7 @@ class ClientsExtractRequisitesCommand extends Command
         // «Покупатель» — счета 1С, «Заказчик» — наши КП: реквизиты там тоже есть.
         if (preg_match('/(?:Покупатель|Заказчик)\s*:?\s*([^,]{2,90})(.{0,200})/iu', $flat, $m)
             && preg_match('/ИНН\D{0,4}(\d{10,12})/iu', $m[2], $mi)
-            && $mi[1] !== $this->ourInn) {
+            && ! $this->isOurs($mi[1])) {
             $res['inn'] = $mi[1];
             $nm = $this->cleanName($m[1]);
             // Отбраковываем «артикульные» имена (6311-2RS и т.п.): пусть имя
@@ -177,7 +193,7 @@ class ClientsExtractRequisitesCommand extends Command
         // если оно похоже на организацию (есть форма собственности).
         // Без этой проверки прежний «голый ИНН» давал 17 мусорных имён из 18.
         foreach (self::allInns($flat) as [$inn, $offset]) {
-            if ($inn === $this->ourInn) {
+            if ($this->isOurs($inn)) {
                 continue;
             }
             // Смещение указывает на цифры, а перед ними стоит сам маркер
@@ -294,6 +310,14 @@ class ClientsExtractRequisitesCommand extends Command
         $woForm = preg_replace('/^(?:ООО|ОАО|ЗАО|ПАО|НАО|АО|ИП|НКО|ФГУП|МУП|ГУП|ГБУ|МБУ|АНО|ТСЖ|СНТ)\b/iu', '', $name) ?? $name;
 
         return preg_match('/\p{L}{3,}/u', $woForm) !== 1;
+    }
+
+    /** Наш ли это ИНН — продавец, а не покупатель. */
+    private function isOurs(?string $inn): bool
+    {
+        $inn = preg_replace('/\D+/', '', (string) $inn) ?? '';
+
+        return $inn !== '' && in_array($inn, $this->ourInns, true);
     }
 
     private function linkEmail(Organization $org, string $email, array &$stats): void
