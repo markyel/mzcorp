@@ -84,11 +84,19 @@ class MediaMaterialService
             return ['ok' => false, 'publication' => null, 'message' => 'Модель ответила не по форме — попробуйте ещё раз.'];
         }
 
+        // Для ленты соцсети сразу приводим текст к тому виду, в каком он уйдёт
+        // на площадку: редактор должен показывать пост, а не его исходник с
+        // разметкой, которую ВК и Telegram покажут как есть.
+        $body = trim((string) $parsed['body']);
+        if ($channel->isPostable()) {
+            $body = MediaPublisherService::forFeed($body);
+        }
+
         $publication = MediaPublication::create([
             'media_topic_id' => $topic->id,
             'media_channel_id' => $channel->id,
             'title' => mb_substr(trim((string) ($parsed['title'] ?? $topic->title)), 0, 300),
-            'body' => trim((string) $parsed['body']),
+            'body' => $body,
             'status' => 'draft',
             'planned_for' => $topic->next_due_on ?? now()->toDateString(),
             'model' => $model,

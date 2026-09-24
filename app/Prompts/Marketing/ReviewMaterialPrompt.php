@@ -2,6 +2,8 @@
 
 namespace App\Prompts\Marketing;
 
+use App\Models\MediaProfileReview;
+
 /**
  * Проверка маркетингового материала по медиапрофилю компании.
  *
@@ -61,7 +63,7 @@ PROMPT;
 
     public static function userMessage(string $profile, string $kind, string $material): string
     {
-        $kindLabel = \App\Models\MediaProfileReview::KINDS[$kind] ?? 'Материал';
+        $kindLabel = MediaProfileReview::KINDS[$kind] ?? 'Материал';
 
         return "МЕДИАПРОФИЛЬ КОМПАНИИ:\n{$profile}\n\n"
             ."ТИП МАТЕРИАЛА: {$kindLabel}\n\n"

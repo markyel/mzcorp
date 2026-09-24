@@ -64,8 +64,7 @@ class MarketingBlockService
     public function __construct(
         private readonly SupplierRegistry $suppliers,
         private readonly EmailSignatureService $signature,
-    ) {
-    }
+    ) {}
 
     /**
      * Глобальная позиция блока относительно подписи: 'above' | 'below'.

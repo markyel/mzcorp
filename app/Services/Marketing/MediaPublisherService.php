@@ -198,9 +198,45 @@ class MediaPublisherService
         $title = trim((string) $publication->title);
         $body = trim((string) $publication->body);
 
-        return $title !== '' && ! str_starts_with($body, $title)
+        $text = $title !== '' && ! str_starts_with($body, $title)
             ? $title."\n\n".$body
             : $body;
+
+        return self::forFeed($text);
+    }
+
+    /**
+     * Текст для ленты соцсети.
+     *
+     * Ни ВК, ни Telegram (в режиме plain text) markdown не разбирают: звёздочки
+     * и решётки читатель видит как есть — первая же публикация вышла с «**Винт**».
+     * Промпт это запрещает, но запрет модели — не гарантия, поэтому чистим перед
+     * отправкой: разметка снимается, маркеры списка приводятся к «•», пустые
+     * строки не громоздятся.
+     */
+    public static function forFeed(string $text): string
+    {
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+
+        // **жирный** / __жирный__ / *курсив* / `код` — оставляем содержимое.
+        $text = preg_replace('~\*\*(.+?)\*\*~us', '$1', $text) ?? $text;
+        $text = preg_replace('~__(.+?)__~us', '$1', $text) ?? $text;
+        $text = preg_replace('~(?<!\S)\*(\S.*?\S|\S)\*(?!\S)~us', '$1', $text) ?? $text;
+        $text = preg_replace('~`{1,3}(.+?)`{1,3}~us', '$1', $text) ?? $text;
+
+        // Заголовки ### и цитаты > в ленте выглядят мусором.
+        $text = preg_replace('~^\s{0,3}#{1,6}\s*~um', '', $text) ?? $text;
+        $text = preg_replace('~^\s{0,3}>\s?~um', '', $text) ?? $text;
+
+        // Маркеры списка к единому виду, нумерованные не трогаем.
+        $text = preg_replace('~^\s*[-–—*·]\s+~um', '• ', $text) ?? $text;
+
+        // Markdown-ссылки [текст](url) → «текст — url».
+        $text = preg_replace('~\[([^\]]+)\]\((https?://[^)\s]+)\)~u', '$1 — $2', $text) ?? $text;
+
+        $text = preg_replace('~\n{3,}~u', "\n\n", $text) ?? $text;
+
+        return trim($text);
     }
 
     /**

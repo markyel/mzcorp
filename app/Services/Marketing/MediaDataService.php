@@ -54,6 +54,27 @@ class MediaDataService
         };
     }
 
+    /**
+     * Короткое имя позиции для ленты.
+     *
+     * Каталожное название несёт всю техническую хвостовую часть («DIN 3062
+     * (EN 12385) грузолюдской 8x19S-FC 1570(1370/1770) Н/мм2 44,6 кН»), и в
+     * посте она превращается в нечитаемую строку. Обрезаем по границе слова:
+     * опознать позицию всё равно позволяет артикул рядом.
+     */
+    private function short(?string $name, int $limit = 60): string
+    {
+        $name = trim((string) $name);
+        if (mb_strlen($name) <= $limit) {
+            return $name;
+        }
+
+        $cut = mb_substr($name, 0, $limit);
+        $space = mb_strrpos($cut, ' ');
+
+        return rtrim($space !== false && $space > $limit / 2 ? mb_substr($cut, 0, $space) : $cut, ' ,;(').'…';
+    }
+
     /** Новые позиции каталога за окно. Цены не даём: их место — в карточке товара. */
     private function newItems(int $days): string
     {
@@ -70,7 +91,7 @@ class MediaDataService
 
         $lines = ['Новых позиций в каталоге за '.$days.' дн.: '.$rows->count().'.'];
         foreach ($rows as $r) {
-            $lines[] = '— '.trim((string) $r->name)
+            $lines[] = '— '.$this->short($r->name)
                 .($r->brand ? ' · '.$r->brand : '')
                 .' · артикул '.$r->sku
                 .((float) $r->stock_available > 0 ? ' · есть на складе' : ' · под заказ');
@@ -102,7 +123,7 @@ class MediaDataService
             $pct = (float) $r->old_price > 0
                 ? round(((float) $r->old_price - (float) $r->new_price) * 100 / (float) $r->old_price)
                 : 0;
-            $lines[] = '— '.trim((string) $r->name)
+            $lines[] = '— '.$this->short($r->name)
                 .($r->brand ? ' · '.$r->brand : '')
                 .' · артикул '.$r->sku
                 .' · было '.number_format((float) $r->old_price, 0, ',', ' ')
@@ -135,7 +156,7 @@ class MediaDataService
 
         $lines = ['Позиции в наличии по последнему обновлению склада:'];
         foreach ($rows as $r) {
-            $lines[] = '— '.trim((string) $r->name)
+            $lines[] = '— '.$this->short($r->name)
                 .($r->brand ? ' · '.$r->brand : '')
                 .' · артикул '.$r->sku
                 .' · на складе '.rtrim(rtrim(number_format((float) $r->stock_available, 2, ',', ' '), '0'), ',');
