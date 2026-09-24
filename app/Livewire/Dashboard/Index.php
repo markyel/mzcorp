@@ -937,7 +937,7 @@ class Index extends Component
      *   waiting_quote: array{full:int, partial:int},
      *   waiting_invoice: array{count:int, amount:float},
      *   invoiced: array{count:int, amount:float},
-     *   paid: array{count:int, amount:float}
+     *   paid: array{count:int, amount:float, issued_earlier:int}
      * }
      */
     #[Computed]
@@ -1022,9 +1022,21 @@ class Index extends Component
             ->selectRaw('COUNT(*) AS c, COALESCE(SUM(i.amount_snapshot), 0) AS s')
             ->first();
 
+        // Сумма — по счетам (amount_snapshot), как в разделе «Счета»: там та же
+        // деньга, и две страницы не должны спорить. Фактическое поступление
+        // (paid_amount) отличается на переплаты и округления — это отдельная
+        // величина, не для этой строки.
+        //
+        // Отдельно считаем, сколько из оплаченных выставлено ДО окна: именно
+        // на эту разницу отчёт расходится с разделом «Счета», где период
+        // фильтрует по дате выставления.
         $paid = $invoices()
             ->whereBetween('i.paid_at', [$from, $to])
-            ->selectRaw('COUNT(*) AS c, COALESCE(SUM(COALESCE(i.paid_amount, i.amount_snapshot)), 0) AS s')
+            ->selectRaw(
+                'COUNT(*) AS c, COALESCE(SUM(i.amount_snapshot), 0) AS s,
+                 COUNT(*) FILTER (WHERE i.issued_at < ?) AS earlier',
+                [$from],
+            )
             ->first();
 
         return [
@@ -1046,7 +1058,11 @@ class Index extends Component
                 'amount' => (float) ($waitingInvoice->s ?? 0),
             ],
             'invoiced' => ['count' => (int) ($issued->c ?? 0), 'amount' => (float) ($issued->s ?? 0)],
-            'paid' => ['count' => (int) ($paid->c ?? 0), 'amount' => (float) ($paid->s ?? 0)],
+            'paid' => [
+                'count' => (int) ($paid->c ?? 0),
+                'amount' => (float) ($paid->s ?? 0),
+                'issued_earlier' => (int) ($paid->earlier ?? 0),
+            ],
         ];
     }
 
