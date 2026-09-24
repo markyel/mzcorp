@@ -141,6 +141,11 @@
                     пора публиковать: {{ $this->dueTopics->count() }}
                 </span>
             @endif
+            <button type="button" class="btn btn-sm" wire:click="spreadTopics"
+                    wire:confirm="Разложить регулярные темы по разным будням? Сроки сдвинутся на ближайший подходящий день."
+                    title="Раскидать темы по понедельникам–пятницам, чтобы не выходили одной пачкой">
+                разнести по дням
+            </button>
             <button type="button" class="btn btn-sm btn-primary" wire:click="startTopic">Добавить тему</button>
         </div>
 
@@ -153,8 +158,14 @@
                             <option value="{{ $k }}">{{ $label }}</option>
                         @endforeach
                     </select>
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="grid grid-cols-3 gap-2">
                         <input type="text" wire:model="tpCadence" placeholder="раз в N дн." class="{{ $inp }}">
+                        <select wire:model="tpWeekday" class="{{ $inp }}" title="День недели публикации">
+                            <option value="">день любой</option>
+                            @foreach(\App\Models\MediaTopic::WEEKDAYS as $n => $label)
+                                <option value="{{ $n }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
                         <input type="date" wire:model="tpNextDue" class="{{ $inp }}">
                     </div>
                 </div>
@@ -175,7 +186,9 @@
                     <div class="flex flex-wrap items-baseline gap-2">
                         <b class="text-[13px] text-fg-1">{{ $t->title }}</b>
                         <span class="chip text-[10px]" style="background:var(--neutral-100);color:var(--fg-3)">{{ $t->sourceLabel() }}</span>
-                        <span class="text-[11.5px] text-fg-3">{{ $t->cadenceLabel() }}</span>
+                        <span class="text-[11.5px] text-fg-3">
+                            {{ $t->cadenceLabel() }}@if($t->weekdayLabel()), {{ $t->weekdayLabel() }}@endif
+                        </span>
                         @if($t->next_due_on)
                             <span class="text-[11.5px] {{ $t->isDue() ? 'text-amber-800' : 'text-fg-3' }}">
                                 срок {{ $t->next_due_on->format('d.m.Y') }}

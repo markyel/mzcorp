@@ -127,12 +127,9 @@ class MediaAutopilotService
         return MediaChannel::query()->active()->where('auto_publish', true)->get();
     }
 
-    /** Следующий срок темы — от текущего, а не от сегодня: расписание не съезжает. */
+    /** Следующий срок темы — шаг регулярности с подтяжкой к своему дню недели. */
     private function advance(MediaTopic $topic): void
     {
-        $base = $topic->next_due_on && $topic->next_due_on->isFuture() ? $topic->next_due_on : now();
-        $topic->forceFill([
-            'next_due_on' => $base->copy()->addDays((int) $topic->cadence_days)->toDateString(),
-        ])->save();
+        $topic->forceFill(['next_due_on' => $topic->nextDueAfterPublish()->toDateString()])->save();
     }
 }

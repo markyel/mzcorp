@@ -65,6 +65,9 @@ class MediaPlan extends Component
 
     public string $tpNextDue = '';
 
+    /** День недели публикации: 1 — понедельник … 7 — воскресенье, '' — любой. */
+    public string $tpWeekday = '';
+
     /* --------------------------- Публикации ----------------------------- */
 
     /** Открытая на редактирование публикация. */
@@ -360,6 +363,7 @@ class MediaPlan extends Component
         $this->tpSource = 'manual';
         $this->tpCadence = '';
         $this->tpNextDue = now()->toDateString();
+        $this->tpWeekday = '';
     }
 
     public function editTopic(int $id): void
@@ -375,6 +379,7 @@ class MediaPlan extends Component
         $this->tpSource = (string) $t->source;
         $this->tpCadence = $t->cadence_days !== null ? (string) $t->cadence_days : '';
         $this->tpNextDue = $t->next_due_on?->toDateString() ?? '';
+        $this->tpWeekday = $t->publish_weekday ? (string) $t->publish_weekday : '';
     }
 
     public function cancelTopic(): void
@@ -393,7 +398,10 @@ class MediaPlan extends Component
             return;
         }
 
-        MediaTopic::updateOrCreate(
+        $weekday = ctype_digit(trim($this->tpWeekday)) ? (int) $this->tpWeekday : null;
+        $weekday = $weekday !== null && $weekday >= 1 && $weekday <= 7 ? $weekday : null;
+
+        $topic = MediaTopic::updateOrCreate(
             ['id' => $this->tpEditId],
             [
                 'title' => mb_substr($title, 0, 200),
@@ -401,12 +409,63 @@ class MediaPlan extends Component
                 'source' => array_key_exists($this->tpSource, MediaTopic::SOURCES) ? $this->tpSource : 'manual',
                 'cadence_days' => ctype_digit(trim($this->tpCadence)) ? (int) $this->tpCadence : null,
                 'next_due_on' => trim($this->tpNextDue) !== '' ? trim($this->tpNextDue) : null,
+                'publish_weekday' => $weekday,
                 'created_by_user_id' => $this->tpEditId ? null : auth()->id(),
             ] + ($this->tpEditId ? [] : ['is_active' => true]),
         );
 
+        // Выбрали день недели — срок сразу встаёт на ближайший такой день,
+        // иначе тема осталась бы «горящей» не в свой день.
+        if ($weekday !== null && $topic->next_due_on !== null) {
+            $aligned = $topic->alignToWeekday($topic->next_due_on)->toDateString();
+            if ($aligned !== $topic->next_due_on->toDateString()) {
+                $topic->forceFill(['next_due_on' => $aligned])->save();
+            }
+        }
+
         $this->flash = $this->tpEditId ? 'Тема обновлена.' : 'Тема добавлена.';
         $this->cancelTopic();
+        unset($this->topics, $this->dueTopics);
+    }
+
+    /**
+     * Разнести регулярные темы по разным дням недели.
+     *
+     * Темы, заведённые в один день, дальше так и ходят пачкой: лента получает
+     * четыре поста подряд и шесть дней тишины. Раскладываем их по будням —
+     * понедельник, вторник, среда, четверг, пятница, — а дальше каждая тема
+     * держится своего дня сама.
+     */
+    public function spreadTopics(): void
+    {
+        $this->ensureAdmin();
+        $this->flash = null;
+        $this->error = null;
+
+        $topics = MediaTopic::query()->active()->whereNotNull('cadence_days')
+            ->orderBy('id')->get();
+
+        if ($topics->isEmpty()) {
+            $this->error = 'Регулярных тем нет — раскладывать нечего.';
+
+            return;
+        }
+
+        // Будни: в выходные лента читается хуже, и отвечать на вопросы некому.
+        $weekdays = [1, 2, 3, 4, 5];
+        $names = [];
+
+        foreach ($topics->values() as $i => $topic) {
+            $weekday = $weekdays[$i % count($weekdays)];
+            $topic->forceFill(['publish_weekday' => $weekday])->save();
+            $topic->forceFill([
+                'next_due_on' => $topic->alignToWeekday($topic->next_due_on ?? now())->toDateString(),
+            ])->save();
+
+            $names[] = $topic->title.' — '.MediaTopic::WEEKDAYS[$weekday];
+        }
+
+        $this->flash = 'Разнесли по дням: '.implode(', ', $names).'.';
         unset($this->topics, $this->dueTopics);
     }
 
@@ -560,9 +619,8 @@ class MediaPlan extends Component
 
         // Опубликовали регулярную тему — двигаем её срок на следующий шаг.
         if ($status === 'published' && $pub->topic?->cadence_days) {
-            $base = $pub->topic->next_due_on?->isFuture() ? $pub->topic->next_due_on : now();
             $pub->topic->forceFill([
-                'next_due_on' => $base->copy()->addDays((int) $pub->topic->cadence_days)->toDateString(),
+                'next_due_on' => $pub->topic->nextDueAfterPublish()->toDateString(),
             ])->save();
         }
 
