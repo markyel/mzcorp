@@ -28,7 +28,7 @@ class MediaChannel extends Model
     protected $fillable = [
         'name', 'kind', 'url', 'handle', 'owner_user_id',
         'posts_per_week', 'is_active', 'notes',
-        'auto_publish', 'last_posted_at', 'last_error',
+        'auto_publish', 'last_posted_at', 'last_error', 'mirror_of_channel_id',
     ];
 
     protected $casts = [
@@ -46,6 +46,24 @@ class MediaChannel extends Model
     public function publications(): HasMany
     {
         return $this->hasMany(MediaPublication::class);
+    }
+
+    /** Канал-источник: этот канал повторяет его посты (Дзен ← Telegram). */
+    public function mirrorOf(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'mirror_of_channel_id');
+    }
+
+    /** Площадки, которые забирают посты отсюда. */
+    public function mirrors(): HasMany
+    {
+        return $this->hasMany(self::class, 'mirror_of_channel_id');
+    }
+
+    /** Свой материал каналу не пишут: он повторяет чужой. */
+    public function isMirror(): bool
+    {
+        return $this->mirror_of_channel_id !== null;
     }
 
     public function scopeActive($query)

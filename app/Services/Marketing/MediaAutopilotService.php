@@ -120,11 +120,15 @@ class MediaAutopilotService
             ->distinct()
             ->pluck('media_channel_id');
 
+        // Зеркала пропускаем: Дзен забирает пост из Telegram сам, и свой
+        // материал ему писать не нужно — вышло бы два разных поста об одном.
         if ($usedIds->isNotEmpty()) {
-            return MediaChannel::query()->active()->whereIn('id', $usedIds)->get();
+            return MediaChannel::query()->active()->whereNull('mirror_of_channel_id')
+                ->whereIn('id', $usedIds)->get();
         }
 
-        return MediaChannel::query()->active()->where('auto_publish', true)->get();
+        return MediaChannel::query()->active()->whereNull('mirror_of_channel_id')
+            ->where('auto_publish', true)->get();
     }
 
     /** Следующий срок темы — шаг регулярности с подтяжкой к своему дню недели. */

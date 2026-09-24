@@ -49,6 +49,9 @@ class MediaPlan extends Component
 
     public string $chNotes = '';
 
+    /** Канал-источник для зеркала: Дзен забирает посты из Telegram сам. */
+    public string $chMirrorOf = '';
+
     /* ------------------------------- Темы ------------------------------- */
 
     public bool $tpForm = false;
@@ -112,6 +115,7 @@ class MediaPlan extends Component
     public function channels()
     {
         return MediaChannel::query()
+            ->with('mirrorOf:id,name')
             ->withCount(['publications as published_count' => fn ($q) => $q->where('status', 'published')])
             ->orderByDesc('is_active')
             ->orderBy('name')
@@ -162,6 +166,7 @@ class MediaPlan extends Component
         $this->chHandle = '';
         $this->chPerWeek = '';
         $this->chNotes = '';
+        $this->chMirrorOf = '';
     }
 
     public function editChannel(int $id): void
@@ -178,6 +183,7 @@ class MediaPlan extends Component
         $this->chHandle = (string) $ch->handle;
         $this->chPerWeek = $ch->posts_per_week !== null ? (string) $ch->posts_per_week : '';
         $this->chNotes = (string) $ch->notes;
+        $this->chMirrorOf = $ch->mirror_of_channel_id ? (string) $ch->mirror_of_channel_id : '';
     }
 
     public function cancelChannel(): void
@@ -205,6 +211,9 @@ class MediaPlan extends Component
                 'handle' => trim($this->chHandle) !== '' ? mb_substr(trim($this->chHandle), 0, 160) : null,
                 'posts_per_week' => ctype_digit(trim($this->chPerWeek)) ? (int) $this->chPerWeek : null,
                 'notes' => trim($this->chNotes) !== '' ? trim($this->chNotes) : null,
+                'mirror_of_channel_id' => ctype_digit(trim($this->chMirrorOf)) && (int) $this->chMirrorOf !== (int) $this->chEditId
+                    ? (int) $this->chMirrorOf
+                    : null,
             ] + ($this->chEditId ? [] : ['is_active' => true]),
         );
 

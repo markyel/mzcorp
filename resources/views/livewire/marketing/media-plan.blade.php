@@ -38,7 +38,18 @@
                     <input type="text" wire:model="chHandle" placeholder="@канал / id сообщества" class="{{ $inp }}">
                     <input type="text" wire:model="chPerWeek" placeholder="публикаций в неделю" class="{{ $inp }}">
                 </div>
-                <input type="text" wire:model="chUrl" placeholder="Ссылка на канал" class="{{ $inp }} mb-2">
+                <div class="grid gap-2 md:grid-cols-2 mb-2">
+                    <input type="text" wire:model="chUrl" placeholder="Ссылка на канал" class="{{ $inp }}">
+                    <select wire:model="chMirrorOf" class="{{ $inp }}"
+                            title="Площадка забирает посты из другого канала — свой материал ей не пишут">
+                        <option value="">публикуем сюда сами</option>
+                        @foreach($this->channels->where('is_active', true)->whereNull('mirror_of_channel_id') as $src)
+                            @if($src->id !== $chEditId)
+                                <option value="{{ $src->id }}">повторяет: {{ $src->name }}</option>
+                            @endif
+                        @endforeach
+                    </select>
+                </div>
                 <textarea wire:model="chNotes" rows="2" class="{{ $area }}" placeholder="Кто ведёт, особенности, ограничения"></textarea>
                 <div class="flex items-center gap-2 mt-2">
                     <span class="flex-1"></span>
@@ -61,7 +72,12 @@
                     @if($ch->posts_per_week)
                         <span class="text-[11.5px] text-fg-3">план {{ $ch->posts_per_week }}/нед</span>
                     @endif
-                    @if($ch->isPostable())
+                    @if($ch->isMirror())
+                        <span class="chip text-[10px]" style="background:var(--violet-50);color:var(--violet-700)"
+                              title="Площадка забирает посты из этого канала сама — отдельный материал ей не пишется">
+                            повторяет: {{ $ch->mirrorOf?->name }}
+                        </span>
+                    @elseif($ch->isPostable())
                         <span class="chip text-[10px]"
                               style="{{ $ch->isConnected()
                                 ? 'background:var(--emerald-50);color:var(--emerald-700)'
@@ -211,7 +227,8 @@
                             <select wire:model="draftChannel.{{ $t->id }}"
                                     class="h-[28px] px-2 border border-border rounded-md bg-surface text-[12px]">
                                 <option value="">— канал —</option>
-                                @foreach($this->channels->where('is_active', true) as $ch)
+                                {{-- Зеркала не предлагаем: им материал не пишут, они повторяют чужой. --}}
+                                @foreach($this->channels->where('is_active', true)->whereNull('mirror_of_channel_id') as $ch)
                                     <option value="{{ $ch->id }}">{{ $ch->name }}</option>
                                 @endforeach
                             </select>
@@ -363,8 +380,9 @@
         <div class="ds-card-body text-[11.5px] text-fg-4">
             Раз в сутки в 9:15 система пишет черновики темам, которым пора, и публикует их в каналы с
             включённой автопубликацией; остальные ждут вашей кнопки. Публиковать через API умеем во
-            ВКонтакте и Telegram. У Дзена открытого API публикаций нет — туда материал переносится руками
-            и отмечается ссылкой; это ограничение площадки, а не недоделка.
+            ВКонтакте и Telegram. У Дзена своего API публикаций нет, но его канал привязывается к
+            телеграм-каналу и забирает посты сам: отметьте Дзен как «повторяет Telegram» — материал будет
+            писаться один, а публикация запишется на обе площадки.
         </div>
     </div>
 </div>

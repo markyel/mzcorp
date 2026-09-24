@@ -84,6 +84,7 @@ class MediaPublisherService
         ])->save();
 
         $channel->forceFill(['last_posted_at' => now(), 'last_error' => null])->save();
+        $this->recordMirrors($publication, $channel);
 
         Log::info('MediaPublisherService: published', [
             'publication_id' => $publication->id,
@@ -138,6 +139,34 @@ class MediaPublisherService
             return ['ok' => true, 'message' => 'Telegram отвечает: '.($r['result']['title'] ?? 'канал').'.'];
         } catch (\Throwable $e) {
             return ['ok' => false, 'message' => 'Площадка не ответила: '.$e->getMessage()];
+        }
+    }
+
+    /**
+     * Отметить публикацию на площадках-зеркалах.
+     *
+     * Дзен, привязанный к телеграм-каналу, забирает пост сам — своей кнопки
+     * «опубликовать» у него нет и быть не может. Но в учёте публикация там
+     * состоялась, иначе канал вечно выглядит молчащим. Ссылку не выдумываем:
+     * её проставит человек, когда пост появится.
+     */
+    private function recordMirrors(MediaPublication $source, MediaChannel $channel): void
+    {
+        foreach ($channel->mirrors()->where('is_active', true)->get() as $mirror) {
+            MediaPublication::create([
+                'media_topic_id' => $source->media_topic_id,
+                'media_channel_id' => $mirror->id,
+                'title' => $source->title,
+                'body' => $source->body,
+                'status' => 'published',
+                'planned_for' => $source->planned_for,
+                'published_at' => now(),
+                'subject_key' => $source->subject_key,
+                'model' => $source->model,
+                'created_by_user_id' => $source->created_by_user_id,
+            ]);
+
+            $mirror->forceFill(['last_posted_at' => now()])->save();
         }
     }
 
