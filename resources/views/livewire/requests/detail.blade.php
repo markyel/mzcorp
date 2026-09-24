@@ -1637,6 +1637,18 @@
                                         @if($srcCount > 0)
                                             <span class="chip chip-attn" title="Из этого письма спаршено позиций: {{ $srcCount }}"><span class="dot"></span>источник {{ $srcCount }} поз.</span>
                                         @endif
+                                        {{-- По заявке отработали не всё: заводим наследника по этому
+                                             письму. Родитель не меняется — работает и на закрытых. --}}
+                                        @if($canSplit && ! $isOutbound)
+                                            <button type="button" class="btn btn-xs"
+                                                    wire:click="createSuccessorFromEmail({{ $msg->id }})"
+                                                    wire:loading.attr="disabled"
+                                                    wire:target="createSuccessorFromEmail({{ $msg->id }})"
+                                                    wire:confirm="Создать новую заявку по этому письму? Позиции скопируются, текущая заявка останется как есть."
+                                                    title="Создать заявку-наследника по этому письму: позиции копируются, родитель не меняется">
+                                                ⎘ заявка по письму
+                                            </button>
+                                        @endif
                                         @if($isOutbound)
                                             <span class="chip chip-info"><span class="dot"></span>исходящее</span>
                                         @elseif($catLabel)

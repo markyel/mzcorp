@@ -2,17 +2,45 @@
 
 namespace App\Livewire\Requests;
 
+use App\Enums\AiDecisionStatus;
+use App\Enums\AttentionReason;
+use App\Enums\DetectorType;
+use App\Enums\RequestActivityType;
 use App\Enums\RequestStatus;
 use App\Enums\Role;
-use App\Models\EmailMessage;
-use App\Models\Request;
-use App\Models\RequestItem;
+use App\Jobs\Mail\ParseRequestItemsJob;
+use App\Livewire\Concerns\RendersEmailBody;
 use App\Models\AiDecision;
+use App\Models\AutoQuoteSnapshot;
+use App\Models\CatalogItem;
+use App\Models\CatalogPriceChange;
+use App\Models\EmailMessage;
+use App\Models\Invoice;
+use App\Models\IqotPosition;
+use App\Models\OutboundQuote;
+use App\Models\Request;
+use App\Models\RequestAssignment;
+use App\Models\RequestItem;
+use App\Models\RequestItemLink;
+use App\Models\RequestStateChange;
+use App\Models\RequestUserView;
+use App\Models\SupplierInquiry;
+use App\Models\SupplierInquiryItem;
 use App\Services\Catalog\RequestItemEditor;
 use App\Services\DocumentDetector\AiDecisionService;
+use App\Services\Invoices\InvoiceService;
+use App\Services\Mail\EmailDraftService;
+use App\Services\Quotations\PartialQuoteService;
+use App\Services\Quotes\AutoQuoteOfferService;
+use App\Services\Request\AttentionService;
+use App\Services\Request\RequestActivityService;
+use App\Services\Request\RequestInheritanceService;
 use App\Services\Request\RequestPauseService;
 use App\Services\Request\RequestStateService;
+use App\Services\Request\RequestSuccessorService;
+use App\Services\Request\ResellerEmailService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
@@ -134,10 +162,10 @@ class Detail extends Component
             // исходящие счета (document_type=outbound_invoice) автоматически
             // оборачиваются в Invoice (InvoiceService::autoIssueFromOutboundQuote)
             // и показываются на отдельном табе «Счета» + в /dashboard/invoices.
-            'outboundQuotes' => fn ($q) => $q->where('status', \App\Models\OutboundQuote::STATUS_MATCHED)
+            'outboundQuotes' => fn ($q) => $q->where('status', OutboundQuote::STATUS_MATCHED)
                 ->where(function ($qq) {
                     $qq->whereNull('document_type')
-                        ->orWhere('document_type', '!=', \App\Enums\DetectorType::OutboundInvoice->value);
+                        ->orWhere('document_type', '!=', DetectorType::OutboundInvoice->value);
                 })
                 ->orderByDesc('id'),
             'outboundQuotes.items' => fn ($q) => $q->orderBy('position'),
@@ -148,7 +176,7 @@ class Detail extends Component
             // Берём только из matched quote'ов (failed/parsing скрываем).
             'items.outboundQuoteItems' => fn ($q) => $q->whereHas(
                 'quote',
-                fn ($qq) => $qq->where('status', \App\Models\OutboundQuote::STATUS_MATCHED)
+                fn ($qq) => $qq->where('status', OutboundQuote::STATUS_MATCHED)
             ),
         ]);
 
@@ -192,7 +220,7 @@ class Detail extends Component
         // заявки, только просматривает; и не для гостей (тогда mount абортит
         // выше).
         if ($user !== null && ! $user->hasRole(Role::Secretary->value)) {
-            \App\Models\RequestUserView::updateOrCreate(
+            RequestUserView::updateOrCreate(
                 ['request_id' => $this->request->id, 'user_id' => $user->id],
                 ['last_seen_at' => now()],
             );
@@ -206,7 +234,7 @@ class Detail extends Component
                 || $this->request->isDelegatedTo($user);
 
             if ($isHandler) {
-                app(\App\Services\Request\AttentionService::class)
+                app(AttentionService::class)
                     ->onManagerOpened($this->request);
             }
 
@@ -219,7 +247,7 @@ class Detail extends Component
                 && in_array($this->request->status, [RequestStatus::Assigned, RequestStatus::New], true)
             ) {
                 try {
-                    app(\App\Services\Request\RequestStateService::class)
+                    app(RequestStateService::class)
                         ->transitionTo(
                             $this->request,
                             RequestStatus::InProgress,
@@ -228,7 +256,7 @@ class Detail extends Component
                         );
                     $this->request = $this->request->fresh();
                 } catch (\Throwable $e) {
-                    \Illuminate\Support\Facades\Log::warning(
+                    Log::warning(
                         'Detail::mount auto-transition InProgress failed (non-fatal)',
                         ['request_id' => $this->request->id, 'user_id' => $user->id, 'error' => $e->getMessage()],
                     );
@@ -279,7 +307,7 @@ class Detail extends Component
         if ($this->thread->contains(fn ($m) => $m->id === $draftId)) {
             return;
         }
-        $draft = \App\Models\EmailMessage::query()
+        $draft = EmailMessage::query()
             ->where('related_request_id', $this->request->id)
             ->where('is_draft', true)
             ->where('draft_author_user_id', auth()->id())
@@ -313,9 +341,9 @@ class Detail extends Component
      * не заходя в редактирование. Автор — свой черновик; admin/РОП/директор —
      * любой (подчистить брошенные черновики коллег).
      */
-    public function discardThreadDraft(int $draftId, \App\Services\Mail\EmailDraftService $drafts): void
+    public function discardThreadDraft(int $draftId, EmailDraftService $drafts): void
     {
-        $draft = \App\Models\EmailMessage::query()
+        $draft = EmailMessage::query()
             ->where('related_request_id', $this->request->id)
             ->where('is_draft', true)
             ->whereKey($draftId)
@@ -381,6 +409,7 @@ class Detail extends Component
         foreach ($queue as $entry) {
             if (is_array($entry) && ($entry['id'] ?? null) === $clarificationId && $target === null) {
                 $target = $entry;
+
                 continue;
             }
             $remaining[] = $entry;
@@ -404,7 +433,7 @@ class Detail extends Component
                     if (! $this->articleAlreadyPresent($existingArt, $addArt)) {
                         $item->parsed_article = $existingArt === ''
                             ? $addArt
-                            : $existingArt . ', ' . $addArt;
+                            : $existingArt.', '.$addArt;
                         $dirty = true;
                     }
                 }
@@ -422,7 +451,7 @@ class Detail extends Component
             'pending_clarifications' => empty($remaining) ? null : array_values($remaining),
         ])->save();
 
-        \Illuminate\Support\Facades\Log::info('Detail: clarification mutated', [
+        Log::info('Detail: clarification mutated', [
             'request_id' => $req->id,
             'clarification_id' => $clarificationId,
             'action' => $apply ? 'apply' : 'reject',
@@ -444,9 +473,9 @@ class Detail extends Component
                 'items.kbCategory:id,slug,name',
                 'items.imageAttachment:id,email_message_id,filename,mime_type,disk,file_path,size_bytes',
                 // Полный catalogItem — для раскрываемой карточки товара под позицией
-            // (партиал _catalog-item-detail нужен все поля: name_en, price_min,
-            // purchase_price, размеры, articles/brands, description и т.д.).
-            'items.catalogItem',
+                // (партиал _catalog-item-detail нужен все поля: name_en, price_min,
+                // purchase_price, размеры, articles/brands, description и т.д.).
+                'items.catalogItem',
                 'items.clarificationQuestions' => fn ($q) => $q->orderByDesc('id'),
                 'items.clarificationQuestions.batch:id,status,sent_at,answered_at,created_by_user_id',
                 'items.clarificationQuestions.batch.createdBy:id,name',
@@ -474,6 +503,7 @@ class Detail extends Component
         if ($this->showDeletedItems) {
             return $query; // все, включая is_active=false
         }
+
         return $query->where('is_active', true);
     }
 
@@ -511,7 +541,7 @@ class Detail extends Component
      * Старые backfilled-записи имеют просто `auto_sticky` (без `:`-payload) —
      * legacy=true, links пустой, kind=null; UI покажет общий чип без deep-links.
      *
-     * @return array{links: \Illuminate\Support\Collection, legacy: bool, kind: ?string}
+     * @return array{links: Collection, legacy: bool, kind: ?string}
      */
     #[Computed]
     public function sticky(): array
@@ -541,7 +571,7 @@ class Detail extends Component
             return ['links' => collect(), 'legacy' => true, 'kind' => $kind];
         }
 
-        $links = \App\Models\Request::query()
+        $links = Request::query()
             ->whereIn('id', $ids)
             ->orderByDesc('created_at')
             ->get(['id', 'internal_code', 'subject', 'status', 'client_name']);
@@ -557,7 +587,7 @@ class Detail extends Component
      * Лёгкая выборка (без позиций) — только для перехода между связанными
      * заявками. Полные позиции связанных грузит relatedStickyRequests() (таб «Позиции»).
      *
-     * @return \Illuminate\Support\Collection<int, array{request: \App\Models\Request, forward: bool, reverse: bool}>
+     * @return Collection<int, array{request: Request, forward: bool, reverse: bool}>
      */
     #[Computed]
     public function stickyConnections()
@@ -567,13 +597,13 @@ class Detail extends Component
 
         // Reverse: заявки, в auto_sticky.linked которых упомянут наш id.
         // JSON-as-string в reason — подстрочное ILIKE (как в relatedStickyRequests).
-        $reverseIds = \App\Models\RequestAssignment::query()
+        $reverseIds = RequestAssignment::query()
             ->where('reason', 'like', 'auto_sticky:%')
             ->where(function ($q) use ($thisId) {
-                $q->where('reason', 'like', '%"linked":[' . $thisId . ']%')
-                    ->orWhere('reason', 'like', '%"linked":[' . $thisId . ',%')
-                    ->orWhere('reason', 'like', '%,' . $thisId . ',%')
-                    ->orWhere('reason', 'like', '%,' . $thisId . ']%');
+                $q->where('reason', 'like', '%"linked":['.$thisId.']%')
+                    ->orWhere('reason', 'like', '%"linked":['.$thisId.',%')
+                    ->orWhere('reason', 'like', '%,'.$thisId.',%')
+                    ->orWhere('reason', 'like', '%,'.$thisId.']%');
             })
             ->pluck('request_id')
             ->map(fn ($id) => (int) $id)
@@ -590,7 +620,7 @@ class Detail extends Component
         $forwardSet = array_flip($forwardIds);
         $reverseSet = array_flip($reverseIds);
 
-        return \App\Models\Request::query()
+        return Request::query()
             ->whereIn('id', $ids)
             ->where('id', '!=', $thisId)
             ->orderByDesc('created_at')
@@ -615,7 +645,7 @@ class Detail extends Component
      * Возвращает пустую коллекцию если заявка не участвует в наследовании.
      */
     #[Computed]
-    public function inheritanceItemLinks(): \Illuminate\Support\Collection
+    public function inheritanceItemLinks(): Collection
     {
         $itemIds = $this->request->items->pluck('id');
         if ($itemIds->isEmpty()) {
@@ -623,7 +653,7 @@ class Detail extends Component
         }
 
         if ($this->request->isInheritanceChild()) {
-            return \App\Models\RequestItemLink::query()
+            return RequestItemLink::query()
                 ->active()
                 ->whereIn('child_item_id', $itemIds)
                 ->with(['parentItem' => fn ($q) => $q->select('id', 'request_id', 'position', 'parsed_name', 'parsed_article', 'parsed_qty', 'parsed_unit')])
@@ -633,7 +663,7 @@ class Detail extends Component
         }
 
         if ($this->request->isInheritanceParent()) {
-            return \App\Models\RequestItemLink::query()
+            return RequestItemLink::query()
                 ->active()
                 ->whereIn('parent_item_id', $itemIds)
                 ->with(['childItem' => fn ($q) => $q->select('id', 'request_id', 'position', 'parsed_qty', 'parsed_unit')])
@@ -658,29 +688,32 @@ class Detail extends Component
      * Permission: owner / acting (delegation) / privileged
      * (head_of_sales, director, admin). Секретарь — нет (он только наблюдатель).
      */
-    public function manualReanimate(\App\Services\Request\RequestStateService $service): void
+    public function manualReanimate(RequestStateService $service): void
     {
         $user = auth()->user();
         if (! $user) {
             abort(403);
         }
-        if ($user->hasRole(\App\Enums\Role::Secretary->value)) {
+        if ($user->hasRole(Role::Secretary->value)) {
             $this->dispatch('toast', message: 'Секретарь только просматривает заявки.', type: 'error');
+
             return;
         }
 
         $privileged = $user->hasAnyRole([
-            \App\Enums\Role::HeadOfSales->value,
-            \App\Enums\Role::Director->value,
-            \App\Enums\Role::Admin->value,
+            Role::HeadOfSales->value,
+            Role::Director->value,
+            Role::Admin->value,
         ]) ?? false;
         if (! $privileged && ! $this->request->isAccessibleBy($user)) {
             $this->dispatch('toast', message: 'Нет прав реанимировать.', type: 'error');
+
             return;
         }
 
         if ($this->request->status !== RequestStatus::ClosedLost) {
             $this->dispatch('toast', message: 'Реанимировать можно только закрытые с потерей.', type: 'error');
+
             return;
         }
 
@@ -696,12 +729,12 @@ class Detail extends Component
             $this->reloadRequest();
             $this->dispatch('toast', message: 'Заявка реанимирована. Менеджер сохранён.', type: 'success');
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Detail::manualReanimate failed', [
+            Log::error('Detail::manualReanimate failed', [
                 'request_id' => $this->request->id,
                 'user_id' => $user->id,
                 'error' => $e->getMessage(),
             ]);
-            $this->dispatch('toast', message: 'Не удалось реанимировать: ' . $e->getMessage(), type: 'error');
+            $this->dispatch('toast', message: 'Не удалось реанимировать: '.$e->getMessage(), type: 'error');
         }
     }
 
@@ -714,7 +747,7 @@ class Detail extends Component
     {
         $email = (string) ($this->request->client_email ?? '');
 
-        return $email !== '' && app(\App\Services\Request\ResellerEmailService::class)->isReseller($email);
+        return $email !== '' && app(ResellerEmailService::class)->isReseller($email);
     }
 
     /**
@@ -723,13 +756,13 @@ class Detail extends Component
      * Может любой менеджер в любой заявке (кроме секретаря — только просмотр).
      * На распределение НЕ влияет (это не «дилер»).
      */
-    public function toggleReseller(\App\Services\Request\ResellerEmailService $resellers): void
+    public function toggleReseller(ResellerEmailService $resellers): void
     {
         $user = auth()->user();
         if (! $user) {
             abort(403);
         }
-        if ($user->hasRole(\App\Enums\Role::Secretary->value)) {
+        if ($user->hasRole(Role::Secretary->value)) {
             $this->dispatch('toast', message: 'Секретарь только просматривает заявки.', type: 'error');
 
             return;
@@ -743,10 +776,10 @@ class Detail extends Component
 
         if ($resellers->isReseller($email)) {
             $resellers->unmark($email);
-            $this->dispatch('toast', message: 'Статус «перепродавец» снят с ' . $email . '.', type: 'success');
+            $this->dispatch('toast', message: 'Статус «перепродавец» снят с '.$email.'.', type: 'success');
         } else {
             $resellers->mark($email, $user->id);
-            $this->dispatch('toast', message: 'Клиент ' . $email . ' помечен как перепродавец.', type: 'success');
+            $this->dispatch('toast', message: 'Клиент '.$email.' помечен как перепродавец.', type: 'success');
         }
         unset($this->clientIsReseller);
     }
@@ -759,7 +792,7 @@ class Detail extends Component
      * связанную child-заявку отвязать от parent. Item-links
      * деактивируются (история сохраняется).
      */
-    public function unlinkInheritance(\App\Services\Request\RequestInheritanceService $service): void
+    public function unlinkInheritance(RequestInheritanceService $service): void
     {
         $user = auth()->user();
         if (! $user) {
@@ -767,17 +800,19 @@ class Detail extends Component
         }
 
         $privileged = $user->hasAnyRole([
-            \App\Enums\Role::HeadOfSales->value,
-            \App\Enums\Role::Director->value,
-            \App\Enums\Role::Admin->value,
+            Role::HeadOfSales->value,
+            Role::Director->value,
+            Role::Admin->value,
         ]) ?? false;
         if (! $privileged && ! $this->request->isAccessibleBy($user)) {
             $this->dispatch('toast', message: 'Нет прав отвязать наследование.', type: 'error');
+
             return;
         }
 
         if (! $this->request->isInheritanceChild()) {
             $this->dispatch('toast', message: 'Эта заявка не является наследником.', type: 'error');
+
             return;
         }
 
@@ -789,14 +824,14 @@ class Detail extends Component
                 unlinkedBy: (string) ($user->email ?? $user->id),
             );
             $this->reloadRequest();
-            $this->dispatch('toast', message: 'Наследование от ' . ($parentCode ?: 'архивной') . ' отвязано.', type: 'success');
+            $this->dispatch('toast', message: 'Наследование от '.($parentCode ?: 'архивной').' отвязано.', type: 'success');
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Detail::unlinkInheritance failed', [
+            Log::error('Detail::unlinkInheritance failed', [
                 'request_id' => $this->request->id,
                 'user_id' => $user->id,
                 'error' => $e->getMessage(),
             ]);
-            $this->dispatch('toast', message: 'Не удалось отвязать: ' . $e->getMessage(), type: 'error');
+            $this->dispatch('toast', message: 'Не удалось отвязать: '.$e->getMessage(), type: 'error');
         }
     }
 
@@ -811,17 +846,17 @@ class Detail extends Component
      * Карта catalog_item_id → последнее изменение цены — для раскрываемой
      * карточки товара под сматченной позицией (партиал _catalog-item-detail).
      *
-     * @return \Illuminate\Support\Collection<int, \App\Models\CatalogPriceChange>
+     * @return Collection<int, CatalogPriceChange>
      */
     #[Computed]
-    public function catalogPriceChangeByCatalogId(): \Illuminate\Support\Collection
+    public function catalogPriceChangeByCatalogId(): Collection
     {
         $ids = $this->request->items->pluck('catalog_item_id')->filter()->unique()->all();
         if ($ids === []) {
             return collect();
         }
 
-        return \App\Models\CatalogPriceChange::query()
+        return CatalogPriceChange::query()
             ->whereIn('catalog_item_id', $ids)
             ->orderByDesc('changed_at')->orderByDesc('id')
             ->get()->unique('catalog_item_id')->keyBy('catalog_item_id');
@@ -830,10 +865,10 @@ class Detail extends Component
     /**
      * Карта catalog_item_id → IqotPosition (свежий анализ цен конкурентов).
      *
-     * @return \Illuminate\Support\Collection<int, \App\Models\IqotPosition>
+     * @return Collection<int, IqotPosition>
      */
     #[Computed]
-    public function catalogIqotByCatalogId(): \Illuminate\Support\Collection
+    public function catalogIqotByCatalogId(): Collection
     {
         if (! $this->canIqotCatalog) {
             return collect();
@@ -843,7 +878,7 @@ class Detail extends Component
             return collect();
         }
 
-        return \App\Models\IqotPosition::whereIn('catalog_item_id', $ids)->get()->keyBy('catalog_item_id');
+        return IqotPosition::whereIn('catalog_item_id', $ids)->get()->keyBy('catalog_item_id');
     }
 
     /**
@@ -897,29 +932,29 @@ class Detail extends Component
             $invState = match (true) {
                 $hasOverdue => 'overdue',
                 $hasPending => 'pending',
-                $hasPaid    => 'paid',
-                default     => 'closed',
+                $hasPaid => 'paid',
+                default => 'closed',
             };
         }
 
         // Фаза 3.2: число разосланных запросов поставщикам (бейдж на табе,
         // чтобы было видно без захода в таб).
-        $supplierInquiriesCount = \App\Models\SupplierInquiry::query()
+        $supplierInquiriesCount = SupplierInquiry::query()
             ->where('related_request_id', $this->request->id)->count();
 
         // Таб «КП» всегда виден — без него менеджер не может создать первый
         // черновик КП через QuotationEditor. Counter null при нуле (чтобы
         // не показывать «КП 0»).
         $tabs = [
-            'overview'  => ['label' => 'Обзор',      'count' => null,         'disabled' => false],
-            'thread'    => ['label' => 'Переписка',  'count' => $threadCount, 'disabled' => false],
-            'items'     => ['label' => 'Позиции',    'count' => $items,       'disabled' => false],
-            'quotes'    => ['label' => 'КП',         'count' => $quotesCount > 0 ? $quotesCount : null, 'disabled' => false],
-            'invoices'  => ['label' => 'Счета',      'count' => $invCount > 0 ? $invCount : null, 'disabled' => false, 'state' => $invState],
+            'overview' => ['label' => 'Обзор',      'count' => null,         'disabled' => false],
+            'thread' => ['label' => 'Переписка',  'count' => $threadCount, 'disabled' => false],
+            'items' => ['label' => 'Позиции',    'count' => $items,       'disabled' => false],
+            'quotes' => ['label' => 'КП',         'count' => $quotesCount > 0 ? $quotesCount : null, 'disabled' => false],
+            'invoices' => ['label' => 'Счета',      'count' => $invCount > 0 ? $invCount : null, 'disabled' => false, 'state' => $invState],
             'suppliers' => ['label' => 'Поставщики', 'count' => $supplierInquiriesCount > 0 ? $supplierInquiriesCount : null, 'disabled' => false],
-            'activity'  => ['label' => 'Активность', 'count' => $activity,    'disabled' => false],
-            'files'     => ['label' => 'Файлы',      'count' => $files,       'disabled' => false],
-            'related'   => ['label' => 'Связанные',  'count' => null,         'disabled' => true],
+            'activity' => ['label' => 'Активность', 'count' => $activity,    'disabled' => false],
+            'files' => ['label' => 'Файлы',      'count' => $files,       'disabled' => false],
+            'related' => ['label' => 'Связанные',  'count' => null,         'disabled' => true],
         ];
 
         return $tabs;
@@ -945,16 +980,16 @@ class Detail extends Component
         // который в этом письме нет вложения (типовой случай — картинка в
         // цитате, которую почтовый клиент в ответ не перевкладывает), заменяем
         // прозрачным пикселем, иначе каждый рендер даёт 404 и битую иконку.
-        $known = \App\Livewire\Concerns\RendersEmailBody::knownContentIds($email);
+        $known = RendersEmailBody::knownContentIds($email);
         $missingPixel = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
         $html = preg_replace_callback(
             '/(src|href)\s*=\s*(["\'])cid:([^"\']+)\2/i',
             function ($m) use ($messageId, $known, $missingPixel) {
-                if (! isset($known[\App\Livewire\Concerns\RendersEmailBody::normalizeContentId($m[3])])) {
+                if (! isset($known[RendersEmailBody::normalizeContentId($m[3])])) {
                     return $m[1] === 'href'
-                        ? 'href=' . $m[2] . '#' . $m[2] . ' data-cid-missing="1"'
-                        : 'src=' . $m[2] . $missingPixel . $m[2] . ' data-cid-missing="1"';
+                        ? 'href='.$m[2].'#'.$m[2].' data-cid-missing="1"'
+                        : 'src='.$m[2].$missingPixel.$m[2].' data-cid-missing="1"';
                 }
 
                 $url = route('attachments.inline', [
@@ -962,7 +997,7 @@ class Detail extends Component
                     'contentId' => rawurlencode($m[3]),
                 ]);
 
-                return $m[1] . '=' . $m[2] . $url . $m[2];
+                return $m[1].'='.$m[2].$url.$m[2];
             },
             $email->body_html
         ) ?? $email->body_html;
@@ -1001,7 +1036,7 @@ class Detail extends Component
         $doc = new \DOMDocument('1.0', 'UTF-8');
         // Префикс для UTF-8 + корневой контейнер, чтобы saveHTML мог обойти
         // только наши дочерние ноды без `<html><body>` обёртки.
-        $wrapped = '<?xml encoding="UTF-8"?><div id="mylift-thread-root">' . $html . '</div>';
+        $wrapped = '<?xml encoding="UTF-8"?><div id="mylift-thread-root">'.$html.'</div>';
         $loaded = $doc->loadHTML($wrapped, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
         libxml_clear_errors();
         libxml_use_internal_errors($previous);
@@ -1047,7 +1082,7 @@ class Detail extends Component
     {
         $candidates = $xpath->query(
             '//p[not(ancestor::blockquote) and not(ancestor::details)]'
-            . ' | //div[not(ancestor::blockquote) and not(ancestor::details)]'
+            .' | //div[not(ancestor::blockquote) and not(ancestor::details)]'
         );
         if ($candidates === false || $candidates->length === 0) {
             return false;
@@ -1097,8 +1132,8 @@ class Detail extends Component
         // повторно при перерендере (и не трогать цитаты внутри Outlook-details).
         $nodes = $xpath->query(
             '//blockquote[not(ancestor::blockquote) and not(ancestor::details)]'
-            . ' | //div[contains(@class, "gmail_quote") and not(ancestor::blockquote) and not(ancestor::details)]'
-            . ' | //div[contains(@class, "yahoo_quoted") and not(ancestor::blockquote) and not(ancestor::details)]'
+            .' | //div[contains(@class, "gmail_quote") and not(ancestor::blockquote) and not(ancestor::details)]'
+            .' | //div[contains(@class, "yahoo_quoted") and not(ancestor::blockquote) and not(ancestor::details)]'
         );
         if ($nodes === false || $nodes->length === 0) {
             return false;
@@ -1117,6 +1152,7 @@ class Detail extends Component
                 if ($this->looksLikeQuoteAttribution($prev)) {
                     $attributionNodes[] = $prev;
                     $prev = $prev->previousSibling;
+
                     continue;
                 }
                 if (($prev->nodeType === XML_TEXT_NODE && trim($prev->textContent) === '')
@@ -1124,6 +1160,7 @@ class Detail extends Component
                 ) {
                     $attributionNodes[] = $prev;
                     $prev = $prev->previousSibling;
+
                     continue;
                 }
                 break;
@@ -1156,7 +1193,7 @@ class Detail extends Component
         $summary->setAttribute(
             'style',
             'cursor:pointer;list-style:none;font-size:12px;color:#7280a0;'
-            . 'user-select:none;padding:2px 0;outline:none;'
+            .'user-select:none;padding:2px 0;outline:none;'
         );
         $details->appendChild($summary);
 
@@ -1399,7 +1436,7 @@ class Detail extends Component
                 return;
             }
         } else {
-            if ($user->hasRole(\App\Enums\Role::Secretary->value)
+            if ($user->hasRole(Role::Secretary->value)
                 || ! $this->request->isAccessibleBy($user)) {
                 $this->dispatch('toast', message: 'Нет прав указать номер 1С для этой заявки.', type: 'error');
 
@@ -1410,7 +1447,7 @@ class Detail extends Component
         $this->request->forceFill(['onec_number' => $value])->save();
 
         try {
-            \App\Models\RequestStateChange::create([
+            RequestStateChange::create([
                 'request_id' => $this->request->id,
                 'from_status' => $this->request->status->value,
                 'to_status' => $this->request->status->value,
@@ -1422,7 +1459,7 @@ class Detail extends Component
                 'payload' => ['old' => $old ?: null, 'new' => $value],
             ]);
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('Detail: onec number audit failed (non-fatal)', [
+            Log::warning('Detail: onec number audit failed (non-fatal)', [
                 'request_id' => $this->request->id,
                 'error' => $e->getMessage(),
             ]);
@@ -1458,7 +1495,7 @@ class Detail extends Component
         $this->request->forceFill(['onec_number' => null])->save();
 
         try {
-            \App\Models\RequestStateChange::create([
+            RequestStateChange::create([
                 'request_id' => $this->request->id,
                 'from_status' => $this->request->status->value,
                 'to_status' => $this->request->status->value,
@@ -1468,7 +1505,7 @@ class Detail extends Component
                 'payload' => ['old' => $old, 'new' => null],
             ]);
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('Detail: onec number clear audit failed (non-fatal)', [
+            Log::warning('Detail: onec number clear audit failed (non-fatal)', [
                 'request_id' => $this->request->id,
                 'error' => $e->getMessage(),
             ]);
@@ -1489,15 +1526,15 @@ class Detail extends Component
         }
         // Привилегированные (РОП/директор/админ) — на любой заявке.
         if ($user->hasAnyRole([
-            \App\Enums\Role::HeadOfSales->value,
-            \App\Enums\Role::Director->value,
-            \App\Enums\Role::Admin->value,
+            Role::HeadOfSales->value,
+            Role::Director->value,
+            Role::Admin->value,
         ])) {
             return true;
         }
         // Менеджер (владелец / acting-делегат) — на своей доступной заявке.
         // Секретарь операционно с заявками не работает.
-        if ($user->hasRole(\App\Enums\Role::Secretary->value)) {
+        if ($user->hasRole(Role::Secretary->value)) {
             return false;
         }
 
@@ -1517,7 +1554,7 @@ class Detail extends Component
             return null;
         }
 
-        return \App\Models\OutboundQuote::query()
+        return OutboundQuote::query()
             ->where('request_id', $this->request->id)
             ->where('document_type', 'like', 'outbound_quotation%')
             ->whereNotNull('document_number')
@@ -1591,7 +1628,7 @@ class Detail extends Component
      * Reverse: другие заявки ссылаются на эту через
      * `request_assignments.reason LIKE '%auto_sticky:%"linked":[..., this_id, ...]%'`.
      *
-     * @return \Illuminate\Database\Eloquent\Collection<int, \App\Models\Request>
+     * @return \Illuminate\Database\Eloquent\Collection<int, Request>
      */
     #[Computed]
     public function relatedStickyRequests()
@@ -1603,13 +1640,13 @@ class Detail extends Component
         // в auto_sticky:{"linked":[...]}. JSON-as-string в reason — простое
         // ILIKE-сравнение по подстроке "%, $id]" / "[$id," / "[$id]".
         $thisId = $this->request->id;
-        $reverseIds = \App\Models\RequestAssignment::query()
+        $reverseIds = RequestAssignment::query()
             ->where('reason', 'like', 'auto_sticky:%')
             ->where(function ($q) use ($thisId) {
-                $q->where('reason', 'like', '%"linked":[' . $thisId . ']%')
-                    ->orWhere('reason', 'like', '%"linked":[' . $thisId . ',%')
-                    ->orWhere('reason', 'like', '%,' . $thisId . ',%')
-                    ->orWhere('reason', 'like', '%,' . $thisId . ']%');
+                $q->where('reason', 'like', '%"linked":['.$thisId.']%')
+                    ->orWhere('reason', 'like', '%"linked":['.$thisId.',%')
+                    ->orWhere('reason', 'like', '%,'.$thisId.',%')
+                    ->orWhere('reason', 'like', '%,'.$thisId.']%');
             })
             ->pluck('request_id')
             ->unique()
@@ -1648,9 +1685,9 @@ class Detail extends Component
      * ровно это: проверять одно, а отправлять пересчитанное нельзя.
      */
     #[Computed]
-    public function autoQuote(): ?\App\Models\AutoQuoteSnapshot
+    public function autoQuote(): ?AutoQuoteSnapshot
     {
-        return app(\App\Services\Quotes\AutoQuoteOfferService::class)->readyFor($this->request);
+        return app(AutoQuoteOfferService::class)->readyFor($this->request);
     }
 
     /**
@@ -1662,7 +1699,7 @@ class Detail extends Component
     #[Computed]
     public function partialQuote(): ?array
     {
-        return app(\App\Services\Quotations\PartialQuoteService::class)->state($this->request);
+        return app(PartialQuoteService::class)->state($this->request);
     }
 
     /** Остановить досылку: клиент передумал, ушёл или решил вопрос иначе. */
@@ -1672,7 +1709,7 @@ class Detail extends Component
             return;
         }
 
-        app(\App\Services\Quotations\PartialQuoteService::class)->stop($this->request, auth()->user());
+        app(PartialQuoteService::class)->stop($this->request, auth()->user());
         unset($this->partialQuote);
         $this->autoQuoteFailed = false;
         $this->autoQuoteNotice = 'Досылка полного КП остановлена. Статус заявки не менялся — переведите её вручную, если работа по ней закончена.';
@@ -1685,7 +1722,7 @@ class Detail extends Component
             return;
         }
 
-        app(\App\Services\Quotations\PartialQuoteService::class)->resume($this->request);
+        app(PartialQuoteService::class)->resume($this->request);
         unset($this->partialQuote);
         $this->autoQuoteFailed = false;
         $this->autoQuoteNotice = 'Досылка полного КП возобновлена.';
@@ -1714,7 +1751,7 @@ class Detail extends Component
             return null;
         }
 
-        $res = app(\App\Services\Quotes\AutoQuoteOfferService::class)->send($this->request->fresh(), $user);
+        $res = app(AutoQuoteOfferService::class)->send($this->request->fresh(), $user);
         unset($this->autoQuote);
 
         if (! $res['ok']) {
@@ -1738,7 +1775,7 @@ class Detail extends Component
             return;
         }
 
-        $draftId = app(\App\Services\Quotes\AutoQuoteOfferService::class)
+        $draftId = app(AutoQuoteOfferService::class)
             ->draft($this->request, $snapshot, $user);
 
         if ($draftId === null) {
@@ -1769,9 +1806,9 @@ class Detail extends Component
         }
 
         return $user->hasAnyRole([
-            \App\Enums\Role::Admin->value,
-            \App\Enums\Role::HeadOfSales->value,
-            \App\Enums\Role::Director->value,
+            Role::Admin->value,
+            Role::HeadOfSales->value,
+            Role::Director->value,
         ]);
     }
 
@@ -1780,7 +1817,7 @@ class Detail extends Component
     {
         return AiDecision::query()
             ->where('request_id', $this->request->id)
-            ->where('status', \App\Enums\AiDecisionStatus::Suggested->value)
+            ->where('status', AiDecisionStatus::Suggested->value)
             // Пока парсер разбирает КП/счёт из вложения — плашку не показываем
             // (иначе менеджер жмёт «применить» раньше автоматики, M-2026-14815).
             ->actionable()
@@ -1799,8 +1836,8 @@ class Detail extends Component
     {
         return AiDecision::query()
             ->where('request_id', $this->request->id)
-            ->where('status', \App\Enums\AiDecisionStatus::Suggested->value)
-            ->where('payload->' . AiDecision::PAYLOAD_AWAITING_PARSE_UNTIL, '>', now()->toIso8601String())
+            ->where('status', AiDecisionStatus::Suggested->value)
+            ->where('payload->'.AiDecision::PAYLOAD_AWAITING_PARSE_UNTIL, '>', now()->toIso8601String())
             ->exists();
     }
 
@@ -1812,12 +1849,12 @@ class Detail extends Component
      * (supplier_inquiry_items.status=pending). Для пометки «ждём поставщика»
      * в табе «Позиции».
      *
-     * @return \Illuminate\Support\Collection<int, int>
+     * @return Collection<int, int>
      */
     #[Computed]
     public function requestedItemIds()
     {
-        return \App\Models\SupplierInquiryItem::query()
+        return SupplierInquiryItem::query()
             ->whereHas('inquiry', fn ($q) => $q->where('related_request_id', $this->request->id))
             ->where('status', 'pending')
             ->pluck('request_item_id')
@@ -1897,7 +1934,7 @@ class Detail extends Component
             return;
         }
         $item = $this->loadItemOrFail($itemId);
-        $catalog = \App\Models\CatalogItem::query()
+        $catalog = CatalogItem::query()
             ->whereRaw('UPPER(sku) = ?', [$sku])
             ->first();
         if ($catalog === null) {
@@ -1913,7 +1950,7 @@ class Detail extends Component
         try {
             $editor->linkToCatalog($item, $catalog, auth()->user());
         } catch (\Throwable $e) {
-            $this->dispatch('toast', message: 'Не удалось привязать: ' . $e->getMessage(), type: 'error');
+            $this->dispatch('toast', message: 'Не удалось привязать: '.$e->getMessage(), type: 'error');
 
             return;
         }
@@ -1929,8 +1966,8 @@ class Detail extends Component
         session()->flash(
             'status',
             $result->catalog_item_id
-                ? 'Позиция #' . $result->position . ' заново сматчена с каталогом.'
-                : 'Не нашлось каталожного аналога для позиции #' . $result->position . '.',
+                ? 'Позиция #'.$result->position.' заново сматчена с каталогом.'
+                : 'Не нашлось каталожного аналога для позиции #'.$result->position.'.',
         );
     }
 
@@ -1960,6 +1997,7 @@ class Detail extends Component
             ));
         } catch (\DomainException $e) {
             $this->addError('status', $e->getMessage());
+
             return;
         }
         $this->reloadRequest();
@@ -2079,7 +2117,7 @@ class Detail extends Component
                         $editor->applyEnrichmentSuggestion($item->fresh(), (string) $sugg['id'], $user);
                         $applied++;
                     } catch (\Throwable $e) {
-                        \Illuminate\Support\Facades\Log::warning('applyAllEnrichments: skip', [
+                        Log::warning('applyAllEnrichments: skip', [
                             'item_id' => $item->id,
                             'sugg_id' => $sugg['id'],
                             'error' => $e->getMessage(),
@@ -2115,7 +2153,7 @@ class Detail extends Component
                         $editor->dismissEnrichmentSuggestion($item->fresh(), (string) $sugg['id'], $user);
                         $dismissed++;
                     } catch (\Throwable $e) {
-                        \Illuminate\Support\Facades\Log::warning('dismissAllEnrichments: skip', [
+                        Log::warning('dismissAllEnrichments: skip', [
                             'item_id' => $item->id,
                             'sugg_id' => $sugg['id'],
                             'error' => $e->getMessage(),
@@ -2146,7 +2184,7 @@ class Detail extends Component
                 $this->reloadRequest();
                 session()->flash('status', 'Уточнения применены, заявка возвращена в работу.');
             } catch (\DomainException $e) {
-                $this->addError('status', 'Не удалось перевести статус: ' . $e->getMessage());
+                $this->addError('status', 'Не удалось перевести статус: '.$e->getMessage());
             }
         }
     }
@@ -2209,6 +2247,64 @@ class Detail extends Component
      * reset=true стирает existing items перед persist'ом — на случай если
      * прошлый прогон оставил «склеенный» мусор.
      */
+    /**
+     * Завести заявку-наследника по одному письму этой переписки.
+     *
+     * Нужно, когда по заявке отработали не всё, а закрывать её уже нечестно:
+     * родитель остаётся как есть, работа продолжается в новой заявке с
+     * позициями из выбранного письма. Работает и на закрытых заявках — именно
+     * там это чаще всего и требуется.
+     */
+    public function createSuccessorFromEmail(int $emailId)
+    {
+        $user = auth()->user();
+        $privileged = $user?->hasAnyRole([
+            Role::HeadOfSales->value,
+            Role::Director->value,
+            Role::Admin->value,
+        ]) ?? false;
+        if (! $user || (! $privileged && ! $this->request->isAccessibleBy($user))) {
+            $this->dispatch('toast', message: 'Нет прав.', type: 'error');
+
+            return null;
+        }
+
+        $email = EmailMessage::find($emailId);
+        if ($email === null) {
+            $this->dispatch('toast', message: 'Письмо не найдено.', type: 'error');
+
+            return null;
+        }
+
+        try {
+            $child = app(RequestSuccessorService::class)
+                ->createFromEmail($this->request, $email, $user);
+        } catch (\DomainException $e) {
+            $this->dispatch('toast', message: $e->getMessage(), type: 'error');
+
+            return null;
+        } catch (\Throwable $e) {
+            Log::error('Detail::createSuccessorFromEmail failed', [
+                'request_id' => $this->request->id ?? null,
+                'email_message_id' => $emailId,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+            $this->dispatch('toast', message: 'Не удалось создать заявку: '.$e->getMessage(), type: 'error');
+
+            return null;
+        }
+
+        session()->flash('status', sprintf(
+            'Создана заявка-наследник %s по письму от %s. Родитель %s не изменён.',
+            $child->internal_code,
+            $email->sent_at?->format('d.m.Y') ?? 'без даты',
+            $this->request->internal_code,
+        ));
+
+        return $this->redirect(route('requests.show', $child->id), navigate: false);
+    }
+
     public function reparseItems(): void
     {
         $user = auth()->user();
@@ -2219,11 +2315,13 @@ class Detail extends Component
         ]) ?? false;
         if (! $user || (! $privileged && ! $this->request->isAccessibleBy($user))) {
             $this->dispatch('toast', message: 'Нет прав.', type: 'error');
+
             return;
         }
         $emailId = $this->request->email_message_id;
         if (! $emailId) {
             $this->dispatch('toast', message: 'У заявки нет триггерного письма.', type: 'error');
+
             return;
         }
 
@@ -2239,7 +2337,7 @@ class Detail extends Component
             $meta['reparse_dispatched_at'] = now()->toIso8601String();
             $this->request->forceFill(['parsing_meta' => $meta])->save();
 
-            \App\Jobs\Mail\ParseRequestItemsJob::dispatch($emailId, force: true, reset: true);
+            ParseRequestItemsJob::dispatch($emailId, force: true, reset: true);
 
             // Перезагружаем модель через стандартный паттерн (не unset — он
             // ломает Livewire public-property и при перерисовке blade падает
@@ -2248,13 +2346,13 @@ class Detail extends Component
 
             $this->dispatch('toast', message: 'Парсер перезапущен. Карточка обновится автоматически.', type: 'success');
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Detail::reparseItems failed', [
+            Log::error('Detail::reparseItems failed', [
                 'request_id' => $this->request->id ?? null,
                 'email_message_id' => $emailId,
                 'user_id' => $user->id,
                 'error' => $e->getMessage(),
             ]);
-            $this->dispatch('toast', message: 'Не удалось перезапустить: ' . $e->getMessage(), type: 'error');
+            $this->dispatch('toast', message: 'Не удалось перезапустить: '.$e->getMessage(), type: 'error');
         }
     }
 
@@ -2263,10 +2361,10 @@ class Detail extends Component
      * — не для отдельного pagination, а для компактного списка из 3-5
      * последних invoice'ов. Полный листинг — на /dashboard/invoices.
      */
-    #[\Livewire\Attributes\Computed]
+    #[Computed]
     public function invoicesForRequest()
     {
-        return \App\Models\Invoice::query()
+        return Invoice::query()
             ->where('request_id', $this->request->id)
             ->with('createdByUser:id,name')
             ->orderByDesc('id')
@@ -2279,7 +2377,7 @@ class Detail extends Component
      * Permission: owner / acting (delegation) / privileged (head_of_sales,
      * director, admin). Inline-проверка через Request::isAccessibleBy.
      */
-    public function markInvoicePaid(int $invoiceId, \App\Services\Invoices\InvoiceService $service): void
+    public function markInvoicePaid(int $invoiceId, InvoiceService $service): void
     {
         $user = auth()->user();
         $privileged = $user?->hasAnyRole([
@@ -2289,9 +2387,10 @@ class Detail extends Component
         ]) ?? false;
         if (! $user || (! $privileged && ! $this->request->isAccessibleBy($user))) {
             $this->dispatch('toast', message: 'Нет прав.', type: 'error');
+
             return;
         }
-        $invoice = \App\Models\Invoice::where('request_id', $this->request->id)
+        $invoice = Invoice::where('request_id', $this->request->id)
             ->whereKey($invoiceId)
             ->first();
         if (! $invoice) {
@@ -2300,7 +2399,8 @@ class Detail extends Component
         try {
             $service->markPaid($invoice, auth()->user());
         } catch (\Throwable $e) {
-            $this->dispatch('toast', message: 'Ошибка: ' . $e->getMessage(), type: 'error');
+            $this->dispatch('toast', message: 'Ошибка: '.$e->getMessage(), type: 'error');
+
             return;
         }
         $this->dispatch('toast', message: "Счёт №{$invoice->invoice_number} оплачен.", type: 'success');
@@ -2313,7 +2413,7 @@ class Detail extends Component
      * Аннулировать счёт. Подтверждение через wire:confirm + prompt для
      * reason'а (передаётся как параметр от UI).
      */
-    public function cancelInvoice(int $invoiceId, string $reason, \App\Services\Invoices\InvoiceService $service): void
+    public function cancelInvoice(int $invoiceId, string $reason, InvoiceService $service): void
     {
         $user = auth()->user();
         $privileged = $user?->hasAnyRole([
@@ -2323,14 +2423,16 @@ class Detail extends Component
         ]) ?? false;
         if (! $user || (! $privileged && ! $this->request->isAccessibleBy($user))) {
             $this->dispatch('toast', message: 'Нет прав.', type: 'error');
+
             return;
         }
         $reason = trim($reason);
         if ($reason === '') {
             $this->dispatch('toast', message: 'Укажите причину аннулирования.', type: 'error');
+
             return;
         }
-        $invoice = \App\Models\Invoice::where('request_id', $this->request->id)
+        $invoice = Invoice::where('request_id', $this->request->id)
             ->whereKey($invoiceId)
             ->first();
         if (! $invoice) {
@@ -2339,7 +2441,8 @@ class Detail extends Component
         try {
             $service->cancel($invoice, $reason, auth()->user());
         } catch (\Throwable $e) {
-            $this->dispatch('toast', message: 'Ошибка: ' . $e->getMessage(), type: 'error');
+            $this->dispatch('toast', message: 'Ошибка: '.$e->getMessage(), type: 'error');
+
             return;
         }
         $this->dispatch('toast', message: "Счёт №{$invoice->invoice_number} аннулирован.", type: 'success');
@@ -2358,15 +2461,18 @@ class Detail extends Component
     {
         $target = RequestStatus::tryFrom($to);
         if ($target === null) {
-            $this->addError('status', 'Неизвестный статус: ' . $to);
+            $this->addError('status', 'Неизвестный статус: '.$to);
+
             return;
         }
         if ($target === RequestStatus::ClosedLost) {
             $this->addError('status', 'closed_lost — через диалог с reason.');
+
             return;
         }
         if ($target === RequestStatus::Paused) {
             $this->addError('status', 'paused — через диалог с датой.');
+
             return;
         }
 
@@ -2374,7 +2480,7 @@ class Detail extends Component
             $req = $this->request->fresh();
             $service->transitionTo($req, $target, auth()->user());
             $this->reloadRequest();
-            session()->flash('status', 'Статус обновлён: ' . $target->label());
+            session()->flash('status', 'Статус обновлён: '.$target->label());
         } catch (\DomainException $e) {
             $this->addError('status', $e->getMessage());
         }
@@ -2389,8 +2495,8 @@ class Detail extends Component
      * не затирается recompute/onClientReplied/onManagerOpened.
      */
     public function toggleManualAttention(
-        \App\Services\Request\AttentionService $attention,
-        \App\Services\Request\RequestActivityService $activity,
+        AttentionService $attention,
+        RequestActivityService $activity,
     ): void {
         $user = auth()->user();
         if ($user === null) {
@@ -2415,8 +2521,8 @@ class Detail extends Component
 
         // Eloquent cast attention_reason → AttentionReason enum; сравниваем
         // через ->value на случай если каст ещё не сработал (forceFill).
-        $manualValue = \App\Enums\AttentionReason::Manual->value;
-        $currentReason = $req->attention_reason instanceof \App\Enums\AttentionReason
+        $manualValue = AttentionReason::Manual->value;
+        $currentReason = $req->attention_reason instanceof AttentionReason
             ? $req->attention_reason->value
             : $req->attention_reason;
         $isSet = $currentReason === $manualValue;
@@ -2424,15 +2530,15 @@ class Detail extends Component
         try {
             if ($isSet) {
                 $attention->clearManual($req);
-                $activity->touch($req, \App\Enums\RequestActivityType::ManualFlagCleared);
+                $activity->touch($req, RequestActivityType::ManualFlagCleared);
                 session()->flash('status', 'Ручной флаг внимания снят.');
             } else {
                 $attention->setManual($req, $user);
-                $activity->touch($req, \App\Enums\RequestActivityType::ManualFlagSet);
+                $activity->touch($req, RequestActivityType::ManualFlagSet);
                 session()->flash('status', 'Заявка помечена как «требует внимания».');
             }
         } catch (\Throwable $e) {
-            $this->addError('status', 'Не удалось переключить флаг: ' . $e->getMessage());
+            $this->addError('status', 'Не удалось переключить флаг: '.$e->getMessage());
 
             return;
         }
@@ -2454,7 +2560,7 @@ class Detail extends Component
             abort(403);
         }
 
-        $item = \App\Models\RequestItem::query()
+        $item = RequestItem::query()
             ->where('request_id', $this->request->id)
             ->whereKey($itemId)
             ->where('suggestion_status', 'pending')
@@ -2468,7 +2574,7 @@ class Detail extends Component
             'suggestion_status' => 'applied',
         ])->save();
 
-        \App\Models\RequestStateChange::create([
+        RequestStateChange::create([
             'request_id' => $this->request->id,
             'from_status' => $this->request->status->value,
             'to_status' => $this->request->status->value,
@@ -2501,7 +2607,7 @@ class Detail extends Component
             abort(403);
         }
 
-        $item = \App\Models\RequestItem::query()
+        $item = RequestItem::query()
             ->where('request_id', $this->request->id)
             ->whereKey($itemId)
             ->where('suggestion_status', 'pending')
@@ -2515,7 +2621,7 @@ class Detail extends Component
             'suggestion_status' => 'rejected',
         ])->save();
 
-        \App\Models\RequestStateChange::create([
+        RequestStateChange::create([
             'request_id' => $this->request->id,
             'from_status' => $this->request->status->value,
             'to_status' => $this->request->status->value,
@@ -2545,7 +2651,7 @@ class Detail extends Component
             $this->reloadRequest();
             session()->flash('status', 'Заявка снята с паузы.');
         } catch (\Throwable $e) {
-            $this->addError('status', 'Не удалось снять с паузы: ' . $e->getMessage());
+            $this->addError('status', 'Не удалось снять с паузы: '.$e->getMessage());
         }
     }
 
@@ -2568,6 +2674,7 @@ class Detail extends Component
         if (! $includeDeleted) {
             $query->where('is_active', true);
         }
+
         return $query->firstOrFail();
     }
 
