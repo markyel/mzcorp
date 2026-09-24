@@ -24,8 +24,7 @@ class MailboxFolderService
     public function __construct(
         private readonly MailboxAccessService $access,
         private readonly ImapFolderSyncService $imap,
-    ) {
-    }
+    ) {}
 
     /**
      * Дерево папок ящика, сплющенное в порядке обхода, с глубиной и счётчиками:
@@ -55,6 +54,15 @@ class MailboxFolderService
             })
             ->whereIn('e.mailbox_folder_id', $folders->pluck('id'))
             ->where('e.is_draft', false)
+            // Бейдж обязан считать ровно те письма, которые человек увидит в
+            // списке. Иначе папка обещает 15 непрочитанных, фильтр «только
+            // непрочитанные» показывает пустоту, и доверия к счётчикам нет.
+            ->whereNotIn('e.folder', MailReassignArchiverService::archivePaths())
+            ->when($this->imap->isServerSynced($mailbox), fn ($q) => $q->where(
+                // Входящее без imap_uid уже удалено на сервере (корзина, спам,
+                // стёрто) — в почте mzCorp его тоже нет, см. Client::hideGoneFromServer.
+                fn ($w) => $w->where('e.direction', '!=', 'inbound')->orWhereNotNull('e.imap_uid'),
+            ))
             ->groupBy('e.mailbox_folder_id')
             ->selectRaw("e.mailbox_folder_id as fid, count(*) as total, count(*) filter (where e.direction = 'inbound' and s.read_at is null) as unread")
             ->get()
@@ -71,7 +79,7 @@ class MailboxFolderService
                 $c = $counts->get($f->id);
                 $out[] = [
                     'id' => (int) $f->id,
-                    'key' => 'f:' . $f->id,
+                    'key' => 'f:'.$f->id,
                     'name' => (string) $f->name,
                     'depth' => $depth,
                     'parent_id' => $f->parent_id ? (int) $f->parent_id : null,
@@ -97,7 +105,7 @@ class MailboxFolderService
         if ($parentId) {
             $parent = MailboxFolder::query()->where('mailbox_id', $mailbox->id)->findOrFail($parentId);
             if ($this->depthOf($parent) + 1 >= MailboxFolder::MAX_DEPTH) {
-                throw new \DomainException('Максимум ' . MailboxFolder::MAX_DEPTH . ' уровня вложенности.');
+                throw new \DomainException('Максимум '.MailboxFolder::MAX_DEPTH.' уровня вложенности.');
             }
         }
         $exists = MailboxFolder::query()
@@ -182,7 +190,7 @@ class MailboxFolderService
             $parentPath = $folder->parent_id ? $folder->parent?->imap_path : null;
             foreach (MailboxFolder::query()->where('parent_id', $folder->id)->whereNotNull('imap_path')->get() as $child) {
                 $segment = MailboxFolder::imapSegmentFromName($child->name, $delimiter);
-                $childRenames[] = [$child->imap_path, $parentPath !== null ? $parentPath . $delimiter . $segment : $segment];
+                $childRenames[] = [$child->imap_path, $parentPath !== null ? $parentPath.$delimiter.$segment : $segment];
             }
             $payload = ['path' => $folder->imap_path, 'child_renames' => $childRenames, 'uids' => $uids];
         }
@@ -214,15 +222,15 @@ class MailboxFolderService
      */
     private function rewritePaths(int $mailboxId, string $oldPath, string $newPath, string $delimiter): void
     {
-        $prefix = $oldPath . $delimiter;
-        $like = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $prefix) . '%';
+        $prefix = $oldPath.$delimiter;
+        $like = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $prefix).'%';
 
         foreach (MailboxFolder::query()->where('mailbox_id', $mailboxId)->where('imap_path', 'like', $like)->get() as $desc) {
-            $desc->forceFill(['imap_path' => $newPath . $delimiter . substr($desc->imap_path, strlen($prefix))])->save();
+            $desc->forceFill(['imap_path' => $newPath.$delimiter.substr($desc->imap_path, strlen($prefix))])->save();
         }
         EmailMessage::query()->where('mailbox_id', $mailboxId)->where('folder', $oldPath)->update(['folder' => $newPath]);
         EmailMessage::query()->where('mailbox_id', $mailboxId)->where('folder', 'like', $like)
-            ->update(['folder' => DB::raw("'" . str_replace("'", "''", $newPath . $delimiter) . "' || substr(folder, " . (strlen($prefix) + 1) . ')')]);
+            ->update(['folder' => DB::raw("'".str_replace("'", "''", $newPath.$delimiter)."' || substr(folder, ".(strlen($prefix) + 1).')')]);
     }
 
     /**
@@ -230,7 +238,7 @@ class MailboxFolderService
      * доступных пользователю ящиков; папка должна принадлежать ящику письма.
      *
      * @param  list<int>  $messageIds
-     * @return int  сколько перенесено
+     * @return int сколько перенесено
      */
     public function moveMessages(array $messageIds, ?int $folderId, User $user): int
     {
