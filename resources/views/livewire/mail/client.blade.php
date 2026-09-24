@@ -297,6 +297,10 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .chead .reqlink .code{font-family:var(--font-mono);font-weight:600;color:var(--violet-700)}
 /* Письмо без заявки — та же плашка, но нейтральная: это не связь, а её отсутствие. */
 .mailapp .chead .reqlink.promote{background:var(--bg-surface);border-color:var(--border-strong);color:var(--fg-3);gap:12px}
+/* Привязка угадана (токен запроса, номер в теме) — пунктир вместо сплошной
+   рамки: это вывод по признакам, а не поле related_request_id. */
+.mailapp .chead .reqlink.hinted{border-style:dashed}
+.mailapp .chead .reqlink .linkbtn{background:none;border:0;padding:0;font:inherit;color:var(--violet-700);font-weight:600;cursor:pointer;border-bottom:1px dashed currentColor}
 .mailapp .chead .reqlink .onec{font-family:var(--font-mono);font-weight:600;color:var(--emerald-700);margin-left:6px}
 .mailapp .chead .reqlink .st{color:var(--violet-700)}
 .mailapp .chead .decisions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
@@ -884,6 +888,27 @@ body.mail-resizing iframe{pointer-events:none}
                         <span class="st">· {{ $reqStatus?->label() ?? $req->status }}</span>
                         <span class="spacer"></span>
                         <a href="{{ route('requests.show', $req->id) }}" wire:navigate>Открыть заявку →</a>
+                    </div>
+                @elseif($this->hintedRequest)
+                    {{-- Письмо к заявке не привязано, но идёт по ней: ответ поставщика,
+                         пересылка, письмо из чужой тикет-системы. Предлагать «Это
+                         заявка!» тут неверно — заявка уже есть, нужна ссылка. --}}
+                    @php
+                        $hint = $this->hintedRequest;
+                        $hintReq = $hint['request'];
+                        $hintStatus = $hintReq->status instanceof \App\Enums\RequestStatus
+                            ? $hintReq->status
+                            : \App\Enums\RequestStatus::tryFrom((string) $hintReq->status);
+                    @endphp
+                    <div class="reqlink hinted" title="Определено {{ $hint['why'] }}">
+                        <span>Переписка по заявке</span>
+                        <span class="code">{{ $hintReq->internal_code }}</span>
+                        @if($hintReq->onec_number)<span class="onec" title="Номер заявки/КП в 1С">1С: {{ $hintReq->onec_number }}</span>@endif
+                        <span class="st">· {{ $hintStatus?->label() ?? $hintReq->status }}</span>
+                        <span class="spacer"></span>
+                        <button type="button" class="linkbtn" wire:click="filterByRequest({{ $hintReq->id }})"
+                                title="Показать все письма этой заявки">Все письма заявки</button>
+                        <a href="{{ route('requests.show', $hintReq->id) }}" wire:navigate>Открыть заявку →</a>
                     </div>
                 @elseif($anchor->direction?->value === 'inbound'
                     && $this->canPromote

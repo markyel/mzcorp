@@ -14,6 +14,7 @@ use App\Models\Mailbox;
 use App\Models\MailboxFolder;
 use App\Models\MailLabel;
 use App\Models\Request;
+use App\Models\SupplierInquiry;
 use App\Models\User;
 use App\Services\Mail\EmailDraftService;
 use App\Services\Mail\EmailToRequestPromoter;
@@ -27,6 +28,7 @@ use App\Services\Mail\MessageLabelService;
 use App\Services\Mail\SharedMailService;
 use App\Services\Mail\SupplierCcInboxService;
 use App\Services\Quotes\AutoQuoteOfferService;
+use App\Services\Supplier\SupplierInquiryService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -268,6 +270,58 @@ class Client extends Component
         }
 
         return Request::query()->find($this->requestId, ['id', 'internal_code', 'status', 'subject', 'onec_number']);
+    }
+
+    /**
+     * Заявка, по которой идёт переписка, когда само письмо к ней не привязано.
+     *
+     * Ответ поставщика приходит в личный ящик менеджера и заявкой не становится
+     * — и не должен. Но идёт он ПО заявке: её номер стоит в теме ([M-…]) либо
+     * зашит в токен запроса ([RFQ-…]), которым мы же эту тему и пометили.
+     * В таком письме предлагать «Это заявка!» неверно — заявка уже есть, нужна
+     * ссылка на неё.
+     *
+     * @return array{request: Request, why: string}|null
+     */
+    #[Computed]
+    public function hintedRequest(): ?array
+    {
+        $anchor = $this->openAnchor;
+        if ($anchor === null || $anchor->related_request_id) {
+            return null;
+        }
+
+        // 1. Соседнее письмо той же переписки уже привязано — самый прямой ответ.
+        $sibling = $this->openThread->first(fn (EmailMessage $m) => (bool) $m->related_request_id);
+        if ($sibling?->relatedRequest !== null) {
+            return ['request' => $sibling->relatedRequest, 'why' => 'по соседнему письму переписки'];
+        }
+
+        // 2. Токен запроса поставщику: уникален на пару «заявка × поставщик».
+        $inquiries = app(SupplierInquiryService::class);
+        $token = $inquiries->extractRfqToken($anchor->subject);
+        if ($token !== null) {
+            $inquiry = SupplierInquiry::query()
+                ->where('rfq_token', $token)
+                ->whereNotNull('related_request_id')
+                ->with('relatedRequest:id,internal_code,status,onec_number')
+                ->first();
+            if ($inquiry?->relatedRequest !== null) {
+                return ['request' => $inquiry->relatedRequest, 'why' => 'по токену запроса поставщику'];
+            }
+        }
+
+        // 3. Номер заявки в теме — так его пишут и люди, и чужие тикет-системы.
+        if (preg_match('/\bM-\d{4}-\d{1,6}\b/iu', (string) $anchor->subject, $m) === 1) {
+            $request = Request::query()
+                ->whereRaw('upper(internal_code) = ?', [mb_strtoupper($m[0])])
+                ->first(['id', 'internal_code', 'status', 'onec_number']);
+            if ($request !== null) {
+                return ['request' => $request, 'why' => 'по номеру в теме письма'];
+            }
+        }
+
+        return null;
     }
 
     public function loadMore(): void
