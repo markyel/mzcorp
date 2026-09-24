@@ -324,11 +324,18 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .chead .reqlink a{color:var(--violet-700);font-weight:600;text-decoration:none;border-bottom:1px dashed currentColor}
 /* Полоса «ещё письма в переписке»: открыто ровно выбранное письмо, соседние —
    свёрнутым списком, клик по строке открывает её. */
-.mailapp .tstrip{border-bottom:1px solid var(--border-subtle);background:var(--bg-app)}
+.mailapp .tstrip{display:flex;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border-subtle);background:var(--bg-app)}
 .mailapp .tstrip-head{display:flex;align-items:center;gap:6px;width:100%;border:none;background:none;cursor:pointer;
     padding:7px 24px;font:500 12px/1 var(--font-sans);color:var(--fg-2);text-align:left}
 .mailapp .tstrip-head:hover{color:var(--fg-1)}
-.mailapp .tstrip-list{padding:0 12px 6px}
+.mailapp .tstrip-head{width:auto;flex:1 1 auto}
+.mailapp .tstrip-all{flex-shrink:0;margin-right:24px;border:1px solid var(--border-strong);background:var(--bg-surface);
+    border-radius:var(--r-sm,6px);padding:3px 9px;font:500 11.5px/1.4 var(--font-sans);color:var(--fg-2);cursor:pointer}
+.mailapp .tstrip-all:hover{color:var(--fg-1);background:var(--bg-hover)}
+.mailapp .tstrip-all.on{background:var(--bg-selected);border-color:var(--sky-500);color:var(--sky-700)}
+.mailapp .tstrip-list{width:100%;padding:0 12px 6px}
+/* В развёрнутом треде видно, какое письмо выбрано в списке слева. */
+.mailapp .msg.cur{box-shadow:inset 3px 0 0 var(--sky-500);padding-left:12px}
 .mailapp .tstrip-item{display:flex;align-items:center;gap:8px;width:100%;border:none;background:none;cursor:pointer;
     padding:5px 12px;border-radius:6px;font:400 12px/1.3 var(--font-sans);color:var(--fg-2);text-align:left}
 .mailapp .tstrip-item:hover{background:var(--bg-hover)}
@@ -962,6 +969,15 @@ body.mail-resizing iframe{pointer-events:none}
                         <span x-text="open ? '▾' : '▸'"></span>
                         <span>Ещё {{ $others->count() }} {{ $plural($others->count()) }} в этой переписке</span>
                     </button>
+                    {{-- Список — это перейти к письму; кнопка — прочитать всё подряд,
+                         не перескакивая между письмами. Разные задачи, разные кнопки. --}}
+                    <button type="button" class="tstrip-all {{ $expandThread ? 'on' : '' }}"
+                            wire:click="toggleExpandThread"
+                            title="{{ $expandThread
+                                ? 'Оставить на экране только выбранное письмо'
+                                : 'Показать тела всех писем переписки подряд' }}">
+                        {{ $expandThread ? 'Только это письмо' : 'Показать весь тред' }}
+                    </button>
                     <div class="tstrip-list" x-show="open" x-cloak>
                         @foreach(($threadSort === 'desc' ? $thread->reverse() : $thread) as $m)
                             @php [$sName, $sEmail, $sIsTo] = $counterparty($m); @endphp
@@ -980,10 +996,17 @@ body.mail-resizing iframe{pointer-events:none}
             @endif
 
             <div class="cbody">
-                @php $openMsg = $thread->firstWhere('id', $anchor->id) ?? $anchor; @endphp
-                @foreach([$openMsg] as $msg)
+                @php
+                    $openMsg = $thread->firstWhere('id', $anchor->id) ?? $anchor;
+                    // Развёрнутый тред — в том же порядке, что и строка-список выше.
+                    $shown = $expandThread && $thread->count() > 1
+                        ? ($threadSort === 'desc' ? $thread->reverse() : $thread)
+                        : collect([$openMsg]);
+                @endphp
+                @foreach($shown as $msg)
                     @php $outbound = $msg->direction?->value === 'outbound'; $html = $this->bodyHtmlFor($msg); @endphp
-                    <div class="msg {{ $msg->is_draft ? 'draft' : ($outbound ? 'outbound' : '') }}" wire:key="msg-{{ $msg->id }}">
+                    <div class="msg {{ $msg->is_draft ? 'draft' : ($outbound ? 'outbound' : '') }} {{ $shown->count() > 1 && (int) $msg->id === (int) $anchor->id ? 'cur' : '' }}"
+                         wire:key="msg-{{ $msg->id }}">
                         <div class="mhead">
                             <span class="av">{{ $msg->is_draft ? '✎' : $initials($msg->from_name, $msg->from_email) }}</span>
                             <div class="who">
