@@ -38,8 +38,9 @@
                     @else
                         <div class="flex flex-wrap gap-1.5">
                             @foreach($this->organizations as $o)
+                                <span class="inline-flex items-center gap-1 rounded-md border border-border bg-surface pr-1" wire:key="org-{{ $o->id }}">
                                 <a href="{{ route('clients.show', $o->id) }}" wire:navigate
-                                   class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border bg-surface text-[12px] text-fg-1 hover:bg-hover">
+                                   class="inline-flex items-center gap-1 px-2 py-1 text-[12px] text-fg-1 hover:bg-hover">
                                     {{ \Illuminate\Support\Str::limit($o->name, 40) }}
                                     @if($o->inn)<span class="mono text-fg-4">· {{ $o->inn }}</span>@endif
                                     @if($o->discount_percent > 0)<span class="text-emerald-700 font-medium">· {{ rtrim(rtrim(number_format($o->discount_percent,2,'.',''),'0'),'.') }}%</span>@endif
@@ -48,6 +49,14 @@
                                               title="Заказчик закреплён: автоматика другие юрлица к адресу не добавляет">закреплён</span>
                                     @endif
                                 </a>
+                                {{-- Ошибочную связь можно снять и не закрепляя заказчика. --}}
+                                @if($contact->pinned_organization_id !== $o->id)
+                                    <button type="button" class="text-fg-4 hover:text-red-700 text-[13px] leading-none px-1"
+                                            wire:click="detachOrganization({{ $o->id }})"
+                                            wire:confirm="Отвязать «{{ \Illuminate\Support\Str::limit($o->name, 40) }}» от этого адреса? Организация и её документы останутся, уйдёт только связь с e-mail."
+                                            title="Отвязать организацию от этого адреса">×</button>
+                                @endif
+                                </span>
                             @endforeach
                         </div>
                     @endif

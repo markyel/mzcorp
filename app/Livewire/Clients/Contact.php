@@ -105,6 +105,29 @@ class Contact extends Component
         );
     }
 
+    /**
+     * Отвязать одну организацию от адреса — без закрепления.
+     *
+     * Нужно, когда связь просто ошибочная: документ ушёл на конечного
+     * заказчика, а закреплять заказчика за адресом рано или незачем.
+     * Закреплённую организацию так не снять: сначала снимите закрепление,
+     * иначе подбор остался бы со ссылкой в никуда.
+     */
+    public function detachOrganization(int $organizationId): void
+    {
+        if ((int) $this->contact->pinned_organization_id === $organizationId) {
+            $this->dispatch('toast', message: 'Это закреплённый заказчик — сначала снимите закрепление.', type: 'error');
+
+            return;
+        }
+
+        $this->contact->organizations()->detach($organizationId);
+        $this->contact->refresh();
+        unset($this->organizations);
+
+        $this->dispatch('toast', message: 'Организация отвязана от адреса.', type: 'success');
+    }
+
     public function unpinOrganization(): void
     {
         $this->contact->forceFill([
