@@ -141,6 +141,57 @@ class MediaPublisherService
         }
     }
 
+    /**
+     * Числовой id сообщества из того, что человек ввёл.
+     *
+     * Руками id найти неудобно: у сообщества с коротким адресом его вообще не
+     * видно. Поэтому принимаем всё, что есть под рукой — ссылку, короткое имя,
+     * club123456 или сам номер, — и добираем недостающее у ВК.
+     *
+     * @return array{ok: bool, id: ?string, message: string}
+     */
+    public function resolveVkOwnerId(string $token, string $input): array
+    {
+        $raw = trim($input);
+        if ($raw === '') {
+            return ['ok' => false, 'id' => null, 'message' => 'Пустой адрес сообщества.'];
+        }
+
+        // vk.com/club123 · https://vk.com/myzip · @myzip — берём последний кусок.
+        $slug = preg_replace('~^https?://~i', '', $raw) ?? $raw;
+        $slug = preg_replace('~^(m\.)?vk\.(com|ru)/~i', '', $slug) ?? $slug;
+        $slug = ltrim(trim(explode('?', $slug)[0], "/ \t\n\r"), '@');
+
+        if (preg_match('~^-?\d+$~', $slug) === 1) {
+            return ['ok' => true, 'id' => ltrim($slug, '-'), 'message' => 'id принят как есть.'];
+        }
+        if (preg_match('~^(club|public|event)(\d+)$~i', $slug, $m) === 1) {
+            return ['ok' => true, 'id' => $m[2], 'message' => 'id взят из адреса.'];
+        }
+
+        try {
+            $r = Http::timeout(self::TIMEOUT)->asForm()->post('https://api.vk.com/method/groups.getById', [
+                'group_id' => $slug,
+                'access_token' => $token,
+                'v' => self::VK_API_VERSION,
+            ])->json();
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'id' => null, 'message' => 'ВК не ответил: '.$e->getMessage()];
+        }
+
+        if (isset($r['error'])) {
+            return ['ok' => false, 'id' => null, 'message' => 'ВК: '.($r['error']['error_msg'] ?? 'ошибка')];
+        }
+
+        $group = $r['response']['groups'][0] ?? $r['response'][0] ?? null;
+        $id = $group['id'] ?? null;
+        if (! $id) {
+            return ['ok' => false, 'id' => null, 'message' => 'ВК не вернул id по этому адресу.'];
+        }
+
+        return ['ok' => true, 'id' => (string) $id, 'message' => 'Сообщество «'.($group['name'] ?? '').'», id '.$id.'.'];
+    }
+
     /** Заголовок отдельной строкой: у постов в ленте своей шапки нет. */
     private function text(MediaPublication $publication): string
     {

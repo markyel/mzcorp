@@ -261,10 +261,25 @@ class MediaPlan extends Component
             $secrets[$targetKey] = trim($this->credTarget);
         }
 
+        // У ВК числовой id сообщества руками найти неудобно, а у сообщества с
+        // коротким адресом его просто не видно. Принимаем ссылку или короткое
+        // имя и дорешиваем id по токену — на стене он всё равно нужен числом.
+        if ($ch->kind === 'vk' && ! empty($secrets['owner_id']) && ! empty($secrets['access_token'])) {
+            $resolved = app(MediaPublisherService::class)
+                ->resolveVkOwnerId((string) $secrets['access_token'], (string) $secrets['owner_id']);
+            if (! $resolved['ok']) {
+                $this->error = 'Не удалось определить сообщество: '.$resolved['message'];
+
+                return;
+            }
+            $secrets['owner_id'] = $resolved['id'];
+            $this->flash = $resolved['message'].' ';
+        }
+
         $ch->writeSecrets($secrets);
         $ch->save();
 
-        $this->flash = 'Доступ сохранён. Проверьте связь — публикация пойдёт только после этого.';
+        $this->flash = ($this->flash ?? '').'Доступ сохранён. Проверьте связь — публикация пойдёт только после этого.';
         $this->cancelCredentials();
         unset($this->channels);
     }
