@@ -9,6 +9,7 @@ use App\Models\OutboundQuote;
 use App\Services\Clients\RequestOrganizationResolver;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
+use Smalot\PdfParser\Parser;
 
 /**
  * Извлечение реквизитов ПОКУПАТЕЛЯ (организации) из PDF внешних КП/счетов,
@@ -119,7 +120,7 @@ class ClientsExtractRequisitesCommand extends Command
                     $org->address = $buyer['address'];
                 }
                 if (trim((string) ($org->name ?? '')) === '') {
-                    $org->name = 'ИНН ' . $buyer['inn'];
+                    $org->name = 'ИНН '.$buyer['inn'];
                 }
                 $org->save();
                 $this->linkEmail($org, (string) (optional($q->request)->client_email ?? ''), $stats);
@@ -163,7 +164,7 @@ class ClientsExtractRequisitesCommand extends Command
                 $res['kpp'] = $mk[1];
             }
             if (preg_match('/(?:КПП\D{0,4}\d{9}|ИНН\D{0,4}\d{10,12})\s*,?\s*(.+)$/iu', $m[2], $ma)) {
-                $res['address'] = trim(mb_substr(trim($ma[1]), 0, 160), " ,;");
+                $res['address'] = trim(mb_substr(trim($ma[1]), 0, 160), ' ,;');
             }
 
             return $res;
@@ -253,7 +254,7 @@ class ClientsExtractRequisitesCommand extends Command
     {
         $cut = preg_split('/\s*(?:Заказчик|Покупатель|Поставщик|Исполнитель|Карта клиента|Ответственный|тел\.?:|e-?mail)/iu', trim($raw))[0] ?? $raw;
 
-        return trim(mb_substr(trim($cut), 0, 160), " ,;:");
+        return trim(mb_substr(trim($cut), 0, 160), ' ,;:');
     }
 
     /** Название похоже на организацию: есть форма собственности. */
@@ -302,6 +303,16 @@ class ClientsExtractRequisitesCommand extends Command
             return;
         }
         $contact = ClientContact::firstOrCreate(['email' => $email]);
+
+        // Закреплённый адрес не обогащаем: у посредника документы уходят на
+        // конечных заказчиков, и одиннадцать таких PDF за год делали адрес
+        // «многоюрлицным» — система начинала выбирать, чьи условия применить.
+        if ($contact->pinned_organization_id !== null && (int) $contact->pinned_organization_id !== (int) $org->id) {
+            $stats['pinned_skipped'] = ($stats['pinned_skipped'] ?? 0) + 1;
+
+            return;
+        }
+
         if (! $org->contacts()->where('client_contacts.id', $contact->id)->exists()) {
             $org->contacts()->attach($contact->id);
             $stats['links']++;
@@ -324,7 +335,7 @@ class ClientsExtractRequisitesCommand extends Command
             return null;
         }
         try {
-            $text = (new \Smalot\PdfParser\Parser())
+            $text = (new Parser)
                 ->parseFile(Storage::disk($disk)->path($att->file_path))
                 ->getText();
         } catch (\Throwable $e) {

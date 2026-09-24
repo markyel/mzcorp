@@ -43,8 +43,57 @@
                                     {{ \Illuminate\Support\Str::limit($o->name, 40) }}
                                     @if($o->inn)<span class="mono text-fg-4">· {{ $o->inn }}</span>@endif
                                     @if($o->discount_percent > 0)<span class="text-emerald-700 font-medium">· {{ rtrim(rtrim(number_format($o->discount_percent,2,'.',''),'0'),'.') }}%</span>@endif
+                                    @if($contact->pinned_organization_id === $o->id)
+                                        <span class="chip text-[10px]" style="background:var(--emerald-50);color:var(--emerald-700)"
+                                              title="Заказчик закреплён: автоматика другие юрлица к адресу не добавляет">закреплён</span>
+                                    @endif
                                 </a>
                             @endforeach
+                        </div>
+                    @endif
+
+                    {{-- Закрепление заказчика. Реестр наполняется сам — из реквизитов
+                         покупателя в наших же PDF. Для посредника это ломается: счёт
+                         уходит на конечного клиента, и адрес обрастает чужими юрлицами. --}}
+                    @if($this->organizations->isNotEmpty())
+                        <div class="mt-3 pt-2 border-t border-border-subtle">
+                            @if($contact->isPinned())
+                                <div class="text-[12px] text-fg-2">
+                                    Заказчик закреплён: <b>{{ $contact->pinnedOrganization?->name }}</b>
+                                    @if($contact->pinned_at)
+                                        <span class="text-fg-4">· {{ $contact->pinned_at->format('d.m.Y') }}</span>
+                                    @endif
+                                    @if($contact->pinnedBy)<span class="text-fg-4">· {{ $contact->pinnedBy->name }}</span>@endif
+                                </div>
+                                <div class="text-[11px] text-fg-4 mt-1">
+                                    Разбор реквизитов и ночной backfill другие организации к этому адресу
+                                    не добавляют, а КП и авто-КП берут условия закреплённой.
+                                </div>
+                                <button type="button" class="btn btn-xs mt-2" wire:click="unpinOrganization"
+                                        wire:confirm="Снять закрепление? Адрес снова начнёт обрастать организациями из документов.">
+                                    снять закрепление
+                                </button>
+                            @else
+                                <div class="text-[11.5px] text-fg-3 mb-1">Закрепить заказчика за адресом:</div>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <select wire:model="pinOrgId"
+                                            class="h-[30px] px-2 border border-border rounded-md bg-surface text-[12px]">
+                                        <option value="">— организация —</option>
+                                        @foreach($this->organizations as $o)
+                                            <option value="{{ $o->id }}">{{ \Illuminate\Support\Str::limit($o->name, 44) }}</option>
+                                        @endforeach
+                                    </select>
+                                    <button type="button" class="btn btn-xs" wire:click="pinOrganization(false)">закрепить</button>
+                                    <button type="button" class="btn btn-xs btn-primary" wire:click="pinOrganization(true)"
+                                            wire:confirm="Закрепить и снять связи с остальными организациями этого адреса?">
+                                        закрепить и убрать лишние
+                                    </button>
+                                </div>
+                                <div class="text-[11px] text-fg-4 mt-1">
+                                    Нужно для посредников: они присылают заявки с одного адреса, а счета уходят
+                                    на конечных заказчиков — и адрес обрастает чужими юрлицами.
+                                </div>
+                            @endif
                         </div>
                     @endif
                 </div>

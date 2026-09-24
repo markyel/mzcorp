@@ -7,10 +7,12 @@ use App\Enums\InvoiceStatus;
 use App\Enums\RequestStatus;
 use App\Models\ClientContact;
 use App\Models\Invoice;
+use App\Models\Organization;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
 use App\Models\SupplierInquiry;
 use App\Services\Mail\ClientNotificationOptoutService;
+use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -24,7 +26,9 @@ class Contact extends Component
     public ClientContact $contact;
 
     public string $full_name = '';
+
     public string $phone = '';
+
     public string $notes = '';
 
     public function mount(ClientContact $contact): void
@@ -53,13 +57,73 @@ class Contact extends Component
         $this->dispatch('toast', message: 'Контакт сохранён.', type: 'success');
     }
 
+    /** Организация, выбранная для закрепления в форме. */
+    public string $pinOrgId = '';
+
+    /**
+     * Закрепить заказчика за адресом.
+     *
+     * После этого автоматика (разбор реквизитов из наших PDF, ночной backfill)
+     * перестаёт цеплять к адресу другие юрлица, а подбор организации для КП и
+     * авто-КП всегда даёт закреплённую. Нужно для посредников: с адреса Liftway
+     * ушло 1928 документов на ИП Маркелова и одиннадцать — на конечных
+     * заказчиков, и адрес стал «многоюрлицным».
+     *
+     * @param  bool  $detachOthers  Снять уже налипшие связи с другими организациями.
+     */
+    public function pinOrganization(bool $detachOthers = false): void
+    {
+        $orgId = ctype_digit(trim($this->pinOrgId)) ? (int) $this->pinOrgId : 0;
+        if ($orgId <= 0 || ! $this->contact->organizations->contains('id', $orgId)) {
+            $this->dispatch('toast', message: 'Выберите организацию из списка.', type: 'error');
+
+            return;
+        }
+
+        $this->contact->forceFill([
+            'pinned_organization_id' => $orgId,
+            'pinned_at' => now(),
+            'pinned_by_user_id' => auth()->id(),
+        ])->save();
+
+        $detached = 0;
+        if ($detachOthers) {
+            $others = $this->contact->organizations->pluck('id')->reject(fn ($id) => (int) $id === $orgId);
+            if ($others->isNotEmpty()) {
+                $this->contact->organizations()->detach($others->all());
+                $detached = $others->count();
+            }
+        }
+
+        $this->contact->refresh();
+        unset($this->organizations);
+
+        $this->dispatch(
+            'toast',
+            message: 'Заказчик закреплён.'.($detached > 0 ? ' Лишних связей снято: '.$detached.'.' : ''),
+            type: 'success',
+        );
+    }
+
+    public function unpinOrganization(): void
+    {
+        $this->contact->forceFill([
+            'pinned_organization_id' => null,
+            'pinned_at' => null,
+            'pinned_by_user_id' => null,
+        ])->save();
+
+        $this->contact->refresh();
+        $this->dispatch('toast', message: 'Закрепление снято — адрес снова обогащается автоматически.', type: 'success');
+    }
+
     private function email(): string
     {
         return mb_strtolower((string) $this->contact->email);
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, \App\Models\Organization>
+     * @return Collection<int, Organization>
      */
     #[Computed]
     public function organizations()
@@ -131,7 +195,7 @@ class Contact extends Component
      * Запросы поставщику от этого контрагента (если он бывает и поставщиком).
      * Раздел [[suppliers]] — переписка по нашим запросам расценки.
      *
-     * @return \Illuminate\Support\Collection<int, SupplierInquiry>
+     * @return Collection<int, SupplierInquiry>
      */
     #[Computed]
     public function supplierInquiries()
@@ -145,7 +209,7 @@ class Contact extends Component
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, RequestModel>
+     * @return Collection<int, RequestModel>
      */
     #[Computed]
     public function recentRequests()

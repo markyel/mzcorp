@@ -206,7 +206,7 @@ class ClientsBackfillCommand extends Command
             $stats['orgs']++;
         }
         if (trim((string) ($org->name ?? '')) === '') {
-            $org->name = $name !== '' ? $name : ('ИНН ' . $inn);
+            $org->name = $name !== '' ? $name : ('ИНН '.$inn);
         }
 
         return $org;
@@ -251,6 +251,15 @@ class ClientsBackfillCommand extends Command
             return;
         }
         $contact = ClientContact::firstOrCreate(['email' => $email]);
+
+        // Закреплённый за организацией адрес другими не обогащаем — см.
+        // ClientContact::pinnedOrganization.
+        if ($contact->pinned_organization_id !== null && (int) $contact->pinned_organization_id !== (int) $org->id) {
+            $stats['pinned_skipped'] = ($stats['pinned_skipped'] ?? 0) + 1;
+
+            return;
+        }
+
         if (! $org->contacts()->where('client_contacts.id', $contact->id)->exists()) {
             $org->contacts()->attach($contact->id);
             $stats['links']++;
@@ -260,7 +269,7 @@ class ClientsBackfillCommand extends Command
     private function isInternal(string $email): bool
     {
         foreach ($this->internalDomains as $d) {
-            if ($d !== '' && str_ends_with($email, '@' . $d)) {
+            if ($d !== '' && str_ends_with($email, '@'.$d)) {
                 return true;
             }
         }

@@ -111,7 +111,18 @@ class RequestOrganizationResolver
             ->with('organizations')
             ->first();
 
-        if ($contact === null || $contact->organizations->count() !== 1) {
+        if ($contact === null) {
+            return null;
+        }
+
+        // Закреплённый заказчик снимает неоднозначность: адрес посредника
+        // числится за несколькими юрлицами из-за отдельных документов на
+        // конечных клиентов, но заявки его — всегда одного заказчика.
+        if ($contact->pinned_organization_id !== null) {
+            return $contact->pinnedOrganization;
+        }
+
+        if ($contact->organizations->count() !== 1) {
             return null;
         }
 

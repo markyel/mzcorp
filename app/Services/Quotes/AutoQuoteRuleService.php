@@ -7,6 +7,7 @@ use App\Enums\MatchPath;
 use App\Enums\OrganizationPricingMode;
 use App\Models\CatalogItem;
 use App\Models\CatalogPriceChange;
+use App\Models\ClientContact;
 use App\Models\EmailMessage;
 use App\Models\Organization;
 use App\Models\OutboundQuote;
@@ -17,6 +18,7 @@ use App\Services\Clients\ClientDiscountImportService;
 use App\Services\Mail\EmailTextCleanerService;
 use App\Services\Mail\PostSaleFulfillmentDetector;
 use App\Services\Quotations\QuotationService;
+use Illuminate\Support\Collection;
 
 /**
  * Правило автоматической выдачи КП: годится ли заявка на автомат и что именно
@@ -194,7 +196,7 @@ class AutoQuoteRuleService
      * 812,88). Пропустить режим здесь значит систематически врать в цене
      * целому классу клиентов.
      *
-     * @param  \Illuminate\Support\Collection<int, RequestItem>  $items
+     * @param  Collection<int, RequestItem>  $items
      * @return array<int, array<string, mixed>>
      */
     public function lines($items, float $discountPercent = 0.0, ?Organization $organization = null): array
@@ -364,6 +366,14 @@ class AutoQuoteRuleService
             return null;
         }
 
+        // Закреплённый заказчик отменяет любой подбор: адрес посредника
+        // числится за несколькими юрлицами только из-за отдельных документов
+        // на конечных клиентов, и угадывать по ним нельзя.
+        $pinnedId = ClientContact::pinnedOrganizationIdFor($email);
+        if ($pinnedId !== null) {
+            return Organization::find($pinnedId);
+        }
+
         $candidates = Organization::query()
             ->whereHas('contacts', fn ($q) => $q->whereRaw('lower(email) = ?', [$email]))
             ->get();
@@ -388,7 +398,7 @@ class AutoQuoteRuleService
      * «Себестоимость + наценка» считаем лучшим вариантом: этот режим для
      * особых клиентов и почти всегда даёт цену ниже каталожной со скидкой.
      *
-     * @param  \Illuminate\Support\Collection<int, Organization>  $candidates
+     * @param  Collection<int, Organization>  $candidates
      * @param  callable(Organization): float  $discountOf
      */
     public static function mostGenerous($candidates, callable $discountOf): ?Organization
@@ -645,7 +655,7 @@ class AutoQuoteRuleService
         return ['key' => $key, 'label' => $label, 'ok' => $ok, 'detail' => $detail];
     }
 
-    /** @param  \Illuminate\Support\Collection<int, RequestItem>  $items */
+    /** @param  Collection<int, RequestItem>  $items */
     private function matchPathsDetail($items): string
     {
         $paths = $items->map(fn ($i) => self::matchPath($i)?->label() ?? 'не сматчена')
@@ -654,7 +664,7 @@ class AutoQuoteRuleService
         return $paths === [] ? 'позиций нет' : implode(', ', $paths);
     }
 
-    /** @param  \Illuminate\Support\Collection<int, RequestItem>  $items */
+    /** @param  Collection<int, RequestItem>  $items */
     private function pricesDetail($items): string
     {
         $stale = $items->filter(fn ($i) => ! (bool) ($i->catalogItem?->is_price_actual ?? false))->count();
