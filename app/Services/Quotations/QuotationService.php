@@ -10,7 +10,8 @@ use App\Models\QuotationItem;
 use App\Models\Request;
 use App\Models\RequestItem;
 use App\Models\User;
-use Illuminate\Support\Carbon;
+use App\Services\Clients\ClientDiscountImportService;
+use App\Services\Quotes\AutoQuoteRuleService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -44,9 +45,17 @@ class QuotationService
             // Режим цены наследуется от организации-заказчика (если привязана).
             // cost_plus → цена = себестоимость + наценка, скидка обнуляется
             // (см. recalcTotals). Наценку фиксируем на КП для immutability.
-            $org = $request->organization;
+            // Организацию ищем так же, как автоматическое КП: сначала привязка
+            // заявки, потом — по адресу клиента. Без этого КП, собранное руками
+            // по заявке без привязки, выходило вообще без скидки, хотя у того же
+            // адреса в системе есть юрлицо с условиями (кейс M-2026-17117:
+            // order@liftway.store, скидка не подтянулась ни разу).
+            $org = $request->organization ?: app(AutoQuoteRuleService::class)->organizationFor($request);
             $pricingMode = $org?->pricing_mode ?? OrganizationPricingMode::Standard;
             $isCostPlus = $pricingMode === OrganizationPricingMode::CostPlus;
+            // Скидка — из карточки организации или выгрузки по ИНН. В режиме
+            // «себестоимость + наценка» скидки нет: цена считается от закупочной.
+            $discount = $isCostPlus ? 0.0 : app(ClientDiscountImportService::class)->discountFor($org);
 
             $quotation = new Quotation([
                 'request_id' => $request->id,
@@ -56,7 +65,10 @@ class QuotationService
                 'recipient_name' => $request->client_name ?: $request->client_email,
                 'responsible_user_id' => $request->assigned_user_id ?: $byUser->id,
                 'valid_days' => 5,
-                'discount_percent' => 0,
+                'discount_percent' => $discount,
+                // ИНН подставляем, когда организация опознана: он и в печатной
+                // форме нужен, и показывает менеджеру, чьи условия применились.
+                'recipient_inn' => $org?->inn,
                 'pricing_mode' => $pricingMode->value,
                 'cost_markup_percent' => $isCostPlus
                     ? (float) config('services.pricing.cost_plus_markup', 15)
@@ -122,9 +134,9 @@ class QuotationService
             $current->forceFill([
                 'status' => QuotationStatus::Cancelled->value,
                 'cancelled_at' => now(),
-                'notes' => trim(($current->notes ? $current->notes . "\n" : '')
-                    . 'Заморожена при создании v' . $clone->version
-                    . ($reason ? ': ' . $reason : '')),
+                'notes' => trim(($current->notes ? $current->notes."\n" : '')
+                    .'Заморожена при создании v'.$clone->version
+                    .($reason ? ': '.$reason : '')),
             ])->save();
 
             Log::info('QuotationService: next version created', [
@@ -255,9 +267,8 @@ class QuotationService
      * Защита от продажи ниже catalog_items.price_min даже когда менеджер
      * поставил большую скидку.
      *
-     * @param  float       $catalogUnitPrice
      * @param  float|null  $catalogPriceMin  null = нет защиты, считаем как обычно
-     * @param  float       $discountPercent  0..100
+     * @param  float  $discountPercent  0..100
      */
     public function computeFinalUnitPrice(float $catalogUnitPrice, ?float $catalogPriceMin, float $discountPercent): float
     {
@@ -346,7 +357,7 @@ class QuotationService
     {
         $patch = ['status' => QuotationStatus::Rejected->value, 'declined_at' => now()];
         if ($reason) {
-            $patch['notes'] = trim(($quotation->notes ? $quotation->notes . "\n" : '') . 'Отклонено: ' . $reason);
+            $patch['notes'] = trim(($quotation->notes ? $quotation->notes."\n" : '').'Отклонено: '.$reason);
         }
         $quotation->forceFill($patch)->save();
     }
@@ -355,7 +366,7 @@ class QuotationService
     {
         $patch = ['status' => QuotationStatus::Cancelled->value, 'cancelled_at' => now()];
         if ($reason) {
-            $patch['notes'] = trim(($quotation->notes ? $quotation->notes . "\n" : '') . 'Отменено: ' . $reason);
+            $patch['notes'] = trim(($quotation->notes ? $quotation->notes."\n" : '').'Отменено: '.$reason);
         }
         $quotation->forceFill($patch)->save();
     }
