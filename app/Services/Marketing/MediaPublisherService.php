@@ -62,13 +62,16 @@ class MediaPublisherService
             return ['ok' => false, 'message' => 'У канала не заполнен доступ: нужен токен и адрес места публикации.', 'url' => null];
         }
 
-        $text = $this->text($publication);
+        // Артикулы в тексте превращаем в ссылки на карточки товара: читателю
+        // из ленты идти больше некуда, а по артикулу он искать не станет.
+        ['text' => $text, 'html' => $html] = app(MediaLinkService::class)
+            ->linkify($this->text($publication), (string) $channel->kind);
 
         $images = $this->usableImages($publication->images());
 
         $res = match ($channel->kind) {
             'vk' => $this->postToVk($channel, $text, $images),
-            'telegram' => $this->postToTelegram($channel, $text, $images),
+            'telegram' => $this->postToTelegram($channel, $text, $images, $html),
             default => ['ok' => false, 'message' => 'Канал не поддержан.', 'url' => null, 'external_id' => null],
         };
 
@@ -434,17 +437,19 @@ class MediaPublisherService
      * @param  list<string>  $images
      * @return array{ok: bool, message: string, url: ?string, external_id: ?string}
      */
-    private function postToTelegram(MediaChannel $channel, string $text, array $images = []): array
+    private function postToTelegram(MediaChannel $channel, string $text, array $images = [], bool $html = false): array
     {
         $api = 'https://api.telegram.org/bot'.$channel->secret('bot_token').'/';
         $chatId = $channel->secret('chat_id');
+        $mode = $html ? 'HTML' : null;
 
         try {
             // С картинками пост уходит альбомом. Подпись у альбома всего 1024
             // знака — если текст длиннее, шлём альбом без подписи, а текст
             // отдельным сообщением следом: обрезать материал ради формата нельзя.
+            // Считаем по видимому тексту: html-разметка ссылок в лимит не идёт.
             if ($images !== []) {
-                $fits = mb_strlen($text) <= 1024;
+                $fits = mb_strlen($html ? strip_tags($text) : $text) <= 1024;
                 $media = [];
                 $request = Http::timeout(self::TIMEOUT * 3);
 
@@ -465,6 +470,7 @@ class MediaPublisherService
                         'type' => 'photo',
                         'media' => 'attach://'.$name,
                         'caption' => $media === [] && $fits ? $text : null,
+                        'parse_mode' => $media === [] && $fits ? $mode : null,
                     ]);
                 }
 
@@ -488,11 +494,12 @@ class MediaPublisherService
             }
 
             $r = Http::timeout(self::TIMEOUT)
-                ->post($api.'sendMessage', [
+                ->post($api.'sendMessage', array_filter([
                     'chat_id' => $chatId,
                     'text' => mb_substr($text, 0, 4096),
+                    'parse_mode' => $mode,
                     'disable_web_page_preview' => true,
-                ])->json();
+                ]))->json();
         } catch (\Throwable $e) {
             return ['ok' => false, 'message' => 'Telegram не ответил: '.$e->getMessage(), 'url' => null, 'external_id' => null];
         }

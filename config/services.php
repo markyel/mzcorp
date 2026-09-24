@@ -348,6 +348,10 @@ return [
     // Override в Настройках приложения (app_setting 'marketing.block_position').
     'marketing' => [
         'block_position' => env('MARKETING_BLOCK_POSITION', 'below'),
+        // Карточка товара для ссылок в публикациях медиаплана. По умолчанию —
+        // тот же адрес, что отдаётся в товарный фид Директа, чтобы читатель из
+        // ленты и из рекламы попадал на одну и ту же страницу.
+        'product_url' => env('MARKETING_PRODUCT_URL'),
     ],
 
     'mail_outbound' => [
@@ -450,8 +454,8 @@ return [
             explode(',', (string) env(
                 'MAIL_PUBLIC_MAIL_DOMAINS',
                 'mail.ru,inbox.ru,list.ru,bk.ru,internet.ru,gmail.com,yandex.ru,ya.ru,yandex.com,'
-                . 'rambler.ru,lenta.ru,autorambler.ru,myrambler.ru,outlook.com,hotmail.com,live.com,'
-                . 'icloud.com,me.com,proton.me,protonmail.com,gmx.com,gmx.de'
+                .'rambler.ru,lenta.ru,autorambler.ru,myrambler.ru,outlook.com,hotmail.com,live.com,'
+                .'icloud.com,me.com,proton.me,protonmail.com,gmx.com,gmx.de'
             ))
         )),
 
