@@ -3,13 +3,20 @@
 namespace App\Services\Request;
 
 use App\Enums\MailboxType;
-use App\Enums\Role as RoleEnum;
+use App\Enums\RequestActivityType;
 use App\Enums\RequestStatus;
+use App\Enums\Role as RoleEnum;
+use App\Jobs\Mail\DeliverToManagerInboxJob;
 use App\Models\Request;
 use App\Models\RequestAssignment;
 use App\Models\User;
+use App\Notifications\RequestAssignedNotification;
+use App\Services\Mail\ClientNotificationService;
+use App\Services\Settings\SettingsService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Phase 1 sticky + round-robin.
@@ -90,7 +97,7 @@ class AssignmentService
 
     public function mode(): string
     {
-        $mode = (string) app(\App\Services\Settings\SettingsService::class)->get(self::SETTING_MODE, self::MODE_SMART);
+        $mode = (string) app(SettingsService::class)->get(self::SETTING_MODE, self::MODE_SMART);
 
         return $mode === self::MODE_PROPORTIONAL ? self::MODE_PROPORTIONAL : self::MODE_SMART;
     }
@@ -100,11 +107,10 @@ class AssignmentService
         private readonly RequestActivityService $activity,
         private readonly DealerEmailService $dealers,
         private readonly ManagerComplexityGate $complexityGate,
-    ) {
-    }
+    ) {}
 
     /**
-     * @return User|null  null если в системе нет активных менеджеров.
+     * @return User|null null если в системе нет активных менеджеров.
      */
     public function autoAssign(Request $request, ?int $byUserId = null): ?User
     {
@@ -178,7 +184,7 @@ class AssignmentService
             // рендерим разной иконкой / tooltip'ом. Старые записи (165
             // backfill) останутся как plain `auto_sticky` без kind — UI
             // делает graceful fallback.
-            $reason = 'auto_sticky:' . json_encode(
+            $reason = 'auto_sticky:'.json_encode(
                 ['kind' => $sticky['kind'], 'linked' => $sticky['linked']],
                 JSON_UNESCAPED_UNICODE,
             );
@@ -189,7 +195,7 @@ class AssignmentService
             // reason — РОПу видно, почему именно этому менеджеру (детерминир.).
             // Формат: auto_round_robin:{"closes":{1:140},"today":{1:6},"tw":{1:3.1}}
             $reason = $rr
-                ? 'auto_round_robin:' . json_encode(
+                ? 'auto_round_robin:'.json_encode(
                     array_filter([
                         'closes' => $rr['closes'],
                         'today' => $rr['today'],
@@ -235,7 +241,7 @@ class AssignmentService
             // первого открытия менеджером (onManagerOpened сбросит).
             $this->attention->onAssigned($request);
 
-            $this->activity->touch($request, \App\Enums\RequestActivityType::Assigned);
+            $this->activity->touch($request, RequestActivityType::Assigned);
         });
 
         // Защитная сетка. По новому правилу заявки на личный ящик недоступного
@@ -247,10 +253,10 @@ class AssignmentService
         // делегируем доступному коллеге, чтобы не зависла. Non-fatal.
         if ($manager->isUnavailable()) {
             try {
-                app(\App\Services\Request\ManagerUnavailabilityService::class)
+                app(ManagerUnavailabilityService::class)
                     ->delegateOne($request->fresh(), $manager, $byUserId ? User::find($byUserId) : null);
             } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::warning(
+                Log::warning(
                     'AssignmentService: auto-delegate to acting failed (non-fatal)',
                     ['request_id' => $request->id, 'manager_id' => $manager->id, 'error' => $e->getMessage()],
                 );
@@ -259,9 +265,9 @@ class AssignmentService
 
         // Foundation Фаза 2: in-app уведомление менеджеру о новой заявке.
         try {
-            $manager->notify(\App\Notifications\RequestAssignedNotification::from($request->fresh(), $reason));
+            $manager->notify(RequestAssignedNotification::from($request->fresh(), $reason));
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning(
+            Log::warning(
                 'AssignmentService: notification dispatch failed (non-fatal)',
                 ['request_id' => $request->id, 'manager_id' => $manager->id, 'error' => $e->getMessage()],
             );
@@ -273,7 +279,7 @@ class AssignmentService
         // как новое.
         $email = $request->emailMessage;
         if ($email) {
-            \App\Jobs\Mail\DeliverToManagerInboxJob::dispatch($email->id, $manager->id);
+            DeliverToManagerInboxJob::dispatch($email->id, $manager->id);
         }
 
         // Phase 6: автоматическое уведомление клиенту «Заявка принята в работу».
@@ -293,10 +299,10 @@ class AssignmentService
             && empty($email->in_reply_to)
         ) {
             try {
-                app(\App\Services\Mail\ClientNotificationService::class)
+                app(ClientNotificationService::class)
                     ->sendOrderReceived($request->refresh());
             } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::warning(
+                Log::warning(
                     'AssignmentService: order_received notification failed (non-fatal)',
                     ['request_id' => $request->id, 'error' => $e->getMessage()]
                 );
@@ -416,13 +422,32 @@ class AssignmentService
      *
      * Никаких поправок на скорость закрытия, текущую загрузку и потолок
      * сложности: режим включают именно тогда, когда нужен ровный поток и
-     * предсказуемость, а не оптимизация. Очередь считается по назначенным
-     * сегодня: берём того, кому меньше всех «додано» относительно его доли.
+     * предсказуемость, а не оптимизация. Очередь считается по РАЗДАННЫМ
+     * сегодня — заявки, прилетевшие в личные ящики, в счёт не идут: берём
+     * того, кому меньше всех «додано» относительно его доли.
      * Недоступные менеджеры в список не попадают — их отсеял вызывающий.
      *
      * @param  Collection<int, User>  $managers
      * @return array{user: User, shares: array<int, float>, today: array<int, int>}|null
      */
+    /**
+     * Назначения, которые сделал распределитель общего потока.
+     *
+     * Всё остальное — письмо в личный ящик (`auto_sticky` с kind
+     * direct_mailbox), ручная передача РОПом, замещение — к пропорции
+     * отношения не имеет и в счётчик доли не попадает.
+     *
+     * @param  Collection<int, int>  $userIds
+     */
+    private function distributedAssignments(Collection $userIds): Builder
+    {
+        return RequestAssignment::query()
+            ->whereIn('user_id', $userIds)
+            ->where(fn ($w) => $w
+                ->where('reason', 'like', 'auto_proportional%')
+                ->orWhere('reason', 'like', 'auto_twin%'));
+    }
+
     private function pickProportionalManager(Collection $managers): ?array
     {
         if ($managers->isEmpty()) {
@@ -430,19 +455,24 @@ class AssignmentService
         }
 
         $ids = $managers->pluck('id');
-        $todayByUser = Request::query()
-            ->whereIn('assigned_user_id', $ids)
-            ->where('assigned_at', '>=', now()->startOfDay())
-            ->groupBy('assigned_user_id')
-            ->selectRaw('assigned_user_id, COUNT(*) AS today')
-            ->pluck('today', 'assigned_user_id');
 
-        $lastByUser = Request::query()
-            ->whereIn('assigned_user_id', $ids)
+        // Считаем ТОЛЬКО то, что раздали сами: заявка с личного ящика остаётся
+        // за владельцем, к пропорции она отношения не имеет. Иначе менеджер, к
+        // которому клиенты пишут лично, выглядел бы «уже загруженным» и получал
+        // бы меньше общего потока — ровно то, чего пропорциональный режим
+        // должен избегать. Учитываем и близнецов: они приходят с общего потока
+        // и по правилу садятся на того же менеджера, значит долю занимают.
+        $todayByUser = $this->distributedAssignments($ids)
+            ->where('assigned_at', '>=', now()->startOfDay())
+            ->groupBy('user_id')
+            ->selectRaw('user_id, COUNT(*) AS today')
+            ->pluck('today', 'user_id');
+
+        $lastByUser = $this->distributedAssignments($ids)
             ->whereNotNull('assigned_at')
-            ->groupBy('assigned_user_id')
-            ->selectRaw('assigned_user_id, MAX(assigned_at) AS last_assigned_at')
-            ->pluck('last_assigned_at', 'assigned_user_id');
+            ->groupBy('user_id')
+            ->selectRaw('user_id, MAX(assigned_at) AS last_assigned_at')
+            ->pluck('last_assigned_at', 'user_id');
 
         $weights = $managers->mapWithKeys(fn (User $u) => [
             $u->id => max(1, min(500, (int) ($u->load_weight ?? 100))) / 100.0,
@@ -842,7 +872,7 @@ class AssignmentService
         $gateNote = null;
         if ($gate['excluded'] !== []) {
             $gateNote = ['excluded' => array_values($gate['excluded']), 'relaxed' => $gate['relaxed']];
-            \Illuminate\Support\Facades\Log::info('AssignmentService: complexity gate applied', [
+            Log::info('AssignmentService: complexity gate applied', [
                 'request_id' => $request->id,
                 'complexity_level' => $request->complexity_level?->value,
                 'excluded_user_ids' => $gateNote['excluded'],
@@ -872,7 +902,7 @@ class AssignmentService
         $cases = '';
         foreach ($statusWeights as $status => $weight) {
             if (isset($validStatuses[$status])) {
-                $cases .= 'WHEN status = ' . DB::getPdo()->quote((string) $status) . ' THEN ' . (float) $weight . ' ';
+                $cases .= 'WHEN status = '.DB::getPdo()->quote((string) $status).' THEN '.(float) $weight.' ';
             }
         }
         $loadExpr = $cases === '' ? 'COUNT(*)' : "SUM(CASE {$cases} ELSE 1 END)";
