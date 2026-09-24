@@ -23,7 +23,7 @@ class MediaPublication extends Model
 
     protected $fillable = [
         'media_topic_id', 'media_channel_id', 'title', 'body', 'status',
-        'planned_for', 'published_at', 'url', 'model',
+        'planned_for', 'published_at', 'url', 'model', 'subject_key', 'external_id',
         'media_profile_review_id', 'created_by_user_id',
     ];
 

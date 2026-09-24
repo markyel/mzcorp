@@ -41,7 +41,9 @@ class MediaMaterialService
         }
 
         // Факты для тем «из наших данных». Пусто — тема пишется по брифу.
-        $data = $this->data->factsFor($topic);
+        // Ключ выпуска есть у серийных тем: по нему в следующий раз берётся
+        // следующая категория, а не та же самая.
+        ['key' => $subjectKey, 'facts' => $data] = $this->data->factsWithKey($topic);
         if ($data === '' && $this->data->isDataDriven($topic)) {
             return [
                 'ok' => false,
@@ -64,6 +66,7 @@ class MediaMaterialService
                         (string) $topic->title,
                         $topic->brief,
                         $data,
+                        WriteMaterialPrompt::genreHint((string) $topic->source),
                     )],
                 ],
                 $model,
@@ -97,6 +100,7 @@ class MediaMaterialService
             'media_channel_id' => $channel->id,
             'title' => mb_substr(trim((string) ($parsed['title'] ?? $topic->title)), 0, 300),
             'body' => $body,
+            'subject_key' => $subjectKey,
             'status' => 'draft',
             'planned_for' => $topic->next_due_on ?? now()->toDateString(),
             'model' => $model,

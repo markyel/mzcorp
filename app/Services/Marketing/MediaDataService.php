@@ -2,6 +2,7 @@
 
 namespace App\Services\Marketing;
 
+use App\Models\MediaPublication;
 use App\Models\MediaTopic;
 use Illuminate\Support\Facades\DB;
 
@@ -21,6 +22,9 @@ class MediaDataService
     /** Окно по умолчанию, если у темы не задана регулярность. */
     public const DEFAULT_WINDOW_DAYS = 7;
 
+    /** Ниже этого числа уточнений по категории инструкция не окупается. */
+    public const MIN_CATEGORY_ITEMS = 25;
+
     /** @var list<string> */
     public const DATA_SOURCES = ['catalog_new', 'catalog_price', 'stock_arrivals', 'request_tips'];
 
@@ -36,21 +40,37 @@ class MediaDataService
             'catalog_new' => 'Берём позиции, появившиеся в каталоге за окно темы.',
             'catalog_price' => 'Берём позиции, у которых цена за окно темы снизилась.',
             'stock_arrivals' => 'Журнала поступлений в системе нет: пока показываем позиции, вставшие в наличие вместе с последним импортом.',
-            'request_tips' => 'Считаем, чего чаще всего не хватало в заявках, по которым пришлось писать клиенту уточнение.',
+            'request_tips' => 'Серия: каждый выпуск — инструкция по одной категории товара, о которой ещё не рассказывали. '
+                .'Что именно советовать, видно из того, чего нам не хватало в заявках по этой категории.',
             default => 'Материал пишется по брифу темы.',
         };
     }
 
     public function factsFor(MediaTopic $topic): string
     {
+        return $this->factsWithKey($topic)['facts'];
+    }
+
+    /**
+     * Факты и — для серийных тем — чему посвящён этот выпуск.
+     *
+     * «Советы по оформлению заявок» — не один пост со сводной статистикой, а
+     * серия коротких инструкций: в каждом выпуске одна категория товара, ещё не
+     * разобранная. Ключ выпуска возвращаем наружу, чтобы следующий раз взять
+     * следующую категорию, а не ту же самую.
+     *
+     * @return array{key: ?string, facts: string}
+     */
+    public function factsWithKey(MediaTopic $topic): array
+    {
         $days = max(1, (int) ($topic->cadence_days ?: self::DEFAULT_WINDOW_DAYS));
 
         return match ($topic->source) {
-            'catalog_new' => $this->newItems($days),
-            'catalog_price' => $this->priceDrops($days),
-            'stock_arrivals' => $this->arrivals($days),
-            'request_tips' => $this->requestTips(),
-            default => '',
+            'catalog_new' => ['key' => null, 'facts' => $this->newItems($days)],
+            'catalog_price' => ['key' => null, 'facts' => $this->priceDrops($days)],
+            'stock_arrivals' => ['key' => null, 'facts' => $this->arrivals($days)],
+            'request_tips' => $this->tipsForNextCategory($topic),
+            default => ['key' => null, 'facts' => ''],
         };
     }
 
@@ -166,70 +186,161 @@ class MediaDataService
     }
 
     /**
-     * Из-за чего мы пишем клиентам уточнения.
+     * Инструкция по одной категории товара: чему посвятить следующий выпуск и
+     * что о ней известно.
      *
-     * Считаем по заявкам, которые за квартал уходили в «жду клиента»: чего
-     * не хватало в их позициях. Это и есть материал для советов — не общие
-     * слова «пишите подробнее», а конкретика по категориям деталей.
+     * Серия устроена так: берём категорию, по которой мы чаще всего пишем
+     * уточнения и о которой ещё не рассказывали. Если рассказали обо всех —
+     * возвращаемся к той, что разбирали дольше всех: за квартал состав заявок
+     * успевает поменяться.
+     *
+     * Модель получает три вещи: чего не хватало именно в этой категории,
+     * как клиенты формулируют такие позиции у себя в заявках и как те же
+     * позиции называются в нашем каталоге. Последнее и есть источник
+     * конкретики: по каталожным названиям видно, чем позиции различаются
+     * между собой — серия, символ, подсветка, разъём, размер, — а значит,
+     * что именно клиенту нужно указать, чтобы выбор был однозначным.
+     *
+     * @return array{key: ?string, facts: string}
      */
-    private function requestTips(): string
+    private function tipsForNextCategory(MediaTopic $topic): array
     {
         $since = now()->subDays(90);
 
-        $ids = DB::table('request_state_changes')
+        $requestIds = DB::table('request_state_changes')
             ->where('to_status', 'awaiting_client_clarification')
             ->where('created_at', '>=', $since)
             ->distinct()
             ->pluck('request_id');
 
-        if ($ids->isEmpty()) {
-            return '';
+        if ($requestIds->isEmpty()) {
+            return ['key' => null, 'facts' => ''];
         }
 
-        $stats = DB::table('request_items')
-            ->whereIn('request_id', $ids)
-            ->where('is_active', true)
-            ->selectRaw(
-                "COUNT(*) AS total,
-                 COUNT(*) FILTER (WHERE parsed_article IS NULL OR btrim(parsed_article) = '') AS no_article,
-                 COUNT(*) FILTER (WHERE parsed_brand IS NULL OR btrim(parsed_brand) = '') AS no_brand,
-                 COUNT(*) FILTER (WHERE parsed_qty IS NULL OR parsed_qty <= 0) AS no_qty,
-                 COUNT(*) FILTER (WHERE image_attachment_id IS NULL) AS no_photo,
-                 COUNT(*) FILTER (WHERE catalog_item_id IS NULL) AS no_match"
-            )
-            ->first();
-
-        if ($stats === null || (int) $stats->total === 0) {
-            return '';
-        }
-
-        $pct = fn ($n) => round((int) $n * 100 / (int) $stats->total);
-
-        $top = DB::table('request_items')
-            ->whereIn('request_id', $ids)
+        $categories = DB::table('request_items')
+            ->whereIn('request_id', $requestIds)
             ->where('is_active', true)
             ->whereNotNull('category')
             ->selectRaw('category, COUNT(*) AS c')
             ->groupBy('category')
+            ->havingRaw('COUNT(*) >= ?', [self::MIN_CATEGORY_ITEMS])
             ->orderByDesc('c')
-            ->limit(8)
-            ->get();
+            ->pluck('c', 'category');
 
-        $lines = [
-            'За 90 дней нам пришлось писать уточнение по '.$ids->count().' заявкам.',
-            'В этих заявках '.(int) $stats->total.' позиций, и в них не хватало:',
-            '— артикула: '.$pct($stats->no_article).'% позиций',
-            '— бренда или производителя: '.$pct($stats->no_brand).'% позиций',
-            '— количества: '.$pct($stats->no_qty).'% позиций',
-            '— фотографии детали: '.$pct($stats->no_photo).'% позиций',
-            '— подбор по каталогу не сошёлся сразу: '.$pct($stats->no_match).'% позиций',
-        ];
-
-        if ($top->isNotEmpty()) {
-            $lines[] = 'Чаще всего уточняли позиции этих категорий: '
-                .$top->map(fn ($r) => trim((string) $r->category).' — '.$r->c.' позиций')->implode(', ').'.';
+        if ($categories->isEmpty()) {
+            return ['key' => null, 'facts' => ''];
         }
 
-        return implode("\n", $lines);
+        $category = $this->nextCategory($topic, $categories->keys()->all());
+        if ($category === null) {
+            return ['key' => null, 'facts' => ''];
+        }
+
+        $items = DB::table('request_items')
+            ->whereIn('request_id', $requestIds)
+            ->where('is_active', true)
+            ->where('category', $category);
+
+        $stats = (clone $items)->selectRaw(
+            "COUNT(*) AS total,
+             COUNT(*) FILTER (WHERE parsed_article IS NULL OR btrim(parsed_article) = '') AS no_article,
+             COUNT(*) FILTER (WHERE parsed_brand IS NULL OR btrim(parsed_brand) = '') AS no_brand,
+             COUNT(*) FILTER (WHERE parsed_qty IS NULL OR parsed_qty <= 0) AS no_qty,
+             COUNT(*) FILTER (WHERE image_attachment_id IS NULL) AS no_photo,
+             COUNT(*) FILTER (WHERE catalog_item_id IS NULL) AS no_match"
+        )->first();
+
+        $total = (int) ($stats->total ?? 0);
+        if ($total === 0) {
+            return ['key' => null, 'facts' => ''];
+        }
+        $pct = fn ($n) => (int) round((int) $n * 100 / $total);
+
+        // Как клиенты пишут такие позиции у себя — короткие строки без артикула
+        // показательнее всего: именно из-за них и начинается переписка.
+        $asked = (clone $items)
+            ->whereNotNull('parsed_name')
+            ->orderByRaw('length(parsed_name)')
+            ->limit(12)
+            ->pluck('parsed_name')
+            ->map(fn ($n) => $this->short($n, 80))
+            ->unique()
+            ->values();
+
+        // Чем позиции категории различаются в каталоге — по этим названиям
+        // видно, какие признаки делают выбор однозначным.
+        $catalog = DB::table('request_items as ri')
+            ->join('catalog_items as ci', 'ci.id', '=', 'ri.catalog_item_id')
+            ->whereIn('ri.request_id', $requestIds)
+            ->where('ri.category', $category)
+            ->whereNotNull('ri.catalog_item_id')
+            ->distinct()
+            ->limit(12)
+            ->pluck('ci.name')
+            ->map(fn ($n) => $this->short($n, 90))
+            ->unique()
+            ->values();
+
+        $lines = [
+            'ТЕМА ВЫПУСКА: как оформить заявку на категорию «'.$category.'».',
+            '',
+            'За 90 дней по этой категории нам пришлось уточнять '.$total.' позиций. Не хватало:',
+            '— артикула: '.$pct($stats->no_article).'% позиций',
+            '— бренда или производителя: '.$pct($stats->no_brand).'% позиций',
+            '— фотографии: '.$pct($stats->no_photo).'% позиций',
+            '— количества: '.$pct($stats->no_qty).'% позиций',
+            '— по '.$pct($stats->no_match).'% позиций подбор по каталогу не сошёлся сразу.',
+        ];
+
+        if ($asked->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = 'Так эти позиции выглядят в заявках клиентов (по ним и приходится спрашивать):';
+            foreach ($asked as $name) {
+                $lines[] = '— '.$name;
+            }
+        }
+
+        if ($catalog->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = 'Так они называются в нашем каталоге — по этим названиям видно, '
+                .'какими признаками позиции отличаются друг от друга:';
+            foreach ($catalog as $name) {
+                $lines[] = '— '.$name;
+            }
+        }
+
+        return ['key' => $category, 'facts' => implode("\n", $lines)];
+    }
+
+    /**
+     * Следующая категория серии: первая неразобранная, иначе разобранная
+     * раньше всех.
+     *
+     * @param  list<string>  $ordered  категории по убыванию числа уточнений
+     */
+    private function nextCategory(MediaTopic $topic, array $ordered): ?string
+    {
+        $covered = MediaPublication::query()
+            ->where('media_topic_id', $topic->id)
+            ->whereNotNull('subject_key')
+            ->orderByDesc('id')
+            ->pluck('subject_key')
+            ->all();
+
+        foreach ($ordered as $category) {
+            if (! in_array($category, $covered, true)) {
+                return $category;
+            }
+        }
+
+        // Все разобраны — берём ту, что разбирали дольше всех.
+        $oldest = MediaPublication::query()
+            ->where('media_topic_id', $topic->id)
+            ->whereNotNull('subject_key')
+            ->whereIn('subject_key', $ordered)
+            ->orderBy('id')
+            ->value('subject_key');
+
+        return $oldest ?: ($ordered[0] ?? null);
     }
 }
