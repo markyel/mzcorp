@@ -5,17 +5,23 @@
 
 <div class="space-y-4">
 
-    @if($notice)
-        <div class="ds-card"><div class="ds-card-body flex items-center gap-2 text-[13px] text-emerald-700">
-            <span>{{ $notice }}</span><span class="flex-1"></span>
-            <button type="button" class="btn btn-sm" wire:click="dismiss">Скрыть</button>
-        </div></div>
-    @endif
-    @if($error)
-        <div class="ds-card"><div class="ds-card-body flex items-center gap-2 text-[13px] text-amber-800">
-            <span>{{ $error }}</span><span class="flex-1"></span>
-            <button type="button" class="btn btn-sm" wire:click="dismiss">Скрыть</button>
-        </div></div>
+    {{-- Страница длинная, а кнопки разбросаны по всей высоте: ответ на действие
+         должен быть виден там, где нажали, иначе «ничего не произошло». --}}
+    @if($notice || $error)
+        <div class="sticky top-0 z-20">
+            @if($notice)
+                <div class="ds-card"><div class="ds-card-body flex items-center gap-2 text-[13px] text-emerald-700">
+                    <span>{{ $notice }}</span><span class="flex-1"></span>
+                    <button type="button" class="btn btn-sm" wire:click="dismiss">Скрыть</button>
+                </div></div>
+            @endif
+            @if($error)
+                <div class="ds-card"><div class="ds-card-body flex items-center gap-2 text-[13px] text-amber-800">
+                    <span>{{ $error }}</span><span class="flex-1"></span>
+                    <button type="button" class="btn btn-sm" wire:click="dismiss">Скрыть</button>
+                </div></div>
+            @endif
+        </div>
     @endif
 
     {{-- Связь с Директом --}}
@@ -239,10 +245,17 @@
                      общем списке по убыванию показов они уезжают под низ, хотя
                      это единственные строки, с которыми надо что-то делать. --}}
                 @if($this->pendingForeign->isNotEmpty())
+                    @php
+                        // Кампании Мастера кампаний API не отдаёт даже на чтение: минус-фразу
+                        // туда не записать. Честнее сказать это до нажатия, а не после.
+                        $canEdit = app(\App\Services\Direct\DirectNegativeService::class)->manageable();
+                        $locked = $this->pendingForeign->reject(fn ($r) => in_array((int) $r->campaign_id, $canEdit, true));
+                    @endphp
                     <div class="mb-3 p-2 rounded-md" style="background:var(--red-50)">
                         <div class="flex items-center flex-wrap gap-2 mb-1">
                             <span class="text-[11.5px] text-fg-3 flex-1">
-                                Чужие запросы — можно вычесть ({{ $this->pendingForeign->count() }})
+                                Чужие запросы — можно вычесть ({{ $this->pendingForeign->count() - $locked->count() }}
+                                из {{ $this->pendingForeign->count() }})
                             </span>
                             @if($pickedQueries)
                                 <span class="text-[11.5px] text-fg-3">отмечено {{ count($pickedQueries) }}</span>
@@ -254,14 +267,48 @@
                                 <button type="button" class="btn btn-xs" wire:click="pickAllQueries">отметить все</button>
                             @endif
                         </div>
+                        @if($locked->isNotEmpty())
+                            <div class="flex items-center flex-wrap gap-2 mb-1 text-[11px] text-fg-3"
+                                 x-data="{ copied: false }">
+                                <span class="flex-1">
+                                    {{ $locked->count() }} из них — в кампаниях Мастера кампаний
+                                    (#{{ $locked->pluck('campaign_id')->unique()->implode(', #') }}):
+                                    API их не отдаёт, минус-фразы туда добавляются только в кабинете Директа.
+                                </span>
+                                <button type="button" class="btn btn-xs"
+                                        @click="navigator.clipboard.writeText(@js($locked->pluck('phrase')->unique()->implode(PHP_EOL)));
+                                                copied = true; setTimeout(() => copied = false, 2000)">
+                                    <span x-show="! copied">скопировать все минус-фразы</span>
+                                    <span x-show="copied" x-cloak>скопировано</span>
+                                </button>
+                            </div>
+                        @endif
+
                         @foreach($this->pendingForeign as $rv)
+                            @php $editable = in_array((int) $rv->campaign_id, $canEdit, true); @endphp
                             <div class="flex items-center gap-2 text-[12.5px] py-[3px]" wire:key="pf-{{ $rv->id }}">
                                 <input type="checkbox" value="{{ $rv->id }}" wire:model.live="pickedQueries"
-                                       class="shrink-0" title="Отметить для массового действия">
-                                <span class="flex-1 truncate text-fg-1" title="{{ $rv->reason }}">{{ $rv->query }}</span>
+                                       class="shrink-0" @disabled(! $editable)
+                                       title="{{ $editable
+                                           ? 'Отметить для массового действия'
+                                           : 'Эту кампанию API не отдаёт — вычесть отсюда нельзя' }}">
+                                <span class="flex-1 truncate {{ $editable ? 'text-fg-1' : 'text-fg-3' }}"
+                                      title="{{ $rv->reason }}">{{ $rv->query }}</span>
                                 <span class="mono text-[11px] text-fg-4">{{ $rv->impressions }}</span>
-                                <button type="button" class="btn btn-xs" wire:click="excludeQuery({{ $rv->id }})"
-                                        title="Добавить минус-фразу в кампанию #{{ $rv->campaign_id }}">− {{ $rv->phrase }}</button>
+                                @if($editable)
+                                    <button type="button" class="btn btn-xs" wire:click="excludeQuery({{ $rv->id }})"
+                                            title="Добавить минус-фразу в кампанию #{{ $rv->campaign_id }}">− {{ $rv->phrase }}</button>
+                                @else
+                                    <span class="chip text-[10px]" style="background:var(--neutral-100);color:var(--fg-3)"
+                                          title="Кампания #{{ $rv->campaign_id }} — Мастер кампаний, правится только в кабинете">в кабинете</span>
+                                    <button type="button" class="btn btn-xs" x-data="{ copied: false }"
+                                            @click="navigator.clipboard.writeText(@js($rv->phrase));
+                                                    copied = true; setTimeout(() => copied = false, 1500)"
+                                            title="Скопировать минус-фразу для кабинета Директа">
+                                        <span x-show="! copied">⧉ −{{ $rv->phrase }}</span>
+                                        <span x-show="copied" x-cloak>скопировано</span>
+                                    </button>
+                                @endif
                                 <button type="button" class="btn btn-xs" wire:click="keepQuery({{ $rv->id }})"
                                         title="Модель ошиблась, запрос наш">оставить</button>
                             </div>

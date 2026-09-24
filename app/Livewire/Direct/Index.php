@@ -7,15 +7,19 @@ use App\Models\CatalogItem;
 use App\Models\DirectAdText;
 use App\Models\DirectOperation;
 use App\Models\DirectPublishedAd;
+use App\Models\DirectQueryReview;
 use App\Services\Direct\DirectAdPlanService;
 use App\Services\Direct\DirectAdTextService;
 use App\Services\Direct\DirectAdTone;
 use App\Services\Direct\DirectApiClient;
 use App\Services\Direct\DirectBidService;
 use App\Services\Direct\DirectCandidateService;
+use App\Services\Direct\DirectNegativeService;
 use App\Services\Direct\DirectPublisherService;
+use App\Services\Direct\DirectStatsService;
 use App\Services\Direct\DirectSyncService;
 use App\Services\Settings\SettingsService;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -512,18 +516,18 @@ class Index extends Component
     #[Computed]
     public function stats(): array
     {
-        return app(\App\Services\Direct\DirectStatsService::class)->summary(self::STATS_DAYS);
+        return app(DirectStatsService::class)->summary(self::STATS_DAYS);
     }
 
     /**
      * Вердикты модели по запросам: чей запрос и что из него вычесть.
      *
-     * @return \Illuminate\Support\Collection<string, \App\Models\DirectQueryReview>
+     * @return Collection<string, DirectQueryReview>
      */
     #[Computed]
     public function reviews()
     {
-        return \App\Models\DirectQueryReview::query()->get()->keyBy(fn ($r) => mb_strtolower($r->query));
+        return DirectQueryReview::query()->get()->keyBy(fn ($r) => mb_strtolower($r->query));
     }
 
     /**
@@ -531,14 +535,14 @@ class Index extends Component
      * единицы, в списке по убыванию показов они уезжают вниз — а это как раз
      * те строки, ради которых раздел и открывают.
      *
-     * @return \Illuminate\Support\Collection<int, \App\Models\DirectQueryReview>
+     * @return Collection<int, DirectQueryReview>
      */
     #[Computed]
     public function pendingForeign()
     {
-        return \App\Models\DirectQueryReview::query()
+        return DirectQueryReview::query()
             ->whereNull('decision')
-            ->where('verdict', \App\Models\DirectQueryReview::FOREIGN)
+            ->where('verdict', DirectQueryReview::FOREIGN)
             ->whereNotNull('phrase')
             ->orderByDesc('impressions')
             ->limit(25)
@@ -548,10 +552,21 @@ class Index extends Component
     /** Отмеченные галочками запросы (идентификаторы вердиктов). */
     public array $pickedQueries = [];
 
-    /** Отметить все чужие запросы разом — обычный случай при разборе. */
+    /**
+     * Отметить все чужие запросы разом — обычный случай при разборе.
+     *
+     * Кампании Мастера кампаний API не отдаёт: отмечать их строки бессмысленно,
+     * «вычесть» по ним вернёт только объяснение, почему не вышло.
+     */
     public function pickAllQueries(): void
     {
-        $this->pickedQueries = $this->pendingForeign->pluck('id')->map(fn ($id) => (string) $id)->all();
+        $manageable = app(DirectNegativeService::class)->manageable();
+
+        $this->pickedQueries = $this->pendingForeign
+            ->filter(fn ($r) => in_array((int) $r->campaign_id, $manageable, true))
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
     }
 
     public function clearPickedQueries(): void
@@ -566,14 +581,14 @@ class Index extends Component
     public function excludePicked(): void
     {
         $this->ensureAdmin();
-        $reviews = \App\Models\DirectQueryReview::query()->whereKey($this->pickedQueries)->get();
+        $reviews = DirectQueryReview::query()->whereKey($this->pickedQueries)->get();
         if ($reviews->isEmpty()) {
             $this->notice = 'Не отмечено ни одного запроса.';
 
             return;
         }
 
-        $res = app(\App\Services\Direct\DirectNegativeService::class)->excludeMany($reviews, Auth::user());
+        $res = app(DirectNegativeService::class)->excludeMany($reviews, Auth::user());
         $this->notice = "Вычтено запросов: {$res['applied']}. ".implode(' ', array_slice($res['messages'], 0, 3));
         $this->pickedQueries = [];
         unset($this->reviews, $this->pendingForeign);
@@ -583,8 +598,8 @@ class Index extends Component
     public function keepPicked(): void
     {
         $this->ensureAdmin();
-        $negatives = app(\App\Services\Direct\DirectNegativeService::class);
-        $reviews = \App\Models\DirectQueryReview::query()->whereKey($this->pickedQueries)->get();
+        $negatives = app(DirectNegativeService::class);
+        $reviews = DirectQueryReview::query()->whereKey($this->pickedQueries)->get();
 
         foreach ($reviews as $review) {
             $negatives->keep($review, Auth::user());
@@ -599,12 +614,12 @@ class Index extends Component
     public function excludeQuery(int $reviewId): void
     {
         $this->ensureAdmin();
-        $review = \App\Models\DirectQueryReview::query()->find($reviewId);
+        $review = DirectQueryReview::query()->find($reviewId);
         if ($review === null) {
             return;
         }
 
-        $res = app(\App\Services\Direct\DirectNegativeService::class)->exclude($review, Auth::user());
+        $res = app(DirectNegativeService::class)->exclude($review, Auth::user());
         $res['ok'] ? $this->notice = $res['message'] : $this->error = $res['message'];
         unset($this->reviews, $this->pendingForeign);
     }
@@ -613,12 +628,12 @@ class Index extends Component
     public function keepQuery(int $reviewId): void
     {
         $this->ensureAdmin();
-        $review = \App\Models\DirectQueryReview::query()->find($reviewId);
+        $review = DirectQueryReview::query()->find($reviewId);
         if ($review === null) {
             return;
         }
 
-        app(\App\Services\Direct\DirectNegativeService::class)->keep($review, Auth::user());
+        app(DirectNegativeService::class)->keep($review, Auth::user());
         $this->notice = 'Запрос «'.mb_substr($review->query, 0, 40).'» оставлен как наш.';
         unset($this->reviews, $this->pendingForeign);
     }
@@ -631,10 +646,10 @@ class Index extends Component
     public function toggleNegativesAuto(SettingsService $settings): void
     {
         $this->ensureAdmin();
-        $on = ! app(\App\Services\Direct\DirectNegativeService::class)->autoEnabled();
+        $on = ! app(DirectNegativeService::class)->autoEnabled();
 
         $settings->set(
-            \App\Services\Direct\DirectNegativeService::SETTING_AUTO,
+            DirectNegativeService::SETTING_AUTO,
             $on,
             AppSetting::TYPE_BOOL,
             Auth::id(),
@@ -651,7 +666,7 @@ class Index extends Component
     public function judgeQueries(): void
     {
         $this->ensureAdmin();
-        $res = app(\App\Services\Direct\DirectNegativeService::class)->judge();
+        $res = app(DirectNegativeService::class)->judge();
         $this->notice = $res['error'] ?? "Разобрано запросов: {$res['judged']}, из них чужих: {$res['foreign']}.";
         unset($this->reviews, $this->pendingForeign);
     }
@@ -668,7 +683,7 @@ class Index extends Component
         return ['id' => $id, 'name' => DirectAdPlanService::campaignName()];
     }
 
-    /** @return \Illuminate\Support\Collection<int, DirectPublishedAd> */
+    /** @return Collection<int, DirectPublishedAd> */
     #[Computed]
     public function publishedAds()
     {
@@ -679,7 +694,7 @@ class Index extends Component
         return DirectPublishedAd::query()->orderByDesc('id')->get();
     }
 
-    /** @return \Illuminate\Support\Collection<int, DirectOperation> */
+    /** @return Collection<int, DirectOperation> */
     #[Computed]
     public function operations()
     {
