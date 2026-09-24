@@ -5,14 +5,17 @@ namespace App\Livewire\Mail;
 use App\Enums\Role;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
+use App\Models\LetterTemplate;
 use App\Models\Mailbox;
 use App\Models\Request as RequestModel;
 use App\Models\User;
 use App\Services\Mail\EmailDraftService;
 use App\Services\Mail\HtmlSanitizer;
+use App\Services\Mail\LetterTemplateService;
 use App\Services\Mail\MailboxAccessService;
 use App\Services\Mail\OutboundReplyHooks;
 use App\Services\Mail\OutgoingMailSender;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -72,7 +75,15 @@ class Composer extends Component
     private function user(): User
     {
         $u = auth()->user();
-        abort_unless($u?->hasAnyRole([Role::Manager->value, Role::Admin->value, Role::Director->value]), 403);
+        // РОП работает в клиенте наравне с менеджером: свой личный ящик плюс
+        // ящики менеджеров. Без него в этом списке «Написать» и «Ответить»
+        // отвечали ему 403, хотя canSendForRequest ниже его как раз разрешает.
+        abort_unless($u?->hasAnyRole([
+            Role::Manager->value,
+            Role::HeadOfSales->value,
+            Role::Admin->value,
+            Role::Director->value,
+        ]), 403);
 
         return $u;
     }
@@ -320,19 +331,19 @@ class Composer extends Component
      * Личное дерево шаблонов для меню вставки — та же библиотека, что во
      * вкладке «Переписка» карточки заявки (раздел «Шаблоны писем»).
      *
-     * @return \Illuminate\Support\Collection<int, \App\Models\LetterTemplate>
+     * @return Collection<int, LetterTemplate>
      */
     #[Computed]
     public function templateTree()
     {
-        return app(\App\Services\Mail\LetterTemplateService::class)->tree((int) auth()->id());
+        return app(LetterTemplateService::class)->tree((int) auth()->id());
     }
 
     /** Свои папки — выбор при «Сохранить как шаблон». */
     #[Computed]
     public function templateFolders()
     {
-        return \App\Models\LetterTemplate::folders()
+        return LetterTemplate::folders()
             ->ownedBy((int) auth()->id())
             ->orderBy('name')
             ->get(['id', 'name']);
@@ -345,7 +356,7 @@ class Composer extends Component
      */
     public function insertTemplateById(int $id, EmailDraftService $drafts): void
     {
-        $tpl = \App\Models\LetterTemplate::templates()
+        $tpl = LetterTemplate::templates()
             ->ownedBy((int) auth()->id())
             ->find($id);
         if (! $tpl) {
@@ -383,7 +394,7 @@ class Composer extends Component
             return;
         }
 
-        app(\App\Services\Mail\LetterTemplateService::class)->saveFromLetter(
+        app(LetterTemplateService::class)->saveFromLetter(
             name: $name,
             body: $body,
             parentId: $parentId,
