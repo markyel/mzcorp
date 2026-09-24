@@ -33,6 +33,9 @@ class MediaPublisherService
     /** Столько картинок вмещает альбом Telegram; ВК ограничивает стену десятью вложениями. */
     private const MAX_PHOTOS = 10;
 
+    /** Telegram принимает картинку по ссылке до 5 МБ — больше не отправляем. */
+    private const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
     /**
      * @return array{ok: bool, message: string, url: ?string}
      */
@@ -61,7 +64,7 @@ class MediaPublisherService
 
         $text = $this->text($publication);
 
-        $images = $publication->images();
+        $images = $this->usableImages($publication->images());
 
         $res = match ($channel->kind) {
             'vk' => $this->postToVk($channel, $text, $images),
@@ -315,6 +318,48 @@ class MediaPublisherService
             'url' => 'https://vk.com/wall'.$ownerId.'_'.$postId,
             'external_id' => $postId,
         ];
+    }
+
+    /**
+     * Отсеять картинки, на которых площадка споткнётся.
+     *
+     * Альбом Telegram атомарен: одна нерабочая ссылка — и не уходит весь пост.
+     * Поэтому перед отправкой спрашиваем у каждой картинки заголовки: это
+     * вообще изображение и влезает ли оно в лимит приёма по ссылке (5 МБ).
+     * Наши каталожные фото отдаются уже сжатыми (1024×900, 40–100 КБ), так что
+     * проверка почти всегда проходит — она про битые ссылки, а не про вес.
+     *
+     * @param  list<string>  $images
+     * @return list<string>
+     */
+    private function usableImages(array $images): array
+    {
+        $out = [];
+
+        foreach (array_slice($images, 0, self::MAX_PHOTOS) as $url) {
+            try {
+                $head = Http::timeout(8)->head($url);
+                $type = (string) $head->header('Content-Type');
+                $size = (int) $head->header('Content-Length');
+
+                if (! $head->successful() || ! str_starts_with($type, 'image/')) {
+                    Log::info('MediaPublisherService: image skipped, not an image', ['url' => $url, 'type' => $type]);
+
+                    continue;
+                }
+                if ($size > self::MAX_PHOTO_BYTES) {
+                    Log::info('MediaPublisherService: image skipped, too heavy', ['url' => $url, 'bytes' => $size]);
+
+                    continue;
+                }
+
+                $out[] = $url;
+            } catch (\Throwable $e) {
+                Log::info('MediaPublisherService: image skipped, unreachable', ['url' => $url, 'error' => $e->getMessage()]);
+            }
+        }
+
+        return $out;
     }
 
     /**
