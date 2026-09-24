@@ -44,7 +44,17 @@ class MediaAutopilotService
             ->filter(fn (MediaTopic $t) => $t->isDue());
 
         foreach ($topics as $topic) {
-            foreach ($this->channelsFor($topic) as $channel) {
+            $channels = $this->channelsFor($topic);
+            if ($channels->isEmpty()) {
+                // Молча ничего не делать — худший вариант: тема «горит» в разделе,
+                // а конвейер её игнорирует. Говорим, чего не хватает.
+                $skipped[] = $topic->title.': не выбран канал — сделайте первый материал руками '
+                    .'или включите автопубликацию в нужном канале';
+
+                continue;
+            }
+
+            foreach ($channels as $channel) {
                 if ($drafted >= self::MAX_DRAFTS_PER_RUN) {
                     $skipped[] = 'лимит черновиков за прогон исчерпан';
                     break 2;
