@@ -5,11 +5,16 @@
 @endphp
 
 <div class="space-y-4">
-    @if($flash)
-        <div class="ds-card"><div class="ds-card-body text-[13px] text-emerald-700">{{ $flash }}</div></div>
-    @endif
-    @if($error)
-        <div class="ds-card"><div class="ds-card-body text-[13px] text-amber-800">{{ $error }}</div></div>
+    {{-- Страница длинная, кнопки внизу: ответ должен быть виден там, где нажали. --}}
+    @if($flash || $error)
+        <div class="sticky top-0 z-20">
+            @if($flash)
+                <div class="ds-card"><div class="ds-card-body text-[13px] text-emerald-700">{{ $flash }}</div></div>
+            @endif
+            @if($error)
+                <div class="ds-card"><div class="ds-card-body text-[13px] text-amber-800">{{ $error }}</div></div>
+            @endif
+        </div>
     @endif
 
     {{-- ─────────────── Каналы ─────────────── --}}
@@ -261,6 +266,20 @@
                         @if($pub->review->rewritten_text)
                             <button type="button" class="btn btn-xs" wire:click="acceptRewrite">взять правку в материал</button>
                         @endif
+                    </div>
+                @endif
+
+                {{-- Тот же ответ, но рядом с кнопками: до верхней плашки отсюда не докрутить. --}}
+                @if($error)
+                    <div class="mt-2 text-[12.5px] text-amber-800">{{ $error }}</div>
+                @elseif($flash)
+                    <div class="mt-2 text-[12.5px] text-emerald-700">{{ $flash }}</div>
+                @endif
+
+                @if($pub->channel?->isPostable() && ! $pub->channel->isConnected())
+                    <div class="mt-2 text-[12.5px] text-amber-800">
+                        У канала «{{ $pub->channel->name }}» не заполнен доступ — публиковать нечем.
+                        Кнопка «доступ» в списке каналов выше.
                     </div>
                 @endif
 
