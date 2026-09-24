@@ -446,18 +446,34 @@ class MediaPublisherService
             if ($images !== []) {
                 $fits = mb_strlen($text) <= 1024;
                 $media = [];
+                $request = Http::timeout(self::TIMEOUT * 3);
+
+                // Картинки грузим файлами, а не ссылками. По ссылке Telegram
+                // качает их сам со своей стороны и на седьмой картинке ответил
+                // WEBPAGE_CURL_FAILED — весь альбом отвалился, пост ушёл голым.
+                // Своей загрузкой мы не зависим ни от редиректов нашего сайта,
+                // ни от того, пустит ли он телеграмовский робот.
                 foreach (array_slice($images, 0, self::MAX_PHOTOS) as $i => $url) {
+                    $file = Http::timeout(self::TIMEOUT)->get($url);
+                    if (! $file->successful() || $file->body() === '') {
+                        continue;
+                    }
+
+                    $name = 'photo'.$i;
+                    $request = $request->attach($name, $file->body(), $name.'.jpg');
                     $media[] = array_filter([
                         'type' => 'photo',
-                        'media' => $url,
-                        'caption' => $i === 0 && $fits ? $text : null,
+                        'media' => 'attach://'.$name,
+                        'caption' => $media === [] && $fits ? $text : null,
                     ]);
                 }
 
-                $album = Http::timeout(self::TIMEOUT)->post($api.'sendMediaGroup', [
-                    'chat_id' => $chatId,
-                    'media' => json_encode($media, JSON_UNESCAPED_UNICODE),
-                ])->json();
+                $album = $media === []
+                    ? ['ok' => false, 'description' => 'ни одна картинка не скачалась']
+                    : $request->post($api.'sendMediaGroup', [
+                        'chat_id' => $chatId,
+                        'media' => json_encode($media, JSON_UNESCAPED_UNICODE),
+                    ])->json();
 
                 if (! ($album['ok'] ?? false)) {
                     Log::warning('MediaPublisherService: telegram album failed, falling back to text', [
