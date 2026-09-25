@@ -37,8 +37,11 @@ class MailHistoryMirrorService
     /** Поля шапки для FETCH: всё, что нужно строке списка и треду. */
     private const HEADER_ITEM = 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM TO CC SUBJECT DATE IN-REPLY-TO REFERENCES CONTENT-TYPE)]';
 
-    /** Писем в одной IMAP-команде: 1000 шапок Яндекс отдаёт за ~20 с. */
+    /** Писем в одной IMAP-команде: 500 шапок старых писем Яндекс отдаёт за ~40–50 с. */
     private const FETCH_CHUNK = 500;
+
+    /** Шард текущего прогона: [k, n] — только UID с uid % n = k. */
+    private ?array $shard = null;
 
     public function __construct(
         private readonly MailboxConnector $connector,
@@ -73,11 +76,18 @@ class MailHistoryMirrorService
      * Один проход по ящику: по каждой папке заводим недостающие письма, пока
      * не выйдет лимит писем или времени (0 — без ограничения).
      *
+     * Первичный проход по миллиону писем идёт в несколько процессов: по
+     * группам папок ($only: inbox | sent | folders) и по остатку UID ($shard
+     * [k, n] — свои UID, где uid % n = k). Яндекс отдаёт ~10 шапок старых
+     * писем в секунду на соединение, параллельные соединения складываются.
+     *
      * @param  callable(string $folder, int $done, int $todo):void|null  $progress
+     * @param  array{0:int, 1:int}|null  $shard
      * @return array{imported:int, rehomed:int, uid_filled:int, folders:array<string, array{todo:int, imported:int}>}
      */
-    public function run(Mailbox $mailbox, int $budget = 0, int $seconds = 0, ?callable $progress = null): array
+    public function run(Mailbox $mailbox, int $budget = 0, int $seconds = 0, ?callable $progress = null, ?string $only = null, ?array $shard = null): array
     {
+        $this->shard = $shard !== null && $shard[1] > 1 ? $shard : null;
         $stats = ['imported' => 0, 'rehomed' => 0, 'uid_filled' => 0, 'folders' => []];
         if (! $this->isMirrored($mailbox)) {
             return $stats;
@@ -87,6 +97,10 @@ class MailHistoryMirrorService
         $client = $this->connector->imapClient($mailbox);
         try {
             foreach ($this->folders($mailbox, $client) as $f) {
+                $group = $f['folder_id'] !== null ? 'folders' : ($f['db'] === 'Sent' ? 'sent' : 'inbox');
+                if ($only !== null && $only !== $group) {
+                    continue;
+                }
                 if (($budget > 0 && $stats['imported'] >= $budget) || ($deadline && microtime(true) > $deadline)) {
                     break;
                 }
@@ -175,12 +189,16 @@ class MailHistoryMirrorService
         }
 
         $serverUids = array_map('intval', (array) $conn->getUid()->validatedData());
-        $todo = array_values(array_filter($serverUids, fn (int $u) => ! isset($known[$u]) && ($f['bound'] === null || $u <= $f['bound'])));
+        $shard = $this->shard;
+        $todo = array_values(array_filter($serverUids, fn (int $u) => ! isset($known[$u])
+            && ($f['bound'] === null || $u <= $f['bound'])
+            && ($shard === null || $u % $shard[1] === $shard[0])));
         rsort($todo); // сначала свежие
         $res['todo'] = count($todo);
 
+        // Шард видит только свою долю: «папка пройдена» отметит обычный прогон.
         if ($todo === []) {
-            if ($state->exists || $f['folder_id'] !== null) {
+            if ($shard === null && ($state->exists || $f['folder_id'] !== null)) {
                 $state->forceFill(['history_completed_at' => now(), 'uid_validity' => $state->uid_validity ?? $validity])->save();
             }
 
@@ -201,17 +219,20 @@ class MailHistoryMirrorService
             }
             $done += count($chunk);
 
-            $state->forceFill([
-                'history_low_uid' => min($chunk),
-                'history_imported' => (int) $state->history_imported + $part['imported'],
-                'uid_validity' => $state->uid_validity ?? $validity,
-            ])->save();
+            // Несколько процессов пишут в одну строку состояния — атомарно.
+            if (! $state->exists) {
+                $state->forceFill(['uid_validity' => $validity])->save();
+            }
+            MailboxFolderState::query()->whereKey($state->id)->update([
+                'history_low_uid' => DB::raw('LEAST(COALESCE(history_low_uid, '.(int) min($chunk).'), '.(int) min($chunk).')'),
+                'history_imported' => DB::raw('history_imported + '.(int) $part['imported']),
+            ]);
             if ($progress) {
                 $progress($f['db'], $done, $res['todo']);
             }
         }
 
-        if ($done >= $res['todo']) {
+        if ($shard === null && $done >= $res['todo']) {
             $state->forceFill(['history_completed_at' => now()])->save();
         }
 

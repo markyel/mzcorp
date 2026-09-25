@@ -20,7 +20,9 @@ class MailHistoryMirrorCommand extends Command
     protected $signature = 'mail:history-mirror
         {--mailbox=* : id ящиков (по умолчанию — все личные ящики менеджеров)}
         {--budget=0 : максимум писем на ящик за прогон (0 — без ограничения)}
-        {--seconds=0 : лимит времени на ящик, с (0 — без ограничения)}';
+        {--seconds=0 : лимит времени на ящик, с (0 — без ограничения)}
+        {--only= : только группа папок: inbox | sent | folders}
+        {--shard= : доля UID для параллельного прогона, k/n (uid % n = k)}';
 
     protected $description = 'Завести историю личных ящиков менеджеров шапками писем (тело — при открытии)';
 
@@ -30,6 +32,22 @@ class MailHistoryMirrorCommand extends Command
         $mailboxes = $ids !== []
             ? Mailbox::query()->whereIn('id', $ids)->orderBy('id')->get()->filter(fn ($m) => $svc->isMirrored($m))
             : $svc->mailboxes();
+
+        $only = $this->option('only') ?: null;
+        if ($only !== null && ! in_array($only, ['inbox', 'sent', 'folders'], true)) {
+            $this->error('--only: inbox | sent | folders');
+
+            return self::INVALID;
+        }
+        $shard = null;
+        if ($this->option('shard')) {
+            if (! preg_match('/^(\d+)\/(\d+)$/', (string) $this->option('shard'), $m) || (int) $m[2] < 1 || (int) $m[1] >= (int) $m[2]) {
+                $this->error('--shard: k/n, где 0 ≤ k < n');
+
+                return self::INVALID;
+            }
+            $shard = [(int) $m[1], (int) $m[2]];
+        }
 
         if ($mailboxes->isEmpty()) {
             $this->warn('Нет ящиков для зеркала (личные ящики менеджеров, синхронизируемые mzCorp).');
@@ -50,6 +68,8 @@ class MailHistoryMirrorCommand extends Command
                             $this->line(sprintf('  %s: %d/%d', mb_convert_encoding($folder, 'UTF-8', 'UTF7-IMAP'), $done, $todo));
                         }
                     },
+                    $only,
+                    $shard,
                 );
             } catch (\Throwable $e) {
                 $this->error('  ошибка: '.$e->getMessage());
