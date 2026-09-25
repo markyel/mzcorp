@@ -346,6 +346,16 @@ return [
     // Рекламные блоки в письмах клиентам (MarketingBlockService). Позиция
     // относительно подписи менеджера: 'above' — над подписью, 'below' — под.
     // Override в Настройках приложения (app_setting 'marketing.block_position').
+    /*
+     * DaData — официальные реквизиты организаций по ИНН (ЕГРЮЛ/ЕГРИП).
+     * Бесплатный тариф: 10 000 запросов в сутки. Ключ — в .env сервера.
+     */
+    'dadata' => [
+        'api_key' => env('DADATA_API_KEY'),
+        'party_url' => env('DADATA_PARTY_URL', 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party'),
+        'timeout' => (int) env('DADATA_TIMEOUT', 10),
+    ],
+
     'marketing' => [
         'block_position' => env('MARKETING_BLOCK_POSITION', 'below'),
         // Карточка товара для ссылок в публикациях медиаплана. По умолчанию —

@@ -31,6 +31,23 @@ class Organization extends Model
         // Режим расчёта цены: standard | cost_plus (см. OrganizationPricingMode).
         'pricing_mode',
         'notes',
+        // Официальные реквизиты из ЕГРЮЛ/ЕГРИП — см. OrganizationRegistryService.
+        'ogrn',
+        'registry_short_name',
+        'registry_full_name',
+        'registry_address',
+        'registry_director',
+        'registry_status',
+        'registry_checked_at',
+    ];
+
+    public const REGISTRY_STATUSES = [
+        'ACTIVE' => 'действующая',
+        'LIQUIDATING' => 'ликвидируется',
+        'LIQUIDATED' => 'ликвидирована',
+        'BANKRUPT' => 'банкротство',
+        'REORGANIZING' => 'реорганизуется',
+        'NOT_FOUND' => 'не найдена в ЕГРЮЛ',
     ];
 
     protected function casts(): array
@@ -38,7 +55,19 @@ class Organization extends Model
         return [
             'discount_percent' => 'decimal:2',
             'pricing_mode' => OrganizationPricingMode::class,
+            'registry_checked_at' => 'datetime',
         ];
+    }
+
+    public function registryStatusLabel(): ?string
+    {
+        return self::REGISTRY_STATUSES[$this->registry_status] ?? $this->registry_status;
+    }
+
+    /** Закрылась по реестру — работать с ней как с живым клиентом нельзя. */
+    public function isDefunct(): bool
+    {
+        return in_array($this->registry_status, ['LIQUIDATED', 'LIQUIDATING', 'BANKRUPT'], true);
     }
 
     /** Спец-режим «Себестоимость + наценка»? */

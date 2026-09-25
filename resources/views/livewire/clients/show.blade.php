@@ -65,6 +65,78 @@
                 <div class="flex gap-2 pt-1">
                     <button type="button" wire:click="save" class="btn btn-sm btn-primary">Сохранить</button>
                 </div>
+
+                {{-- ЕГРЮЛ/ЕГРИП: официальные данные по ИНН. Рабочее название не
+                     затираем молча — его поправлял человек; мусорное меняется при
+                     сверке само, остальное — кнопкой, видя разницу. --}}
+                @php $o = $organization; @endphp
+                <div class="pt-3 border-t border-border-subtle">
+                    <div class="flex flex-wrap items-center gap-2 mb-2">
+                        <span class="text-[12px] font-semibold text-fg-1">ЕГРЮЛ / ЕГРИП</span>
+                        @if($o->registry_status)
+                            <span class="chip text-[10px]"
+                                  style="{{ $o->isDefunct()
+                                      ? 'background:var(--red-50);color:var(--red-700)'
+                                      : ($o->registry_status === 'ACTIVE'
+                                          ? 'background:var(--emerald-50);color:var(--emerald-700)'
+                                          : 'background:var(--amber-50);color:var(--amber-800)') }}">
+                                {{ $o->registryStatusLabel() }}
+                            </span>
+                        @endif
+                        @if($o->registry_checked_at)
+                            <span class="text-[11px] text-fg-4">сверено {{ $o->registry_checked_at->format('d.m.Y H:i') }}</span>
+                        @endif
+                        <span class="flex-1"></span>
+                        <button type="button" class="btn btn-xs" wire:click="syncRegistry"
+                                wire:loading.attr="disabled" wire:target="syncRegistry"
+                                @disabled(trim($inn) === '')
+                                title="{{ trim($inn) === '' ? 'Нужен ИНН' : 'Запросить официальные реквизиты по ИНН' }}">
+                            <span wire:loading.remove wire:target="syncRegistry">сверить по ИНН</span>
+                            <span wire:loading wire:target="syncRegistry">сверяю…</span>
+                        </button>
+                        @if($o->registry_short_name && ($o->registry_short_name !== $o->name || ($o->registry_address && $o->registry_address !== $o->address)))
+                            <button type="button" class="btn btn-xs btn-primary" wire:click="adoptRegistry"
+                                    wire:confirm="Заменить название и адрес на официальные из реестра?">
+                                взять официальное
+                            </button>
+                        @endif
+                    </div>
+
+                    @if($registryMessage)
+                        <div class="text-[12px] text-fg-2 mb-1">{{ $registryMessage }}</div>
+                    @endif
+                    @if($registryChanges)
+                        <div class="text-[11.5px] text-fg-3 mb-2">
+                            @foreach($registryChanges as $field => $ch)
+                                <div>
+                                    <span class="mono">{{ $field }}</span>:
+                                    <span class="line-through text-fg-4">{{ $ch['from'] ?: '—' }}</span>
+                                    → <span class="text-fg-1">{{ $ch['to'] ?: '—' }}</span>
+                                </div>
+                            @endforeach
+                        </div>
+                    @endif
+
+                    @if($o->registry_short_name)
+                        <dl class="grid grid-cols-[120px_1fr] gap-x-3 gap-y-1 text-[12px]">
+                            <dt class="text-fg-3">Краткое</dt><dd class="text-fg-1">{{ $o->registry_short_name }}</dd>
+                            @if($o->registry_full_name)
+                                <dt class="text-fg-3">Полное</dt><dd class="text-fg-2">{{ $o->registry_full_name }}</dd>
+                            @endif
+                            @if($o->ogrn)
+                                <dt class="text-fg-3">ОГРН</dt><dd class="mono text-fg-2">{{ $o->ogrn }}</dd>
+                            @endif
+                            @if($o->registry_address)
+                                <dt class="text-fg-3">Адрес</dt><dd class="text-fg-2">{{ $o->registry_address }}</dd>
+                            @endif
+                            @if($o->registry_director)
+                                <dt class="text-fg-3">Руководитель</dt><dd class="text-fg-2">{{ $o->registry_director }}</dd>
+                            @endif
+                        </dl>
+                    @elseif(! $o->registry_checked_at)
+                        <div class="text-[11.5px] text-fg-4">Ещё не сверялась с реестром.</div>
+                    @endif
+                </div>
             </div>
         </div>
 

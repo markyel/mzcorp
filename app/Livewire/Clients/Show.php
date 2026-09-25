@@ -11,8 +11,10 @@ use App\Models\Invoice;
 use App\Models\Organization;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
+use App\Services\Clients\OrganizationRegistryService;
 use App\Services\Clients\RequestOrganizationResolver;
 use App\Services\Mail\ClientNotificationOptoutService;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -28,23 +30,34 @@ class Show extends Component
 
     /* --- Реквизиты организации --- */
     public string $name = '';
+
     public string $inn = '';
+
     public string $kpp = '';
+
     public string $address = '';
+
     public string $requisites_text = '';
+
     public string $discount_percent = '0';
+
     // Режим цены: standard | cost_plus (см. OrganizationPricingMode).
     public string $pricing_mode = 'standard';
+
     public string $notes = '';
 
     /* --- Добавление контакта --- */
     public string $newContactEmail = '';
+
     public string $newContactName = '';
+
     public string $newContactPhone = '';
 
     /* --- Инлайн-редактирование контакта --- */
     public ?int $editingContactId = null;
+
     public string $editName = '';
+
     public string $editPhone = '';
 
     public bool $confirmingDelete = false;
@@ -81,7 +94,7 @@ class Show extends Component
             'address' => 'nullable|string|max:1000',
             'requisites_text' => 'nullable|string|max:5000',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
-            'pricing_mode' => 'required|in:' . implode(',', OrganizationPricingMode::values()),
+            'pricing_mode' => 'required|in:'.implode(',', OrganizationPricingMode::values()),
             'notes' => 'nullable|string|max:5000',
         ], [], [
             'name' => 'название',
@@ -103,6 +116,40 @@ class Show extends Component
         ]);
 
         $this->dispatch('toast', message: 'Реквизиты сохранены.', type: 'success');
+    }
+
+    /** Итог последней сверки — какие поля поменял реестр. */
+    public array $registryChanges = [];
+
+    public ?string $registryMessage = null;
+
+    /**
+     * Сверить с ЕГРЮЛ/ЕГРИП по ИНН. Пишет официальные данные в отдельные поля,
+     * мусорное название заменяет, хорошее — нет (для этого «взять официальное»).
+     */
+    public function syncRegistry(OrganizationRegistryService $registry): void
+    {
+        // Сначала сохраняем то, что в форме: иначе сверка пошла бы по старому ИНН.
+        if (trim($this->inn) !== (string) $this->organization->inn) {
+            $this->save();
+        }
+
+        $res = $registry->sync($this->organization);
+        $this->organization->refresh();
+        $this->fillForm();
+
+        $this->registryChanges = $res['changed'];
+        $this->registryMessage = $res['message'];
+    }
+
+    /** Взять из реестра название и адрес целиком — решение человека. */
+    public function adoptRegistry(OrganizationRegistryService $registry): void
+    {
+        $registry->adoptOfficial($this->organization);
+        $this->organization->refresh();
+        $this->fillForm();
+        $this->registryMessage = 'Название и адрес взяты из реестра.';
+        $this->registryChanges = [];
     }
 
     public function addContact(): void
@@ -202,7 +249,7 @@ class Show extends Component
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, ClientContact>
+     * @return Collection<int, ClientContact>
      */
     #[Computed]
     public function contacts()
@@ -332,7 +379,7 @@ class Show extends Component
     /**
      * Последние заявки организации (точная привязка + fallback по email).
      *
-     * @return \Illuminate\Support\Collection<int, RequestModel>
+     * @return Collection<int, RequestModel>
      */
     #[Computed]
     public function recentRequests()
