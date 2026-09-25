@@ -17,7 +17,8 @@ use Illuminate\Support\Facades\Log;
  *
  * Политика записи осторожная:
  *   — официальные данные ложатся в отдельные поля registry_* всегда;
- *   — КПП, ОГРН и пустой адрес дописываем — там спорить не о чем;
+ *   — КПП и ОГРН берём из выписки — там спорить не о чем;
+ *   — юридический адрес идёт за реестром, пока его не поправил человек;
  *   — рабочее название меняем, только если оно мусорное; хорошее название,
  *     которое поправил человек, выпиской не затираем — это делает кнопка.
  */
@@ -282,6 +283,11 @@ class OrganizationRegistryService
             return $changed;
         }
 
+        // Адрес карточки идёт за реестром, пока его не правил человек: пустой
+        // или равный прежней выписке — обновляем, свой — не трогаем.
+        $followsRegistry = trim((string) $org->address) === ''
+            || trim((string) $org->address) === trim((string) $org->registry_address);
+
         $set('registry_short_name', $reg['short_name'] ?? null);
         $set('registry_full_name', $reg['full_name'] ?? null);
         $set('registry_address', $reg['address'] ?? null);
@@ -292,8 +298,11 @@ class OrganizationRegistryService
         // нашего разборщика. У ИП КПП нет: пустое значение не пишем.
         if (! empty($reg['kpp'])) {
             $set('kpp', $reg['kpp']);
+        } elseif (strlen((string) $org->inn) === 12) {
+            // ИП без КПП: «КПП» в такой карточке — чужой, из соседней колонки.
+            $set('kpp', null);
         }
-        if (trim((string) $org->address) === '' && ! empty($reg['address'])) {
+        if ($followsRegistry && ! empty($reg['address'])) {
             $set('address', $reg['address']);
         }
         if (self::isJunkName((string) $org->name) && ! empty($reg['short_name'])) {
