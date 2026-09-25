@@ -2,11 +2,14 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\QuotationStatus;
 use App\Models\AppSetting;
 use App\Models\ClientContact;
 use App\Models\Organization;
+use App\Models\OrganizationLinkRequest;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
+use App\Services\Clients\OrganizationLinkGuard;
 use App\Services\Clients\OrganizationRegistryService;
 use App\Services\Clients\RequestOrganizationResolver;
 use App\Services\Settings\SettingsService;
@@ -42,6 +45,7 @@ class ClientsBackfillCommand extends Command
     public function __construct(
         private readonly RequestOrganizationResolver $orgResolver,
         private readonly OrganizationRegistryService $registry,
+        private readonly OrganizationLinkGuard $linkGuard,
     ) {
         parent::__construct();
     }
@@ -171,7 +175,11 @@ class ClientsBackfillCommand extends Command
                         $org->discount_percent = (float) $q->discount_percent;
                     }
                     $org->save();
-                    $this->linkEmail($org, (string) ($q->request?->client_email ?? ''), $stats);
+                    $this->linkEmail($org, (string) ($q->request?->client_email ?? ''), $stats, [
+                        'source' => OrganizationLinkRequest::SOURCE_QUOTATION,
+                        'quotation' => $q,
+                        'request' => $q->request,
+                    ], sent: in_array($q->status, [QuotationStatus::Sent, QuotationStatus::Accepted], true));
                 }
             });
 
@@ -190,7 +198,10 @@ class ClientsBackfillCommand extends Command
                         continue;
                     }
                     $org->save();
-                    $this->linkEmail($org, (string) $r->client_email, $stats);
+                    $this->linkEmail($org, (string) $r->client_email, $stats, [
+                        'source' => OrganizationLinkRequest::SOURCE_WEB_FORM,
+                        'request' => $r,
+                    ]);
                 }
             });
 
@@ -341,26 +352,29 @@ class ClientsBackfillCommand extends Command
         return false;
     }
 
-    private function linkEmail(Organization $org, string $email, array &$stats): void
+    /**
+     * Привязка через OrganizationLinkGuard. Известный контрагент на чужом
+     * адресе: по отправленному КП — менеджеру на подтверждение; по черновику
+     * и по названию из веб-формы — не привязываем (спрашивать не о чем).
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private function linkEmail(Organization $org, string $email, array &$stats, array $context = [], bool $sent = false): void
     {
         $email = mb_strtolower(trim($email));
         if ($email === '' || $this->isInternal($email)) {
             return;
         }
-        $contact = ClientContact::firstOrCreate(['email' => $email]);
 
-        // Закреплённый за организацией адрес другими не обогащаем — см.
-        // ClientContact::pinnedOrganization.
-        if ($contact->pinned_organization_id !== null && (int) $contact->pinned_organization_id !== (int) $org->id) {
-            $stats['pinned_skipped'] = ($stats['pinned_skipped'] ?? 0) + 1;
+        $res = $this->linkGuard->link($org, $email, $context, notify: $sent, record: $sent);
 
-            return;
-        }
-
-        if (! $org->contacts()->where('client_contacts.id', $contact->id)->exists()) {
-            $org->contacts()->attach($contact->id);
-            $stats['links']++;
-        }
+        match ($res['status']) {
+            'linked' => $stats['links']++,
+            'pinned' => $stats['pinned_skipped'] = ($stats['pinned_skipped'] ?? 0) + 1,
+            'pending' => $stats['links_held'] = ($stats['links_held'] ?? 0) + 1,
+            'skipped' => $stats['links_skipped'] = ($stats['links_skipped'] ?? 0) + 1,
+            default => null,
+        };
     }
 
     private function isInternal(string $email): bool

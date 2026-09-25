@@ -350,6 +350,13 @@ return [
      * DaData — официальные реквизиты организаций по ИНН (ЕГРЮЛ/ЕГРИП).
      * Бесплатный тариф: 10 000 запросов в сутки. Ключ — в .env сервера.
      */
+    // Сомнительные привязки контрагента к адресу заказчика — см. OrganizationLinkGuard.
+    // trust_same_domain: адрес на корпоративном домене, где у контрагента уже
+    // есть адреса, привязывается без подтверждения (новый сотрудник клиента).
+    'client_links' => [
+        'trust_same_domain' => (bool) env('CLIENT_LINKS_TRUST_SAME_DOMAIN', true),
+    ],
+
     'dadata' => [
         'api_key' => env('DADATA_API_KEY'),
         'party_url' => env('DADATA_PARTY_URL', 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party'),

@@ -36,6 +36,7 @@
                             $icon = match($kind) {
                                 'request_assigned' => '📥',
                                 'delegated_activity' => '🤝',
+                                'organization_link_pending' => '🔗',
                                 'attention_overdue' => '⚡',
                                 'openai_circuit_opened' => '⛔',
                                 'queue_stalled' => '⏳',
@@ -46,6 +47,7 @@
                                 'request_assigned' => 'Новая заявка ' . ($data['internal_code'] ?? ''),
                                 'delegated_activity' => 'Делегированная ' . ($data['internal_code'] ?? '') . ' · новое сообщение',
                                 'attention_overdue' => 'Просрочено: ' . ($data['internal_code'] ?? ''),
+                                'organization_link_pending' => 'Проверьте реквизиты в КП ' . ($data['internal_code'] ?? ''),
                                 'openai_circuit_opened' => 'OpenAI недоступен — категоризатор на паузе',
                                 'queue_stalled' => 'Очередь задач встала — письма не разбираются',
                                 'support_reply' => 'Ответ создателя по тикету #' . ($data['ticket_id'] ?? ''),
@@ -55,6 +57,7 @@
                                 'request_assigned' => ($data['client_name'] ?? '') . ' · ' . ($data['subject'] ?? ''),
                                 'delegated_activity' => ($data['client_name'] ?? '') . ' · ' . ($data['subject'] ?? ''),
                                 'attention_overdue' => ($data['status_label'] ?? '') . ' · ' . ($data['attention_reason'] ?? ''),
+                                'organization_link_pending' => ($data['organization_name'] ?? '') . ' → ' . ($data['email'] ?? '') . ' · привязка не создана',
                                 'openai_circuit_opened' => 'Подряд ошибок: ' . ($data['fail_count'] ?? 0) . ' · пауза ' . ($data['cooldown_minutes'] ?? 15) . ' мин',
                                 'queue_stalled' => collect($data['stalled'] ?? [])->map(fn ($m, $q) => $q . ': ' . ($m['count'] ?? 0) . ' задач, ждут ' . ($m['oldest_minutes'] ?? 0) . ' мин')->implode(' · '),
                                 'support_reply' => ($data['subject'] ?? '') . ' · ' . \Illuminate\Support\Str::limit($data['reply_preview'] ?? '', 60),
@@ -65,6 +68,7 @@
                                 'openai_circuit_opened' => 'https://platform.openai.com/account/billing',
                                 'queue_stalled' => '#',
                                 'support_reply' => $data['ticket_id'] ?? null ? route('support.show', $data['ticket_id']) : '#',
+                                'organization_link_pending' => isset($data['link_request_id']) ? route('clients.link-requests.show', $data['link_request_id']) : '#',
                                 default => $reqId ? route('requests.show', $reqId) : '#',
                             };
                         @endphp

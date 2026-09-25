@@ -2,14 +2,14 @@
 
 namespace App\Console\Commands;
 
-use App\Models\ClientContact;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\Organization;
+use App\Models\OrganizationLinkRequest;
 use App\Models\OutboundQuote;
 use App\Models\Supplier;
+use App\Services\Clients\OrganizationLinkGuard;
 use App\Services\Clients\OrganizationRegistryService;
-use App\Services\Clients\RequestOrganizationResolver;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\IOFactory as SpreadsheetIO;
@@ -37,7 +37,8 @@ class ClientsExtractRequisitesCommand extends Command
     protected $signature = 'clients:extract-requisites
         {--apply : Реально писать организации/связи}
         {--limit=0 : Максимум документов за прогон (0 = все необработанные)}
-        {--retry-empty : Перепроверить и те, где покупателя не нашли (после правки парсера)}';
+        {--retry-empty : Перепроверить и те, где покупателя не нашли (после правки парсера)}
+        {--no-notify : Сомнительные привязки завести без писем менеджерам (перепрогон по истории)}';
 
     protected $description = 'Достать реквизиты организаций-покупателей из внешних КП/счетов (OutboundQuote)';
 
@@ -67,7 +68,7 @@ class ClientsExtractRequisitesCommand extends Command
     private const INN_BARE = '(?:ИНН|УНП)\D{0,4}(?:\d{10,12}|\d{9}(?!\d))';
 
     public function __construct(
-        private readonly RequestOrganizationResolver $orgResolver,
+        private readonly OrganizationLinkGuard $linkGuard,
         private readonly OrganizationRegistryService $registry,
     ) {
         parent::__construct();
@@ -166,7 +167,7 @@ class ClientsExtractRequisitesCommand extends Command
                     }
                     $org->save();
                     foreach ($this->documentRecipients($q) as $email) {
-                        $this->linkEmail($org, $email, $stats);
+                        $this->linkEmail($org, $email, $q, $stats);
                     }
                 } else {
                     // not_found — такого ИНН нет в ЕГРЮЛ/ЕГРИП; ours — это мы сами.
@@ -434,31 +435,25 @@ class ClientsExtractRequisitesCommand extends Command
         return $domain !== '' && in_array($domain, $internal, true);
     }
 
-    private function linkEmail(Organization $org, string $email, array &$stats): void
+    /**
+     * Привязка через OrganizationLinkGuard: реквизиты известного контрагента
+     * на чужом адресе не привязываются, а уходят менеджеру на подтверждение.
+     * Закреплённый адрес другими юрлицами не обогащается.
+     */
+    private function linkEmail(Organization $org, string $email, OutboundQuote $q, array &$stats): void
     {
-        $email = mb_strtolower(trim($email));
-        if ($email === '') {
-            return;
-        }
-        $contact = ClientContact::firstOrCreate(['email' => $email]);
+        $res = $this->linkGuard->link($org, $email, [
+            'source' => OrganizationLinkRequest::SOURCE_OUTBOUND_QUOTE,
+            'outbound_quote' => $q,
+        ], notify: ! $this->option('no-notify'));
 
-        // Закреплённый адрес не обогащаем: у посредника документы уходят на
-        // конечных заказчиков, и одиннадцать таких PDF за год делали адрес
-        // «многоюрлицным» — система начинала выбирать, чьи условия применить.
-        if ($contact->pinned_organization_id !== null && (int) $contact->pinned_organization_id !== (int) $org->id) {
-            $stats['pinned_skipped'] = ($stats['pinned_skipped'] ?? 0) + 1;
-
-            return;
-        }
-
-        if (! $org->contacts()->where('client_contacts.id', $contact->id)->exists()) {
-            $org->contacts()->attach($contact->id);
-            $stats['links']++;
-        }
-
-        // Появилась связь email↔организация — точная привязка ещё не
-        // привязанных заявок этого email к organization_id.
-        $stats['requests_linked'] += $this->orgResolver->backfillForEmailLink($org, $email);
+        match ($res['status']) {
+            'linked' => $stats['links']++,
+            'pinned' => $stats['pinned_skipped'] = ($stats['pinned_skipped'] ?? 0) + 1,
+            'pending' => $stats['links_held'] = ($stats['links_held'] ?? 0) + 1,
+            default => null,
+        };
+        $stats['requests_linked'] += $res['requests_linked'];
     }
 
     /**

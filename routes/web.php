@@ -20,6 +20,7 @@ use App\Models\ClientContact;
 use App\Models\ClientNotificationTemplate;
 use App\Models\MailRoutingRule;
 use App\Models\Organization;
+use App\Models\OrganizationLinkRequest;
 use App\Models\Request;
 use App\Models\Supplier;
 use App\Models\SupplierInquiry;
@@ -278,6 +279,12 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/clients/org/{organization}', function (Organization $organization) {
             return view('clients.show', ['organization' => $organization]);
         })->name('clients.show');
+
+        // Подтверждение сомнительной привязки контрагента к адресу заказчика —
+        // ссылка из письма менеджеру (OrganizationLinkGuard).
+        Route::get('/dashboard/clients/link/{linkRequest}', function (OrganizationLinkRequest $linkRequest) {
+            return view('clients.link-request', ['linkRequest' => $linkRequest]);
+        })->name('clients.link-requests.show');
 
         // Раздел «Поставщики» — запросы расценки поставщикам (SupplierInquiry).
         // Тред, помеченный как наш запрос поставщику; ответы в нём — переписка,
