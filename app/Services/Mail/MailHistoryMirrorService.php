@@ -416,8 +416,8 @@ class MailHistoryMirrorService
 
     /**
      * Скачать тело и вложения письма из истории при первом открытии. \Seen на
-     * сервере не меняем: тело Яндекс отдаёт с установкой флага, поэтому
-     * непрочитанному письму флаг снимаем обратно (как SyncMailboxFolderJob) —
+     * сервере не меняем: тело (RFC822.TEXT) Яндекс отдаёт с установкой флага,
+     * webklex с FT_PEEK снимает его обратно у непрочитанного письма —
      * прочитанным его делает владелец, открыв письмо (MailReadService).
      *
      * @return bool false — письма на сервере уже нет (удалено / перенесено)
@@ -442,28 +442,15 @@ class MailHistoryMirrorService
             if (! $folder) {
                 return false;
             }
-            $folder->select();
-            $conn = $client->getConnection();
-            $uid = (int) $row->imap_uid;
-
-            $before = (array) $conn->getFlags($uid)->validatedData();
-            $list = is_array($before[$uid] ?? null) ? $before[$uid] : [];
-            $wasUnread = ! in_array('\\Seen', $list, true) && ! in_array('Seen', $list, true);
-
+            // FT_PEEK: webklex читает флаги до тела и, если письмо было
+            // непрочитанным, снимает \Seen после (Message::peek()).
             $msg = $folder->query()
                 ->setFetchOptions(IMAP::FT_PEEK)
                 ->setFetchBody(true)
                 ->setFetchFlags(true)
-                ->whereUid($uid)
+                ->whereUid((int) $row->imap_uid)
                 ->get()
                 ->first();
-            if ($wasUnread) {
-                try {
-                    $conn->store(['\\Seen'], $uid, $uid, '-', true, IMAP::ST_UID);
-                } catch (\Throwable) {
-                    // не критично: флаг выровняет ImapSeenSyncService
-                }
-            }
             if (! $msg) {
                 return false;
             }
