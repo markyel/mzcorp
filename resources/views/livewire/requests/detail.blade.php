@@ -1629,6 +1629,23 @@
                                                     · через {{ $msg->mailbox->email }}
                                                 @endif
                                             </div>
+                                            {{-- Кому ушло письмо: без этого исходящее поставщику или
+                                                 письмо с копиями не отличить от ответа клиенту. --}}
+                                            @php
+                                                $rcpt = fn ($list) => collect($list ?? [])->filter(fn ($r) => is_array($r) && ! empty($r['email']))
+                                                    ->map(fn ($r) => trim((string) ($r['name'] ?? '')) !== '' ? $r['name'].' <'.$r['email'].'>' : $r['email']);
+                                                $toList = $rcpt($msg->to_recipients);
+                                                $ccList = $rcpt($msg->cc_recipients);
+                                                $short = fn ($c) => $c->take(3)->map(fn ($s) => preg_replace('/^.*<(.+)>$/', '$1', $s))->implode(', ')
+                                                    .($c->count() > 3 ? ' и ещё '.($c->count() - 3) : '');
+                                            @endphp
+                                            @if($toList->isNotEmpty() || $ccList->isNotEmpty())
+                                                <div class="text-[11.5px] text-fg-3 mono truncate"
+                                                     title="{{ $toList->isNotEmpty() ? 'Кому: '.$toList->implode(', ') : '' }}{{ $ccList->isNotEmpty() ? ($toList->isNotEmpty() ? "\n" : '').'Копия: '.$ccList->implode(', ') : '' }}">
+                                                    @if($toList->isNotEmpty())кому: {{ $short($toList) }}@endif
+                                                    @if($ccList->isNotEmpty()){{ $toList->isNotEmpty() ? ' · ' : '' }}копия: {{ $short($ccList) }}@endif
+                                                </div>
+                                            @endif
                                         </div>
                                         <span class="flex-1"></span>
                                         {{-- Провенанс: сколько активных позиций заявки спаршено

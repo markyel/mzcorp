@@ -119,6 +119,12 @@
                 <div class="msg-sub">
                     {{ $msg['from_email'] }} · {{ $msg['sent_at'] ?? '—' }}@if($msg['mailbox']) · через {{ $msg['mailbox'] }}@endif
                 </div>
+                @if(($msg['to'] ?? '') !== '' || ($msg['cc'] ?? '') !== '')
+                    <div class="msg-sub">
+                        @if(($msg['to'] ?? '') !== '')кому: {{ $msg['to'] }}@endif
+                        @if(($msg['cc'] ?? '') !== ''){{ ($msg['to'] ?? '') !== '' ? ' · ' : '' }}копия: {{ $msg['cc'] }}@endif
+                    </div>
+                @endif
             </div>
 
             <div class="msg-body">

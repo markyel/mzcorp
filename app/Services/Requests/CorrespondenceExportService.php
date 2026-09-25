@@ -246,6 +246,9 @@ class CorrespondenceExportService
             'from_email' => $m->from_email,
             'sent_at' => $m->sent_at?->setTimezone(config('app.timezone'))->format('d.m.Y H:i'),
             'mailbox' => $m->mailbox?->email,
+            // Кому ушло письмо — в выгрузке, как и в карточке заявки.
+            'to' => collect($m->to_recipients ?? [])->pluck('email')->filter()->implode(', '),
+            'cc' => collect($m->cc_recipients ?? [])->pluck('email')->filter()->implode(', '),
             'category' => $m->category
                 ? (EmailCategory::tryFrom($m->category)?->label() ?? $m->category)
                 : null,
