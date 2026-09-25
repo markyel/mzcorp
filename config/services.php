@@ -353,6 +353,8 @@ return [
     'dadata' => [
         'api_key' => env('DADATA_API_KEY'),
         'party_url' => env('DADATA_PARTY_URL', 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party'),
+        // Компании Беларуси по УНП (9 цифр) — у нас есть клиенты из Минска и Гомеля.
+        'party_by_url' => env('DADATA_PARTY_BY_URL', 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party_by'),
         'timeout' => (int) env('DADATA_TIMEOUT', 10),
     ],
 

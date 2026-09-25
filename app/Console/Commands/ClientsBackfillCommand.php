@@ -268,6 +268,12 @@ class ClientsBackfillCommand extends Command
         if (! $assumeOrg && $inn === '' && $this->looksLikePerson($name)) {
             return null;
         }
+        // Получателем КП бывает просто адрес: так завелись «организации»
+        // slava.alshevski@chasti-stock.by (ООО «ЭкоЛифт», Минск) и
+        // ruslangaliev226@gmail.com. Адрес — это контакт, не юрлицо.
+        if ($inn === '' && str_contains($name, '@')) {
+            return null;
+        }
 
         // ИНН есть — спрашиваем реестр: организация заводится с официальными
         // данными, несуществующий ИНН и наш собственный в клиенты не попадают.

@@ -10,10 +10,11 @@ use App\Services\Clients\OrganizationRegistryService;
 use App\Services\Clients\RequestOrganizationResolver;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
+use PhpOffice\PhpSpreadsheet\IOFactory as SpreadsheetIO;
 use Smalot\PdfParser\Parser;
 
 /**
- * Извлечение реквизитов ПОКУПАТЕЛЯ (организации) из PDF внешних КП/счетов,
+ * Извлечение реквизитов ПОКУПАТЕЛЯ (организации) из внешних КП/счетов (PDF, xls, docx),
  * пойманных в исходящей почте (OutboundQuote). В документах 1С есть блок
  * «Покупатель: <Название>, ИНН …, КПП …, <адрес>» — оттуда тянем
  * Название / ИНН / КПП / адрес и наполняем реестр организаций.
@@ -36,7 +37,7 @@ class ClientsExtractRequisitesCommand extends Command
         {--limit=0 : Максимум документов за прогон (0 = все необработанные)}
         {--retry-empty : Перепроверить и те, где покупателя не нашли (после правки парсера)}';
 
-    protected $description = 'Достать реквизиты организаций-покупателей из PDF внешних КП/счетов (OutboundQuote)';
+    protected $description = 'Достать реквизиты организаций-покупателей из внешних КП/счетов (OutboundQuote)';
 
     private string $ourInn = '';
 
@@ -51,6 +52,17 @@ class ClientsExtractRequisitesCommand extends Command
      * @var array<int, string>
      */
     private array $ourInns = [];
+
+    /**
+     * ИНН покупателя в документе: российский (10/12 цифр) или белорусский
+     * УНП (9 цифр). Белорусским клиентам 1С пишет УНП под той же подписью
+     * «ИНН 101439542», и прежний шаблон на 10–12 цифр пропускал все их КП
+     * и счета — у ООО «ЭкоЛифт» так остались без реквизитов 46 документов.
+     */
+    private const INN = '(?:ИНН|УНП)\D{0,4}(\d{10,12}|\d{9}(?!\d))';
+
+    /** То же без захвата — для якоря «после ИНН идёт адрес». */
+    private const INN_BARE = '(?:ИНН|УНП)\D{0,4}(?:\d{10,12}|\d{9}(?!\d))';
 
     public function __construct(
         private readonly RequestOrganizationResolver $orgResolver,
@@ -111,7 +123,7 @@ class ClientsExtractRequisitesCommand extends Command
     private function processOne(OutboundQuote $q, array &$stats): void
     {
         $stats['processed']++;
-        $text = $this->pdfText($q->email_attachment_id);
+        $text = $this->documentText($q->email_attachment_id);
         $registryVerdict = null;
 
         if ($text === null) {
@@ -189,7 +201,7 @@ class ClientsExtractRequisitesCommand extends Command
         // 1) Чёткий блок «Покупатель|Заказчик: <Название>, ИНН …, КПП …, <адрес>».
         // «Покупатель» — счета 1С, «Заказчик» — наши КП: реквизиты там тоже есть.
         if (preg_match('/(?:Покупатель|Заказчик)\s*:?\s*([^,]{2,90})(.{0,200})/iu', $flat, $m)
-            && preg_match('/ИНН\D{0,4}(\d{10,12})/iu', $m[2], $mi)
+            && preg_match('/'.self::INN.'/iu', $m[2], $mi)
             && ! $this->isOurs($mi[1])) {
             $res['inn'] = $mi[1];
             $nm = $this->cleanName($m[1]);
@@ -199,7 +211,7 @@ class ClientsExtractRequisitesCommand extends Command
             if (preg_match('/КПП\D{0,4}(\d{9})/iu', $m[2], $mk)) {
                 $res['kpp'] = $mk[1];
             }
-            if (preg_match('/(?:КПП\D{0,4}\d{9}|ИНН\D{0,4}\d{10,12})\s*,?\s*(.+)$/iu', $m[2], $ma)) {
+            if (preg_match('/(?:КПП\D{0,4}\d{9}|'.self::INN_BARE.')\s*,?\s*(.+)$/iu', $m[2], $ma)) {
                 $res['address'] = trim(mb_substr(trim($ma[1]), 0, 160), ' ,;');
             }
 
@@ -219,7 +231,7 @@ class ClientsExtractRequisitesCommand extends Command
             // Смещение указывает на цифры, а перед ними стоит сам маркер
             // «ИНН» — снимаем его, иначе названием окажется он же.
             $before = mb_substr($flat, max(0, $offset - 140), min($offset, 140));
-            $before = preg_replace('/[\s,;:]*ИНН\D{0,4}$/iu', '', $before) ?? $before;
+            $before = preg_replace('/[\s,;:]*(?:ИНН|УНП)\D{0,4}$/iu', '', $before) ?? $before;
             if (! preg_match('/([^,;:|]{2,90})\s*,?\s*$/u', $before, $mn)) {
                 continue;
             }
@@ -236,7 +248,7 @@ class ClientsExtractRequisitesCommand extends Command
             if (preg_match('/КПП\D{0,4}(\d{9})/iu', $tail, $mk)) {
                 $res['kpp'] = $mk[1];
             }
-            if (preg_match('/(?:КПП\D{0,4}\d{9}|ИНН\D{0,4}\d{10,12})\s*,?\s*(.+)$/iu', $tail, $ma)) {
+            if (preg_match('/(?:КПП\D{0,4}\d{9}|'.self::INN_BARE.')\s*,?\s*(.+)$/iu', $tail, $ma)) {
                 $res['address'] = self::cutAddress($ma[1]);
             }
 
@@ -256,7 +268,7 @@ class ClientsExtractRequisitesCommand extends Command
      */
     private static function allInns(string $flat): array
     {
-        if (! preg_match_all('/ИНН\D{0,4}(\d{10,12})/iu', $flat, $m, PREG_OFFSET_CAPTURE)) {
+        if (! preg_match_all('/'.self::INN.'/iu', $flat, $m, PREG_OFFSET_CAPTURE)) {
             return [];
         }
 
@@ -367,25 +379,68 @@ class ClientsExtractRequisitesCommand extends Command
         $stats['requests_linked'] += $this->orgResolver->backfillForEmailLink($org, $email);
     }
 
-    private function pdfText(int $attId): ?string
+    /**
+     * Текст документа. Кроме PDF менеджеры отправляют счета и КП прямо
+     * из 1С в .xls (около трёхсот документов), изредка — .xlsx и .docx;
+     * блок «Покупатель: …, ИНН …» в них тот же.
+     */
+    private function documentText(int $attId): ?string
     {
         $att = EmailAttachment::find($attId);
         if (! $att || ! $att->file_path) {
             return null;
         }
         $disk = $att->disk ?: 'local';
-        if (strtolower((string) pathinfo((string) $att->filename, PATHINFO_EXTENSION)) !== 'pdf'
-            || ! Storage::disk($disk)->exists($att->file_path)) {
+        $ext = strtolower((string) pathinfo((string) $att->filename, PATHINFO_EXTENSION));
+        if (! in_array($ext, ['pdf', 'xls', 'xlsx', 'docx'], true) || ! Storage::disk($disk)->exists($att->file_path)) {
             return null;
         }
+        $path = Storage::disk($disk)->path($att->file_path);
+
         try {
-            $text = (new Parser)
-                ->parseFile(Storage::disk($disk)->path($att->file_path))
-                ->getText();
+            $text = match ($ext) {
+                'pdf' => (new Parser)->parseFile($path)->getText(),
+                'docx' => self::docxText($path),
+                default => self::spreadsheetText($path),
+            };
         } catch (\Throwable $e) {
             return null;
         }
 
         return trim((string) $text) !== '' ? $text : null;
+    }
+
+    /** Ячейки листов построчно: непустые через пробел, строки — переводом. */
+    private static function spreadsheetText(string $path): string
+    {
+        $reader = SpreadsheetIO::createReaderForFile($path);
+        $reader->setReadDataOnly(true);
+        $book = $reader->load($path);
+
+        $lines = [];
+        foreach ($book->getAllSheets() as $sheet) {
+            foreach ($sheet->toArray(null, false, false, false) as $row) {
+                $cells = array_filter(array_map(fn ($v) => trim((string) $v), $row), fn ($v) => $v !== '');
+                if ($cells !== []) {
+                    $lines[] = implode(' ', $cells);
+                }
+            }
+        }
+        $book->disconnectWorksheets();
+
+        return implode("\n", $lines);
+    }
+
+    /** Текст .docx: абзацы и ячейки таблиц из word/document.xml. */
+    private static function docxText(string $path): string
+    {
+        $zip = new \ZipArchive;
+        if ($zip->open($path) !== true) {
+            return '';
+        }
+        $xml = (string) $zip->getFromName('word/document.xml');
+        $zip->close();
+
+        return html_entity_decode(strip_tags(str_replace(['</w:p>', '</w:tc>'], ["\n", ' '], $xml)), ENT_QUOTES | ENT_XML1, 'UTF-8');
     }
 }

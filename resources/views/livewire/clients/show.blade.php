@@ -24,7 +24,7 @@
                         @error('name') <div class="text-[11px] text-red-600 mt-0.5">{{ $message }}</div> @enderror
                     </div>
                     <div>
-                        <label class="block text-[11.5px] text-fg-3 mb-1">ИНН</label>
+                        <label class="block text-[11.5px] text-fg-3 mb-1">ИНН <span class="text-fg-4">/ УНП для Беларуси</span></label>
                         <input type="text" wire:model="inn" class="{{ $inputCls }} mono">
                         @error('inn') <div class="text-[11px] text-red-600 mt-0.5">{{ $message }}</div> @enderror
                     </div>
@@ -72,7 +72,7 @@
                 @php $o = $organization; @endphp
                 <div class="pt-3 border-t border-border-subtle">
                     <div class="flex flex-wrap items-center gap-2 mb-2">
-                        <span class="text-[12px] font-semibold text-fg-1">ЕГРЮЛ / ЕГРИП</span>
+                        <span class="text-[12px] font-semibold text-fg-1">{{ \App\Services\Clients\OrganizationRegistryService::isBelarusUnp((string) $o->inn) ? 'ЕГР Беларуси' : 'ЕГРЮЛ / ЕГРИП' }}</span>
                         @if($o->registry_status)
                             <span class="chip text-[10px]"
                                   style="{{ $o->isDefunct()

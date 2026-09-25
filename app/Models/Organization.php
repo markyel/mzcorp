@@ -47,7 +47,7 @@ class Organization extends Model
         'LIQUIDATED' => 'ликвидирована',
         'BANKRUPT' => 'банкротство',
         'REORGANIZING' => 'реорганизуется',
-        'NOT_FOUND' => 'не найдена в ЕГРЮЛ',
+        'NOT_FOUND' => 'не найдена в реестре',
     ];
 
     protected function casts(): array

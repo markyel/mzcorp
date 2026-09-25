@@ -3,6 +3,7 @@
 namespace App\Services\Clients;
 
 use App\Models\Organization;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -30,33 +31,20 @@ class OrganizationRegistryService
      */
     public function lookup(string $inn): ?array
     {
-        $key = (string) config('services.dadata.api_key');
         $inn = preg_replace('/\D+/', '', $inn) ?? '';
-        if ($key === '' || $inn === '') {
+        if ($inn === '') {
             return null;
         }
-
-        try {
-            $response = Http::timeout((int) config('services.dadata.timeout', 10))
-                ->withHeaders([
-                    'Authorization' => 'Token '.$key,
-                    'Accept' => 'application/json',
-                ])
-                ->asJson()
-                ->post((string) config('services.dadata.party_url'), [
-                    'query' => $inn,
-                    // Филиалы не нужны: реквизиты договора — головной организации.
-                    'branch_type' => 'MAIN',
-                ]);
-        } catch (\Throwable $e) {
-            Log::warning('OrganizationRegistryService: dadata unreachable', ['inn' => $inn, 'error' => $e->getMessage()]);
-
-            return null;
+        if (self::isBelarusUnp($inn)) {
+            return $this->lookupBelarus($inn);
         }
 
-        if (! $response->successful()) {
-            Log::warning('OrganizationRegistryService: dadata error', ['inn' => $inn, 'status' => $response->status()]);
-
+        $response = $this->ask((string) config('services.dadata.party_url'), [
+            'query' => $inn,
+            // Филиалы не нужны: реквизиты договора — головной организации.
+            'branch_type' => 'MAIN',
+        ], $inn);
+        if ($response === null) {
             return null;
         }
 
@@ -79,6 +67,81 @@ class OrganizationRegistryService
             'address' => $data['address']['unrestricted_value'] ?? $data['address']['value'] ?? null,
             'director' => $director,
         ];
+    }
+
+    /**
+     * УНП — регистрационный номер плательщика Беларуси, 9 цифр. Российский
+     * ИНН всегда 10 или 12, так что по длине они не путаются. В наших КП и
+     * счетах белорусский покупатель подписан тем же «ИНН 101439542».
+     */
+    public static function isBelarusUnp(string $inn): bool
+    {
+        return preg_match('/^\d{9}$/', $inn) === 1;
+    }
+
+    /**
+     * Выписка из ЕГР Беларуси. КПП, ОГРН и руководителя там нет — только
+     * названия, адрес и статус; остальное карточка берёт из документов.
+     *
+     * @return array{status: string, short_name?: string, full_name?: string, kpp?: ?string, ogrn?: ?string, address?: ?string, director?: ?string}|null
+     */
+    private function lookupBelarus(string $unp): ?array
+    {
+        $response = $this->ask((string) config('services.dadata.party_by_url'), ['query' => $unp], $unp);
+        if ($response === null) {
+            return null;
+        }
+
+        $data = $response->json('suggestions.0.data');
+        if (! is_array($data)) {
+            return ['status' => 'NOT_FOUND'];
+        }
+
+        // У ИП нет названия, есть ФИО.
+        $individual = ($data['type'] ?? null) === 'INDIVIDUAL';
+        $short = ($data['short_name_ru'] ?? null)
+            ?: ($individual && ! empty($data['fio_ru']) ? 'ИП '.$data['fio_ru'] : $response->json('suggestions.0.value'));
+
+        return [
+            'status' => (string) ($data['status'] ?? 'ACTIVE'),
+            'short_name' => (string) $short,
+            'full_name' => (string) ($data['full_name_ru'] ?? ''),
+            'kpp' => null,
+            'ogrn' => null,
+            'address' => $data['address'] ?? null,
+            'director' => $individual ? ($data['fio_ru'] ?? null) : null,
+        ];
+    }
+
+    /** Запрос к DaData. null — ключа нет, сервис недоступен или ответил ошибкой. */
+    private function ask(string $url, array $payload, string $inn): ?Response
+    {
+        $key = (string) config('services.dadata.api_key');
+        if ($key === '') {
+            return null;
+        }
+
+        try {
+            $response = Http::timeout((int) config('services.dadata.timeout', 10))
+                ->withHeaders([
+                    'Authorization' => 'Token '.$key,
+                    'Accept' => 'application/json',
+                ])
+                ->asJson()
+                ->post($url, $payload);
+        } catch (\Throwable $e) {
+            Log::warning('OrganizationRegistryService: dadata unreachable', ['inn' => $inn, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+
+        if (! $response->successful()) {
+            Log::warning('OrganizationRegistryService: dadata error', ['inn' => $inn, 'status' => $response->status()]);
+
+            return null;
+        }
+
+        return $response;
     }
 
     /**
@@ -105,7 +168,7 @@ class OrganizationRegistryService
             'changed' => $changed,
             'status' => $reg['status'],
             'message' => $reg['status'] === 'NOT_FOUND'
-                ? 'ИНН в ЕГРЮЛ/ЕГРИП не найден.'
+                ? (self::isBelarusUnp((string) $org->inn) ? 'УНП в реестре Беларуси не найден.' : 'ИНН в ЕГРЮЛ/ЕГРИП не найден.')
                 : ($changed === [] ? 'Реквизиты совпадают с реестром.' : 'Обновлено полей: '.count($changed).'.'),
         ];
     }
@@ -261,7 +324,8 @@ class OrganizationRegistryService
         if ($name === '' || preg_match('/^ИНН\s*\d+$/u', $name) === 1) {
             return true;
         }
-        if (str_contains($name, '[') || str_contains($name, '/')) {
+        // «slava.alshevski@chasti-stock.by» — адрес получателя из черновика КП.
+        if (str_contains($name, '[') || str_contains($name, '/') || str_contains($name, '@')) {
             return true;
         }
         // «ип DCSS5-E», «ООО AGH (стандарт EN81-20…» — латиница с цифрами вместо имени.
