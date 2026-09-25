@@ -8,6 +8,7 @@ use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use App\Models\MailboxFolder;
 use App\Models\MailboxFolderState;
+use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -339,7 +340,6 @@ class MailHistoryMirrorService
         $flagsByUid = [];
         foreach ($parsed as $uid => $p) {
             $flags = $p['flags'];
-            $env = new HeaderEnvelope(new Header($p['raw'], $config), $flags);
             $mid = $p['mid'];
 
             $existing = $mid !== null ? ($existingByMid[mb_strtolower($mid)] ?? null) : null;
@@ -365,12 +365,27 @@ class MailHistoryMirrorService
                 continue;
             }
 
-            $direction = $f['direction'] ?? $this->directionFor($env, $ownerEmail);
-            $insert[] = $this->persister->historyRow(
-                $env, $mailbox, $f['db'], $uid, $direction, $f['folder_id'],
-                sprintf('hist-%d-%d-%d@mzcorp', $mailbox->id, $validity, $uid),
-            );
-            $flagsByUid[$uid] = $flags;
+            try {
+                $insert[] = self::quietly(function () use ($p, $config, $flags, $f, $ownerEmail, $mailbox, $uid, $validity) {
+                    $env = new HeaderEnvelope(new Header($p['raw'], $config), $flags);
+                    $direction = $f['direction'] ?? $this->directionFor($env, $ownerEmail);
+
+                    return $this->persister->historyRow(
+                        $env, $mailbox, $f['db'], $uid, $direction, $f['folder_id'],
+                        sprintf('hist-%d-%d-%d@mzcorp', $mailbox->id, $validity, $uid),
+                    );
+                });
+                $flagsByUid[$uid] = $flags;
+            } catch (\Throwable $e) {
+                // Одна кривая шапка не должна ронять пачку из 500 писем, а
+                // повтор её не вылечит — заводим письмо по-простому: тема и
+                // отправитель регуляркой, текст подтянется при открытии.
+                Log::info('MailHistoryMirror: header parsed by fallback', [
+                    'mailbox_id' => $mailbox->id, 'folder' => $f['db'], 'uid' => $uid, 'error' => mb_substr($e->getMessage(), 0, 200),
+                ]);
+                $insert[] = $this->fallbackRow($p, $mailbox, $f, $uid, $validity, $ownerEmail);
+                $flagsByUid[$uid] = $flags;
+            }
         }
 
         if ($insert !== []) {
@@ -468,6 +483,75 @@ class MailHistoryMirrorService
             return false;
         } finally {
             $client?->disconnect();
+        }
+    }
+
+    /**
+     * Строка истории, когда webklex не разобрал шапку: Message-ID, тема,
+     * отправитель и дата — простым разбором, без получателей.
+     *
+     * @param  array{raw:string, flags:list<string>, mid:?string}  $p
+     * @return array<string, mixed>
+     */
+    private function fallbackRow(array $p, Mailbox $mailbox, array $f, int $uid, int $validity, string $ownerEmail): array
+    {
+        $raw = preg_replace('/\r?\n[ \t]+/', ' ', $p['raw']) ?? $p['raw'];
+        $field = fn (string $name) => preg_match('/^'.$name.':\s*(.*)$/mi', $raw, $m) ? trim($m[1]) : '';
+        $decode = fn (string $v) => (string) (@iconv_mime_decode($v, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8') ?: $v);
+        $fromRaw = $field('From');
+        $fromEmail = preg_match('/<([^>]+@[^>]+)>/', $fromRaw, $m) ? $m[1] : (preg_match('/[\w.+-]+@[\w.-]+/', $fromRaw, $m) ? $m[0] : '');
+        $date = null;
+        try {
+            $date = $field('Date') !== '' ? Carbon::parse($field('Date'))->setTimezone(config('app.timezone'))->format('Y-m-d H:i:s') : null;
+        } catch (\Throwable) {
+        }
+        $now = now();
+        $outbound = $f['direction'] === MailDirection::Outbound
+            || ($f['direction'] === null && mb_strtolower($fromEmail) === $ownerEmail);
+
+        return [
+            'mailbox_id' => $mailbox->id,
+            'folder' => $f['db'],
+            'mailbox_folder_id' => $f['folder_id'],
+            'direction' => ($outbound ? MailDirection::Outbound : MailDirection::Inbound)->value,
+            'imap_uid' => $uid,
+            'message_id' => $p['mid'] ?? sprintf('hist-%d-%d-%d@mzcorp', $mailbox->id, $validity, $uid),
+            'in_reply_to' => null,
+            'references_header' => null,
+            'subject' => mb_substr($decode($field('Subject')), 0, 998),
+            'from_email' => mb_substr($fromEmail, 0, 255),
+            'from_name' => ($n = trim($decode((string) preg_replace('/<[^>]*>/', '', $fromRaw)), " \t\"")) !== '' ? mb_substr($n, 0, 255) : null,
+            'to_recipients' => null,
+            'cc_recipients' => null,
+            'sent_at' => $date,
+            'imap_flags' => json_encode($p['flags']),
+            'is_draft' => false,
+            'is_history' => true,
+            'history_has_attachments' => str_contains(mb_strtolower($field('Content-Type')), 'multipart/mixed'),
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
+    }
+
+    /**
+     * Разбор шапки без предупреждений PHP. Декодер webklex на имени адресата
+     * с обратным слэшем («Запорожец Павел \ Pavel Zaporozhets») зовёт
+     * property_exists('') — автозагрузчик Composer пишет «Uninitialized string
+     * offset 0», Laravel превращает это в исключение, и падала вся пачка из
+     * 500 писем — на каждой попытке заново. Само предупреждение безвредно.
+     *
+     * @template T
+     *
+     * @param  callable():T  $fn
+     * @return T
+     */
+    private static function quietly(callable $fn): mixed
+    {
+        set_error_handler(fn (int $no) => in_array($no, [E_WARNING, E_NOTICE, E_USER_WARNING, E_USER_NOTICE, E_DEPRECATED, E_USER_DEPRECATED], true));
+        try {
+            return $fn();
+        } finally {
+            restore_error_handler();
         }
     }
 
