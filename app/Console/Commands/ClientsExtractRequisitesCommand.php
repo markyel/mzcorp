@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\ClientContact;
 use App\Models\EmailAttachment;
+use App\Models\EmailMessage;
 use App\Models\Organization;
 use App\Models\OutboundQuote;
 use App\Services\Clients\OrganizationRegistryService;
@@ -163,7 +164,9 @@ class ClientsExtractRequisitesCommand extends Command
                         $org->address = $buyer['address'];
                     }
                     $org->save();
-                    $this->linkEmail($org, (string) (optional($q->request)->client_email ?? ''), $stats);
+                    foreach ($this->documentRecipients($q) as $email) {
+                        $this->linkEmail($org, $email, $stats);
+                    }
                 } else {
                     // not_found — такого ИНН нет в ЕГРЮЛ/ЕГРИП; ours — это мы сами.
                     // В обоих случаях организацию не заводим и к адресу не цепляем.
@@ -364,6 +367,45 @@ class ClientsExtractRequisitesCommand extends Command
         $inn = preg_replace('/\D+/', '', (string) $inn) ?? '';
 
         return $inn !== '' && in_array($inn, $this->ourInns, true);
+    }
+
+    /**
+     * Кому на самом деле ушёл документ — к этим адресам и цепляем покупателя.
+     *
+     * Раньше брался e-mail заявки, а письмо к заявке бывает приклеено чужое:
+     * КП 358863 для ЛИФТРЕМОНТа ушло zelenkova@liftremont.ru, но лежало в
+     * заявке ima@service-cl.ru — и ЛИФТРЕМОНТ повис на КОМБОЛИФТ СЕРВИС.
+     * По заявкам, пересланным нашим сотрудником, e-mail заявки — вообще наш.
+     *
+     * Внешние получатели письма (To/Cc) — они и есть заказчик. Если внешних
+     * нет (менеджер переслал счёт коллеге), остаётся e-mail заявки. Наши
+     * домены не привязываются никогда.
+     *
+     * @return array<int, string>
+     */
+    private function documentRecipients(OutboundQuote $q): array
+    {
+        $message = $q->email_message_id ? EmailMessage::find($q->email_message_id) : null;
+        $recipients = collect(array_merge((array) ($message?->to_recipients ?? []), (array) ($message?->cc_recipients ?? [])))
+            ->map(fn ($r) => mb_strtolower(trim((string) (is_array($r) ? ($r['email'] ?? '') : $r))))
+            ->filter(fn ($e) => filter_var($e, FILTER_VALIDATE_EMAIL) && ! $this->isInternalEmail($e))
+            ->unique()->values()->all();
+        if ($recipients !== []) {
+            return $recipients;
+        }
+
+        $client = mb_strtolower(trim((string) (optional($q->request)->client_email ?? '')));
+
+        return filter_var($client, FILTER_VALIDATE_EMAIL) && ! $this->isInternalEmail($client) ? [$client] : [];
+    }
+
+    /** Адрес на нашем домене (services.mail.internal_domains): сотрудник или технический ящик. */
+    private function isInternalEmail(string $email): bool
+    {
+        $domain = mb_strtolower((string) substr((string) strrchr($email, '@'), 1));
+        $internal = array_map(fn ($d) => mb_strtolower(trim((string) $d)), (array) config('services.mail.internal_domains', []));
+
+        return $domain !== '' && in_array($domain, $internal, true);
     }
 
     private function linkEmail(Organization $org, string $email, array &$stats): void
