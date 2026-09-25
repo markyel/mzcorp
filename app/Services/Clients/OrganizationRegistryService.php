@@ -285,8 +285,11 @@ class OrganizationRegistryService
 
         // Адрес карточки идёт за реестром, пока его не правил человек: пустой
         // или равный прежней выписке — обновляем, свой — не трогаем.
+        // У ИП выписка даёт только город («101000, г Москва») — адрес из
+        // документов полнее, его ИП не меняем, только заполняем пустой.
         $followsRegistry = trim((string) $org->address) === ''
-            || trim((string) $org->address) === trim((string) $org->registry_address);
+            || (strlen((string) $org->inn) !== 12
+                && trim((string) $org->address) === trim((string) $org->registry_address));
 
         $set('registry_short_name', $reg['short_name'] ?? null);
         $set('registry_full_name', $reg['full_name'] ?? null);
