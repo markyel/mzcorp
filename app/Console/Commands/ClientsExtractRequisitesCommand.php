@@ -211,9 +211,7 @@ class ClientsExtractRequisitesCommand extends Command
             if (preg_match('/КПП\D{0,4}(\d{9})/iu', $m[2], $mk)) {
                 $res['kpp'] = $mk[1];
             }
-            if (preg_match('/(?:КПП\D{0,4}\d{9}|'.self::INN_BARE.')\s*,?\s*(.+)$/iu', $m[2], $ma)) {
-                $res['address'] = trim(mb_substr(trim($ma[1]), 0, 160), ' ,;');
-            }
+            $res['address'] = self::addressAfterIds($m[2]);
 
             return $res;
         }
@@ -248,9 +246,8 @@ class ClientsExtractRequisitesCommand extends Command
             if (preg_match('/КПП\D{0,4}(\d{9})/iu', $tail, $mk)) {
                 $res['kpp'] = $mk[1];
             }
-            if (preg_match('/(?:КПП\D{0,4}\d{9}|'.self::INN_BARE.')\s*,?\s*(.+)$/iu', $tail, $ma)) {
-                $res['address'] = self::cutAddress($ma[1]);
-            }
+            // Хвост начинается с самих цифр ИНН — возвращаем ему подпись.
+            $res['address'] = self::addressAfterIds('ИНН '.$tail);
 
             return $res;
         }
@@ -295,12 +292,29 @@ class ClientsExtractRequisitesCommand extends Command
     }
 
     /**
+     * Адрес — то, что идёт после ПОСЛЕДНЕГО из «ИНН …» / «КПП …».
+     *
+     * Прежний шаблон брал текст после первого совпавшего маркера, а первым в
+     * строке стоит ИНН — так в адрес 944 карточек попало «КПП 771401001, …».
+     * Жадное «.*» в начале доводит до последнего маркера.
+     */
+    public static function addressAfterIds(string $s): ?string
+    {
+        if (! preg_match('/^.*(?:КПП\D{0,4}\d{9}|'.self::INN_BARE.')\s*,?\s*(.+)$/isu', $s, $m)) {
+            return null;
+        }
+        $address = self::cutAddress($m[1]);
+
+        return $address !== '' ? $address : null;
+    }
+
+    /**
      * Адрес обрывается там, где начинается следующая колонка документа:
      * «…ком. 12, Заказчик: тел.: …» — всё после подписи уже не адрес.
      */
     public static function cutAddress(string $raw): string
     {
-        $cut = preg_split('/\s*(?:Заказчик|Покупатель|Поставщик|Исполнитель|Карта клиента|Ответственный|тел\.?:|e-?mail)/iu', trim($raw))[0] ?? $raw;
+        $cut = preg_split('/\s*(?:Заказчик|Покупатель|Поставщик|Исполнитель|Грузополучатель|Карта клиента|Ответственный|Основание|Внимание|Счет действителен|Содержание запроса|тел\.?:|e-?mail)/iu', trim($raw))[0] ?? $raw;
 
         return trim(mb_substr(trim($cut), 0, 160), ' ,;:');
     }
