@@ -282,8 +282,17 @@ class MailHistoryMirrorService
             $existing = $mid !== null ? ($existingByMid[mb_strtolower($mid)] ?? null) : null;
             if ($existing !== null) {
                 if ($f['folder_id'] !== null) {
-                    if ($existing->folder !== $f['db'] && $this->folderSync->rehome($existing, $f['db'], $uid, $f['folder_id'])) {
-                        $out['rehomed']++;
+                    if ($existing->folder !== $f['db']) {
+                        if ($this->folderSync->rehome($existing, $f['db'], $uid, $f['folder_id'])) {
+                            $out['rehomed']++;
+                        }
+                    } elseif ($existing->imap_uid === null) {
+                        // Письмо уже в этой папке, но связь с сервером потеряна:
+                        // клиент прячет такие входящие как удалённые. У
+                        // Агрызкова так пропали 6 тыс. писем «Входящих
+                        // (локально)» — разовый проход 08.09 остановили на 29k.
+                        $existing->forceFill(['imap_uid' => $uid, 'mailbox_folder_id' => $f['folder_id']])->saveQuietly();
+                        $out['uid_filled']++;
                     }
                 } elseif ($existing->folder === $f['db'] && $existing->imap_uid === null) {
                     $existing->forceFill(['imap_uid' => $uid])->saveQuietly();
