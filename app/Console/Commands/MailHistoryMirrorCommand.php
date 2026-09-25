@@ -77,8 +77,8 @@ class MailHistoryMirrorCommand extends Command
                 continue;
             }
             $this->line(sprintf(
-                '  готово за %d с: заведено %d, переселено %d, UID проставлен %d',
-                (int) (microtime(true) - $started), $stats['imported'], $stats['rehomed'], $stats['uid_filled'],
+                '  готово за %d с: заведено %d, переселено %d, UID проставлен %d, не отдано сервером %d (доберёт следующий прогон)',
+                (int) (microtime(true) - $started), $stats['imported'], $stats['rehomed'], $stats['uid_filled'], $stats['missing'],
             ));
         }
 

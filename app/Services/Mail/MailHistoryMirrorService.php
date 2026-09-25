@@ -88,7 +88,7 @@ class MailHistoryMirrorService
     public function run(Mailbox $mailbox, int $budget = 0, int $seconds = 0, ?callable $progress = null, ?string $only = null, ?array $shard = null): array
     {
         $this->shard = $shard !== null && $shard[1] > 1 ? $shard : null;
-        $stats = ['imported' => 0, 'rehomed' => 0, 'uid_filled' => 0, 'folders' => []];
+        $stats = ['imported' => 0, 'rehomed' => 0, 'uid_filled' => 0, 'missing' => 0, 'folders' => []];
         if (! $this->isMirrored($mailbox)) {
             return $stats;
         }
@@ -116,6 +116,7 @@ class MailHistoryMirrorService
                 $stats['imported'] += $res['imported'];
                 $stats['rehomed'] += $res['rehomed'];
                 $stats['uid_filled'] += $res['uid_filled'];
+                $stats['missing'] += $res['missing'] ?? 0;
                 $stats['folders'][$f['db']] = ['todo' => $res['todo'], 'imported' => $res['imported']];
             }
         } finally {
@@ -162,11 +163,11 @@ class MailHistoryMirrorService
 
     /**
      * @param  array{server:string, db:string, direction:?MailDirection, folder_id:?int, bound:?int}  $f
-     * @return array{todo:int, imported:int, rehomed:int, uid_filled:int}
+     * @return array{todo:int, imported:int, rehomed:int, uid_filled:int, missing:int}
      */
     private function mirrorFolder(Mailbox $mailbox, Client $client, array $f, int $budget, ?float $deadline, ?callable $progress): array
     {
-        $res = ['todo' => 0, 'imported' => 0, 'rehomed' => 0, 'uid_filled' => 0];
+        $res = ['todo' => 0, 'imported' => 0, 'rehomed' => 0, 'uid_filled' => 0, 'missing' => 0];
         $conn = $client->getConnection();
         $status = (array) $client->openFolder($f['server'], force_select: true);
         $validity = (int) ($status['uidvalidity'] ?? 0);
@@ -213,9 +214,9 @@ class MailHistoryMirrorService
             if ($deadline && microtime(true) > $deadline) {
                 break;
             }
-            $part = $this->importChunk($mailbox, $client, $f, $chunk, $validity);
+            $part = $this->importChunkWithRetry($mailbox, $client, $f, $chunk, $validity);
             foreach ($part as $k => $v) {
-                $res[$k] += $v;
+                $res[$k] = ($res[$k] ?? 0) + $v;
             }
             $done += count($chunk);
 
@@ -232,11 +233,69 @@ class MailHistoryMirrorService
             }
         }
 
-        if ($shard === null && $done >= $res['todo']) {
+        // Папка пройдена, только если Яндекс отдал все письма: недополученные
+        // доберёт следующий прогон (они не заведены — попадут в todo снова).
+        if ($shard === null && $done >= $res['todo'] && ($res['missing'] ?? 0) === 0) {
             $state->forceFill(['history_completed_at' => now()])->save();
         }
 
         return $res;
+    }
+
+    /**
+     * Пачка с повторами. Под нагрузкой (несколько соединений к одному
+     * аккаунту) Яндекс отвечает пустым или обрезанным FETCH — webklex то
+     * молча отдаёт меньше строк, то падает («empty response», «Uninitialized
+     * string offset»). Недополученные UID запрашиваем снова, при сбое —
+     * переподключаемся; что не удалось за 3 попытки, остаётся на следующий
+     * прогон.
+     *
+     * @param  list<int>  $uids
+     * @return array{imported:int, rehomed:int, uid_filled:int, missing:int}
+     */
+    private function importChunkWithRetry(Mailbox $mailbox, Client $client, array $f, array $uids, int $validity): array
+    {
+        $out = ['imported' => 0, 'rehomed' => 0, 'uid_filled' => 0, 'missing' => 0];
+        $left = $uids;
+        for ($attempt = 1; $attempt <= 3 && $left !== []; $attempt++) {
+            try {
+                $part = $this->importChunk($mailbox, $client, $f, $left, $validity);
+            } catch (\Throwable $e) {
+                Log::info('MailHistoryMirror: chunk failed, reconnecting', [
+                    'mailbox_id' => $mailbox->id, 'folder' => $f['db'], 'uids' => count($left),
+                    'attempt' => $attempt, 'error' => mb_substr($e->getMessage(), 0, 200),
+                ]);
+                sleep(3 * $attempt);
+                $this->reconnect($client, $f['server']);
+
+                continue;
+            }
+            $out['imported'] += $part['imported'];
+            $out['rehomed'] += $part['rehomed'];
+            $out['uid_filled'] += $part['uid_filled'];
+            $left = $part['missing'];
+            if ($left !== []) {
+                sleep(2 * $attempt);
+            }
+        }
+        $out['missing'] = count($left);
+
+        return $out;
+    }
+
+    private function reconnect(Client $client, string $path): void
+    {
+        try {
+            $client->disconnect();
+        } catch (\Throwable) {
+            // соединение уже мертво
+        }
+        try {
+            $client->connect();
+            $client->openFolder($path, force_select: true);
+        } catch (\Throwable $e) {
+            Log::warning('MailHistoryMirror: reconnect failed', ['folder' => $path, 'error' => mb_substr($e->getMessage(), 0, 200)]);
+        }
     }
 
     /**
@@ -245,11 +304,11 @@ class MailHistoryMirrorService
      * (как ImapFolderSyncService), в INBOX/Sent — проставляем UID.
      *
      * @param  list<int>  $uids
-     * @return array{imported:int, rehomed:int, uid_filled:int}
+     * @return array{imported:int, rehomed:int, uid_filled:int, missing:list<int>} missing — UID, которых нет в ответе сервера
      */
     private function importChunk(Mailbox $mailbox, Client $client, array $f, array $uids, int $validity): array
     {
-        $out = ['imported' => 0, 'rehomed' => 0, 'uid_filled' => 0];
+        $out = ['imported' => 0, 'rehomed' => 0, 'uid_filled' => 0, 'missing' => []];
         $rows = (array) $client->getConnection()
             ->fetch(['UID', 'FLAGS', self::HEADER_ITEM], $uids, null, IMAP::ST_UID)
             ->data();
@@ -268,6 +327,8 @@ class MailHistoryMirrorService
                 'mid' => ImapFolderSyncService::messageIdFromHeaders($raw),
             ];
         }
+        $out['missing'] = array_values(array_diff($uids, array_keys($parsed)));
+
         // Уже известные письма пачки — одним запросом (живой синк, доставка
         // копии, прошлый проход): по одному на письмо миллион шапок не пройти.
         $existingByMid = $this->findByMessageIds($mailbox, array_values(array_filter(array_column($parsed, 'mid'))));
