@@ -251,7 +251,7 @@ class ImapFolderSyncService
             if ($folder->imap_synced_at !== null) {
                 // Сервер её знал → удалили в Яндексе. Письма — во «Входящие», подпапки — выше.
                 DB::transaction(function () use ($folder) {
-                    EmailMessage::query()->where('mailbox_folder_id', $folder->id)->update(['mailbox_folder_id' => null]);
+                    EmailMessage::withHistory()->where('mailbox_folder_id', $folder->id)->update(['mailbox_folder_id' => null]);
                     MailboxFolder::query()->where('parent_id', $folder->id)->update(['parent_id' => $folder->parent_id]);
                     $folder->delete();
                 });
@@ -311,7 +311,7 @@ class ImapFolderSyncService
             }
             $serverSet = array_fill_keys($serverUids, true);
 
-            $dbRows = EmailMessage::query()
+            $dbRows = EmailMessage::withHistory()
                 ->where('mailbox_id', $mailbox->id)
                 ->where('folder', $folder->imap_path)
                 ->whereNotNull('imap_uid')
@@ -382,7 +382,7 @@ class ImapFolderSyncService
             // удалены. UID больше не валиден — обнуляем, чтобы не гонять флаги.
             foreach ($dbRows as $r) {
                 if (! isset($serverSet[(int) $r->imap_uid])) {
-                    EmailMessage::query()->whereKey($r->id)->update(['imap_uid' => null]);
+                    EmailMessage::withHistory()->whereKey($r->id)->update(['imap_uid' => null]);
                     $gone++;
                 }
             }
@@ -427,7 +427,7 @@ class ImapFolderSyncService
             foreach ($folders as $folder) {
                 $client->openFolder($folder->imap_path, force_select: true);
                 $serverUids = array_map('intval', (array) $conn->getUid()->validatedData());
-                $known = EmailMessage::query()
+                $known = EmailMessage::withHistory()
                     ->where('mailbox_id', $mailbox->id)
                     ->where('folder', $folder->imap_path)
                     ->whereNotNull('imap_uid')
@@ -517,7 +517,7 @@ class ImapFolderSyncService
     /** Письмо ящика по Message-ID: сначала то, что лежит в INBOX/Sent, потом любое. */
     private function findByMessageId(Mailbox $mailbox, string $mid): ?EmailMessage
     {
-        return EmailMessage::query()
+        return EmailMessage::withHistory()
             ->where('mailbox_id', $mailbox->id)
             ->where('is_draft', false)
             ->whereRaw('lower(message_id) = ?', [mb_strtolower($mid)])
@@ -545,7 +545,7 @@ class ImapFolderSyncService
             Log::warning('ImapFolderSyncService: rehome conflict', [
                 'email_message_id' => $row->id, 'folder' => $folderPath, 'error' => substr($e->getMessage(), 0, 200),
             ]);
-            EmailMessage::query()->whereKey($row->id)->update(['mailbox_folder_id' => $mailboxFolderId]);
+            EmailMessage::withHistory()->whereKey($row->id)->update(['mailbox_folder_id' => $mailboxFolderId]);
 
             return false;
         }
@@ -687,7 +687,7 @@ class ImapFolderSyncService
             $map = self::parseCopyUidMap((array) $resp->validatedData());
             foreach ($chunk as $uid) {
                 $newUid = $map[$uid] ?? null;
-                EmailMessage::query()
+                EmailMessage::withHistory()
                     ->where('mailbox_id', $mailbox->id)
                     ->where('folder', $fromPath)
                     ->where('imap_uid', $uid)

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\MailDirection;
+use App\Models\Scopes\ExcludeMailHistoryScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -60,7 +61,37 @@ class EmailMessage extends Model
         'is_draft',
         'draft_author_user_id',
         'last_edited_at',
+        // Зеркало истории личного ящика — см. ExcludeMailHistoryScope, MailHistoryMirrorService.
+        'is_history',
+        'body_fetched_at',
+        'history_has_attachments',
     ];
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new ExcludeMailHistoryScope);
+    }
+
+    /**
+     * Запрос вместе с письмами из истории ящика. Только для почтового клиента
+     * и синка: всё прочее должно работать с живой перепиской.
+     */
+    public static function withHistory(): Builder
+    {
+        return static::query()->withoutGlobalScope(ExcludeMailHistoryScope::class);
+    }
+
+    /** Ссылки на письмо (вложения, inline-картинки) открываются и у архивных писем. */
+    public function resolveRouteBinding($value, $field = null)
+    {
+        return static::withHistory()->where($field ?? $this->getRouteKeyName(), $value)->first();
+    }
+
+    /** Письмо из истории, тело и вложения которого ещё не скачаны с сервера. */
+    public function needsBodyFetch(): bool
+    {
+        return (bool) $this->is_history && $this->body_fetched_at === null;
+    }
 
     protected function casts(): array
     {
@@ -84,6 +115,9 @@ class EmailMessage extends Model
             // Phase 1.9
             'is_draft' => 'bool',
             'last_edited_at' => 'datetime',
+            'is_history' => 'bool',
+            'body_fetched_at' => 'datetime',
+            'history_has_attachments' => 'bool',
         ];
     }
 

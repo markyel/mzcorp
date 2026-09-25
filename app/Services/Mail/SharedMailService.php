@@ -87,7 +87,7 @@ class SharedMailService
      *
      * @return Collection<int, EmailMessage>
      */
-    public function threadFor(EmailMessage $original): Collection
+    public function threadFor(EmailMessage $original, bool $withHistory = false): Collection
     {
         $ids = collect([$original->message_id])
             ->merge((array) ($original->references_header ?? []))
@@ -96,7 +96,11 @@ class SharedMailService
             ->unique()
             ->values();
 
-        $thread = EmailMessage::query()
+        // Почтовый клиент показывает в треде и письма из истории ящика — но
+        // только из ящика самого письма: чужие архивы в тред не подмешиваем.
+        $thread = ($withHistory ? EmailMessage::withHistory() : EmailMessage::query())
+            ->when($withHistory, fn (Builder $q) => $q->where(fn (Builder $w) => $w
+                ->where('is_history', false)->orWhere('mailbox_id', $original->mailbox_id)))
             ->where('is_draft', false)
             // Технические cross-mailbox копии доставки — не отдельные письма.
             ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")

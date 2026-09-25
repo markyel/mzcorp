@@ -83,6 +83,8 @@ class WeeklyManagerReportService
             ->whereBetween('assigned_at', [$from, $to])->distinct('request_id')->count('request_id');
 
         $emailsTotal = empty($mbx) ? 0 : DB::table('email_messages')->whereIn('mailbox_id', $mbx)
+            // История ящика (шапки старых писем) — не работа менеджера за неделю.
+            ->where('is_history', false)
             ->where('direction', 'outbound')
             ->where(fn ($q) => $q->whereNull('is_draft')->orWhere('is_draft', false))
             ->whereBetween('sent_at', [$from, $to])->count();

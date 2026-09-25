@@ -1,0 +1,449 @@
+<?php
+
+namespace App\Services\Mail;
+
+use App\Enums\MailboxType;
+use App\Enums\MailDirection;
+use App\Models\EmailMessage;
+use App\Models\Mailbox;
+use App\Models\MailboxFolder;
+use App\Models\MailboxFolderState;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Webklex\PHPIMAP\Client;
+use Webklex\PHPIMAP\Header;
+use Webklex\PHPIMAP\IMAP;
+
+/**
+ * Зеркало истории личных ящиков менеджеров (заказчик, 2026-09-26: «полная
+ * синхронизация ящиков, в т.ч. папок»).
+ *
+ * Живой синк (SyncMailboxFolderJob) забирает письма, пришедшие после
+ * подключения ящика, и прогоняет их через конвейер. Всё, что лежало раньше
+ * (ниже водяного знака INBOX/Sent), и всё, что живёт в пользовательских
+ * папках Яндекса, заводится здесь — шапкой, без тела:
+ *   - письмо видно в списке, в счётчиках, в поиске по теме и отправителю;
+ *   - тело и вложения скачиваются при первом открытии (fetchBody);
+ *   - is_history = true: конвейер, заявки, детекторы и отчёты его не видят
+ *     (ExcludeMailHistoryScope).
+ * Прочитанность и флаг берутся с сервера — это правда владельца ящика.
+ *
+ * Идём от свежих писем к старым: польза видна сразу, а прерванный проход
+ * продолжается с history_low_uid.
+ */
+class MailHistoryMirrorService
+{
+    /** Поля шапки для FETCH: всё, что нужно строке списка и треду. */
+    private const HEADER_ITEM = 'BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM TO CC SUBJECT DATE IN-REPLY-TO REFERENCES CONTENT-TYPE)]';
+
+    /** Писем в одной IMAP-команде: 1000 шапок Яндекс отдаёт за ~20 с. */
+    private const FETCH_CHUNK = 500;
+
+    public function __construct(
+        private readonly MailboxConnector $connector,
+        private readonly MessagePersister $persister,
+        private readonly ImapFolderSyncService $folderSync,
+    ) {}
+
+    /**
+     * Ящики, чья история зеркалится: личные ящики сотрудников, которые синкает
+     * mzCorp (Mailbox::syncable — роли менеджеров, РОП, закупки). Ящик
+     * директора и общие ящики — нет.
+     *
+     * @return Collection<int, Mailbox>
+     */
+    public function mailboxes(): Collection
+    {
+        return Mailbox::query()->syncable()
+            ->where('type', MailboxType::Personal->value)
+            ->whereNotNull('owner_user_id')
+            ->orderBy('id')
+            ->get();
+    }
+
+    public function isMirrored(Mailbox $mailbox): bool
+    {
+        return $mailbox->type === MailboxType::Personal
+            && $mailbox->owner_user_id !== null
+            && Mailbox::query()->syncable()->whereKey($mailbox->id)->exists();
+    }
+
+    /**
+     * Один проход по ящику: по каждой папке заводим недостающие письма, пока
+     * не выйдет лимит писем или времени (0 — без ограничения).
+     *
+     * @param  callable(string $folder, int $done, int $todo):void|null  $progress
+     * @return array{imported:int, rehomed:int, uid_filled:int, folders:array<string, array{todo:int, imported:int}>}
+     */
+    public function run(Mailbox $mailbox, int $budget = 0, int $seconds = 0, ?callable $progress = null): array
+    {
+        $stats = ['imported' => 0, 'rehomed' => 0, 'uid_filled' => 0, 'folders' => []];
+        if (! $this->isMirrored($mailbox)) {
+            return $stats;
+        }
+
+        $deadline = $seconds > 0 ? microtime(true) + $seconds : null;
+        $client = $this->connector->imapClient($mailbox);
+        try {
+            foreach ($this->folders($mailbox, $client) as $f) {
+                if (($budget > 0 && $stats['imported'] >= $budget) || ($deadline && microtime(true) > $deadline)) {
+                    break;
+                }
+                try {
+                    $res = $this->mirrorFolder($mailbox, $client, $f, $budget > 0 ? $budget - $stats['imported'] : 0, $deadline, $progress);
+                } catch (\Throwable $e) {
+                    Log::warning('MailHistoryMirror: folder failed', [
+                        'mailbox_id' => $mailbox->id, 'folder' => $f['db'], 'error' => $e->getMessage(),
+                    ]);
+
+                    continue;
+                }
+                $stats['imported'] += $res['imported'];
+                $stats['rehomed'] += $res['rehomed'];
+                $stats['uid_filled'] += $res['uid_filled'];
+                $stats['folders'][$f['db']] = ['todo' => $res['todo'], 'imported' => $res['imported']];
+            }
+        } finally {
+            $client->disconnect();
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Папки ящика для зеркала: INBOX и «Отправленные» — до водяного знака
+     * живого синка (выше него письма приходят через конвейер), пользовательские
+     * папки Яндекса — целиком (их письма конвейер не видит вовсе).
+     *
+     * @return list<array{server:string, db:string, direction:?MailDirection, folder_id:?int, bound:?int}>
+     */
+    private function folders(Mailbox $mailbox, Client $client): array
+    {
+        $out = [];
+        $states = MailboxFolderState::query()->where('mailbox_id', $mailbox->id)->get()->keyBy('folder');
+
+        // Без водяного знака живой синк ещё не начинал — историю не трогаем,
+        // иначе граница «история / новые письма» не определена.
+        if (($st = $states->get('INBOX')) && (int) $st->last_uid_seen > 0) {
+            $out[] = ['server' => 'INBOX', 'db' => 'INBOX', 'direction' => MailDirection::Inbound, 'folder_id' => null, 'bound' => (int) $st->last_uid_seen];
+        }
+        try {
+            $sent = $this->connector->findSent($client)->path;
+            $st = $states->get($sent) ?? $states->get('Sent');
+            if ($st && (int) $st->last_uid_seen > 0) {
+                $out[] = ['server' => $sent, 'db' => 'Sent', 'direction' => MailDirection::Outbound, 'folder_id' => null, 'bound' => (int) $st->last_uid_seen];
+            }
+        } catch (\Throwable) {
+            // нет «Отправленных» — пропускаем
+        }
+
+        foreach (MailboxFolder::query()->where('mailbox_id', $mailbox->id)
+            ->whereNotNull('imap_path')->whereNotNull('imap_synced_at')->orderBy('id')->get() as $folder) {
+            $out[] = ['server' => $folder->imap_path, 'db' => $folder->imap_path, 'direction' => null, 'folder_id' => $folder->id, 'bound' => null];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array{server:string, db:string, direction:?MailDirection, folder_id:?int, bound:?int}  $f
+     * @return array{todo:int, imported:int, rehomed:int, uid_filled:int}
+     */
+    private function mirrorFolder(Mailbox $mailbox, Client $client, array $f, int $budget, ?float $deadline, ?callable $progress): array
+    {
+        $res = ['todo' => 0, 'imported' => 0, 'rehomed' => 0, 'uid_filled' => 0];
+        $conn = $client->getConnection();
+        $status = (array) $client->openFolder($f['server'], force_select: true);
+        $validity = (int) ($status['uidvalidity'] ?? 0);
+
+        $state = MailboxFolderState::query()->firstOrNew(['mailbox_id' => $mailbox->id, 'folder' => $f['server']]);
+
+        // История INBOX/Sent ограничена водяным знаком и после прохода не
+        // растёт: всё выше знака приходит живым синком.
+        if ($f['bound'] !== null && $state->history_completed_at !== null) {
+            return $res;
+        }
+
+        // Быстрый выход: на сервере писем не больше, чем у нас в этой папке.
+        $exists = (int) ($status['exists'] ?? 0);
+        $known = EmailMessage::withHistory()
+            ->where('mailbox_id', $mailbox->id)->where('folder', $f['db'])->whereNotNull('imap_uid')
+            ->pluck('imap_uid')->map(fn ($u) => (int) $u)->flip()->all();
+        if ($f['bound'] === null && $exists <= count($known) && $state->history_completed_at !== null) {
+            return $res;
+        }
+
+        $serverUids = array_map('intval', (array) $conn->getUid()->validatedData());
+        $todo = array_values(array_filter($serverUids, fn (int $u) => ! isset($known[$u]) && ($f['bound'] === null || $u <= $f['bound'])));
+        rsort($todo); // сначала свежие
+        $res['todo'] = count($todo);
+
+        if ($todo === []) {
+            if ($state->exists || $f['folder_id'] !== null) {
+                $state->forceFill(['history_completed_at' => now(), 'uid_validity' => $state->uid_validity ?? $validity])->save();
+            }
+
+            return $res;
+        }
+        if ($budget > 0) {
+            $todo = array_slice($todo, 0, $budget);
+        }
+
+        $done = 0;
+        foreach (array_chunk($todo, self::FETCH_CHUNK) as $chunk) {
+            if ($deadline && microtime(true) > $deadline) {
+                break;
+            }
+            $part = $this->importChunk($mailbox, $client, $f, $chunk, $validity);
+            foreach ($part as $k => $v) {
+                $res[$k] += $v;
+            }
+            $done += count($chunk);
+
+            $state->forceFill([
+                'history_low_uid' => min($chunk),
+                'history_imported' => (int) $state->history_imported + $part['imported'],
+                'uid_validity' => $state->uid_validity ?? $validity,
+            ])->save();
+            if ($progress) {
+                $progress($f['db'], $done, $res['todo']);
+            }
+        }
+
+        if ($done >= $res['todo']) {
+            $state->forceFill(['history_completed_at' => now()])->save();
+        }
+
+        return $res;
+    }
+
+    /**
+     * Шапки пачки UID → строки истории. Письмо, которое у нас уже есть под
+     * тем же Message-ID, не задваиваем: в пользовательской папке переселяем
+     * (как ImapFolderSyncService), в INBOX/Sent — проставляем UID.
+     *
+     * @param  list<int>  $uids
+     * @return array{imported:int, rehomed:int, uid_filled:int}
+     */
+    private function importChunk(Mailbox $mailbox, Client $client, array $f, array $uids, int $validity): array
+    {
+        $out = ['imported' => 0, 'rehomed' => 0, 'uid_filled' => 0];
+        $rows = (array) $client->getConnection()
+            ->fetch(['UID', 'FLAGS', self::HEADER_ITEM], $uids, null, IMAP::ST_UID)
+            ->data();
+        $config = $client->getConfig();
+        $ownerEmail = mb_strtolower((string) $mailbox->email);
+
+        $parsed = [];
+        foreach ($rows as $uid => $data) {
+            $raw = self::headerText((array) $data);
+            if ($raw === null) {
+                continue;
+            }
+            $parsed[(int) $uid] = [
+                'raw' => $raw,
+                'flags' => array_values(array_map(fn ($fl) => ltrim((string) $fl, '\\'), (array) ($data['FLAGS'] ?? []))),
+                'mid' => ImapFolderSyncService::messageIdFromHeaders($raw),
+            ];
+        }
+        // Уже известные письма пачки — одним запросом (живой синк, доставка
+        // копии, прошлый проход): по одному на письмо миллион шапок не пройти.
+        $existingByMid = $this->findByMessageIds($mailbox, array_values(array_filter(array_column($parsed, 'mid'))));
+
+        $insert = [];
+        $flagsByUid = [];
+        foreach ($parsed as $uid => $p) {
+            $flags = $p['flags'];
+            $env = new HeaderEnvelope(new Header($p['raw'], $config), $flags);
+            $mid = $p['mid'];
+
+            $existing = $mid !== null ? ($existingByMid[mb_strtolower($mid)] ?? null) : null;
+            if ($existing !== null) {
+                if ($f['folder_id'] !== null) {
+                    if ($existing->folder !== $f['db'] && $this->folderSync->rehome($existing, $f['db'], $uid, $f['folder_id'])) {
+                        $out['rehomed']++;
+                    }
+                } elseif ($existing->folder === $f['db'] && $existing->imap_uid === null) {
+                    $existing->forceFill(['imap_uid' => $uid])->saveQuietly();
+                    $out['uid_filled']++;
+                }
+
+                continue;
+            }
+
+            $direction = $f['direction'] ?? $this->directionFor($env, $ownerEmail);
+            $insert[] = $this->persister->historyRow(
+                $env, $mailbox, $f['db'], $uid, $direction, $f['folder_id'],
+                sprintf('hist-%d-%d-%d@mzcorp', $mailbox->id, $validity, $uid),
+            );
+            $flagsByUid[$uid] = $flags;
+        }
+
+        if ($insert !== []) {
+            $out['imported'] = DB::table('email_messages')->insertOrIgnore($insert);
+            $this->applyReadState($mailbox, $f['db'], $flagsByUid);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Прочитанность и флаг с сервера — состояние владельца ящика (как у
+     * ImapSeenSyncService): отсутствие строки = непрочитано.
+     *
+     * @param  array<int, list<string>>  $flagsByUid
+     */
+    private function applyReadState(Mailbox $mailbox, string $folder, array $flagsByUid): void
+    {
+        $marked = array_filter($flagsByUid, fn ($fl) => in_array('Seen', $fl, true) || in_array('Flagged', $fl, true));
+        if ($marked === [] || ! $mailbox->owner_user_id) {
+            return;
+        }
+        $rows = DB::table('email_messages')
+            ->where('mailbox_id', $mailbox->id)->where('folder', $folder)->where('is_history', true)
+            ->whereIn('imap_uid', array_keys($marked))
+            ->get(['id', 'imap_uid', 'sent_at']);
+
+        $now = now();
+        $states = [];
+        foreach ($rows as $r) {
+            $fl = $marked[(int) $r->imap_uid] ?? [];
+            $states[] = [
+                'email_message_id' => $r->id,
+                'user_id' => (int) $mailbox->owner_user_id,
+                'read_at' => in_array('Seen', $fl, true) ? ($r->sent_at ?? $now) : null,
+                'flagged_at' => in_array('Flagged', $fl, true) ? ($r->sent_at ?? $now) : null,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+        foreach (array_chunk($states, 1000) as $chunk) {
+            DB::table('email_message_user_states')->insertOrIgnore($chunk);
+        }
+    }
+
+    /**
+     * Скачать тело и вложения письма из истории при первом открытии. \Seen на
+     * сервере не меняем: тело Яндекс отдаёт с установкой флага, поэтому
+     * непрочитанному письму флаг снимаем обратно (как SyncMailboxFolderJob) —
+     * прочитанным его делает владелец, открыв письмо (MailReadService).
+     *
+     * @return bool false — письма на сервере уже нет (удалено / перенесено)
+     */
+    public function fetchBody(EmailMessage $row): bool
+    {
+        if (! $row->needsBodyFetch()) {
+            return true;
+        }
+        if ($row->imap_uid === null) {
+            return false;
+        }
+        $mailbox = Mailbox::query()->find($row->mailbox_id);
+        if (! $mailbox) {
+            return false;
+        }
+
+        $client = null;
+        try {
+            $client = $this->connector->imapClient($mailbox);
+            $folder = $row->folder === 'Sent' ? $this->connector->findSent($client) : $client->getFolderByPath($row->folder);
+            if (! $folder) {
+                return false;
+            }
+            $folder->select();
+            $conn = $client->getConnection();
+            $uid = (int) $row->imap_uid;
+
+            $before = (array) $conn->getFlags($uid)->validatedData();
+            $list = is_array($before[$uid] ?? null) ? $before[$uid] : [];
+            $wasUnread = ! in_array('\\Seen', $list, true) && ! in_array('Seen', $list, true);
+
+            $msg = $folder->query()
+                ->setFetchOptions(IMAP::FT_PEEK)
+                ->setFetchBody(true)
+                ->setFetchFlags(true)
+                ->whereUid($uid)
+                ->get()
+                ->first();
+            if ($wasUnread) {
+                try {
+                    $conn->store(['\\Seen'], $uid, $uid, '-', true, IMAP::ST_UID);
+                } catch (\Throwable) {
+                    // не критично: флаг выровняет ImapSeenSyncService
+                }
+            }
+            if (! $msg) {
+                return false;
+            }
+
+            $this->persister->hydrateBody($row, $msg);
+
+            return true;
+        } catch (\Throwable $e) {
+            Log::warning('MailHistoryMirror: body fetch failed', [
+                'email_message_id' => $row->id, 'mailbox_id' => $row->mailbox_id, 'error' => $e->getMessage(),
+            ]);
+
+            return false;
+        } finally {
+            $client?->disconnect();
+        }
+    }
+
+    /** Текст шапки из ответа FETCH: webklex кладёт его последним элементом «BODY[HEADER.FIELDS». */
+    private static function headerText(array $data): ?string
+    {
+        foreach ($data as $key => $value) {
+            if (! str_starts_with((string) $key, 'BODY[HEADER')) {
+                continue;
+            }
+            $text = is_array($value) ? end($value) : $value;
+
+            return is_string($text) && trim($text) !== '' ? $text : null;
+        }
+
+        return null;
+    }
+
+    /** В пользовательской папке лежат и входящие, и отправленные: наше — исходящее. */
+    private function directionFor(HeaderEnvelope $env, string $ownerEmail): MailDirection
+    {
+        $from = '';
+        foreach ((array) ($env->getFrom()?->toArray() ?? []) as $a) {
+            $from = mb_strtolower((string) ($a->mail ?? ''));
+            break;
+        }
+
+        return $from !== '' && $from === $ownerEmail ? MailDirection::Outbound : MailDirection::Inbound;
+    }
+
+    /**
+     * Письма ящика по Message-ID: lower(mid) => письмо (сначала лежащее в
+     * INBOX/Sent, как ImapFolderSyncService::findByMessageId). Индекс
+     * email_messages_mailbox_lower_mid_idx.
+     *
+     * @param  list<string>  $mids
+     * @return array<string, EmailMessage>
+     */
+    private function findByMessageIds(Mailbox $mailbox, array $mids): array
+    {
+        $lower = array_values(array_unique(array_map('mb_strtolower', $mids)));
+        if ($lower === []) {
+            return [];
+        }
+        $out = [];
+        $rows = EmailMessage::withHistory()
+            ->where('mailbox_id', $mailbox->id)
+            ->where('is_draft', false)
+            ->whereIn(DB::raw('lower(message_id)'), $lower)
+            ->orderByRaw("CASE folder WHEN 'INBOX' THEN 0 WHEN 'Sent' THEN 1 ELSE 2 END")
+            ->orderBy('id')
+            ->get(['id', 'mailbox_id', 'folder', 'imap_uid', 'mailbox_folder_id', 'message_id']);
+        foreach ($rows as $r) {
+            $out[mb_strtolower((string) $r->message_id)] ??= $r;
+        }
+
+        return $out;
+    }
+}

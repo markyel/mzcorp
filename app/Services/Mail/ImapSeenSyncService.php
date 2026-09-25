@@ -65,7 +65,7 @@ class ImapSeenSyncService
         if ($ids === []) {
             return;
         }
-        $rows = EmailMessage::query()
+        $rows = EmailMessage::withHistory()
             ->whereKey($ids)
             ->where('is_draft', false)
             ->whereNotNull('imap_uid')
@@ -113,7 +113,7 @@ class ImapSeenSyncService
                 }
             }
             // Зеркалим в нашу копию флагов.
-            $messages = EmailMessage::query()->where('mailbox_id', $mailbox->id)->where('folder', $folderPath)->whereIn('imap_uid', $uids)->get(['id', 'imap_flags']);
+            $messages = EmailMessage::withHistory()->where('mailbox_id', $mailbox->id)->where('folder', $folderPath)->whereIn('imap_uid', $uids)->get(['id', 'imap_flags']);
             foreach ($messages as $m) {
                 $flags = array_values(array_filter((array) ($m->imap_flags ?? []), fn ($f) => ! $this->isSeenFlag((string) $f)));
                 if ($seen) {
@@ -150,7 +150,7 @@ class ImapSeenSyncService
             ->pluck('imap_path')
             ->all();
 
-        $messages = EmailMessage::query()
+        $messages = EmailMessage::withHistory()
             ->where('mailbox_id', $mailbox->id)
             ->where('direction', 'inbound')
             ->where('is_draft', false)
@@ -233,7 +233,7 @@ class ImapSeenSyncService
         if ($stale !== []) {
             $this->read->markManyRead($stale, $owner);
             foreach (array_chunk($stale, 500) as $chunk) {
-                EmailMessage::query()->whereKey($chunk)->update(['imap_uid' => null]);
+                EmailMessage::withHistory()->whereKey($chunk)->update(['imap_uid' => null]);
             }
             Log::info('ImapSeenSyncService: stale rows marked read (gone from server folder)', [
                 'mailbox_id' => $mailbox->id, 'count' => count($stale),

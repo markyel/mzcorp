@@ -748,7 +748,7 @@ body.mail-resizing iframe{pointer-events:none}
                         <div class="l3">
                             <span class="snip">{{ \Illuminate\Support\Str::limit(trim((string) $m->body_plain), 90) }}</span>
                             <span class="metaicons">
-                                @if($m->attachments_count)<span class="clip">📎</span>@endif
+                                @if($m->attachments_count || ($m->history_has_attachments && $m->body_fetched_at === null))<span class="clip">📎</span>@endif
                                 @if($m->mailbox_folder_id && $m->mailbox_folder_id !== $this->customFolderId() && isset($this->folderNames[$m->mailbox_folder_id]))
                                     <span class="fchip" title="Письмо лежит в папке">▸ {{ $this->folderNames[$m->mailbox_folder_id] }}</span>
                                 @endif
@@ -1075,6 +1075,20 @@ body.mail-resizing iframe{pointer-events:none}
                                         "></iframe>
                             @elseif($msg->body_plain)
                                 <pre>{{ $msg->body_plain }}</pre>
+                            @elseif($msg->needsBodyFetch())
+                                {{-- Письмо из истории ящика: у нас только шапка, текст — на сервере. --}}
+                                <div style="color:var(--fg-3);font-size:12.5px;display:flex;align-items:center;gap:8px">
+                                    @if($msg->imap_uid)
+                                        Текст письма хранится на почтовом сервере.
+                                        <button type="button" class="btn btn-xs" wire:click="loadBody({{ $msg->id }})"
+                                                wire:loading.attr="disabled" wire:target="loadBody({{ $msg->id }})">
+                                            <span wire:loading.remove wire:target="loadBody({{ $msg->id }})">Загрузить текст</span>
+                                            <span wire:loading wire:target="loadBody({{ $msg->id }})">Загружаем…</span>
+                                        </button>
+                                    @else
+                                        Письма больше нет на почтовом сервере — текст недоступен.
+                                    @endif
+                                </div>
                             @else
                                 <div style="color:var(--fg-3);font-size:12.5px">(пустое тело)</div>
                             @endif

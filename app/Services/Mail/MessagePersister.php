@@ -45,7 +45,8 @@ class MessagePersister
         }
 
         return DB::transaction(function () use ($msg, $mailbox, $folder, $direction, $messageId) {
-            $existing = EmailMessage::where('mailbox_id', $mailbox->id)
+            // withHistory: письмо может уже лежать у нас шапкой из истории ящика.
+            $existing = EmailMessage::withHistory()->where('mailbox_id', $mailbox->id)
                 ->where('folder', $folder)
                 ->where('message_id', $messageId)
                 ->first();
@@ -55,10 +56,12 @@ class MessagePersister
             // INBOX) — это НЕ новое письмо. Переселяем существующую запись
             // (folder/imap_uid, из папки — вон) и не запускаем пайплайн заново,
             // иначе повторная классификация/линковка и риск заявки-дубля.
+            // То же для письма из истории ящика (is_history): старое письмо,
+            // которое на сервере перенесли во «Входящие», — не новая заявка.
             if (! $existing) {
-                $filed = EmailMessage::where('mailbox_id', $mailbox->id)
+                $filed = EmailMessage::withHistory()->where('mailbox_id', $mailbox->id)
                     ->where('message_id', $messageId)
-                    ->whereNotNull('mailbox_folder_id')
+                    ->where(fn ($w) => $w->whereNotNull('mailbox_folder_id')->orWhere('is_history', true))
                     ->where('folder', '!=', $folder)
                     ->orderBy('id')
                     ->first();
@@ -127,26 +130,97 @@ class MessagePersister
                 'imap_flags' => $this->extractFlags($msg),
             ]);
 
-            // Главный путь имени аттача: парсим filename'ы напрямую из raw
-            // RFC822 body, обходя Webklex sanitizeName() (который ломает
-            // base64 в MIME-encoded словах) и пустой `$att->getHeader()`
-            // (для outbound sync из Sent). См. extractFilenamesFromRawBody.
-            //
-            // Гард: если count расходится с числом attachment'ов webklex'а
-            // (типичный кейс — пересланный message/rfc822 с вложенным MIME
-            // tree'ем), ordinal-mapping ненадёжен → каждому атачу передадим
-            // null, persistAttachment упадёт на старую resolveRawFilename
-            // цепочку.
-            $attachments = $msg->getAttachments();
-            $rawBodyFilenames = self::extractFilenamesFromRawBody((string) $msg->getRawBody());
-            $useRawBodyNames = (count($rawBodyFilenames) === count($attachments));
-
-            foreach ($attachments as $i => $att) {
-                $rawNameFromBody = $useRawBodyNames ? ($rawBodyFilenames[$i] ?? null) : null;
-                $this->persistAttachment($att, $email, $rawNameFromBody !== '' ? $rawNameFromBody : null);
-            }
+            $this->persistAttachments($msg, $email);
 
             return $email;
+        });
+    }
+
+    /**
+     * Главный путь имени аттача: парсим filename'ы напрямую из raw RFC822
+     * body, обходя Webklex sanitizeName() (который ломает base64 в
+     * MIME-encoded словах) и пустой `$att->getHeader()` (для outbound sync из
+     * Sent). См. extractFilenamesFromRawBody.
+     *
+     * Гард: если count расходится с числом attachment'ов webklex'а (типичный
+     * кейс — пересланный message/rfc822 с вложенным MIME tree'ем),
+     * ordinal-mapping ненадёжен → каждому атачу передадим null,
+     * persistAttachment упадёт на старую resolveRawFilename цепочку.
+     */
+    private function persistAttachments(Message $msg, EmailMessage $email): void
+    {
+        $attachments = $msg->getAttachments();
+        $rawBodyFilenames = self::extractFilenamesFromRawBody((string) $msg->getRawBody());
+        $useRawBodyNames = (count($rawBodyFilenames) === count($attachments));
+
+        foreach ($attachments as $i => $att) {
+            $rawNameFromBody = $useRawBodyNames ? ($rawBodyFilenames[$i] ?? null) : null;
+            $this->persistAttachment($att, $email, $rawNameFromBody !== '' ? $rawNameFromBody : null);
+        }
+    }
+
+    /**
+     * Строка для письма из истории ящика: только шапка (FETCH HEADER.FIELDS),
+     * тело и вложения — при открытии (hydrateBody). Готова к пакетному
+     * insertOrIgnore: json-поля закодированы, касты не нужны.
+     *
+     * @return array<string, mixed>
+     */
+    public function historyRow(
+        HeaderEnvelope $env,
+        Mailbox $mailbox,
+        string $folder,
+        int $uid,
+        MailDirection $direction,
+        ?int $mailboxFolderId,
+        string $fallbackMessageId,
+    ): array {
+        $json = fn ($v) => $v === null ? null : json_encode($v, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        $now = now();
+
+        return [
+            'mailbox_id' => $mailbox->id,
+            'folder' => $folder,
+            'mailbox_folder_id' => $mailboxFolderId,
+            'direction' => $direction->value,
+            'imap_uid' => $uid,
+            'message_id' => $this->extractMessageId($env) ?? $fallbackMessageId,
+            'in_reply_to' => $this->extractInReplyTo($env),
+            'references_header' => $json($this->extractReferences($env)),
+            'subject' => $this->truncate($this->decodeMimeHeader($this->stringify($env->getSubject())), 998),
+            'from_email' => $this->truncate($this->extractFromEmail($env), 255),
+            'from_name' => ($n = $this->extractFromName($env)) !== null ? $this->truncate($n, 255) : null,
+            'to_recipients' => $json($this->extractAddressList($env, 'to')),
+            'cc_recipients' => $json($this->extractAddressList($env, 'cc')),
+            'sent_at' => $this->extractDate($env)?->format('Y-m-d H:i:s'),
+            'imap_flags' => $json($this->extractFlags($env)),
+            'is_draft' => false,
+            'is_history' => true,
+            'history_has_attachments' => $env->looksLikeWithAttachments(),
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
+    }
+
+    /**
+     * Скачать тело и вложения письма из истории ящика (при первом открытии).
+     * raw_source не храним: у истории он не нужен детекторам, а вложения
+     * внутри него удвоили бы место.
+     */
+    public function hydrateBody(EmailMessage $row, Message $msg): void
+    {
+        DB::transaction(function () use ($row, $msg) {
+            $row->forceFill([
+                'body_plain' => $this->bodyPlainWithHtmlFallback($msg),
+                'body_html' => $this->cleanString((string) $msg->getHTMLBody()),
+                'headers' => $this->extractAllHeaders($msg),
+                'imap_flags' => $this->extractFlags($msg),
+                'body_fetched_at' => now(),
+            ])->saveQuietly();
+
+            if (! $row->attachments()->exists()) {
+                $this->persistAttachments($msg, $row);
+            }
         });
     }
 
@@ -757,14 +831,14 @@ class MessagePersister
         return null;
     }
 
-    private function extractMessageId(Message $msg): ?string
+    private function extractMessageId(Message|HeaderEnvelope $msg): ?string
     {
         $raw = trim($this->stringify($msg->getMessageId()), " \t\n\r\0\x0B<>");
 
         return $raw !== '' ? $raw : null;
     }
 
-    private function extractInReplyTo(Message $msg): ?string
+    private function extractInReplyTo(Message|HeaderEnvelope $msg): ?string
     {
         $raw = trim($this->stringify($msg->getInReplyTo()), " \t\n\r\0\x0B<>");
 
@@ -774,7 +848,7 @@ class MessagePersister
     /**
      * @return array<int, string>|null
      */
-    private function extractReferences(Message $msg): ?array
+    private function extractReferences(Message|HeaderEnvelope $msg): ?array
     {
         $raw = $this->stringify($msg->getReferences());
         if ($raw === '') {
@@ -796,14 +870,14 @@ class MessagePersister
         return $ids ?: null;
     }
 
-    private function extractFromEmail(Message $msg): string
+    private function extractFromEmail(Message|HeaderEnvelope $msg): string
     {
         $from = $this->firstAddress($msg->getFrom());
 
         return $from['email'] ?? '';
     }
 
-    private function extractFromName(Message $msg): ?string
+    private function extractFromName(Message|HeaderEnvelope $msg): ?string
     {
         $from = $this->firstAddress($msg->getFrom());
 
@@ -813,7 +887,7 @@ class MessagePersister
     /**
      * @return array<int, array{email: string, name: ?string}>
      */
-    private function extractAddressList(Message $msg, string $field): array
+    private function extractAddressList(Message|HeaderEnvelope $msg, string $field): array
     {
         $attribute = match ($field) {
             'to' => $msg->getTo(),
@@ -925,7 +999,7 @@ class MessagePersister
     /**
      * Carbon-дата из Attribute getDate(). Webklex кладёт туда первый элемент Carbon.
      */
-    private function extractDate(Message $msg): ?CarbonInterface
+    private function extractDate(Message|HeaderEnvelope $msg): ?CarbonInterface
     {
         $attr = $msg->getDate();
         if ($attr === null) {
@@ -945,7 +1019,7 @@ class MessagePersister
     /**
      * @return array<int, string>
      */
-    private function extractFlags(Message $msg): array
+    private function extractFlags(Message|HeaderEnvelope $msg): array
     {
         $flags = $msg->getFlags();
         if (! $flags) {

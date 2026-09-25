@@ -13,6 +13,7 @@ use App\Services\Mail\EmailDraftService;
 use App\Services\Mail\HtmlSanitizer;
 use App\Services\Mail\LetterTemplateService;
 use App\Services\Mail\MailboxAccessService;
+use App\Services\Mail\MailHistoryMirrorService;
 use App\Services\Mail\OutboundReplyHooks;
 use App\Services\Mail\OutgoingMailSender;
 use Illuminate\Support\Collection;
@@ -554,7 +555,15 @@ class Composer extends Component
     {
         $ids = app(MailboxAccessService::class)->mailboxIdsFor($this->user());
 
-        return EmailMessage::whereIn('mailbox_id', $ids)->whereKey($id)->first();
+        $message = EmailMessage::withHistory()->whereIn('mailbox_id', $ids)->whereKey($id)->first();
+
+        // Ответ и пересылка письма из истории ящика: цитате нужен текст, пересылке —
+        // вложения. Скачиваем с сервера, если ещё не скачаны.
+        if ($message?->needsBodyFetch()) {
+            app(MailHistoryMirrorService::class)->fetchBody($message);
+        }
+
+        return $message;
     }
 
     private function canSendForRequest(RequestModel $req): bool

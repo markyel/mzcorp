@@ -181,7 +181,7 @@ class MailboxFolderService
 
         $payload = null;
         if ($serverSync) {
-            $uids = EmailMessage::query()
+            $uids = EmailMessage::withHistory()
                 ->where('mailbox_id', $folder->mailbox_id)
                 ->where('folder', $folder->imap_path)
                 ->whereNotNull('imap_uid')
@@ -196,7 +196,7 @@ class MailboxFolderService
         }
 
         $moved = DB::transaction(function () use ($folder, $payload, $delimiter) {
-            $moved = EmailMessage::query()->where('mailbox_folder_id', $folder->id)->update(['mailbox_folder_id' => null]);
+            $moved = EmailMessage::withHistory()->where('mailbox_folder_id', $folder->id)->update(['mailbox_folder_id' => null]);
             if ($payload !== null) {
                 foreach ($payload['child_renames'] as [$old, $new]) {
                     MailboxFolder::query()->where('mailbox_id', $folder->mailbox_id)->where('imap_path', $old)->update(['imap_path' => $new]);
@@ -228,8 +228,8 @@ class MailboxFolderService
         foreach (MailboxFolder::query()->where('mailbox_id', $mailboxId)->where('imap_path', 'like', $like)->get() as $desc) {
             $desc->forceFill(['imap_path' => $newPath.$delimiter.substr($desc->imap_path, strlen($prefix))])->save();
         }
-        EmailMessage::query()->where('mailbox_id', $mailboxId)->where('folder', $oldPath)->update(['folder' => $newPath]);
-        EmailMessage::query()->where('mailbox_id', $mailboxId)->where('folder', 'like', $like)
+        EmailMessage::withHistory()->where('mailbox_id', $mailboxId)->where('folder', $oldPath)->update(['folder' => $newPath]);
+        EmailMessage::withHistory()->where('mailbox_id', $mailboxId)->where('folder', 'like', $like)
             ->update(['folder' => DB::raw("'".str_replace("'", "''", $newPath.$delimiter)."' || substr(folder, ".(strlen($prefix) + 1).')')]);
     }
 
@@ -252,7 +252,7 @@ class MailboxFolderService
             throw new \DomainException('Нет доступа к ящику этой папки.');
         }
 
-        $q = EmailMessage::query()
+        $q = EmailMessage::withHistory()
             ->whereKey($ids)
             ->whereIn('mailbox_id', $mailboxIds)
             ->where('is_draft', false);

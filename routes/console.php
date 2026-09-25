@@ -34,6 +34,16 @@ Schedule::command('mail:sync --folder=sent')
     ->onOneServer()
     ->runInBackground();
 
+// Зеркало истории личных ящиков менеджеров (MailHistoryMirrorService): письма
+// пользовательских папок Яндекса, которых конвейер не видит (фильтры сервера,
+// ручной перенос), заводятся шапками — тело при открытии. Первичный проход по
+// миллиону писем делается вручную командой без лимитов; здесь — поддержка.
+Schedule::command('mail:history-mirror --seconds=120 --budget=3000')
+    ->everyTenMinutes()
+    ->withoutOverlapping(60)
+    ->onOneServer()
+    ->runInBackground();
+
 // Phase 1.10 (Foundation §5.4): возобновление paused-заявок чьи
 // paused_until <= now(). Один раз утром — оператор увидит «оттаявшие»
 // заявки в начале рабочего дня.

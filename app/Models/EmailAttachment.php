@@ -41,7 +41,9 @@ class EmailAttachment extends Model
 
     public function emailMessage(): BelongsTo
     {
-        return $this->belongsTo(EmailMessage::class);
+        // Вложения архивного письма скачиваются при его открытии — ссылка на
+        // файл должна находить и такое письмо (ExcludeMailHistoryScope).
+        return $this->belongsTo(EmailMessage::class)->withoutGlobalScope(Scopes\ExcludeMailHistoryScope::class);
     }
 
     /**

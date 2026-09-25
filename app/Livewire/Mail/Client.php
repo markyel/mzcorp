@@ -22,6 +22,7 @@ use App\Services\Mail\ImapFolderSyncService;
 use App\Services\Mail\ImapSeenSyncService;
 use App\Services\Mail\MailboxAccessService;
 use App\Services\Mail\MailboxFolderService;
+use App\Services\Mail\MailHistoryMirrorService;
 use App\Services\Mail\MailReadService;
 use App\Services\Mail\MailReassignArchiverService;
 use App\Services\Mail\MessageLabelService;
@@ -387,6 +388,12 @@ class Client extends Component
 
             return;
         }
+        // Письмо из истории ящика: у нас только шапка — текст и вложения
+        // скачиваем с сервера сейчас, при первом открытии.
+        if ($anchor->needsBodyFetch()) {
+            app(MailHistoryMirrorService::class)->fetchBody($anchor);
+        }
+
         $this->openId = $id;
         unset($this->openThread, $this->openAnchor);
 
@@ -400,6 +407,19 @@ class Client extends Component
 
         // Обновить список (снять «непрочитано») и счётчики.
         unset($this->threads, $this->folders, $this->mailboxes);
+    }
+
+    /** Скачать текст письма из истории ящика в открытом треде (кнопка «Загрузить текст»). */
+    public function loadBody(int $id): void
+    {
+        $row = $this->findAccessible($id);
+        if ($row === null || ! $row->needsBodyFetch()) {
+            return;
+        }
+        if (! app(MailHistoryMirrorService::class)->fetchBody($row)) {
+            $this->dispatch('toast', message: 'Не удалось загрузить письмо с почтового сервера.', type: 'error');
+        }
+        unset($this->openThread, $this->openAnchor, $this->threads);
     }
 
     /* ----------------------- Массовые действия ------------------------ */
@@ -421,7 +441,7 @@ class Client extends Component
         if ($ids === []) {
             return [];
         }
-        $byMessage = EmailMessage::query()->whereKey($ids)->pluck('mailbox_id', 'id');
+        $byMessage = EmailMessage::withHistory()->whereKey($ids)->pluck('mailbox_id', 'id');
         $map = $this->readStateUserByMailbox(
             array_values(array_unique(array_map('intval', $byMessage->all())))
         );
@@ -661,7 +681,7 @@ class Client extends Component
             return [];
         }
 
-        $allowed = EmailMessage::query()
+        $allowed = EmailMessage::withHistory()
             ->whereIn('mailbox_id', app(MailboxAccessService::class)->mailboxIdsFor($this->user()))
             ->whereKey($ids)
             ->pluck('id')
@@ -928,6 +948,17 @@ class Client extends Component
             return;
         }
 
+        // Письмо из истории ящика становится живой перепиской: нужен текст
+        // (разбор позиций) и видимость для конвейера, заявки, отчётов.
+        if ($email->is_history) {
+            if (! app(MailHistoryMirrorService::class)->fetchBody($email)) {
+                $this->notice = 'Не удалось загрузить текст письма с почтового сервера — заявку создать не из чего.';
+
+                return;
+            }
+            $email->forceFill(['is_history' => false])->saveQuietly();
+        }
+
         try {
             $request = app(EmailToRequestPromoter::class)
                 ->promote($email, $this->user()?->id, 'manual_create_request_from_mail');
@@ -1126,6 +1157,9 @@ class Client extends Component
                 'email_messages.category',
                 'email_messages.related_request_id',
                 'email_messages.mailbox_folder_id',
+                // Письмо из истории ящика: скрепка до скачивания тела.
+                'email_messages.history_has_attachments',
+                'email_messages.body_fetched_at',
                 'ustate.read_at as my_read_at',
                 'ustate.flagged_at as my_flagged_at',
             ])
@@ -1215,7 +1249,7 @@ class Client extends Component
     {
         $mailboxIds = $this->activeMailboxIds($allMailboxes);
 
-        return EmailMessage::query()
+        return EmailMessage::withHistory()
             ->whereIn('email_messages.mailbox_id', $mailboxIds)
             ->tap(fn (Builder $q) => $this->hideCopiesWhoseOriginalIsListed($q, $mailboxIds))
             ->tap(fn (Builder $q) => $this->hideReassignedCopies($q))
@@ -1452,7 +1486,7 @@ class Client extends Component
         // Бейдж ящика = то, что физически лежит в ЭТОМ ящике (как и список при
         // выборе одного ящика), поэтому копии здесь не прячем: копия и её
         // оригинал никогда не лежат в одном ящике.
-        return EmailMessage::query()
+        return EmailMessage::withHistory()
             ->whereIn('email_messages.mailbox_id', $mailboxIds)
             ->where('email_messages.is_draft', false)
             ->where('email_messages.direction', MailDirection::Inbound->value)
@@ -1491,7 +1525,7 @@ class Client extends Component
                 ->values();
         }
 
-        return app(SharedMailService::class)->threadFor($anchor);
+        return app(SharedMailService::class)->threadFor($anchor, withHistory: true);
     }
 
     /**
@@ -1563,7 +1597,7 @@ class Client extends Component
     /** Найти письмо в пределах доступных ящиков (защита доступа). */
     private function findAccessible(int $id): ?EmailMessage
     {
-        return EmailMessage::query()
+        return EmailMessage::withHistory()
             ->whereIn('mailbox_id', app(MailboxAccessService::class)->mailboxIdsFor($this->user()))
             ->whereKey($id)
             ->first();
