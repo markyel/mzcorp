@@ -5,6 +5,7 @@ namespace App\Livewire\Clients;
 use App\Models\ClientContact;
 use App\Models\Organization;
 use App\Models\Request as RequestModel;
+use App\Services\Clients\OrganizationRegistryService;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
@@ -28,7 +29,9 @@ class Index extends Component
 
     /* --- Инлайн-создание организации --- */
     public bool $creating = false;
+
     public string $newName = '';
+
     public string $newInn = '';
 
     public function mount(): void
@@ -68,9 +71,33 @@ class Index extends Component
             'newInn' => 'nullable|string|max:20',
         ], [], ['newName' => 'название', 'newInn' => 'ИНН']);
 
+        $inn = preg_replace('/\D+/', '', trim($this->newInn)) ?? '';
+
+        // С ИНН — через реестр, как и организации из документов: карточка
+        // получает официальные реквизиты, а уже заведённый ИНН не задваивается.
+        if ($inn !== '') {
+            $res = app(OrganizationRegistryService::class)
+                ->resolveForIngest($inn, trim($this->newName));
+
+            if ($res['status'] === 'ours') {
+                $this->addError('newInn', 'Это наш собственный ИНН — клиентом он быть не может.');
+
+                return null;
+            }
+            if ($res['status'] === 'not_found') {
+                $this->addError('newInn', 'ИНН не найден в ЕГРЮЛ/ЕГРИП — проверьте цифры.');
+
+                return null;
+            }
+            if ($res['status'] === 'ok') {
+                return $this->redirectRoute('clients.show', ['organization' => $res['org']->id], navigate: true);
+            }
+            // unavailable — реестр молчит: заводим по введённому, сверка догонит.
+        }
+
         $org = Organization::create([
             'name' => trim($this->newName),
-            'inn' => trim($this->newInn) !== '' ? trim($this->newInn) : null,
+            'inn' => $inn !== '' ? $inn : null,
         ]);
 
         return $this->redirectRoute('clients.show', ['organization' => $org->id], navigate: true);
@@ -85,7 +112,7 @@ class Index extends Component
 
         $s = trim($this->search);
         if ($s !== '') {
-            $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
+            $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
             $q->where(function ($w) use ($like) {
                 $w->where('email', 'ilike', $like)
                     ->orWhere('full_name', 'ilike', $like)
@@ -127,7 +154,7 @@ class Index extends Component
 
         $s = trim($this->search);
         if ($s !== '') {
-            $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
+            $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
             $q->where(function ($w) use ($like) {
                 $w->where('name', 'ilike', $like)
                     ->orWhere('inn', 'ilike', $like)

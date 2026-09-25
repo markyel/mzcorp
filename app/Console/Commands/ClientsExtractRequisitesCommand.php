@@ -6,6 +6,7 @@ use App\Models\ClientContact;
 use App\Models\EmailAttachment;
 use App\Models\Organization;
 use App\Models\OutboundQuote;
+use App\Services\Clients\OrganizationRegistryService;
 use App\Services\Clients\RequestOrganizationResolver;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
@@ -51,8 +52,10 @@ class ClientsExtractRequisitesCommand extends Command
      */
     private array $ourInns = [];
 
-    public function __construct(private readonly RequestOrganizationResolver $orgResolver)
-    {
+    public function __construct(
+        private readonly RequestOrganizationResolver $orgResolver,
+        private readonly OrganizationRegistryService $registry,
+    ) {
         parent::__construct();
     }
 
@@ -109,6 +112,7 @@ class ClientsExtractRequisitesCommand extends Command
     {
         $stats['processed']++;
         $text = $this->pdfText($q->email_attachment_id);
+        $registryVerdict = null;
 
         if ($text === null) {
             $stats['no_text']++;
@@ -116,30 +120,43 @@ class ClientsExtractRequisitesCommand extends Command
             $buyer = $this->parseBuyer($text);
             if ($buyer['inn'] !== null) {
                 $stats['with_buyer']++;
-                $org = Organization::firstOrNew(['inn' => $buyer['inn']]);
-                if (! $org->exists) {
-                    $stats['orgs_new']++;
+
+                // ИНН из документа — только повод спросить реестр. Название,
+                // КПП и адрес берём из выписки: разборщик их то обрезает, то
+                // склеивает с артикулом, то путает колонки.
+                $res = $this->registry->resolveForIngest($buyer['inn'], $buyer['name']);
+                $registryVerdict = $res['status'];
+
+                if ($res['status'] === 'unavailable') {
+                    // Реестр молчит — документ не помечаем разобранным: следующий
+                    // прогон спросит снова. Лучше опоздать с организацией, чем
+                    // завести её по догадке разборщика.
+                    $stats['registry_unavailable'] = ($stats['registry_unavailable'] ?? 0) + 1;
+                    $stats['processed']--;
+
+                    return;
                 }
-                // Перезаписываем имя, если текущее пустое / плейсхолдер «ИНН N» /
-                // мусорное (артикул) — хорошее имя из чистого документа важнее.
-                $cur = (string) ($org->name ?? '');
-                $replaceable = trim($cur) === ''
-                    || preg_match('/^ИНН \d+$/u', $cur) === 1
-                    || $this->isJunkName($cur);
-                if ($replaceable && $buyer['name']) {
-                    $org->name = $buyer['name'];
+
+                if ($res['status'] === 'ok') {
+                    $org = $res['org'];
+                    if ($res['created']) {
+                        $stats['orgs_new']++;
+                    }
+                    // Выписка про ИП КПП не даёт, про адрес — почти всегда даёт.
+                    // Из документа дописываем только то, чего в реестре нет.
+                    if (trim((string) ($org->kpp ?? '')) === '' && $buyer['kpp'] && strlen((string) $org->inn) === 10) {
+                        $org->kpp = $buyer['kpp'];
+                    }
+                    if (trim((string) ($org->address ?? '')) === '' && $buyer['address']) {
+                        $org->address = $buyer['address'];
+                    }
+                    $org->save();
+                    $this->linkEmail($org, (string) (optional($q->request)->client_email ?? ''), $stats);
+                } else {
+                    // not_found — такого ИНН нет в ЕГРЮЛ/ЕГРИП; ours — это мы сами.
+                    // В обоих случаях организацию не заводим и к адресу не цепляем.
+                    $stats['registry_'.$res['status']] = ($stats['registry_'.$res['status']] ?? 0) + 1;
                 }
-                if (trim((string) ($org->kpp ?? '')) === '' && $buyer['kpp']) {
-                    $org->kpp = $buyer['kpp'];
-                }
-                if (trim((string) ($org->address ?? '')) === '' && $buyer['address']) {
-                    $org->address = $buyer['address'];
-                }
-                if (trim((string) ($org->name ?? '')) === '') {
-                    $org->name = 'ИНН '.$buyer['inn'];
-                }
-                $org->save();
-                $this->linkEmail($org, (string) (optional($q->request)->client_email ?? ''), $stats);
             }
         }
 
@@ -147,8 +164,11 @@ class ClientsExtractRequisitesCommand extends Command
         // документы стоит перепроверить после правки парсера (--retry-empty).
         $payload = is_array($q->payload) ? $q->payload : [];
         $payload['requisites_extracted'] = true;
-        if (isset($buyer) && $buyer['inn'] !== null) {
+        if (isset($buyer) && $buyer['inn'] !== null && $registryVerdict === 'ok') {
             $payload['requisites_buyer_inn'] = $buyer['inn'];
+        }
+        if ($registryVerdict !== null) {
+            $payload['requisites_registry'] = $registryVerdict;
         }
         $q->forceFill(['payload' => $payload])->save();
     }

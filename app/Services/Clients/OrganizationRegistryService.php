@@ -97,6 +97,109 @@ class OrganizationRegistryService
             return ['ok' => false, 'changed' => [], 'status' => null, 'message' => 'Реестр не ответил — попробуйте позже.'];
         }
 
+        $changed = $this->apply($org, $reg);
+        $org->save();
+
+        return [
+            'ok' => true,
+            'changed' => $changed,
+            'status' => $reg['status'],
+            'message' => $reg['status'] === 'NOT_FOUND'
+                ? 'ИНН в ЕГРЮЛ/ЕГРИП не найден.'
+                : ($changed === [] ? 'Реквизиты совпадают с реестром.' : 'Обновлено полей: '.count($changed).'.'),
+        ];
+    }
+
+    /** Реестр перепроверяем не чаще раза в месяц: реквизиты меняются редко. */
+    public const FRESH_DAYS = 30;
+
+    /** Ответы реестра в пределах одного прогона: 1928 документов Liftway — один ИНН. */
+    private array $cache = [];
+
+    /**
+     * Покупатель из нашего документа (КП, счёт) — через реестр.
+     *
+     * Это главный вход в реестр клиентов: реквизиты мы достаём из отправленных
+     * документов, и всё, что разборщик понял неверно, раньше так и оседало —
+     * название, склеенное с артикулом, обрезанный адрес, КПП соседней колонки.
+     * Теперь ИНН из документа проверяется по ЕГРЮЛ, и организация заводится
+     * уже с официальными данными.
+     *
+     *   ok          — организация есть в реестре; возвращаем её (новую или
+     *                 существующую), реквизиты взяты из выписки;
+     *   ours        — это наш собственный ИНН, продавец, а не покупатель;
+     *   not_found   — такого ИНН в реестре нет: организацию не заводим, иначе
+     *                 в реестр клиентов попадёт мусор;
+     *   unavailable — реестр не ответил; решение за вызывающим (повторить
+     *                 позже или завести по данным документа).
+     *
+     * @return array{status: 'ok'|'ours'|'not_found'|'unavailable', org: ?Organization, created: bool}
+     */
+    public function resolveForIngest(string $inn, ?string $parsedName = null): array
+    {
+        $inn = preg_replace('/\D+/', '', $inn) ?? '';
+        if ($inn === '') {
+            return ['status' => 'not_found', 'org' => null, 'created' => false];
+        }
+
+        $ours = array_merge(
+            [preg_replace('/\D+/', '', (string) config('services.company.inn', '')) ?? ''],
+            (array) config('services.company.own_inns', []),
+        );
+        if (in_array($inn, $ours, true)) {
+            return ['status' => 'ours', 'org' => null, 'created' => false];
+        }
+
+        $org = Organization::query()->where('inn', $inn)->first();
+
+        // Уже сверена недавно — в реестр не ходим, решение прежнее.
+        if ($org !== null && $org->registry_checked_at?->gt(now()->subDays(self::FRESH_DAYS))) {
+            return $org->registry_status === 'NOT_FOUND'
+                ? ['status' => 'not_found', 'org' => null, 'created' => false]
+                : ['status' => 'ok', 'org' => $org, 'created' => false];
+        }
+
+        $reg = $this->cache[$inn] ??= $this->lookup($inn);
+        if ($reg === null) {
+            unset($this->cache[$inn]); // сбой не запоминаем — пусть следующий документ спросит снова
+
+            return ['status' => 'unavailable', 'org' => $org, 'created' => false];
+        }
+
+        if ($reg['status'] === 'NOT_FOUND') {
+            // Существующую карточку помечаем, но не удаляем: у неё может быть история.
+            if ($org !== null) {
+                $org->forceFill(['registry_status' => 'NOT_FOUND', 'registry_checked_at' => now()])->save();
+            }
+
+            return ['status' => 'not_found', 'org' => null, 'created' => false];
+        }
+
+        $created = $org === null;
+        if ($created) {
+            $org = new Organization(['inn' => $inn]);
+            // Новая карточка сразу получает официальное имя, а не догадку
+            // разборщика. Разобранное имя — только на крайний случай.
+            $official = trim((string) ($reg['short_name'] ?? ''));
+            $parsed = trim((string) $parsedName);
+            $org->name = $official !== '' ? $official : ($parsed !== '' ? $parsed : 'ИНН '.$inn);
+        }
+
+        $this->apply($org, $reg);
+        $org->save();
+
+        return ['status' => 'ok', 'org' => $org, 'created' => $created];
+    }
+
+    /**
+     * Единая политика записи выписки в карточку — и для ручной сверки, и для
+     * входящих документов.
+     *
+     * @param  array<string, mixed>  $reg
+     * @return array<string, array{from: ?string, to: ?string}>
+     */
+    private function apply(Organization $org, array $reg): array
+    {
         $changed = [];
         $set = function (string $field, ?string $value) use ($org, &$changed): void {
             $value = $value !== null && trim($value) !== '' ? trim($value) : null;
@@ -109,36 +212,29 @@ class OrganizationRegistryService
         $org->registry_status = $reg['status'];
         $org->registry_checked_at = now();
 
-        if ($reg['status'] !== 'NOT_FOUND') {
-            $set('registry_short_name', $reg['short_name'] ?? null);
-            $set('registry_full_name', $reg['full_name'] ?? null);
-            $set('registry_address', $reg['address'] ?? null);
-            $set('registry_director', $reg['director'] ?? null);
-            $set('ogrn', $reg['ogrn'] ?? null);
-
-            // КПП у юрлица один на головную организацию — выписка правее
-            // нашего разборщика. У ИП КПП нет: пустое значение не пишем.
-            if (! empty($reg['kpp'])) {
-                $set('kpp', $reg['kpp']);
-            }
-            if (trim((string) $org->address) === '' && ! empty($reg['address'])) {
-                $set('address', $reg['address']);
-            }
-            if (self::isJunkName((string) $org->name) && ! empty($reg['short_name'])) {
-                $set('name', $reg['short_name']);
-            }
+        if ($reg['status'] === 'NOT_FOUND') {
+            return $changed;
         }
 
-        $org->save();
+        $set('registry_short_name', $reg['short_name'] ?? null);
+        $set('registry_full_name', $reg['full_name'] ?? null);
+        $set('registry_address', $reg['address'] ?? null);
+        $set('registry_director', $reg['director'] ?? null);
+        $set('ogrn', $reg['ogrn'] ?? null);
 
-        return [
-            'ok' => true,
-            'changed' => $changed,
-            'status' => $reg['status'],
-            'message' => $reg['status'] === 'NOT_FOUND'
-                ? 'ИНН в ЕГРЮЛ/ЕГРИП не найден.'
-                : ($changed === [] ? 'Реквизиты совпадают с реестром.' : 'Обновлено полей: '.count($changed).'.'),
-        ];
+        // КПП у юрлица один на головную организацию — выписка правее
+        // нашего разборщика. У ИП КПП нет: пустое значение не пишем.
+        if (! empty($reg['kpp'])) {
+            $set('kpp', $reg['kpp']);
+        }
+        if (trim((string) $org->address) === '' && ! empty($reg['address'])) {
+            $set('address', $reg['address']);
+        }
+        if (self::isJunkName((string) $org->name) && ! empty($reg['short_name'])) {
+            $set('name', $reg['short_name']);
+        }
+
+        return $changed;
     }
 
     /**

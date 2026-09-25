@@ -7,6 +7,7 @@ use App\Models\ClientContact;
 use App\Models\Organization;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
+use App\Services\Clients\OrganizationRegistryService;
 use App\Services\Clients\RequestOrganizationResolver;
 use App\Services\Settings\SettingsService;
 use Illuminate\Console\Command;
@@ -38,8 +39,10 @@ class ClientsBackfillCommand extends Command
     /** @var array<int, string> */
     private array $internalDomains = [];
 
-    public function __construct(private readonly RequestOrganizationResolver $orgResolver)
-    {
+    public function __construct(
+        private readonly RequestOrganizationResolver $orgResolver,
+        private readonly OrganizationRegistryService $registry,
+    ) {
         parent::__construct();
     }
 
@@ -264,6 +267,26 @@ class ClientsBackfillCommand extends Command
         // безмаркерные компании («СтайлЛифт», «СП Интерлифт»), и отсекаем людей.
         if (! $assumeOrg && $inn === '' && $this->looksLikePerson($name)) {
             return null;
+        }
+
+        // ИНН есть — спрашиваем реестр: организация заводится с официальными
+        // данными, несуществующий ИНН и наш собственный в клиенты не попадают.
+        if ($inn !== '') {
+            $res = $this->registry->resolveForIngest($inn, $name);
+            if ($res['status'] === 'ok') {
+                if ($res['created']) {
+                    $stats['orgs']++;
+                }
+
+                return $res['org'];
+            }
+            if ($res['status'] !== 'unavailable') {
+                $stats['registry_'.$res['status']] = ($stats['registry_'.$res['status']] ?? 0) + 1;
+
+                return null;
+            }
+            // Реестр молчит — заводим по данным КП, как раньше: ночная сверка
+            // (clients:registry-sync) догонит такую карточку, как только сможет.
         }
 
         $org = $inn !== ''
