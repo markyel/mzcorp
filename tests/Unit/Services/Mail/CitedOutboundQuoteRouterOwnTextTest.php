@@ -53,14 +53,16 @@ class CitedOutboundQuoteRouterOwnTextTest extends TestCase
         $this->assertTrue($this->router->hasInvoiceIntent((string) $m->subject, $own));
     }
 
-    public function test_forwarded_kp_with_preamble_keeps_forwarded_number(): void
+    public function test_forwarded_kp_with_preamble_keeps_invoice_intent(): void
     {
+        // Номер КП для привязки берётся из всего тела (collectCandidates);
+        // собственный текст — преамбула клиента, а намерение — в ней.
         $body = "Выставите счёт, пожалуйста.\n\n-------- Пересылаемое сообщение --------\nОт: Агрызков Сергей <s@myzip.ru>\nТема: КП\n\nПредложение МЗ-364274 во вложении\n";
         $m = $this->msg($body, 'Fwd: КП');
 
         $own = $this->router->ownBodyText($m);
 
-        $this->assertStringContainsString('364274', $own);
+        $this->assertStringContainsString('Выставите счёт', $own);
         $this->assertTrue($this->router->hasInvoiceIntent((string) $m->subject, $own));
     }
 

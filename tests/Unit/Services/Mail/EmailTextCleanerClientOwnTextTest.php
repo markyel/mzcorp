@@ -4,7 +4,7 @@ namespace Tests\Unit\Services\Mail;
 
 use App\Models\EmailMessage;
 use App\Services\Mail\EmailTextCleanerService;
-use PHPUnit\Framework\TestCase;
+use Tests\TestCase;
 
 /**
  * EmailTextCleanerService::clientOwnText — единый владелец понятия «собственный
@@ -19,6 +19,7 @@ class EmailTextCleanerClientOwnTextTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config()->set('services.mail.internal_domains', ['myzip.ru', 'mylift.ru']);
         $this->cleaner = new EmailTextCleanerService;
     }
 
@@ -52,14 +53,47 @@ class EmailTextCleanerClientOwnTextTest extends TestCase
         $this->assertStringNotContainsString('не оплачены', $own);
     }
 
-    public function test_forwarded_block_is_kept_with_client_preamble(): void
+    public function test_forwarded_letter_of_ours_leaves_only_client_preamble(): void
     {
+        // Номер КП для привязки ищется по всему телу (CitedOutboundQuoteRouter::
+        // collectCandidates), в собственный текст наше письмо не входит.
         $m = $this->message("Прошу выставить счёт по этому КП.\n\n-------- Пересылаемое сообщение --------\nОт: manager@myzip.ru\nТема: КП 359668\n\nКП 359668 во вложении");
 
         $own = $this->cleaner->clientOwnText($m);
 
         $this->assertStringContainsString('Прошу выставить счёт', $own);
-        $this->assertStringContainsString('359668', $own, 'номер КП из пересланного блока нужен для матча');
+        $this->assertStringNotContainsString('во вложении', $own);
+    }
+
+    public function test_question_about_delivery_over_our_forwarded_invoice_has_no_invoice_request(): void
+    {
+        // M-2026-17327: клиент переслал наш счёт № 7182 и спросил про срок
+        // поставки; ниже — наше «Высылаем счёт» и его старое «Просим выставить счет».
+        $m = $this->message("Добрый день!\nПодскажите, пожалуйста, когда ожидать поставку по данному счёту?\n \n"
+            ."-------- Пересылаемое сообщение --------\n"
+            ."09.07.2026, 14:48, Владимир Головнёв (vladimir.golovnev@myzip.ru):\n"
+            ."Кому: ООО \\МостЛифтСтрой\\ (mostliftstroy1@yandex.ru);\n"
+            ."Тема: Запрос: концевой выключатель (360686);\n \n"
+            ."   Добрый день.\n   Высылаем счёт на оплату № 7182 по вашему запросу.\n"
+            ."09.07.2026 13:53, ООО \"МостЛифтСтрой\" пишет:\nДобрый день! Просим выставить счет на 1 шт.");
+
+        $own = $this->cleaner->clientOwnText($m);
+
+        $this->assertStringContainsString('когда ожидать поставку', $own);
+        $this->assertStringNotContainsString('Высылаем счёт', $own);
+        $this->assertStringNotContainsString('Просим выставить', $own);
+    }
+
+    public function test_forwarded_third_party_letter_is_kept_with_client_preamble(): void
+    {
+        // Клиент пересылает заявку коллеги со своим комментарием — позиции в пересылке.
+        $m = $this->message("Посмотрите, пожалуйста, нужна цена.\n\n-------- Пересылаемое сообщение --------\n"
+            ."От: Иван Петров <petrov@liftremont.ru>\nТема: заявка\n\nКонцевой выключатель ВК-300 — 2 шт.");
+
+        $own = $this->cleaner->clientOwnText($m);
+
+        $this->assertStringContainsString('нужна цена', $own);
+        $this->assertStringContainsString('ВК-300', $own);
     }
 
     public function test_html_fallback_when_plain_is_broken(): void

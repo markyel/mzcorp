@@ -484,12 +484,67 @@ class EmailTextCleanerService
         }
         $own = $this->cutQuotedReplyTail($raw);
 
-        ['forwarded' => $fwd, 'original' => $orig] = $this->extractForwardedContent($own !== '' ? $own : $raw);
+        $base = $own !== '' ? $own : $raw;
+        ['forwarded' => $fwd, 'original' => $orig] = $this->extractForwardedContent($base);
         if ($fwd !== null) {
+            // Клиент переслал НАШЕ письмо со своим вопросом: в пересылке наши
+            // слова («Высылаем счёт на оплату № 7182») и его старая просьба
+            // («Просим выставить счет»), а сегодня он спрашивает только срок
+            // поставки. Намерение — из его преамбулы. Номер документа для
+            // привязки ищется по всему письму (CitedOutboundQuoteRouter::detect).
+            // Кейс M-2026-17327: вопрос о поставке родил дочернюю «Новый счёт».
+            if (trim($orig) !== '' && $this->forwardedFromUs($base)) {
+                return $orig;
+            }
+
             return trim($orig) !== '' ? $orig . "\n" . $fwd : $fwd;
         }
 
         return $own;
+    }
+
+    /**
+     * Пересланное письмо написано нами: в шапке пересылки отправитель — адрес
+     * нашего домена (services.mail.internal_domains). Строки «Кому/Копия/Тема»
+     * не в счёт — там адрес клиента или наш как получатель.
+     *
+     *   09.07.2026, 14:48, Владимир Головнёв (vladimir.golovnev@myzip.ru):
+     *   От: Владимир Головнёв <vladimir.golovnev@myzip.ru>
+     */
+    private function forwardedFromUs(string $text): bool
+    {
+        $startPattern = '/^-{4,}\s*(?:Пересылаемое сообщение|Пересланное сообщение|Forwarded message|Перенаправленное сообщение|Original Message)\s*-{0,}\s*$/imu';
+        if (! preg_match($startPattern, $text, $m, PREG_OFFSET_CAPTURE)) {
+            return false;
+        }
+        try {
+            $configured = (array) config('services.mail.internal_domains', []);
+        } catch (\Throwable) {
+            $configured = []; // без приложения (чистые unit-тесты) — своих доменов не знаем
+        }
+        $domains = array_filter(array_map(fn ($d) => mb_strtolower(trim((string) $d)), $configured));
+        if ($domains === []) {
+            return false;
+        }
+
+        $header = array_slice(preg_split("/\r?\n/", substr($text, $m[0][1] + strlen($m[0][0]))) ?: [], 0, 6);
+        foreach ($header as $line) {
+            $line = trim($line);
+            if ($line === '' || preg_match('/^(Кому|To|Копия|Cc|Тема|Subject)\s*:/iu', $line)) {
+                continue;
+            }
+            if (preg_match_all('/[\w.+-]+@([\w-]+(?:\.[\w-]+)+)/u', $line, $mm)) {
+                foreach ($mm[1] as $domain) {
+                    if (in_array(mb_strtolower($domain), $domains, true)) {
+                        return true;
+                    }
+                }
+
+                return false; // первый же адрес отправителя — чужой
+            }
+        }
+
+        return false;
     }
 
     /**
