@@ -425,6 +425,18 @@ return [
         )),
 
         /*
+        | Публичные почтовые домены: у разных контрагентов домен общий,
+        | поэтому совпадение по домену на них ничего не значит.
+        */
+        'free_mail_domains' => [
+            'mail.ru', 'inbox.ru', 'list.ru', 'bk.ru', 'internet.ru',
+            'gmail.com', 'yandex.ru', 'ya.ru', 'yandex.com',
+            'rambler.ru', 'lenta.ru', 'autorambler.ru', 'myrambler.ru',
+            'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'me.com',
+            'proton.me', 'protonmail.com', 'gmx.com', 'gmx.de',
+        ],
+
+        /*
         | Публичные почтовые домены (бесплатные почтовики). Для них
         | «получатель на том же домене, что и заказчик» НЕ означает «коллега
         | заказчика» — InternalSenderDetector::isAddressedToClient считает

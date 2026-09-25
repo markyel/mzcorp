@@ -7,6 +7,7 @@ use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\Organization;
 use App\Models\OutboundQuote;
+use App\Models\Supplier;
 use App\Services\Clients\OrganizationRegistryService;
 use App\Services\Clients\RequestOrganizationResolver;
 use Illuminate\Console\Command;
@@ -389,6 +390,9 @@ class ClientsExtractRequisitesCommand extends Command
         $recipients = collect(array_merge((array) ($message?->to_recipients ?? []), (array) ($message?->cc_recipients ?? [])))
             ->map(fn ($r) => mb_strtolower(trim((string) (is_array($r) ? ($r['email'] ?? '') : $r))))
             ->filter(fn ($e) => filter_var($e, FILTER_VALIDATE_EMAIL) && ! $this->isInternalEmail($e))
+            // Счёт клиента менеджер пересылает и поставщику (unisystem.si,
+            // paulschaab.de, liftway.ru) — поставщик не заказчик.
+            ->reject(fn ($e) => $this->isSupplierEmail($e))
             ->unique()->values()->all();
         if ($recipients !== []) {
             return $recipients;
@@ -397,6 +401,28 @@ class ClientsExtractRequisitesCommand extends Command
         $client = mb_strtolower(trim((string) (optional($q->request)->client_email ?? '')));
 
         return filter_var($client, FILTER_VALIDATE_EMAIL) && ! $this->isInternalEmail($client) ? [$client] : [];
+    }
+
+    /** @var array<string, bool> */
+    private array $supplierCache = [];
+
+    /** Адрес поставщика: сам ящик в справочнике или корпоративный домен поставщика. */
+    private function isSupplierEmail(string $email): bool
+    {
+        return $this->supplierCache[$email] ??= (function () use ($email) {
+            $domain = mb_strtolower((string) substr((string) strrchr($email, '@'), 1));
+            $free = in_array($domain, (array) config('services.mail.free_mail_domains', []), true);
+
+            return Supplier::query()
+                ->where(function ($q) use ($email, $domain, $free) {
+                    $q->whereRaw('lower(email) = ?', [$email]);
+                    if (! $free && $domain !== '') {
+                        $q->orWhereRaw('lower(email) LIKE ?', ['%@'.$domain])
+                            ->orWhereRaw('lower(domain) = ?', [$domain]);
+                    }
+                })
+                ->exists();
+        })();
     }
 
     /** Адрес на нашем домене (services.mail.internal_domains): сотрудник или технический ящик. */
