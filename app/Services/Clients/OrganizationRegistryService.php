@@ -99,8 +99,11 @@ class OrganizationRegistryService
 
         // У ИП нет названия, есть ФИО.
         $individual = ($data['type'] ?? null) === 'INDIVIDUAL';
+        // Краткого названия в ЕГР бывает нет (ЗАО «Гомельлифт») — тогда полное:
+        // строка подсказки несёт в себе ещё и УНП.
         $short = ($data['short_name_ru'] ?? null)
-            ?: ($individual && ! empty($data['fio_ru']) ? 'ИП '.$data['fio_ru'] : $response->json('suggestions.0.value'));
+            ?: ($individual && ! empty($data['fio_ru']) ? 'ИП '.$data['fio_ru'] : ($data['full_name_ru'] ?? null))
+            ?: trim(str_replace($unp, '', (string) $response->json('suggestions.0.value')));
 
         return [
             'status' => (string) ($data['status'] ?? 'ACTIVE'),
