@@ -247,8 +247,10 @@ class MailHistoryMirrorService
      * аккаунту) Яндекс отвечает пустым или обрезанным FETCH — webklex то
      * молча отдаёт меньше строк, то падает («empty response», «Uninitialized
      * string offset»). Недополученные UID запрашиваем снова, при сбое —
-     * переподключаемся; что не удалось за 3 попытки, остаётся на следующий
-     * прогон.
+     * переподключаемся; что не удалось за 4 попытки, остаётся на следующий
+     * прогон. Отступ растёт (5–10–20 с): при долгой выборке Яндекс придерживает
+     * и одиночное соединение, и короткие паузы окно не перекрывали — у
+     * Агрызкова и Якубовича так недополучили по ~40 тыс. писем.
      *
      * @param  list<int>  $uids
      * @return array{imported:int, rehomed:int, uid_filled:int, missing:int}
@@ -257,7 +259,7 @@ class MailHistoryMirrorService
     {
         $out = ['imported' => 0, 'rehomed' => 0, 'uid_filled' => 0, 'missing' => 0];
         $left = $uids;
-        for ($attempt = 1; $attempt <= 3 && $left !== []; $attempt++) {
+        for ($attempt = 1; $attempt <= 4 && $left !== []; $attempt++) {
             try {
                 $part = $this->importChunk($mailbox, $client, $f, $left, $validity);
             } catch (\Throwable $e) {
@@ -265,7 +267,7 @@ class MailHistoryMirrorService
                     'mailbox_id' => $mailbox->id, 'folder' => $f['db'], 'uids' => count($left),
                     'attempt' => $attempt, 'error' => mb_substr($e->getMessage(), 0, 200),
                 ]);
-                sleep(3 * $attempt);
+                sleep(5 * 2 ** ($attempt - 1));
                 $this->reconnect($client, $f['server']);
 
                 continue;
@@ -275,7 +277,7 @@ class MailHistoryMirrorService
             $out['uid_filled'] += $part['uid_filled'];
             $left = $part['missing'];
             if ($left !== []) {
-                sleep(2 * $attempt);
+                sleep(5 * 2 ** ($attempt - 1));
             }
         }
         $out['missing'] = count($left);
