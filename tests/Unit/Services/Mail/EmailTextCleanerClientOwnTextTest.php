@@ -84,6 +84,45 @@ class EmailTextCleanerClientOwnTextTest extends TestCase
         $this->assertStringNotContainsString('Просим выставить', $own);
     }
 
+    public function test_yandex_quote_header_without_pishet_is_cut(): void
+    {
+        // M-2026-17264: цитата нашего письма в формате Яндекса — «Кому:», «Тема:»
+        // и атрибуция «время, дата, "Имя" <адрес>:» без «пишет».
+        $m = $this->message("Добрый день, Владимир!\n Мы доплатим доставку\n"
+            ."Кому: \"Елена Лихацкая\" <elvl10@yandex.ru>;\nТема: АНО МКК, покупка запчастей (368530);\n"
+            ."10:01, 25 сентября 2026 г., \"Владимир Головнёв\" <vladimir.golovnev@myzip.ru>:\n"
+            ."Добрый день Елена.\n Вы оплатили счет № 10061 от 24.09.2026 без доставки.");
+
+        $own = $this->cleaner->clientOwnText($m);
+
+        $this->assertStringContainsString('доплатим доставку', $own);
+        $this->assertStringNotContainsString('Кому:', $own);
+        $this->assertStringNotContainsString('Вы оплатили счет', $own);
+    }
+
+    public function test_yandex_quote_with_dash_separator_is_cut(): void
+    {
+        // M-2026-16693: «----------------», «Кому:», «Тема:», «дата, время, "Имя" <адрес>:».
+        $m = $this->message("Привезёт транспортная компания ?\n \n----------------\n"
+            ."Кому: Александр Кригер (kriger@un74.ru);\nТема: Коммерческое предложение 355797 5550 356493 5609;\n"
+            ."22.09.2026, 11:11, \"Дмитрий Якубович\" <dmitry.yakubovich@myzip.ru>:\n"
+            ."Александр, добрый день,\nМы отправляли 16-го. Счет на Родник");
+
+        $own = $this->cleaner->clientOwnText($m);
+
+        $this->assertSame('Привезёт транспортная компания ?', $own);
+    }
+
+    public function test_yandex_header_inside_forward_is_not_cut(): void
+    {
+        // Пересланная заявка коллеги клиента в формате Яндекса: позиции нужны.
+        $m = $this->message("Посмотрите заявку.\n\n-------- Пересылаемое сообщение --------\n"
+            ."25.09.2026, 10:01, \"Иван Петров\" <petrov@firm.ru>:\n"
+            ."Нужна цена: концевой выключатель ВК-300 — 2 шт.");
+
+        $this->assertStringContainsString('ВК-300', $this->cleaner->clientOwnText($m));
+    }
+
     public function test_forwarded_third_party_letter_is_kept_with_client_preamble(): void
     {
         // Клиент пересылает заявку коллеги со своим комментарием — позиции в пересылке.
