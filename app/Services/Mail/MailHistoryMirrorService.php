@@ -261,22 +261,32 @@ class MailHistoryMirrorService
         $out = ['imported' => 0, 'rehomed' => 0, 'uid_filled' => 0, 'missing' => 0];
         $left = $uids;
         for ($attempt = 1; $attempt <= 4 && $left !== []; $attempt++) {
-            try {
-                $part = $this->importChunk($mailbox, $client, $f, $left, $validity);
-            } catch (\Throwable $e) {
-                Log::info('MailHistoryMirror: chunk failed, reconnecting', [
-                    'mailbox_id' => $mailbox->id, 'folder' => $f['db'], 'uids' => count($left),
-                    'attempt' => $attempt, 'error' => mb_substr($e->getMessage(), 0, 200),
-                ]);
-                sleep(5 * 2 ** ($attempt - 1));
-                $this->reconnect($client, $f['server']);
+            // Повторы — мельче: медленный ящик (Курзаев, ~50 с на 500 шапок)
+            // не укладывается в таймаут чтения, и webklex молча отдаёт обрезанный
+            // ответ; та же пачка упирается в тот же таймаут снова (75 тыс.
+            // «недоданных» за проход). 500 → 100 → 50 → 25.
+            $size = [1 => self::FETCH_CHUNK, 2 => 100, 3 => 50, 4 => 25][$attempt];
+            $stillLeft = [];
+            foreach (array_chunk($left, $size) as $piece) {
+                try {
+                    $part = $this->importChunk($mailbox, $client, $f, $piece, $validity);
+                } catch (\Throwable $e) {
+                    Log::info('MailHistoryMirror: chunk failed, reconnecting', [
+                        'mailbox_id' => $mailbox->id, 'folder' => $f['db'], 'uids' => count($piece),
+                        'attempt' => $attempt, 'error' => mb_substr($e->getMessage(), 0, 200),
+                    ]);
+                    sleep(5 * 2 ** ($attempt - 1));
+                    $this->reconnect($client, $f['server']);
+                    $stillLeft = array_merge($stillLeft, $piece);
 
-                continue;
+                    continue;
+                }
+                $out['imported'] += $part['imported'];
+                $out['rehomed'] += $part['rehomed'];
+                $out['uid_filled'] += $part['uid_filled'];
+                $stillLeft = array_merge($stillLeft, $part['missing']);
             }
-            $out['imported'] += $part['imported'];
-            $out['rehomed'] += $part['rehomed'];
-            $out['uid_filled'] += $part['uid_filled'];
-            $left = $part['missing'];
+            $left = $stillLeft;
             if ($left !== []) {
                 sleep(5 * 2 ** ($attempt - 1));
             }
