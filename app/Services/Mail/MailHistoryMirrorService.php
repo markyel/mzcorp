@@ -352,7 +352,18 @@ class MailHistoryMirrorService
             $flags = $p['flags'];
             $mid = $p['mid'];
 
-            $existing = $mid !== null ? ($existingByMid[mb_strtolower($mid)] ?? null) : null;
+            // Все наши строки этого письма в ящике; строка ИМЕННО в этой папке — главнее.
+            $rowsOfMid = $mid !== null ? ($existingByMid[mb_strtolower($mid)] ?? []) : [];
+            $sameFolder = collect($rowsOfMid)->first(fn ($r) => $r->folder === $f['db']);
+            $existing = $sameFolder ?? ($rowsOfMid[0] ?? null);
+
+            // INBOX/Sent: письмо лежит на сервере и здесь, и в другой папке (себе
+            // или копия себе: у Курзаева ~17 тыс. таких в «Отправленных») — это
+            // два места письма, у нас две строки. Пропуск копии оставлял её
+            // вечным «несделанным» и в сверке сервер ≠ БД.
+            if ($existing !== null && $f['folder_id'] === null && $sameFolder === null) {
+                $existing = null;
+            }
             if ($existing !== null) {
                 if ($f['folder_id'] !== null) {
                     if ($existing->folder !== $f['db']) {
@@ -598,7 +609,7 @@ class MailHistoryMirrorService
      * email_messages_mailbox_lower_mid_idx.
      *
      * @param  list<string>  $mids
-     * @return array<string, EmailMessage>
+     * @return array<string, list<EmailMessage>> lower(mid) => все строки письма в ящике
      */
     private function findByMessageIds(Mailbox $mailbox, array $mids): array
     {
@@ -615,7 +626,7 @@ class MailHistoryMirrorService
             ->orderBy('id')
             ->get(['id', 'mailbox_id', 'folder', 'imap_uid', 'mailbox_folder_id', 'message_id']);
         foreach ($rows as $r) {
-            $out[mb_strtolower((string) $r->message_id)] ??= $r;
+            $out[mb_strtolower((string) $r->message_id)][] = $r;
         }
 
         return $out;
