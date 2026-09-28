@@ -18,13 +18,21 @@ use Illuminate\Support\Facades\Log;
  * временем догоняет сам себя.
  *
  * Отчёт готовится офлайн: на 201/202 надо повторить запрос С ТЕМ ЖЕ именем,
- * пока не придёт 200. Новое имя каждый раз — это новый отчёт и бесконечное
- * ожидание.
+ * пока не придёт 200 — ждём прямо в прогоне (retryIn из ответа).
+ *
+ * Имя отчёта меняется каждый час. Директ хранит готовый отчёт по имени и на
+ * повторный запрос с тем же именем отдаёт сохранённую копию — при периоде
+ * LAST_14_DAYS это копия того дня, когда отчёт собрали впервые. Так статистика
+ * в разделе застыла на 25.09.2026: каждый час переписывались одни и те же
+ * строки ночного отчёта 26.09.
  */
 class DirectStatsService
 {
     /** За сколько дней тянем: отчёт уточняется задним числом. */
     public const WINDOW_DAYS = 14;
+
+    /** Сколько ждём готовности отчёта в одном прогоне, секунд. */
+    private const MAX_WAIT_SECONDS = 180;
 
     /**
      * Забрать оба разреза. Возвращает, сколько строк записано.
@@ -185,11 +193,11 @@ class DirectStatsService
             'params' => [
                 'SelectionCriteria' => (object) [],
                 'FieldNames' => $fields,
-                // Имя постоянное: по нему Директ отдаёт уже заказанный отчёт.
-                // В имени — отпечаток состава полей: Директ хранит отчёт по
-                // имени и на изменившийся набор колонок молча отдаёт старый.
-                // Так мы сутки получали строки без номера кампании.
-                'ReportName' => $name.'-'.self::WINDOW_DAYS.'d-'.substr(md5($type.implode(',', $fields)), 0, 6),
+                // В имени — отпечаток состава полей и час: Директ хранит отчёт
+                // по имени и на то же имя отдаёт старую копию — и при другом
+                // наборе колонок (сутки строк без номера кампании), и на
+                // следующий день (статистика застыла на 25.09).
+                'ReportName' => $name.'-'.self::WINDOW_DAYS.'d-'.substr(md5($type.implode(',', $fields)), 0, 6).'-'.now()->format('YmdH'),
                 'ReportType' => $type,
                 'DateRangeType' => 'LAST_'.self::WINDOW_DAYS.'_DAYS',
                 'Format' => 'TSV',
@@ -197,22 +205,32 @@ class DirectStatsService
             ],
         ];
 
-        try {
-            $res = Http::withToken((string) config('services.yandex_direct.token'))
-                ->withHeaders([
-                    'Accept-Language' => 'ru',
-                    'processingMode' => 'auto',
-                    'returnMoneyInMicros' => 'false',
-                    'skipReportHeader' => 'true',
-                    'skipReportSummary' => 'true',
-                ])
-                ->timeout(180)
-                ->post((string) config('services.yandex_direct.endpoint').'reports', $definition);
-        } catch (\Throwable $e) {
-            Log::warning('Direct: отчёт недоступен', ['report' => $name, 'error' => $e->getMessage()]);
+        $deadline = time() + self::MAX_WAIT_SECONDS;
+        do {
+            try {
+                $res = Http::withToken((string) config('services.yandex_direct.token'))
+                    ->withHeaders([
+                        'Accept-Language' => 'ru',
+                        'processingMode' => 'auto',
+                        'returnMoneyInMicros' => 'false',
+                        'skipReportHeader' => 'true',
+                        'skipReportSummary' => 'true',
+                    ])
+                    ->timeout(180)
+                    ->post((string) config('services.yandex_direct.endpoint').'reports', $definition);
+            } catch (\Throwable $e) {
+                Log::warning('Direct: отчёт недоступен', ['report' => $name, 'error' => $e->getMessage()]);
 
-            return null;
-        }
+                return null;
+            }
+
+            // 201/202 — отчёт готовится: ждём, сколько просит Директ, и
+            // спрашиваем с тем же именем.
+            $pending = in_array($res->status(), [201, 202], true);
+            if ($pending && time() < $deadline) {
+                sleep(max(2, min(30, (int) ($res->header('retryIn') ?: 5))));
+            }
+        } while ($pending && time() < $deadline);
 
         if ($res->status() !== 200) {
             if ($res->status() >= 400) {
