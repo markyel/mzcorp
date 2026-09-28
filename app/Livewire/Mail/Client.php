@@ -483,6 +483,8 @@ class Client extends Component
                 app(ImapSeenSyncService::class)->pushSeen($chunk, $this->user(), $read);
             }
         }
+
+        $this->forgetUnreadBadges();
     }
 
     /** @param  list<int>  $ids */
@@ -1476,6 +1478,28 @@ class Client extends Component
         return null;
     }
 
+    /**
+     * Сколько держим бейджи ящиков. Свой бейдж сбрасывается сразу при
+     * прочтении (applyReadState); чужие ящики и новые письма догоняют за
+     * минуту — зато автообновление раз в 30 с не пересчитывает ~700 тыс.
+     * входящих у каждого, кто держит почту открытой.
+     */
+    private const UNREAD_BADGES_TTL = 60;
+
+    private function unreadCacheKey(array $mailboxIds): string
+    {
+        $ids = array_map('intval', $mailboxIds);
+        sort($ids);
+
+        return 'mail:unread-by-mailbox:'.(int) $this->user()->id.':'.md5(implode(',', $ids));
+    }
+
+    private function forgetUnreadBadges(): void
+    {
+        $ids = app(MailboxAccessService::class)->mailboxesFor($this->user())->pluck('id')->all();
+        Cache::forget($this->unreadCacheKey($ids));
+    }
+
     /** Непрочитанные по каждому ящику (для бейджей переключателя). @return array<int,int> */
     private function unreadByMailbox(array $mailboxIds): array
     {
@@ -1483,6 +1507,16 @@ class Client extends Component
             return [];
         }
 
+        return Cache::remember(
+            $this->unreadCacheKey($mailboxIds),
+            self::UNREAD_BADGES_TTL,
+            fn () => $this->countUnreadByMailbox($mailboxIds),
+        );
+    }
+
+    /** @return array<int,int> */
+    private function countUnreadByMailbox(array $mailboxIds): array
+    {
         // Бейдж ящика = то, что физически лежит в ЭТОМ ящике (как и список при
         // выборе одного ящика), поэтому копии здесь не прячем: копия и её
         // оригинал никогда не лежат в одном ящике.
