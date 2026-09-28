@@ -166,15 +166,15 @@ class MailDeliverToManagerService
             // 14 дней ушли назначенным менеджерам без письма (skip_reason
             // `origin_in_another_personal` в mail_append_audit).
             //
-            // ИСКЛЮЧЕНИЕ 2 — продолжение переписки по заявке B, пересланное лично
-            // A (foreign_thread_continuation, InboundReplyLinker): заявка остаётся
-            // у B и не переподчиняется, значит, отвечать клиенту будет B — копия
-            // нужна в его ящике (заказчик, 2026-09-28; кейс M-2026-16890).
+            // ИСКЛЮЧЕНИЕ 2 — A исполнял обязанности по заявке B (делегирование),
+            // клиент ответил лично A (delegated_thread, InboundReplyLinker):
+            // заявка остаётся у B, отвечать клиенту будет вернувшийся B — копия
+            // нужна в его ящике (кейс M-2026-16890).
             $originMailbox = $message->mailbox;
             $originOwner = $originMailbox?->owner;
             $originOwnerOutOfPlay = $originOwner !== null
                 && ($originOwner->archived_at !== null || $originOwner->isUnavailable());
-            $foreignThread = ! empty(((array) ($message->detected_artifacts ?? []))['foreign_thread_continuation']);
+            $foreignThread = ! empty(((array) ($message->detected_artifacts ?? []))['delegated_thread']);
             if ($originMailbox
                 && ! $originOwnerOutOfPlay
                 && ! $foreignThread

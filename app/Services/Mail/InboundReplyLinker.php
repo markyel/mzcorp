@@ -132,24 +132,28 @@ class InboundReplyLinker
             // Кейс 1 (happy path): parent есть и его Request не terminal —
             // привязываемся к ней. Для personal-ящика — только Request в
             // scope менеджера (см. resolveOwnerScopeUserId).
-            // Заголовки треда (In-Reply-To/References на письма заявки) — самое
-            // надёжное свидетельство: это продолжение переписки ПО ЭТОЙ заявке,
-            // даже если клиент переслал её лично другому менеджеру. Такое письмо
-            // привязываем к заявке, в чей бы личный ящик оно ни пришло (заказчик,
-            // 2026-09-28: «это продолжение переписки по старой заявке»; кейс
-            // M-2026-16890 — Тулупов переслал тред Румянцева Агрызкову, письмо
-            // повисло без заявки). Scope личного ящика остаётся для слабых
-            // уровней (тема, внешний код, адрес клиента, ИИ) — финальная
-            // проверка ниже. Заявка остаётся у ответственного
-            // (LinkedThreadHandler не переподчиняет), копия уходит ему.
             $matched = $parents
-                ->first(function (EmailMessage $p): bool {
+                ->first(function (EmailMessage $p) use ($ownerScopeUserId, $message): bool {
                     if ($p->related_request_id === null) {
                         return false;
                     }
                     $req = Request::find($p->related_request_id);
-
-                    return $req !== null && ! $req->status->isTerminal();
+                    if (! $req || $req->status->isTerminal()) {
+                        return false;
+                    }
+                    // Scope-check личного ящика — НЕ отвергаем, если parent пришёл
+                    // в ТОТ ЖЕ ящик (это физически тот же тред). Иначе реплай
+                    // отваливается в НОВУЮ заявку, когда исходная была переназначена
+                    // (напр. владелец ящика недоступен → заявка ушла доступному
+                    // менеджеру, assigned != owner ящика). Кейс M-2026-11194:
+                    // #68904 и reply #68936 — один ящик #13, но заявка переназначена.
+                    $sameMailbox = $p->mailbox_id !== null && $p->mailbox_id === $message->mailbox_id;
+                    if ($ownerScopeUserId !== null
+                        && ! $sameMailbox
+                        && ! $this->isRequestInScope($req, $ownerScopeUserId)) {
+                        return false;
+                    }
+                    return true;
                 });
             $matchedBy = $matched ? 'in_reply_to_or_references' : null;
 
@@ -269,33 +273,12 @@ class InboundReplyLinker
             return null;
         }
 
-        // Продолжение треда чужой заявки (Level 1) — привязываем, но помечаем:
-        // LinkedThreadHandler не переподчинит заявку владельцу ящика, а
-        // MailDeliverToManagerService доставит копию ответственному.
-        $foreignThread = $matchedBy === 'in_reply_to_or_references'
-            && $ownerScopeUserId !== null
-            && ! $this->isRequestInScope($request, $ownerScopeUserId);
-        if ($foreignThread) {
-            $artifacts = (array) ($message->detected_artifacts ?? []);
-            $artifacts['foreign_thread_continuation'] = [
-                'request_id' => $request->id,
-                'assigned_user_id' => $request->assigned_user_id,
-                'mailbox_owner_user_id' => $ownerScopeUserId,
-            ];
-            $message->forceFill(['detected_artifacts' => $artifacts])->save();
-            Log::info('InboundReplyLinker: thread continuation of another manager\'s request — linked, stays with its manager', [
-                'email_message_id' => $message->id,
-                'request_id' => $request->id,
-                'assigned_user_id' => $request->assigned_user_id,
-                'mailbox_owner_user_id' => $ownerScopeUserId,
-            ]);
-        }
-
         // Финальный scope-check для уровней 2-5 (subject_code / external_code /
-        // from_email_open_request / AI). Если линкер нашёл Request не в scope
-        // менеджера-владельца ящика — игнорируем: IncomingMailProcessor создаст
-        // новую Request у этого менеджера через sticky direct_mailbox.
-        if (! $foreignThread && $ownerScopeUserId !== null && ! $this->isRequestInScope($request, $ownerScopeUserId)) {
+        // from_email_open_request / AI). Level 1 уже отфильтрован внутри.
+        // Если линкер нашёл Request не в scope менеджера-владельца ящика —
+        // игнорируем: IncomingMailProcessor создаст новую Request у этого
+        // менеджера через sticky direct_mailbox. Уважаем выбор клиента.
+        if ($ownerScopeUserId !== null && ! $this->isRequestInScope($request, $ownerScopeUserId)) {
             Log::info('InboundReplyLinker: matched Request out of personal-mailbox scope — ignoring link', [
                 'email_message_id' => $message->id,
                 'matched_request_id' => $request->id,
@@ -355,6 +338,7 @@ class InboundReplyLinker
         }
 
         $message->forceFill(['related_request_id' => $request->id])->save();
+        $this->markDelegatedThread($message, $request, $ownerScopeUserId);
 
         // Pool: входящее от клиента → ClientReplied (требует внимания).
         // sent_at — стабильный порядок при бэкфилле/перезапуске sync'а.
@@ -731,6 +715,52 @@ class InboundReplyLinker
         return \App\Models\RequestAssignment::query()
             ->where('request_id', $request->id)
             ->where('user_id', $userId)
+            ->exists()
+            || $this->wasActingFor($request, $userId);
+    }
+
+    /**
+     * Менеджер исполнял обязанности по заявке (делегирование — сейчас или в
+     * прошлом). Пока основной менеджер отсутствовал, исполняющий отвечал
+     * клиенту — и клиент потом пишет ему лично. Кейс M-2026-16890: Румянцев
+     * в отпуске 24–25.09, Агрызков ответил клиенту, 28.09 ответ пришёл лично
+     * Агрызкову; делегирование уже закончилось, в пуле его заявка не числилась,
+     * письмо повисло без заявки, а вернувшийся Румянцев его не получил.
+     */
+    private function wasActingFor(Request $request, int $userId): bool
+    {
+        return \App\Models\RequestDelegation::query()
+            ->where('request_id', $request->id)
+            ->where('acting_user_id', $userId)
             ->exists();
+    }
+
+    /**
+     * Заявка в пуле владельца ящика только через делегирование: письмо
+     * привязывается к заявке, но её не переподчиняем исполнявшему
+     * (LinkedThreadHandler), а основному менеджеру доставляем копию
+     * (MailDeliverToManagerService). Метка detected_artifacts.delegated_thread.
+     */
+    private function markDelegatedThread(EmailMessage $message, Request $request, ?int $ownerScopeUserId): void
+    {
+        if ($ownerScopeUserId === null
+            || (int) $request->assigned_user_id === $ownerScopeUserId
+            || \App\Models\RequestAssignment::query()->where('request_id', $request->id)->where('user_id', $ownerScopeUserId)->exists()
+            || ! $this->wasActingFor($request, $ownerScopeUserId)) {
+            return;
+        }
+        $artifacts = (array) ($message->detected_artifacts ?? []);
+        $artifacts['delegated_thread'] = [
+            'request_id' => $request->id,
+            'assigned_user_id' => $request->assigned_user_id,
+            'acting_user_id' => $ownerScopeUserId,
+        ];
+        $message->forceFill(['detected_artifacts' => $artifacts])->save();
+        Log::info('InboundReplyLinker: reply to the acting manager of a delegation — linked, stays with the assigned manager', [
+            'email_message_id' => $message->id,
+            'request_id' => $request->id,
+            'assigned_user_id' => $request->assigned_user_id,
+            'acting_user_id' => $ownerScopeUserId,
+        ]);
     }
 }

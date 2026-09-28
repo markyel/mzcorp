@@ -325,11 +325,11 @@ final class LinkedThreadHandler implements InboundRoutingHandler
         if (! $mailbox || $mailbox->type !== MailboxType::Personal) {
             return;
         }
-        // Продолжение переписки по заявке (заголовки треда), пересланное лично
-        // другому менеджеру, заявку не переподчиняет: сделку ведёт
-        // ответственный, письмо ему доставляется (заказчик, 2026-09-28;
-        // кейс M-2026-16890). См. InboundReplyLinker, foreign_thread_continuation.
-        if (! empty(($message->detected_artifacts ?? [])['foreign_thread_continuation'])) {
+        // Клиент ответил лично менеджеру, который ИСПОЛНЯЛ ОБЯЗАННОСТИ по заявке
+        // (делегирование на время отсутствия основного). Это не выбор клиента
+        // сменить менеджера — сделку ведёт основной, письмо ему доставляется
+        // (кейс M-2026-16890). См. InboundReplyLinker::markDelegatedThread.
+        if (! empty(($message->detected_artifacts ?? [])['delegated_thread'])) {
             return;
         }
         $ownerId = $mailbox->owner_user_id;
