@@ -88,6 +88,18 @@ class OrganizationLinkRequest extends Model
     }
 
     /** «КП» / «счёт» — для текста письма и страницы. */
+    /** «был выслан счёт № 10119» / «было выслано КП № 367252» — с согласованием рода. */
+    public function documentSentPhrase(): string
+    {
+        $number = $this->document_number ? ' № '.$this->document_number : '';
+
+        return match ($this->document_type) {
+            'outbound_invoice' => 'был выслан счёт'.$number,
+            null, '' => 'был выслан документ'.$number,
+            default => 'было выслано КП'.$number,
+        };
+    }
+
     public function documentLabel(): string
     {
         return match ($this->document_type) {

@@ -22,12 +22,12 @@
             <p>
                 @if($p->request)
                     По заявке <a href="{{ route('requests.show', $p->request_id) }}" class="text-sky-700 hover:underline font-medium">{{ $p->request->internal_code }}</a>
-                    выдан {{ $what }}
+                    заказчику
                 @else
-                    Выдан {{ $what }}
+                    Заказчику
                 @endif
-                с реквизитами
-                <a href="{{ route('clients.show', $p->organization_id) }}" wire:navigate class="text-sky-700 hover:underline font-medium">{{ $org?->name }}</a>@if($org?->inn)<span class="mono text-fg-3">, ИНН {{ $org->inn }}</span>@endif.
+                на адрес <b class="mono">{{ $p->contact?->email }}</b> {{ $p->documentSentPhrase() }} для
+                <a href="{{ route('clients.show', $p->organization_id) }}" wire:navigate class="text-sky-700 hover:underline font-medium">{{ $org?->name }}</a>@if($org?->inn)<span class="mono text-fg-3"> (ИНН {{ $org->inn }})</span>@endif.
             </p>
 
             <dl class="grid grid-cols-[180px_1fr] gap-x-3 gap-y-1.5 text-[12.5px]">
@@ -54,7 +54,21 @@
                 <div class="pt-3 border-t border-border-subtle space-y-2">
                     <p class="text-fg-2">
                         Это может быть ошибкой: реквизиты чужого контрагента, письмо в чужой заявке, счёт посреднику.
-                        Автоматической привязки не произошло.
+                        <b>Автоматической привязки не произошло.</b>
+                    </p>
+                    <p class="text-fg-2">
+                        <b>Если реквизиты верные</b> — обязательно подтвердите привязку, иначе реквизиты
+                        {{ $org?->name }} к адресу {{ $p->contact?->email }} не привяжутся.
+                    </p>
+                    <p class="text-fg-2">
+                        <b>Если это ошибка</b> — зайдите в
+                        @if($p->request)
+                            <a href="{{ route('requests.show', $p->request_id) }}" class="text-sky-700 hover:underline">заявку {{ $p->request->internal_code }}</a>
+                        @else
+                            заявку
+                        @endif
+                        и вышлите заказчику {{ $p->documentLabel() }} с корректными реквизитами, а здесь отметьте ошибку —
+                        система больше не будет предлагать эту привязку.
                     </p>
                     @if($canDecide)
                         <div class="flex flex-wrap gap-2">
