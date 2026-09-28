@@ -165,12 +165,19 @@ class MailDeliverToManagerService
             // Проверено 02.09.2026: 63 из 63 заявок из ящиков двух отпускников за
             // 14 дней ушли назначенным менеджерам без письма (skip_reason
             // `origin_in_another_personal` в mail_append_audit).
+            //
+            // ИСКЛЮЧЕНИЕ 2 — продолжение переписки по заявке B, пересланное лично
+            // A (foreign_thread_continuation, InboundReplyLinker): заявка остаётся
+            // у B и не переподчиняется, значит, отвечать клиенту будет B — копия
+            // нужна в его ящике (заказчик, 2026-09-28; кейс M-2026-16890).
             $originMailbox = $message->mailbox;
             $originOwner = $originMailbox?->owner;
             $originOwnerOutOfPlay = $originOwner !== null
                 && ($originOwner->archived_at !== null || $originOwner->isUnavailable());
+            $foreignThread = ! empty(((array) ($message->detected_artifacts ?? []))['foreign_thread_continuation']);
             if ($originMailbox
                 && ! $originOwnerOutOfPlay
+                && ! $foreignThread
                 && $originMailbox->type === MailboxType::Personal
                 && $originMailbox->owner_user_id
                 && (int) $originMailbox->owner_user_id !== (int) $manager->id) {
