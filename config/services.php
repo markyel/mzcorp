@@ -365,6 +365,33 @@ return [
         'timeout' => (int) env('DADATA_TIMEOUT', 10),
     ],
 
+    /*
+    | Яндекс Метрика — визиты и цели по кампаниям Директа (наши и агентские в
+    | одном счётчике). Токен тот же, что у Директа: приложение mzDirect с
+    | правами metrika:read (28.09.2026), логин mz-marketing — гостевой доступ.
+    */
+    'yandex_metrika' => [
+        'token' => env('YANDEX_METRIKA_TOKEN', env('YANDEX_DIRECT_TOKEN')),
+        'endpoint' => env('YANDEX_METRIKA_ENDPOINT', 'https://api-metrika.yandex.net/'),
+        // Через запятую. 107254483 — «Мой Лифт_общий» (myzip.ru, mylift.ru,
+        // handrails.ru); к 38099855 доступа пока нет.
+        'counters' => array_values(array_filter(array_map('intval', explode(',', (string) env('YANDEX_METRIKA_COUNTERS', '107254483'))))),
+        // Отчёт Метрики уточняется задним числом — переписываем окно целиком.
+        'window_days' => (int) env('YANDEX_METRIKA_WINDOW_DAYS', 14),
+        // Какие цели в отчёте что означают. Номера — из справочника счётчика
+        // 107254483; «Переход из спецразмещения» (557405298) — не заявка, а
+        // факт клика с верхнего блока, показываем отдельно, чтобы его не
+        // путали с результатом.
+        'goal_groups' => [
+            'forms' => ['label' => 'Формы', 'ids' => [541694338]],
+            'calls' => ['label' => 'Целевые звонки', 'ids' => [548759791]],
+            'emails' => ['label' => 'Email (Calltouch)', 'ids' => [555786539]],
+            'email_clicks' => ['label' => 'Клик по email', 'ids' => [530350742]],
+            'phone_clicks' => ['label' => 'Клик по телефону', 'ids' => [540595690]],
+            'premium' => ['label' => 'Из спецразмещения', 'ids' => [557405298]],
+        ],
+    ],
+
     'marketing' => [
         'block_position' => env('MARKETING_BLOCK_POSITION', 'below'),
         // Карточка товара для ссылок в публикациях медиаплана. По умолчанию —

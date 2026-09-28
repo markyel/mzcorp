@@ -55,6 +55,9 @@ class Index extends Component
     /** За сколько дней показываем статистику в разделе. */
     public const STATS_DAYS = 7;
 
+    /** Период карточки Метрики: 7 или 30 дней. */
+    public int $metrikaDays = 30;
+
     /** Сколько позиций пишем за одно нажатие — чтобы запрос не висел минутами. */
     public const BULK_LIMIT = 25;
 
@@ -517,6 +520,44 @@ class Index extends Component
     public function stats(): array
     {
         return app(DirectStatsService::class)->summary(self::STATS_DAYS);
+    }
+
+    /**
+     * Что люди делают на сайте после клика — по Метрике, для наших и
+     * агентских кампаний по одним и тем же целям. Расход знаем только по
+     * нашему аккаунту Директа; у агентских кампаний его нет.
+     *
+     * @return array{days: int, campaigns: Collection<int, array<string, mixed>>, spend: array<int, float>, groups: array<string, array{label: string, ids: list<int>}>}
+     */
+    #[Computed]
+    public function metrika(): array
+    {
+        $days = in_array($this->metrikaDays, [7, 30], true) ? $this->metrikaDays : 30;
+        $since = now()->subDays($days - 1)->toDateString();
+        $spend = \App\Models\DirectStat::query()
+            ->where('kind', \App\Models\DirectStat::KIND_CAMPAIGN)
+            ->where('date', '>=', $since)
+            ->whereNotNull('campaign_id')
+            ->groupBy('campaign_id')
+            ->selectRaw('campaign_id, SUM(cost) AS cost')
+            ->pluck('cost', 'campaign_id')
+            ->map(fn ($v) => (float) $v)
+            ->all();
+        $ours = \App\Models\DirectStat::query()->where('kind', \App\Models\DirectStat::KIND_CAMPAIGN)
+            ->whereNotNull('campaign_id')->distinct()->pluck('campaign_id')->map(fn ($v) => (int) $v)->all();
+
+        return [
+            'days' => $days,
+            'campaigns' => app(\App\Services\Metrika\MetrikaStatsService::class)->campaigns($days, $ours),
+            'spend' => $spend,
+            'groups' => (array) config('services.yandex_metrika.goal_groups', []),
+        ];
+    }
+
+    public function setMetrikaDays(int $days): void
+    {
+        $this->metrikaDays = in_array($days, [7, 30], true) ? $days : 30;
+        unset($this->metrika);
     }
 
     /**

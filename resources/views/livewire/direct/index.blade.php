@@ -194,6 +194,83 @@
         $plan = $plan->sortByDesc($onAir)->values();
     @endphp
 
+    {{-- Что делают на сайте — по Метрике, наши и агентские кампании вместе --}}
+    @php
+        $mk = $this->metrika;
+        $leadCodes = ['forms', 'calls', 'emails'];
+    @endphp
+    <div class="ds-card">
+        <div class="ds-card-header flex-wrap">
+            <h3 class="text-[15px] font-semibold text-fg-1">📊 Что делают на сайте</h3>
+            <span class="text-[12px] text-fg-3">по Метрике, все кампании Директа в одном счётчике</span>
+            <span class="flex-1"></span>
+            @foreach([7, 30] as $d)
+                <button type="button" wire:click="setMetrikaDays({{ $d }})"
+                        class="btn btn-xs {{ $mk['days'] === $d ? 'btn-primary' : '' }}">{{ $d }} дн.</button>
+            @endforeach
+        </div>
+        <div class="ds-card-body">
+            @if($mk['campaigns']->isEmpty())
+                <p class="text-[12.5px] text-fg-3">
+                    Данных Метрики пока нет — выгрузка идёт раз в час (<span class="mono">metrika:pull</span>).
+                </p>
+            @else
+                <div class="overflow-x-auto">
+                    <table class="w-full text-[12px]">
+                        <thead class="text-[10.5px] uppercase tracking-wider text-fg-3">
+                            <tr class="text-left">
+                                <th class="py-1.5 pr-3 font-medium">Кампания</th>
+                                <th class="py-1.5 px-2 font-medium text-right">Визиты</th>
+                                <th class="py-1.5 px-2 font-medium text-right">Отказы</th>
+                                @foreach($mk['groups'] as $code => $g)
+                                    <th class="py-1.5 px-2 font-medium text-right {{ $code === 'premium' ? 'text-fg-4' : '' }}"
+                                        @if($code === 'premium') title="Не заявка: цель засчитывается за сам клик с верхнего блока выдачи" @endif>{{ $g['label'] }}</th>
+                                @endforeach
+                                <th class="py-1.5 px-2 font-medium text-right">Расход</th>
+                                <th class="py-1.5 pl-2 font-medium text-right" title="Расход / (формы + звонки + email)">₽ за обращение</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($mk['campaigns'] as $c)
+                                @php
+                                    $cost = $c['ours'] ? ($mk['spend'][(int) $c['id']] ?? null) : null;
+                                    $leads = array_sum(array_map(fn ($k) => $c['groups'][$k] ?? 0, $leadCodes));
+                                @endphp
+                                <tr class="border-t border-border-subtle" wire:key="mk-{{ $c['id'] }}">
+                                    <td class="py-1.5 pr-3 max-w-[320px]">
+                                        <div class="flex items-baseline gap-1.5">
+                                            <span class="truncate text-fg-1" title="#{{ $c['id'] }}">{{ $c['name'] }}</span>
+                                            @if($c['ours'])
+                                                <span class="chip text-[10px]" style="background:var(--emerald-50);color:var(--emerald-700)">наша</span>
+                                            @else
+                                                <span class="chip text-[10px]" style="background:var(--neutral-100);color:var(--fg-3)">агентство</span>
+                                            @endif
+                                        </div>
+                                    </td>
+                                    <td class="py-1.5 px-2 text-right mono tnum">{{ number_format($c['visits'], 0, ',', ' ') }}</td>
+                                    <td class="py-1.5 px-2 text-right mono tnum {{ ($c['bounce_rate'] ?? 0) >= 50 ? 'text-amber-700' : 'text-fg-2' }}">{{ $c['bounce_rate'] !== null ? $c['bounce_rate'].'%' : '—' }}</td>
+                                    @foreach($mk['groups'] as $code => $g)
+                                        @php $n = $c['groups'][$code] ?? 0; @endphp
+                                        <td class="py-1.5 px-2 text-right mono tnum {{ $code === 'premium' ? 'text-fg-4' : ($n > 0 && in_array($code, $leadCodes, true) ? 'text-emerald-700 font-semibold' : 'text-fg-2') }}">{{ $n ?: '·' }}</td>
+                                    @endforeach
+                                    <td class="py-1.5 px-2 text-right mono tnum text-fg-2">{{ $cost !== null ? number_format($cost, 0, ',', ' ').' ₽' : '—' }}</td>
+                                    <td class="py-1.5 pl-2 text-right mono tnum text-fg-2">{{ $cost !== null && $leads > 0 ? number_format($cost / $leads, 0, ',', ' ').' ₽' : '—' }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-[11px] text-fg-4 mt-2">
+                    Атрибуция — последний значимый переход. Обращения — формы, целевые звонки и email по Calltouch;
+                    «из спецразмещения» — не результат, а сам клик с верхнего блока (у агентства и в двух наших
+                    кампаниях эта цель стоит среди приоритетных, отсюда «конверсии» в отчётах Директа).
+                    Звонки и email Calltouch отслеживает только на части платного трафика — нули у кампании
+                    ещё не значат, что обращений не было. Расход агентских кампаний нам не виден: они в другом аккаунте.
+                </p>
+            @endif
+        </div>
+    </div>
+
     {{-- Что приносит показы: наши фразы или подбор Яндекса --}}
     @php $st = $this->stats; @endphp
     <div class="ds-card">
