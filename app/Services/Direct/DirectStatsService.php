@@ -200,7 +200,7 @@ class DirectStatsService
                 // по имени и на то же имя отдаёт старую копию — при другом
                 // наборе колонок мы так сутки получали строки без номера
                 // кампании.
-                'ReportName' => $name.'-'.self::WINDOW_DAYS.'d-'.substr(md5($type.implode(',', $fields)), 0, 6).'-'.now()->format('YmdH'),
+                'ReportName' => $name.'-'.self::WINDOW_DAYS.'d-'.substr(md5($type.implode(',', $fields).'CUSTOM'.now()->toDateString()), 0, 6).'-'.now()->format('YmdH'),
                 'ReportType' => $type,
                 'DateRangeType' => 'CUSTOM_DATE',
                 'Format' => 'TSV',
