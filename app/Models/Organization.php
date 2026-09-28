@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\OrganizationPricingMode;
+use App\Support\LegalForm;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -49,6 +50,23 @@ class Organization extends Model
         'REORGANIZING' => 'реорганизуется',
         'NOT_FOUND' => 'не найдена в реестре',
     ];
+
+    /**
+     * Форма собственности в названии — всегда сокращённо («ООО», «ИП», «АО»…),
+     * откуда бы название ни пришло: ручной ввод, выписка ЕГРЮЛ, наши КП и
+     * счета, веб-форма. Заказчик, 2026-09-28. См. LegalForm.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (Organization $org) {
+            if ($org->isDirty('name') && $org->name !== null) {
+                $org->name = LegalForm::abbreviate($org->name);
+            }
+            if ($org->isDirty('registry_short_name') && $org->registry_short_name !== null) {
+                $org->registry_short_name = LegalForm::abbreviate($org->registry_short_name);
+            }
+        });
+    }
 
     protected function casts(): array
     {
