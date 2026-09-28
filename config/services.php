@@ -1058,6 +1058,12 @@ return [
         // ACCESSORY; «узкие» Директ показывает всегда). 28.09.2026 — только
         // целевые: «широкие» давали 91% расхода на «кнопки» и «метизы».
         'autotargeting_categories' => env('YANDEX_DIRECT_AUTOTARGETING_CATEGORIES', 'EXACT'),
+        // Параметры отслеживания кампании — метка Calltouch по его шаблону
+        // (Интеграции → Яндекс Директ → «Разметка объявлений»). utm в ссылках
+        // объявлений ставит конвейер сам, здесь только calltouch_tm.
+        'tracking_params' => env('YANDEX_DIRECT_TRACKING_PARAMS',
+            'calltouch_tm=yd_c:{campaign_id}_gb:{gbid}_ad:{ad_id}_ph:{phrase_id}_st:{source_type}_pt:{position_type}'
+            .'_p:{position}_s:{source}_dt:{device_type}_reg:{region_id}_ret:{retargeting_id}_apt:{addphrasestext}'),
         'search_strategy' => env('YANDEX_DIRECT_SEARCH_STRATEGY', 'HIGHEST_POSITION'),
 
         /*

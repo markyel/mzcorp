@@ -349,6 +349,11 @@ class DirectPublisherService
                     ['Option' => 'ADD_METRICA_TAG', 'Value' => 'YES'],
                     ['Option' => 'ADD_OPENSTAT_TAG', 'Value' => 'NO'],
                 ],
+                // Метка Calltouch: без неё звонок и email с нашей рекламы не
+                // привязываются к кампании (интеграция Calltouch подключена
+                // только к агентскому аккаунту, автоматическая разметка
+                // текстовые кампании не размечает). utm уже есть в ссылках.
+                'TrackingParams' => (string) ($cfg['tracking_params'] ?? ''),
             ],
             'DailyBudget' => [
                 'Amount' => (int) round((float) ($cfg['daily_budget'] ?? 300) * 1_000_000),
