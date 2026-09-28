@@ -199,10 +199,16 @@ class ImapSeenSyncService
             $client?->disconnect();
         }
 
-        $states = DB::table('email_message_user_states')
-            ->where('user_id', $owner->id)
-            ->whereIn('email_message_id', $messages->pluck('id'))
-            ->pluck('read_at', 'email_message_id');
+        // Пачками: с историей ящика (MailHistoryMirrorService) полный проход
+        // видит 100+ тыс. писем, а один whereIn упирается в лимит PostgreSQL на
+        // 65 535 параметров — проход падал и повторялся каждые 2 минуты.
+        $states = collect();
+        foreach ($messages->pluck('id')->chunk(10000) as $ids) {
+            $states = $states->union(DB::table('email_message_user_states')
+                ->where('user_id', $owner->id)
+                ->whereIn('email_message_id', $ids->values()->all())
+                ->pluck('read_at', 'email_message_id'));
+        }
 
         $toRead = [];
         $toUnread = [];

@@ -36,12 +36,16 @@ class MailReadService
             'updated_at' => $now,
         ], $ids);
 
-        // upsert: не перетираем уже проставленный read_at (COALESCE).
-        DB::table('email_message_user_states')->upsert(
-            $rows,
-            ['email_message_id', 'user_id'],
-            ['read_at' => DB::raw('COALESCE(email_message_user_states.read_at, excluded.read_at)'), 'updated_at' => DB::raw('excluded.updated_at')],
-        );
+        // upsert: не перетираем уже проставленный read_at (COALESCE). Пачками:
+        // синк прочитанности с историей ящика отмечает десятки тысяч писем, а
+        // 5 полей × строка упираются в лимит PostgreSQL на 65 535 параметров.
+        foreach (array_chunk($rows, 2000) as $chunk) {
+            DB::table('email_message_user_states')->upsert(
+                $chunk,
+                ['email_message_id', 'user_id'],
+                ['read_at' => DB::raw('COALESCE(email_message_user_states.read_at, excluded.read_at)'), 'updated_at' => DB::raw('excluded.updated_at')],
+            );
+        }
     }
 
     public function markUnread(int $emailMessageId, User $user): void
