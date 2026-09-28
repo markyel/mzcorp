@@ -32,7 +32,7 @@ class DirectStatsService
     public const WINDOW_DAYS = 14;
 
     /** Сколько ждём готовности отчёта в одном прогоне, секунд. */
-    private const MAX_WAIT_SECONDS = 180;
+    private const MAX_WAIT_SECONDS = 480;
 
     /**
      * Забрать оба разреза. Возвращает, сколько строк записано.
