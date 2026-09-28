@@ -130,7 +130,9 @@ class MediaDataService
             return $text;
         }
 
-        $text = preg_replace_callback('~\s?\[(\d{1,2})\]~u', function (array $m) use ($links) {
+        // Точку после метки в конце строки съедаем: «…лифтов https://…/kmz.» —
+        // площадка может принять точку за часть адреса.
+        $text = preg_replace_callback('~\s?\[(\d{1,2})\](?:\.(?=\s*$))?~um', function (array $m) use ($links) {
             $url = $links[(int) $m[1]] ?? null;
 
             return $url !== null ? ' '.$url : '';

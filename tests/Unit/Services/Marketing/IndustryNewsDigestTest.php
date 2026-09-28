@@ -62,7 +62,7 @@ class IndustryNewsDigestTest extends TestCase
     public function test_resolve_links_replaces_known_marks_and_drops_unknown(): void
     {
         $links = [0 => 'https://liftpages.ru/news', 1 => 'https://liftpages.ru/news/a', 2 => 'https://liftpages.ru/news/b'];
-        $text = "• КМЗ установил почти 3000 лифтов [1]\n• ХМАО обновит парк [2]\n• Лишнее [9]\nВсе новости отрасли: [0]";
+        $text = "• КМЗ установил почти 3000 лифтов [1].\n• ХМАО обновит парк [2]\n• Лишнее [9]\nВсе новости отрасли: [0]";
 
         $this->assertSame(
             "• КМЗ установил почти 3000 лифтов https://liftpages.ru/news/a\n"
