@@ -84,23 +84,27 @@ class MediaDataService
     }
 
     /**
-     * Новости отрасли за окно — пронумерованным списком. [0] — сама лента.
+     * Новости отрасли за ровную неделю до сегодняшнего дня — пронумерованным
+     * списком. [0] — сама лента.
+     *
+     * Период — окно выпуска, а не даты первой и последней новости: иначе
+     * «неделя» выходила 23.09–27.09 (лента держит только 30 новостей).
      *
      * @return array{key: ?string, facts: string, links: array<int, string>}
      */
     private function newsDigest(int $days): array
     {
-        ['home' => $home, 'items' => $items] = app(IndustryNewsFeed::class)->recent($days);
+        [$from, $to] = IndustryNewsFeed::window(now(), $days);
+        ['home' => $home, 'items' => $items] = app(IndustryNewsFeed::class)->between($from, $to);
         if (count($items) < self::MIN_DIGEST_ITEMS) {
             return ['key' => null, 'facts' => '', 'links' => []];
         }
 
-        $from = end($items)['published_at'];
-        $to = $items[0]['published_at'];
         $links = $home !== null ? [0 => $home] : [];
         $lines = [
-            'Новости отрасли с '.$from->format('d.m').' по '.$to->format('d.m.Y').', всего '.count($items).'.'
-                .($home !== null ? ' [0] — вся лента новостей.' : ''),
+            'ПЕРИОД ОБЗОРА: '.self::periodLabel($from, $to).' ('.$days.' дн.). Период пиши именно так, '
+                .'а не по датам первой и последней новости.',
+            'Новостей за период: '.count($items).'.'.($home !== null ? ' [0] — вся лента новостей.' : ''),
         ];
         foreach ($items as $i => $item) {
             $n = $i + 1;
@@ -110,12 +114,29 @@ class MediaDataService
         }
 
         return [
-            // Выпуск — неделя по дате самой свежей новости: повторный прогон в ту
-            // же неделю видно по ключу.
-            'key' => 'digest:'.$to->format('o-\WW'),
+            'key' => 'digest:'.$from->toDateString().'..'.$to->toDateString(),
             'facts' => implode("\n", $lines),
             'links' => $links,
         ];
+    }
+
+    private const MONTHS_GEN = [
+        1 => 'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+        'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+    ];
+
+    /** «21–27 сентября 2026», «25 сентября – 1 октября 2026». */
+    public static function periodLabel(\DateTimeInterface $from, \DateTimeInterface $to): string
+    {
+        $f = [(int) $from->format('j'), (int) $from->format('n'), (int) $from->format('Y')];
+        $t = [(int) $to->format('j'), (int) $to->format('n'), (int) $to->format('Y')];
+
+        if ($f[1] === $t[1] && $f[2] === $t[2]) {
+            return $f[0].'–'.$t[0].' '.self::MONTHS_GEN[$t[1]].' '.$t[2];
+        }
+
+        return $f[0].' '.self::MONTHS_GEN[$f[1]].($f[2] !== $t[2] ? ' '.$f[2] : '')
+            .' – '.$t[0].' '.self::MONTHS_GEN[$t[1]].' '.$t[2];
     }
 
     /**

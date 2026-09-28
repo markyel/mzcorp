@@ -4,6 +4,7 @@ namespace Tests\Unit\Services\Marketing;
 
 use App\Services\Marketing\IndustryNewsFeed;
 use App\Services\Marketing\MediaDataService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -38,25 +39,41 @@ class IndustryNewsDigestTest extends TestCase
         $this->assertSame('26.09.2026 13:40', $feed['items'][0]['published_at']->format('d.m.Y H:i'));
     }
 
-    public function test_recent_keeps_window_and_sorts_fresh_first(): void
+    public function test_guid_falls_back_to_link(): void
     {
-        $this->travelTo(now()->setDate(2026, 9, 28)->setTime(9, 15));
-        Http::fake(['*' => Http::response($this->rss([
-            ['Старая', 'https://x.ru/1', 'Mon, 14 Sep 2026 10:00:00 +0000', ''],
-            ['Вторая', 'https://x.ru/2', 'Fri, 25 Sep 2026 10:00:00 +0000', ''],
-            ['Свежая', 'https://x.ru/3', 'Sun, 27 Sep 2026 10:00:00 +0000', ''],
-        ]))]);
+        $feed = (new IndustryNewsFeed)->parse($this->rss([
+            ['Новость', 'https://liftpages.ru/news/a', 'Sat, 26 Sep 2026 10:40:01 +0000', ''],
+        ]));
 
-        $items = (new IndustryNewsFeed)->recent(7)['items'];
-
-        $this->assertSame(['Свежая', 'Вторая'], array_column($items, 'title'));
+        $this->assertSame('https://liftpages.ru/news/a', $feed['items'][0]['guid']);
     }
 
-    public function test_feed_failure_gives_no_items(): void
+    public function test_window_is_whole_days_before_release(): void
+    {
+        [$from, $to] = IndustryNewsFeed::window(Carbon::parse('2026-10-02 09:15'), 7);
+        $this->assertSame('2026-09-25 00:00:00', $from->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-10-01 23:59:59', $to->format('Y-m-d H:i:s'));
+
+        // Выпуск в понедельник — ровно прошлая календарная неделя.
+        [$from, $to] = IndustryNewsFeed::window(Carbon::parse('2026-09-28 09:15'), 7);
+        $this->assertSame('2026-09-21 — 2026-09-27', $from->toDateString().' — '.$to->toDateString());
+    }
+
+    public function test_period_label(): void
+    {
+        $this->assertSame('21–27 сентября 2026',
+            MediaDataService::periodLabel(Carbon::parse('2026-09-21'), Carbon::parse('2026-09-27 23:59:59')));
+        $this->assertSame('25 сентября – 1 октября 2026',
+            MediaDataService::periodLabel(Carbon::parse('2026-09-25'), Carbon::parse('2026-10-01')));
+        $this->assertSame('29 декабря 2026 – 4 января 2027',
+            MediaDataService::periodLabel(Carbon::parse('2026-12-29'), Carbon::parse('2027-01-04')));
+    }
+
+    public function test_feed_failure_is_not_a_crash(): void
     {
         Http::fake(['*' => Http::response('oops', 500)]);
 
-        $this->assertSame([], (new IndustryNewsFeed)->recent(7)['items']);
+        $this->assertNull((new IndustryNewsFeed)->sync());
     }
 
     public function test_resolve_links_replaces_known_marks_and_drops_unknown(): void

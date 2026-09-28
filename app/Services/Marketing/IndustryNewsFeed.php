@@ -2,7 +2,9 @@
 
 namespace App\Services\Marketing;
 
+use App\Models\IndustryNewsItem;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -20,16 +22,22 @@ class IndustryNewsFeed
     /** Потолок новостей в один обзор — чтобы промпт не распух, если лента разрастётся. */
     public const MAX_ITEMS = 50;
 
+    private const HOME_CACHE_KEY = 'media:news-feed-home';
+
     /**
-     * Новости за последние $days дней, свежие первыми.
+     * Забрать ленту и сложить новые новости в industry_news_items.
      *
-     * @return array{home: ?string, items: list<array{title: string, description: string, link: string, published_at: Carbon}>}
+     * Лента держит только 30 последних новостей (4–5 дней), поэтому читаем
+     * её несколько раз в сутки (media:news-fetch), а дайджест собираем из
+     * накопленного.
+     *
+     * @return int|null сколько новых; null — лента не прочиталась
      */
-    public function recent(int $days): array
+    public function sync(): ?int
     {
         $url = (string) config('services.marketing.news_digest_feed');
         if ($url === '') {
-            return ['home' => null, 'items' => []];
+            return null;
         }
 
         try {
@@ -41,21 +49,73 @@ class IndustryNewsFeed
         } catch (\Throwable $e) {
             Log::warning('IndustryNewsFeed: лента не прочиталась', ['url' => $url, 'error' => $e->getMessage()]);
 
-            return ['home' => null, 'items' => []];
+            return null;
         }
 
-        $since = now()->subDays(max(1, $days));
-        $items = array_values(array_filter(
-            $feed['items'],
-            fn (array $i) => $i['published_at']->gte($since),
-        ));
-        usort($items, fn (array $a, array $b) => $b['published_at'] <=> $a['published_at']);
+        if ($feed['home'] !== null) {
+            Cache::forever(self::HOME_CACHE_KEY, $feed['home']);
+        }
 
-        return ['home' => $feed['home'], 'items' => array_slice($items, 0, self::MAX_ITEMS)];
+        $new = 0;
+        foreach ($feed['items'] as $item) {
+            $row = IndustryNewsItem::firstOrCreate(['guid' => mb_substr($item['guid'], 0, 500)], [
+                'title' => $item['title'],
+                'description' => $item['description'] !== '' ? $item['description'] : null,
+                'link' => $item['link'],
+                'published_at' => $item['published_at'],
+                'feed_url' => mb_substr($url, 0, 500),
+            ]);
+            $new += $row->wasRecentlyCreated ? 1 : 0;
+        }
+
+        return $new;
     }
 
     /**
+     * Ровная неделя перед днём выпуска: $days полных суток, заканчивая
+     * вчерашним днём. Выпуск в пятницу 02.10 → с 25.09 по 01.10; в
+     * понедельник — ровно прошлая календарная неделя.
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    public static function window(Carbon $releaseDay, int $days): array
+    {
+        $to = $releaseDay->copy()->startOfDay()->subSecond();
+        $from = $releaseDay->copy()->startOfDay()->subDays(max(1, $days));
+
+        return [$from, $to];
+    }
+
+    /**
+     * Новости за окно, по порядку публикации. Перед выборкой — свежее чтение
+     * ленты: если расписание пропустило запуск, хотя бы последние дни будут.
+     *
      * @return array{home: ?string, items: list<array{title: string, description: string, link: string, published_at: Carbon}>}
+     */
+    public function between(Carbon $from, Carbon $to): array
+    {
+        $this->sync();
+
+        $items = IndustryNewsItem::query()
+            ->whereBetween('published_at', [$from, $to])
+            ->orderBy('published_at')
+            ->limit(self::MAX_ITEMS)
+            ->get()
+            ->map(fn (IndustryNewsItem $n) => [
+                'title' => (string) $n->title,
+                'description' => (string) $n->description,
+                'link' => (string) $n->link,
+                'published_at' => $n->published_at->copy()->setTimezone(config('app.timezone')),
+            ])
+            ->all();
+
+        $home = Cache::get(self::HOME_CACHE_KEY);
+
+        return ['home' => is_string($home) ? $home : null, 'items' => $items];
+    }
+
+    /**
+     * @return array{home: ?string, items: list<array{guid: string, title: string, description: string, link: string, published_at: Carbon}>}
      */
     public function parse(string $xml): array
     {
@@ -81,7 +141,9 @@ class IndustryNewsFeed
                 continue;
             }
 
+            $guid = trim((string) $item->guid);
             $items[] = [
+                'guid' => $guid !== '' ? $guid : $link,
                 'title' => $title,
                 'description' => $this->clean((string) $item->description),
                 'link' => $link,
