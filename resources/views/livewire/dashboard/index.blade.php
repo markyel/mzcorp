@@ -267,18 +267,23 @@
                         <span class="text-[10.5px] uppercase tracking-wider text-fg-3">Ждут КП, цены есть</span>
                         <span class="chip text-[10px]" style="background:var(--neutral-100);color:var(--fg-3)">сейчас</span>
                     </div>
-                    <div class="flex items-baseline gap-4 mt-1">
-                        <span>
-                            <span class="mono tnum text-[22px] font-semibold text-fg-1">{{ $rep['waiting_quote']['full'] }}</span>
+                    <div class="flex items-baseline gap-2 mt-1">
+                        <button type="button" wire:click="toggleQueueList('quote_full')"
+                                class="rounded-md px-1.5 -mx-1.5 hover:bg-[var(--neutral-100)] {{ $queueList === 'quote_full' ? 'bg-[var(--sky-50)] ring-1 ring-sky-300' : '' }}"
+                                title="Показать заявки, где цены есть по всем позициям">
+                            <span class="mono tnum text-[22px] font-semibold text-fg-1 underline decoration-dotted underline-offset-4">{{ $rep['waiting_quote']['full'] }}</span>
                             <span class="text-[11.5px] text-fg-3">полностью</span>
-                        </span>
-                        <span>
-                            <span class="mono tnum text-[22px] font-semibold text-amber-700">{{ $rep['waiting_quote']['partial'] }}</span>
+                        </button>
+                        <button type="button" wire:click="toggleQueueList('quote_partial')"
+                                class="rounded-md px-1.5 hover:bg-[var(--neutral-100)] {{ $queueList === 'quote_partial' ? 'bg-[var(--sky-50)] ring-1 ring-sky-300' : '' }}"
+                                title="Показать заявки, где цены есть хотя бы по одной позиции">
+                            <span class="mono tnum text-[22px] font-semibold text-amber-700 underline decoration-dotted underline-offset-4">{{ $rep['waiting_quote']['partial'] }}</span>
                             <span class="text-[11.5px] text-fg-3">частично</span>
-                        </span>
+                        </button>
                     </div>
                     <div class="text-[11px] text-fg-3 mt-1">
-                        КП ещё не выдано, а цены по позициям уже актуальны — это очередь на выдачу
+                        КП ещё не выдано, а цены по позициям уже актуальны — это очередь на выдачу.
+                        Нажмите на число, чтобы увидеть заявки.
                     </div>
                 </div>
                 {{-- 4 --}}
@@ -287,15 +292,82 @@
                         <span class="text-[10.5px] uppercase tracking-wider text-fg-3">КП ждут счёт</span>
                         <span class="chip text-[10px]" style="background:var(--neutral-100);color:var(--fg-3)">сейчас</span>
                     </div>
-                    <div class="flex items-baseline gap-2 mt-1">
-                        <span class="mono tnum text-[22px] font-semibold text-fg-1">{{ $rep['waiting_invoice']['count'] }}</span>
+                    <button type="button" wire:click="toggleQueueList('invoice')"
+                            class="flex items-baseline gap-2 mt-1 rounded-md px-1.5 -mx-1.5 hover:bg-[var(--neutral-100)] {{ $queueList === 'invoice' ? 'bg-[var(--sky-50)] ring-1 ring-sky-300' : '' }}"
+                            title="Показать заявки, которые ждут счёт">
+                        <span class="mono tnum text-[22px] font-semibold text-fg-1 underline decoration-dotted underline-offset-4">{{ $rep['waiting_invoice']['count'] }}</span>
                         <span class="mono tnum text-[12.5px] text-fg-2">на {{ $money($rep['waiting_invoice']['amount']) }} ₽</span>
-                    </div>
+                    </button>
                     <div class="text-[11px] text-fg-3 mt-1">
-                        статус «Согласован / ждёт счёт», сумма — по последнему КП заявки
+                        статус «Согласован / ждёт счёт», сумма — по последнему КП заявки.
+                        Нажмите на число, чтобы увидеть заявки.
                     </div>
                 </div>
             </div>
+
+            @if($queueList)
+                @php
+                    $qRows = $this->queueRows;
+                    $qTitle = match ($queueList) {
+                        'quote_full' => 'Ждут КП, цены есть по всем позициям',
+                        'quote_partial' => 'Ждут КП, цены есть частично',
+                        default => 'КП ждут счёт',
+                    };
+                @endphp
+                <div class="mt-3 rounded-md border border-border" wire:key="queue-{{ $queueList }}">
+                    <div class="flex items-baseline gap-2 px-3 py-2 border-b border-border-subtle">
+                        <b class="text-[12.5px] text-fg-1">{{ $qTitle }}</b>
+                        <span class="text-[11.5px] text-fg-3">{{ count($qRows) }} · дольше всех ждущие сверху</span>
+                        <span class="flex-1"></span>
+                        <button type="button" class="btn btn-xs" wire:click="toggleQueueList('{{ $queueList }}')">свернуть</button>
+                    </div>
+                    <div class="overflow-x-auto max-h-[420px] overflow-y-auto">
+                        <table class="w-full text-[12px]">
+                            <thead class="text-[10.5px] uppercase tracking-wider text-fg-3 sticky top-0 bg-surface">
+                                <tr class="text-left">
+                                    <th class="px-3 py-1.5 font-medium">Заявка</th>
+                                    <th class="px-3 py-1.5 font-medium">Клиент</th>
+                                    <th class="px-3 py-1.5 font-medium">Менеджер</th>
+                                    <th class="px-3 py-1.5 font-medium">Статус</th>
+                                    <th class="px-3 py-1.5 font-medium text-right">{{ $queueList === 'invoice' ? 'Ждёт счёт' : 'Заявке' }}</th>
+                                    <th class="px-3 py-1.5 font-medium text-right">{{ $queueList === 'invoice' ? 'Сумма КП' : 'Цены' }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @forelse($qRows as $row)
+                                    @php
+                                        $r = $row['request'];
+                                        $days = $row['since'] ? (int) $row['since']->startOfDay()->diffInDays(now()->startOfDay()) : null;
+                                    @endphp
+                                    <tr class="border-t border-border-subtle hover:bg-[var(--neutral-50)]" wire:key="q-{{ $r->id }}">
+                                        <td class="px-3 py-1.5 whitespace-nowrap">
+                                            <a href="{{ route('requests.show', $r) }}" class="mono text-sky-700 hover:underline">{{ $r->internal_code }}</a>
+                                        </td>
+                                        <td class="px-3 py-1.5 max-w-[320px] truncate" title="{{ $r->subject }}">
+                                            {{ $r->organization?->name ?: ($r->client_company ?: ($r->client_name ?: $r->client_email)) }}
+                                        </td>
+                                        <td class="px-3 py-1.5 whitespace-nowrap text-fg-2">{{ $r->assignedUser?->name ?? '—' }}</td>
+                                        <td class="px-3 py-1.5 whitespace-nowrap text-fg-3">{{ $r->status?->label() }}</td>
+                                        <td class="px-3 py-1.5 whitespace-nowrap text-right mono tnum {{ $days !== null && $days >= 3 ? 'text-amber-700' : 'text-fg-2' }}"
+                                            title="{{ $row['since']?->format('d.m.Y H:i') }}">
+                                            {{ $days === null ? '—' : ($days === 0 ? 'сегодня' : $days.' дн.') }}
+                                        </td>
+                                        <td class="px-3 py-1.5 whitespace-nowrap text-right mono tnum text-fg-2">
+                                            @if($queueList === 'invoice')
+                                                {{ $row['amount'] !== null ? $money($row['amount']).' ₽' : '—' }}
+                                            @else
+                                                {{ $row['priced'] }} из {{ $row['total'] }}
+                                            @endif
+                                        </td>
+                                    </tr>
+                                @empty
+                                    <tr><td colspan="6" class="px-3 py-3 text-fg-3">Очередь пуста.</td></tr>
+                                @endforelse
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            @endif
 
             <div class="text-[10.5px] text-fg-4 mt-3">
                 Получено — заявки, созданные в окне. КП — отправленные документы (по дате письма,

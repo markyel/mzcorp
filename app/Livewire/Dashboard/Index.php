@@ -69,6 +69,13 @@ class Index extends Component
     public bool $customPickerOpen = false;
 
     /**
+     * Раскрытый список под «Отчётом» — какие именно заявки стоят за цифрами
+     * «Ждут КП, цены есть» и «КП ждут счёт»: quote_full | quote_partial |
+     * invoice | null.
+     */
+    public ?string $queueList = null;
+
+    /**
      * Фильтр круговой диаграммы «распределение текущих заявок по статусам»:
      * id менеджера (assigned_user_id) или 0 = все менеджеры. Персистится
      * в URL, чтобы РОП мог расшарить ссылку на срез конкретного менеджера.
@@ -986,45 +993,10 @@ class Index extends Component
                          COALESCE(SUM(oq.total_amount), 0) AS s')
             ->get();
 
-        // ── 3. Ждут КП, а цены уже есть: полностью — по всем активным позициям,
-        // частично — хотя бы по одной. Цена считается годной только пока
-        // catalog_items.is_price_actual = true: просроченную в КП не ставим.
-        $preQuote = [
-            RequestStatus::New->value,
-            RequestStatus::Assigned->value,
-            RequestStatus::InProgress->value,
-            RequestStatus::AwaitingClientClarification->value,
-        ];
-        $waitingQuote = DB::selectOne(
-            'SELECT
-                COUNT(*) FILTER (WHERE priced = total) AS full_priced,
-                COUNT(*) FILTER (WHERE priced > 0 AND priced < total) AS part_priced
-             FROM (
-                SELECT r.id,
-                       COUNT(*) AS total,
-                       COUNT(*) FILTER (WHERE ri.catalog_item_id IS NOT NULL AND ci.is_price_actual) AS priced
-                FROM requests r
-                JOIN request_items ri ON ri.request_id = r.id AND ri.is_active
-                LEFT JOIN catalog_items ci ON ci.id = ri.catalog_item_id
-                WHERE r.status = ANY(?) '.($mine ? 'AND r.assigned_user_id = '.$mine.' ' : '').'
-                GROUP BY r.id
-             ) t',
-            ['{'.implode(',', $preQuote).'}'],
-        );
-
-        // ── 4. КП выдано, ждём счёт. Сумма — по последнему КП заявки: именно
-        // его согласовали, предыдущие версии в деньгах уже не участвуют.
-        $waitingInvoice = DB::selectOne(
-            'SELECT COUNT(*) AS c, COALESCE(SUM(q.total_amount), 0) AS s
-             FROM requests r
-             LEFT JOIN LATERAL (
-                SELECT oq.total_amount FROM outbound_quotes oq
-                WHERE oq.request_id = r.id AND oq.document_type = ANY(?)
-                ORDER BY oq.id DESC LIMIT 1
-             ) q ON TRUE
-             WHERE r.status = ? '.($mine ? 'AND r.assigned_user_id = '.$mine : ''),
-            ['{'.implode(',', $quoteTypes).'}', RequestStatus::AwaitingInvoice->value],
-        );
+        // ── 3–4. Очереди «на сейчас». Строки те же, что в раскрывающемся списке
+        // под карточками (queueRows), — цифра и список не разойдутся.
+        $waitingQuote = $this->waitingQuoteRows($mine);
+        $waitingInvoice = $this->waitingInvoiceRows($mine);
 
         // ── 5–6. Счета: выставленные за окно и оплаченные за окно. Отменённые
         // из «выставлено» убираем — счёт, который отозвали, деньгами не был.
@@ -1071,12 +1043,12 @@ class Index extends Component
                 'by_complexity' => $this->byComplexity($quoteRows->pluck('c', 'complexity_level')->all()),
             ],
             'waiting_quote' => [
-                'full' => (int) ($waitingQuote->full_priced ?? 0),
-                'partial' => (int) ($waitingQuote->part_priced ?? 0),
+                'full' => $waitingQuote->filter(fn ($r) => (int) $r->priced === (int) $r->total)->count(),
+                'partial' => $waitingQuote->filter(fn ($r) => (int) $r->priced < (int) $r->total)->count(),
             ],
             'waiting_invoice' => [
-                'count' => (int) ($waitingInvoice->c ?? 0),
-                'amount' => (float) ($waitingInvoice->s ?? 0),
+                'count' => $waitingInvoice->count(),
+                'amount' => (float) $waitingInvoice->sum(fn ($r) => (float) $r->amount),
             ],
             'invoiced' => ['count' => (int) ($issued->c ?? 0), 'amount' => (float) ($issued->s ?? 0)],
             'paid' => [
@@ -1085,6 +1057,123 @@ class Index extends Component
                 'issued_earlier' => (int) ($paid->earlier ?? 0),
             ],
         ];
+    }
+
+    /**
+     * Ждут КП, а цены уже есть: полностью — по всем активным позициям,
+     * частично — хотя бы по одной. Цена считается годной только пока
+     * catalog_items.is_price_actual = true: просроченную в КП не ставим.
+     *
+     * @return Collection<int, object{id:int, total:int, priced:int}>
+     */
+    private function waitingQuoteRows(?int $mine): Collection
+    {
+        $preQuote = [
+            RequestStatus::New->value,
+            RequestStatus::Assigned->value,
+            RequestStatus::InProgress->value,
+            RequestStatus::AwaitingClientClarification->value,
+        ];
+
+        return collect(DB::select(
+            'SELECT r.id,
+                    COUNT(*) AS total,
+                    COUNT(*) FILTER (WHERE ri.catalog_item_id IS NOT NULL AND ci.is_price_actual) AS priced
+             FROM requests r
+             JOIN request_items ri ON ri.request_id = r.id AND ri.is_active
+             LEFT JOIN catalog_items ci ON ci.id = ri.catalog_item_id
+             WHERE r.status = ANY(?) '.($mine ? 'AND r.assigned_user_id = '.(int) $mine.' ' : '').'
+             GROUP BY r.id
+             HAVING COUNT(*) FILTER (WHERE ri.catalog_item_id IS NOT NULL AND ci.is_price_actual) > 0',
+            ['{'.implode(',', $preQuote).'}'],
+        ));
+    }
+
+    /**
+     * КП выдано, ждём счёт. Сумма — по последнему КП заявки: именно его
+     * согласовали, предыдущие версии в деньгах уже не участвуют.
+     *
+     * @return Collection<int, object{id:int, amount:?string}>
+     */
+    private function waitingInvoiceRows(?int $mine): Collection
+    {
+        $quoteTypes = [
+            DetectorType::OutboundQuotationFull->value,
+            DetectorType::OutboundQuotationPartial->value,
+        ];
+
+        return collect(DB::select(
+            'SELECT r.id, q.total_amount AS amount
+             FROM requests r
+             LEFT JOIN LATERAL (
+                SELECT oq.total_amount FROM outbound_quotes oq
+                WHERE oq.request_id = r.id AND oq.document_type = ANY(?)
+                ORDER BY oq.id DESC LIMIT 1
+             ) q ON TRUE
+             WHERE r.status = ? '.($mine ? 'AND r.assigned_user_id = '.(int) $mine : ''),
+            ['{'.implode(',', $quoteTypes).'}', RequestStatus::AwaitingInvoice->value],
+        ));
+    }
+
+    public function toggleQueueList(string $list): void
+    {
+        $this->queueList = $this->queueList === $list || ! in_array($list, ['quote_full', 'quote_partial', 'invoice'], true)
+            ? null
+            : $list;
+    }
+
+    /**
+     * Заявки раскрытой очереди — дольше всех ждущие сверху.
+     *
+     * @return list<array{request: Request, since: ?CarbonImmutable, priced: ?int, total: ?int, amount: ?float}>
+     */
+    #[Computed]
+    public function queueRows(): array
+    {
+        if ($this->queueList === null) {
+            return [];
+        }
+        $mine = $this->isPrivileged ? null : (int) auth()->id();
+
+        if ($this->queueList === 'invoice') {
+            $rows = $this->waitingInvoiceRows($mine)->keyBy('id');
+            // С какого момента ждёт счёт — последний переход в «Согласован / ждёт счёт».
+            $since = RequestStateChange::query()
+                ->whereIn('request_id', $rows->keys())
+                ->where('to_status', RequestStatus::AwaitingInvoice->value)
+                ->groupBy('request_id')
+                ->selectRaw('request_id, MAX(created_at) AS at')
+                ->pluck('at', 'request_id');
+        } else {
+            $full = $this->queueList === 'quote_full';
+            $rows = $this->waitingQuoteRows($mine)
+                ->filter(fn ($r) => $full ? (int) $r->priced === (int) $r->total : (int) $r->priced < (int) $r->total)
+                ->keyBy('id');
+            $since = collect();
+        }
+
+        $requests = Request::query()
+            ->whereIn('id', $rows->keys())
+            ->with(['assignedUser:id,name', 'organization:id,name'])
+            ->get(['id', 'internal_code', 'status', 'client_name', 'client_email', 'client_company',
+                'organization_id', 'assigned_user_id', 'subject', 'created_at']);
+
+        return $requests
+            ->map(function (Request $r) use ($rows, $since) {
+                $row = $rows[$r->id];
+                $at = $since[$r->id] ?? $r->created_at;
+
+                return [
+                    'request' => $r,
+                    'since' => $at ? CarbonImmutable::parse($at) : null,
+                    'priced' => isset($row->priced) ? (int) $row->priced : null,
+                    'total' => isset($row->total) ? (int) $row->total : null,
+                    'amount' => isset($row->amount) ? (float) $row->amount : null,
+                ];
+            })
+            ->sortBy(fn (array $x) => $x['since']?->getTimestamp() ?? PHP_INT_MAX)
+            ->values()
+            ->all();
     }
 
     /**
