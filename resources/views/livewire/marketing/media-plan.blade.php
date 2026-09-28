@@ -17,6 +17,94 @@
         </div>
     @endif
 
+    {{-- ─────────────── Ближайшие выпуски ─────────────── --}}
+    @php
+        $runAt = \App\Services\Marketing\MediaAutopilotService::runAt();
+        $lastRun = $this->lastRun;
+    @endphp
+    <div class="ds-card">
+        <div class="ds-card-header flex-wrap">
+            <h3 class="text-[15px] font-semibold text-fg-1">🗓 Ближайшие выпуски</h3>
+            <span class="text-[12px] text-fg-3">что конвейер сделает сам в ближайшие 4 недели · прогон ежедневно в {{ $runAt }}</span>
+        </div>
+
+        @if($lastRun)
+            @php $lastAt = \Illuminate\Support\Carbon::parse($lastRun['at']); @endphp
+            <div class="ds-card-body border-b border-border-subtle text-[12px] text-fg-2">
+                Последний прогон {{ $lastAt->format('d.m H:i') }}:
+                черновиков {{ $lastRun['drafted'] }}, опубликовано {{ $lastRun['published'] }}@if(! $lastRun['publish']) (без публикации)@endif.
+                @if($lastRun['skipped'])
+                    <ul class="mt-1 space-y-0.5">
+                        @foreach(array_slice($lastRun['skipped'], 0, 8) as $line)
+                            <li class="text-amber-800">— {{ $line }}</li>
+                        @endforeach
+                        @if(count($lastRun['skipped']) > 8)
+                            <li class="text-fg-4">и ещё {{ count($lastRun['skipped']) - 8 }}</li>
+                        @endif
+                    </ul>
+                @endif
+            </div>
+        @endif
+
+        <div class="ds-card-body">
+            @forelse($this->upcoming as $day => $rows)
+                @php $d = \Illuminate\Support\Carbon::parse($day); @endphp
+                <div class="grid gap-x-3 gap-y-1 py-2 border-b border-border-subtle last:border-b-0 md:grid-cols-[110px_1fr]"
+                     wire:key="up-{{ $day }}">
+                    <div class="text-[12px] text-fg-3">
+                        <b class="text-[13px] text-fg-1 mono">{{ $d->format('d.m') }}</b>
+                        {{ \App\Models\MediaTopic::WEEKDAYS[$d->isoWeekday()] }}
+                        @if($d->isToday())<span class="chip text-[10px]" style="background:var(--sky-50);color:var(--sky-700)">сегодня</span>@endif
+                        @if($d->isTomorrow())<span class="text-fg-4">завтра</span>@endif
+                    </div>
+                    <div class="space-y-1.5">
+                        @foreach($rows as $row)
+                            <div wire:key="up-{{ $day }}-{{ $row['topic']->id }}">
+                                <div class="flex flex-wrap items-baseline gap-2">
+                                    <b class="text-[12.5px] text-fg-1">{{ $row['topic']->title }}</b>
+                                    <span class="text-[11px] text-fg-4">{{ $row['topic']->cadenceLabel() }}</span>
+                                    @if($row['overdue_since'])
+                                        <span class="chip text-[10px]" style="background:var(--amber-100);color:var(--amber-800)"
+                                              title="Срок темы прошёл, а выпуска не было — конвейер пробует каждый день">
+                                            срок был {{ $row['overdue_since']->format('d.m') }}
+                                        </span>
+                                    @endif
+                                    @if($row['data_driven'])
+                                        <span class="text-[11px] text-fg-4"
+                                              title="{{ $this->sourceNote($row['topic']->source) }}">выйдет, если за период найдутся данные</span>
+                                    @endif
+                                </div>
+                                @if($row['note'])
+                                    <div class="text-[11.5px] text-amber-800">{{ $row['note'] }}</div>
+                                @endif
+                                @foreach($row['entries'] as $e)
+                                    <div class="flex flex-wrap items-baseline gap-2 pl-3 text-[11.5px]">
+                                        <span class="text-fg-2">{{ $e['channel']->name }}@if($e['mirrors']) <span class="text-fg-4">+ {{ implode(', ', $e['mirrors']) }}</span>@endif</span>
+                                        @if($e['blocker'])
+                                            <span class="chip text-[10px]" style="background:var(--amber-50);color:var(--amber-800)">не выйдет</span>
+                                            <span class="text-amber-800">{{ $e['blocker'] }}</span>
+                                        @elseif($e['mode'] === 'publish')
+                                            <span class="chip text-[10px]" style="background:var(--emerald-50);color:var(--emerald-700)"
+                                                  title="Канал с автопубликацией: материал уйдёт без просмотра">опубликуется сам в {{ $runAt }}</span>
+                                        @else
+                                            <span class="chip text-[10px]" style="background:var(--neutral-100);color:var(--fg-3)"
+                                                  title="Автопубликация в канале выключена: материал ляжет в «Материалы»">черновик на проверку</span>
+                                        @endif
+                                    </div>
+                                @endforeach
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            @empty
+                <p class="text-[12.5px] text-fg-3">
+                    Регулярных тем со сроком нет — конвейеру нечего планировать. Задайте теме регулярность
+                    («раз в N дн.») и дату, и она появится здесь.
+                </p>
+            @endforelse
+        </div>
+    </div>
+
     {{-- ─────────────── Каналы ─────────────── --}}
     <div class="ds-card">
         <div class="ds-card-header flex-wrap">
@@ -397,7 +485,7 @@
 
     <div class="ds-card">
         <div class="ds-card-body text-[11.5px] text-fg-4">
-            Раз в сутки в 9:15 система пишет черновики темам, которым пора, и публикует их в каналы с
+            Раз в сутки в {{ $runAt }} система пишет черновики темам, которым пора, и публикует их в каналы с
             включённой автопубликацией; остальные ждут вашей кнопки. Публиковать через API умеем во
             ВКонтакте и Telegram. У Дзена своего API публикаций нет, но его канал привязывается к
             телеграм-каналу и забирает посты сам: отметьте Дзен как «повторяет Telegram» — материал будет

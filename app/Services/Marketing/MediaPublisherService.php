@@ -97,6 +97,10 @@ class MediaPublisherService
         $channel->forceFill(['last_posted_at' => now(), 'last_error' => null])->save();
         $this->recordMirrors($publication, $channel);
 
+        // Срок темы двигаем здесь, а не в вызывающем коде: кнопка «опубликовать»
+        // срок не двигала, и тема после выпуска висела «просроченной».
+        $publication->topic?->advanceAfter($publication);
+
         Log::info('MediaPublisherService: published', [
             'publication_id' => $publication->id,
             'channel_id' => $channel->id,

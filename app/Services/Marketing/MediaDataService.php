@@ -26,7 +26,10 @@ class MediaDataService
     public const MIN_CATEGORY_ITEMS = 25;
 
     /** @var list<string> */
-    public const DATA_SOURCES = ['catalog_new', 'catalog_price', 'stock_arrivals', 'request_tips'];
+    public const DATA_SOURCES = ['catalog_new', 'catalog_price', 'stock_arrivals', 'request_tips', 'industry_digest'];
+
+    /** Меньше новостей за неделю — дайджеста нет: из двух строк сводки не выходит. */
+    public const MIN_DIGEST_ITEMS = 3;
 
     public function isDataDriven(MediaTopic $topic): bool
     {
@@ -42,6 +45,8 @@ class MediaDataService
             'stock_arrivals' => 'Журнала поступлений в системе нет: пока показываем позиции, вставшие в наличие вместе с последним импортом.',
             'request_tips' => 'Серия: каждый выпуск — инструкция по одной категории товара, о которой ещё не рассказывали. '
                 .'Что именно советовать, видно из того, чего нам не хватало в заявках по этой категории.',
+            'industry_digest' => 'Берём новости отрасли из ленты '.config('services.marketing.news_digest_feed')
+                .' за окно темы и собираем из них один пост со ссылками на первоисточник.',
             default => 'Материал пишется по брифу темы.',
         };
     }
@@ -59,7 +64,10 @@ class MediaDataService
      * разобранная. Ключ выпуска возвращаем наружу, чтобы следующий раз взять
      * следующую категорию, а не ту же самую.
      *
-     * @return array{key: ?string, facts: string}
+     * У дайджеста есть ещё links: модель ставит метку [3], адрес подставляет
+     * resolveLinks() — длинный адрес модель переписала бы с опечаткой.
+     *
+     * @return array{key: ?string, facts: string, links?: array<int, string>}
      */
     public function factsWithKey(MediaTopic $topic): array
     {
@@ -70,8 +78,65 @@ class MediaDataService
             'catalog_price' => ['key' => null, 'facts' => $this->priceDrops($days)],
             'stock_arrivals' => ['key' => null, 'facts' => $this->arrivals($days)],
             'request_tips' => $this->tipsForNextCategory($topic),
+            'industry_digest' => $this->newsDigest($days),
             default => ['key' => null, 'facts' => ''],
         };
+    }
+
+    /**
+     * Новости отрасли за окно — пронумерованным списком. [0] — сама лента.
+     *
+     * @return array{key: ?string, facts: string, links: array<int, string>}
+     */
+    private function newsDigest(int $days): array
+    {
+        ['home' => $home, 'items' => $items] = app(IndustryNewsFeed::class)->recent($days);
+        if (count($items) < self::MIN_DIGEST_ITEMS) {
+            return ['key' => null, 'facts' => '', 'links' => []];
+        }
+
+        $from = end($items)['published_at'];
+        $to = $items[0]['published_at'];
+        $links = $home !== null ? [0 => $home] : [];
+        $lines = [
+            'Новости отрасли с '.$from->format('d.m').' по '.$to->format('d.m.Y').', всего '.count($items).'.'
+                .($home !== null ? ' [0] — вся лента новостей.' : ''),
+        ];
+        foreach ($items as $i => $item) {
+            $n = $i + 1;
+            $links[$n] = $item['link'];
+            $lines[] = '['.$n.'] '.$item['published_at']->format('d.m').' · '.$item['title']
+                .($item['description'] !== '' ? "\n    ".$item['description'] : '');
+        }
+
+        return [
+            // Выпуск — неделя по дате самой свежей новости: повторный прогон в ту
+            // же неделю видно по ключу.
+            'key' => 'digest:'.$to->format('o-\WW'),
+            'facts' => implode("\n", $lines),
+            'links' => $links,
+        ];
+    }
+
+    /**
+     * Метки [n] из текста модели → адреса. Неизвестная метка убирается: пустая
+     * ссылка лучше, чем ссылка не туда.
+     *
+     * @param  array<int, string>  $links
+     */
+    public function resolveLinks(string $text, array $links): string
+    {
+        if ($links === []) {
+            return $text;
+        }
+
+        $text = preg_replace_callback('~\s?\[(\d{1,2})\]~u', function (array $m) use ($links) {
+            $url = $links[(int) $m[1]] ?? null;
+
+            return $url !== null ? ' '.$url : '';
+        }, $text) ?? $text;
+
+        return preg_replace('~[ \t]+$~um', '', $text) ?? $text;
     }
 
     /**

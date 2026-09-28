@@ -57,7 +57,9 @@ class MediaMaterialService
         // Факты для тем «из наших данных». Пусто — тема пишется по брифу.
         // Ключ выпуска есть у серийных тем: по нему в следующий раз берётся
         // следующая категория, а не та же самая.
-        ['key' => $subjectKey, 'facts' => $data] = $this->data->factsWithKey($topic);
+        $facts = $this->data->factsWithKey($topic);
+        ['key' => $subjectKey, 'facts' => $data] = $facts;
+        $links = $facts['links'] ?? [];
 
         // То, что редактор написал руками, идёт первым и с пометкой: это факты
         // сегодняшнего повода, и они важнее любых посчитанных.
@@ -112,7 +114,7 @@ class MediaMaterialService
         // Для ленты соцсети сразу приводим текст к тому виду, в каком он уйдёт
         // на площадку: редактор должен показывать пост, а не его исходник с
         // разметкой, которую ВК и Telegram покажут как есть.
-        $body = trim((string) $parsed['body']);
+        $body = $this->data->resolveLinks(trim((string) $parsed['body']), $links);
         if ($channel->isPostable()) {
             $body = MediaPublisherService::forFeed($body);
         }

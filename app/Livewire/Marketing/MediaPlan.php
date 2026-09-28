@@ -5,6 +5,7 @@ namespace App\Livewire\Marketing;
 use App\Models\MediaChannel;
 use App\Models\MediaPublication;
 use App\Models\MediaTopic;
+use App\Services\Marketing\MediaAutopilotService;
 use App\Services\Marketing\MediaDataService;
 use App\Services\Marketing\MediaMaterialService;
 use App\Services\Marketing\MediaProfileReviewService;
@@ -27,6 +28,9 @@ use Livewire\Component;
  */
 class MediaPlan extends Component
 {
+    /** Горизонт блока «Ближайшие выпуски». */
+    private const UPCOMING_DAYS = 28;
+
     public ?string $flash = null;
 
     public ?string $error = null;
@@ -152,6 +156,20 @@ class MediaPlan extends Component
     public function dueTopics()
     {
         return $this->topics->filter(fn (MediaTopic $t) => $t->isDue());
+    }
+
+    /** Прогноз конвейера на четыре недели, сгруппированный по дням. */
+    #[Computed]
+    public function upcoming(): Collection
+    {
+        return collect(app(MediaAutopilotService::class)->upcoming(self::UPCOMING_DAYS))
+            ->groupBy(fn (array $row) => $row['date']->toDateString());
+    }
+
+    #[Computed]
+    public function lastRun(): ?array
+    {
+        return app(MediaAutopilotService::class)->lastRun();
     }
 
     /* ----------------------------- Каналы ------------------------------ */
@@ -643,10 +661,8 @@ class MediaPlan extends Component
         ])->save();
 
         // Опубликовали регулярную тему — двигаем её срок на следующий шаг.
-        if ($status === 'published' && $pub->topic?->cadence_days) {
-            $pub->topic->forceFill([
-                'next_due_on' => $pub->topic->nextDueAfterPublish()->toDateString(),
-            ])->save();
+        if ($status === 'published') {
+            $pub->topic?->advanceAfter($pub);
         }
 
         $this->flash = 'Статус: '.$pub->statusLabel().'.';

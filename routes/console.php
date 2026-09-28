@@ -446,7 +446,7 @@ Schedule::command('auto-quote:snapshot --hours=72')
 // рабочего дня: если материал лёг в «Черновик», у маркетинга есть день, чтобы
 // его выпустить руками. См. MediaAutopilotService.
 Schedule::command('media:autopilot')
-    ->dailyAt('09:15')
+    ->dailyAt((string) config('services.marketing.autopilot_at', '09:15'))
     ->timezone('Europe/Moscow')
     ->withoutOverlapping()
     ->onOneServer()

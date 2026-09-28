@@ -21,6 +21,7 @@ class MediaTopic extends Model
         'stock_arrivals' => 'Поступления на склад',
         'request_tips' => 'Советы по оформлению заявок',
         'news' => 'Новости компании',
+        'industry_digest' => 'Дайджест новостей отрасли',
     ];
 
     public const WEEKDAYS = [
@@ -90,6 +91,26 @@ class MediaTopic extends Model
         $next = $base->copy()->addDays(max(1, (int) $this->cadence_days));
 
         return $this->alignToWeekday($next);
+    }
+
+    /**
+     * Выпуск вышел — двигаем срок темы, но только если выпуск закрывает
+     * именно текущий срок. Материал, запланированный раньше срока (второй
+     * канал того же выпуска после сдвига, старый черновик), срок не трогает:
+     * иначе тема с двумя автоканалами уезжала бы на два шага за один день.
+     */
+    public function advanceAfter(MediaPublication $publication): void
+    {
+        if (! $this->cadence_days) {
+            return;
+        }
+
+        $planned = $publication->planned_for;
+        if ($this->next_due_on !== null && $planned !== null && $planned->lt($this->next_due_on->copy()->startOfDay())) {
+            return;
+        }
+
+        $this->forceFill(['next_due_on' => $this->nextDueAfterPublish()->toDateString()])->save();
     }
 
     /** Ближайший «свой» день недели, начиная с указанной даты. */

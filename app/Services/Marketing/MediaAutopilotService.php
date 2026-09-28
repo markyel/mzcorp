@@ -5,8 +5,11 @@ namespace App\Services\Marketing;
 use App\Models\MediaChannel;
 use App\Models\MediaPublication;
 use App\Models\MediaTopic;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Конвейер медиаплана: раз в день смотрит, каким темам пора, пишет черновики
@@ -25,6 +28,8 @@ class MediaAutopilotService
 {
     /** Сколько черновиков делаем за один прогон: защита от расходов на модель. */
     public const MAX_DRAFTS_PER_RUN = 10;
+
+    private const LAST_RUN_KEY = 'media:autopilot:last-run';
 
     public function __construct(
         private readonly MediaMaterialService $materials,
@@ -85,10 +90,11 @@ class MediaAutopilotService
                     continue;
                 }
 
+                // Срок темы сдвигает сам публикатор — один раз на выпуск, сколько
+                // бы автоканалов у темы ни было.
                 $out = $this->publisher->publish($res['publication']);
                 if ($out['ok']) {
                     $published++;
-                    $this->advance($topic);
                 } else {
                     $skipped[] = $topic->title.' → '.$channel->name.': '.$out['message'];
                 }
@@ -101,7 +107,122 @@ class MediaAutopilotService
             'skipped' => count($skipped),
         ]);
 
+        // Итог прогона показываем в разделе: без него «почему сегодня ничего
+        // не вышло» можно было узнать только из логов сервера.
+        Cache::put(self::LAST_RUN_KEY, [
+            'at' => now()->toIso8601String(),
+            'publish' => $publish,
+            'drafted' => $drafted,
+            'published' => $published,
+            'skipped' => array_values(array_unique($skipped)),
+        ], now()->addDays(30));
+
         return ['drafted' => $drafted, 'published' => $published, 'skipped' => $skipped];
+    }
+
+    /** @return array{at: string, publish: bool, drafted: int, published: int, skipped: list<string>}|null */
+    public function lastRun(): ?array
+    {
+        $run = Cache::get(self::LAST_RUN_KEY);
+
+        return is_array($run) ? $run : null;
+    }
+
+    /** Время ежедневного прогона, «ЧЧ:ММ». */
+    public static function runAt(): string
+    {
+        return (string) config('services.marketing.autopilot_at', '09:15');
+    }
+
+    /**
+     * Что конвейер сделает в ближайшие $days дней: по дням — какая тема, в какой
+     * канал и что с ней будет (уйдёт сама / ляжет в черновик / не выйдет и почему).
+     *
+     * Это прогноз по тем же правилам, что и run(): те же каналы темы, та же
+     * проверка «прошлый материал ещё в работе». Причины «не выйдет» считаются
+     * только для ближайшего выпуска — дальше они сами по себе не доживут.
+     *
+     * @return list<array{date: Carbon, topic: MediaTopic, overdue_since: ?Carbon, data_driven: bool,
+     *     note: ?string, entries: list<array{channel: MediaChannel, mode: string, mirrors: list<string>, blocker: ?string}>}>
+     */
+    public function upcoming(int $days = 28): array
+    {
+        [$hour, $minute] = array_map('intval', explode(':', self::runAt()) + [1 => 0]);
+        $todayRun = now()->setTime($hour, $minute);
+        // Сегодняшний прогон уже прошёл — ближайший завтра.
+        $firstRunDay = now()->gte($todayRun) ? now()->addDay()->startOfDay() : now()->startOfDay();
+        $until = now()->startOfDay()->addDays($days);
+
+        $mirrors = MediaChannel::query()->active()->whereNotNull('mirror_of_channel_id')->get()
+            ->groupBy('mirror_of_channel_id');
+        $dataDriven = app(MediaDataService::class);
+
+        $out = [];
+        $topics = MediaTopic::query()->active()->whereNotNull('cadence_days')->whereNotNull('next_due_on')->get();
+        foreach ($topics as $topic) {
+            $channels = $this->channelsFor($topic);
+            $due = $topic->next_due_on->copy()->startOfDay();
+            $date = $due->lt($firstRunDay) ? $firstRunDay->copy() : $due;
+            $overdueSince = $due->lt($date) ? $due : null;
+            $first = true;
+
+            while ($date->lte($until)) {
+                $entries = [];
+                foreach ($channels as $channel) {
+                    $entries[] = [
+                        'channel' => $channel,
+                        'mode' => $this->modeFor($channel),
+                        'mirrors' => ($mirrors[$channel->id] ?? collect())->pluck('name')->all(),
+                        'blocker' => $first ? $this->blockerFor($topic, $channel) : null,
+                    ];
+                }
+
+                $out[] = [
+                    'date' => $date->copy(),
+                    'topic' => $topic,
+                    'overdue_since' => $first ? $overdueSince : null,
+                    'data_driven' => $dataDriven->isDataDriven($topic),
+                    'note' => $channels->isEmpty()
+                        ? 'не выбран канал — сделайте первый материал руками или включите автопубликацию в канале'
+                        : null,
+                    'entries' => $entries,
+                ];
+
+                $first = false;
+                $date = $topic->alignToWeekday($date->copy()->addDays(max(1, (int) $topic->cadence_days)));
+            }
+        }
+
+        usort($out, fn (array $a, array $b) => [$a['date'], $a['topic']->title] <=> [$b['date'], $b['topic']->title]);
+
+        return $out;
+    }
+
+    /** publish — уйдёт сама; draft — ляжет в черновик и ждёт человека. */
+    private function modeFor(MediaChannel $channel): string
+    {
+        return $channel->auto_publish && $channel->isPostable() ? 'publish' : 'draft';
+    }
+
+    /** Почему ближайший выпуск в этот канал не выйдет; null — препятствий не видно. */
+    private function blockerFor(MediaTopic $topic, MediaChannel $channel): ?string
+    {
+        $pending = MediaPublication::query()
+            ->where('media_topic_id', $topic->id)
+            ->where('media_channel_id', $channel->id)
+            ->whereNotIn('status', ['published', 'rejected'])
+            ->orderBy('id')
+            ->first(['id', 'title', 'status', 'created_at']);
+        if ($pending !== null) {
+            return 'новый материал не напишется: ждёт «'.Str::limit((string) $pending->title, 60)
+                .'» от '.$pending->created_at?->format('d.m').' — опубликуйте или отклоните его';
+        }
+
+        if ($this->modeFor($channel) === 'publish' && ! $channel->isConnected()) {
+            return 'у канала не заполнен доступ — материал ляжет в черновик';
+        }
+
+        return null;
     }
 
     /**
@@ -112,7 +233,7 @@ class MediaAutopilotService
      *
      * @return Collection<int, MediaChannel>
      */
-    private function channelsFor(MediaTopic $topic): Collection
+    public function channelsFor(MediaTopic $topic): Collection
     {
         $usedIds = MediaPublication::query()
             ->where('media_topic_id', $topic->id)
@@ -129,11 +250,5 @@ class MediaAutopilotService
 
         return MediaChannel::query()->active()->whereNull('mirror_of_channel_id')
             ->where('auto_publish', true)->get();
-    }
-
-    /** Следующий срок темы — шаг регулярности с подтяжкой к своему дню недели. */
-    private function advance(MediaTopic $topic): void
-    {
-        $topic->forceFill(['next_due_on' => $topic->nextDueAfterPublish()->toDateString()])->save();
     }
 }
