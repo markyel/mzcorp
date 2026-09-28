@@ -14,6 +14,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Webklex\PHPIMAP\Folder;
 use Webklex\PHPIMAP\IMAP;
@@ -52,6 +53,9 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
      * timeout=120, job попадал в failed_jobs каждые 6 минут (см. 2026-05-22).
      */
     private const MAX_MESSAGES_PER_RUN = 100;
+
+    /** Сколько раз подряд пробуем сохранить письмо, прежде чем пропустить его. */
+    private const MAX_PERSIST_ATTEMPTS = 5;
 
     public int $tries = 3;
 
@@ -464,14 +468,36 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
                     }
                 }
             } catch (\Throwable $e) {
-                Log::error('Failed to persist message', [
+                // Сбой чаще временный, чем «битое письмо»: 18.09.2026 Яндекс
+                // ответил «BAD [CLIENTBUG] … Wrong session state» на письмо с КП
+                // (M-2026-16361), watermark ушёл дальше — и письмо не пришло
+                // никогда, КП не засчиталось. Поэтому останавливаемся на этом
+                // UID и не двигаем watermark: следующий заход (через 2 минуты,
+                // с новой сессией) возьмёт его снова. Пропускаем только письмо,
+                // которое не сохраняется MAX_PERSIST_ATTEMPTS раз подряд, —
+                // иначе по-настоящему битый UID заморозил бы папку.
+                $key = 'mail-sync-fail:'.$mailbox->id.':'.$folder->path.':'.$uid;
+                $attempts = (int) Cache::get($key, 0) + 1;
+                Cache::put($key, $attempts, now()->addDay());
+
+                if ($attempts < self::MAX_PERSIST_ATTEMPTS) {
+                    Log::warning('Failed to persist message, will retry', [
+                        'mailbox_id' => $mailbox->id,
+                        'folder' => $folder->path,
+                        'uid' => $uid,
+                        'attempt' => $attempts,
+                        'error' => $e->getMessage(),
+                    ]);
+                    break;
+                }
+
+                Log::error('Failed to persist message, skipped after retries', [
                     'mailbox_id' => $mailbox->id,
                     'folder' => $folder->path,
                     'uid' => $uid,
+                    'attempts' => $attempts,
                     'error' => $e->getMessage(),
                 ]);
-                // Не валим весь job — двигаем maxUid, чтобы битый UID не залип
-                // навсегда, и продолжаем со следующим письмом.
                 $maxUid = max($maxUid, $uid);
             }
         }
