@@ -181,10 +181,20 @@ class ClientsBackfillCommand extends Command
                 }
             });
 
-        // 3) Организации из client_company заявок (для заявок без КП-реквизитов).
+        // 3) Организации из client_company заявок — только для тех, кого больше
+        // опознать нечем. Название из веб-формы — самое слабое свидетельство:
+        // если у заявки организация уже есть или адрес привязан к организации
+        // (по ИНН из наших документов), новую карточку не заводим. Иначе
+        // слитые 25.09 двойники («ИП Зотов», «АО ЩЛЗ», «АстраханьЛифт»…)
+        // возвращались: слияние трогало заявки, обход видел их «изменёнными».
         RequestModel::query()
             ->whereNotNull('client_company')->where('client_company', '!=', '')
             ->whereNotNull('client_email')->where('client_email', '!=', '')
+            ->whereNull('organization_id')
+            ->whereNotExists(fn ($q) => $q->selectRaw('1')
+                ->from('client_contacts as cc')
+                ->join('organization_contact as oc', 'oc.client_contact_id', '=', 'cc.id')
+                ->whereRaw('lower(cc.email) = lower(requests.client_email)'))
             ->when($since, fn ($q) => $q->where('updated_at', '>=', $since))
             ->orderBy('id')
             ->chunkById(500, function ($chunk) use (&$stats) {
