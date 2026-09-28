@@ -147,20 +147,18 @@ class ClientsBackfillCommand extends Command
                 }
             });
 
-        // 2) Организации из реквизитов отправленных КП.
+        // 2) Организации из реквизитов отправленных КП — только с ИНН.
+        // Без ИНН recipient_name — это подпись отправителя из письма, а не
+        // реквизиты: из него выросли «Liftway.ru — [ЗАКУПКИ]», «Отдел закупок /
+        // продаж [ЛТД…]» и два десятка двойников настоящих организаций
+        // («СП Интерлифт» рядом с ООО СП "ИНТЕРЛИФТ"), слитых 25.09.
         Quotation::query()
-            ->where(function ($q) {
-                $q->where(fn ($w) => $w->whereNotNull('recipient_inn')->where('recipient_inn', '!=', ''))
-                    ->orWhere(fn ($w) => $w->whereNotNull('recipient_name')->where('recipient_name', '!=', ''));
-            })
+            ->whereNotNull('recipient_inn')->where('recipient_inn', '!=', '')
             ->when($since, fn ($q) => $q->where('updated_at', '>=', $since))
             ->with('request:id,client_email')
             ->orderBy('id')
             ->chunkById(300, function ($chunk) use (&$stats) {
                 foreach ($chunk as $q) {
-                    // recipient_name в КП часто = ФИО получателя, а не юр.лицо.
-                    // Организацию создаём только если есть ИНН или имя похоже на
-                    // юр.лицо; ФИО-получатели остаются только контактами.
                     $org = $this->resolveOrg($q->recipient_name, $q->recipient_inn, $stats);
                     if (! $org) {
                         continue;
