@@ -536,4 +536,49 @@ class Request extends Model
 
         return $this->isDelegatedTo($user);
     }
+
+    /**
+     * Статусы «КП ещё не выдано» — очередь на выдачу КП.
+     *
+     * @return list<string>
+     */
+    public static function preQuoteStatuses(): array
+    {
+        return [
+            RequestStatus::New->value,
+            RequestStatus::Assigned->value,
+            RequestStatus::InProgress->value,
+            RequestStatus::AwaitingClientClarification->value,
+        ];
+    }
+
+    /**
+     * Ждут КП, а цены уже есть — одно определение для дашборда и пула.
+     * Цена годна, пока catalog_items.is_price_actual = true: просроченную в
+     * КП не ставим. $coverage: full — цена есть по всем активным позициям,
+     * partial — по части, null — хотя бы по одной.
+     */
+    public function scopeAwaitingQuoteWithPrices($query, ?string $coverage = null)
+    {
+        $priced = fn ($sub) => $sub->selectRaw('1')
+            ->from('request_items as ri')
+            ->join('catalog_items as ci', 'ci.id', '=', 'ri.catalog_item_id')
+            ->whereColumn('ri.request_id', 'requests.id')
+            ->where('ri.is_active', true)
+            ->where('ci.is_price_actual', true);
+        $unpriced = fn ($sub) => $sub->selectRaw('1')
+            ->from('request_items as ri')
+            ->leftJoin('catalog_items as ci', 'ci.id', '=', 'ri.catalog_item_id')
+            ->whereColumn('ri.request_id', 'requests.id')
+            ->where('ri.is_active', true)
+            ->where(fn ($w) => $w->whereNull('ci.id')->orWhere('ci.is_price_actual', false)->orWhereNull('ci.is_price_actual'));
+
+        $query->whereIn('requests.status', self::preQuoteStatuses())->whereExists($priced);
+
+        return match ($coverage) {
+            'full' => $query->whereNotExists($unpriced),
+            'partial' => $query->whereExists($unpriced),
+            default => $query,
+        };
+    }
 }

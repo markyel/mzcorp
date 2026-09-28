@@ -448,6 +448,7 @@
                     'active'   => ['label' => 'Активные',    'count' => $bucketCounts['active']],
                     'overdue'  => ['label' => 'Просрочено',  'count' => $bucketCounts['overdue'] ?? 0],
                     'silence'  => ['label' => '🤫 Клиент молчит', 'count' => $bucketCounts['silence'] ?? 0],
+                    'priced'   => ['label' => '💰 Ждут КП · цены есть', 'count' => $bucketCounts['priced'] ?? 0, 'title' => 'КП ещё не выдано, а цены по позициям уже актуальны — очередь на выдачу КП. Дольше всех ждущие сверху'],
                     'paused'   => ['label' => 'На паузе',    'count' => $bucketCounts['paused']],
                     'closed'   => ['label' => 'Закрытые',    'count' => $bucketCounts['closed']],
                     'refused'  => ['label' => '🚫 Наш отказ', 'count' => $bucketCounts['refused'] ?? 0],
@@ -488,6 +489,21 @@
                  bucket=postsale не показываем — статус всегда closed_won,
                  а statusCounts считал бы ВСЕ закрытые-success (не только
                  с постпродажным письмом), что вводит в заблуждение. --}}
+            {{-- «Ждут КП · цены есть»: цены по всем позициям или по части. --}}
+            @if($bucket === 'priced')
+                <span class="text-[var(--fg-4)] mx-1">·</span>
+                @foreach(['' => 'Цены: все', 'full' => 'полностью', 'partial' => 'частично'] as $cov => $covLabel)
+                    <button wire:click="setPricedCoverage('{{ $cov }}')"
+                            class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap
+                                   {{ $pricedCoverage === $cov
+                                      ? 'bg-[var(--sky-50)] border border-[var(--sky-500)] text-[var(--sky-700)]'
+                                      : 'bg-[var(--bg-surface)] border border-[var(--border-strong)] text-[var(--fg-2)] hover:text-[var(--fg-1)]' }}">
+                        {{ $covLabel }}
+                        <span class="font-mono text-[11px] opacity-75">{{ $pricedCounts[$cov] ?? 0 }}</span>
+                    </button>
+                @endforeach
+            @endif
+
             @if(! in_array($bucket, ['postsale', 'refused', 'abandoned'], true))
             <span class="text-[var(--fg-4)] mx-1">·</span>
 

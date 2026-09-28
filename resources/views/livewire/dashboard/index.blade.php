@@ -319,6 +319,14 @@
                         <b class="text-[12.5px] text-fg-1">{{ $qTitle }}</b>
                         <span class="text-[11.5px] text-fg-3">{{ count($qRows) }} · дольше всех ждущие сверху</span>
                         <span class="flex-1"></span>
+                        @if($queueList !== 'invoice')
+                            <a href="{{ route('requests.index', array_filter([
+                                    'bucket' => 'priced',
+                                    'priced' => $queueList === 'quote_full' ? 'full' : 'partial',
+                                    'scope' => $this->isPrivileged ? 'all' : null,
+                                ])) }}"
+                               class="text-[11.5px] text-sky-700 hover:underline">открыть в заявках →</a>
+                        @endif
                         <button type="button" class="btn btn-xs" wire:click="toggleQueueList('{{ $queueList }}')">свернуть</button>
                     </div>
                     <div class="overflow-x-auto max-h-[420px] overflow-y-auto">

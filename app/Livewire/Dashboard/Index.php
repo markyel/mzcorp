@@ -1068,12 +1068,9 @@ class Index extends Component
      */
     private function waitingQuoteRows(?int $mine): Collection
     {
-        $preQuote = [
-            RequestStatus::New->value,
-            RequestStatus::Assigned->value,
-            RequestStatus::InProgress->value,
-            RequestStatus::AwaitingClientClarification->value,
-        ];
+        // Те же статусы и то же понятие «цена есть», что у фильтра пула
+        // Request::scopeAwaitingQuoteWithPrices — цифры должны совпадать.
+        $preQuote = Request::preQuoteStatuses();
 
         return collect(DB::select(
             'SELECT r.id,
