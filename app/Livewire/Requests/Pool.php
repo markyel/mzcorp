@@ -62,11 +62,18 @@ class Pool extends Component
     public string $bucket = 'active';
 
     /**
-     * Уточнение корзины «Ждут КП · цены есть»: full — цены по всем позициям,
-     * partial — по части, '' — хотя бы по одной (как карточка дашборда).
+     * Уточнение фильтра «Ждут КП · цены есть» (status=priced): full — цены по
+     * всем позициям, partial — по части, '' — хотя бы по одной (как карточка
+     * дашборда).
      */
     #[Url(as: 'priced', except: '')]
     public string $pricedCoverage = '';
+
+    /**
+     * Псевдостатус чипа «Ждут КП · цены есть» в строке статусов: это не
+     * статус заявки, а срез статусов до КП, где цены по позициям уже есть.
+     */
+    public const PRICED_STATUS = 'priced';
 
     /**
      * Фильтр «только делегированные мне» — заявки, временно открытые мне
@@ -169,6 +176,7 @@ class Pool extends Component
         $this->resetPage();
         // При переключении bucket — сбрасываем уточняющий status-фильтр.
         $this->status = '';
+        $this->pricedCoverage = '';
     }
 
     public function updatingAssignedUserId(): void
@@ -306,8 +314,12 @@ class Pool extends Component
             $this->scope = 'all';
         }
 
-        if ($this->status !== '' && ! in_array($this->status, $this->statusesForBucket(), true)) {
+        $pricedOk = $this->status === self::PRICED_STATUS && $this->bucketHasPreQuote($this->statusesForBucket());
+        if ($this->status !== '' && ! $pricedOk && ! in_array($this->status, $this->statusesForBucket(), true)) {
             $this->status = '';
+        }
+        if ($this->status !== self::PRICED_STATUS) {
+            $this->pricedCoverage = '';
         }
     }
 
@@ -360,7 +372,7 @@ class Pool extends Component
 
     public function setBucket(string $bucket): void
     {
-        $allowed = ['active', 'overdue', 'silence', 'priced', 'paused', 'closed', 'refused', 'abandoned', 'postsale', 'all'];
+        $allowed = ['active', 'overdue', 'silence', 'paused', 'closed', 'refused', 'abandoned', 'postsale', 'all'];
         $this->bucket = in_array($bucket, $allowed, true) ? $bucket : 'active';
         $this->status = '';
         $this->pricedCoverage = '';
@@ -370,8 +382,28 @@ class Pool extends Component
 
     public function setPricedCoverage(string $coverage): void
     {
+        $this->status = self::PRICED_STATUS;
         $this->pricedCoverage = in_array($coverage, ['full', 'partial'], true) ? $coverage : '';
         $this->resetPage();
+    }
+
+    /** Ушли с чипа «Ждут КП · цены есть» — его уточнение больше не действует. */
+    public function updatedStatus(): void
+    {
+        if ($this->status !== self::PRICED_STATUS) {
+            $this->pricedCoverage = '';
+        }
+    }
+
+    /**
+     * Есть ли в корзине статусы до КП — только там чип «Ждут КП · цены есть»
+     * имеет смысл (Активные, Все).
+     *
+     * @param  array<int, string>  $bucketStatuses
+     */
+    private function bucketHasPreQuote(array $bucketStatuses): bool
+    {
+        return array_intersect(Request::preQuoteStatuses(), $bucketStatuses) !== [];
     }
 
     /** Покрытие ценами для scopeAwaitingQuoteWithPrices: full | partial | null. */
@@ -469,9 +501,6 @@ class Pool extends Component
             // «Наш отказ» — только closed_lost; доп. фильтр по причине (наша
             // инициатива) навешивается в buildQuery.
             'refused' => [RequestStatus::ClosedLost->value],
-            // «Ждут КП · цены есть» — КП не выдано, а цены по позициям уже
-            // актуальны. Наличие цен навешивается в buildQuery/counts.
-            'priced' => Request::preQuoteStatuses(),
             // «Заброшенные» = где мы перестали отвечать клиенту при мяче у нас.
             // Охватывает открытые (последнее событие — ответ клиента, молчим >N
             // дней) И закрытые (closed_lost, где закрыли не ответив). Поэтому
@@ -664,7 +693,7 @@ class Pool extends Component
                     ->orderByDesc('id'),
                 // «Ждут КП · цены есть» — очередь на выдачу: дольше всех
                 // ждущие сверху, как в списке на дашборде.
-                $this->bucket === 'priced' => $query
+                $this->status === self::PRICED_STATUS => $query
                     ->orderBy('created_at')
                     ->orderBy('id'),
                 default => $query
@@ -748,11 +777,6 @@ class Pool extends Component
                 ->whereNotNull('attention_required_at');
         }
 
-        // «Ждут КП · цены есть» — то же определение, что карточка дашборда.
-        if ($this->bucket === 'priced') {
-            $query->awaitingQuoteWithPrices($this->pricedCoverageOrNull());
-        }
-
         // «Наш отказ» — closed_lost по нашей инициативе (не наша тематика /
         // не можем предложить), в отличие от потерь по вине клиента.
         // Только активные (не архивные) владельцы — ровно как фильтр менеджеров
@@ -775,6 +799,10 @@ class Pool extends Component
         $validStatus = $this->status !== '' && in_array($this->status, $bucketStatuses, true);
         if ($validStatus) {
             $query->where('status', $this->status);
+        } elseif ($this->status === self::PRICED_STATUS && $this->bucketHasPreQuote($bucketStatuses)) {
+            // «Ждут КП · цены есть» — не статус, а срез статусов до КП с ценами;
+            // то же определение, что карточка дашборда.
+            $query->awaitingQuoteWithPrices($this->pricedCoverageOrNull());
         }
 
         // Фильтр «нераспределённые» — assigned_user_id IS NULL. Работает
@@ -972,7 +1000,6 @@ class Pool extends Component
             'abandoned' => (clone $countsBase)
                 ->tap(fn ($q) => $this->applyAbandonedFilter($q))
                 ->count(),
-            'priced' => (clone $countsBase)->awaitingQuoteWithPrices()->count(),
             // Постпродажа: заказы со счётом/оплатой/успехом и непрочитанным
             // постпродажным письмом.
             'postsale' => (clone $countsBase)
@@ -992,16 +1019,17 @@ class Pool extends Component
         // Per-status counts внутри активного bucket'а — для уточняющих chip'ов.
         $statusCounts = [];
         foreach ($bucketStatuses as $sv) {
-            $statusCounts[$sv] = (clone $countsBase)->where('status', $sv)
-                ->when($this->bucket === 'priced', fn ($q) => $q->awaitingQuoteWithPrices($this->pricedCoverageOrNull()))
-                ->count();
+            $statusCounts[$sv] = (clone $countsBase)->where('status', $sv)->count();
         }
 
-        // Разбивка корзины «Ждут КП · цены есть» — для переключателя
-        // «все / полностью / частично».
-        $pricedCounts = $this->bucket === 'priced'
+        // «Ждут КП · цены есть» — чип в строке статусов (перед «Согласован /
+        // ждёт счёт») и разбивка «все / полностью / частично» для переключателя.
+        $pricedAll = $this->bucketHasPreQuote($bucketStatuses)
+            ? (clone $countsBase)->awaitingQuoteWithPrices()->count()
+            : 0;
+        $pricedCounts = $this->status === self::PRICED_STATUS && $pricedAll > 0
             ? [
-                '' => $bucketCounts['priced'],
+                '' => $pricedAll,
                 'full' => (clone $countsBase)->awaitingQuoteWithPrices('full')->count(),
                 'partial' => (clone $countsBase)->awaitingQuoteWithPrices('partial')->count(),
             ]
@@ -1139,6 +1167,7 @@ class Pool extends Component
             'statusCounts' => $statusCounts,
             'bucketCounts' => $bucketCounts,
             'pricedCounts' => $pricedCounts,
+            'pricedAll' => $pricedAll,
             'bucketStatuses' => $bucketStatuses,
             'managerOpenCounts' => $managerOpenCounts,
         ]);

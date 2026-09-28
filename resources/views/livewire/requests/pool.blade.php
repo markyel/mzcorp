@@ -447,9 +447,7 @@
                 $bucketChips = [
                     'active'   => ['label' => 'Активные',    'count' => $bucketCounts['active']],
                     'overdue'  => ['label' => 'Просрочено',  'count' => $bucketCounts['overdue'] ?? 0],
-                    'silence'  => ['label' => '🤫 Клиент молчит', 'count' => $bucketCounts['silence'] ?? 0],
-                    'priced'   => ['label' => '💰 Ждут КП · цены есть', 'count' => $bucketCounts['priced'] ?? 0, 'title' => 'КП ещё не выдано, а цены по позициям уже актуальны — очередь на выдачу КП. Дольше всех ждущие сверху'],
-                    'paused'   => ['label' => 'На паузе',    'count' => $bucketCounts['paused']],
+                    'silence'  => ['label' => '🤫 Клиент молчит', 'count' => $bucketCounts['silence'] ?? 0],                    'paused'   => ['label' => 'На паузе',    'count' => $bucketCounts['paused']],
                     'closed'   => ['label' => 'Закрытые',    'count' => $bucketCounts['closed']],
                     'refused'  => ['label' => '🚫 Наш отказ', 'count' => $bucketCounts['refused'] ?? 0],
                     'abandoned'=> ['label' => '🕳 Заброшенные', 'count' => $bucketCounts['abandoned'] ?? 0, 'title' => 'Где МЫ перестали отвечать клиенту, а мяч был на нашей стороне: открытые (клиент ответил последним, молчим >5 дн.) + закрытые, которые закрыли не ответив клиенту'],
@@ -489,21 +487,6 @@
                  bucket=postsale не показываем — статус всегда closed_won,
                  а statusCounts считал бы ВСЕ закрытые-success (не только
                  с постпродажным письмом), что вводит в заблуждение. --}}
-            {{-- «Ждут КП · цены есть»: цены по всем позициям или по части. --}}
-            @if($bucket === 'priced')
-                <span class="text-[var(--fg-4)] mx-1">·</span>
-                @foreach(['' => 'Цены: все', 'full' => 'полностью', 'partial' => 'частично'] as $cov => $covLabel)
-                    <button wire:click="setPricedCoverage('{{ $cov }}')"
-                            class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap
-                                   {{ $pricedCoverage === $cov
-                                      ? 'bg-[var(--sky-50)] border border-[var(--sky-500)] text-[var(--sky-700)]'
-                                      : 'bg-[var(--bg-surface)] border border-[var(--border-strong)] text-[var(--fg-2)] hover:text-[var(--fg-1)]' }}">
-                        {{ $covLabel }}
-                        <span class="font-mono text-[11px] opacity-75">{{ $pricedCounts[$cov] ?? 0 }}</span>
-                    </button>
-                @endforeach
-            @endif
-
             @if(! in_array($bucket, ['postsale', 'refused', 'abandoned'], true))
             <span class="text-[var(--fg-4)] mx-1">·</span>
 
@@ -515,6 +498,33 @@
                 Любой статус
             </button>
             @foreach($bucketStatuses as $sv)
+                {{-- «Ждут КП · цены есть» — не статус, а срез статусов до КП с
+                     ценами; по смыслу стоит перед «Согласован / ждёт счёт». --}}
+                @if($sv === \App\Enums\RequestStatus::AwaitingInvoice->value && $pricedAll > 0)
+                    @php $pricedOn = $status === \App\Livewire\Requests\Pool::PRICED_STATUS; @endphp
+                    <button wire:click="setPricedCoverage('')"
+                            title="КП ещё не выдано, а цены по позициям уже актуальны — очередь на выдачу КП. Дольше всех ждущие сверху"
+                            class="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-md whitespace-nowrap
+                                   {{ $pricedOn
+                                      ? 'bg-[var(--sky-50)] border border-[var(--sky-500)] text-[var(--sky-700)]'
+                                      : 'bg-[var(--bg-surface)] border border-[var(--border-strong)] text-[var(--fg-2)] hover:text-[var(--fg-1)]' }}">
+                        <span>Ждут КП · цены есть</span>
+                        <span class="font-mono text-[11px] opacity-75">{{ $pricedAll }}</span>
+                    </button>
+                    @if($pricedOn)
+                        @foreach(['full' => 'полностью', 'partial' => 'частично'] as $cov => $covLabel)
+                            <button wire:click="setPricedCoverage('{{ $pricedCoverage === $cov ? '' : $cov }}')"
+                                    class="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md whitespace-nowrap text-[12px]
+                                           {{ $pricedCoverage === $cov
+                                              ? 'bg-[var(--sky-500)] text-white'
+                                              : 'bg-[var(--sky-50)] text-[var(--sky-700)] hover:bg-[var(--sky-100)]' }}">
+                                {{ $covLabel }}
+                                <span class="font-mono text-[11px] opacity-80">{{ $pricedCounts[$cov] ?? 0 }}</span>
+                            </button>
+                        @endforeach
+                        <button wire:click="$set('status', '')" class="text-[var(--fg-3)] text-[14px] leading-none px-1" title="Снять фильтр">×</button>
+                    @endif
+                @endif
                 @php
                     $enum = \App\Enums\RequestStatus::tryFrom($sv);
                     if (! $enum) continue;

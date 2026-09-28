@@ -321,7 +321,8 @@
                         <span class="flex-1"></span>
                         @if($queueList !== 'invoice')
                             <a href="{{ route('requests.index', array_filter([
-                                    'bucket' => 'priced',
+                                    'bucket' => 'active',
+                                    'status' => \App\Livewire\Requests\Pool::PRICED_STATUS,
                                     'priced' => $queueList === 'quote_full' ? 'full' : 'partial',
                                     'scope' => $this->isPrivileged ? 'all' : null,
                                 ])) }}"
