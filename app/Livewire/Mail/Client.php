@@ -482,9 +482,8 @@ class Client extends Component
             if ($userId === $me) {
                 app(ImapSeenSyncService::class)->pushSeen($chunk, $this->user(), $read);
             }
+            $this->forgetUnreadBadges($chunk, (int) $userId);
         }
-
-        $this->forgetUnreadBadges();
     }
 
     /** @param  list<int>  $ids */
@@ -1479,25 +1478,29 @@ class Client extends Component
     }
 
     /**
-     * Сколько держим бейджи ящиков. Свой бейдж сбрасывается сразу при
-     * прочтении (applyReadState); чужие ящики и новые письма догоняют за
-     * минуту — зато автообновление раз в 30 с не пересчитывает ~700 тыс.
-     * входящих у каждого, кто держит почту открытой.
+     * Сколько держим бейдж ящика. Прочтение сбрасывает его сразу
+     * (applyReadState); новые письма догоняют за минуту — зато автообновление
+     * раз в 30 с не пересчитывает ~700 тыс. входящих у каждого, кто держит
+     * почту открытой.
      */
     private const UNREAD_BADGES_TTL = 60;
 
-    private function unreadCacheKey(array $mailboxIds): string
+    /**
+     * Ключ — ящик и ЧЬЯ прочитанность: у личного ящика она владельца, кто бы
+     * ни смотрел, поэтому директор, РОП и сам менеджер делят одно число.
+     */
+    private static function unreadCacheKey(int $mailboxId, int $stateUserId): string
     {
-        $ids = array_map('intval', $mailboxIds);
-        sort($ids);
-
-        return 'mail:unread-by-mailbox:'.(int) $this->user()->id.':'.md5(implode(',', $ids));
+        return 'mail:unread:'.$mailboxId.':'.$stateUserId;
     }
 
-    private function forgetUnreadBadges(): void
+    /** @param  list<int>  $ids  письма, чья прочитанность только что изменилась */
+    private function forgetUnreadBadges(array $ids, int $stateUserId): void
     {
-        $ids = app(MailboxAccessService::class)->mailboxesFor($this->user())->pluck('id')->all();
-        Cache::forget($this->unreadCacheKey($ids));
+        $mailboxIds = EmailMessage::withHistory()->whereIn('id', $ids)->distinct()->pluck('mailbox_id');
+        foreach ($mailboxIds as $mailboxId) {
+            Cache::forget(self::unreadCacheKey((int) $mailboxId, $stateUserId));
+        }
     }
 
     /** Непрочитанные по каждому ящику (для бейджей переключателя). @return array<int,int> */
@@ -1507,11 +1510,16 @@ class Client extends Component
             return [];
         }
 
-        return Cache::remember(
-            $this->unreadCacheKey($mailboxIds),
-            self::UNREAD_BADGES_TTL,
-            fn () => $this->countUnreadByMailbox($mailboxIds),
-        );
+        $out = [];
+        foreach ($this->readStateUserByMailbox($mailboxIds) as $mailboxId => $stateUserId) {
+            $out[$mailboxId] = (int) Cache::remember(
+                self::unreadCacheKey($mailboxId, $stateUserId),
+                self::UNREAD_BADGES_TTL,
+                fn () => $this->countUnreadByMailbox([$mailboxId])[$mailboxId] ?? 0,
+            );
+        }
+
+        return $out;
     }
 
     /** @return array<int,int> */
