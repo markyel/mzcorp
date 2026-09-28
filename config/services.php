@@ -374,7 +374,7 @@ return [
         'token' => env('YANDEX_METRIKA_TOKEN', env('YANDEX_DIRECT_TOKEN')),
         'endpoint' => env('YANDEX_METRIKA_ENDPOINT', 'https://api-metrika.yandex.net/'),
         // Через запятую. 107254483 — «Мой Лифт_общий» (myzip.ru, mylift.ru,
-        // handrails.ru); к 38099855 доступа пока нет.
+        // handrails.ru). 38099855 не используем (решение заказчика 28.09.2026).
         'counters' => array_values(array_filter(array_map('intval', explode(',', (string) env('YANDEX_METRIKA_COUNTERS', '107254483'))))),
         // Отчёт Метрики уточняется задним числом — переписываем окно целиком.
         'window_days' => (int) env('YANDEX_METRIKA_WINDOW_DAYS', 14),
