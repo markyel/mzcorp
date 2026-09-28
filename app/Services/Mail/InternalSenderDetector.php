@@ -143,7 +143,16 @@ class InternalSenderDetector
             return true;
         }
 
-        if ($recipients !== [] && $this->wroteIntoRequest($recipients, $request, $message)) {
+        // Свои адреса вторым контактом клиента не бывают, даже если коллега сам
+        // писал в заявку. M-2026-15625: РОП написал менеджеру «Ждет счет
+        // M-2026-15625» (письмо легло в заявку по номеру в теме), менеджер
+        // ответил ему счётом по ДРУГОЙ заявке — счёт встал в эту, к нему
+        // привязалась оплата из 1С, и заявка закрылась «успехом» без оплаты.
+        $external = array_values(array_filter(
+            $recipients,
+            fn (string $r) => ! $this->isInternalDomain((string) substr((string) strrchr($r, '@'), 1)),
+        ));
+        if ($external !== [] && $this->wroteIntoRequest($external, $request, $message)) {
             return true;
         }
 

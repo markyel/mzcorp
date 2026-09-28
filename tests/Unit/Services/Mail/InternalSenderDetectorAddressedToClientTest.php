@@ -73,6 +73,27 @@ class InternalSenderDetectorAddressedToClientTest extends TestCase
         $this->assertTrue($withThread->isAddressedToClient($m, 'rodionshvedchikov@yandex.ru'));
     }
 
+    /**
+     * M-2026-15625: коллега написал в заявку («Ждет счет M-2026-15625»),
+     * менеджер ответил ему счётом по другой заявке. Коллега — не контакт
+     * клиента, документ ему статус заявки не двигает.
+     */
+    public function test_colleague_that_wrote_into_the_request_is_not_the_client(): void
+    {
+        $m = new EmailMessage();
+        $m->to_recipients = [['name' => 'Alexander R MyZiP', 'email' => 'alexander.rodenkov@myzip.ru']];
+
+        $withThread = new class extends InternalSenderDetector
+        {
+            protected function wroteIntoRequest(array $recipients, ?Request $request, EmailMessage $message): bool
+            {
+                return in_array('alexander.rodenkov@myzip.ru', $recipients, true);
+            }
+        };
+
+        $this->assertFalse($withThread->isAddressedToClient($m, 'k.laricheva@lespb.ru'));
+    }
+
     public function test_third_party_that_never_wrote_into_the_request_is_still_blocked(): void
     {
         $m = new EmailMessage();
