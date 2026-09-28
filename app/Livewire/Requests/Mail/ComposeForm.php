@@ -152,11 +152,24 @@ class ComposeForm extends Component
             return;
         }
         $req = $this->request();
-        $replyTo = EmailMessage::where('related_request_id', $req->id)
+        // Письмо-основание заявки тоже годится для ответа, даже если оно
+        // привязано к другой: у заявки-наследника (created_successor_from_email)
+        // исходное письмо остаётся в родителе, и кнопка «Ответить» молча не
+        // открывала окно (M-2026-17143).
+        $replyTo = EmailMessage::query()
             ->whereKey($messageId)
+            ->where(fn ($q) => $q->where('related_request_id', $req->id)
+                ->when($req->email_message_id, fn ($q) => $q->orWhere('id', $req->email_message_id)))
             ->first();
         if (! $replyTo) {
-            $this->addError('subject', 'Письмо для ответа не найдено.');
+            // Молчать нельзя: ошибка в закрытом окне не видна, и кнопка
+            // выглядит сломанной. Открываем новое письмо клиенту заявки.
+            $draft = $drafts->createCompose($req, auth()->user());
+            $this->hydrateFromDraft($draft);
+            $this->replyToMessageId = null;
+            $this->mode = 'compose';
+            $this->open = true;
+            $this->dispatch('toast', message: 'Письмо для ответа не найдено — открыто новое письмо клиенту заявки.', type: 'info');
 
             return;
         }
