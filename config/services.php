@@ -1027,6 +1027,10 @@ return [
         // артикулы, ставка была заградительной (0,3 ₽); замер 22.09.2026
         // показал, что артикулы не ищут, и автотаргетинг стал рабочим каналом.
         'autotargeting_bid' => (float) env('YANDEX_DIRECT_AUTOTARGETING_BID', 12),
+        // Категории автотаргетинга (EXACT, ALTERNATIVE, COMPETITOR, BROADER,
+        // ACCESSORY; «узкие» Директ показывает всегда). 28.09.2026 — только
+        // целевые: «широкие» давали 91% расхода на «кнопки» и «метизы».
+        'autotargeting_categories' => env('YANDEX_DIRECT_AUTOTARGETING_CATEGORIES', 'EXACT'),
         'search_strategy' => env('YANDEX_DIRECT_SEARCH_STRATEGY', 'HIGHEST_POSITION'),
 
         /*

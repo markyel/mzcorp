@@ -61,7 +61,7 @@ class DirectSyncCommand extends Command
         }
         if (($report['autotargeting'] ?? 0) > 0) {
             $this->line(sprintf(
-                '  автотаргетинг: ставка %s ₽ в %d группах',
+                '  автотаргетинг: ставка не ниже %s ₽ и категории поправлены — %d правок',
                 \App\Services\Direct\DirectPublisherService::autotargetingBid(),
                 $report['autotargeting'],
             ));

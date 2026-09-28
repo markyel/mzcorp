@@ -171,7 +171,7 @@ class DirectPublisherService
 
         $tamed = $this->tameAutotargeting($campaignId, $by);
         if ($tamed > 0) {
-            $messages[] = 'Автотаргетингу выставлена ставка '.self::autotargetingBid()." ₽ в {$tamed} группах.";
+            $messages[] = 'Автотаргетинг: ставка не ниже '.self::autotargetingBid()." ₽ и категории поправлены — {$tamed} правок.";
         }
 
         return ['published' => $published, 'skipped' => $skipped, 'failed' => $failed, 'messages' => $messages];
@@ -541,33 +541,103 @@ class DirectPublisherService
      * Аукционной лестницы у псевдофразы нет, так что ставка тут плоская:
      * `keywordbids.get` отдаёт ступени только для настоящих фраз.
      *
+     * Ставка из настроек — НИЖНЯЯ граница, а не точное значение. 28.09.2026:
+     * по совету менеджера Яндекса ставку в части групп подняли до 30 ₽, а
+     * конвейер каждый час сбивал её обратно до 12 — и так весь день. Ручное
+     * повышение теперь не трогаем, поднимаем только то, что ниже настройки.
+     *
+     * Заодно держим категории автотаргетинга (autotargetingCategories): новые
+     * группы Директ создаёт со всеми включёнными, а «широкие» запросы — это
+     * «кнопки», «трансформатор», «метизы»: 91% расхода кампании 28.09.
+     *
      * @return int сколько псевдофраз поправили
      */
     public function tameAutotargeting(int $campaignId, ?User $by = null): int
     {
         $bid = (int) round(self::autotargetingBid() * 1_000_000);
+        $categories = self::autotargetingCategories();
 
         $res = $this->call('keywords', 'get', [
             'SelectionCriteria' => ['CampaignIds' => [$campaignId]],
-            'FieldNames' => ['Id', 'Keyword', 'Bid'],
+            'FieldNames' => ['Id', 'Keyword', 'Bid', 'AutotargetingCategories'],
+            'Page' => ['Limit' => 10000],
         ], null, $by);
 
-        $ids = [];
+        $raise = [];
+        $recategorize = [];
         foreach ($res['result']['Keywords'] ?? [] as $keyword) {
-            if (str_contains((string) ($keyword['Keyword'] ?? ''), 'autotargeting')
-                && (int) ($keyword['Bid'] ?? 0) !== $bid) {
-                $ids[] = (int) $keyword['Id'];
+            if (! str_contains((string) ($keyword['Keyword'] ?? ''), 'autotargeting')) {
+                continue;
+            }
+            if ((int) ($keyword['Bid'] ?? 0) < $bid) {
+                $raise[] = (int) $keyword['Id'];
+            }
+            if (self::categoriesDiffer($keyword['AutotargetingCategories']['Items'] ?? [], $categories)) {
+                $recategorize[] = (int) $keyword['Id'];
             }
         }
-        if ($ids === []) {
-            return 0;
+
+        $done = 0;
+        if ($raise !== []) {
+            $set = $this->call('bids', 'set', [
+                'Bids' => array_map(fn ($id) => ['KeywordId' => $id, 'Bid' => $bid], $raise),
+            ], null, $by);
+            $done += $set['ok'] ? count($raise) : 0;
+        }
+        if ($recategorize !== []) {
+            $items = array_map(
+                fn (string $category) => ['Category' => $category, 'Value' => in_array($category, $categories, true) ? 'YES' : 'NO'],
+                self::AUTOTARGETING_CATEGORIES,
+            );
+            $upd = $this->call('keywords', 'update', [
+                'Keywords' => array_map(fn ($id) => ['Id' => $id, 'AutotargetingCategories' => $items], $recategorize),
+            ], null, $by);
+            $done += $upd['ok'] ? count($recategorize) : 0;
         }
 
-        $set = $this->call('bids', 'set', [
-            'Bids' => array_map(fn ($id) => ['KeywordId' => $id, 'Bid' => $bid], $ids),
-        ], null, $by);
+        return $done;
+    }
 
-        return $set['ok'] ? count($ids) : 0;
+    /**
+     * Категории автотаргетинга, которыми управляет API. «Узкие» (NARROW) в
+     * их число не входят — Директ показывает по ним всегда.
+     */
+    public const AUTOTARGETING_CATEGORIES = ['EXACT', 'ALTERNATIVE', 'COMPETITOR', 'BROADER', 'ACCESSORY'];
+
+    /** Ключ настройки с включёнными категориями автотаргетинга (через запятую). */
+    public const SETTING_AUTOTARGETING_CATEGORIES = 'direct.autotargeting_categories';
+
+    /**
+     * Включённые категории. По умолчанию — только целевые (EXACT): решение
+     * заказчика 28.09.2026 «только целевые и узкие».
+     *
+     * @return list<string>
+     */
+    public static function autotargetingCategories(): array
+    {
+        $raw = app(SettingsService::class)->get(self::SETTING_AUTOTARGETING_CATEGORIES)
+            ?? config('services.yandex_direct.autotargeting_categories', 'EXACT');
+        $list = is_array($raw) ? $raw : explode(',', (string) $raw);
+        $list = array_values(array_intersect(self::AUTOTARGETING_CATEGORIES, array_map(fn ($c) => strtoupper(trim((string) $c)), $list)));
+
+        return $list !== [] ? $list : ['EXACT'];
+    }
+
+    /**
+     * @param  array<int, array{Category?: string, Value?: string}>  $current
+     * @param  list<string>  $wanted
+     */
+    private static function categoriesDiffer(array $current, array $wanted): bool
+    {
+        $on = [];
+        foreach ($current as $item) {
+            if (($item['Value'] ?? '') === 'YES') {
+                $on[] = (string) ($item['Category'] ?? '');
+            }
+        }
+        $on = array_values(array_intersect(self::AUTOTARGETING_CATEGORIES, $on));
+
+        return $on !== array_values(array_intersect(self::AUTOTARGETING_CATEGORIES, $wanted));
     }
 
     /**
