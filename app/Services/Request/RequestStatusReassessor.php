@@ -26,6 +26,9 @@ class RequestStatusReassessor
         'invoiced' => RequestStatus::Invoiced,
     ];
 
+    /** Наш автоответ о получении заявки (шаблон order_received). */
+    private const RECEIPT_ACK_RE = '~успешно получено и принято в работу~iu';
+
     public function __construct(
         private readonly OpenAIChatService $openai,
         private readonly ReassessRequestStatusPrompt $prompt,
@@ -259,6 +262,12 @@ class RequestStatusReassessor
         $lines = [];
         foreach ($messages as $m) {
             $who = $m->direction === \App\Enums\MailDirection::Outbound ? 'ОТ НАС' : 'ОТ КЛИЕНТА';
+            // Автоответ «письмо получено, номер заявки» — не ответ по сути: без
+            // пометки модель считала его нашим ходом и «мяч у клиента» там, где
+            // клиенту ещё никто не ответил.
+            if ($who === 'ОТ НАС' && preg_match(self::RECEIPT_ACK_RE, (string) ($m->body_plain ?: strip_tags((string) $m->body_html)))) {
+                $who = 'ОТ НАС (АВТООТВЕТ о получении заявки — не ответ по сути)';
+            }
             $date = $m->sent_at?->format('d.m.Y H:i') ?? '—';
             $text = $this->cleanSnippet((string) ($m->body_plain ?: $m->body_html));
             if ($text === '') {
