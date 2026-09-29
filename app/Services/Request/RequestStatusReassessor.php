@@ -135,6 +135,83 @@ class RequestStatusReassessor
         return $target;
     }
 
+    /**
+     * Кнопка «⚽ Мяч у клиента»: менеджер решил, что ход за клиентом. Модель
+     * читает последние письма и говорит, чего ждём; статус выбираем с гардами
+     * документов — «КП отправлено» только при распознанном КП, «Счёт
+     * выставлен» только при счёте, иначе «Жду клиента». Отслеживание дальше
+     * штатное: дедлайн внимания считается от входа в статус (2 раб. дня на
+     * ответ, 3 на решение по КП), напоминание клиенту по КП, авто-закрытие.
+     * Модель недоступна — всё равно «Жду клиента»: решение менеджера главнее.
+     *
+     * @return array{status: RequestStatus, what: ?string, warning: ?string, deadline: ?\Illuminate\Support\Carbon}
+     */
+    public function handToClient(Request $request, User $by): array
+    {
+        $decision = null;
+        $transcript = $this->buildTranscript($request);
+        if (trim($transcript) !== '' && config('services.openai.api_key')) {
+            try {
+                $response = $this->openai->chat(
+                    $this->prompt->buildHandover($transcript),
+                    (string) config('services.openai.reassess_model', config('services.openai.outbound_classifier_model', 'gpt-4o-mini')),
+                    ['temperature' => 0, 'max_tokens' => 300, 'response_format' => ['type' => 'json_object']],
+                );
+                $decision = json_decode((string) ($response['content'] ?? ''), true);
+            } catch (\Throwable $e) {
+                Log::warning('RequestStatusReassessor::handToClient: OpenAI failed', ['request_id' => $request->id, 'error' => $e->getMessage()]);
+            }
+        }
+        $decision = is_array($decision) ? $decision : [];
+        $waitingFor = (string) ($decision['waiting_for'] ?? 'answer');
+
+        $target = match (true) {
+            $waitingFor === 'payment' && $this->hasInvoice($request) => RequestStatus::Invoiced,
+            $waitingFor === 'quote_decision' && $this->hasOutboundQuote($request) => RequestStatus::Quoted,
+            default => RequestStatus::AwaitingClientClarification,
+        };
+        $what = trim((string) ($decision['what'] ?? '')) ?: null;
+        $warning = ! empty($decision['client_last_unanswered'])
+            ? trim('Похоже, последнее письмо клиента осталось без ответа'
+                .(! empty($decision['unanswered_quote']) ? ': «'.mb_substr((string) $decision['unanswered_quote'], 0, 100).'»' : '').'.')
+            : null;
+
+        $payload = [
+            'event' => 'manual_ball_client',
+            'comment' => 'Мяч у клиента'.($what ? ': ждём '.$what : '').'.',
+            'payload' => [
+                'waiting_for' => $waitingFor,
+                'what' => $what,
+                'client_last_unanswered' => (bool) ($decision['client_last_unanswered'] ?? false),
+                'reasoning' => mb_substr((string) ($decision['reasoning'] ?? ''), 0, 300),
+                'from' => $request->status->value,
+            ],
+        ];
+
+        if ($request->status === $target) {
+            // Статус уже тот — запускаем отсчёт заново и фиксируем, чего ждём.
+            \App\Models\RequestStateChange::create([
+                'request_id' => $request->id,
+                'from_status' => $target->value,
+                'to_status' => $target->value,
+                'by_user_id' => $by->id,
+                'event' => $payload['event'],
+                'comment' => $payload['comment'],
+                'payload' => $payload['payload'],
+            ]);
+            app(AttentionService::class)->recompute($request->fresh());
+        } else {
+            $this->stateService->transitionTo($request, $target, $by, $payload);
+        }
+
+        return [
+            'status' => $target,
+            'what' => $what,
+            'warning' => $warning,
+            'deadline' => $request->fresh()?->attention_required_at,
+        ];
+    }
+
     /** Есть ли реально исходящий КП по заявке (для гарда target=quoted). */
     private function hasOutboundQuote(Request $request): bool
     {
@@ -169,10 +246,15 @@ class RequestStatusReassessor
             ->where('related_request_id', $request->id)
             ->whereNull('supplier_inquiry_id')
             ->where('is_draft', false)
-            ->orderBy('sent_at')
-            ->orderBy('id')
+            // ПОСЛЕДНИЕ 24 письма (решает последнее содержательное), в хронологии.
+            // Раньше брались первые 24 — в длинной переписке свежих писем модель
+            // не видела вовсе.
+            ->orderByDesc('sent_at')
+            ->orderByDesc('id')
+            ->limit(24)
             ->get(['id', 'direction', 'subject', 'body_plain', 'body_html', 'sent_at'])
-            ->take(24);
+            ->reverse()
+            ->values();
 
         $lines = [];
         foreach ($messages as $m) {

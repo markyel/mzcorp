@@ -844,6 +844,31 @@
                     ✓ {{ session('status') }}
                 </div>
             @endif
+            {{-- Отказ смены статуса (transitionStatus / «Мяч у клиента») — раньше
+                 addError('status') нигде не выводился, и кнопка молча не работала. --}}
+            @error('status')
+                <div class="ds-card p-2 text-[12px]"
+                     style="background:var(--red-50);border-color:var(--red-300)">
+                    ✕ {{ $message }}
+                </div>
+            @enderror
+            @if($ballWarning)
+                <div class="ds-card p-2 text-[12px]"
+                     style="background:var(--amber-50);border-color:var(--amber-300)">
+                    ⚠ {{ $ballWarning }}
+                </div>
+            @endif
+            {{-- «Мяч у клиента»: чего ждём и когда заявка всплывёт, если клиент промолчит. --}}
+            @if($ball = $this->ballInfo)
+                <div class="ds-card p-2 text-[12px] text-fg-2 flex flex-wrap gap-x-2">
+                    <span>⚽ Ждём от клиента{{ $ball['what'] ? ':' : '' }}</span>
+                    @if($ball['what'])<b class="text-fg-1">{{ $ball['what'] }}</b>@endif
+                    <span class="text-fg-3">· с {{ $ball['since']->format('d.m') }}</span>
+                    @if($req->attention_required_at)
+                        <span class="text-fg-3">· если промолчит, заявка всплывёт {{ $req->attention_required_at->format('d.m') }}</span>
+                    @endif
+                </div>
+            @endif
             @if($autoQuoteNotice)
                 <div class="ds-card p-2 text-[12px]"
                      style="{{ $autoQuoteFailed
@@ -1183,6 +1208,19 @@
                      AI-плашка над action-panel остаётся для случаев когда
                      detector сработал — менеджер может «Применить» одним
                      кликом. Здесь же — ручной путь когда AI молчит. --}}
+
+                {{-- Автомат ошибся: заявка «в работе», а мы ждём клиента. Модель
+                     перечитает последние письма и выберет статус и отслеживание. --}}
+                @if(in_array($req->status, [$RS::Assigned, $RS::InProgress], true))
+                    <button type="button" wire:click="ballToClient"
+                            wire:loading.attr="disabled" wire:target="ballToClient"
+                            class="btn btn-sm"
+                            @disabled(! $canManage)
+                            title="Мы ждём клиента: ответа на вопрос, решения по КП или оплаты. Система перечитает последние письма, поставит нужный статус и будет следить за ответом.">
+                        <span wire:loading.remove wire:target="ballToClient">⚽ Мяч у клиента</span>
+                        <span wire:loading wire:target="ballToClient">⚽ читаю переписку…</span>
+                    </button>
+                @endif
 
                 @if($allow($RS::Quoted) && $req->status !== $RS::Quoted)
                     <button type="button" wire:click="transitionStatus('quoted')"

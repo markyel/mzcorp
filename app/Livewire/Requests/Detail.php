@@ -111,6 +111,9 @@ class Detail extends Component
      */
     public bool $aiBannerHidden = false;
 
+    /** Предупреждение после «Мяч у клиента»: последнее письмо клиента, похоже, без ответа. */
+    public ?string $ballWarning = null;
+
     /** Открыта карточка клиента у адреса в шапке (контрагенты, скидки, статистика). */
     public bool $clientCardOpen = false;
 
@@ -2567,6 +2570,66 @@ class Detail extends Component
         } catch (\DomainException $e) {
             $this->addError('status', $e->getMessage());
         }
+    }
+
+    /**
+     * «⚽ Мяч у клиента»: автомат ошибся, заявка числится «в работе», а мы
+     * ждём клиента. Модель перечитывает последние письма и решает, чего ждём
+     * (ответа на вопрос / решения по КП / оплаты), статус и отслеживание —
+     * по этому. Права — как на смену статуса (владелец, acting, РОП).
+     */
+    /**
+     * Чего ждём от клиента после «Мяч у клиента» — пока заявка в статусе,
+     * в который её перевела кнопка.
+     *
+     * @return array{what: ?string, since: \Illuminate\Support\Carbon}|null
+     */
+    #[Computed]
+    public function ballInfo(): ?array
+    {
+        $last = \App\Models\RequestStateChange::query()
+            ->where('request_id', $this->request->id)
+            ->orderByDesc('id')
+            ->first(['event', 'to_status', 'payload', 'created_at']);
+        if ($last === null || $last->event !== 'manual_ball_client' || $last->to_status !== $this->request->status->value) {
+            return null;
+        }
+
+        return ['what' => $last->payload['what'] ?? null, 'since' => $last->created_at];
+    }
+
+    public function ballToClient(\App\Services\Request\RequestStatusReassessor $reassessor): void
+    {
+        $user = auth()->user();
+        if ($user === null || $user->hasRole(Role::Secretary->value)) {
+            abort(403);
+        }
+        if (! in_array($this->request->status, [RequestStatus::Assigned, RequestStatus::InProgress], true)) {
+            $this->addError('status', 'Кнопка работает из статусов «Назначена» и «В работе».');
+
+            return;
+        }
+
+        try {
+            $res = $reassessor->handToClient($this->request->fresh(), $user);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            $this->addError('status', $e->getMessage() ?: 'Нет прав менять статус этой заявки.');
+
+            return;
+        } catch (\DomainException $e) {
+            $this->addError('status', $e->getMessage());
+
+            return;
+        }
+
+        $this->reloadRequest();
+        $message = 'Мяч у клиента — «'.$res['status']->label().'»'
+            .($res['what'] ? '. Ждём: '.$res['what'] : '')
+            .($res['deadline'] ? '. Если клиент промолчит, заявка всплывёт '.$res['deadline']->format('d.m') : '')
+            .'.';
+        // Тосты в интерфейсе никто не слушает — результат строкой над карточкой.
+        session()->flash('status', $message);
+        $this->ballWarning = $res['warning'] ? $res['warning'].' Проверьте переписку — возможно, ход за нами.' : null;
     }
 
     // markAsSupplierInquiry удалён: пометка «запрос поставщику» теперь идёт
