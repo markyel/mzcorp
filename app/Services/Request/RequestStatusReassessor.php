@@ -174,9 +174,12 @@ class RequestStatusReassessor
             default => RequestStatus::AwaitingClientClarification,
         };
         $what = trim((string) ($decision['what'] ?? '')) ?: null;
-        $warning = ! empty($decision['client_last_unanswered'])
-            ? trim('Похоже, последнее письмо клиента осталось без ответа'
-                .(! empty($decision['unanswered_quote']) ? ': «'.mb_substr((string) $decision['unanswered_quote'], 0, 100).'»' : '').'.')
+        // Чьё последнее письмо — видно по данным, модели тут не доверяем: в
+        // холостом прогоне она пропускала неотвеченные письма клиента и
+        // принимала за них наш же вопрос.
+        $unanswered = $this->lastLetterFromClient($request);
+        $warning = $unanswered !== null
+            ? 'Последнее письмо — от клиента, ответа на него нет: «'.$unanswered.'».'
             : null;
 
         $payload = [
@@ -185,7 +188,7 @@ class RequestStatusReassessor
             'payload' => [
                 'waiting_for' => $waitingFor,
                 'what' => $what,
-                'client_last_unanswered' => (bool) ($decision['client_last_unanswered'] ?? false),
+                'client_last_unanswered' => $unanswered !== null,
                 'reasoning' => mb_substr((string) ($decision['reasoning'] ?? ''), 0, 300),
                 'from' => $request->status->value,
             ],
@@ -213,6 +216,37 @@ class RequestStatusReassessor
             'warning' => $warning,
             'deadline' => $request->fresh()?->attention_required_at,
         ];
+    }
+
+    /**
+     * Начало последнего содержательного письма, если оно от клиента (наш
+     * автоответ о получении заявки не в счёт). null — последнее слово за нами.
+     */
+    private function lastLetterFromClient(Request $request): ?string
+    {
+        $messages = EmailMessage::query()
+            ->where('related_request_id', $request->id)
+            ->whereNull('supplier_inquiry_id')
+            ->where('is_draft', false)
+            ->orderByDesc('sent_at')
+            ->orderByDesc('id')
+            ->limit(10)
+            ->get(['id', 'direction', 'body_plain', 'body_html']);
+
+        foreach ($messages as $m) {
+            $body = (string) ($m->body_plain ?: strip_tags((string) $m->body_html));
+            if ($m->direction === \App\Enums\MailDirection::Outbound) {
+                if (preg_match(self::RECEIPT_ACK_RE, $body)) {
+                    continue;
+                }
+
+                return null;
+            }
+
+            return mb_strimwidth($this->cleanSnippet($body), 0, 110, '…');
+        }
+
+        return null;
     }
 
     /** Есть ли реально исходящий КП по заявке (для гарда target=quoted). */
