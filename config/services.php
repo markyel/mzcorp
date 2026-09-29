@@ -782,6 +782,8 @@ return [
         // чем на этот допуск (доля). Проверяем только свежие документы.
         'cost_plus_guard_tolerance' => (float) env('PRICING_COST_PLUS_GUARD_TOLERANCE', 0.02),
         'cost_plus_guard_max_age_days' => (int) env('PRICING_COST_PLUS_GUARD_MAX_AGE_DAYS', 3),
+        // Разница по документу меньше этой суммы (₽) — не пишем: 16 ₽ на строке это шум.
+        'cost_plus_guard_min_rub' => (float) env('PRICING_COST_PLUS_GUARD_MIN_RUB', 500),
     ],
 
     /*

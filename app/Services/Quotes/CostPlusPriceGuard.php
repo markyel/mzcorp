@@ -67,7 +67,9 @@ class CostPlusPriceGuard
             }
         }
 
-        if ($over === [] || ! $notify || ! $this->fresh($quote) || $this->alreadyNotified($quote)) {
+        $overSum = array_sum(array_map(fn ($l) => ($l['price'] - $l['expected']) * $l['qty'], $over));
+        $tooSmall = $overSum < (float) config('services.pricing.cost_plus_guard_min_rub', 500);
+        if ($over === [] || $tooSmall || ! $notify || ! $this->fresh($quote) || $this->alreadyNotified($quote)) {
             return $over;
         }
 
