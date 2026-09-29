@@ -78,6 +78,9 @@ return [
         // дешёвой моделью, отмеченное перепроверяет сильная — мини шумит.
         'tone_audit_model' => env('OPENAI_TONE_AUDIT_MODEL', 'gpt-4o-mini'),
         'tone_audit_verify_model' => env('OPENAI_TONE_AUDIT_VERIFY_MODEL', 'gpt-4o'),
+        // Заказчики, переписку с которыми проверка не смотрит (решение 29.09:
+        // Liftway — маркетплейс-партнёр, а не клиент в обычном смысле).
+        'tone_audit_excluded_domains' => array_values(array_filter(array_map('trim', explode(',', (string) env('OPENAI_TONE_AUDIT_EXCLUDED_DOMAINS', 'liftway.store,liftway.ru'))))),
         // Парсинг позиций заявки (RequestItemParsingService).
         // parsing_model — текстовый чат, vision_model — image_url-чат с detail:high.
         'parsing_model' => env('OPENAI_PARSING_MODEL', 'gpt-4.1'),

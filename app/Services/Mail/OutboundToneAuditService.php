@@ -166,6 +166,8 @@ class OutboundToneAuditService
         $supplierEmails = Supplier::query()->whereNotNull('email')->pluck('email')->map(fn ($e) => mb_strtolower(trim((string) $e)))->flip();
         $supplierDomains = Supplier::query()->whereNotNull('domain')->pluck('domain')->map(fn ($d) => mb_strtolower(trim((string) $d)))->filter()->flip();
 
+        $excluded = array_map('mb_strtolower', (array) config('services.openai.tone_audit_excluded_domains', []));
+
         $out = collect();
         EmailMessage::query()
             ->where('direction', MailDirection::Outbound->value)
@@ -180,7 +182,7 @@ class OutboundToneAuditService
                 ->whereColumn('rq.id', 'email_messages.related_request_id')
                 ->whereIn('rq.status', [\App\Enums\RequestStatus::ClosedWon->value, \App\Enums\RequestStatus::Paid->value]))
             ->orderBy('id')
-            ->chunkById(500, function ($chunk) use (&$out, $internal, $users, $supplierEmails, $supplierDomains, $limit) {
+            ->chunkById(500, function ($chunk) use (&$out, $internal, $users, $supplierEmails, $supplierDomains, $limit, $excluded) {
                 // Заказчик заявки — клиент, даже если его адрес есть и в
                 // справочнике поставщиков: Liftway и ему подобные и покупают у
                 // нас, и продают нам (исходный случай M-2026-17474 так и выпал).
@@ -198,6 +200,9 @@ class OutboundToneAuditService
                         continue;
                     }
                     $client = (string) ($clients[$m->related_request_id] ?? '');
+                    if (in_array((string) substr((string) strrchr($client, '@'), 1), $excluded, true)) {
+                        continue;
+                    }
                     $external = array_filter(
                         array_map(fn ($r) => mb_strtolower(trim((string) ($r['email'] ?? ''))), array_merge((array) $m->to_recipients, (array) $m->cc_recipients)),
                         function (string $e) use ($internal, $supplierEmails, $supplierDomains, $client) {
