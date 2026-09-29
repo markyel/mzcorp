@@ -343,13 +343,18 @@ class InboundIntentClassifier
     /**
      * «Бонусную карту прикрепите», «примените скидку», «поменяйте реквизиты /
      * плательщика», «перевыставьте счёт» — правка КП/счёта, а не новая позиция.
+     * Если в письме названы артикулы или количества («М09436 - 13 шт. Реквизиты
+     * Заказчика: …», M-2026-3461) — это дозаказ, гард не срабатывает.
      */
     public static function isDocumentAdjustmentText(string $text): bool
     {
-        return (bool) preg_match(
+        $adjusts = preg_match(
             '~(бонусн|скидочн|дисконтн)\w*\s+карт|карт\w*\s+(клиента|лояльности|покупателя)|скидк|реквизит|плательщик|перевыстав|переделайте\s+сч|исправьте\s+сч|пересчитайте\s+сч~iu',
             $text,
         );
+        $namesPositions = preg_match('~\b[MМ]\d{4,6}\b|\d+\s*(шт|штук|компл|пар)\b~iu', $text);
+
+        return $adjusts && ! $namesPositions;
     }
 
     private function looksLikeDocumentAdjustment(EmailMessage $message): bool
