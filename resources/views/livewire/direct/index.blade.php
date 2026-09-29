@@ -276,11 +276,16 @@
                 @endphp
                 <div class="mt-5">
                     <div class="flex flex-wrap items-baseline gap-2 mb-2">
-                        <h4 class="text-[13px] font-semibold text-fg-1">Наши фразы</h4>
+                        <h4 class="text-[13px] font-semibold text-fg-1">{{ $phraseScope === 'agency' ? 'Фразы агентства' : 'Наши фразы' }}</h4>
                         <span class="text-[12px] text-fg-3">
                             {{ $phraseMode === 'all' ? 'все фразы по визитам' : 'фраза и запрос, после которых было обращение или клик по контактам' }}
                         </span>
                         <span class="flex-1"></span>
+                        <button type="button" wire:click="setPhraseScope('ours')"
+                                class="btn btn-xs {{ $phraseScope !== 'agency' ? 'btn-primary' : '' }}">Наши</button>
+                        <button type="button" wire:click="setPhraseScope('agency')"
+                                class="btn btn-xs {{ $phraseScope === 'agency' ? 'btn-primary' : '' }}">Агентство</button>
+                        <span class="w-2"></span>
                         <button type="button" wire:click="setPhraseMode('leads')"
                                 class="btn btn-xs {{ $phraseMode !== 'all' ? 'btn-primary' : '' }}">С результатом</button>
                         <button type="button" wire:click="setPhraseMode('all')"
@@ -308,7 +313,7 @@
                                 </thead>
                                 <tbody>
                                     @foreach($ph as $i => $r)
-                                        <tr class="border-t border-border-subtle" wire:key="mkp-{{ $phraseMode }}-{{ $i }}">
+                                        <tr class="border-t border-border-subtle" wire:key="mkp-{{ $phraseScope }}-{{ $phraseMode }}-{{ $i }}">
                                             <td class="py-1.5 pr-3 max-w-[160px] truncate text-fg-2" title="#{{ $r['campaign_id'] }}">{{ $campNames[(string) $r['campaign_id']] ?? '#'.$r['campaign_id'] }}</td>
                                             <td class="py-1.5 px-2 max-w-[260px] truncate {{ $r['condition'] === 'Автотаргетинг' ? 'text-fg-3 italic' : 'text-fg-1' }}" title="{{ $r['condition'] }}">{{ $r['condition'] }}</td>
                                             @if($phraseMode !== 'all')

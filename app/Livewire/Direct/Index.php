@@ -61,6 +61,9 @@ class Index extends Component
     /** Разрез по фразам: 'leads' — фразы и запросы с обращениями, 'all' — все фразы по визитам. */
     public string $phraseMode = 'leads';
 
+    /** Чьи фразы: 'ours' — наш аккаунт Директа, 'agency' — кампании агентства (тот же счётчик Метрики). */
+    public string $phraseScope = 'ours';
+
     /** Сколько позиций пишем за одно нажатие — чтобы запрос не висел минутами. */
     public const BULK_LIMIT = 25;
 
@@ -572,10 +575,16 @@ class Index extends Component
     #[Computed]
     public function metrikaPhrases(): Collection
     {
-        $ours = $this->metrika['campaigns']->where('ours', true)->pluck('id')->map(fn ($v) => (int) $v)->all();
+        $ids = $this->metrika['campaigns']->where('ours', $this->phraseScope !== 'agency')->pluck('id')->map(fn ($v) => (int) $v)->all();
 
         return app(\App\Services\Metrika\MetrikaStatsService::class)
-            ->phrases($this->metrika['days'], $ours, $this->phraseMode !== 'all');
+            ->phrases($this->metrika['days'], $ids, $this->phraseMode !== 'all');
+    }
+
+    public function setPhraseScope(string $scope): void
+    {
+        $this->phraseScope = $scope === 'agency' ? 'agency' : 'ours';
+        unset($this->metrikaPhrases);
     }
 
     public function setPhraseMode(string $mode): void
