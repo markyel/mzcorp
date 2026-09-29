@@ -1714,6 +1714,17 @@
                                             <span class="chip chip-ok"><span class="dot"></span>{{ $catLabel }}</span>
                                         @endif
                                     </div>
+                                    {{-- Тема письма: клиенты пишут в ней важное («M27099 - 5шт»,
+                                         M-2026-17605 — в тексте количества нет, парсер взял его из темы). --}}
+                                    <div class="px-[18px] pb-1.5 pl-[56px] -mt-1 text-[12.5px] text-fg-2 truncate"
+                                         title="{{ $msg->subject }}">
+                                        <span class="text-fg-3">Тема:</span>
+                                        @if(trim((string) $msg->subject) !== '')
+                                            <span class="font-medium text-fg-1">{{ $msg->subject }}</span>
+                                        @else
+                                            <span class="text-fg-4">(без темы)</span>
+                                        @endif
+                                    </div>
                                     <div class="px-[18px] pb-3.5 pl-[56px] text-[13px] leading-[1.55] text-fg-1">
                                         @php $html = $this->bodyHtmlFor($msg); @endphp
                                         @if($html)
