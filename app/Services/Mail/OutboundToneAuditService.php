@@ -40,7 +40,7 @@ class OutboundToneAuditService
         .'|закрыта\. причина:|отправили вам уточняющие вопросы по заявке~iu';
 
     /** Кроме названия приложенного КП или счёта в письме ничего нет. */
-    private const ATTACHMENT_ONLY_RE = '~^(предложение|сч[её]т)\s+мз-\S+\s+от\s+\S+$~iu';
+    private const ATTACHMENT_ONLY_RE = '~^((предложение|сч[её]т)\s+мз-\S+\s+от\s+\S+|(кп|сч[её]т)?\s*№?\s*\d{4,7})$~iu';
 
     /** Письма поставщикам (RFQ) — не клиентская переписка. */
     private const RFQ_SUBJECT_RE = '~(^|\s)(request|req\.?|price request)\s+m-\d{4}-\d+|\[rfq|запрос цены~iu';
@@ -239,6 +239,8 @@ class OutboundToneAuditService
         // Подпись, если removeSignature её не узнал, и всё, что ниже.
         $text = preg_split('~^\s*(--\s*$|с уважением|with best regards|best regards)~miu', $text)[0] ?? $text;
         $text = preg_replace('~^\s*№ заявки:.*$~mu', '', $text) ?? $text;
+        // Строка ЭДО — хвост подписи, который removeSignature не узнаёт.
+        $text = preg_replace('~^.*идентификатор участника эдо.*$~miu', '', $text) ?? $text;
         $text = str_replace('**', '', $text);
         $text = preg_replace("~\n{3,}~u", "\n\n", $text) ?? $text;
 
