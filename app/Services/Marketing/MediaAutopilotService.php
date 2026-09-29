@@ -34,6 +34,7 @@ class MediaAutopilotService
     public function __construct(
         private readonly MediaMaterialService $materials,
         private readonly MediaPublisherService $publisher,
+        private readonly \App\Services\Calendar\RussianWorkingDayService $calendar,
     ) {}
 
     /**
@@ -45,10 +46,31 @@ class MediaAutopilotService
         $published = 0;
         $skipped = [];
 
-        $topics = MediaTopic::query()->active()->whereNotNull('cadence_days')->get()
-            ->filter(fn (MediaTopic $t) => $t->isDue());
+        // В выходные и праздники не публикуем — выпуски растянуты на рабочую неделю.
+        if (! $this->calendar->isBusinessDay(now())) {
+            $skipped[] = 'нерабочий день — выпуски ждут ближайшего рабочего';
+            $this->remember($publish, 0, 0, $skipped);
+
+            return ['drafted' => 0, 'published' => 0, 'skipped' => $skipped];
+        }
+
+        // Одна тема в день (config): сначала тема своего дня недели, потом
+        // самая просроченная. Остальные ждут следующего рабочего дня — раньше
+        // все созревшие темы уходили одним прогоном (29.09: три поста подряд).
+        $topics = self::queueFor(
+            MediaTopic::query()->active()->whereNotNull('cadence_days')->get()->filter(fn (MediaTopic $t) => $t->isDue()),
+            now(),
+        );
+        $perDay = max(1, (int) config('services.marketing.autopilot_topics_per_day', 1));
+        $taken = 0;
 
         foreach ($topics as $topic) {
+            if ($taken >= $perDay) {
+                $skipped[] = $topic->title.': перенесено на следующий рабочий день — в день выходит '.$perDay.' '.($perDay === 1 ? 'тема' : 'темы');
+
+                continue;
+            }
+            $draftedBefore = $drafted;
             $channels = $this->channelsFor($topic);
             if ($channels->isEmpty()) {
                 // Молча ничего не делать — худший вариант: тема «горит» в разделе,
@@ -99,6 +121,12 @@ class MediaAutopilotService
                     $skipped[] = $topic->title.' → '.$channel->name.': '.$out['message'];
                 }
             }
+
+            // Слот дня занимает тема, по которой что-то сделано; тема, чьи
+            // черновики ещё ждут человека, место следующей не отнимает.
+            if ($drafted > $draftedBefore) {
+                $taken++;
+            }
         }
 
         Log::info('MediaAutopilot: run finished', [
@@ -107,8 +135,19 @@ class MediaAutopilotService
             'skipped' => count($skipped),
         ]);
 
-        // Итог прогона показываем в разделе: без него «почему сегодня ничего
-        // не вышло» можно было узнать только из логов сервера.
+        $this->remember($publish, $drafted, $published, $skipped);
+
+        return ['drafted' => $drafted, 'published' => $published, 'skipped' => $skipped];
+    }
+
+    /**
+     * Итог прогона показываем в разделе: без него «почему сегодня ничего
+     * не вышло» можно было узнать только из логов сервера.
+     *
+     * @param  list<string>  $skipped
+     */
+    private function remember(bool $publish, int $drafted, int $published, array $skipped): void
+    {
         Cache::put(self::LAST_RUN_KEY, [
             'at' => now()->toIso8601String(),
             'publish' => $publish,
@@ -116,8 +155,23 @@ class MediaAutopilotService
             'published' => $published,
             'skipped' => array_values(array_unique($skipped)),
         ], now()->addDays(30));
+    }
 
-        return ['drafted' => $drafted, 'published' => $published, 'skipped' => $skipped];
+    /**
+     * Порядок созревших тем на день: тема своего дня недели первой, дальше
+     * самая просроченная, при равенстве — по названию.
+     *
+     * @param  Collection<int, MediaTopic>  $topics
+     * @param  array<int, Carbon>  $dueById  срок темы, если он отличается от next_due_on (прогноз)
+     * @return Collection<int, MediaTopic>
+     */
+    public static function queueFor(Collection $topics, Carbon $day, array $dueById = []): Collection
+    {
+        return $topics->sortBy(fn (MediaTopic $t) => [
+            (int) $t->publish_weekday === $day->isoWeekday() ? 0 : 1,
+            ($dueById[$t->id] ?? $t->next_due_on)?->format('Y-m-d') ?? '9999',
+            $t->title,
+        ])->values();
     }
 
     /** @return array{at: string, publish: bool, drafted: int, published: int, skipped: list<string>}|null */
@@ -150,50 +204,54 @@ class MediaAutopilotService
         [$hour, $minute] = array_map('intval', explode(':', self::runAt()) + [1 => 0]);
         $todayRun = now()->setTime($hour, $minute);
         // Сегодняшний прогон уже прошёл — ближайший завтра.
-        $firstRunDay = now()->gte($todayRun) ? now()->addDay()->startOfDay() : now()->startOfDay();
+        $day = now()->gte($todayRun) ? now()->addDay()->startOfDay() : now()->startOfDay();
         $until = now()->startOfDay()->addDays($days);
+        $perDay = max(1, (int) config('services.marketing.autopilot_topics_per_day', 1));
 
         $mirrors = MediaChannel::query()->active()->whereNotNull('mirror_of_channel_id')->get()
             ->groupBy('mirror_of_channel_id');
         $dataDriven = app(MediaDataService::class);
 
-        $out = [];
-        $topics = MediaTopic::query()->active()->whereNotNull('cadence_days')->whereNotNull('next_due_on')->get();
-        foreach ($topics as $topic) {
-            $channels = $this->channelsFor($topic);
-            $due = $topic->next_due_on->copy()->startOfDay();
-            $date = $due->lt($firstRunDay) ? $firstRunDay->copy() : $due;
-            $overdueSince = $due->lt($date) ? $due : null;
-            $first = true;
+        $topics = MediaTopic::query()->active()->whereNotNull('cadence_days')->whereNotNull('next_due_on')->get()->keyBy('id');
+        $channels = $topics->map(fn (MediaTopic $t) => $this->channelsFor($t));
+        // Срок каждой темы по ходу симуляции; первый выпуск — с проверкой препятствий.
+        $due = $topics->map(fn (MediaTopic $t) => $t->next_due_on->copy()->startOfDay())->all();
+        $first = $topics->map(fn () => true)->all();
 
-            while ($date->lte($until)) {
+        // Та же очередь, что у run(): рабочие дни, N тем в день, своя тема
+        // дня первой, потом самая просроченная.
+        $out = [];
+        for (; $day->lte($until); $day = $day->copy()->addDay()) {
+            if (! $this->calendar->isBusinessDay($day)) {
+                continue;
+            }
+            $ready = $topics->filter(fn (MediaTopic $t) => $due[$t->id]->lte($day));
+            foreach (self::queueFor($ready, $day, $due)->take($perDay) as $topic) {
                 $entries = [];
-                foreach ($channels as $channel) {
+                foreach ($channels[$topic->id] as $channel) {
                     $entries[] = [
                         'channel' => $channel,
                         'mode' => $this->modeFor($channel),
                         'mirrors' => ($mirrors[$channel->id] ?? collect())->pluck('name')->all(),
-                        'blocker' => $first ? $this->blockerFor($topic, $channel) : null,
+                        'blocker' => $first[$topic->id] ? $this->blockerFor($topic, $channel) : null,
                     ];
                 }
 
                 $out[] = [
-                    'date' => $date->copy(),
+                    'date' => $day->copy(),
                     'topic' => $topic,
-                    'overdue_since' => $first ? $overdueSince : null,
+                    'overdue_since' => $due[$topic->id]->lt($day) ? $due[$topic->id]->copy() : null,
                     'data_driven' => $dataDriven->isDataDriven($topic),
-                    'note' => $channels->isEmpty()
+                    'note' => $channels[$topic->id]->isEmpty()
                         ? 'не выбран канал — сделайте первый материал руками или включите автопубликацию в канале'
                         : null,
                     'entries' => $entries,
                 ];
 
-                $first = false;
-                $date = $topic->alignToWeekday($date->copy()->addDays(max(1, (int) $topic->cadence_days)));
+                $first[$topic->id] = false;
+                $due[$topic->id] = $topic->nextDueAfter($day, $due[$topic->id]);
             }
         }
-
-        usort($out, fn (array $a, array $b) => [$a['date'], $a['topic']->title] <=> [$b['date'], $b['topic']->title]);
 
         return $out;
     }

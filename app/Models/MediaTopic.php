@@ -87,8 +87,32 @@ class MediaTopic extends Model
      */
     public function nextDueAfterPublish(): Carbon
     {
-        $base = $this->next_due_on && $this->next_due_on->isFuture() ? $this->next_due_on : now();
-        $next = $base->copy()->addDays(max(1, (int) $this->cadence_days));
+        return $this->nextDueAfter(now(), $this->next_due_on);
+    }
+
+    /**
+     * Срок после выпуска в день $day для срока $due. Опоздание шагаем от
+     * прошлого срока, а не от $day: раньше «сегодня + неделя» с подтяжкой к
+     * своему дню недели уводило понедельничную тему, вышедшую во вторник, на
+     * 12.10 вместо 05.10 — тема пропускала неделю.
+     */
+    public function nextDueAfter(Carbon $day, ?Carbon $due): Carbon
+    {
+        $step = max(1, (int) $this->cadence_days);
+        $day = $day->copy()->startOfDay();
+        if ($due === null) {
+            return $this->alignToWeekday($day->addDays($step));
+        }
+
+        $next = $due->copy()->startOfDay();
+        if ($next->gt($day)) {
+            // Выпустили раньше срока — закрываем этот срок, следующий через шаг.
+            $next->addDays($step);
+        } else {
+            while ($next->lte($day)) {
+                $next->addDays($step);
+            }
+        }
 
         return $this->alignToWeekday($next);
     }
