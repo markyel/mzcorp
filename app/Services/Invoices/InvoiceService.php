@@ -97,6 +97,32 @@ class InvoiceService
         return $this->requestBuyerInn($request, $inn) && ($other === null || ! $this->requestBuyerInn($other, $inn));
     }
 
+    /**
+     * Сделка ожила: счёт лежит в заявке, закрытой отказом, и тот же клиент
+     * получил его заново — позже, уже в новой заявке. M-2026-16626: по счёту
+     * 9254 заказчик отказался 11.09 (M-2026-14409 закрыта), 21.09 «заказчик
+     * опять вернулся», менеджер переотправил 9254 «под заказ» — защита от
+     * дублей оставила счёт в закрытой заявке, а новая неделю висела «Назначена».
+     */
+    private function shouldReviveDuplicateHere(\App\Models\OutboundQuote $quote, Request $request, Invoice $dup): bool
+    {
+        if (! in_array($dup->status, [InvoiceStatus::Pending, InvoiceStatus::Expired], true)) {
+            return false;
+        }
+        $other = Request::query()->find($dup->request_id);
+        if ($other === null || $other->status !== RequestStatus::ClosedLost) {
+            return false;
+        }
+        $email = mb_strtolower(trim((string) $request->client_email));
+        if ($email === '' || $email !== mb_strtolower(trim((string) $other->client_email))) {
+            return false;
+        }
+        $sentHere = EmailMessage::withHistory()->whereKey($quote->email_message_id)->value('sent_at');
+        $sentThere = EmailMessage::withHistory()->whereKey($dup->email_message_id)->value('sent_at');
+
+        return $sentHere !== null && $sentThere !== null && Carbon::parse($sentHere)->gt(Carbon::parse($sentThere));
+    }
+
     /** Клиент заявки — эта организация: сама заявка к ней привязана или адрес клиента связан с ней. */
     private function requestBuyerInn(Request $request, string $inn): bool
     {
@@ -236,15 +262,42 @@ class InvoiceService
         return ['moved_to' => $movedTo, 'cancelled' => $movedTo === null];
     }
 
-    /** Перенести счёт в эту заявку, с записью в истории обеих. */
-    private function moveDuplicateHere(Invoice $dup, \App\Models\OutboundQuote $quote, Request $request, string $number): Invoice
+    /**
+     * Перенести счёт в эту заявку, с записью в истории обеих.
+     * $revived — сделка ожила (shouldReviveDuplicateHere): счёт снова
+     * действующий, дата и срок — по переотправленному документу.
+     */
+    private function moveDuplicateHere(Invoice $dup, \App\Models\OutboundQuote $quote, Request $request, string $number, bool $revived = false): Invoice
     {
         $fromRequest = Request::query()->find($dup->request_id);
         $author = $request->assignedUser ?? \App\Models\User::role(\App\Enums\Role::Admin->value)->first();
         $inn = (string) (($quote->payload ?? [])['requisites_buyer_inn'] ?? '');
+        $outComment = $revived
+            ? sprintf('Счёт №%s переотправлен тому же клиенту в заявке %s — сделка ожила, счёт перенесён туда.', $number, $request->internal_code)
+            : sprintf('Счёт №%s перенесён в заявку %s: покупатель по реквизитам (ИНН %s) — клиент той заявки.', $number, $request->internal_code, $inn);
+        $inComment = $revived
+            ? sprintf('Счёт №%s из закрытой отказом заявки %s переотправлен клиенту — сделка ожила.', $number, $fromRequest?->internal_code ?? '—')
+            : sprintf('Счёт №%s перенесён из заявки %s: покупатель по реквизитам (ИНН %s) — клиент этой заявки.', $number, $fromRequest?->internal_code ?? '—', $inn);
 
-        DB::transaction(function () use ($dup, $quote, $request, $fromRequest, $number, $inn, $author) {
-            $dup->forceFill(['request_id' => $request->id, 'email_message_id' => $quote->email_message_id])->save();
+        DB::transaction(function () use ($dup, $quote, $request, $fromRequest, $number, $author, $revived, $outComment, $inComment) {
+            $fill = ['request_id' => $request->id, 'email_message_id' => $quote->email_message_id];
+            if ($revived) {
+                $issuedAt = $quote->document_date ? Carbon::parse((string) $quote->document_date) : now();
+                [$expiresAt, $validityDays] = self::computeExpiry(
+                    $this->calendar,
+                    $issuedAt,
+                    $quote->valid_until,
+                    (int) config('services.invoices.default_validity_business_days', 5),
+                );
+                $fill += [
+                    'status' => InvoiceStatus::Pending,
+                    'issued_at' => $issuedAt,
+                    'expires_at' => $expiresAt,
+                    'validity_days' => $validityDays,
+                    'amount_snapshot' => $quote->total_amount !== null ? (float) $quote->total_amount : $dup->amount_snapshot,
+                ];
+            }
+            $dup->forceFill($fill)->save();
 
             if ($fromRequest) {
                 \App\Models\RequestStateChange::create([
@@ -253,7 +306,7 @@ class InvoiceService
                     'to_status' => $fromRequest->status->value,
                     'by_user_id' => null,
                     'event' => 'invoice_moved_out',
-                    'comment' => sprintf('Счёт №%s перенесён в заявку %s: покупатель по реквизитам (ИНН %s) — клиент той заявки.', $number, $request->internal_code, $inn),
+                    'comment' => $outComment,
                     'payload' => ['invoice_id' => $dup->id, 'to_request_id' => $request->id],
                 ]);
             }
@@ -261,7 +314,7 @@ class InvoiceService
             try {
                 $this->stateService->transitionTo($request, RequestStatus::Invoiced, $author, [
                     'event' => 'invoice_auto_issued',
-                    'comment' => sprintf('Счёт №%s перенесён из заявки %s: покупатель по реквизитам (ИНН %s) — клиент этой заявки.', $number, $fromRequest?->internal_code ?? '—', $inn),
+                    'comment' => $inComment,
                     'payload' => ['invoice_id' => $dup->id, 'invoice_number' => $number, 'outbound_quote_id' => $quote->id, 'moved_from_request_id' => $fromRequest?->id],
                 ], systemTransition: true);
             } catch (\Throwable $e) {
@@ -459,6 +512,9 @@ class InvoiceService
         // счёт переезжает сюда. Оплаченный не трогаем.
         if ($dup !== null && $this->shouldMoveDuplicateHere($quote, $request, $dup)) {
             return $this->moveDuplicateHere($dup, $quote, $request, $number);
+        }
+        if ($dup !== null && $this->shouldReviveDuplicateHere($quote, $request, $dup)) {
+            return $this->moveDuplicateHere($dup, $quote, $request, $number, revived: true);
         }
 
         if ($dup !== null) {
