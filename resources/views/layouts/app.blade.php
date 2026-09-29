@@ -73,6 +73,10 @@
             @endauth
         </div>
 
+        {{-- Глобальные тосты: ловят window-событие `toast` из
+             $this->dispatch('toast', message: …, type: …) любого компонента. --}}
+        <x-toast-stack />
+
         @auth
             <script>
                 // Триггер «связь с создателем»: собирает на клике URL/route/viewport/UA

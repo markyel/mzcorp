@@ -337,3 +337,81 @@
     .doc-content h3:hover .doc-anchor,
     .doc-content h4:hover .doc-anchor { opacity: 1; }
 }
+
+/* Глобальные тосты — resources/views/components/toast-stack.blade.php.
+   Вне @layer намеренно: модификаторы (.toast-success и т.п.) собираются в
+   Alpine из type ('toast-' + t.type), JIT их в шаблоне не видит и из
+   @layer components вырезал бы. Белая поверхность + статусный акцент
+   (полоса и иконка), status-цвета не заливают фон — см. design/README.md. */
+.toast-stack {
+    position: fixed;
+    right: var(--s-4);
+    bottom: var(--s-4);
+    z-index: 10000; /* выше модалок (9999): тост из модалки должен быть виден */
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--s-2);
+    width: min(380px, calc(100vw - 2 * var(--s-4)));
+    pointer-events: none;
+}
+.toast {
+    --toast-accent: var(--status-info-fg);
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 8px 10px 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--toast-accent);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-md);
+    font: var(--fw-regular) var(--fs-base)/var(--lh-snug) var(--font-sans);
+    color: var(--fg-1);
+}
+.toast-success { --toast-accent: var(--status-ok-fg); }
+.toast-error   { --toast-accent: var(--status-overdue-fg); }
+.toast-warning { --toast-accent: var(--status-attn-fg); }
+.toast-info    { --toast-accent: var(--status-info-fg); }
+.toast-icon {
+    flex-shrink: 0;
+    display: inline-flex;
+    width: 16px;
+    height: 16px;
+    margin-top: 1px;
+    color: var(--toast-accent);
+}
+.toast-icon svg { width: 16px; height: 16px; }
+.toast-message {
+    flex: 1;
+    min-width: 0;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+}
+.toast-close {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    margin: -1px 0 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--fg-3);
+    cursor: pointer;
+    transition: background var(--dur-micro) var(--ease), color var(--dur-micro) var(--ease);
+}
+.toast-close:hover { background: var(--bg-hover); color: var(--fg-1); }
+.toast-close:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+.toast-close svg { width: 14px; height: 14px; }
+/* 120ms fade + 4px slide (design/README.md → Motion). */
+.toast-anim { transition: opacity var(--dur-micro) var(--ease), transform var(--dur-micro) var(--ease); }
+.toast-anim-from { opacity: 0; transform: translateY(4px); }
+@media (prefers-reduced-motion: reduce) {
+    .toast-anim { transition: none; }
+}
