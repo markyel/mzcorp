@@ -57,6 +57,9 @@ class AutoQuoteComparisonService
 
     public const KIND_PRICE = 'price';
 
+    /** Цены совпали, отличается количество (клиент просил 5, менеджер дал 1). */
+    public const KIND_QTY = 'qty';
+
     public const KIND_NOMENCLATURE = 'nomenclature';
 
     public const KIND_COMPOSITION = 'composition';
@@ -67,6 +70,7 @@ class AutoQuoteComparisonService
         self::KIND_DELIVERY => 'добавлена доставка',
         self::KIND_SAME => 'совпало',
         self::KIND_PRICE => 'другая цена',
+        self::KIND_QTY => 'другое количество',
         self::KIND_NOMENCLATURE => 'другая номенклатура',
         self::KIND_COMPOSITION => 'другой состав',
     ];
@@ -242,10 +246,18 @@ class AutoQuoteComparisonService
             // Тот же размер, но другие артикулы — подобрана замена.
             return self::KIND_NOMENCLATURE;
         }
+        // Цена важнее количества: при обоих расхождениях — «другая цена».
+        // Раньше и одно количество называлось «другой ценой» (M-2026-17605:
+        // 1 111,49 ₽ и там и там, но 5 шт у автомата против 1 у менеджера).
+        $qty = false;
         foreach ($goods as $row) {
-            if ($row['price_differs'] || $row['qty_differs']) {
+            if ($row['price_differs']) {
                 return self::KIND_PRICE;
             }
+            $qty = $qty || $row['qty_differs'];
+        }
+        if ($qty) {
+            return self::KIND_QTY;
         }
 
         return $service !== [] ? self::KIND_DELIVERY : self::KIND_SAME;

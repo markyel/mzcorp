@@ -6,7 +6,7 @@
     $labels = \App\Services\Quotes\AutoQuoteComparisonService::LABELS;
     $kindStyle = fn ($k) => match ($k) {
         'same', 'delivery' => 'background:var(--emerald-50);color:var(--emerald-700)',
-        'price', 'unparsed' => 'background:var(--amber-50);color:var(--amber-800)',
+        'price', 'qty', 'unparsed' => 'background:var(--amber-50);color:var(--amber-800)',
         'nomenclature', 'composition' => 'background:var(--red-50);color:var(--red-700)',
         default => 'background:var(--neutral-100);color:var(--fg-3)',
     };

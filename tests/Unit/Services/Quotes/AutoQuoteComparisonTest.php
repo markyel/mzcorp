@@ -51,10 +51,38 @@ class AutoQuoteComparisonTest extends TestCase
     public function test_labels_cover_every_kind(): void
     {
         // Подпись под чипом берётся по ключу — пропуск означает пустой чип.
-        foreach ([Cmp::KIND_NONE, Cmp::KIND_UNPARSED, Cmp::KIND_DELIVERY, Cmp::KIND_SAME, Cmp::KIND_PRICE, Cmp::KIND_NOMENCLATURE, Cmp::KIND_COMPOSITION] as $kind) {
+        foreach ([Cmp::KIND_NONE, Cmp::KIND_UNPARSED, Cmp::KIND_DELIVERY, Cmp::KIND_SAME, Cmp::KIND_PRICE, Cmp::KIND_QTY, Cmp::KIND_NOMENCLATURE, Cmp::KIND_COMPOSITION] as $kind) {
             $this->assertArrayHasKey($kind, Cmp::LABELS);
             $this->assertNotSame('', Cmp::LABELS[$kind]);
         }
+    }
+
+    public function test_quantity_only_difference_is_not_called_price(): void
+    {
+        // M-2026-17605: 1 111,49 ₽ и у автомата, и у менеджера, но 5 шт против 1.
+        $this->assertSame(Cmp::KIND_QTY, $this->kindOf(
+            ['sku' => 'M27099', 'qty' => 5, 'unit_price' => 1111.49],
+            ['sku' => 'M27099', 'qty' => 1, 'unit_price' => 1111.49],
+        ));
+        // Цена и количество разные — главное расхождение цена.
+        $this->assertSame(Cmp::KIND_PRICE, $this->kindOf(
+            ['sku' => 'M27099', 'qty' => 5, 'unit_price' => 1111.49],
+            ['sku' => 'M27099', 'qty' => 1, 'unit_price' => 1389.36],
+        ));
+        $this->assertSame(Cmp::KIND_SAME, $this->kindOf(
+            ['sku' => 'M27099', 'qty' => 5, 'unit_price' => 1111.49],
+            ['sku' => 'M27099', 'qty' => 5, 'unit_price' => 1111.49],
+        ));
+    }
+
+    /** Вид расхождения для одной строки автомата и одной строки документа. */
+    private function kindOf(array $auto, array $fact): string
+    {
+        $cmp = (new \ReflectionClass(Cmp::class))->newInstanceWithoutConstructor();
+        $row = (new \ReflectionMethod(Cmp::class, 'row'))->invoke($cmp, $auto, $fact);
+        $key = Rule::normalize($auto['sku']);
+
+        return (new \ReflectionMethod(Cmp::class, 'kind'))->invoke($cmp, [$key => $auto], [$key => $fact], [$row]);
     }
 
     public function test_price_tolerance_is_a_percent(): void
