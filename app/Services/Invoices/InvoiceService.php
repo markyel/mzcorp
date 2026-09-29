@@ -67,6 +67,81 @@ class InvoiceService
             ->first();
     }
 
+    /**
+     * Счёт с этим номером уже в другой заявке — но по реквизитам покупателя он
+     * принадлежит этой: ИНН из документа совпадает с организацией клиента
+     * этой заявки и не совпадает с той. Оплаченный и частично оплаченный счёт
+     * не переносим — за ним уже деньги и закрытая сделка.
+     */
+    private function shouldMoveDuplicateHere(\App\Models\OutboundQuote $quote, Request $request, Invoice $dup): bool
+    {
+        if (in_array($dup->status, [InvoiceStatus::Paid, InvoiceStatus::PartiallyPaid], true)) {
+            return false;
+        }
+        $inn = trim((string) (($quote->payload ?? [])['requisites_buyer_inn'] ?? ''));
+        if ($inn === '') {
+            return false;
+        }
+        $other = Request::query()->find($dup->request_id);
+
+        return $this->requestBuyerInn($request, $inn) && ($other === null || ! $this->requestBuyerInn($other, $inn));
+    }
+
+    /** Клиент заявки — эта организация: сама заявка к ней привязана или адрес клиента связан с ней. */
+    private function requestBuyerInn(Request $request, string $inn): bool
+    {
+        if ($request->organization_id !== null
+            && \App\Models\Organization::query()->whereKey($request->organization_id)->where('inn', $inn)->exists()) {
+            return true;
+        }
+        $email = mb_strtolower(trim((string) $request->client_email));
+
+        return $email !== '' && \App\Models\ClientContact::query()
+            ->whereRaw('lower(email) = ?', [$email])
+            ->whereHas('organizations', fn ($q) => $q->where('inn', $inn))
+            ->exists();
+    }
+
+    /** Перенести счёт в эту заявку, с записью в истории обеих. */
+    private function moveDuplicateHere(Invoice $dup, \App\Models\OutboundQuote $quote, Request $request, string $number): Invoice
+    {
+        $fromRequest = Request::query()->find($dup->request_id);
+        $author = $request->assignedUser ?? \App\Models\User::role(\App\Enums\Role::Admin->value)->first();
+        $inn = (string) (($quote->payload ?? [])['requisites_buyer_inn'] ?? '');
+
+        DB::transaction(function () use ($dup, $quote, $request, $fromRequest, $number, $inn, $author) {
+            $dup->forceFill(['request_id' => $request->id, 'email_message_id' => $quote->email_message_id])->save();
+
+            if ($fromRequest) {
+                \App\Models\RequestStateChange::create([
+                    'request_id' => $fromRequest->id,
+                    'from_status' => $fromRequest->status->value,
+                    'to_status' => $fromRequest->status->value,
+                    'by_user_id' => null,
+                    'event' => 'invoice_moved_out',
+                    'comment' => sprintf('Счёт №%s перенесён в заявку %s: покупатель по реквизитам (ИНН %s) — клиент той заявки.', $number, $request->internal_code, $inn),
+                    'payload' => ['invoice_id' => $dup->id, 'to_request_id' => $request->id],
+                ]);
+            }
+
+            try {
+                $this->stateService->transitionTo($request, RequestStatus::Invoiced, $author, [
+                    'event' => 'invoice_auto_issued',
+                    'comment' => sprintf('Счёт №%s перенесён из заявки %s: покупатель по реквизитам (ИНН %s) — клиент этой заявки.', $number, $fromRequest?->internal_code ?? '—', $inn),
+                    'payload' => ['invoice_id' => $dup->id, 'invoice_number' => $number, 'outbound_quote_id' => $quote->id, 'moved_from_request_id' => $fromRequest?->id],
+                ], systemTransition: true);
+            } catch (\Throwable $e) {
+                Log::info('InvoiceService: moved invoice, status not changed', ['request_id' => $request->id, 'error' => $e->getMessage()]);
+            }
+        });
+
+        Log::info('InvoiceService: duplicate invoice moved to the buyer\'s request', [
+            'invoice_id' => $dup->id, 'number' => $number, 'from_request_id' => $fromRequest?->id, 'to_request_id' => $request->id, 'inn' => $inn,
+        ]);
+
+        return $dup->fresh();
+    }
+
     public function issue(
         Request $request,
         string $invoiceNumber,
@@ -241,6 +316,17 @@ class InvoiceService
         // заявки (audit-row без смены статуса), чтобы менеджер видел, куда
         // ушёл счёт (кейс: одно письмо со счётом в двух тредах клиента).
         $dup = $this->findDuplicateOnOtherRequest($number, $request->id);
+
+        // «Первая привязка выигрывает» — это первая по времени РАЗБОРА, а не
+        // по праву: M-2026-17145 (28.09) — счёт 10119 на «Яуза Риэлти» ушёл
+        // «Яузе», через 6 минут по ошибке «Лифтремонту», второе письмо
+        // разобралось на полчаса раньше, и счёт осел в чужой заявке. Если
+        // покупатель по реквизитам счёта — клиент ЭТОЙ заявки, а не той, —
+        // счёт переезжает сюда. Оплаченный не трогаем.
+        if ($dup !== null && $this->shouldMoveDuplicateHere($quote, $request, $dup)) {
+            return $this->moveDuplicateHere($dup, $quote, $request, $number);
+        }
+
         if ($dup !== null) {
             Log::info('InvoiceService::autoIssueFromOutboundQuote: skip — duplicate number on another request', [
                 'outbound_quote_id' => $quote->id,
