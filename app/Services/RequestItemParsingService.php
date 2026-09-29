@@ -1155,7 +1155,7 @@ PROMPT;
                     ]);
 
                     if (! empty($unifiedItems)) {
-                        return $this->dedupeWithinList($unifiedItems);
+                        return $this->dropStorefrontEcho($this->dedupeWithinList($unifiedItems), $linkedUrlsText);
                     }
 
                     // unified-vision вернул 0 позиций — НЕ сдаёмся: проваливаемся
@@ -1302,7 +1302,47 @@ PROMPT;
         //    атрибуты («подсветка красная») переносятся на весь набор.
         //    Fail-soft: при выключенном killswitch / одном источнике / ошибке
         //    возвращается результат dedupeWithinList.
-        return $this->consolidateSplitItems($items, $subject, $referenceText ?? '', $linkedUrlsText);
+        return $this->dropStorefrontEcho(
+            $this->consolidateSplitItems($items, $subject, $referenceText ?? '', $linkedUrlsText),
+            $linkedUrlsText,
+        );
+    }
+
+    /**
+     * Убрать из примечаний позиций то, что модель переписала из справки нашего
+     * каталога (ownStorefrontCatalogBlocks), а не из слов клиента. M-2026-17627:
+     * клиент прислал ссылку mylift.ru/?code=M08156 и «12 шт.», а в примечании
+     * оказалось «OEM/модель: 4R09654*A» — и авто-КП остановилось на «есть
+     * уточнение». Выкидываем только фрагменты, дословно стоящие в справке.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array<int, array<string, mixed>>
+     */
+    private function dropStorefrontEcho(array $items, ?string $linkedUrlsText): array
+    {
+        if ($linkedUrlsText === null
+            || preg_match_all('~^### https://mylift\.ru/\?code=M\d+\n(.+)$~mu', $linkedUrlsText, $m) === 0) {
+            return $items;
+        }
+        $catalogText = mb_strtolower(implode("\n", $m[1]));
+
+        foreach ($items as $k => $item) {
+            $note = trim((string) ($item['note'] ?? ''));
+            if ($note === '') {
+                continue;
+            }
+            $keep = array_values(array_filter(
+                preg_split('~\s*(?:·|;|\n)\s*~u', $note) ?: [],
+                fn ($part) => ($part = trim($part)) !== ''
+                    && (mb_strlen($part) < 4 || ! str_contains($catalogText, mb_strtolower($part))),
+            ));
+            if (count($keep) !== count(preg_split('~\s*(?:·|;|\n)\s*~u', $note) ?: [])) {
+                Log::info('parseItems: storefront echo dropped from note', ['note' => $note, 'kept' => $keep]);
+                $items[$k]['note'] = $keep !== [] ? implode('; ', $keep) : null;
+            }
+        }
+
+        return $items;
     }
 
     /**
