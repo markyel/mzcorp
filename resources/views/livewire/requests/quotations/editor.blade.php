@@ -422,6 +422,7 @@
                        class="btn btn-sm">⤓ Скачать</a>
                     <button type="button" wire:click="createDraft"
                             @if(! $canEdit) disabled @endif
+                            wire:loading.attr="disabled" wire:target="createDraft"
                             class="btn btn-sm">＋ Создать новую версию КП</button>
                 @endif
             </div>

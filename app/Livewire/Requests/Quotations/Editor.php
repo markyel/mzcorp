@@ -170,6 +170,24 @@ class Editor extends Component
 
             return;
         }
+
+        // Черновик уже есть — открываем его, а не создаём второй. Повторное
+        // нажатие (кнопка не успела перерисоваться, вторая вкладка) плодило
+        // одинаковые КП с разными номерами: M-2026-17184, №0170 и №0171 через
+        // 14 секунд. Второй вариант комплектации — отдельная кнопка «новая
+        // версия» (createNextVersion).
+        $existing = $this->request->quotations()
+            ->where('status', \App\Enums\QuotationStatus::Draft->value)
+            ->orderByDesc('id')
+            ->first();
+        if ($existing) {
+            $this->viewQuotationId = $existing->id;
+            unset($this->versions, $this->activeQuotation);
+            $this->dispatch('toast', message: "Черновик {$existing->internal_code} уже есть — открыл его.", type: 'info');
+
+            return;
+        }
+
         $q = $svc->createDraft($this->request, auth()->user());
         $this->viewQuotationId = $q->id;
         unset($this->versions, $this->activeQuotation);
