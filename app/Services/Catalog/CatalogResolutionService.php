@@ -559,8 +559,15 @@ class CatalogResolutionService
         // Бренд из каталога наследуем в пустой parsed_brand — НО не наш
         // house-brand «Мой ЗиП»: у 752 позиций каталога brand='Мой ЗиП', и без
         // фильтра клиентская позиция получала бы бренд из ниоткуда (ri#24363).
-        if (empty($item->parsed_brand)) {
+        // И только когда позиция опознана по коду/точному имени: матч по
+        // похожему названию (C_name_vector) — догадка, а бренд, записанный в
+        // позицию, выглядит как слова клиента и уходит поставщикам в запрос.
+        // M-2026-17149: «Кнопка закрытия» по двум фото без надписей получила
+        // «Silver Elevator, Korea» от M22474, и бренд остался после отвязки.
+        $brandInherited = false;
+        if (empty($item->parsed_brand) && $matchMethod !== 'C_name_vector') {
             $item->parsed_brand = \App\Support\HouseBrand::filter($catalog->brand);
+            $brandInherited = $item->parsed_brand !== null;
         }
 
         $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
@@ -571,6 +578,8 @@ class CatalogResolutionService
             'matched_at' => now()->toIso8601String(),
             'catalog_item_id' => $catalog->id,
             'catalog_sku' => $catalog->sku,
+            // unbindCatalog снимает бренд вместе с привязкой.
+            'brand_inherited' => $brandInherited,
         ], $extraPayload);
 
         if ($promoteStatus) {

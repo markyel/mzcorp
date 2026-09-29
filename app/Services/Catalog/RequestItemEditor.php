@@ -128,6 +128,7 @@ class RequestItemEditor
                     // действительно пересчитал по новым parsed_name/article.
                     if ($oldCatalogId !== null) {
                         $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+                        $this->dropInheritedBrand($item, $payload['catalog_match'] ?? null);
                         if (! empty($payload['catalog_match'])) {
                             $payload['previous_catalog_match'] = $payload['catalog_match'];
                         }
@@ -331,6 +332,7 @@ class RequestItemEditor
 
             $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
             // Сохраняем history предыдущей привязки, очищаем активный catalog_match.
+            $this->dropInheritedBrand($item, $payload['catalog_match'] ?? null);
             if (! empty($payload['catalog_match'])) {
                 $payload['previous_catalog_match'] = $payload['catalog_match'];
             }
@@ -370,6 +372,7 @@ class RequestItemEditor
 
             $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
             // Если был активный catalog_match — переносим в previous.
+            $this->dropInheritedBrand($item, $payload['catalog_match'] ?? null);
             if (! empty($payload['catalog_match'])) {
                 $payload['previous_catalog_match'] = $payload['catalog_match'];
             }
@@ -443,6 +446,7 @@ class RequestItemEditor
         // Сначала очистим, чтобы он действительно пересчитал.
         if ($item->catalog_item_id !== null) {
             $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+            $this->dropInheritedBrand($item, $payload['catalog_match'] ?? null);
             if (! empty($payload['catalog_match'])) {
                 $payload['previous_catalog_match'] = $payload['catalog_match'];
             }
@@ -1245,6 +1249,36 @@ class RequestItemEditor
         }
 
         abort(403, 'Эта позиция принадлежит заявке другого менеджера.');
+    }
+
+    /**
+     * Снять бренд, который автоматчинг унаследовал от позиции каталога,
+     * вместе с самой привязкой: иначе после отвязки/перепривязки у позиции
+     * остаётся бренд чужого товара (M-2026-17149: «Silver Elevator, Korea»
+     * от M22474 пережил отвязку), а новый матч его уже не перезапишет.
+     * Бренд, который указал клиент или менеджер, не трогаем: новые матчи
+     * пишут brand_inherited, у старых матчей по похожему названию бренд
+     * считается унаследованным, если совпадает с брендом каталога.
+     */
+    private function dropInheritedBrand(RequestItem $item, ?array $match): void
+    {
+        if (! $match || empty($item->parsed_brand) || empty($match['catalog_item_id'])) {
+            return;
+        }
+
+        // Менеджер поправил бренд руками — это уже не наследство каталога.
+        $catalogBrand = \App\Support\HouseBrand::filter(CatalogItem::whereKey($match['catalog_item_id'])->value('brand'));
+        if ($catalogBrand === null || trim($catalogBrand) !== trim((string) $item->parsed_brand)) {
+            return;
+        }
+
+        $inherited = array_key_exists('brand_inherited', $match)
+            ? (bool) $match['brand_inherited']
+            : ($match['method'] ?? null) === 'C_name_vector';
+
+        if ($inherited) {
+            $item->parsed_brand = null;
+        }
     }
 
     /**
