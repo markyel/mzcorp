@@ -58,6 +58,9 @@ class Index extends Component
     /** Период карточки Метрики: 7 или 30 дней. */
     public int $metrikaDays = 30;
 
+    /** Разрез по фразам: 'leads' — фразы и запросы с обращениями, 'all' — все фразы по визитам. */
+    public string $phraseMode = 'leads';
+
     /** Сколько позиций пишем за одно нажатие — чтобы запрос не висел минутами. */
     public const BULK_LIMIT = 25;
 
@@ -557,7 +560,28 @@ class Index extends Component
     public function setMetrikaDays(int $days): void
     {
         $this->metrikaDays = in_array($days, [7, 30], true) ? $days : 30;
-        unset($this->metrika);
+        unset($this->metrika, $this->metrikaPhrases);
+    }
+
+    /**
+     * Фразы наших кампаний по Метрике: какая фраза и какой запрос привели
+     * обращение, и где визиты есть, а обращений нет.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    #[Computed]
+    public function metrikaPhrases(): Collection
+    {
+        $ours = $this->metrika['campaigns']->where('ours', true)->pluck('id')->map(fn ($v) => (int) $v)->all();
+
+        return app(\App\Services\Metrika\MetrikaStatsService::class)
+            ->phrases($this->metrika['days'], $ours, $this->phraseMode !== 'all');
+    }
+
+    public function setPhraseMode(string $mode): void
+    {
+        $this->phraseMode = $mode === 'all' ? 'all' : 'leads';
+        unset($this->metrikaPhrases);
     }
 
     /**

@@ -267,6 +267,69 @@
                     Звонки и email Calltouch отслеживает только на части платного трафика — нули у кампании
                     ещё не значат, что обращений не было. Расход агентских кампаний нам не виден: они в другом аккаунте.
                 </p>
+
+                {{-- Наши кампании по фразам: какая фраза и какой запрос дали результат --}}
+                @php
+                    $ph = $this->metrikaPhrases;
+                    $campNames = $mk['campaigns']->pluck('name', 'id');
+                    $phGroups = array_diff_key($mk['groups'], ['premium' => true]);
+                @endphp
+                <div class="mt-5">
+                    <div class="flex flex-wrap items-baseline gap-2 mb-2">
+                        <h4 class="text-[13px] font-semibold text-fg-1">Наши фразы</h4>
+                        <span class="text-[12px] text-fg-3">
+                            {{ $phraseMode === 'all' ? 'все фразы по визитам' : 'фраза и запрос, после которых было обращение или клик по контактам' }}
+                        </span>
+                        <span class="flex-1"></span>
+                        <button type="button" wire:click="setPhraseMode('leads')"
+                                class="btn btn-xs {{ $phraseMode !== 'all' ? 'btn-primary' : '' }}">С результатом</button>
+                        <button type="button" wire:click="setPhraseMode('all')"
+                                class="btn btn-xs {{ $phraseMode === 'all' ? 'btn-primary' : '' }}">Все фразы</button>
+                    </div>
+                    @if($ph->isEmpty())
+                        <p class="text-[12.5px] text-fg-3">
+                            {{ $phraseMode === 'all' ? 'Визитов по нашим фразам за период нет.' : 'За период ни одна наша фраза не дала обращения или клика по контактам.' }}
+                        </p>
+                    @else
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-[12px]">
+                                <thead class="text-[10.5px] uppercase tracking-wider text-fg-3">
+                                    <tr class="text-left">
+                                        <th class="py-1.5 pr-3 font-medium">Кампания</th>
+                                        <th class="py-1.5 px-2 font-medium">Фраза</th>
+                                        @if($phraseMode !== 'all')
+                                            <th class="py-1.5 px-2 font-medium">Запрос</th>
+                                        @endif
+                                        <th class="py-1.5 px-2 font-medium text-right">Визиты</th>
+                                        @foreach($phGroups as $code => $g)
+                                            <th class="py-1.5 px-2 font-medium text-right">{{ $g['label'] }}</th>
+                                        @endforeach
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($ph as $i => $r)
+                                        <tr class="border-t border-border-subtle" wire:key="mkp-{{ $phraseMode }}-{{ $i }}">
+                                            <td class="py-1.5 pr-3 max-w-[160px] truncate text-fg-2" title="#{{ $r['campaign_id'] }}">{{ $campNames[(string) $r['campaign_id']] ?? '#'.$r['campaign_id'] }}</td>
+                                            <td class="py-1.5 px-2 max-w-[260px] truncate {{ $r['condition'] === 'Автотаргетинг' ? 'text-fg-3 italic' : 'text-fg-1' }}" title="{{ $r['condition'] }}">{{ $r['condition'] }}</td>
+                                            @if($phraseMode !== 'all')
+                                                <td class="py-1.5 px-2 max-w-[280px] truncate text-fg-1" title="{{ $r['query'] }}">{{ $r['query'] ?? '—' }}</td>
+                                            @endif
+                                            <td class="py-1.5 px-2 text-right mono tnum">{{ number_format($r['visits'], 0, ',', ' ') }}</td>
+                                            @foreach($phGroups as $code => $g)
+                                                @php $n = $r['groups'][$code] ?? 0; @endphp
+                                                <td class="py-1.5 px-2 text-right mono tnum {{ $n > 0 && in_array($code, $leadCodes, true) ? 'text-emerald-700 font-semibold' : 'text-fg-2' }}">{{ $n ?: '·' }}</td>
+                                            @endforeach
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-[11px] text-fg-4 mt-2">
+                            «Автотаргетинг» — Директ сам подобрал запрос, фразы у такого визита нет; что искал человек,
+                            видно в колонке «Запрос». Запрос Метрика знает не всегда — тогда прочерк.
+                        </p>
+                    @endif
+                </div>
             @endif
         </div>
     </div>
