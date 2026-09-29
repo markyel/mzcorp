@@ -555,6 +555,9 @@ class MediaDataService
             }
         }
         $text = trim(preg_replace('/\s+/u', ' ', $text) ?? '');
+        // Хвост цитаты «06.07.2026 13:25, Игорь Тюренков пишет:» / «wrote:».
+        $text = trim(preg_replace('~\s*\d{1,2}\.\d{1,2}\.\d{2,4},?\s+(в\s+)?\d{1,2}:\d{2}.*$~u', '', $text) ?? $text);
+        $text = trim(preg_replace('~\s*[^.?!]*\b(пишет|написал\(а\)|wrote):?\s*$~ui', '', $text) ?? $text);
         if ($text === '' || preg_match('~успешно получено|уточняющие вопросы по заявке~u', $text)) {
             return null;
         }
