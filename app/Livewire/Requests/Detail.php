@@ -111,6 +111,9 @@ class Detail extends Component
      */
     public bool $aiBannerHidden = false;
 
+    /** Открыта карточка клиента у адреса в шапке (контрагенты, скидки, статистика). */
+    public bool $clientCardOpen = false;
+
     public function mount(Request $request): void
     {
         $user = auth()->user();
@@ -759,6 +762,31 @@ class Detail extends Component
         $email = (string) ($this->request->client_email ?? '');
 
         return $email !== '' && app(ResellerEmailService::class)->isReseller($email);
+    }
+
+    /**
+     * Карточка клиента у адреса в шапке: связанные контрагенты со скидками и
+     * сводка по его заявкам. Считается только когда менеджер её открыл
+     * (clientCardOpen), а не на каждом рендере заявки.
+     *
+     * @return array<string, mixed>|null
+     */
+    #[Computed]
+    public function clientCard(): ?array
+    {
+        $email = (string) ($this->request->client_email ?? '');
+        if (! $this->clientCardOpen || $email === '') {
+            return null;
+        }
+
+        return app(\App\Services\Clients\ClientCardService::class)
+            ->forEmail($email, $this->request->organization_id);
+    }
+
+    public function toggleClientCard(): void
+    {
+        $this->clientCardOpen = ! $this->clientCardOpen;
+        unset($this->clientCard);
     }
 
     /**

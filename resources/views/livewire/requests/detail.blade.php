@@ -323,7 +323,37 @@
                     <span class="text-border-strong">·</span>
                 @endif
                 @if($req->client_email)
-                    <a href="mailto:{{ $req->client_email }}" class="text-sky-700 hover:underline">{{ $req->client_email }}</a>
+                    {{-- Клик по адресу — копирование в буфер (почтовое приложение не нужно, отвечают из заявки). --}}
+                    <button type="button"
+                            x-data="{ copied: false }"
+                            x-on:click="
+                                const text = @js((string) $req->client_email);
+                                const finish = () => { copied = true; setTimeout(() => copied = false, 1500); };
+                                const legacy = () => {
+                                    const ta = document.createElement('textarea');
+                                    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+                                    document.body.appendChild(ta); ta.select();
+                                    try { document.execCommand('copy'); finish(); } catch (e) {}
+                                    document.body.removeChild(ta);
+                                };
+                                (navigator.clipboard && window.isSecureContext)
+                                    ? navigator.clipboard.writeText(text).then(finish).catch(legacy)
+                                    : legacy();
+                            "
+                            x-bind:title="copied ? 'Скопировано' : 'Скопировать адрес'"
+                            class="text-sky-700 hover:underline cursor-copy">
+                        <span>{{ $req->client_email }}</span>
+                        <span x-show="copied" x-cloak class="ml-1 text-[11px] text-emerald-700 no-underline">✓ скопировано</span>
+                    </button>
+                    {{-- Карточка клиента: контрагенты, скидки, статистика заявок. --}}
+                    <span class="relative inline-flex">
+                        <button type="button" wire:click="toggleClientCard" wire:loading.attr="disabled" wire:target="toggleClientCard"
+                                title="Контрагенты, скидки и статистика клиента"
+                                class="inline-flex items-center justify-center w-[20px] h-[20px] rounded-full border text-[11px] font-semibold transition-colors {{ $clientCardOpen ? 'bg-sky-50 border-sky-300 text-sky-700' : 'bg-app border-border text-fg-3 hover:text-fg-1 hover:bg-surface-2' }}">i</button>
+                        @if($clientCardOpen && ($card = $this->clientCard))
+                            @include('livewire.requests.partials.client-card', ['card' => $card])
+                        @endif
+                    </span>
                     {{-- Статус клиента-перепродавца (на уровне e-mail, виден во всех его заявках) --}}
                     <span class="text-border-strong">·</span>
                     @if($this->clientIsReseller)
