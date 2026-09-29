@@ -146,8 +146,28 @@ class AutoQuoteComparisonTest extends TestCase
 
     public function test_rule_thresholds_match_the_analysis(): void
     {
-        // Порог 100 000 ₽ и только однострочные — из разбора 10 525 заявок.
-        $this->assertSame(100_000.0, Rule::MAX_TOTAL);
-        $this->assertSame(1, Rule::MAX_LINES);
+        // Начинали со 100 000 ₽ и однострочных (разбор 10 525 заявок);
+        // 29.09.2026 заказчик поднял до 200 000 ₽ и 3 позиций.
+        $this->assertSame(200_000.0, Rule::MAX_TOTAL);
+        $this->assertSame(3, Rule::MAX_LINES);
+    }
+
+    public function test_term_is_known_from_stock_transit_or_lead_time(): void
+    {
+        $item = fn (int $qty, array $catalog) => (new RequestItem(['parsed_qty' => $qty]))
+            ->setRelation('catalogItem', new CatalogItem($catalog));
+        $future = now()->addDays(10)->toDateString();
+        $past = now()->subDays(10)->toDateString();
+
+        // Склад покрывает.
+        $this->assertTrue(Rule::termKnown($item(5, ['stock_available' => 5, 'lead_time_days' => 0])));
+        // Склад + приход в пути покрывают.
+        $this->assertTrue(Rule::termKnown($item(8, ['stock_available' => 2, 'lead_time_days' => 0, 'stock_in_transit' => [['qty' => 6, 'date' => $future]]])));
+        // Не покрывают, но срок под заказ есть — в КП «≈ N нед».
+        $this->assertTrue(Rule::termKnown($item(8, ['stock_available' => 2, 'lead_time_days' => 70])));
+        // M-2026-17202: 8 при остатке 2, срока нет — «срок уточняется», к менеджеру.
+        $this->assertFalse(Rule::termKnown($item(8, ['stock_available' => 2, 'lead_time_days' => 0])));
+        // Просроченный приход не считается.
+        $this->assertFalse(Rule::termKnown($item(3, ['stock_available' => 0, 'lead_time_days' => 0, 'stock_in_transit' => [['qty' => 5, 'date' => $past]]])));
     }
 }

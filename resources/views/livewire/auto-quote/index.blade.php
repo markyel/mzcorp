@@ -25,8 +25,8 @@
         </div>
         <div class="ds-card-body space-y-2">
             <div class="text-[12.5px] text-fg-2">
-                Автомат выдаёт только КП и только по однострочной заявке, где клиент сам написал наш артикул,
-                цена актуальна, сумма до {{ number_format(\App\Services\Quotes\AutoQuoteRuleService::MAX_TOTAL, 0, ',', ' ') }} ₽
+                Автомат выдаёт только КП и только по заявке до {{ \App\Services\Quotes\AutoQuoteRuleService::MAX_LINES }} позиций, где клиент сам написал наш артикул,
+                цена актуальна, срок поставки известен, сумма до {{ number_format(\App\Services\Quotes\AutoQuoteRuleService::MAX_TOTAL, 0, ',', ' ') }} ₽
                 и счёт не просят прямым текстом. Здесь видно, что он выдал бы и чем это расходится
                 с тем, что ушло клиенту на самом деле.
             </div>

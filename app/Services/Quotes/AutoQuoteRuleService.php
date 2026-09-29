@@ -39,11 +39,19 @@ use Illuminate\Support\Collection;
  */
 class AutoQuoteRuleService
 {
-    /** Потолок суммы: выше — только человек. */
-    public const MAX_TOTAL = 100_000.0;
+    /**
+     * Потолок суммы: выше — только человек. 100 000 → 200 000 (заказчик,
+     * 29.09.2026): за неделю 7 заявок 100–200 тыс. остановила только сумма,
+     * и все 7 совпали с КП менеджера.
+     */
+    public const MAX_TOTAL = 200_000.0;
 
-    /** Автомат работает только на однострочных заявках — там точность 99,1%. */
-    public const MAX_LINES = 1;
+    /**
+     * Сколько позиций в заявке. Начинали с однострочных (там точность 99,1%);
+     * 29.09.2026 заказчик расширил до 3 — каждая строка по-прежнему проходит
+     * все проверки, не прошла одна — заявка к менеджеру целиком.
+     */
+    public const MAX_LINES = 3;
 
     public function __construct(
         private readonly PostSaleFulfillmentDetector $postSale,
@@ -67,7 +75,7 @@ class AutoQuoteRuleService
         $checks = [];
         $checks[] = $this->check(
             'single_line',
-            'Однострочная заявка',
+            'Позиций не больше '.self::MAX_LINES,
             $items->count() > 0 && $items->count() <= self::MAX_LINES,
             'позиций: '.$items->count(),
         );
@@ -127,6 +135,19 @@ class AutoQuoteRuleService
                 ? 'штучные позиции — цена за штуку'
                 : 'клиент указал длину ('.$measured->first()->parsed_length.' '
                     .$measured->first()->parsed_length_unit.'): за штуку или за метр — решает менеджер',
+        );
+        // Срок поставки известен: запрошенное количество покрывают склад и
+        // приходы в пути, либо в каталоге есть срок под заказ. Иначе в КП
+        // встанет «Под заказ (срок уточняется)» — это не ответ, клиент всё
+        // равно пойдёт к менеджеру (M-2026-17005, 17202, 17281, 17501).
+        $unknownTerm = $items->filter(fn (RequestItem $i) => ! self::termKnown($i));
+        $checks[] = $this->check(
+            'term_known',
+            'Срок поставки известен',
+            $unknownTerm->isEmpty(),
+            $unknownTerm->isEmpty()
+                ? 'склад, приходы в пути или срок под заказ покрывают количество'
+                : 'нет на складе и в пути, срок под заказ неизвестен: '.$unknownTerm->map(fn ($i) => $i->catalogItem?->sku ?? $i->parsed_article)->filter()->implode(', '),
         );
         $checks[] = $this->check(
             'no_notes',
@@ -429,6 +450,32 @@ class AutoQuoteRuleService
      * Артикул действительно присутствует в тексте строки — защита от «матчинг
      * додумал». По разбору эта проверка отсекает полтора процента заявок.
      */
+    /**
+     * Срок по позиции известен: склад + приходы в пути (с сегодняшней датой и
+     * позже — просроченный приход в КП не обещаем) покрывают количество, либо
+     * у позиции каталога есть срок под заказ.
+     */
+    public static function termKnown(RequestItem $item): bool
+    {
+        $catalog = $item->catalogItem;
+        if ($catalog === null) {
+            return false;
+        }
+        if ((int) ($catalog->lead_time_days ?? 0) > 0) {
+            return true;
+        }
+        $cover = max(0, (int) ($catalog->stock_available ?? 0));
+        $today = now()->startOfDay();
+        foreach ((array) ($catalog->stock_in_transit ?? []) as $lot) {
+            $date = is_array($lot) ? strtotime((string) ($lot['date'] ?? '')) : false;
+            if ($date !== false && $date >= $today->getTimestamp()) {
+                $cover += max(0, (int) ($lot['qty'] ?? 0));
+            }
+        }
+
+        return $cover >= (float) $item->parsed_qty;
+    }
+
     public static function articleInText(RequestItem $item): bool
     {
         $haystack = self::normalize($item->parsed_article.' '.$item->parsed_name);

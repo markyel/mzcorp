@@ -173,7 +173,7 @@ class Index extends Component
             left join catalog_items ci on ci.id = ri.catalog_item_id
             where r.created_at > now() - interval '{$days} days'
             group by r.id
-            having count(*) = 1
+            having count(*) <= ".AutoQuoteRuleService::MAX_LINES."
                and bool_and(ri.match_path = 'internal_sku')
                and bool_and(ci.id is not null and ci.price > 0 and ci.is_price_actual)
                and bool_and(coalesce(ri.parsed_qty, 0) > 0)

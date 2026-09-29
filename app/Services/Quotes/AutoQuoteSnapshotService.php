@@ -28,8 +28,10 @@ class AutoQuoteSnapshotService
      *  v2 — добавлена проверка «в строке один наш артикул»: парсер иногда
      *       складывает два разных M-кода в одну позицию, и заявка выглядит
      *       однострочной (кейс M-2026-16171).
+     *  v3 — 29.09.2026: до 3 позиций, сумма до 200 000 ₽, срок поставки
+     *       должен быть известен (склад, приходы в пути или срок под заказ).
      */
-    public const RULE_VERSION = 'v2';
+    public const RULE_VERSION = 'v3';
 
     public function __construct(
         private readonly AutoQuoteRuleService $rule,
