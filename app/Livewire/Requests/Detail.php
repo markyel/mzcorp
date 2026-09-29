@@ -2462,6 +2462,43 @@ class Detail extends Component
         $this->request->refresh();
     }
 
+    /**
+     * Счёт отправлен в этой заявке по ошибке (не тому клиенту / не в ту
+     * переписку). Переносится в заявку, где он тоже отправлен, или
+     * аннулируется. См. InvoiceService::detachMisdirected.
+     */
+    public function detachMisdirectedInvoice(int $invoiceId, InvoiceService $service): void
+    {
+        $user = auth()->user();
+        $privileged = $user?->hasAnyRole([
+            Role::HeadOfSales->value,
+            Role::Director->value,
+            Role::Admin->value,
+        ]) ?? false;
+        if (! $user || (! $privileged && ! $this->request->isAccessibleBy($user))) {
+            $this->dispatch('toast', message: 'Нет прав.', type: 'error');
+
+            return;
+        }
+        $invoice = Invoice::where('request_id', $this->request->id)->whereKey($invoiceId)->first();
+        if (! $invoice) {
+            return;
+        }
+        try {
+            $res = $service->detachMisdirected($invoice, $user);
+        } catch (\Throwable $e) {
+            $this->dispatch('toast', message: 'Ошибка: '.$e->getMessage(), type: 'error');
+
+            return;
+        }
+        $this->dispatch('toast', message: $res['moved_to']
+            ? "Счёт №{$invoice->invoice_number} перенесён в заявку {$res['moved_to']->internal_code}."
+            : "Счёт №{$invoice->invoice_number} отвязан и аннулирован как отправленный по ошибке.", type: 'success');
+        $this->dispatch('request-state-changed');
+        unset($this->invoicesForRequest);
+        $this->request->refresh();
+    }
+
     /* ---------------- Phase 1.10 — state-machine transitions ---------------- */
 
     /**

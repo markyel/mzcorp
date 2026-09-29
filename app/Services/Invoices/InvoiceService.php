@@ -112,6 +112,123 @@ class InvoiceService
             ->exists();
     }
 
+    /**
+     * Менеджер отметил: счёт отправлен в этой заявке по ошибке.
+     *
+     * Если тот же счёт отправлен и в другой заявке (там есть разобранный
+     * документ с этим номером) — счёт переезжает туда, предпочтительно в
+     * заявку, чей клиент — покупатель по реквизитам. Иначе аннулируется с
+     * причиной «отправлен по ошибке». Эта заявка возвращается в статус до
+     * счёта, если других действующих счетов в ней нет. Незакрытое
+     * предупреждение о сомнительных реквизитах по этому счёту — отклоняется:
+     * реквизиты ушли не тому клиенту, привязывать нечего.
+     *
+     * @return array{moved_to: ?Request, cancelled: bool}
+     */
+    public function detachMisdirected(Invoice $invoice, User $author): array
+    {
+        if (in_array($invoice->status, [InvoiceStatus::Paid, InvoiceStatus::PartiallyPaid], true)) {
+            throw new \DomainException('Оплаченный счёт отвязать нельзя.');
+        }
+        $from = $invoice->request;
+        if (! $from) {
+            throw new \DomainException('Счёт не привязан к заявке.');
+        }
+
+        $number = (string) $invoice->invoice_number;
+        $digits = preg_replace('/\D+/', '', $number);
+        $candidates = \App\Models\OutboundQuote::query()
+            ->where('document_type', \App\Enums\DetectorType::OutboundInvoice->value)
+            ->where('request_id', '!=', $from->id)
+            ->whereNotNull('request_id')
+            ->whereRaw("regexp_replace(coalesce(document_number, ''), '\\D', '', 'g') = ?", [$digits])
+            ->orderByDesc('id')
+            ->get();
+        $target = $candidates->first(function ($q) {
+            $inn = trim((string) (($q->payload ?? [])['requisites_buyer_inn'] ?? ''));
+
+            return $inn !== '' && $q->request && $this->requestBuyerInn($q->request, $inn);
+        }) ?? $candidates->first();
+
+        $before = \App\Models\RequestStateChange::query()
+            ->where('request_id', $from->id)
+            ->where('to_status', RequestStatus::Invoiced->value)
+            ->orderByDesc('id')
+            ->value('from_status');
+
+        $movedTo = null;
+        DB::transaction(function () use ($invoice, $from, $target, $author, $number, &$movedTo) {
+            if ($target !== null) {
+                $movedTo = $target->request;
+                $invoice->forceFill(['request_id' => $movedTo->id, 'email_message_id' => $target->email_message_id])->save();
+                \App\Models\RequestStateChange::create([
+                    'request_id' => $from->id,
+                    'from_status' => $from->status->value,
+                    'to_status' => $from->status->value,
+                    'by_user_id' => $author->id,
+                    'event' => 'invoice_misdirected',
+                    'comment' => sprintf('Счёт №%s отправлен сюда по ошибке — перенесён в заявку %s, где он тоже отправлен.', $number, $movedTo->internal_code),
+                    'payload' => ['invoice_id' => $invoice->id, 'to_request_id' => $movedTo->id],
+                ]);
+                try {
+                    $this->stateService->transitionTo($movedTo, RequestStatus::Invoiced, $author, [
+                        'event' => 'invoice_auto_issued',
+                        'comment' => sprintf('Счёт №%s перенесён из заявки %s: там он был отправлен по ошибке.', $number, $from->internal_code),
+                        'payload' => ['invoice_id' => $invoice->id, 'moved_from_request_id' => $from->id],
+                    ], systemTransition: true);
+                } catch (\Throwable $e) {
+                    Log::info('InvoiceService::detachMisdirected: target status unchanged', ['request_id' => $movedTo->id, 'error' => $e->getMessage()]);
+                }
+            } else {
+                $invoice->forceFill([
+                    'status' => InvoiceStatus::Cancelled->value,
+                    'cancelled_at' => now(),
+                    'cancellation_reason' => 'Отправлен по ошибке',
+                ])->save();
+                \App\Models\RequestStateChange::create([
+                    'request_id' => $from->id,
+                    'from_status' => $from->status->value,
+                    'to_status' => $from->status->value,
+                    'by_user_id' => $author->id,
+                    'event' => 'invoice_misdirected',
+                    'comment' => sprintf('Счёт №%s отправлен по ошибке — аннулирован.', $number),
+                    'payload' => ['invoice_id' => $invoice->id],
+                ]);
+            }
+
+            foreach (\App\Models\OrganizationLinkRequest::query()
+                ->where('request_id', $from->id)
+                ->where('document_number', $number)
+                ->where('status', \App\Enums\OrganizationLinkStatus::Pending->value)
+                ->get() as $pending) {
+                app(\App\Services\Clients\OrganizationLinkGuard::class)->reject($pending, $author);
+            }
+        });
+
+        // Эта заявка — назад в статус до счёта, если действующих счетов не осталось.
+        $from->refresh();
+        $stillHas = Invoice::query()->where('request_id', $from->id)
+            ->whereIn('status', [InvoiceStatus::Pending->value, InvoiceStatus::Paid->value, InvoiceStatus::PartiallyPaid->value])
+            ->exists();
+        if (! $stillHas && $from->status === RequestStatus::Invoiced) {
+            $back = RequestStatus::tryFrom((string) $before);
+            foreach (array_filter([$back, RequestStatus::AwaitingInvoice]) as $to) {
+                try {
+                    $this->stateService->transitionTo($from, $to, $author, [
+                        'event' => 'invoice_misdirected',
+                        'comment' => sprintf('Счёт №%s был отправлен по ошибке — заявка возвращена в статус до счёта.', $number),
+                        'payload' => ['invoice_id' => $invoice->id],
+                    ], systemTransition: true);
+                    break;
+                } catch (\Throwable $e) {
+                    continue;
+                }
+            }
+        }
+
+        return ['moved_to' => $movedTo, 'cancelled' => $movedTo === null];
+    }
+
     /** Перенести счёт в эту заявку, с записью в истории обеих. */
     private function moveDuplicateHere(Invoice $dup, \App\Models\OutboundQuote $quote, Request $request, string $number): Invoice
     {

@@ -2999,6 +2999,13 @@
                                                         class="btn btn-sm btn-primary"
                                                         title="{{ $isCancelled ? 'Отметить оплаченным (реанимация аннулированного счёта)' : 'Отметить оплаченным' }}">✓ Оплачен</button>
                                             @endif
+                                            @if(($isPending || $invStatus === 'expired') && $canManage)
+                                                <button type="button"
+                                                        wire:click="detachMisdirectedInvoice({{ $inv->id }})"
+                                                        wire:confirm="Счёт №{{ $inv->invoice_number }} отправлен в этой заявке по ошибке? Если он отправлен и в другой заявке — перенесём его туда, иначе аннулируем. Эта заявка вернётся в статус до счёта."
+                                                        class="btn btn-sm"
+                                                        title="Счёт ушёл не тому клиенту или не в ту переписку">↩ По ошибке</button>
+                                            @endif
                                             @if($isPending && $canManage)
                                                 <button type="button"
                                                         onclick="const r = prompt('Причина аннулирования счёта №{{ $inv->invoice_number }}?'); if (r) @this.call('cancelInvoice', {{ $inv->id }}, r);"
