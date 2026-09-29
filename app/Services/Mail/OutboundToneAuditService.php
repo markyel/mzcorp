@@ -151,6 +151,7 @@ class OutboundToneAuditService
             $r->forceFill([
                 'egregious' => $yes,
                 'egregious_reason' => $yes ? mb_substr((string) ($a['reason'] ?? ''), 0, 1000) : null,
+                'better_reply' => $yes ? mb_substr((string) ($a['better_reply'] ?? ''), 0, 3000) : null,
             ])->save();
             $marked += $yes ? 1 : 0;
         }

@@ -26,7 +26,7 @@ class OutboundToneReview extends Model
 
     protected $fillable = [
         'email_message_id', 'request_id', 'user_id', 'sent_at', 'verdict', 'severity',
-        'categories', 'quote', 'comment', 'suggestion', 'model', 'egregious', 'egregious_reason',
+        'categories', 'quote', 'comment', 'suggestion', 'model', 'egregious', 'egregious_reason', 'better_reply',
     ];
 
     protected $casts = [
