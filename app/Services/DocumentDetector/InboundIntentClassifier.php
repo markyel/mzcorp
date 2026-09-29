@@ -238,6 +238,21 @@ class InboundIntentClassifier
             $type = DetectorType::InboundUnclear;
         }
 
+        // «Клиент добавил позиции» откатывает заявку «в работу» — поэтому два
+        // детерминированных гарда (кейсы M-2026-17147, M-2026-17148, 24.09):
+        //  • письмо устарело: после него мы уже отправили распознанный КП или
+        //    счёт — уточнение из письма («10 штук») уже в документе, откат
+        //    стирал бы результат работы;
+        //  • это подтверждение заказа, а не новые позиции: «прошу поставить на
+        //    комплектацию», «в резерв», «отгружайте» — после счёта модель
+        //    читала это как расширение сделки.
+        // В обоих случаях — подсказка менеджеру (unclear), статус не двигаем.
+        if ($type === DetectorType::InboundExtension
+            && ($this->answeredByLaterDocument($message, $request) || $this->looksLikeOrderConfirmation($message))
+        ) {
+            $type = DetectorType::InboundUnclear;
+        }
+
         $payload = [
             'intent' => $intent,
             'reasoning' => $parsed['reasoning'] ?? null,
@@ -294,6 +309,39 @@ class InboundIntentClassifier
 
         // Слабое упоминание счёта — единый владелец понятия InvoiceMentionMatcher.
         return (new \App\Services\Mail\InvoiceMentionMatcher)->mentions($text);
+    }
+
+    /** После письма клиента по заявке уже ушёл распознанный КП или счёт. */
+    private function answeredByLaterDocument(EmailMessage $message, Request $request): bool
+    {
+        if ($message->sent_at === null) {
+            return false;
+        }
+
+        return \App\Models\OutboundQuote::query()
+            ->where('outbound_quotes.request_id', $request->id)
+            ->join('email_messages as em', 'em.id', '=', 'outbound_quotes.email_message_id')
+            ->where('em.sent_at', '>', $message->sent_at)
+            ->exists();
+    }
+
+    /**
+     * «Прошу поставить на комплектацию / в резерв», «отгружайте», «запускайте в
+     * работу» — клиент подтверждает заказ, а не добавляет позиции.
+     */
+    public static function isOrderConfirmationText(string $text): bool
+    {
+        return (bool) preg_match(
+            '~постав\w*\s+(на|в)\s+(комплектаци|резерв|сборк)|в\s+резерв|отгружайте|запускайте|отгрузите|собирайте~iu',
+            $text,
+        );
+    }
+
+    private function looksLikeOrderConfirmation(EmailMessage $message): bool
+    {
+        $own = trim(app(\App\Services\Mail\EmailTextCleanerService::class)->clientOwnText($message));
+
+        return $own !== '' && self::isOrderConfirmationText($own);
     }
 
     private function intentToDetectorType(string $intent, RequestStatus $currentStatus): ?DetectorType
