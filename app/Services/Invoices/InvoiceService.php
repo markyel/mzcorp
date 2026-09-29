@@ -82,6 +82,16 @@ class InvoiceService
         if ($inn === '') {
             return false;
         }
+        // Переезжает только гонка разбора: письмо покупателю ушло РАНЬШЕ, чем
+        // письмо, по которому счёт записан сейчас. Старый счёт, переотправленный
+        // позже в новой переписке (сверка, «вот счёт по прошлому заказу»), так
+        // и остаётся в своей заявке — M-2026-11318 собрал бы три чужих счёта.
+        $sentHere = EmailMessage::withHistory()->whereKey($quote->email_message_id)->value('sent_at');
+        $sentThere = EmailMessage::withHistory()->whereKey($dup->email_message_id)->value('sent_at');
+        if ($sentHere === null || $sentThere === null || Carbon::parse($sentHere)->gt(Carbon::parse($sentThere))) {
+            return false;
+        }
+
         $other = Request::query()->find($dup->request_id);
 
         return $this->requestBuyerInn($request, $inn) && ($other === null || ! $this->requestBuyerInn($other, $inn));
