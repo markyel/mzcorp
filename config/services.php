@@ -74,6 +74,10 @@ return [
         'proxy_key' => env('OPENAI_PROXY_KEY', ''),
         'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
         'mail_classifier_model' => env('OPENAI_MAIL_CLASSIFIER_MODEL', 'gpt-4o-mini'),
+        // Проверка писем менеджеров на образ компании (mail:tone-audit): отсев
+        // дешёвой моделью, отмеченное перепроверяет сильная — мини шумит.
+        'tone_audit_model' => env('OPENAI_TONE_AUDIT_MODEL', 'gpt-4o-mini'),
+        'tone_audit_verify_model' => env('OPENAI_TONE_AUDIT_VERIFY_MODEL', 'gpt-4o'),
         // Парсинг позиций заявки (RequestItemParsingService).
         // parsing_model — текстовый чат, vision_model — image_url-чат с detail:high.
         'parsing_model' => env('OPENAI_PARSING_MODEL', 'gpt-4.1'),

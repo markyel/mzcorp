@@ -56,16 +56,66 @@ class OutboundToneAuditService
     public function run(string $since, string $until, int $limit = 0, int $concurrency = 6, ?callable $progress = null): array
     {
         $letters = $this->candidates($since, $until, $limit);
-        $profile = MediaProfileEntry::asBrief();
-        $model = (string) config('services.openai.mail_classifier_model', 'gpt-4o-mini');
-        $system = OutboundToneAuditPrompt::systemMessage($profile);
+        $system = OutboundToneAuditPrompt::systemMessage(MediaProfileEntry::asBrief());
+        $screen = (string) config('services.openai.tone_audit_model', 'gpt-4o-mini');
+        $verify = (string) config('services.openai.tone_audit_verify_model', 'gpt-4o');
 
         $reviewed = 0;
         $issues = 0;
         $failed = 0;
-        $batches = $letters->chunk(self::BATCH)->values();
 
-        foreach ($batches->chunk(max(1, $concurrency)) as $wave) {
+        foreach ($letters->chunk(self::BATCH * max(1, $concurrency)) as $wave) {
+            $wave = $wave->values();
+
+            // 1. Быстрый отсев дешёвой моделью: всё «ok» записываем сразу.
+            $first = $this->ask($system, $wave, $screen, $concurrency);
+            $flagged = collect();
+            foreach ($wave as $l) {
+                $r = $first[$l['id']] ?? null;
+                if ($r === null) {
+                    $failed++;
+                } elseif ($this->isIssue($r)) {
+                    $flagged->push($l);
+                } else {
+                    $this->save($l, $r, $screen);
+                    $reviewed++;
+                }
+            }
+
+            // 2. Отмеченное перепроверяет модель посильнее — решение за ней:
+            // мини-модель переносит в письма правила рекламных текстов и шумит.
+            if ($flagged->isNotEmpty()) {
+                $second = $this->ask($system, $flagged, $verify, $concurrency);
+                foreach ($flagged as $l) {
+                    $r = $second[$l['id']] ?? null;
+                    if ($r === null) {
+                        $failed++;
+
+                        continue;
+                    }
+                    $this->save($l, $r, $verify);
+                    $reviewed++;
+                    $issues += $this->isIssue($r) ? 1 : 0;
+                }
+            }
+
+            if ($progress) {
+                $progress($reviewed, $issues, $letters->count());
+            }
+        }
+
+        return ['candidates' => $letters->count(), 'reviewed' => $reviewed, 'issues' => $issues, 'failed' => $failed];
+    }
+
+    /**
+     * Спросить модель про письма пачками, параллельно. Ответ — id письма → вердикт.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function ask(string $system, Collection $letters, string $model, int $concurrency): array
+    {
+        $out = [];
+        foreach ($letters->chunk(self::BATCH)->values()->chunk(max(1, $concurrency)) as $wave) {
             $wave = $wave->values();
             $responses = Http::pool(fn (Pool $pool) => $wave->map(
                 fn (Collection $batch, int $i) => $this->request($pool->as((string) $i), $system, $batch, $model)
@@ -76,31 +126,32 @@ class OutboundToneAuditService
                 $content = ($res instanceof \Illuminate\Http\Client\Response && $res->successful())
                     ? (string) ($res->json('choices.0.message.content') ?? '')
                     : null;
-
                 // Пачка не прошла — один повтор обычным путём, с ретраями на 429.
                 if ($content === null) {
                     try {
                         $content = (string) ($this->openai->chat($this->messages($system, $batch), $model, $this->options())['content'] ?? '');
                     } catch (\Throwable $e) {
-                        Log::warning('ToneAudit: пачка не проверена', ['ids' => $batch->pluck('id')->all(), 'error' => $e->getMessage()]);
-                        $failed += $batch->count();
+                        Log::warning('ToneAudit: пачка не проверена', ['model' => $model, 'ids' => $batch->pluck('id')->all(), 'error' => $e->getMessage()]);
 
                         continue;
                     }
                 }
-
-                [$r, $x] = $this->store($batch, $content, $model);
-                $reviewed += $r;
-                $issues += $x;
-                $failed += $batch->count() - $r;
-            }
-
-            if ($progress) {
-                $progress($reviewed, $issues, $letters->count());
+                foreach ((array) (json_decode($content, true)['results'] ?? []) as $r) {
+                    if (isset($r['id'])) {
+                        $out[(int) $r['id']] = $r;
+                    }
+                }
             }
         }
 
-        return ['candidates' => $letters->count(), 'reviewed' => $reviewed, 'issues' => $issues, 'failed' => $failed];
+        return $out;
+    }
+
+    /** @param  array<string, mixed>  $r */
+    private function isIssue(array $r): bool
+    {
+        return ($r['verdict'] ?? 'ok') === 'issue'
+            && array_intersect(array_keys(OutboundToneReview::CATEGORIES), (array) ($r['categories'] ?? [])) !== [];
     }
 
     /**
@@ -228,38 +279,26 @@ class OutboundToneAuditService
     }
 
     /**
-     * @return array{0: int, 1: int} [проверено, с замечаниями]
+     * Записать вердикт по письму.
+     *
+     * @param  array<string, mixed>  $l
+     * @param  array<string, mixed>  $r
      */
-    private function store(Collection $batch, string $content, string $model): array
+    private function save(array $l, array $r, string $model): void
     {
-        $parsed = json_decode($content, true);
-        $byId = collect($parsed['results'] ?? [])->keyBy(fn ($r) => (int) ($r['id'] ?? 0));
-        $reviewed = 0;
-        $issues = 0;
-
-        foreach ($batch as $l) {
-            $r = $byId[$l['id']] ?? null;
-            if ($r === null) {
-                continue;
-            }
-            $cats = array_values(array_intersect(array_keys(OutboundToneReview::CATEGORIES), (array) ($r['categories'] ?? [])));
-            $issue = ($r['verdict'] ?? 'ok') === 'issue' && $cats !== [];
-            OutboundToneReview::query()->updateOrCreate(['email_message_id' => $l['id']], [
-                'request_id' => $l['request_id'],
-                'user_id' => $l['user_id'],
-                'sent_at' => $l['sent_at'],
-                'verdict' => $issue ? 'issue' : 'ok',
-                'severity' => $issue ? max(1, min(3, (int) ($r['severity'] ?? 1))) : 0,
-                'categories' => $issue ? $cats : null,
-                'quote' => $issue ? mb_substr((string) ($r['quote'] ?? ''), 0, 1000) : null,
-                'comment' => $issue ? mb_substr((string) ($r['comment'] ?? ''), 0, 1000) : null,
-                'suggestion' => $issue ? mb_substr((string) ($r['suggestion'] ?? ''), 0, 2000) : null,
-                'model' => $model,
-            ]);
-            $reviewed++;
-            $issues += $issue ? 1 : 0;
-        }
-
-        return [$reviewed, $issues];
+        $issue = $this->isIssue($r);
+        $cats = array_values(array_intersect(array_keys(OutboundToneReview::CATEGORIES), (array) ($r['categories'] ?? [])));
+        OutboundToneReview::query()->updateOrCreate(['email_message_id' => $l['id']], [
+            'request_id' => $l['request_id'],
+            'user_id' => $l['user_id'],
+            'sent_at' => $l['sent_at'],
+            'verdict' => $issue ? 'issue' : 'ok',
+            'severity' => $issue ? max(1, min(3, (int) ($r['severity'] ?? 1))) : 0,
+            'categories' => $issue ? $cats : null,
+            'quote' => $issue ? mb_substr((string) ($r['quote'] ?? ''), 0, 1000) : null,
+            'comment' => $issue ? mb_substr((string) ($r['comment'] ?? ''), 0, 1000) : null,
+            'suggestion' => $issue ? mb_substr((string) ($r['suggestion'] ?? ''), 0, 2000) : null,
+            'model' => $model,
+        ]);
     }
 }
