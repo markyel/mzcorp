@@ -181,6 +181,14 @@ class OutboundToneAuditService
                 ->whereIn('rq.status', [\App\Enums\RequestStatus::ClosedWon->value, \App\Enums\RequestStatus::Paid->value]))
             ->orderBy('id')
             ->chunkById(500, function ($chunk) use (&$out, $internal, $users, $supplierEmails, $supplierDomains, $limit) {
+                // Заказчик заявки — клиент, даже если его адрес есть и в
+                // справочнике поставщиков: Liftway и ему подобные и покупают у
+                // нас, и продают нам (исходный случай M-2026-17474 так и выпал).
+                $clients = \App\Models\Request::query()
+                    ->whereIn('id', $chunk->pluck('related_request_id')->filter()->unique())
+                    ->pluck('client_email', 'id')
+                    ->map(fn ($e) => mb_strtolower(trim((string) $e)));
+
                 foreach ($chunk as $m) {
                     if ($limit > 0 && $out->count() >= $limit) {
                         return false;
@@ -189,13 +197,16 @@ class OutboundToneAuditService
                     if ($userId === null || preg_match(self::RFQ_SUBJECT_RE, (string) $m->subject)) {
                         continue;
                     }
+                    $client = (string) ($clients[$m->related_request_id] ?? '');
                     $external = array_filter(
                         array_map(fn ($r) => mb_strtolower(trim((string) ($r['email'] ?? ''))), array_merge((array) $m->to_recipients, (array) $m->cc_recipients)),
-                        function (string $e) use ($internal, $supplierEmails, $supplierDomains) {
+                        function (string $e) use ($internal, $supplierEmails, $supplierDomains, $client) {
                             $domain = (string) substr((string) strrchr($e, '@'), 1);
+                            if ($e === '' || in_array($domain, $internal, true)) {
+                                return false;
+                            }
 
-                            return $e !== '' && ! in_array($domain, $internal, true)
-                                && ! isset($supplierEmails[$e]) && ! isset($supplierDomains[$domain]);
+                            return $e === $client || (! isset($supplierEmails[$e]) && ! isset($supplierDomains[$domain]));
                         },
                     );
                     if ($external === []) {
