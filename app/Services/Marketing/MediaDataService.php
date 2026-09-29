@@ -25,6 +25,9 @@ class MediaDataService
     /** Ниже этого числа уточнений по категории инструкция не окупается. */
     public const MIN_CATEGORY_ITEMS = 25;
 
+    /** Ключ выпуска серии советов: тип детали из базы знаний опознания. */
+    public const TIPS_KEY_PREFIX = 'kb:';
+
     /** @var list<string> */
     public const DATA_SOURCES = ['catalog_new', 'catalog_price', 'stock_arrivals', 'request_tips', 'industry_digest'];
 
@@ -43,8 +46,9 @@ class MediaDataService
             'catalog_new' => 'Берём позиции, появившиеся в каталоге за окно темы.',
             'catalog_price' => 'Берём позиции, у которых цена за окно темы снизилась.',
             'stock_arrivals' => 'Журнала поступлений в системе нет: пока показываем позиции, вставшие в наличие вместе с последним импортом.',
-            'request_tips' => 'Серия: каждый выпуск — инструкция по одной категории товара, о которой ещё не рассказывали. '
-                .'Что именно советовать, видно из того, чего нам не хватало в заявках по этой категории.',
+            'request_tips' => 'Серия: каждый выпуск — как оформить заявку на один тип детали из базы знаний опознания '
+                .'(кнопка, отводка, ролик…), о котором ещё не рассказывали. Советы — из того, по чему мы эту деталь '
+                .'опознаём, и из вопросов, которые менеджеры задавали клиентам.',
             'industry_digest' => 'Берём новости отрасли из ленты '.config('services.marketing.news_digest_feed')
                 .' за окно темы и сводим их в один обзор недели по направлениям, со ссылкой на ленту.',
             default => 'Материал пишется по брифу темы.',
@@ -362,21 +366,33 @@ class MediaDataService
             return ['key' => null, 'facts' => ''];
         }
 
-        $categories = DB::table('request_items')
-            ->whereIn('request_id', $requestIds)
-            ->where('is_active', true)
-            ->whereNotNull('category')
-            ->selectRaw('category, COUNT(*) AS c')
-            ->groupBy('category')
+        // Серия идёт по типам деталей из базы знаний опознания («Кнопка
+        // лифтовая», «Отводка дверная»), а не по крупным группам: группа
+        // «Прочее» дала пост ни о чём (29.09), а общие советы «артикул, бренд,
+        // фото» повторялись из выпуска в выпуск с разными процентами.
+        $categories = DB::table('request_items as ri')
+            ->join('equipment_categories as ec', 'ec.id', '=', 'ri.identification_category_id')
+            ->whereIn('ri.request_id', $requestIds)
+            ->where('ri.is_active', true)
+            ->where('ec.is_active', true)
+            ->whereExists(fn ($q) => $q->selectRaw('1')->from('identification_rules as ir')
+                ->whereColumn('ir.category_id', 'ec.id')->where('ir.is_active', true))
+            ->selectRaw('ec.slug, COUNT(*) AS c')
+            ->groupBy('ec.slug')
             ->havingRaw('COUNT(*) >= ?', [self::MIN_CATEGORY_ITEMS])
             ->orderByDesc('c')
-            ->pluck('c', 'category');
+            ->pluck('c', 'ec.slug');
 
         if ($categories->isEmpty()) {
             return ['key' => null, 'facts' => ''];
         }
 
-        $category = $this->nextCategory($topic, $categories->keys()->all());
+        $keys = $categories->keys()->map(fn ($slug) => self::TIPS_KEY_PREFIX.$slug)->all();
+        $key = $this->nextCategory($topic, $keys);
+        if ($key === null) {
+            return ['key' => null, 'facts' => ''];
+        }
+        $category = DB::table('equipment_categories')->where('slug', substr($key, strlen(self::TIPS_KEY_PREFIX)))->first();
         if ($category === null) {
             return ['key' => null, 'facts' => ''];
         }
@@ -384,78 +400,172 @@ class MediaDataService
         $items = DB::table('request_items')
             ->whereIn('request_id', $requestIds)
             ->where('is_active', true)
-            ->where('category', $category);
+            ->where('identification_category_id', $category->id);
+        $asked = (int) (clone $items)->distinct()->count('request_id');
 
-        $stats = (clone $items)->selectRaw(
-            "COUNT(*) AS total,
-             COUNT(*) FILTER (WHERE parsed_article IS NULL OR btrim(parsed_article) = '') AS no_article,
-             COUNT(*) FILTER (WHERE parsed_brand IS NULL OR btrim(parsed_brand) = '') AS no_brand,
-             COUNT(*) FILTER (WHERE parsed_qty IS NULL OR parsed_qty <= 0) AS no_qty,
-             COUNT(*) FILTER (WHERE image_attachment_id IS NULL) AS no_photo,
-             COUNT(*) FILTER (WHERE catalog_item_id IS NULL) AS no_match"
-        )->first();
+        $lines = [
+            'ТЕМА ВЫПУСКА: как оформить заявку на «'.$category->name.'».',
+            'Что это: '.trim((string) $category->description),
+            'За 90 дней по заявкам с такой деталью нам пришлось переспрашивать клиента '.$asked.' раз.',
+            '',
+            'КАК МЫ ОПОЗНАЁМ ТАКУЮ ДЕТАЛЬ (база знаний; достаточно ОДНОГО из путей, они перечислены по удобству):',
+        ];
+        $lines = array_merge($lines, $this->identificationPaths((int) $category->id));
 
-        $total = (int) ($stats->total ?? 0);
-        if ($total === 0) {
-            return ['key' => null, 'facts' => ''];
+        $questions = $this->managerQuestions((int) $category->id, $since);
+        if ($questions !== []) {
+            $lines[] = '';
+            $lines[] = 'ВОПРОСЫ, КОТОРЫЕ МЕНЕДЖЕРЫ РЕАЛЬНО ЗАДАВАЛИ КЛИЕНТАМ по таким заявкам '
+                .'(часть может касаться других позиций заявки или доставки — бери только то, что про эту деталь):';
+            foreach ($questions as $q) {
+                $lines[] = '— '.$q;
+            }
         }
-        $pct = fn ($n) => (int) round((int) $n * 100 / $total);
 
-        // Как клиенты пишут такие позиции у себя — короткие строки без артикула
+        // Как клиенты пишут такие позиции — короткие строки без артикула
         // показательнее всего: именно из-за них и начинается переписка.
-        $asked = (clone $items)
+        $written = (clone $items)
             ->whereNotNull('parsed_name')
             ->orderByRaw('length(parsed_name)')
-            ->limit(12)
+            ->limit(8)
             ->pluck('parsed_name')
             ->map(fn ($n) => $this->short($n, 80))
             ->unique()
             ->values();
-
-        // Чем позиции категории различаются в каталоге — по этим названиям
-        // видно, какие признаки делают выбор однозначным.
-        $catalog = DB::table('request_items as ri')
-            ->join('catalog_items as ci', 'ci.id', '=', 'ri.catalog_item_id')
-            ->whereIn('ri.request_id', $requestIds)
-            ->where('ri.category', $category)
-            ->whereNotNull('ri.catalog_item_id')
-            ->distinct()
-            ->limit(12)
-            ->pluck('ci.name')
-            ->map(fn ($n) => $this->short($n, 90))
-            ->unique()
-            ->values();
-
-        $lines = [
-            'ТЕМА ВЫПУСКА: как оформить заявку на категорию «'.$category.'».',
-            '',
-            'За 90 дней по этой категории нам пришлось уточнять '.$total.' позиций. Не хватало:',
-            '— артикула: '.$pct($stats->no_article).'% позиций',
-            '— бренда или производителя: '.$pct($stats->no_brand).'% позиций',
-            '— фотографии: '.$pct($stats->no_photo).'% позиций',
-            '— количества: '.$pct($stats->no_qty).'% позиций',
-            '— по '.$pct($stats->no_match).'% позиций подбор по каталогу не сошёлся сразу.',
-        ];
-
-        if ($asked->isNotEmpty()) {
+        if ($written->isNotEmpty()) {
             $lines[] = '';
-            $lines[] = 'Так эти позиции выглядят в заявках клиентов (по ним и приходится спрашивать):';
-            foreach ($asked as $name) {
+            $lines[] = 'ТАК ЭТИ ПОЗИЦИИ ВЫГЛЯДЯТ В ЗАЯВКАХ (по ним и приходится переспрашивать):';
+            foreach ($written as $name) {
                 $lines[] = '— '.$name;
             }
         }
 
+        // Чем позиции различаются в каталоге — по этим названиям видно,
+        // какие признаки делают выбор однозначным, и из них строится пример.
+        $catalog = DB::table('request_items as ri')
+            ->join('catalog_items as ci', 'ci.id', '=', 'ri.catalog_item_id')
+            ->whereIn('ri.request_id', $requestIds)
+            ->where('ri.identification_category_id', $category->id)
+            ->distinct()
+            ->limit(10)
+            ->pluck('ci.name')
+            ->map(fn ($n) => $this->short($n, 90))
+            ->unique()
+            ->values();
         if ($catalog->isNotEmpty()) {
             $lines[] = '';
-            $lines[] = 'Так они называются в нашем каталоге — по этим названиям видно, '
-                .'какими признаками позиции отличаются друг от друга:';
+            $lines[] = 'ТАК ОНИ НАЗЫВАЮТСЯ В НАШЕМ КАТАЛОГЕ (чем отличаются друг от друга):';
             foreach ($catalog as $name) {
                 $lines[] = '— '.$name;
             }
         }
 
-        return ['key' => $category, 'facts' => implode("\n", $lines)];
+        $lines[] = '';
+        $lines[] = 'УЖЕ БЫЛО В ПРОШЛЫХ ВЫПУСКАХ, НЕ ПОВТОРЯТЬ: общие советы «укажите артикул, бренд, '
+            .'количество, приложите фото» и проценты заявок без них.';
+
+        return ['key' => $key, 'facts' => implode("\n", $lines)];
     }
+
+    /**
+     * Пути опознания типа детали из базы знаний: для каждого правила —
+     * альтернативы с параметрами, их вариантами и подсказками.
+     *
+     * @return list<string>
+     */
+    private function identificationPaths(int $categoryId): array
+    {
+        $params = DB::table('identification_parameters')->where('is_active', true)->get()->keyBy('id');
+        $lines = [];
+        foreach (DB::table('identification_rules')->where('category_id', $categoryId)->where('is_active', true)->orderBy('priority')->get() as $rule) {
+            $brands = json_decode((string) $rule->applies_to_brands, true);
+            $lines[] = is_array($brands) && $brands !== []
+                ? 'Для марок '.implode(', ', $brands).':'
+                : 'В общем случае:';
+            foreach (DB::table('identification_rule_alternatives')->where('rule_id', $rule->id)->orderBy('preference_order')->get() as $alt) {
+                $parts = [];
+                foreach (json_decode((string) $alt->required_parameter_ids, true) ?: [] as $pid) {
+                    $p = $params[$pid] ?? null;
+                    if ($p === null) {
+                        continue;
+                    }
+                    $values = collect(json_decode((string) $p->allowed_values, true) ?: [])
+                        ->map(fn ($v) => is_array($v) ? ($v['label'] ?? $v['value'] ?? null) : $v)->filter()->take(8)->implode(', ');
+                    $parts[] = $p->name
+                        .($p->unit ? ', '.$p->unit : '')
+                        .($values !== '' ? ' (варианты: '.$values.')' : '')
+                        .(trim((string) $p->description) !== '' ? ' — '.$this->short($p->description, 140) : '');
+                }
+                if ($parts !== []) {
+                    $lines[] = '  • '.$alt->label.': '.implode('; ', $parts);
+                }
+            }
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Вопросы, с которыми менеджеры переводили заявки с этой деталью в «Жду
+     * клиента»: наше письмо за два часа до перехода, без подписи.
+     *
+     * @return list<string>
+     */
+    private function managerQuestions(int $categoryId, \DateTimeInterface $since): array
+    {
+        $rows = DB::select(
+            "select distinct on (sc.request_id) sc.request_id, sc.created_at
+               from request_state_changes sc
+               join request_items ri on ri.request_id = sc.request_id and ri.is_active and ri.identification_category_id = ?
+              where sc.to_status = 'awaiting_client_clarification' and sc.created_at >= ?
+              order by sc.request_id, sc.created_at desc
+              limit 80",
+            [$categoryId, $since],
+        );
+
+        $out = [];
+        foreach ($rows as $row) {
+            $at = \Illuminate\Support\Carbon::parse($row->created_at);
+            $body = DB::table('email_messages')
+                ->where('related_request_id', $row->request_id)
+                ->where('direction', 'outbound')
+                ->whereBetween('sent_at', [$at->copy()->subHours(2), $at->copy()->addMinutes(10)])
+                ->orderByDesc('sent_at')
+                ->value('body_plain');
+            $text = self::questionText((string) $body);
+            if ($text !== null && ! in_array($text, $out, true)) {
+                $out[] = $text;
+            }
+            if (count($out) >= 12) {
+                break;
+            }
+        }
+
+        return $out;
+    }
+
+    /** Текст вопроса менеджера без подписи и цитаты; null — вопроса нет. */
+    public static function questionText(string $body): ?string
+    {
+        $text = str_replace("\r", '', $body);
+        foreach (["\n-- ", "\n--\n", 'С уважением', 'With best regards', 'Best regards', "\n>", "\nОт:", "\nFrom:", '-----', '_____', 'Идентификатор участника ЭДО', 'ЭДО ('] as $marker) {
+            $pos = mb_stripos($text, $marker);
+            if ($pos !== false) {
+                $text = mb_substr($text, 0, $pos);
+            }
+        }
+        $text = trim(preg_replace('/\s+/u', ' ', $text) ?? '');
+        if ($text === '' || preg_match('~успешно получено|уточняющие вопросы по заявке~u', $text)) {
+            return null;
+        }
+        // Нужен вопрос или просьба прислать/указать — иначе это не уточнение.
+        if (! preg_match('~\?|прошу|пришлите|укажите|уточните|необходим|нужн|фото~ui', $text)) {
+            return null;
+        }
+
+        return mb_strimwidth($text, 0, 220, '…');
+    }
+
 
     /**
      * Следующая категория серии: первая неразобранная, иначе разобранная
@@ -465,6 +575,19 @@ class MediaDataService
      */
     private function nextCategory(MediaTopic $topic, array $ordered): ?string
     {
+        // Один выпуск — одна категория во всех каналах. Каналы пишутся по
+        // очереди, и второй брал «следующую неразобранную»: 29.09 ВКонтакте
+        // получил кнопки, а Telegram — «Прочее».
+        $sameRelease = MediaPublication::query()
+            ->where('media_topic_id', $topic->id)
+            ->whereNotNull('subject_key')
+            ->where('created_at', '>=', now()->subHours(12))
+            ->orderByDesc('id')
+            ->value('subject_key');
+        if ($sameRelease !== null && in_array($sameRelease, $ordered, true)) {
+            return $sameRelease;
+        }
+
         $covered = MediaPublication::query()
             ->where('media_topic_id', $topic->id)
             ->whereNotNull('subject_key')
