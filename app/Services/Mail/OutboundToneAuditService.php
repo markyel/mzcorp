@@ -31,8 +31,16 @@ class OutboundToneAuditService
     /** Писем в одном запросе к модели. */
     public const BATCH = 8;
 
-    /** Шаблон автоответа о приёме заявки — его проверять незачем. */
-    private const AUTO_ACK_RE = '~успешно получено и принято в работу~u';
+    /**
+     * Автоуведомления клиентам (client_notification_templates) — это наши
+     * шаблоны, а не слова менеджера: проверять незачем.
+     */
+    private const AUTO_ACK_RE = '~успешно получено и принято в работу|ранее мы направляли вам коммерческое предложение'
+        .'|мы отправляли вам коммерческое предложение|напоминаем, что срок действия сч[её]та|к сожалению, срок действия сч[её]та'
+        .'|закрыта\. причина:|отправили вам уточняющие вопросы по заявке~iu';
+
+    /** Кроме названия приложенного КП или счёта в письме ничего нет. */
+    private const ATTACHMENT_ONLY_RE = '~^(предложение|сч[её]т)\s+мз-\S+\s+от\s+\S+$~iu';
 
     /** Письма поставщикам (RFQ) — не клиентская переписка. */
     private const RFQ_SUBJECT_RE = '~(^|\s)(request|req\.?|price request)\s+m-\d{4}-\d+|\[rfq|запрос цены~iu';
@@ -143,7 +151,7 @@ class OutboundToneAuditService
                         continue;
                     }
                     $text = $this->ownText($m);
-                    if (mb_strlen($text) < 3 || preg_match(self::AUTO_ACK_RE, $text)) {
+                    if (mb_strlen($text) < 3 || preg_match(self::AUTO_ACK_RE, $text) || preg_match(self::ATTACHMENT_ONLY_RE, $text)) {
                         continue;
                     }
                     $out->push([
