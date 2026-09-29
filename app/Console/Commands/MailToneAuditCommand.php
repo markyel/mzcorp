@@ -17,7 +17,8 @@ class MailToneAuditCommand extends Command
         {--until= : По какую дату (по умолчанию — сейчас)}
         {--limit=0 : Не больше N писем}
         {--concurrency=6 : Параллельных запросов к модели}
-        {--dry : Только посчитать кандидатов}';
+        {--dry : Только посчитать кандидатов}
+        {--egregious-only : Только отобрать вопиющие среди уже отмеченных}';
 
     protected $description = 'Audit managers\' letters to clients against the company media profile (tone, blame, warranty policy)';
 
@@ -26,6 +27,12 @@ class MailToneAuditCommand extends Command
         $since = (string) ($this->option('since') ?: now()->subDays(7)->toDateString());
         $until = (string) ($this->option('until') ?: now()->toDateTimeString());
         $limit = (int) $this->option('limit');
+
+        if ($this->option('egregious-only')) {
+            $this->info('Вопиющих: '.$audit->markEgregious($since, (int) $this->option('concurrency')).'.');
+
+            return self::SUCCESS;
+        }
 
         if ($this->option('dry')) {
             $c = $audit->candidates($since, $until, $limit);
@@ -41,7 +48,7 @@ class MailToneAuditCommand extends Command
             $this->line("  проверено {$done} из {$total}, с замечаниями {$issues}");
         });
 
-        $this->info("Кандидатов {$res['candidates']}, проверено {$res['reviewed']}, с замечаниями {$res['issues']}, не удалось {$res['failed']}.");
+        $this->info("Кандидатов {$res['candidates']}, проверено {$res['reviewed']}, с замечаниями {$res['issues']}, из них вопиющих {$res['egregious']}, не удалось {$res['failed']}.");
 
         return self::SUCCESS;
     }

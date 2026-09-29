@@ -15,6 +15,7 @@ class OutboundToneReview extends Model
 {
     public const CATEGORIES = [
         'rude' => 'Грубость, пренебрежение',
+        'familiar' => 'Панибратство, жаргон',
         'blame' => 'Перекладывание ответственности',
         'warranty' => 'Гарантия и документы вразрез с политикой',
         'incompetent' => 'Некомпетентность, не ответил на вопрос',
@@ -25,13 +26,14 @@ class OutboundToneReview extends Model
 
     protected $fillable = [
         'email_message_id', 'request_id', 'user_id', 'sent_at', 'verdict', 'severity',
-        'categories', 'quote', 'comment', 'suggestion', 'model',
+        'categories', 'quote', 'comment', 'suggestion', 'model', 'egregious', 'egregious_reason',
     ];
 
     protected $casts = [
         'sent_at' => 'datetime',
         'severity' => 'integer',
         'categories' => 'array',
+        'egregious' => 'boolean',
     ];
 
     public function emailMessage(): BelongsTo

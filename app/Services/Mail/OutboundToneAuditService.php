@@ -104,7 +104,58 @@ class OutboundToneAuditService
             }
         }
 
-        return ['candidates' => $letters->count(), 'reviewed' => $reviewed, 'issues' => $issues, 'failed' => $failed];
+        $egregious = $this->markEgregious($since, $concurrency);
+
+        return ['candidates' => $letters->count(), 'reviewed' => $reviewed, 'issues' => $issues, 'failed' => $failed, 'egregious' => $egregious];
+    }
+
+    /**
+     * Узкий отбор «вопиющего» среди писем с замечаниями: хамство,
+     * панибратство, высокомерие, отсылка к конкурентам. Сухие отказы — нет.
+     *
+     * @return int сколько отмечено вопиющими
+     */
+    public function markEgregious(string $since, int $concurrency = 6): int
+    {
+        $reviews = OutboundToneReview::query()
+            ->where('verdict', 'issue')
+            ->whereNull('egregious')
+            ->where('sent_at', '>=', $since)
+            ->with('emailMessage')
+            ->get()
+            ->filter(fn (OutboundToneReview $r) => $r->emailMessage !== null);
+        if ($reviews->isEmpty()) {
+            return 0;
+        }
+
+        $letters = $reviews->map(fn (OutboundToneReview $r) => [
+            'id' => (int) $r->email_message_id,
+            'client' => $this->clientContext($r->emailMessage),
+            'text' => $this->ownText($r->emailMessage),
+        ])->values();
+
+        $answers = $this->ask(
+            OutboundToneAuditPrompt::egregiousSystemMessage(),
+            $letters,
+            (string) config('services.openai.tone_audit_verify_model', 'gpt-4o'),
+            $concurrency,
+        );
+
+        $marked = 0;
+        foreach ($reviews as $r) {
+            $a = $answers[(int) $r->email_message_id] ?? null;
+            if ($a === null) {
+                continue;
+            }
+            $yes = (bool) ($a['egregious'] ?? false);
+            $r->forceFill([
+                'egregious' => $yes,
+                'egregious_reason' => $yes ? mb_substr((string) ($a['reason'] ?? ''), 0, 1000) : null,
+            ])->save();
+            $marked += $yes ? 1 : 0;
+        }
+
+        return $marked;
     }
 
     /**
