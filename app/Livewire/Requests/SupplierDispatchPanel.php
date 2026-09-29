@@ -621,9 +621,11 @@ class SupplierDispatchPanel extends Component
         if ($user === null) {
             abort(403);
         }
-        $privileged = $user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value, Role::Admin->value]);
+        // Снабжение ведёт поставщиков по любой заявке (заказчик, 2026-09-29):
+        // запрос уходит с ящика менеджера заявки, ответы ложатся в её тред.
+        $privileged = $user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value, Role::Admin->value, Role::Procurement->value]);
         if ($user->hasRole(Role::Secretary->value) || (! $privileged && ! $req->isAccessibleBy($user))) {
-            abort(403, 'Доступно назначенному менеджеру, acting или РОПу.');
+            abort(403, 'Доступно назначенному менеджеру, acting, РОПу или снабжению.');
         }
 
         $itemIds = array_values(array_map('intval', array_keys(array_filter($this->selectedItems))));
