@@ -807,6 +807,12 @@ class Detail extends Component
 
             return;
         }
+        // Снабжение открывает чужие заявки только на просмотр (isViewableBy).
+        if (! $this->request->isAccessibleBy($user) && ! $user->hasRole(Role::Manager->value)) {
+            $this->dispatch('toast', message: 'Снабжение только просматривает заявки.', type: 'error');
+
+            return;
+        }
         $email = (string) ($this->request->client_email ?? '');
         if (trim($email) === '') {
             $this->dispatch('toast', message: 'У заявки нет e-mail клиента.', type: 'error');
