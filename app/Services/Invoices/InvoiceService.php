@@ -150,9 +150,12 @@ class InvoiceService
             return $inn !== '' && $q->request && $this->requestBuyerInn($q->request, $inn);
         }) ?? $candidates->first();
 
+        // Статус до счёта — из последнего НАСТОЯЩЕГО перехода в «Счёт
+        // отправлен» (записи invoiced→invoiced — это аудит без смены статуса).
         $before = \App\Models\RequestStateChange::query()
             ->where('request_id', $from->id)
             ->where('to_status', RequestStatus::Invoiced->value)
+            ->where('from_status', '!=', RequestStatus::Invoiced->value)
             ->orderByDesc('id')
             ->value('from_status');
 
@@ -210,20 +213,24 @@ class InvoiceService
         $stillHas = Invoice::query()->where('request_id', $from->id)
             ->whereIn('status', [InvoiceStatus::Pending->value, InvoiceStatus::Paid->value, InvoiceStatus::PartiallyPaid->value])
             ->exists();
-        if (! $stillHas && $from->status === RequestStatus::Invoiced) {
-            $back = RequestStatus::tryFrom((string) $before);
-            foreach (array_filter([$back, RequestStatus::AwaitingInvoice]) as $to) {
-                try {
-                    $this->stateService->transitionTo($from, $to, $author, [
-                        'event' => 'invoice_misdirected',
-                        'comment' => sprintf('Счёт №%s был отправлен по ошибке — заявка возвращена в статус до счёта.', $number),
-                        'payload' => ['invoice_id' => $invoice->id],
-                    ], systemTransition: true);
-                    break;
-                } catch (\Throwable $e) {
-                    continue;
-                }
-            }
+        // Карта переходов из «Счёт отправлен» назад не пускает (только «В
+        // работе», оплата, закрытие), а исправление ошибки — это именно откат
+        // к прежнему статусу. Пишем его напрямую, с записью в истории.
+        $back = RequestStatus::tryFrom((string) $before) ?? RequestStatus::InProgress;
+        if (! $stillHas && $from->status === RequestStatus::Invoiced && $back !== RequestStatus::Invoiced) {
+            DB::transaction(function () use ($from, $back, $author, $number, $invoice) {
+                \App\Models\RequestStateChange::create([
+                    'request_id' => $from->id,
+                    'from_status' => RequestStatus::Invoiced->value,
+                    'to_status' => $back->value,
+                    'by_user_id' => $author->id,
+                    'event' => 'invoice_misdirected',
+                    'comment' => sprintf('Счёт №%s был отправлен по ошибке — заявка возвращена в статус до счёта.', $number),
+                    'payload' => ['invoice_id' => $invoice->id],
+                ]);
+                $from->forceFill(['status' => $back->value])->save();
+                app(\App\Services\Request\AttentionService::class)->recompute($from->fresh());
+            });
         }
 
         return ['moved_to' => $movedTo, 'cancelled' => $movedTo === null];
