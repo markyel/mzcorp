@@ -350,6 +350,18 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
 
             $enrichStats = $enricher->enrich($quote);
 
+            // Покупатель «закупка + наценка» (Liftway): цена в КП/счёте выше
+            // режимной — письмо менеджеру. Позиции уже сопоставлены с каталогом.
+            try {
+                app(\App\Services\Quotes\CostPlusPriceGuard::class)->check($quote->fresh(), $request);
+            } catch (\Throwable $e) {
+                Log::warning('ParseOutboundQuoteJob: cost-plus price guard failed (non-fatal)', [
+                    'quote_id' => $quote->id,
+                    'request_id' => $request->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
             // Если это счёт — создаём parallel Invoice-запись, чтобы документ
             // попал на таб «Счета» и в /dashboard/invoices с возможностью
             // отметить оплаченным. Идемпотентно. Non-fatal: парсинг уже

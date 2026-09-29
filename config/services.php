@@ -777,6 +777,11 @@ return [
         // Глобальная наценка (%) для режима cost_plus. Фиксированная, одна на всех
         // cost_plus-покупателей. Меняем через env без правки кода.
         'cost_plus_markup' => (float) env('PRICING_COST_PLUS_MARKUP', 15),
+        // Сторож цены для cost_plus-покупателей (CostPlusPriceGuard): письмо
+        // менеджеру, если в его КП/счёте цена выше «закупка + наценка» больше
+        // чем на этот допуск (доля). Проверяем только свежие документы.
+        'cost_plus_guard_tolerance' => (float) env('PRICING_COST_PLUS_GUARD_TOLERANCE', 0.02),
+        'cost_plus_guard_max_age_days' => (int) env('PRICING_COST_PLUS_GUARD_MAX_AGE_DAYS', 3),
     ],
 
     /*
