@@ -57,7 +57,9 @@
 
             <dt class="text-fg-3">Частота</dt>
             <dd class="text-fg-1">
-                @if($s['every_days'] !== null)
+                @if($s['per_week'] >= 1)
+                    ~<b class="mono tnum">{{ rtrim(rtrim(number_format($s['per_week'], 1, ',', ''), '0'), ',') }}</b> в неделю <span class="text-fg-3">(за 90 дн.)</span>
+                @elseif($s['every_days'] !== null)
                     раз в ~<b class="mono tnum">{{ $s['every_days'] }}</b> дн. <span class="text-fg-3">(за год)</span>
                 @else
                     <span class="text-fg-3">мало заявок за год</span>

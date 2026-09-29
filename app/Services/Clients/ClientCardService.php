@@ -41,7 +41,7 @@ class ClientCardService
     /**
      * @return array{
      *   organizations: list<array{id: int, name: string, inn: ?string, discount: float, cost_plus: bool, pinned: bool, defunct: bool}>,
-     *   stats: array{total: int, first_at: ?Carbon, last_90: int, every_days: ?int, quoted: int, quoted_pct: ?float, won: int, lost: int, open_quoted: int, win_rate: ?float, paid_sum: float, paid_count: int}
+     *   stats: array{total: int, first_at: ?Carbon, last_90: int, every_days: ?int, per_week: float, quoted: int, quoted_pct: ?float, won: int, lost: int, open_quoted: int, win_rate: ?float, paid_sum: float, paid_count: int}
      * }
      */
     public function forEmail(string $email, ?int $requestOrganizationId = null): array
@@ -87,7 +87,7 @@ class ClientCardService
         $total = count($ids);
         if ($total === 0) {
             return [
-                'total' => 0, 'first_at' => null, 'last_90' => 0, 'every_days' => null,
+                'total' => 0, 'first_at' => null, 'last_90' => 0, 'every_days' => null, 'per_week' => 0.0,
                 'quoted' => 0, 'quoted_pct' => null, 'won' => 0, 'lost' => 0, 'open_quoted' => 0,
                 'win_rate' => null, 'paid_sum' => 0.0, 'paid_count' => 0,
             ];
@@ -132,6 +132,8 @@ class ClientCardService
             'first_at' => $requests->min('created_at'),
             'last_90' => $requests->filter(fn (Request $r) => $r->created_at->gte(now()->subDays(90)))->count(),
             'every_days' => $everyDays,
+            // У частых клиентов «раз в 1 дн.» ничего не говорит — считаем в неделю по последним 90 дням.
+            'per_week' => round($requests->filter(fn (Request $r) => $r->created_at->gte(now()->subDays(90)))->count() / (90 / 7), 1),
             'quoted' => $quotedIds->count(),
             'quoted_pct' => round($quotedIds->count() * 100 / $total, 0),
             'won' => $won,
