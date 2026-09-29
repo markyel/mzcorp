@@ -240,7 +240,7 @@ class AttachmentController extends Controller
             ? Request::find($email->related_request_id)
             : null;
 
-        if ($relatedRequest && $relatedRequest->isAccessibleBy($user)) {
+        if ($relatedRequest && $relatedRequest->isViewableBy($user)) {
             return;
         }
 

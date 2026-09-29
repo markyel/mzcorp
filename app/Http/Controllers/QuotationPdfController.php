@@ -58,7 +58,7 @@ class QuotationPdfController extends Controller
             abort(404);
         }
         $accessible = method_exists($req, 'isAccessibleBy')
-            ? $req->isAccessibleBy($user)
+            ? $req->isViewableBy($user)
             : $req->assigned_user_id === $user->id;
         if (! $accessible) {
             abort(403);

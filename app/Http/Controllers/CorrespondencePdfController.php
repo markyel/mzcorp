@@ -201,7 +201,7 @@ class CorrespondencePdfController extends Controller
         ])) {
             return;
         }
-        if (! $request->isAccessibleBy($user)) {
+        if (! $request->isViewableBy($user)) {
             abort(403, 'Нет доступа к этой заявке.');
         }
     }

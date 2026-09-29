@@ -124,7 +124,8 @@ class Detail extends Component
         // проверял только assigned_user_id, поэтому делегированная заявка —
         // показанная acting-менеджеру в пуле — на входе отбивалась 403
         // «назначена другому менеджеру».
-        if (! $request->isAccessibleBy($user)) {
+        // Снабжение — только просмотр (isViewableBy); действия ниже проверяют isAccessibleBy.
+        if (! $request->isViewableBy($user)) {
             abort(403, 'Эта заявка назначена другому менеджеру.');
         }
 
