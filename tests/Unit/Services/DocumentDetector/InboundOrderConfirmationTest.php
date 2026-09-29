@@ -30,4 +30,24 @@ class InboundOrderConfirmationTest extends TestCase
             'количество' => ['10 штук', false],
         ];
     }
+
+    /** M-2026-16514: «Бонусную карту ещё прикрепите» после счёта — правка счёта, не новая позиция. */
+    #[DataProvider('adjustmentCases')]
+    public function test_document_adjustment(string $text, bool $expected): void
+    {
+        $this->assertSame($expected, InboundIntentClassifier::isDocumentAdjustmentText($text));
+    }
+
+    public static function adjustmentCases(): array
+    {
+        return [
+            'бонусная карта' => ["Бонусную карту еще прикрепите пожалуйста.\nКарта: 10000678", true],
+            'карта клиента' => ['Карта клиента: 10000678', true],
+            'скидка' => ['Можно со скидкой?', true],
+            'реквизиты' => ['Поменяйте реквизиты, счёт нужен на ООО «Лифт-Сервис»', true],
+            'перевыставить' => ['Перевыставьте счёт, пожалуйста', true],
+            'новая позиция' => ['Добавьте ещё ролик M05324 — 4 шт к этому заказу', false],
+            'карта контроллера' => ['И ещё нужна плата управления, карта памяти не нужна', false],
+        ];
+    }
 }

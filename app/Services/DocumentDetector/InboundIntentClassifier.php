@@ -245,10 +245,13 @@ class InboundIntentClassifier
         //    стирал бы результат работы;
         //  • это подтверждение заказа, а не новые позиции: «прошу поставить на
         //    комплектацию», «в резерв», «отгружайте» — после счёта модель
-        //    читала это как расширение сделки.
-        // В обоих случаях — подсказка менеджеру (unclear), статус не двигаем.
+        //    читала это как расширение сделки;
+        //  • это правка уже выставленного документа, а не новая позиция:
+        //    «бонусную карту прикрепите», «со скидкой», «поменяйте реквизиты»
+        //    (M-2026-16514: «Бонусную карту ещё прикрепите» после счёта).
+        // Во всех случаях — подсказка менеджеру (unclear), статус не двигаем.
         if ($type === DetectorType::InboundExtension
-            && ($this->answeredByLaterDocument($message, $request) || $this->looksLikeOrderConfirmation($message))
+            && ($this->answeredByLaterDocument($message, $request) || $this->looksLikeOrderConfirmation($message) || $this->looksLikeDocumentAdjustment($message))
         ) {
             $type = DetectorType::InboundUnclear;
         }
@@ -335,6 +338,25 @@ class InboundIntentClassifier
             '~постав\w*\s+(на|в)\s+(комплектаци|резерв|сборк)|в\s+резерв|отгружайте|запускайте|отгрузите|собирайте~iu',
             $text,
         );
+    }
+
+    /**
+     * «Бонусную карту прикрепите», «примените скидку», «поменяйте реквизиты /
+     * плательщика», «перевыставьте счёт» — правка КП/счёта, а не новая позиция.
+     */
+    public static function isDocumentAdjustmentText(string $text): bool
+    {
+        return (bool) preg_match(
+            '~(бонусн|скидочн|дисконтн)\w*\s+карт|карт\w*\s+(клиента|лояльности|покупателя)|скидк|реквизит|плательщик|перевыстав|переделайте\s+сч|исправьте\s+сч|пересчитайте\s+сч~iu',
+            $text,
+        );
+    }
+
+    private function looksLikeDocumentAdjustment(EmailMessage $message): bool
+    {
+        $own = trim(app(\App\Services\Mail\EmailTextCleanerService::class)->clientOwnText($message));
+
+        return $own !== '' && self::isDocumentAdjustmentText($own);
     }
 
     private function looksLikeOrderConfirmation(EmailMessage $message): bool
