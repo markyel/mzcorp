@@ -186,12 +186,14 @@
                         @endforeach
                     </div>
                 @endif
+                @php $groupsOf = []; foreach ($this->supplierGroups as $sg) { foreach ($sg['ids'] as $sid) { $groupsOf[$sid][] = $sg['name']; } } @endphp
                 <div class="border border-border rounded-md divide-y divide-border-subtle">
                     @forelse($opts as $o)
                         <label wire:key="sup-opt-{{ $o['id'] }}" class="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-hover {{ ($o['already_awaiting'] ?? 0) > 0 ? 'bg-amber-50/60' : '' }}">
                             <input type="checkbox" wire:model.live="selectedSuppliers.{{ $o['id'] }}" class="mt-1">
                             <span class="flex-1">
                                 <span class="text-[13px] text-fg-1 font-medium">{{ $o['name'] }}</span>
+                                @foreach($groupsOf[$o['id']] ?? [] as $gn)<span class="chip chip-neutral text-[10px] ml-1" title="Группа поставщиков">{{ $gn }}</span>@endforeach
                                 @if($o['matched'])
                                     <span class="chip chip-sky text-[10px] ml-1">подходит · {{ $o['item_count'] }} поз.</span>
                                 @else
