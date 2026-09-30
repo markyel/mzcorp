@@ -6,6 +6,7 @@ use App\Models\CatalogItem;
 use App\Models\RequestItem;
 use App\Models\Supplier;
 use App\Models\SupplierInquiry;
+use App\Models\SupplierGroup;
 use App\Models\SupplierInquiryItem;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
@@ -26,6 +27,12 @@ class Index extends Component
 
     #[Url(as: 'q', except: '')]
     public string $search = '';
+
+    /** Фильтр реестра по группе (0 — все). */
+    #[Url(as: 'group', except: 0)]
+    public int $groupFilter = 0;
+
+    public string $newGroupName = '';
 
     /* --- Добавление поставщика в реестр --- */
     public string $newEmail = '';
@@ -77,6 +84,77 @@ class Index extends Component
         $this->newName = '';
         unset($this->suppliers);
         $this->dispatch('toast', message: 'Поставщик добавлен в реестр.', type: 'success');
+    }
+
+    /* --- Группы поставщиков («Китай», «Европа», «Поручни»…) --- */
+
+    /** @return \Illuminate\Support\Collection<int, SupplierGroup> */
+    #[Computed]
+    public function groups()
+    {
+        return SupplierGroup::query()->withCount('suppliers')->orderBy('sort_order')->orderBy('name')->get();
+    }
+
+    public function setGroupFilter(int $groupId): void
+    {
+        $this->groupFilter = $this->groupFilter === $groupId ? 0 : $groupId;
+        $this->resetPage();
+        unset($this->suppliers);
+    }
+
+    public function createGroup(): void
+    {
+        $name = trim($this->newGroupName);
+        if ($name === '') {
+            return;
+        }
+        if (SupplierGroup::query()->whereRaw('lower(name) = ?', [mb_strtolower($name)])->exists()) {
+            $this->addError('newGroupName', 'Группа «'.$name.'» уже есть.');
+
+            return;
+        }
+        SupplierGroup::create([
+            'name' => mb_substr($name, 0, 100),
+            'sort_order' => (int) SupplierGroup::query()->max('sort_order') + 1,
+            'created_by_user_id' => auth()->id(),
+        ]);
+        $this->newGroupName = '';
+        unset($this->groups);
+    }
+
+    public function renameGroup(int $groupId, string $name): void
+    {
+        $name = trim($name);
+        if ($name === '' || SupplierGroup::query()->whereRaw('lower(name) = ?', [mb_strtolower($name)])->whereKeyNot($groupId)->exists()) {
+            return;
+        }
+        SupplierGroup::whereKey($groupId)->update(['name' => mb_substr($name, 0, 100)]);
+        unset($this->groups, $this->suppliers);
+    }
+
+    public function deleteGroup(int $groupId): void
+    {
+        SupplierGroup::whereKey($groupId)->delete();
+        if ($this->groupFilter === $groupId) {
+            $this->groupFilter = 0;
+        }
+        unset($this->groups, $this->suppliers);
+    }
+
+    public function addToGroup(int $supplierId, int $groupId): void
+    {
+        $group = SupplierGroup::find($groupId);
+        if ($group === null || ! Supplier::whereKey($supplierId)->exists()) {
+            return;
+        }
+        $group->suppliers()->syncWithoutDetaching([$supplierId]);
+        unset($this->groups, $this->suppliers);
+    }
+
+    public function removeFromGroup(int $supplierId, int $groupId): void
+    {
+        SupplierGroup::find($groupId)?->suppliers()->detach($supplierId);
+        unset($this->groups, $this->suppliers);
     }
 
     public function removeSupplier(int $id): void
@@ -207,7 +285,10 @@ class Index extends Component
     #[Computed]
     public function suppliers()
     {
-        $q = Supplier::query()->with('createdBy:id,name');
+        $q = Supplier::query()->with(['createdBy:id,name', 'groups:id,name']);
+        if ($this->groupFilter > 0) {
+            $q->whereHas('groups', fn ($g) => $g->whereKey($this->groupFilter));
+        }
 
         $s = trim($this->search);
         if ($s !== '') {

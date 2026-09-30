@@ -114,6 +114,9 @@ class Index extends Component
 
     public string $supplierSearch = '';
 
+    /** Развёрнутые карточки товара: «t:<cid>» — строка таблицы, «p:<cid>» — позиция в запросе. */
+    public array $openCards = [];
+
     public string $greeting = 'Здравствуйте, {поставщик}!';
 
     public string $greetingEn = 'Hello {поставщик},';
@@ -539,6 +542,99 @@ class Index extends Component
         }
         $parts[] = $article;
         $this->editedOem[$cid] = implode(', ', $parts);
+    }
+
+    /** Развернуть / свернуть карточку товара с историей поставщиков. */
+    public function toggleCard(int $cid, string $where = 't'): void
+    {
+        $key = ($where === 'p' ? 'p' : 't').':'.$cid;
+        $this->openCards = in_array($key, $this->openCards, true)
+            ? array_values(array_diff($this->openCards, [$key]))
+            : [...$this->openCards, $key];
+        unset($this->productCards);
+    }
+
+    public function isCardOpen(int $cid, string $where = 't'): bool
+    {
+        return in_array(($where === 'p' ? 'p' : 't').':'.$cid, $this->openCards, true);
+    }
+
+    /**
+     * Данные развёрнутых карточек: товар каталога, последнее изменение цены,
+     * история поставщиков (наши запросы + закупки из 1С). Только для
+     * развёрнутых — полная карточка на каждую строку утяжелила бы страницу.
+     *
+     * @return array<int, array{cat: CatalogItem, pc: ?\App\Models\CatalogPriceChange, history: ?array}>
+     */
+    #[Computed]
+    public function productCards(): array
+    {
+        $ids = array_values(array_unique(array_map(fn ($k) => (int) substr($k, 2), $this->openCards)));
+        if ($ids === []) {
+            return [];
+        }
+        $cats = CatalogItem::query()->whereIn('id', $ids)->get()->keyBy('id');
+        $pcs = \App\Models\CatalogPriceChange::query()->whereIn('catalog_item_id', $ids)
+            ->orderByDesc('changed_at')->orderByDesc('id')->get()->unique('catalog_item_id')->keyBy('catalog_item_id');
+        $history = app(\App\Services\Supplier\CatalogSupplierHistoryService::class)->forCatalogIds($ids);
+
+        $out = [];
+        foreach ($ids as $id) {
+            if (isset($cats[$id])) {
+                $out[$id] = ['cat' => $cats[$id], 'pc' => $pcs[$id] ?? null, 'history' => $history[$id] ?? null];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Группы поставщиков для быстрого выбора: выбрал «Китай» — отмечены все
+     * поставщики группы (с e-mail), остальных можно добавить поштучно.
+     *
+     * @return list<array{id: int, name: string, ids: list<int>, selected: bool}>
+     */
+    #[Computed]
+    public function supplierGroups(): array
+    {
+        return \App\Models\SupplierGroup::query()->with(['suppliers' => fn ($q) => $q->whereNotNull('email')->where('email', '!=', '')])
+            ->orderBy('sort_order')->orderBy('name')->get()
+            ->map(function ($g) {
+                $ids = $g->suppliers->pluck('id')->map(fn ($v) => (int) $v)->all();
+
+                return [
+                    'id' => (int) $g->id,
+                    'name' => (string) $g->name,
+                    'ids' => $ids,
+                    'selected' => $ids !== [] && collect($ids)->every(fn ($id) => ! empty($this->selectedSuppliers[$id])),
+                ];
+            })
+            ->filter(fn ($g) => $g['ids'] !== [])
+            ->values()->all();
+    }
+
+    /** Выбрать / снять всю группу поставщиков. */
+    public function toggleSupplierGroup(int $groupId): void
+    {
+        $group = collect($this->supplierGroups)->firstWhere('id', $groupId);
+        if ($group === null) {
+            return;
+        }
+        foreach ($group['ids'] as $id) {
+            if ($group['selected']) {
+                unset($this->selectedSuppliers[$id]);
+            } else {
+                $this->selectedSuppliers[$id] = true;
+                if (! in_array($id, $this->addedSupplierIds, true)) {
+                    $this->addedSupplierIds[] = $id;
+                }
+            }
+        }
+        unset($this->supplierOptions, $this->supplierGroups, $this->previewLanguages);
+        // В группе бывают англоязычные поставщики — названия позиций переводим сразу.
+        if (! $group['selected']) {
+            $this->autoTranslateIfEnglish();
+        }
     }
 
     /** Очистить весь выбор (крестик в шапке модалки запроса). */

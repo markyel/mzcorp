@@ -115,7 +115,12 @@
                         <tr class="border-b border-border-subtle {{ $it['price_stale'] ? 'bg-amber-50' : '' }}">
                             <td class="px-2 py-2 text-center"><input type="checkbox" wire:model.live="selectedItems.{{ $it['id'] }}"></td>
                             <td class="px-2 py-2">
-                                <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($it['name'], 70) }}
+                                <div class="text-fg-1">
+                                    @if($it['catalog_item_id'])
+                                        <button type="button" wire:click="toggleCard({{ $it['catalog_item_id'] }})" class="text-left hover:text-sky-700" title="Карточка товара и история поставщиков"><span class="text-fg-4 text-[10px] mr-0.5">{{ in_array($it['catalog_item_id'], $openCards, true) ? '▾' : '▸' }}</span>{{ \Illuminate\Support\Str::limit($it['name'], 70) }}</button>
+                                    @else
+                                        {{ \Illuminate\Support\Str::limit($it['name'], 70) }}
+                                    @endif
                                     @if($it['requested'])<span class="chip chip-sky text-[10px] ml-1" title="Запрос уже отправлен — ждём предложение">📦 ждём</span>@endif
                                     @if($it['discontinued'])<span class="chip chip-warn text-[10px] ml-1" title="Все ответы поставщиков — отказ">🚫 возможно не поставляется</span>@endif
                                 </div>
@@ -139,6 +144,14 @@
                                 @endif
                             </td>
                         </tr>
+                        @if($it['catalog_item_id'] && in_array($it['catalog_item_id'], $openCards, true) && ($card = $this->productCards[$it['catalog_item_id']] ?? null))
+                            <tr class="border-b border-border-subtle bg-surface-2" wire:key="card-{{ $it['id'] }}">
+                                <td colspan="5" class="px-4 py-2.5">
+                                    @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false])
+                                    @include('livewire.suppliers._catalog-supplier-history', ['history' => $card['history']])
+                                </td>
+                            </tr>
+                        @endif
                     @empty
                         <tr><td colspan="5" class="px-3 py-6 text-center text-fg-3">Нет активных позиций.</td></tr>
                     @endforelse
@@ -161,6 +174,16 @@
                 @if($dupCount > 0)
                     <div class="text-[11.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
                         ⚠ По {{ $dupCount }} из выбранных позиций запрос поставщику уже отправлен — не дублируйте без необходимости. Поставщики, от которых ждём ответ, помечены ниже.
+                    </div>
+                @endif
+                @if($this->supplierGroups !== [])
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="text-[11px] text-fg-4">Группы:</span>
+                        @foreach($this->supplierGroups as $g)
+                            <button type="button" wire:click="toggleSupplierGroup({{ $g['id'] }})" wire:key="sg-{{ $g['id'] }}"
+                                    class="btn btn-xs {{ $g['selected'] ? 'btn-primary' : '' }}"
+                                    title="{{ $g['selected'] ? 'Снять всех поставщиков группы' : 'Выбрать всех поставщиков группы' }}">{{ $g['selected'] ? '✓ ' : '' }}{{ $g['name'] }} · {{ count($g['ids']) }}</button>
+                        @endforeach
                     </div>
                 @endif
                 <div class="border border-border rounded-md divide-y divide-border-subtle">

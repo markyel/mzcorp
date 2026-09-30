@@ -232,7 +232,12 @@
                             <td class="px-2 py-2 text-center"><input type="checkbox" wire:model.live="selected.{{ $p['cid'] }}"></td>
                             <td class="px-2 py-2 text-right mono text-fg-4">{{ $this->positions->firstItem() + $i }}</td>
                             <td class="px-2 py-2 mono text-fg-2">{{ $p['sku'] }}</td>
-                            <td class="px-2 py-2 text-fg-1">{{ \Illuminate\Support\Str::limit($p['name'], 64) }}</td>
+                            <td class="px-2 py-2 text-fg-1">
+                                <button type="button" wire:click="toggleCard({{ $p['cid'] }}, 't')" class="text-left hover:text-sky-700"
+                                        title="Карточка товара и история поставщиков">
+                                    <span class="text-fg-4 text-[10px] mr-0.5">{{ $this->isCardOpen($p['cid'], 't') ? '▾' : '▸' }}</span>{{ \Illuminate\Support\Str::limit($p['name'], 64) }}
+                                </button>
+                            </td>
                             <td class="px-2 py-2 text-fg-3">{{ $p['brand'] ?: '—' }}</td>
                             <td class="px-2 py-2 text-right"><span class="chip chip-warn text-[11px] mono">{{ $p['req_count'] }}</span></td>
                             <td class="px-2 py-2">
@@ -288,6 +293,14 @@
                                 @endif
                             </td>
                         </tr>
+                        @if($this->isCardOpen($p['cid'], 't') && ($card = $this->productCards[$p['cid']] ?? null))
+                            <tr class="border-b border-border-subtle bg-surface-2">
+                                <td colspan="11" class="px-4 py-2.5">
+                                    @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false])
+                                    @include('livewire.suppliers._catalog-supplier-history', ['history' => $card['history']])
+                                </td>
+                            </tr>
+                        @endif
                         @if($hasIqot)
                             <tr x-show="open" x-cloak class="border-b border-border-subtle bg-surface-2">
                                 <td colspan="11" class="px-4 py-2.5">
@@ -579,6 +592,16 @@
                 {{-- Поставщики --}}
                 <div>
                     <label class="block text-[11.5px] text-fg-3 mb-1">Поставщики <span class="text-fg-4">— подобраны по матрице под выбранные позиции; ✎ — карточка поставщика (правки подтянутся при возврате)</span></label>
+                    @if($this->supplierGroups !== [])
+                        <div class="flex flex-wrap items-center gap-1.5 mb-2">
+                            <span class="text-[11px] text-fg-4">Группы:</span>
+                            @foreach($this->supplierGroups as $g)
+                                <button type="button" wire:click="toggleSupplierGroup({{ $g['id'] }})" wire:key="sg-{{ $g['id'] }}"
+                                        class="btn btn-xs {{ $g['selected'] ? 'btn-primary' : '' }}"
+                                        title="{{ $g['selected'] ? 'Снять всех поставщиков группы' : 'Выбрать всех поставщиков группы' }}">{{ $g['selected'] ? '✓ ' : '' }}{{ $g['name'] }} · {{ count($g['ids']) }}</button>
+                            @endforeach
+                        </div>
+                    @endif
                     <div class="border border-border rounded-md divide-y divide-border-subtle">
                         @forelse($this->supplierOptions as $o)
                             <label wire:key="sup-opt-{{ $o['id'] }}" class="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-hover">
@@ -699,6 +722,16 @@
                                             </div>
                                         @else
                                             <div class="text-[11.5px] text-fg-4">В каталоге нет отдельных OEM-артикулов для этой позиции.</div>
+                                        @endif
+                                        {{-- Карточка товара как в каталоге + кого уже спрашивали и у кого покупали. --}}
+                                        <button type="button" wire:click="toggleCard({{ $r['cid'] }}, 'p')" class="btn btn-xs mt-2">
+                                            {{ $this->isCardOpen($r['cid'], 'p') ? '▾ Скрыть карточку товара' : '▸ Карточка товара и история поставщиков' }}
+                                        </button>
+                                        @if($this->isCardOpen($r['cid'], 'p') && ($card = $this->productCards[$r['cid']] ?? null))
+                                            <div class="mt-2 overflow-x-auto">
+                                                @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false])
+                                                @include('livewire.suppliers._catalog-supplier-history', ['history' => $card['history']])
+                                            </div>
                                         @endif
                                     </div>
                                 </div>

@@ -156,6 +156,32 @@
                 </div>
                 <div class="text-[11.5px] text-fg-3 mt-1.5">Наше исходящее письмо получателю из реестра + подтверждение LLM «это запрос расценки» → тред регистрируется автоматически, ответы поставщика не создают заявок.</div>
             </div>
+            {{-- Группы поставщиков: фильтр реестра и быстрый выбор в запросах цены. --}}
+            <div class="px-4 pb-3">
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold mr-1">Группы</span>
+                    <button type="button" wire:click="setGroupFilter(0)" class="btn btn-xs {{ $groupFilter === 0 ? 'btn-primary' : '' }}">Все</button>
+                    @foreach($this->groups as $g)
+                        <span wire:key="grp-{{ $g->id }}" x-data="{ edit: false, name: @js($g->name) }" class="inline-flex items-center gap-0.5">
+                            <button type="button" x-show="!edit" wire:click="setGroupFilter({{ $g->id }})" @dblclick.prevent="edit = true"
+                                    class="btn btn-xs {{ $groupFilter === $g->id ? 'btn-primary' : '' }}"
+                                    title="Показать поставщиков группы · двойной клик — переименовать">{{ $g->name }} · {{ $g->suppliers_count }}</button>
+                            <input x-show="edit" x-cloak x-model="name" @keydown.enter="$wire.renameGroup({{ $g->id }}, name); edit = false" @keydown.escape="edit = false" @blur="edit = false"
+                                   class="h-[24px] px-1.5 border border-border rounded bg-surface text-[12px] w-[140px] outline-none focus:border-sky-500">
+                            <button type="button" wire:click="deleteGroup({{ $g->id }})"
+                                    wire:confirm="Удалить группу «{{ $g->name }}»? Поставщики останутся в реестре."
+                                    class="text-fg-4 hover:text-red-600 text-[12px] px-0.5" title="Удалить группу">×</button>
+                        </span>
+                    @endforeach
+                    <span class="inline-flex items-center gap-1 ml-1">
+                        <input type="text" wire:model="newGroupName" wire:keydown.enter="createGroup" placeholder="Новая группа"
+                               class="h-[26px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500 w-[150px]">
+                        <button type="button" wire:click="createGroup" class="btn btn-xs">+ Создать</button>
+                    </span>
+                </div>
+                @error('newGroupName') <div class="text-[11px] text-red-600 mt-1">{{ $message }}</div> @enderror
+                <div class="text-[11px] text-fg-4 mt-1">Группу выбирают целиком при запросе цены — в заявке (вкладка «Поставщики») и в «Снабжении». Состав группы правится в колонке «Группы» ниже.</div>
+            </div>
             <div class="overflow-x-auto">
                 <table class="w-full text-[12.5px]">
                     <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
@@ -163,6 +189,7 @@
                             <th class="text-left px-3 py-2">E-mail</th>
                             <th class="text-left px-3 py-2">Домен</th>
                             <th class="text-left px-3 py-2">Название</th>
+                            <th class="text-left px-3 py-2">Группы</th>
                             <th class="text-left px-3 py-2">Добавил</th>
                             <th class="text-right px-3 py-2"></th>
                         </tr>
@@ -173,6 +200,21 @@
                                 <td class="px-3 py-2 mono"><a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="text-sky-700 hover:underline">{{ $s->email ?: '—' }}</a></td>
                                 <td class="px-3 py-2 mono text-fg-2">{{ $s->domain ?: '—' }}</td>
                                 <td class="px-3 py-2 text-fg-2"><a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="hover:underline">{{ $s->name ?: '—' }}</a></td>
+                                <td class="px-3 py-2">
+                                    <span class="inline-flex flex-wrap items-center gap-1">
+                                        @foreach($s->groups as $g)
+                                            <span class="chip chip-neutral text-[10.5px]">{{ $g->name }}<button type="button" wire:click="removeFromGroup({{ $s->id }}, {{ $g->id }})" class="ml-1 text-fg-4 hover:text-red-600" title="Убрать из группы">×</button></span>
+                                        @endforeach
+                                        @php $free = $this->groups->whereNotIn('id', $s->groups->pluck('id')); @endphp
+                                        @if($free->isNotEmpty())
+                                            <select x-data @change="$wire.addToGroup({{ $s->id }}, Number($event.target.value)); $event.target.value = ''"
+                                                    class="h-[22px] px-1 border border-border rounded bg-surface text-[11px] text-fg-3 outline-none">
+                                                <option value="">+ группа</option>
+                                                @foreach($free as $g)<option value="{{ $g->id }}">{{ $g->name }}</option>@endforeach
+                                            </select>
+                                        @endif
+                                    </span>
+                                </td>
                                 <td class="px-3 py-2 text-fg-3 whitespace-nowrap">{{ $s->createdBy?->name ?? '—' }}</td>
                                 <td class="px-3 py-2 text-right">
                                     <a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="text-[11.5px] text-sky-700 hover:underline mr-2">профиль</a>
@@ -180,7 +222,7 @@
                                 </td>
                             </tr>
                         @empty
-                            <tr><td colspan="5" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Ничего не найдено.' : 'Реестр пуст. Добавьте email/домен поставщика выше — или пометьте тред кнопкой на заявке (поставщик добавится автоматически).' }}</td></tr>
+                            <tr><td colspan="6" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' || $groupFilter > 0 ? 'Ничего не найдено.' : 'Реестр пуст. Добавьте email/домен поставщика выше — или пометьте тред кнопкой на заявке (поставщик добавится автоматически).' }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>

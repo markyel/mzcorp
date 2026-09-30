@@ -42,6 +42,9 @@ class SupplierDispatchPanel extends Component
 
     public string $supplierSearch = '';
 
+    /** Развёрнутые карточки товара (catalog_item_id) — с историей поставщиков. */
+    public array $openCards = [];
+
     /** Обращение в начале письма (рус.); {поставщик} подставляется персонально. */
     public string $greeting = 'Здравствуйте, {поставщик}!';
 
@@ -275,6 +278,7 @@ class SupplierDispatchPanel extends Component
                 'qty' => $svc->itemQty($it, [], 'ru'),
                 'qty_en' => $svc->itemQty($it, [], 'en'),
                 'has_catalog' => (bool) $it->catalog_item_id,
+                'catalog_item_id' => $it->catalog_item_id ? (int) $it->catalog_item_id : null,
                 'price_stale' => $it->catalog_item_id ? ($it->catalogItem && ! $it->catalogItem->is_price_actual) : false,
                 'requested' => in_array($it->id, $requested, true),
                 'watched' => (bool) $it->price_refresh_watched,
@@ -480,6 +484,91 @@ class SupplierDispatchPanel extends Component
             ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like))
             ->whereNotIn('id', $existing ?: [0])
             ->orderBy('name')->limit(8)->get(['id', 'name', 'email']);
+    }
+
+    /** Развернуть / свернуть карточку товара с историей поставщиков. */
+    public function toggleCard(int $catalogItemId): void
+    {
+        $this->openCards = in_array($catalogItemId, $this->openCards, true)
+            ? array_values(array_diff($this->openCards, [$catalogItemId]))
+            : [...$this->openCards, $catalogItemId];
+        unset($this->productCards);
+    }
+
+    /**
+     * Данные развёрнутых карточек: товар каталога, последнее изменение цены,
+     * история поставщиков (наши запросы + закупки из 1С).
+     *
+     * @return array<int, array{cat: CatalogItem, pc: ?\App\Models\CatalogPriceChange, history: ?array}>
+     */
+    #[Computed]
+    public function productCards(): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $this->openCards)));
+        if ($ids === []) {
+            return [];
+        }
+        $cats = CatalogItem::query()->whereIn('id', $ids)->get()->keyBy('id');
+        $pcs = \App\Models\CatalogPriceChange::query()->whereIn('catalog_item_id', $ids)
+            ->orderByDesc('changed_at')->orderByDesc('id')->get()->unique('catalog_item_id')->keyBy('catalog_item_id');
+        $history = app(\App\Services\Supplier\CatalogSupplierHistoryService::class)->forCatalogIds($ids);
+
+        $out = [];
+        foreach ($ids as $id) {
+            if (isset($cats[$id])) {
+                $out[$id] = ['cat' => $cats[$id], 'pc' => $pcs[$id] ?? null, 'history' => $history[$id] ?? null];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Группы поставщиков для быстрого выбора: «Китай» — отмечены все поставщики
+     * группы (с e-mail), остальных добавляют поштучно.
+     *
+     * @return list<array{id: int, name: string, ids: list<int>, selected: bool}>
+     */
+    #[Computed]
+    public function supplierGroups(): array
+    {
+        return \App\Models\SupplierGroup::query()->with(['suppliers' => fn ($q) => $q->whereNotNull('email')->where('email', '!=', '')])
+            ->orderBy('sort_order')->orderBy('name')->get()
+            ->map(function ($g) {
+                $ids = $g->suppliers->pluck('id')->map(fn ($v) => (int) $v)->all();
+
+                return [
+                    'id' => (int) $g->id,
+                    'name' => (string) $g->name,
+                    'ids' => $ids,
+                    'selected' => $ids !== [] && collect($ids)->every(fn ($id) => ! empty($this->selectedSuppliers[$id])),
+                ];
+            })
+            ->filter(fn ($g) => $g['ids'] !== [])
+            ->values()->all();
+    }
+
+    /** Выбрать / снять всю группу поставщиков. */
+    public function toggleSupplierGroup(int $groupId): void
+    {
+        $group = collect($this->supplierGroups)->firstWhere('id', $groupId);
+        if ($group === null) {
+            return;
+        }
+        foreach ($group['ids'] as $id) {
+            if ($group['selected']) {
+                unset($this->selectedSuppliers[$id]);
+            } else {
+                $this->selectedSuppliers[$id] = true;
+                if (! in_array($id, $this->addedSupplierIds, true)) {
+                    $this->addedSupplierIds[] = $id;
+                }
+            }
+        }
+        unset($this->supplierOptions, $this->supplierGroups);
+        if (! $group['selected']) {
+            $this->autoTranslateIfEnglish();
+        }
     }
 
     public function addSupplier(int $supplierId): void
