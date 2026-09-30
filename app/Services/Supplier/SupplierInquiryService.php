@@ -235,8 +235,21 @@ class SupplierInquiryService
                     ->orderByDesc('id')
                     ->first();
             } elseif ($foreign === null && $this->extractRfqToken($message->subject) === null) {
+                // Ответ пришёл в ЛИЧНЫЙ ящик — годится только ветка, наш запрос в
+                // которой ушёл из этого же ящика. M-2026-17074 (29.09): ответ EVE
+                // на заказ Марины Петровой (снабжение, «Order EVE 28.09.2026») лёг
+                // в свежий RFQ Васюхно. Общий ящик (info@) — без условия: туда
+                // отвечают на запросы из любых ящиков.
+                $personalMailboxId = $message->mailbox?->type === \App\Enums\MailboxType::Personal
+                    ? (int) $message->mailbox_id
+                    : null;
                 $latest = SupplierInquiry::query()
                     ->whereRaw('lower(supplier_email) = ?', [$email])
+                    ->when($personalMailboxId !== null, fn ($q) => $q->whereExists(fn ($e) => $e->selectRaw('1')
+                        ->from('email_messages as em')
+                        ->whereColumn('em.supplier_inquiry_id', 'supplier_inquiries.id')
+                        ->where('em.direction', MailDirection::Outbound->value)
+                        ->where('em.mailbox_id', $personalMailboxId)))
                     ->orderByDesc('id')
                     ->first();
                 // В теме номер, которого в последней ветке нет, — письмо про
