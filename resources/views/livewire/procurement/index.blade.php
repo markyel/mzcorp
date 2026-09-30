@@ -440,6 +440,7 @@
                             <th class="text-left px-3 py-2">Артикул</th>
                             <th class="text-left px-3 py-2">Позиция</th>
                             <th class="text-left px-3 py-2">Почему в списке</th>
+                            <th class="text-left px-3 py-2" title="Группы поставщиков, которым уже отправляли запрос по позиции (число — сколько поставщиков группы)">Спрашивали</th>
                             <th class="text-right px-3 py-2">Заявок за 30 дн.</th>
                             <th class="text-right px-3 py-2">Остаток</th>
                             <th class="text-right px-3 py-2">Цена</th>
@@ -447,7 +448,8 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @forelse(array_slice($this->refreshList, 0, $perPage) as $p)
+                        @php $refRows = array_slice($this->refreshList, 0, $perPage); $askedGroups = $this->askedGroupsFor(array_column($refRows, 'cid')); @endphp
+                        @forelse($refRows as $p)
                             <tr wire:key="ref-{{ $p['cid'] }}" class="border-b border-border-subtle hover:bg-hover">
                                 <td class="px-3 py-2">
                                     <input type="checkbox" wire:model.live="selected.{{ $p['cid'] }}"
@@ -462,6 +464,19 @@
                                 </td>
                                 <td class="px-3 py-2">
                                     <span class="chip {{ $p['priority'] === 1 ? 'chip-ok' : 'chip-sky' }} text-[10.5px]">{{ $p['reason'] }}</span>
+                                </td>
+                                <td class="px-3 py-2">
+                                    @php $ag = $askedGroups[$p['cid']] ?? ['groups' => [], 'other' => 0]; @endphp
+                                    @if($ag['groups'] === [] && $ag['other'] === 0)
+                                        <span class="text-fg-4 text-[11px]">никого</span>
+                                    @else
+                                        <span class="inline-flex flex-wrap gap-1">
+                                            @foreach($ag['groups'] as $gname => $gcount)
+                                                <span class="chip chip-neutral text-[10.5px]" title="Спрашивали поставщиков группы: {{ $gcount }}">{{ $gname }} · {{ $gcount }}</span>
+                                            @endforeach
+                                            @if($ag['other'] > 0)<span class="text-fg-4 text-[11px]" title="Спрашивали поставщиков, не входящих ни в одну группу">+{{ $ag['other'] }} вне групп</span>@endif
+                                        </span>
+                                    @endif
                                 </td>
                                 <td class="px-3 py-2 text-right mono">{{ $p['req_count'] }}</td>
                                 <td class="px-3 py-2 text-right mono {{ $p['stock'] > 0 ? 'text-emerald-700' : 'text-fg-4' }}">
@@ -478,14 +493,14 @@
                             </tr>
                             @if($this->isCardOpen($p['cid'], 't') && ($card = $this->productCards[$p['cid']] ?? null))
                                 <tr wire:key="ref-card-{{ $p['cid'] }}" class="border-b border-border-subtle bg-surface-2">
-                                    <td colspan="8" class="px-4 py-2.5">
+                                    <td colspan="9" class="px-4 py-2.5">
                                         @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false])
                                         @include('livewire.suppliers._catalog-supplier-history', ['history' => $card['history']])
                                     </td>
                                 </tr>
                             @endif
                         @empty
-                            <tr><td colspan="8" class="px-3 py-10 text-center text-fg-3 text-[13px]">
+                            <tr><td colspan="9" class="px-3 py-10 text-center text-fg-3 text-[13px]">
                                 {{ trim($search) !== '' ? 'Ничего не найдено.' : 'Нет позиций с неактуальной ценой и спросом за последние 30 дней.' }}
                             </td></tr>
                         @endforelse

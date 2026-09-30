@@ -1035,6 +1035,55 @@ class Index extends Component
         $q->whereRaw(($this->askedGroupMode === 'not' ? 'not ' : '').$exists, $emails);
     }
 
+    /** @var array<int, array{groups: array<string, int>, other: int}> */
+    private array $askedGroupsCache = [];
+
+    /**
+     * Из каких групп уже спрашивали поставщиков по позициям: группа → сколько
+     * её поставщиков спрашивали; other — спрошенные поставщики вне групп.
+     * Считается только для видимых строк списка.
+     *
+     * @param  list<int>  $cids
+     * @return array<int, array{groups: array<string, int>, other: int}>
+     */
+    public function askedGroupsFor(array $cids): array
+    {
+        $missing = array_values(array_diff(array_map('intval', $cids), array_keys($this->askedGroupsCache)));
+        if ($missing !== []) {
+            $in = implode(',', array_fill(0, count($missing), '?'));
+            $rows = DB::select(
+                "select distinct coalesce(sii.catalog_item_id, ri.catalog_item_id) as cid, lower(si.supplier_email) as email
+                   from supplier_inquiry_items sii
+                   join supplier_inquiries si on si.id = sii.supplier_inquiry_id
+                   left join request_items ri on ri.id = sii.request_item_id
+                  where coalesce(sii.catalog_item_id, ri.catalog_item_id) in ({$in})",
+                $missing,
+            );
+            $emails = array_values(array_unique(array_filter(array_map(fn ($r) => (string) $r->email, $rows))));
+            $groupsByEmail = [];
+            if ($emails !== []) {
+                foreach (Supplier::query()->with('groups:id,name,sort_order')->whereIn(DB::raw('lower(email)'), $emails)->get() as $s) {
+                    $groupsByEmail[mb_strtolower((string) $s->email)] = $s->groups->sortBy('sort_order')->pluck('name')->all();
+                }
+            }
+            foreach ($missing as $cid) {
+                $this->askedGroupsCache[$cid] = ['groups' => [], 'other' => 0];
+            }
+            foreach ($rows as $r) {
+                $cid = (int) $r->cid;
+                $groups = $groupsByEmail[(string) $r->email] ?? [];
+                if ($groups === []) {
+                    $this->askedGroupsCache[$cid]['other']++;
+                }
+                foreach ($groups as $g) {
+                    $this->askedGroupsCache[$cid]['groups'][$g] = ($this->askedGroupsCache[$cid]['groups'][$g] ?? 0) + 1;
+                }
+            }
+        }
+
+        return array_intersect_key($this->askedGroupsCache, array_flip(array_map('intval', $cids)));
+    }
+
     /** Группы для отбора в списках позиций. */
     #[Computed]
     public function groupOptions(): array
