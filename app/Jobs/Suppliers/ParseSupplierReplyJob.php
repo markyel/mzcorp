@@ -67,6 +67,11 @@ class ParseSupplierReplyJob implements ShouldQueue, ShouldBeUnique
         if ($message === null || $inquiry === null) {
             return;
         }
+        // Письмо успели перенести в другую ветку (исправление привязки) —
+        // разбирать против позиций старой нельзя: цены сядут на чужие позиции.
+        if ((int) $message->supplier_inquiry_id !== $this->supplierInquiryId) {
+            return;
+        }
 
         $counts = $parser->parse($inquiry, $message);
         if (! empty($counts['failed'])) {
