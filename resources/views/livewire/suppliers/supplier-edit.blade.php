@@ -13,6 +13,24 @@
         <h2 class="text-[16px] font-semibold text-fg-1">{{ $supplier->name ?: ($supplier->email ?: $supplier->domain) }}</h2>
     </div>
 
+    {{-- Группы: клик включает / исключает поставщика, сохраняется сразу. По группам
+         выбирают поставщиков для запроса цены (заявка → «Поставщики», «Снабжение»). --}}
+    <div class="flex flex-wrap items-center gap-1.5">
+        <span class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold mr-1">Группы</span>
+        @forelse($this->groupOptions as $g)
+            <button type="button" wire:click="toggleGroup({{ $g['id'] }})" wire:key="sg-{{ $g['id'] }}"
+                    class="btn btn-xs {{ $g['member'] ? 'btn-primary' : '' }}"
+                    title="{{ $g['member'] ? 'Исключить из группы' : 'Добавить в группу' }} · в группе {{ $g['count'] }}">{{ $g['member'] ? '✓ ' : '+ ' }}{{ $g['name'] }}</button>
+        @empty
+            <span class="text-[12px] text-fg-4">Групп пока нет.</span>
+        @endforelse
+        <span class="inline-flex items-center gap-1 ml-1">
+            <input type="text" wire:model="newGroupName" wire:keydown.enter="createGroupAndAdd" placeholder="Новая группа"
+                   class="h-[26px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500 w-[150px]">
+            <button type="button" wire:click="createGroupAndAdd" class="btn btn-xs" title="Создать группу и добавить в неё поставщика">+ Создать</button>
+        </span>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {{-- Реквизиты + ассортимент --}}
         <div class="lg:col-span-2 ds-card">

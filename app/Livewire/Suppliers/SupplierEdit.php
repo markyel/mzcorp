@@ -5,6 +5,7 @@ namespace App\Livewire\Suppliers;
 use App\Models\Kb\EquipmentCategory;
 use App\Models\Kb\ManufacturerBrand;
 use App\Models\Supplier;
+use App\Models\SupplierGroup;
 use App\Services\Supplier\SupplierMatrixBuilder;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -158,6 +159,52 @@ class SupplierEdit extends Component
             message: $ok ? 'Матрица ассортимента пересобрана.' : 'Не удалось собрать матрицу (LLM недоступен) — попробуйте позже.',
             type: $ok ? 'success' : 'error',
         );
+    }
+
+    /* --- Группы поставщика («Китай», «Европа»…) — сохраняются сразу --- */
+
+    public string $newGroupName = '';
+
+    /** @return list<array{id: int, name: string, member: bool, count: int}> */
+    #[Computed]
+    public function groupOptions(): array
+    {
+        $mine = $this->supplier->groups()->pluck('supplier_groups.id')->map(fn ($v) => (int) $v)->all();
+
+        return SupplierGroup::query()->withCount('suppliers')->orderBy('sort_order')->orderBy('name')->get()
+            ->map(fn (SupplierGroup $g) => [
+                'id' => (int) $g->id,
+                'name' => (string) $g->name,
+                'member' => in_array((int) $g->id, $mine, true),
+                'count' => (int) $g->suppliers_count,
+            ])->all();
+    }
+
+    public function toggleGroup(int $groupId): void
+    {
+        if (! SupplierGroup::whereKey($groupId)->exists()) {
+            return;
+        }
+        $this->supplier->groups()->toggle([$groupId]);
+        unset($this->groupOptions);
+    }
+
+    /** Новая группа — сразу с этим поставщиком. */
+    public function createGroupAndAdd(): void
+    {
+        $name = trim($this->newGroupName);
+        if ($name === '') {
+            return;
+        }
+        $group = SupplierGroup::query()->whereRaw('lower(name) = ?', [mb_strtolower($name)])->first()
+            ?? SupplierGroup::create([
+                'name' => mb_substr($name, 0, 100),
+                'sort_order' => (int) SupplierGroup::query()->max('sort_order') + 1,
+                'created_by_user_id' => auth()->id(),
+            ]);
+        $this->supplier->groups()->syncWithoutDetaching([$group->id]);
+        $this->newGroupName = '';
+        unset($this->groupOptions);
     }
 
     public function deleteSupplier()
