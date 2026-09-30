@@ -170,12 +170,12 @@
 
             @if($this->groupOptions !== [])
                 <span class="inline-flex items-center gap-1">
-                    <select wire:model.live="askedGroup" class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500" title="Отбор по группе поставщиков, которых по позиции уже спрашивали">
+                    <select wire:model.live="askedGroup" class="h-[32px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500" title="Отбор по группе поставщиков, которых по позиции уже спрашивали">
                         <option value="0">Группа поставщиков: все</option>
                         @foreach($this->groupOptions as $gid => $gname)<option value="{{ $gid }}">{{ $gname }}</option>@endforeach
                     </select>
                     @if($askedGroup > 0)
-                        <select wire:model.live="askedGroupMode" class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                        <select wire:model.live="askedGroupMode" class="h-[32px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
                             <option value="asked">уже спрашивали</option>
                             <option value="not">ещё не спрашивали</option>
                         </select>
@@ -417,12 +417,12 @@
                    class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
             @if($this->groupOptions !== [])
                 <span class="inline-flex items-center gap-1">
-                    <select wire:model.live="askedGroup" class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500" title="Отбор по группе поставщиков, которых по позиции уже спрашивали">
+                    <select wire:model.live="askedGroup" class="h-[32px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500" title="Отбор по группе поставщиков, которых по позиции уже спрашивали">
                         <option value="0">Группа поставщиков: все</option>
                         @foreach($this->groupOptions as $gid => $gname)<option value="{{ $gid }}">{{ $gname }}</option>@endforeach
                     </select>
                     @if($askedGroup > 0)
-                        <select wire:model.live="askedGroupMode" class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                        <select wire:model.live="askedGroupMode" class="h-[32px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
                             <option value="asked">уже спрашивали</option>
                             <option value="not">ещё не спрашивали</option>
                         </select>
