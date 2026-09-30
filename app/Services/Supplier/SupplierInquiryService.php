@@ -65,6 +65,9 @@ class SupplierInquiryService
         if ($supplierEmail === '') {
             return null;
         }
+        // Прямой запрос менеджера из почты: заявку не знаем, но в теме часто
+        // номер нашего КП или 1С («000368747») — по нему и привязываем.
+        $requestId ??= $this->requestIdByCodes(self::subjectCodes((string) $sent->subject));
 
         return DB::transaction(function () use ($sent, $requestId, $by, $rootId, $supplierEmail, $supplierName) {
             $inquiry = SupplierInquiry::query()->where('thread_root_id', $rootId)->first();
@@ -232,10 +235,25 @@ class SupplierInquiryService
                     ->orderByDesc('id')
                     ->first();
             } elseif ($foreign === null && $this->extractRfqToken($message->subject) === null) {
-                $inquiry = SupplierInquiry::query()
+                $latest = SupplierInquiry::query()
                     ->whereRaw('lower(supplier_email) = ?', [$email])
                     ->orderByDesc('id')
                     ->first();
+                // В теме номер, которого в последней ветке нет, — письмо про
+                // другой запрос (M-2026-17545, 29.09: «Re: 000367712» — ответ
+                // OSS на прямой запрос Румянцева по КП 367712 — лёг в ветку
+                // Курзаева). Тогда новая ветка, а заявку ищем по номеру.
+                // Номер детали в теме (714280102) ни на что не указывает — такой
+                // ответ по-прежнему идёт в последнюю ветку.
+                $codes = self::subjectCodes((string) $message->subject);
+                if ($latest !== null && $codes !== [] && ! self::subjectHasAnyCode((string) $latest->subject, $codes)) {
+                    $byCode = $this->requestIdByCodes($codes);
+                    if ($byCode !== null && $byCode !== (int) $latest->related_request_id) {
+                        $latest = null;
+                        $requestId = $byCode;
+                    }
+                }
+                $inquiry = $latest;
             }
             if ($inquiry === null) {
                 $inquiry = SupplierInquiry::create([
@@ -269,9 +287,9 @@ class SupplierInquiryService
         }
 
         // 1) Корень треда совпал с помеченным запросом поставщику.
-        $byRoot = SupplierInquiry::query()->whereIn('thread_root_id', $refs)->first();
-        if ($byRoot !== null) {
-            return $byRoot;
+        $byRoot = SupplierInquiry::query()->whereIn('thread_root_id', $refs)->get();
+        if ($byRoot->isNotEmpty()) {
+            return $this->pickForSender($byRoot, $message, fn (SupplierInquiry $i) => (string) $i->thread_root_id);
         }
 
         // 2) Письмо ссылается на сообщение, уже прикреплённое к запросу
@@ -279,13 +297,55 @@ class SupplierInquiryService
         $viaMsg = EmailMessage::query()
             ->whereNotNull('supplier_inquiry_id')
             ->whereIn('message_id', $refs)
-            ->orderByDesc('id')
-            ->first();
-        if ($viaMsg !== null) {
-            return SupplierInquiry::find($viaMsg->supplier_inquiry_id);
+            ->get(['supplier_inquiry_id', 'message_id']);
+        if ($viaMsg->isNotEmpty()) {
+            $refByInquiry = $viaMsg->pluck('message_id', 'supplier_inquiry_id');
+            $inquiries = SupplierInquiry::query()->whereIn('id', $refByInquiry->keys())->get();
+
+            return $inquiries->isEmpty()
+                ? null
+                : $this->pickForSender($inquiries, $message, fn (SupplierInquiry $i) => (string) $refByInquiry[$i->id]);
         }
 
         return null;
+    }
+
+    /**
+     * Из нескольких веток, на которые ссылается письмо, — ветка ЭТОГО
+     * поставщика (адрес, затем домен), при равенстве — ближайшая по цепочке.
+     * Кейс 5967/5968 (29.09): Румянцев отправил второй запрос (Eve) ответом на
+     * первый (OSS), ответ Eve ссылался на оба письма, и первая попавшаяся ветка
+     * оказалась чужой. Ни одна не совпала с отправителем — ближайшая по цепочке
+     * (пересылка ответа через посредника).
+     *
+     * @param  \Illuminate\Support\Collection<int, SupplierInquiry>  $candidates
+     * @param  callable(SupplierInquiry): string  $refOf  message-id, по которому ветка найдена
+     */
+    private function pickForSender($candidates, EmailMessage $message, callable $refOf): SupplierInquiry
+    {
+        $from = mb_strtolower(trim((string) $message->from_email));
+        $inReplyTo = (string) ($message->in_reply_to ?? '');
+        $chain = array_values(array_filter((array) ($message->references_header ?? []), 'is_string'));
+        // Ближе к письму: In-Reply-To, затем References с конца (последний — прямой родитель).
+        $closeness = function (SupplierInquiry $i) use ($refOf, $inReplyTo, $chain): int {
+            $ref = $refOf($i);
+            if ($ref !== '' && $ref === $inReplyTo) {
+                return PHP_INT_MAX;
+            }
+            $pos = array_search($ref, $chain, true);
+
+            return $pos === false ? -1 : (int) $pos;
+        };
+
+        $pool = $candidates->filter(fn (SupplierInquiry $i) => mb_strtolower(trim((string) $i->supplier_email)) === $from);
+        if ($pool->isEmpty()) {
+            $pool = $candidates->filter(fn (SupplierInquiry $i) => $this->sameParty((string) $i->supplier_email, $from));
+        }
+        if ($pool->isEmpty()) {
+            $pool = $candidates;
+        }
+
+        return $pool->sortByDesc($closeness)->first();
     }
 
     /**
@@ -607,6 +667,62 @@ class SupplierInquiryService
         if ($message->direction === MailDirection::Inbound && $inquiry->items()->exists()) {
             ParseSupplierReplyJob::dispatch($message->id, $inquiry->id);
         }
+    }
+
+    /**
+     * Коды в теме: M-код заявки и номера документов 6–9 цифр (без ведущих
+     * нулей: «000367712» = КП 367712).
+     *
+     * @return list<string>
+     */
+    public static function subjectCodes(string $subject): array
+    {
+        preg_match_all('/\bM-\d{4}-\d+/u', $subject, $m);
+        preg_match_all('/\b\d{6,9}\b/u', $subject, $n);
+        $codes = array_merge($m[0] ?? [], array_map(fn ($c) => ltrim($c, '0'), $n[0] ?? []));
+
+        return array_values(array_unique(array_filter($codes, fn ($c) => $c !== '')));
+    }
+
+    /** @param  list<string>  $codes */
+    private static function subjectHasAnyCode(string $subject, array $codes): bool
+    {
+        $own = self::subjectCodes($subject);
+
+        return array_intersect($own, $codes) !== [];
+    }
+
+    /**
+     * Заявка по коду из темы: M-код, номер нашего КП/счёта или номер 1С.
+     * Только однозначно — иначе null.
+     *
+     * @param  list<string>  $codes
+     */
+    public function requestIdByCodes(array $codes): ?int
+    {
+        $ids = [];
+        foreach ($codes as $code) {
+            if (str_starts_with($code, 'M-')) {
+                $id = RequestModel::query()->where('internal_code', $code)->value('id');
+                if ($id !== null) {
+                    $ids[] = (int) $id;
+                }
+
+                continue;
+            }
+            $ids = array_merge(
+                $ids,
+                DB::table('outbound_quotes')->whereNotNull('request_id')
+                    ->whereRaw("ltrim(regexp_replace(coalesce(document_number, ''), '\\D', '', 'g'), '0') = ?", [$code])
+                    ->pluck('request_id')->map(fn ($v) => (int) $v)->all(),
+                RequestModel::query()
+                    ->whereRaw("ltrim(regexp_replace(coalesce(onec_number, ''), '\\D', '', 'g'), '0') = ?", [$code])
+                    ->pluck('id')->map(fn ($v) => (int) $v)->all(),
+            );
+        }
+        $ids = array_values(array_unique($ids));
+
+        return count($ids) === 1 ? $ids[0] : null;
     }
 
     /** Является ли email поставщиком (есть хотя бы один помеченный запрос). */
