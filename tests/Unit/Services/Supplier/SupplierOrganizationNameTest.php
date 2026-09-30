@@ -43,6 +43,27 @@ class SupplierOrganizationNameTest extends TestCase
         $this->assertSame('segz.ru', $name);
     }
 
+    public function test_different_people_names_give_way_to_the_domain(): void
+    {
+        $name = (new SupplierOrganizationService)->suggestName(collect([
+            $this->supplier('msabirov@meteor.ru', 'Сабиров Максим'),
+            $this->supplier('dshklyaev@meteor.ru', 'Шкляев Дмитрий'),
+            $this->supplier('etitaeva@meteor.ru'),
+        ]));
+
+        $this->assertSame('meteor.ru', $name);
+    }
+
+    public function test_a_single_name_is_taken_as_is(): void
+    {
+        $name = (new SupplierOrganizationService)->suggestName(collect([
+            $this->supplier('info@elevatorp.ru'),
+            $this->supplier('snab@elevatorp.ru', 'Элеватор Партс ООО'),
+        ]));
+
+        $this->assertSame('Элеватор Партс ООО', $name);
+    }
+
     public function test_domain_comes_from_the_domain_field_or_the_email(): void
     {
         $this->assertSame('kmz.mos.ru', SupplierOrganizationService::domainOf($this->supplier('Sorokinra2@KMZ.mos.ru')));

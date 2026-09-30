@@ -114,10 +114,12 @@ class SupplierOrganizationService
     {
         $names = $suppliers->map(fn (Supplier $s) => trim((string) $s->name))
             ->filter(fn ($n) => $n !== '' && ! str_contains($n, '@'));
-        if ($names->isNotEmpty()) {
-            return (string) $names->countBy()
-                ->sortByDesc(fn ($count, $n) => $count * 1000 + mb_strlen((string) $n))
-                ->keys()->first();
+        $counts = $names->countBy()->sortByDesc(fn ($count, $n) => $count * 1000 + mb_strlen((string) $n));
+        // Разные названия по одному разу — это обычно имена сотрудников
+        // («Сабиров Максим», «Шкляев Дмитрий»), а не компания: meteor.ru
+        // так стал «Долотова Любовь». Тогда честнее домен.
+        if ($counts->isNotEmpty() && ($counts->count() === 1 || $counts->first() > 1)) {
+            return (string) $counts->keys()->first();
         }
 
         $domain = $suppliers->map(fn (Supplier $s) => self::domainOf($s))->filter()->first();
