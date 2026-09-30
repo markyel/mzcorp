@@ -8,6 +8,7 @@ use App\Models\Supplier;
 use App\Models\SupplierInquiry;
 use App\Models\SupplierGroup;
 use App\Models\SupplierInquiryItem;
+use App\Services\Supplier\SupplierOrganizationService;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -33,6 +34,11 @@ class Index extends Component
     public int $groupFilter = 0;
 
     public string $newGroupName = '';
+
+    /** Отмеченные в реестре адреса — для объединения в организацию. */
+    public array $selected = [];
+
+    public string $mergeName = '';
 
     /* --- Добавление поставщика в реестр --- */
     public string $newEmail = '';
@@ -157,10 +163,94 @@ class Index extends Component
         unset($this->groups, $this->suppliers);
     }
 
+    /* --- Организации: несколько адресов одной компании --- */
+
+    /** Сколько адресов в каждой организации реестра. @return array<int, int> */
+    #[Computed]
+    public function organizationSizes(): array
+    {
+        return Supplier::query()->whereNotNull('supplier_organization_id')
+            ->selectRaw('supplier_organization_id, count(*) as c')->groupBy('supplier_organization_id')
+            ->pluck('c', 'supplier_organization_id')->map(fn ($v) => (int) $v)->all();
+    }
+
+    /** Адреса на одном корпоративном домене, ещё не объединённые. */
+    #[Computed]
+    public function domainSuggestions(): array
+    {
+        return app(SupplierOrganizationService::class)->domainSuggestions();
+    }
+
+    /** Название по умолчанию для отмеченных адресов (подсказка в поле). */
+    #[Computed]
+    public function mergePlaceholder(): string
+    {
+        $ids = array_map('intval', $this->selected);
+        if (count($ids) < 2) {
+            return 'Название организации';
+        }
+        $suppliers = Supplier::query()->with('organization:id,name')->whereIn('id', $ids)->get();
+        $org = $suppliers->pluck('organization')->filter()->first();
+
+        return $org?->name ?: app(SupplierOrganizationService::class)->suggestName($suppliers);
+    }
+
+    public function mergeSelected(SupplierOrganizationService $service): void
+    {
+        $ids = array_values(array_unique(array_map('intval', $this->selected)));
+        if (count($ids) < 2) {
+            $this->dispatch('toast', message: 'Отметьте хотя бы два адреса.', type: 'error');
+
+            return;
+        }
+        $org = $service->merge($ids, $this->mergeName, auth()->id());
+        $this->selected = [];
+        $this->mergeName = '';
+        $this->refreshOrganizations();
+        $this->dispatch('toast', message: 'Объединено в «'.$org?->name.'».', type: 'success');
+    }
+
+    public function mergeDomain(string $domain, SupplierOrganizationService $service): void
+    {
+        $ids = Supplier::query()->get(['id', 'email', 'domain'])
+            ->filter(fn (Supplier $s) => SupplierOrganizationService::domainOf($s) === mb_strtolower($domain))
+            ->pluck('id')->all();
+        if (count($ids) < 2) {
+            return;
+        }
+        $org = $service->merge($ids, null, auth()->id());
+        $this->refreshOrganizations();
+        $this->dispatch('toast', message: 'Объединено в «'.$org?->name.'».', type: 'success');
+    }
+
+    public function detachFromOrganization(int $supplierId, SupplierOrganizationService $service): void
+    {
+        $supplier = Supplier::find($supplierId);
+        if ($supplier !== null) {
+            $service->detach($supplier);
+        }
+        $this->refreshOrganizations();
+    }
+
+    public function renameOrganization(int $organizationId, string $name, SupplierOrganizationService $service): void
+    {
+        $service->rename($organizationId, $name);
+        $this->refreshOrganizations();
+    }
+
+    private function refreshOrganizations(): void
+    {
+        unset($this->suppliers, $this->organizationSizes, $this->domainSuggestions, $this->mergePlaceholder);
+    }
+
     public function removeSupplier(int $id): void
     {
+        $orgId = Supplier::whereKey($id)->value('supplier_organization_id');
         Supplier::whereKey($id)->delete();
-        unset($this->suppliers);
+        if ($orgId !== null) {
+            app(SupplierOrganizationService::class)->dropIfEmpty((int) $orgId);
+        }
+        $this->refreshOrganizations();
         $this->dispatch('toast', message: 'Удалён из реестра.', type: 'success');
     }
 
@@ -285,7 +375,12 @@ class Index extends Component
     #[Computed]
     public function suppliers()
     {
-        $q = Supplier::query()->with(['createdBy:id,name', 'groups:id,name']);
+        // Адреса одной организации идут подряд под её названием: сортируем по
+        // названию организации (для одиночек — по своему), затем по организации.
+        $q = Supplier::query()
+            ->select('suppliers.*')
+            ->leftJoin('supplier_organizations as so', 'so.id', '=', 'suppliers.supplier_organization_id')
+            ->with(['createdBy:id,name', 'groups:id,name', 'organization:id,name']);
         if ($this->groupFilter > 0) {
             $q->whereHas('groups', fn ($g) => $g->whereKey($this->groupFilter));
         }
@@ -294,13 +389,17 @@ class Index extends Component
         if ($s !== '') {
             $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
             $q->where(function ($w) use ($like) {
-                $w->where('email', 'ilike', $like)
-                    ->orWhere('domain', 'ilike', $like)
-                    ->orWhere('name', 'ilike', $like);
+                $w->where('suppliers.email', 'ilike', $like)
+                    ->orWhere('suppliers.domain', 'ilike', $like)
+                    ->orWhere('suppliers.name', 'ilike', $like)
+                    ->orWhere('so.name', 'ilike', $like);
             });
         }
 
-        return $q->orderBy('email')->orderBy('domain')->paginate(40);
+        return $q->orderByRaw("lower(coalesce(so.name, nullif(suppliers.name, ''), suppliers.email, suppliers.domain))")
+            ->orderBy('suppliers.supplier_organization_id')
+            ->orderBy('suppliers.email')->orderBy('suppliers.domain')
+            ->paginate(40);
     }
 
     /**

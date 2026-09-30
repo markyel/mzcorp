@@ -31,6 +31,76 @@
         </span>
     </div>
 
+    {{-- Организация: несколько адресов одной компании под общим названием.
+         Письма уходят по-прежнему на адрес, организация группирует адреса в реестре. --}}
+    @php $org = $supplier->organization; $cand = $this->organizationCandidates; @endphp
+    <div class="ds-card">
+        <div class="ds-card-header">
+            <h3>Организация</h3>
+            <span class="text-[12px] text-fg-3 ml-2">{{ $org ? 'адреса одной компании' : 'адрес пока сам по себе' }}</span>
+        </div>
+        <div class="ds-card-body space-y-3 text-[12.5px]">
+            @if($org)
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-[14px] font-semibold text-fg-1">🏢</span>
+                    <input type="text" wire:model="orgName" wire:keydown.enter="renameOrganization"
+                           class="h-[30px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500 w-[340px] max-w-full">
+                    <button type="button" wire:click="renameOrganization" class="btn btn-xs">Переименовать</button>
+                    <button type="button" wire:click="leaveOrganization" wire:confirm="Вывести этот адрес из организации «{{ $org->name }}»?"
+                            class="btn btn-xs text-fg-3">Выйти из организации</button>
+                </div>
+                <div>
+                    <div class="text-[11px] uppercase tracking-wider text-fg-3 mb-1">Другие адреса организации</div>
+                    @forelse($this->organizationMembers as $m)
+                        <div wire:key="om-{{ $m->id }}" class="flex items-center gap-2 py-0.5">
+                            <a href="{{ route('suppliers.registry-edit', $m->id) }}" wire:navigate class="mono text-sky-700 hover:underline">{{ $m->email ?: $m->domain }}</a>
+                            @if($m->name)<span class="text-fg-3">{{ $m->name }}</span>@endif
+                            <button type="button" wire:click="removeMember({{ $m->id }})" class="text-[11px] text-fg-4 hover:text-red-600" title="Вывести адрес из организации">×</button>
+                        </div>
+                    @empty
+                        <div class="text-fg-4">Пока только этот адрес — добавьте другие ниже.</div>
+                    @endforelse
+                </div>
+            @else
+                <div class="flex flex-wrap items-center gap-2">
+                    <input type="text" wire:model="orgName" wire:keydown.enter="createOrganization" placeholder="{{ $supplier->name ?: 'Название организации' }}"
+                           class="h-[30px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500 w-[340px] max-w-full">
+                    <button type="button" wire:click="createOrganization" class="btn btn-xs">Создать организацию</button>
+                    <span class="text-[11.5px] text-fg-4">или объедините с другим адресом ниже</span>
+                </div>
+            @endif
+
+            <div class="border-t border-border-subtle pt-3">
+                <div class="text-[11px] uppercase tracking-wider text-fg-3 mb-1">{{ $org ? 'Добавить адрес в организацию' : 'Объединить с' }}</div>
+                <input type="search" wire:model.live.debounce.300ms="orgSearch" placeholder="Поиск: email / домен / название поставщика или организации"
+                       class="h-[30px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500 w-[440px] max-w-full">
+                @if(trim($orgSearch) === '' && $cand['suppliers']->isNotEmpty())
+                    <div class="text-[11px] text-fg-4 mt-1.5">На том же домене:</div>
+                @endif
+                <div class="mt-1 space-y-0.5">
+                    @foreach($cand['organizations'] as $o)
+                        <div wire:key="oc-{{ $o->id }}" class="flex items-center gap-2">
+                            <span class="text-fg-1 font-medium">🏢 {{ $o->name }}</span>
+                            <span class="text-fg-4 text-[11px]">{{ $o->suppliers_count }} адр.</span>
+                            <button type="button" wire:click="joinOrganization({{ $o->id }})" class="btn btn-xs">Войти в организацию</button>
+                        </div>
+                    @endforeach
+                    @foreach($cand['suppliers'] as $c)
+                        <div wire:key="sc-{{ $c->id }}" class="flex items-center gap-2 flex-wrap">
+                            <span class="mono text-fg-1">{{ $c->email ?: $c->domain }}</span>
+                            @if($c->name)<span class="text-fg-3">{{ $c->name }}</span>@endif
+                            @if($c->organization)<span class="chip chip-neutral text-[10.5px]" title="Уже в организации — организации объединятся в одну">🏢 {{ $c->organization->name }}</span>@endif
+                            <button type="button" wire:click="mergeWith({{ $c->id }})" class="btn btn-xs">{{ $org ? 'Добавить' : 'Объединить' }}</button>
+                        </div>
+                    @endforeach
+                    @if(mb_strlen(trim($orgSearch)) >= 2 && $cand['suppliers']->isEmpty() && $cand['organizations']->isEmpty())
+                        <div class="text-fg-4">Ничего не найдено.</div>
+                    @endif
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {{-- Реквизиты + ассортимент --}}
         <div class="lg:col-span-2 ds-card">

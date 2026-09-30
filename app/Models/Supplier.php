@@ -36,6 +36,8 @@ class Supplier extends Model
         'matrix_built_at',
         'matrix_built_with_model',
         'created_by_user_id',
+        // Организация: несколько адресов одной компании (SupplierOrganizationService).
+        'supplier_organization_id',
     ];
 
     protected function casts(): array
@@ -49,6 +51,12 @@ class Supplier extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
+    /** Организация, в которую объединён этот адрес с другими адресами той же компании. */
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(SupplierOrganization::class, 'supplier_organization_id');
     }
 
     /** Группы («Китай», «Европа», «Поручни»…) — выбор поставщиков для запроса цены группой. */

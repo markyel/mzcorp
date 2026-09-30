@@ -182,10 +182,49 @@
                 @error('newGroupName') <div class="text-[11px] text-red-600 mt-1">{{ $message }}</div> @enderror
                 <div class="text-[11px] text-fg-4 mt-1">Группу выбирают целиком при запросе цены — в заявке (вкладка «Поставщики») и в «Снабжении». Состав группы правится в колонке «Группы» ниже.</div>
             </div>
+            {{-- Организации: адреса одной компании объединяются под общим названием.
+                 Подсказки — адреса на одном корпоративном домене, ещё не объединённые. --}}
+            @php
+                $sugg = $this->domainSuggestions;
+                // Локаль приложения английская — trans_choice русские формы не выберет.
+                $ruPlural = fn (int $n, string $one, string $few, string $many) => ($n % 100 >= 11 && $n % 100 <= 19) ? $many : match ($n % 10) { 1 => $one, 2, 3, 4 => $few, default => $many };
+            @endphp
+            @if($sugg !== [])
+                <div class="px-4 pb-3" x-data="{ open: false }">
+                    <button type="button" @click="open = !open" class="text-[12px] text-sky-700 hover:underline">
+                        <span x-text="open ? '▾' : '▸'"></span> Похоже на одну организацию: {{ count($sugg) }} {{ $ruPlural(count($sugg), 'домен', 'домена', 'доменов') }} с несколькими адресами
+                    </button>
+                    <div x-show="open" x-cloak class="mt-2 border border-border rounded-md divide-y divide-border-subtle max-w-[900px]">
+                        @foreach($sugg as $sg)
+                            <div wire:key="sugg-{{ $sg['domain'] }}" class="px-3 py-2 flex items-start gap-3 flex-wrap">
+                                <div class="flex-1 min-w-[260px]">
+                                    <div class="text-[12.5px] text-fg-1"><span class="mono">{{ $sg['domain'] }}</span> <span class="text-fg-3">→ «{{ $sg['name'] }}»</span></div>
+                                    <div class="text-[11px] text-fg-4 mono">{{ $sg['suppliers']->map(fn ($x) => $x->email ?: $x->domain)->implode(', ') }}</div>
+                                </div>
+                                <button type="button" wire:click="mergeDomain(@js($sg['domain']))" class="btn btn-xs btn-primary shrink-0"
+                                        title="Объединить все адреса домена в одну организацию">Объединить {{ $sg['suppliers']->count() }}</button>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
+            @if(count($selected) > 0)
+                <div class="px-4 pb-3">
+                    <div class="flex flex-wrap items-center gap-2 border border-sky-300 rounded-md px-3 py-2 bg-sky-50 max-w-[900px]">
+                        <span class="text-[12.5px] text-fg-1">Отмечено адресов: <b>{{ count($selected) }}</b></span>
+                        <input type="text" wire:model="mergeName" wire:keydown.enter="mergeSelected" placeholder="{{ $this->mergePlaceholder }}"
+                               class="h-[28px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500 flex-1 min-w-[200px]">
+                        <button type="button" wire:click="mergeSelected" class="btn btn-sm btn-primary" @disabled(count($selected) < 2)
+                                title="Объединить отмеченные адреса в одну организацию. Пустое название — берётся из подсказки.">Объединить в организацию</button>
+                        <button type="button" wire:click="$set('selected', [])" class="btn btn-sm">Снять отметки</button>
+                    </div>
+                </div>
+            @endif
             <div class="overflow-x-auto">
                 <table class="w-full text-[12.5px]">
                     <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
                         <tr>
+                            <th class="w-[28px] pl-3 py-2" title="Отметить адреса для объединения в организацию"></th>
                             <th class="text-left px-3 py-2">E-mail</th>
                             <th class="text-left px-3 py-2">Домен</th>
                             <th class="text-left px-3 py-2">Название</th>
@@ -195,9 +234,27 @@
                         </tr>
                     </thead>
                     <tbody>
+                        @php $prevOrg = null; $orgSizes = $this->organizationSizes; @endphp
                         @forelse($this->suppliers as $s)
+                            @php $org = $s->organization; @endphp
+                            @if($org && $org->id !== $prevOrg)
+                                <tr wire:key="org-{{ $org->id }}-{{ $s->id }}" class="bg-surface-2 border-b border-border-subtle">
+                                    <td class="pl-3 py-1.5"></td>
+                                    <td colspan="6" class="px-3 py-1.5" x-data="{ edit: false, name: @js($org->name) }">
+                                        <span x-show="!edit" class="inline-flex items-center gap-2">
+                                            <span class="text-[12.5px] font-semibold text-fg-1" @dblclick="edit = true" title="Организация · двойной клик — переименовать">🏢 {{ $org->name }}</span>
+                                            <span class="text-[11px] text-fg-3">{{ $orgSizes[$org->id] ?? 1 }} {{ $ruPlural($orgSizes[$org->id] ?? 1, 'адрес', 'адреса', 'адресов') }}</span>
+                                            <button type="button" @click="edit = true" class="text-[11px] text-fg-4 hover:text-sky-700">переименовать</button>
+                                        </span>
+                                        <input x-show="edit" x-cloak x-model="name" @keydown.enter="$wire.renameOrganization({{ $org->id }}, name); edit = false" @keydown.escape="edit = false" @blur="edit = false"
+                                               class="h-[26px] px-2 border border-border rounded bg-surface text-[12.5px] w-[320px] outline-none focus:border-sky-500">
+                                    </td>
+                                </tr>
+                            @endif
+                            @php $prevOrg = $org?->id; @endphp
                             <tr wire:key="sup-{{ $s->id }}" class="border-b border-border-subtle hover:bg-hover">
-                                <td class="px-3 py-2 mono"><a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="text-sky-700 hover:underline">{{ $s->email ?: '—' }}</a></td>
+                                <td class="pl-3 py-2"><input type="checkbox" wire:model.live="selected" value="{{ $s->id }}" class="align-middle"></td>
+                                <td class="px-3 py-2 mono {{ $org ? 'pl-7' : '' }}"><a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="text-sky-700 hover:underline">{{ $s->email ?: '—' }}</a></td>
                                 <td class="px-3 py-2 mono text-fg-2">{{ $s->domain ?: '—' }}</td>
                                 <td class="px-3 py-2 text-fg-2"><a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="hover:underline">{{ $s->name ?: '—' }}</a></td>
                                 <td class="px-3 py-2">
@@ -217,12 +274,13 @@
                                 </td>
                                 <td class="px-3 py-2 text-fg-3 whitespace-nowrap">{{ $s->createdBy?->name ?? '—' }}</td>
                                 <td class="px-3 py-2 text-right">
+                                    @if($org)<button type="button" wire:click="detachFromOrganization({{ $s->id }})" class="text-[11.5px] text-fg-3 hover:underline mr-2" title="Вывести адрес из организации «{{ $org->name }}»">из организации</button>@endif
                                     <a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="text-[11.5px] text-sky-700 hover:underline mr-2">профиль</a>
                                     <button type="button" wire:click="removeSupplier({{ $s->id }})" wire:confirm="Удалить из реестра поставщиков?" class="text-[11.5px] text-red-600 hover:underline">удалить</button>
                                 </td>
                             </tr>
                         @empty
-                            <tr><td colspan="6" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' || $groupFilter > 0 ? 'Ничего не найдено.' : 'Реестр пуст. Добавьте email/домен поставщика выше — или пометьте тред кнопкой на заявке (поставщик добавится автоматически).' }}</td></tr>
+                            <tr><td colspan="7" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' || $groupFilter > 0 ? 'Ничего не найдено.' : 'Реестр пуст. Добавьте email/домен поставщика выше — или пометьте тред кнопкой на заявке (поставщик добавится автоматически).' }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>

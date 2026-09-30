@@ -6,7 +6,9 @@ use App\Models\Kb\EquipmentCategory;
 use App\Models\Kb\ManufacturerBrand;
 use App\Models\Supplier;
 use App\Models\SupplierGroup;
+use App\Models\SupplierOrganization;
 use App\Services\Supplier\SupplierMatrixBuilder;
+use App\Services\Supplier\SupplierOrganizationService;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -58,6 +60,7 @@ class SupplierEdit extends Component
         $this->notes = (string) ($s->notes ?? '');
         $matrix = is_array($s->assortment_matrix) ? $s->assortment_matrix : [];
         $this->rules = array_values(array_filter((array) ($matrix['rules'] ?? []), 'is_array'));
+        $this->orgName = (string) ($s->organization?->name ?? '');
     }
 
     /** @return array<int, string> */
@@ -207,9 +210,134 @@ class SupplierEdit extends Component
         unset($this->groupOptions);
     }
 
+    /* --- Организация: несколько адресов одной компании --- */
+
+    public string $orgSearch = '';
+
+    public string $orgName = '';
+
+    /** Другие адреса организации этого поставщика. */
+    #[Computed]
+    public function organizationMembers()
+    {
+        $orgId = $this->supplier->supplier_organization_id;
+
+        return $orgId === null
+            ? collect()
+            : Supplier::query()->where('supplier_organization_id', $orgId)->whereKeyNot($this->supplier->id)
+                ->orderBy('email')->get(['id', 'email', 'domain', 'name']);
+    }
+
+    /**
+     * С кем объединить: по поиску — адреса и организации; без поиска —
+     * адреса на том же корпоративном домене, ещё не в этой организации.
+     *
+     * @return array{suppliers: \Illuminate\Support\Collection, organizations: \Illuminate\Support\Collection}
+     */
+    #[Computed]
+    public function organizationCandidates(): array
+    {
+        $orgId = $this->supplier->supplier_organization_id;
+        $base = Supplier::query()->with('organization:id,name')->whereKeyNot($this->supplier->id)
+            ->when($orgId !== null, fn ($q) => $q->where(fn ($w) => $w
+                ->whereNull('supplier_organization_id')->orWhere('supplier_organization_id', '!=', $orgId)));
+
+        $s = trim($this->orgSearch);
+        if (mb_strlen($s) >= 2) {
+            $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
+
+            return [
+                'suppliers' => $base->where(fn ($w) => $w->where('email', 'ilike', $like)
+                    ->orWhere('domain', 'ilike', $like)->orWhere('name', 'ilike', $like))
+                    ->orderBy('email')->limit(8)->get(),
+                'organizations' => SupplierOrganization::query()->where('name', 'ilike', $like)
+                    ->when($orgId !== null, fn ($q) => $q->whereKeyNot($orgId))
+                    ->withCount('suppliers')->orderBy('name')->limit(5)->get(),
+            ];
+        }
+
+        $domain = SupplierOrganizationService::domainOf($this->supplier);
+        $free = array_map('mb_strtolower', (array) config('services.mail.free_mail_domains', []));
+        if ($domain === null || in_array($domain, $free, true)) {
+            return ['suppliers' => collect(), 'organizations' => collect()];
+        }
+
+        return [
+            'suppliers' => $base->get()
+                ->filter(fn (Supplier $x) => SupplierOrganizationService::domainOf($x) === $domain)
+                ->take(8)->values(),
+            'organizations' => collect(),
+        ];
+    }
+
+    /** Объединить этот адрес с другим (если тот уже в организации — войти в неё). */
+    public function mergeWith(int $supplierId, SupplierOrganizationService $service): void
+    {
+        if ($supplierId === (int) $this->supplier->id || ! Supplier::whereKey($supplierId)->exists()) {
+            return;
+        }
+        $org = $service->merge([$this->supplier->id, $supplierId], null, auth()->id());
+        $this->afterOrganizationChange('Объединено в «'.$org?->name.'».');
+    }
+
+    public function joinOrganization(int $organizationId, SupplierOrganizationService $service): void
+    {
+        if ($service->attach($this->supplier, $organizationId)) {
+            $this->afterOrganizationChange('Добавлен в организацию.');
+        }
+    }
+
+    /** Завести организацию из одного этого адреса — остальные добавятся потом. */
+    public function createOrganization(SupplierOrganizationService $service): void
+    {
+        if ($this->supplier->supplier_organization_id !== null) {
+            return;
+        }
+        $service->merge([$this->supplier->id], $this->orgName, auth()->id());
+        $this->afterOrganizationChange('Организация создана.');
+    }
+
+    public function renameOrganization(SupplierOrganizationService $service): void
+    {
+        $orgId = $this->supplier->supplier_organization_id;
+        if ($orgId !== null && $service->rename((int) $orgId, $this->orgName)) {
+            $this->afterOrganizationChange('Организация переименована.');
+        }
+    }
+
+    public function removeMember(int $supplierId, SupplierOrganizationService $service): void
+    {
+        $member = Supplier::query()->whereKey($supplierId)
+            ->where('supplier_organization_id', $this->supplier->supplier_organization_id)->first();
+        if ($member !== null && $this->supplier->supplier_organization_id !== null) {
+            $service->detach($member);
+            $this->afterOrganizationChange('Адрес выведен из организации.');
+        }
+    }
+
+    public function leaveOrganization(SupplierOrganizationService $service): void
+    {
+        $service->detach($this->supplier);
+        $this->afterOrganizationChange('Адрес выведен из организации.');
+    }
+
+    private function afterOrganizationChange(string $message): void
+    {
+        $this->supplier->refresh();
+        $this->supplier->load('organization');
+        $this->orgName = (string) ($this->supplier->organization?->name ?? '');
+        $this->orgSearch = '';
+        unset($this->organizationMembers, $this->organizationCandidates);
+        $this->dispatch('toast', message: $message, type: 'success');
+    }
+
     public function deleteSupplier()
     {
+        $orgId = $this->supplier->supplier_organization_id;
         $this->supplier->delete();
+        if ($orgId !== null) {
+            app(SupplierOrganizationService::class)->dropIfEmpty((int) $orgId);
+        }
 
         return $this->redirectRoute('suppliers.index', ['tab' => 'registry'], navigate: true);
     }
