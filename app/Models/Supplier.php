@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
  * Запись реестра поставщиков (модуль поставщиков): email и/или домен,
@@ -48,6 +49,12 @@ class Supplier extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
+    /** Группы («Китай», «Европа», «Поручни»…) — выбор поставщиков для запроса цены группой. */
+    public function groups(): BelongsToMany
+    {
+        return $this->belongsToMany(SupplierGroup::class, 'supplier_group_members')->withTimestamps();
     }
 
     /**
