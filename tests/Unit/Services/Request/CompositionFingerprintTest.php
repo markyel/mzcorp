@@ -81,6 +81,60 @@ class CompositionFingerprintTest extends TestCase
         );
     }
 
+    private function same(Request $a, Request $b, array $catalogCodes = []): bool
+    {
+        return AssignmentService::sameComposition(
+            AssignmentService::compositionItems($a, $catalogCodes),
+            AssignmentService::compositionItems($b, $catalogCodes),
+        );
+    }
+
+    public function test_a_fresh_request_matches_an_earlier_one_already_bound_to_the_catalogue(): void
+    {
+        // M-2026-17067 / M-2026-17075: у ранней каталог привязан и M-код
+        // дописан в артикул, у новой в момент распределения — только артикул.
+        $earlier = $this->request([['catalog_item_id' => 27132, 'article' => 'TAC20602A203, M07308']]);
+        $fresh = $this->request([['article' => 'TAC20602A203']]);
+
+        $this->assertTrue($this->same($fresh, $earlier));
+    }
+
+    public function test_the_catalogue_articles_count_for_the_bound_position(): void
+    {
+        $earlier = $this->request([['catalog_item_id' => 26011]]);
+        $fresh = $this->request([['article' => 'Unidrive SP 2403']]);
+
+        $this->assertTrue($this->same($fresh, $earlier, [26011 => ['M08303', 'UNIDRIVESP2403']]));
+        $this->assertFalse($this->same($fresh, $earlier));
+    }
+
+    public function test_different_catalogue_items_sharing_a_model_code_are_different(): void
+    {
+        $a = $this->request([['catalog_item_id' => 1, 'article' => 'AT120']]);
+        $b = $this->request([['catalog_item_id' => 2, 'article' => 'AT120']]);
+
+        $this->assertFalse($this->same($a, $b));
+    }
+
+    public function test_an_extra_position_breaks_the_match_either_way(): void
+    {
+        $a = $this->request([['article' => 'XO-508']]);
+        $b = $this->request([['article' => 'XO-508'], ['article' => 'ZAA717AP1']]);
+
+        $this->assertFalse($this->same($a, $b));
+        $this->assertFalse($this->same($b, $a));
+    }
+
+    public function test_a_name_only_matches_a_name_only(): void
+    {
+        $a = $this->request([['name' => 'Кнопка для Thyssen']]);
+        $b = $this->request([['name' => 'кнопка для thyssen ']]);
+        $c = $this->request([['name' => 'Кнопка для Thyssen', 'article' => 'MS41']]);
+
+        $this->assertTrue($this->same($a, $b));
+        $this->assertFalse($this->same($a, $c));
+    }
+
     public function test_a_request_without_anything_identifiable_has_no_twin(): void
     {
         $this->assertNull(AssignmentService::compositionFingerprint($this->request([])));

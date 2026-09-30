@@ -769,6 +769,45 @@ class Detail extends Component
     }
 
     /**
+     * Близнецы — та же заявка целиком от другого покупателя (или повтор от
+     * того же), распределитель отдал её менеджеру первой (reason auto_twin).
+     * of — заявка, близнецом которой признана эта; twins — признанные
+     * близнецами этой. Один спрос: считать и отвечать по нему дважды не надо.
+     *
+     * @return array{of: ?Request, twins: Collection<int, Request>}
+     */
+    #[Computed]
+    public function twinLinks(): array
+    {
+        $id = (int) $this->request->id;
+        $cols = ['id', 'internal_code', 'client_email', 'status', 'created_at'];
+
+        $ofId = null;
+        $own = RequestAssignment::query()
+            ->where('request_id', $id)
+            ->where('reason', 'like', 'auto_twin:%')
+            ->latest('id')
+            ->value('reason');
+        if ($own !== null) {
+            $payload = json_decode(substr((string) $own, strlen('auto_twin:')), true);
+            $ofId = (int) (($payload['linked'] ?? [])[0] ?? 0) ?: null;
+        }
+
+        $twinIds = RequestAssignment::query()
+            ->where('reason', 'like', 'auto_twin:%')
+            ->where('reason', 'like', '%"linked":['.$id.']%')
+            ->distinct()
+            ->pluck('request_id');
+
+        return [
+            'of' => $ofId ? Request::query()->find($ofId, $cols) : null,
+            'twins' => $twinIds->isEmpty()
+                ? collect()
+                : Request::query()->whereIn('id', $twinIds)->orderBy('created_at')->get($cols),
+        ];
+    }
+
+    /**
      * Карточка клиента у адреса в шапке: связанные контрагенты со скидками и
      * сводка по его заявкам. Считается только когда менеджер её открыл
      * (clientCardOpen), а не на каждом рендере заявки.

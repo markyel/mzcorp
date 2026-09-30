@@ -7,6 +7,7 @@ use App\Enums\RequestActivityType;
 use App\Enums\RequestStatus;
 use App\Enums\Role as RoleEnum;
 use App\Jobs\Mail\DeliverToManagerInboxJob;
+use App\Models\CatalogItem;
 use App\Models\Request;
 use App\Models\RequestAssignment;
 use App\Models\User;
@@ -360,6 +361,128 @@ class AssignmentService
     }
 
     /**
+     * Позиции заявки в виде, пригодном для сравнения составов: каталожный
+     * товар, все артикулы позиции и название.
+     *
+     * Отпечаток (compositionFingerprint) для поиска близнеца не годится:
+     * каталог к позиции привязывает KB-резолв уже ПОСЛЕ распределения, и в
+     * момент проверки у новой заявки ключ по артикулу, а у ранней — по
+     * каталогу. Отпечатки не сходились, и близнецы расходились разным
+     * менеджерам (29 пар за 23–30.09, «Ограничитель OTIS TAC20602» ушёл
+     * трём людям). Поэтому у позиции держим все её артикулы: свои из
+     * parsed_article (там их бывает несколько через запятую, M-код каталога
+     * дописывается туда же) и артикулы привязанного товара каталога.
+     *
+     * @param  array<int, list<string>>  $catalogCodes  catalog_item_id → нормализованные sku / артикулы товара
+     * @return list<array{c: ?int, a: list<string>, n: ?string}>
+     */
+    public static function compositionItems(Request $request, array $catalogCodes = []): array
+    {
+        $rows = [];
+
+        foreach ($request->items as $item) {
+            $cid = $item->catalog_item_id ? (int) $item->catalog_item_id : null;
+            $raw = (string) ($item->parsed_article ?? '');
+            $articles = [];
+            foreach (array_merge([$raw], preg_split('/[,;\/]+/u', $raw) ?: []) as $piece) {
+                $code = ItemTokenizer::normalize($piece);
+                if ($code !== '') {
+                    $articles[$code] = true;
+                }
+            }
+            foreach ($cid !== null ? ($catalogCodes[$cid] ?? []) : [] as $code) {
+                $articles[$code] = true;
+            }
+            $name = ItemTokenizer::normalize($item->parsed_name ?? null);
+
+            if ($cid === null && $articles === [] && $name === '') {
+                continue;
+            }
+            $rows[] = ['c' => $cid, 'a' => array_keys($articles), 'n' => $name !== '' ? $name : null];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Одна ли это позиция. Каталог у обеих — решает только он: разные товары
+     * каталога с общим «артикулом» (модель привода, серия) — разные детали.
+     * Иначе — общий артикул. Название — только когда артикулов нет ни у одной.
+     *
+     * @param  array{c: ?int, a: list<string>, n: ?string}  $x
+     * @param  array{c: ?int, a: list<string>, n: ?string}  $y
+     */
+    public static function sameItem(array $x, array $y): bool
+    {
+        if ($x['c'] !== null && $y['c'] !== null) {
+            return $x['c'] === $y['c'];
+        }
+        if ($x['a'] !== [] || $y['a'] !== []) {
+            return array_intersect($x['a'], $y['a']) !== [];
+        }
+
+        return $x['n'] !== null && $x['n'] === $y['n'];
+    }
+
+    /**
+     * Тот же состав целиком: каждая позиция одной заявки есть в другой и
+     * наоборот. Лишняя позиция с любой стороны — уже другая заявка.
+     *
+     * @param  list<array{c: ?int, a: list<string>, n: ?string}>  $a
+     * @param  list<array{c: ?int, a: list<string>, n: ?string}>  $b
+     */
+    public static function sameComposition(array $a, array $b): bool
+    {
+        if ($a === [] || $b === []) {
+            return false;
+        }
+        foreach ([[$a, $b], [$b, $a]] as [$from, $to]) {
+            foreach ($from as $x) {
+                $found = false;
+                foreach ($to as $y) {
+                    if (self::sameItem($x, $y)) {
+                        $found = true;
+                        break;
+                    }
+                }
+                if (! $found) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Нормализованные sku и артикулы товаров каталога.
+     *
+     * @param  array<int, int>  $catalogIds
+     * @return array<int, list<string>>
+     */
+    private static function catalogCodes(array $catalogIds): array
+    {
+        $catalogIds = array_values(array_unique(array_filter($catalogIds)));
+        if ($catalogIds === []) {
+            return [];
+        }
+
+        $codes = [];
+        foreach (CatalogItem::query()->whereIn('id', $catalogIds)->get(['id', 'sku', 'brand_article', 'articles']) as $ci) {
+            $set = [];
+            foreach (array_merge([$ci->sku, $ci->brand_article], (array) ($ci->articles ?? [])) as $value) {
+                $code = ItemTokenizer::normalize(is_scalar($value) ? (string) $value : null);
+                if ($code !== '') {
+                    $set[$code] = true;
+                }
+            }
+            $codes[(int) $ci->id] = array_keys($set);
+        }
+
+        return $codes;
+    }
+
+    /**
      * Менеджер заявки с тем же составом.
      *
      * Совпадать должен ВЕСЬ состав, а не отдельная позиция: пересечение по
@@ -399,8 +522,14 @@ class AssignmentService
             ->limit(500)
             ->get(['id', 'assigned_user_id', 'created_at']);
 
+        $catalogCodes = self::catalogCodes(array_merge(
+            $request->items->pluck('catalog_item_id')->all(),
+            $candidates->flatMap(fn (Request $c) => $c->items->pluck('catalog_item_id'))->all(),
+        ));
+        $mine = self::compositionItems($request, $catalogCodes);
+
         foreach ($candidates as $candidate) {
-            if (self::compositionFingerprint($candidate) !== $fingerprint) {
+            if (! self::sameComposition($mine, self::compositionItems($candidate, $catalogCodes))) {
                 continue;
             }
             $manager = $managers->firstWhere('id', (int) $candidate->assigned_user_id);

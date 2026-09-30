@@ -568,6 +568,31 @@
                     @endif
                 </div>
                 @endif
+                @php $twinLinks = $this->twinLinks; @endphp
+                @if($twinLinks['of'] || $twinLinks['twins']->isNotEmpty())
+                <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle min-w-0">
+                    <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Близнецы</span>
+                    <span class="flex items-center gap-1.5 flex-wrap">
+                        @if($twinLinks['of'])
+                            <span class="inline-flex items-center text-[10.5px] font-semibold px-1.5 py-0.5 rounded-[3px] bg-amber-50 text-amber-700"
+                                  title="Тот же состав, что в заявке {{ $twinLinks['of']->internal_code }} ({{ $twinLinks['of']->client_email }}), пришедшей раньше: один спрос, поэтому заявка отдана тому же менеджеру">⧉ близнец</span>
+                            <a href="{{ route('requests.show', $twinLinks['of']) }}" title="{{ $twinLinks['of']->client_email }}"
+                               class="mono text-[12px] text-sky-700 hover:underline">{{ $twinLinks['of']->internal_code }}</a>
+                        @endif
+                        @if($twinLinks['twins']->isNotEmpty())
+                            <span class="inline-flex items-center text-[10.5px] font-semibold px-1.5 py-0.5 rounded-[3px] bg-amber-50 text-amber-700"
+                                  title="Позже пришли заявки с тем же составом — один спрос, они отданы тому же менеджеру">⧉ повторы ×{{ $twinLinks['twins']->count() }}</span>
+                            @foreach($twinLinks['twins']->take(3) as $tw)
+                                <a href="{{ route('requests.show', $tw) }}" title="{{ $tw->client_email }}"
+                                   class="mono text-[12px] text-sky-700 hover:underline">{{ $tw->internal_code }}</a>{{ ! $loop->last ? ',' : '' }}
+                            @endforeach
+                            @if($twinLinks['twins']->count() > 3)
+                                <span class="text-fg-3 text-[12px]">+{{ $twinLinks['twins']->count() - 3 }}</span>
+                            @endif
+                        @endif
+                    </span>
+                </div>
+                @endif
                 <div class="flex flex-col gap-1 pr-4 border-r border-border-subtle">
                     <span class="uppercase tracking-wider text-[10.5px] font-semibold text-fg-3">Возраст</span>
                     <span class="text-fg-1 mono">{{ $age }}</span>
