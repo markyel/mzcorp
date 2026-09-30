@@ -105,6 +105,12 @@ class SuppliersMineFromOutboundCommand extends Command
             $clientReq = EmailMessage::query()->where('direction', 'inbound')
                 ->whereRaw('lower(from_email) = ?', [$email])
                 ->where('category', 'client_request')->count();
+            // Заявки клиента с этого адреса — тоже клиент. Категория письма
+            // не всегда client_request: idrisovaam@grk.ru переслала свой
+            // «Запрос КП на KONE» (категория thread_reply), наш ответ с темой
+            // «Запрос КП…» сошёл за RFQ, и клиент 18.06 попал в поставщики.
+            $clientReq += \App\Models\Request::query()->whereRaw('lower(client_email) = ?', [$email])
+                ->whereNull('merged_into_id')->count();
             $domain = substr($email, strpos($email, '@') + 1);
             $domClient = $domainClientReq[$domain] ?? 0;
             $isClientDomain = $domClient >= $domainThreshold;
