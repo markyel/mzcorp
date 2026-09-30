@@ -17,6 +17,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => \App\Http\Middleware\EnsureRole::class,
             'catalog.import.token' => \App\Http\Middleware\CatalogImportToken::class,
         ]);
+        // Отключённый (архивный) сотрудник выходит на первом же запросе.
+        $middleware->web(append: [\App\Http\Middleware\LogoutArchivedUser::class]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

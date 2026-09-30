@@ -132,9 +132,11 @@
                                                     class="btn btn-sm" title="Отпуск / командировка / больничный">⏸ Недоступен…</button>
                                         @endif
                                     @endif
-                                    <button type="button" wire:click="archive({{ $u->id }})"
-                                            wire:confirm="Перевести «{{ $u->name }}» в архив? Логин будет заблокирован, в round-robin он не попадёт. Открытые заявки нужно переподчинить вручную."
-                                            class="btn btn-sm btn-danger">Архивировать</button>
+                                    {{-- Уход насовсем: заявки переходят другим, делегирования закрываются, учётка в архив. --}}
+                                    <button type="button"
+                                            wire:click="$dispatch('open-offboard', { userId: {{ $u->id }} })"
+                                            class="btn btn-sm btn-danger"
+                                            title="Сотрудник ушёл: передать его заявки другим и отключить учётку">Отключить…</button>
                                 @endif
                             </div>
                         </td>
@@ -160,4 +162,5 @@
 
     {{-- Foundation Фаза 2: модалка «недоступен» — single-instance per page. --}}
     <livewire:admin.managers.unavailability-dialog wire:key="unavail-dialog" />
+    <livewire:admin.managers.offboard-dialog wire:key="offboard-dialog" />
 </div>
