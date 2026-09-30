@@ -302,9 +302,7 @@
                                     <tr class="text-left">
                                         <th class="py-1.5 pr-3 font-medium">Кампания</th>
                                         <th class="py-1.5 px-2 font-medium">Фраза</th>
-                                        @if($phraseMode !== 'all')
-                                            <th class="py-1.5 px-2 font-medium">Запрос</th>
-                                        @endif
+                                        <th class="py-1.5 px-2 font-medium">{{ $phraseMode === 'all' ? 'Запросы' : 'Запрос' }}</th>
                                         <th class="py-1.5 px-2 font-medium text-right">Визиты</th>
                                         @foreach($phGroups as $code => $g)
                                             <th class="py-1.5 px-2 font-medium text-right">{{ $g['label'] }}</th>
@@ -318,6 +316,28 @@
                                             <td class="py-1.5 px-2 max-w-[260px] truncate {{ $r['condition'] === 'Автотаргетинг' ? 'text-fg-3 italic' : 'text-fg-1' }}" title="{{ $r['condition'] }}">{{ $r['condition'] }}</td>
                                             @if($phraseMode !== 'all')
                                                 <td class="py-1.5 px-2 max-w-[280px] truncate text-fg-1" title="{{ $r['query'] }}">{{ $r['query'] ?? '—' }}</td>
+                                            @else
+                                                {{-- Запросы фразы по убыванию визитов: три сразу, остальные по кнопке. --}}
+                                                @php $qs = $r['queries'] ?? []; $qTotal = count($qs); @endphp
+                                                <td class="py-1.5 px-2 max-w-[340px] align-top text-fg-1" x-data="{ more: false }">
+                                                    @forelse(array_slice($qs, 0, 3, true) as $q => $v)
+                                                        <div class="truncate" title="{{ $q }}">{{ $q }} <span class="text-fg-4 mono">{{ $v }}</span></div>
+                                                    @empty
+                                                        <span class="text-fg-4">—</span>
+                                                    @endforelse
+                                                    @if($qTotal > 3)
+                                                        <div x-show="more" x-cloak>
+                                                            @foreach(array_slice($qs, 3, null, true) as $q => $v)
+                                                                <div class="truncate" title="{{ $q }}">{{ $q }} <span class="text-fg-4 mono">{{ $v }}</span></div>
+                                                            @endforeach
+                                                        </div>
+                                                        <button type="button" @click="more = !more" class="text-[11px] text-sky-700 hover:underline"
+                                                                x-text="more ? 'свернуть' : 'ещё {{ $qTotal - 3 }}'"></button>
+                                                    @endif
+                                                    @if(($r['queries_unknown'] ?? 0) > 0)
+                                                        <div class="text-[11px] text-fg-4" title="Визиты, по которым Метрика не знает поисковый запрос">запрос неизвестен: {{ $r['queries_unknown'] }}</div>
+                                                    @endif
+                                                </td>
                                             @endif
                                             <td class="py-1.5 px-2 text-right mono tnum">{{ number_format($r['visits'], 0, ',', ' ') }}</td>
                                             @foreach($phGroups as $code => $g)
@@ -331,7 +351,8 @@
                         </div>
                         <p class="text-[11px] text-fg-4 mt-2">
                             «Автотаргетинг» — Директ сам подобрал запрос, фразы у такого визита нет; что искал человек,
-                            видно в колонке «Запрос». Запрос Метрика знает не всегда — тогда прочерк.
+                            видно в колонке «Запрос». Запрос Метрика знает не всегда — тогда прочерк
+                            (в «Все фразы» — строка «запрос неизвестен» с числом таких визитов).
                         </p>
                     @endif
                 </div>

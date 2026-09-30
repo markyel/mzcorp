@@ -188,10 +188,30 @@ class MetrikaStatsService
                 }
                 $first = $g->first();
 
+                // «Все фразы» сворачивают строки по фразе — запросы при этом не
+                // теряем: список «запрос → визиты» по убыванию, плюс визиты, по
+                // которым Метрика запрос не знает.
+                $queries = [];
+                $unknown = 0;
+                if (! $withLeads) {
+                    foreach ($g as $r) {
+                        $q = trim((string) $r->search_query);
+                        if ($q === '') {
+                            $unknown += (int) $r->visits;
+
+                            continue;
+                        }
+                        $queries[$q] = ($queries[$q] ?? 0) + (int) $r->visits;
+                    }
+                    arsort($queries);
+                }
+
                 return [
                     'campaign_id' => (int) $first->campaign_id,
                     'condition' => (string) $first->condition,
                     'query' => $withLeads ? $first->search_query : null,
+                    'queries' => $queries,
+                    'queries_unknown' => $unknown,
                     'visits' => (int) $g->sum('visits'),
                     'groups' => $byGroup,
                     'leads' => array_sum(array_map(fn ($c) => $byGroup[$c] ?? 0, $resultCodes)),
