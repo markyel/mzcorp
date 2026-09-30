@@ -125,6 +125,14 @@ class CompositionFingerprintTest extends TestCase
         $this->assertFalse($this->same($b, $a));
     }
 
+    public function test_a_short_article_tail_does_not_join_different_parts(): void
+    {
+        $a = $this->request([['article' => 'SC-E02P/G']]);
+        $b = $this->request([['article' => 'SC-N2S/G']]);
+
+        $this->assertFalse($this->same($a, $b));
+    }
+
     public function test_a_name_only_matches_a_name_only(): void
     {
         $a = $this->request([['name' => 'Кнопка для Thyssen']]);

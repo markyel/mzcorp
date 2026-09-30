@@ -386,7 +386,7 @@ class AssignmentService
             $articles = [];
             foreach (array_merge([$raw], preg_split('/[,;\/]+/u', $raw) ?: []) as $piece) {
                 $code = ItemTokenizer::normalize($piece);
-                if ($code !== '') {
+                if (self::isArticleKey($code)) {
                     $articles[$code] = true;
                 }
             }
@@ -402,6 +402,16 @@ class AssignmentService
         }
 
         return $rows;
+    }
+
+    /**
+     * Годится ли кусок артикула в ключ: хвосты вроде «/G», «/c» после
+     * разбиения по «/» склеивали разные детали (контакторы SC-E02P/G и
+     * SC-N2S/G). Нужны цифра и хотя бы три знака.
+     */
+    private static function isArticleKey(string $code): bool
+    {
+        return mb_strlen($code) >= 3 && preg_match('/\d/', $code) === 1;
     }
 
     /**
@@ -472,7 +482,7 @@ class AssignmentService
             $set = [];
             foreach (array_merge([$ci->sku, $ci->brand_article], (array) ($ci->articles ?? [])) as $value) {
                 $code = ItemTokenizer::normalize(is_scalar($value) ? (string) $value : null);
-                if ($code !== '') {
+                if (self::isArticleKey($code)) {
                     $set[$code] = true;
                 }
             }
