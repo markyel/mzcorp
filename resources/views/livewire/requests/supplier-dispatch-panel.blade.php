@@ -188,8 +188,19 @@
                 @endif
                 @php $groupsOf = []; foreach ($this->supplierGroups as $sg) { foreach ($sg['ids'] as $sid) { $groupsOf[$sid][] = $sg['name']; } } @endphp
                 <div class="border border-border rounded-md divide-y divide-border-subtle">
+                    @php $orgOpts = $opts; $prevOrgOpt = null; @endphp
                     @forelse($opts as $o)
-                        <label wire:key="sup-opt-{{ $o['id'] }}" class="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-hover {{ ($o['already_awaiting'] ?? 0) > 0 ? 'bg-amber-50/60' : '' }}">
+                        @if($o['org_id'] && $o['org_id'] !== $prevOrgOpt)
+                            @php $orgIds = array_column(array_filter($orgOpts, fn ($x) => $x['org_id'] === $o['org_id']), 'id'); $orgAll = $orgIds !== [] && collect($orgIds)->every(fn ($sid) => ! empty($selectedSuppliers[$sid])); @endphp
+                            <div wire:key="sup-org-{{ $o['org_id'] }}" class="flex items-center gap-2 px-3 py-1.5 bg-surface-2">
+                                <span class="text-[12.5px] font-semibold text-fg-1">🏢 {{ $o['org_name'] }}</span>
+                                <span class="text-[11px] text-fg-3">адресов в списке: {{ $o['org_size'] }}</span>
+                                <button type="button" wire:click="toggleOrganizationSuppliers({{ $o['org_id'] }})" class="btn btn-xs ml-auto"
+                                        title="Отметить или снять все адреса организации — письмо уйдёт на каждый">{{ $orgAll ? 'снять всех' : 'выбрать всех' }}</button>
+                            </div>
+                        @endif
+                        @php $prevOrgOpt = $o['org_id']; @endphp
+                        <label wire:key="sup-opt-{{ $o['id'] }}" class="flex items-start gap-2 {{ $o['org_id'] ? 'pl-7' : 'pl-3' }} pr-3 py-2 cursor-pointer hover:bg-hover {{ ($o['already_awaiting'] ?? 0) > 0 ? 'bg-amber-50/60' : '' }}">
                             <input type="checkbox" wire:model.live="selectedSuppliers.{{ $o['id'] }}" class="mt-1">
                             <span class="flex-1">
                                 <span class="text-[13px] text-fg-1 font-medium">{{ $o['name'] }}</span>

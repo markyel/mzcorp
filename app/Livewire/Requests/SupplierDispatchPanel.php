@@ -466,7 +466,8 @@ class SupplierDispatchPanel extends Component
         }
         usort($out, fn ($a, $b) => $b['item_count'] <=> $a['item_count']);
 
-        return $out;
+        // Адреса одной организации — подряд, под её названием.
+        return \App\Services\Supplier\SupplierOrganizationService::withOrganizations($out);
     }
 
     /** Поиск поставщиков для ручного добавления (вне матча). */
@@ -549,6 +550,33 @@ class SupplierDispatchPanel extends Component
     }
 
     /** Выбрать / снять всю группу поставщиков. */
+    /**
+     * Отметить / снять все адреса организации из списка разом: письмо уходит
+     * на каждый адрес, а решает снабженец обычно про компанию целиком.
+     */
+    public function toggleOrganizationSuppliers(int $organizationId): void
+    {
+        $ids = array_values(array_map(fn ($o) => (int) $o['id'], array_filter(
+            $this->supplierOptions,
+            fn ($o) => ($o['org_id'] ?? null) === $organizationId,
+        )));
+        if ($ids === []) {
+            return;
+        }
+        $all = array_reduce($ids, fn ($c, $id) => $c && ! empty($this->selectedSuppliers[$id]), true);
+        foreach ($ids as $id) {
+            if ($all) {
+                unset($this->selectedSuppliers[$id]);
+            } else {
+                $this->selectedSuppliers[$id] = true;
+            }
+        }
+        unset($this->supplierGroups);
+        if (! $all) {
+            $this->autoTranslateIfEnglish();
+        }
+    }
+
     public function toggleSupplierGroup(int $groupId): void
     {
         $group = collect($this->supplierGroups)->firstWhere('id', $groupId);

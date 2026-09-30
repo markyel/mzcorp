@@ -153,6 +153,51 @@ class SupplierOrganizationService
             ->all();
     }
 
+    /**
+     * Список выбора поставщиков для запроса цены: адреса одной организации
+     * подряд, организация стоит там, где её лучший по покрытию адрес.
+     * Добавляет org_id / org_name / org_size (сколько её адресов в списке).
+     *
+     * @param  list<array<string, mixed>>  $options  строки с id и item_count
+     * @return list<array<string, mixed>>
+     */
+    public static function withOrganizations(array $options): array
+    {
+        if ($options === []) {
+            return [];
+        }
+
+        $bound = Supplier::query()->whereIn('id', array_column($options, 'id'))
+            ->whereNotNull('supplier_organization_id')
+            ->with('organization:id,name')
+            ->get(['id', 'supplier_organization_id'])->keyBy('id');
+
+        $first = [];
+        $score = [];
+        $size = [];
+        foreach ($options as $i => $o) {
+            $s = $bound->get($o['id']);
+            $orgId = $s?->organization ? (int) $s->supplier_organization_id : null;
+            $key = $orgId !== null ? 'o'.$orgId : 's'.$o['id'];
+            $options[$i] += ['org_id' => $orgId, 'org_name' => $orgId !== null ? (string) $s->organization->name : null];
+            $options[$i]['_k'] = $key;
+            $options[$i]['_i'] = $i;
+            $first[$key] ??= $i;
+            $score[$key] = max($score[$key] ?? 0, (int) ($o['item_count'] ?? 0));
+            $size[$key] = ($size[$key] ?? 0) + 1;
+        }
+
+        usort($options, fn ($a, $b) => [$score[$b['_k']], $first[$a['_k']], (int) ($b['item_count'] ?? 0), $a['_i']]
+            <=> [$score[$a['_k']], $first[$b['_k']], (int) ($a['item_count'] ?? 0), $b['_i']]);
+
+        return array_map(function (array $o) use ($size) {
+            $o['org_size'] = $o['org_id'] !== null ? $size[$o['_k']] : 0;
+            unset($o['_k'], $o['_i']);
+
+            return $o;
+        }, $options);
+    }
+
     public static function domainOf(Supplier $supplier): ?string
     {
         $domain = mb_strtolower(trim((string) $supplier->domain));
