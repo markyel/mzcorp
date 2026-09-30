@@ -29,7 +29,15 @@ class ParseSupplierReplyJob implements ShouldQueue, ShouldBeUnique
     use Queueable;
     use SerializesModels;
 
-    public int $tries = 2;
+    /**
+     * Сбой модели (OpenAI 429 утром 28.09) раньше молча превращал ответ с
+     * ценой в «ответ без цены» — повтора не было. Теперь откладываем и
+     * повторяем: 1, 5, 15, 60 минут.
+     */
+    public int $tries = 5;
+
+    /** Задержки повтора после сбоя модели, секунды. */
+    private const RETRY_DELAYS = [60, 300, 900, 3600];
 
     public function __construct(
         public int $emailMessageId,
@@ -61,6 +69,18 @@ class ParseSupplierReplyJob implements ShouldQueue, ShouldBeUnique
         }
 
         $counts = $parser->parse($inquiry, $message);
+        if (! empty($counts['failed'])) {
+            $attempt = $this->attempts();
+            if ($attempt < $this->tries) {
+                $this->release(self::RETRY_DELAYS[min($attempt, count(self::RETRY_DELAYS)) - 1]);
+            } else {
+                Log::error('ParseSupplierReplyJob: model unavailable, reply left unparsed', [
+                    'email_message_id' => $this->emailMessageId, 'supplier_inquiry_id' => $this->supplierInquiryId,
+                ]);
+            }
+
+            return;
+        }
         if ($counts['quoted'] === 0 && $counts['refused'] === 0) {
             return; // нечего отмечать (молчание/не распознано)
         }

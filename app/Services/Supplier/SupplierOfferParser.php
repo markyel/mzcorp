@@ -99,7 +99,8 @@ class SupplierOfferParser
         } catch (\Throwable $e) {
             Log::warning('SupplierOfferParser: LLM failed', ['inquiry_id' => $inquiry->id, 'message_id' => $reply->id, 'error' => $e->getMessage()]);
 
-            return $zero;
+            // Сбой модели (429, сеть) — не «ответ без цены»: вызывающий повторит.
+            return $zero + ['failed' => true];
         }
 
         $parsed = json_decode($result['content'] ?? '', true);
