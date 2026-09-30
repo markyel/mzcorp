@@ -67,6 +67,24 @@ class RequestExtensionService
             ],
         ]);
 
+        // «Заявка принята в работу» с НОВЫМ номером. Распределитель его не шлёт:
+        // письмо — ответ в тред (In-Reply-To), и для продолжения переписки это
+        // правильно. Но здесь мы сами решили, что это отдельная заявка, и клиент
+        // должен узнать её номер. Кейс M-2026-17852: Боброва ответила на своё же
+        // письмо от 08.09 новым запросом — заявку завели, уведомление не ушло.
+        // Идемпотентность и стоп-лист — внутри sendOrderReceived.
+        $new->refresh();
+        if ($new->assigned_user_id !== null && $new->inheritance_parent_id === null) {
+            try {
+                app(\App\Services\Mail\ClientNotificationService::class)->sendOrderReceived($new);
+            } catch (\Throwable $e) {
+                Log::warning('RequestExtensionService: order_received notification failed (non-fatal)', [
+                    'request_id' => $new->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         Log::info('RequestExtensionService: spun off new request from thread reply', [
             'email_message_id' => $message->id,
             'source_request_id' => $source->id,
