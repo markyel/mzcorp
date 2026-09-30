@@ -630,7 +630,7 @@
              @mousemove.window="move($event)" @mouseup.window="stop()"
              style="position:fixed;left:0;right:0;bottom:0;z-index:40;pointer-events:none;padding:0 12px 12px">
             <div class="ds-card" x-ref="card" @focus.window.debounce.500ms="$wire.refreshSupplierOptions()"
-                 :style="x !== null ? `position:fixed;left:${x}px;top:${y}px;width:${w}px;` + (h && !min ? `height:${h}px;` : '') + 'margin:0;max-width:none;display:flex;flex-direction:column' : ''"
+                 :style="x !== null ? { position: 'fixed', left: x + 'px', top: y + 'px', width: w + 'px', height: (h && !min) ? h + 'px' : 'auto', margin: '0', maxWidth: 'none', display: 'flex', flexDirection: 'column' } : {}"
                  style="pointer-events:auto;max-width:1200px;margin:0 auto;box-shadow:0 -8px 30px rgba(0,0,0,.18);border-top-left-radius:12px;border-top-right-radius:12px;overflow:hidden;position:relative">
                 <div class="ds-card-header select-none" :class="x !== null ? 'cursor-move' : 'cursor-pointer'"
                      @mousedown="startDrag($event)" @click="if (!moved) min = !min; moved = false" title="Перетащите за заголовок, чтобы передвинуть окно">
@@ -646,7 +646,7 @@
                 {{-- Уголок изменения размера окна. --}}
                 <div @mousedown.prevent.stop="startResize($event)" x-show="!min" title="Потяните, чтобы изменить размер окна"
                      style="position:absolute;right:2px;bottom:2px;width:16px;height:16px;cursor:nwse-resize;z-index:5;background:linear-gradient(135deg,transparent 50%,var(--fg-4) 50%,var(--fg-4) 58%,transparent 58%,transparent 70%,var(--fg-4) 70%,var(--fg-4) 78%,transparent 78%);opacity:.6"></div>
-            <div class="ds-card-body space-y-3" x-show="!min" :style="h ? 'flex:1;max-height:none;overflow-y:auto' : 'max-height:40vh;overflow-y:auto'" style="max-height:40vh;overflow-y:auto">
+            <div class="ds-card-body space-y-3" x-show="!min" :style="h && x !== null ? { flex: '1', maxHeight: 'none' } : {}" style="max-height:40vh;overflow-y:auto">
                 {{-- Поставщики --}}
                 <div>
                     <label class="block text-[11.5px] text-fg-3 mb-1">Поставщики <span class="text-fg-4">— подобраны по матрице под выбранные позиции; ✎ — карточка поставщика (правки подтянутся при возврате)</span></label>
