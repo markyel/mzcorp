@@ -94,6 +94,17 @@ class Index extends Component
     public string $rfqFilter = '';
 
     /**
+     * Отбор по группе поставщиков, которых по позиции уже спрашивали: id группы
+     * (0 — без отбора) и режим — 'asked' спрашивали у кого-то из группы,
+     * 'not' ещё ни у кого из группы.
+     */
+    #[Url(as: 'sgroup', except: 0)]
+    public int $askedGroup = 0;
+
+    #[Url(as: 'sgmode', except: 'asked')]
+    public string $askedGroupMode = 'asked';
+
+    /**
      * Окно infinite-scroll: сколько строк списка показывать. Растёт по loadMore()
      * при долистывании; любой сброс фильтра (resetPage override ниже) возвращает
      * в PER_PAGE. Заимствован паттерн из App\Livewire\Requests\Pool.
@@ -868,6 +879,7 @@ class Index extends Component
             ->where('catalog_items.is_price_actual', false)
             ->whereNull('requests.merged_into_id')
             ->where('requests.created_at', '>=', $since)
+            ->tap(fn (Builder $q) => $this->applyAskedGroup($q))
             ->select(
                 'catalog_items.id as cid',
                 'catalog_items.sku',
@@ -995,6 +1007,52 @@ class Index extends Component
         $this->dispatch('toast', message: 'Запрос уйдёт при ближайшем прогоне (раз в час).', type: 'success');
     }
 
+    /**
+     * Отбор «по позиции спрашивали поставщика из группы» (или «ещё не
+     * спрашивали»). Запрос поставщику — любой: из «Снабжения» или из заявки.
+     */
+    private function applyAskedGroup(Builder $q): void
+    {
+        if ($this->askedGroup <= 0) {
+            return;
+        }
+        $emails = \App\Models\SupplierGroup::find($this->askedGroup)?->suppliers()
+            ->whereNotNull('email')->pluck('email')->map(fn ($e) => mb_strtolower(trim((string) $e)))->filter()->values()->all() ?? [];
+        if ($emails === []) {
+            // В группе нет адресов: «спрашивали» — ничего, «не спрашивали» — всё.
+            if ($this->askedGroupMode !== 'not') {
+                $q->whereRaw('false');
+            }
+
+            return;
+        }
+        $in = implode(',', array_fill(0, count($emails), '?'));
+        $exists = 'exists (select 1 from supplier_inquiry_items sii3'
+            .' join supplier_inquiries si3 on si3.id = sii3.supplier_inquiry_id'
+            .' left join request_items ri3 on ri3.id = sii3.request_item_id'
+            .' where coalesce(sii3.catalog_item_id, ri3.catalog_item_id) = catalog_items.id'
+            ." and lower(si3.supplier_email) in ({$in}))";
+        $q->whereRaw(($this->askedGroupMode === 'not' ? 'not ' : '').$exists, $emails);
+    }
+
+    /** Группы для отбора в списках позиций. */
+    #[Computed]
+    public function groupOptions(): array
+    {
+        return \App\Models\SupplierGroup::query()->orderBy('sort_order')->orderBy('name')->pluck('name', 'id')->all();
+    }
+
+    public function updatedAskedGroup(): void
+    {
+        $this->resetPage();
+        unset($this->refreshList, $this->refreshSummary);
+    }
+
+    public function updatedAskedGroupMode(): void
+    {
+        $this->updatedAskedGroup();
+    }
+
     /** Базовый запрос блокеров (сматченные stale-позиции в до-КП заявках). */
     private function baseQuery(): Builder
     {
@@ -1025,6 +1083,7 @@ class Index extends Component
         } elseif ($this->rfqFilter === 'none') {
             $q->whereRaw('not '.$rfqExists);
         }
+        $this->applyAskedGroup($q);
 
         $s = trim($this->search);
         if ($s !== '') {

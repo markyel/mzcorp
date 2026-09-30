@@ -167,6 +167,21 @@
             <option value="sent">⏳ уже запрошены — контроль ответов</option>
             <option value="none">ещё не запрошены</option>
         </select>
+
+            @if($this->groupOptions !== [])
+                <span class="inline-flex items-center gap-1">
+                    <select wire:model.live="askedGroup" class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500" title="Отбор по группе поставщиков, которых по позиции уже спрашивали">
+                        <option value="0">Группа поставщиков: все</option>
+                        @foreach($this->groupOptions as $gid => $gname)<option value="{{ $gid }}">{{ $gname }}</option>@endforeach
+                    </select>
+                    @if($askedGroup > 0)
+                        <select wire:model.live="askedGroupMode" class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                            <option value="asked">уже спрашивали</option>
+                            <option value="not">ещё не спрашивали</option>
+                        </select>
+                    @endif
+                </span>
+            @endif
     </div>
 
     {{-- Запрос расценки на ЛЮБЫЕ позиции каталога (не только блокеры) --}}
@@ -400,6 +415,20 @@
             <input type="search" wire:model.live.debounce.300ms="search"
                    placeholder="Поиск: артикул / наименование / бренд"
                    class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
+            @if($this->groupOptions !== [])
+                <span class="inline-flex items-center gap-1">
+                    <select wire:model.live="askedGroup" class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500" title="Отбор по группе поставщиков, которых по позиции уже спрашивали">
+                        <option value="0">Группа поставщиков: все</option>
+                        @foreach($this->groupOptions as $gid => $gname)<option value="{{ $gid }}">{{ $gname }}</option>@endforeach
+                    </select>
+                    @if($askedGroup > 0)
+                        <select wire:model.live="askedGroupMode" class="h-[32px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                            <option value="asked">уже спрашивали</option>
+                            <option value="not">ещё не спрашивали</option>
+                        </select>
+                    @endif
+                </span>
+            @endif
         </div>
 
         <div class="ds-card">
@@ -426,7 +455,9 @@
                                 </td>
                                 <td class="px-3 py-2 mono whitespace-nowrap">{{ $p['sku'] }}</td>
                                 <td class="px-3 py-2 text-fg-2">
-                                    <span class="inline-block max-w-[420px] truncate align-bottom" title="{{ $p['name'] }}">{{ $p['name'] }}</span>
+                                    <button type="button" wire:click="toggleCard({{ $p['cid'] }}, 't')" class="text-left hover:text-sky-700" title="Карточка товара и история поставщиков">
+                                        <span class="text-fg-4 text-[10px] mr-0.5">{{ $this->isCardOpen($p['cid'], 't') ? '▾' : '▸' }}</span><span class="inline-block max-w-[420px] truncate align-bottom" title="{{ $p['name'] }}">{{ $p['name'] }}</span>
+                                    </button>
                                     @if($p['brand'])<div class="text-[11px] text-fg-4">{{ $p['brand'] }}</div>@endif
                                 </td>
                                 <td class="px-3 py-2">
@@ -445,6 +476,14 @@
                                     @endif
                                 </td>
                             </tr>
+                            @if($this->isCardOpen($p['cid'], 't') && ($card = $this->productCards[$p['cid']] ?? null))
+                                <tr wire:key="ref-card-{{ $p['cid'] }}" class="border-b border-border-subtle bg-surface-2">
+                                    <td colspan="8" class="px-4 py-2.5">
+                                        @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false])
+                                        @include('livewire.suppliers._catalog-supplier-history', ['history' => $card['history']])
+                                    </td>
+                                </tr>
+                            @endif
                         @empty
                             <tr><td colspan="8" class="px-3 py-10 text-center text-fg-3 text-[13px]">
                                 {{ trim($search) !== '' ? 'Ничего не найдено.' : 'Нет позиций с неактуальной ценой и спросом за последние 30 дней.' }}
@@ -575,11 +614,26 @@
 
         {{-- @focus.window: карточку поставщика правят через ✎ в соседней вкладке —
              при возврате сюда молча перечитываем подбор (имя/язык/матрица). --}}
-        <div wire:key="proc-rfq-panel" x-data="{ min: false }"
+        {{-- Окно запроса: тянется за заголовок, размер — за уголок справа внизу; положение
+             и размер запоминаются в браузере, «⤓» возвращает окно вниз. --}}
+        <div wire:key="proc-rfq-panel"
+             x-data="{ min: false, x: null, y: null, w: null, h: null, drag: null, rs: null, moved: false,
+                      init() { try { const s = JSON.parse(localStorage.getItem('procRfqPanel') || 'null'); if (s) { this.x = s.x; this.y = s.y; this.w = s.w; this.h = s.h; } } catch (e) {} },
+                      save() { try { localStorage.setItem('procRfqPanel', JSON.stringify({ x: this.x, y: this.y, w: this.w, h: this.h })); } catch (e) {} },
+                      pin() { const r = this.$refs.card.getBoundingClientRect(); if (this.x === null) { this.x = r.left; this.y = r.top; this.w = r.width; } },
+                      startDrag(e) { if (e.target.closest('button,input,select,textarea,a')) return; this.pin(); this.moved = false; this.drag = { dx: e.clientX - this.x, dy: e.clientY - this.y }; },
+                      startResize(e) { this.pin(); const r = this.$refs.card.getBoundingClientRect(); this.rs = { sx: e.clientX, sy: e.clientY, w: r.width, h: r.height }; },
+                      move(e) { if (this.drag) { this.moved = true; this.x = Math.max(0, Math.min(innerWidth - 120, e.clientX - this.drag.dx)); this.y = Math.max(0, Math.min(innerHeight - 48, e.clientY - this.drag.dy)); }
+                                else if (this.rs) { this.w = Math.max(420, this.rs.w + e.clientX - this.rs.sx); this.h = Math.max(180, this.rs.h + e.clientY - this.rs.sy); } },
+                      stop() { if (this.drag || this.rs) { this.drag = null; this.rs = null; this.save(); } },
+                      dock() { this.x = this.y = this.w = this.h = null; this.save(); } }"
+             @mousemove.window="move($event)" @mouseup.window="stop()"
              style="position:fixed;left:0;right:0;bottom:0;z-index:40;pointer-events:none;padding:0 12px 12px">
-            <div class="ds-card" @focus.window.debounce.500ms="$wire.refreshSupplierOptions()"
-                 style="pointer-events:auto;max-width:1200px;margin:0 auto;box-shadow:0 -8px 30px rgba(0,0,0,.18);border-top-left-radius:12px;border-top-right-radius:12px;overflow:hidden">
-                <div class="ds-card-header cursor-pointer select-none" @click="min = !min">
+            <div class="ds-card" x-ref="card" @focus.window.debounce.500ms="$wire.refreshSupplierOptions()"
+                 :style="x !== null ? `position:fixed;left:${x}px;top:${y}px;width:${w}px;` + (h && !min ? `height:${h}px;` : '') + 'margin:0;max-width:none;display:flex;flex-direction:column' : ''"
+                 style="pointer-events:auto;max-width:1200px;margin:0 auto;box-shadow:0 -8px 30px rgba(0,0,0,.18);border-top-left-radius:12px;border-top-right-radius:12px;overflow:hidden;position:relative">
+                <div class="ds-card-header select-none" :class="x !== null ? 'cursor-move' : 'cursor-pointer'"
+                     @mousedown="startDrag($event)" @click="if (!moved) min = !min; moved = false" title="Перетащите за заголовок, чтобы передвинуть окно">
                     <h3>Запрос поставщикам</h3>
                     <span class="text-[12px] text-fg-3 ml-2">выбрано позиций: {{ $selPos->count() }}</span>
                     <span class="flex-1"></span>
@@ -587,8 +641,12 @@
                             x-text="min ? '▴ развернуть' : '▾ свернуть'"></button>
                     <button type="button" wire:click="clearSelection" @click.stop class="btn btn-sm ml-1"
                             title="Очистить весь выбор позиций">✕ очистить</button>
+                    <button type="button" x-show="x !== null" x-cloak @click.stop="dock()" class="btn btn-sm ml-1" title="Вернуть окно вниз страницы">⤓</button>
                 </div>
-            <div class="ds-card-body space-y-3" x-show="!min" style="max-height:40vh;overflow-y:auto">
+                {{-- Уголок изменения размера окна. --}}
+                <div @mousedown.prevent.stop="startResize($event)" x-show="!min" title="Потяните, чтобы изменить размер окна"
+                     style="position:absolute;right:2px;bottom:2px;width:16px;height:16px;cursor:nwse-resize;z-index:5;background:linear-gradient(135deg,transparent 50%,var(--fg-4) 50%,var(--fg-4) 58%,transparent 58%,transparent 70%,var(--fg-4) 70%,var(--fg-4) 78%,transparent 78%);opacity:.6"></div>
+            <div class="ds-card-body space-y-3" x-show="!min" :style="h ? 'flex:1;max-height:none;overflow-y:auto' : 'max-height:40vh;overflow-y:auto'" style="max-height:40vh;overflow-y:auto">
                 {{-- Поставщики --}}
                 <div>
                     <label class="block text-[11.5px] text-fg-3 mb-1">Поставщики <span class="text-fg-4">— подобраны по матрице под выбранные позиции; ✎ — карточка поставщика (правки подтянутся при возврате)</span></label>
