@@ -50,6 +50,9 @@ class InvoiceForItemsTest extends TestCase
     {
         $this->assertFalse($this->looksLikeOrder('Пришлите счет на оплату по заказу 1234, заберем сами'));
         $this->assertFalse($this->looksLikeOrder('Пришлите счет на доставку. Заберем 3 шт завтра'));
+        // Правка оформленной сделки и цитата нашего письма — не новый заказ.
+        $this->assertFalse($this->looksLikeOrder('Прошу прощения, можете перевыставить счет на 32 шт и поставить на отгрузку.'));
+        $this->assertFalse($this->looksLikeOrder('Направляем счет на плиты 2 шт во вложении'));
     }
 
     public function test_post_sale_letters_are_left_alone(): void
