@@ -139,7 +139,7 @@ class MarketingActService
 
         $section->addText('1. В период с '.self::dateLong($act['from']).' по '.self::dateLong($act['to'])
             .' Исполнитель оказал Заказчику маркетинговые, информационно-аналитические и консультационные услуги'
-            .' в соответствии с Договором '.$contract.'.', [], $p);
+            .' в соответствии с Договором '.rtrim($contract, '.').'.', [], $p);
 
         $money = fn (float $v) => self::money($v).' ('.$this->speller->spell($v).')';
         $rate = rtrim(rtrim(number_format($sum['vat_rate'], 2, ',', ''), '0'), ',');
