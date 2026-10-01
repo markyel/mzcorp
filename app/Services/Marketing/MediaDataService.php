@@ -242,12 +242,19 @@ class MediaDataService
         if ($subjectKey === null || ! str_starts_with($subjectKey, self::TIPS_KEY_PREFIX)) {
             return [];
         }
-        $categoryId = DB::table('equipment_categories')
+        $category = DB::table('equipment_categories')
             ->where('slug', substr($subjectKey, strlen(self::TIPS_KEY_PREFIX)))
-            ->value('id');
-        if ($categoryId === null) {
+            ->first(['id', 'name']);
+        if ($category === null) {
             return [];
         }
+
+        // Категория широкая: самой спрашиваемой в «Кнопке лифтовой» оказался
+        // держатель кнопочного элемента, в «Приводе дверей» — пружина. Поэтому
+        // сначала позиции, чьё название начинается с самого типа детали
+        // (первое слово категории без окончания: «Кнопк», «Приво», «Отводк»).
+        $head = (string) (preg_split('/[\s(\/,]+/u', trim((string) $category->name))[0] ?? '');
+        $stem = mb_substr($head, 0, max(4, mb_strlen($head) - 1));
 
         $asked = DB::table('request_items')
             ->where('created_at', '>=', now()->subDays(90))
@@ -257,10 +264,13 @@ class MediaDataService
 
         $url = DB::table('catalog_items as ci')
             ->leftJoinSub($asked, 'a', 'a.catalog_item_id', '=', 'ci.id')
-            ->where('ci.equipment_category_id', $categoryId)
+            ->where('ci.equipment_category_id', $category->id)
             ->where('ci.is_active', true)
             ->whereNotNull('ci.photo_url')
             ->where('ci.photo_url', '!=', '')
+            // «(ЗАМЕНЕНО НА M00171) Плата…» — снятая позиция, показывать её нельзя.
+            ->where('ci.name', 'not ilike', '%замен%на m%')
+            ->orderByRaw('CASE WHEN ci.name ILIKE ? THEN 0 ELSE 1 END', [$stem.'%'])
             ->orderByRaw('COALESCE(a.c, 0) DESC')
             ->orderByRaw('CASE WHEN ci.stock_available > 0 THEN 0 ELSE 1 END')
             ->orderBy('ci.id')
