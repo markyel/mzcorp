@@ -68,10 +68,17 @@ class MarketingReportService
         $works = $entries->filter(fn (MarketingEntry $e) => $e->kind !== MarketingEntry::KIND_NOTE);
         $done = $works->filter(fn (MarketingEntry $e) => $e->countsAsDone() && ! $e->is_project);
 
-        // 1. Регулярные услуги: строка есть у каждого направления.
+        // 1. Регулярные услуги: строка есть у каждого направления. Источник —
+        // записи о работе; выполненный пункт плана («Создать аккаунт…») идёт,
+        // только если записей о работе по направлению нет: иначе он
+        // повторяет их же повелительным наклонением.
         $regular = [];
         foreach (MarketingSection::ordered() as $section) {
             $rows = $done->where('section', $section->value);
+            $workRows = $rows->where('kind', MarketingEntry::KIND_WORK);
+            if ($workRows->isNotEmpty()) {
+                $rows = $workRows;
+            }
             $comment = $this->joinEntries($rows);
             if ($section === MarketingSection::Ads) {
                 $metrics = $this->metricsLine($this->sumAdMetrics($done->where('section', $section->value)));
