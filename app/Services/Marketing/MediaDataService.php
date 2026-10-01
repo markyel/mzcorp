@@ -444,7 +444,7 @@ class MediaDataService
         }
 
         $keys = $categories->keys()->map(fn ($slug) => self::TIPS_KEY_PREFIX.$slug)->all();
-        $key = $this->nextCategory($topic, $keys);
+        $key = $this->nextCategory($topic, $keys, $this->coarseGroups($categories->keys()->all()));
         if ($key === null) {
             return ['key' => null, 'facts' => ''];
         }
@@ -626,13 +626,57 @@ class MediaDataService
     }
 
 
+    /** Столько дней после выпуска группа деталей считается недавней темой. */
+    private const GROUP_COOLDOWN_DAYS = 21;
+
+    private const OTHER_GROUP = 'Прочее';
+
+    /**
+     * Крупная группа («Кнопки и индикация») для каждой категории базы знаний —
+     * та, в которую разбор заявок чаще всего относит её позиции.
+     *
+     * Нужна, чтобы узнавать похожие темы: до 29.09 серия шла по этим группам,
+     * после — по категориям, и «Кнопка лифтовая» (01.10) вышла через два дня
+     * после «Кнопки и индикация» (29.09) — ключи разные, проверка повтора
+     * их не связала. Так же рядом встали бы «Кнопка» и «Табло» одной группы.
+     *
+     * @param  list<string>  $slugs
+     * @return array<string, string>  ключ выпуска (kb:slug) → группа
+     */
+    private function coarseGroups(array $slugs): array
+    {
+        if ($slugs === []) {
+            return [];
+        }
+        $rows = DB::table('request_items as ri')
+            ->join('equipment_categories as ec', 'ec.id', '=', 'ri.identification_category_id')
+            ->whereIn('ec.slug', $slugs)
+            ->whereNotNull('ri.category')
+            // «Прочее» — остаток, а не тема: похожими по нему ничего не считаем.
+            ->whereNotIn('ri.category', ['', self::OTHER_GROUP])
+            ->where('ri.created_at', '>=', now()->subDays(180))
+            ->selectRaw('ec.slug, ri.category, COUNT(*) AS c')
+            ->groupBy('ec.slug', 'ri.category')
+            ->orderByDesc('c')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $r) {
+            $out[self::TIPS_KEY_PREFIX.$r->slug] ??= (string) $r->category;
+        }
+
+        return $out;
+    }
+
     /**
      * Следующая категория серии: первая неразобранная, иначе разобранная
-     * раньше всех.
+     * раньше всех. Категорию, чья группа деталей была темой последние
+     * GROUP_COOLDOWN_DAYS дней, откладываем, пока есть другие.
      *
      * @param  list<string>  $ordered  категории по убыванию числа уточнений
+     * @param  array<string, string>  $groupOf  категория → крупная группа
      */
-    private function nextCategory(MediaTopic $topic, array $ordered): ?string
+    private function nextCategory(MediaTopic $topic, array $ordered, array $groupOf = []): ?string
     {
         // Один выпуск — одна категория во всех каналах. Каналы пишутся по
         // очереди, и второй брал «следующую неразобранную»: 29.09 ВКонтакте
@@ -654,10 +698,26 @@ class MediaDataService
             ->pluck('subject_key')
             ->all();
 
-        foreach ($ordered as $category) {
-            if (! in_array($category, $covered, true)) {
+        // Группы недавних выпусков. Старые ключи серии — сами группы
+        // («Кнопки и индикация»), новые — категории, их группу берём из карты.
+        $recentGroups = MediaPublication::query()
+            ->where('media_topic_id', $topic->id)
+            ->whereNotNull('subject_key')
+            ->where('created_at', '>=', now()->subDays(self::GROUP_COOLDOWN_DAYS))
+            ->pluck('subject_key')
+            ->map(fn ($k) => str_starts_with((string) $k, self::TIPS_KEY_PREFIX) ? ($groupOf[$k] ?? null) : $k)
+            ->filter(fn ($g) => $g !== null && $g !== self::OTHER_GROUP)
+            ->unique()
+            ->all();
+
+        $fresh = array_values(array_filter($ordered, fn ($c) => ! in_array($c, $covered, true)));
+        foreach ($fresh as $category) {
+            if (! in_array($groupOf[$category] ?? null, $recentGroups, true)) {
                 return $category;
             }
+        }
+        if ($fresh !== []) {
+            return $fresh[0];
         }
 
         // Все разобраны — берём ту, что разбирали дольше всех.
