@@ -29,7 +29,7 @@ class MediaDataService
     public const TIPS_KEY_PREFIX = 'kb:';
 
     /** @var list<string> */
-    public const DATA_SOURCES = ['catalog_new', 'catalog_price', 'stock_arrivals', 'request_tips', 'industry_digest'];
+    public const DATA_SOURCES = ['catalog_new', 'catalog_price', 'stock_arrivals', 'request_tips', 'industry_digest', 'weekly_roundup'];
 
     /** Меньше новостей за неделю — дайджеста нет: из двух строк сводки не выходит. */
     public const MIN_DIGEST_ITEMS = 3;
@@ -51,6 +51,9 @@ class MediaDataService
                 .'опознаём, и из вопросов, которые менеджеры задавали клиентам.',
             'industry_digest' => 'Берём новости отрасли из ленты '.config('services.marketing.news_digest_feed')
                 .' за окно темы и сводим их в один обзор недели по направлениям, со ссылкой на ленту.',
+            'weekly_roundup' => 'Одна статья в неделю для RSS-ленты и страницы mzcorp.ru/news: новинки, снижение цен и '
+                .'поступления на склад — по 2–4 позиции с фото, ценами и ссылками на карточки. Позиции из прошлых '
+                .'выпусков не повторяются; меньше двух разделов с позициями — выпуска нет.',
             default => 'Материал пишется по брифу темы.',
         };
     }

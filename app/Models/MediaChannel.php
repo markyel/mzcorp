@@ -22,6 +22,8 @@ class MediaChannel extends Model
         'zen' => 'Дзен',
         'vk' => 'ВКонтакте',
         'site' => 'Сайт',
+        // Своя лента: страница статьи на mzcorp.ru/news + RSS для отраслевых порталов.
+        'rss' => 'RSS-лента',
         'other' => 'Другое',
     ];
 
@@ -119,7 +121,7 @@ class MediaChannel extends Model
     /** Канал, в который система умеет публиковать сама. */
     public function isPostable(): bool
     {
-        return in_array($this->kind, ['vk', 'telegram'], true);
+        return in_array($this->kind, ['vk', 'telegram', 'rss'], true);
     }
 
     /** Доступ настроен: есть токен и адрес места публикации. */
@@ -128,6 +130,8 @@ class MediaChannel extends Model
         return match ($this->kind) {
             'vk' => $this->secret('access_token') !== null && $this->secret('owner_id') !== null,
             'telegram' => $this->secret('bot_token') !== null && $this->secret('chat_id') !== null,
+            // Лента наша же: публикация — это страница на сайте, ключей не нужно.
+            'rss' => true,
             default => false,
         };
     }

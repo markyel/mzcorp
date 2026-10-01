@@ -62,6 +62,17 @@ class MediaPublisherService
             return ['ok' => false, 'message' => 'У канала не заполнен доступ: нужен токен и адрес места публикации.', 'url' => null];
         }
 
+        // Своя лента: «опубликовать» — значит выставить страницу /news и пункт
+        // RSS. Ни внешнего вызова, ни ключей; адрес публикации — страница статьи.
+        if ($channel->kind === 'rss') {
+            $publication->forceFill(['status' => 'published', 'published_at' => now()])->save();
+            $publication->forceFill(['url' => $publication->newsUrl(), 'external_id' => (string) $publication->id])->save();
+            $channel->forceFill(['last_posted_at' => now(), 'last_error' => null])->save();
+            $publication->topic?->advanceAfter($publication);
+
+            return ['ok' => true, 'message' => 'Опубликовано в ленте.', 'url' => $publication->url];
+        }
+
         // Артикулы в тексте превращаем в ссылки на карточки товара: читателю
         // из ленты идти больше некуда, а по артикулу он искать не станет.
         ['text' => $text, 'html' => $html] = app(MediaLinkService::class)

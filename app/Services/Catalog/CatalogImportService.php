@@ -178,7 +178,7 @@ class CatalogImportService
                 // для детекта перехода «неактуальна → актуальна»; name/name_en/
                 // brand_article — детект МАТЧИНГ-изменений для точечного
                 // ре-резолва (цена/сток матчинг не меняют).
-                ->get(['id', 'sku', 'source_hash', 'is_active', 'price', 'price_min', 'is_price_actual', 'name', 'name_en', 'brand_article'])
+                ->get(['id', 'sku', 'source_hash', 'is_active', 'price', 'price_min', 'is_price_actual', 'name', 'name_en', 'brand_article', 'stock_available'])
                 ->keyBy('sku');
 
             $now = Carbon::now();
@@ -193,6 +193,7 @@ class CatalogImportService
 
                 if ($existingRow === null) {
                     $row['is_active'] = true;
+                    $row['in_stock_since'] = (float) ($row['stock_available'] ?? 0) > 0 ? $now : null;
                     $row['created_at'] = $now;
                     $row['updated_at'] = $now;
                     $toInsert[] = $row;
@@ -247,6 +248,16 @@ class CatalogImportService
                     $resolveSkus[] = $row['sku'];
                 }
 
+                // «В наличии с»: остаток появился — отмечаем момент (это и есть
+                // поступление для обзора недели), обнулился — снимаем.
+                $wasInStock = (float) ($existingRow->stock_available ?? 0) > 0;
+                $isInStock = (float) ($row['stock_available'] ?? 0) > 0;
+                if ($isInStock && ! $wasInStock) {
+                    $row['in_stock_since'] = $now;
+                } elseif (! $isInStock) {
+                    $row['in_stock_since'] = null;
+                }
+
                 $row['is_active'] = true;
                 $row['updated_at'] = $now;
                 CatalogItem::query()
@@ -294,6 +305,7 @@ class CatalogImportService
                 })
                 ->update([
                     'stock_available' => 0,
+                    'in_stock_since' => null,
                     'is_price_actual' => false,
                     'updated_at' => $now,
                 ]);

@@ -412,6 +412,15 @@ return [
         // следующего рабочего дня, в выходные не публикуем: 29.09 в Telegram
         // разом вышли три темы (заказчик: «растянуть на рабочую неделю»).
         'autopilot_topics_per_day' => (int) env('MEDIA_AUTOPILOT_TOPICS_PER_DAY', 1),
+        // Публичная лента обзоров недели (mzcorp.ru/news + RSS для отраслевых
+        // порталов): бренд, сайт и почта в шапке, подвале и описании ленты.
+        'news' => [
+            'brand' => env('MEDIA_NEWS_BRAND', 'MyZip'),
+            'site_url' => env('MEDIA_NEWS_SITE_URL', 'https://www.mylift.ru'),
+            'email' => env('MEDIA_NEWS_EMAIL', 'info@myzip.ru'),
+            'feed_title' => env('MEDIA_NEWS_FEED_TITLE', 'MyZip — склад запчастей для лифтов и эскалаторов: обзор недели'),
+            'feed_description' => env('MEDIA_NEWS_FEED_DESCRIPTION', 'Раз в неделю: новые позиции, снижение цен и поступления на склад запчастей для лифтов и эскалаторов MyZip.'),
+        ],
         // Лента новостей отрасли для еженедельного дайджеста.
         'news_digest_feed' => env('MEDIA_NEWS_DIGEST_FEED', 'https://liftpages.ru/rss.xml'),
     ],

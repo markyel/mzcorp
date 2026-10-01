@@ -22,6 +22,7 @@ class MediaTopic extends Model
         'request_tips' => 'Советы по оформлению заявок',
         'news' => 'Новости компании',
         'industry_digest' => 'Дайджест новостей отрасли',
+        'weekly_roundup' => 'Обзор недели (RSS)',
     ];
 
     public const WEEKDAYS = [

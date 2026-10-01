@@ -24,14 +24,32 @@ class MediaPublication extends Model
     protected $fillable = [
         'media_topic_id', 'media_channel_id', 'title', 'body', 'status',
         'planned_for', 'published_at', 'url', 'model', 'subject_key', 'external_id',
-        'media_profile_review_id', 'created_by_user_id', 'image_urls',
+        'media_profile_review_id', 'created_by_user_id', 'image_urls', 'article',
     ];
 
     protected $casts = [
         'planned_for' => 'date',
         'published_at' => 'datetime',
         'image_urls' => 'array',
+        'article' => 'array',
     ];
+
+    /**
+     * Человекопонятный адрес статьи в ленте: /news/{id}-{заголовок латиницей}.
+     * Id впереди — по нему и ищем, заголовок для людей и агрегаторов (Дзен
+     * требует ЧПУ без меток); правка заголовка ссылку не ломает.
+     */
+    public function newsSlug(): string
+    {
+        $slug = \Illuminate\Support\Str::limit(\Illuminate\Support\Str::slug((string) $this->title), 80, '');
+
+        return $this->id.($slug !== '' ? '-'.rtrim($slug, '-') : '');
+    }
+
+    public function newsUrl(): string
+    {
+        return route('news.show', ['slug' => $this->newsSlug()]);
+    }
 
     /** @return list<string> */
     public function images(): array

@@ -51,6 +51,14 @@ Route::get('/feeds/liftway/in-transit.yml', [LiftwayFeedController::class, 'inTr
 Route::get('/feeds/liftway/full.yml', [LiftwayFeedController::class, 'full'])
     ->name('feeds.liftway.full');
 
+// Обзор недели: архив, статья и RSS для отраслевых порталов. БЕЗ auth —
+// ленту забирают роботы порталов; черновик открывается только сотруднику.
+Route::get('/news', [\App\Http\Controllers\NewsController::class, 'index'])->name('news.index');
+Route::get('/news/rss.xml', [\App\Http\Controllers\NewsController::class, 'rss'])->name('news.rss');
+Route::get('/news/{slug}', [\App\Http\Controllers\NewsController::class, 'show'])
+    ->where('slug', '[0-9]+(-[a-z0-9-]*)?')
+    ->name('news.show');
+
 // YML-фид товарной кампании Яндекс.Директа. БЕЗ auth (забирает робот Яндекса),
 // секрет — в самом адресе: фид раскрывает розничные цены, которых на сайте
 // анонимному посетителю не видно. Токен в YANDEX_DIRECT_FEED_TOKEN.

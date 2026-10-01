@@ -65,13 +65,17 @@ class MediaAutopilotService
         $taken = 0;
 
         foreach ($topics as $topic) {
-            if ($taken >= $perDay) {
+            $channels = $this->channelsFor($topic);
+            // Тема только для RSS-ленты (обзор недели) слот дня не занимает:
+            // её не видят подписчики соцсетей, а ограничение «одна тема в день»
+            // придумано против трёх постов подряд в одной ленте.
+            $slotFree = self::slotFree($channels);
+            if (! $slotFree && $taken >= $perDay) {
                 $skipped[] = $topic->title.': перенесено на следующий рабочий день — в день выходит '.$perDay.' '.($perDay === 1 ? 'тема' : 'темы');
 
                 continue;
             }
             $draftedBefore = $drafted;
-            $channels = $this->channelsFor($topic);
             if ($channels->isEmpty()) {
                 // Молча ничего не делать — худший вариант: тема «горит» в разделе,
                 // а конвейер её игнорирует. Говорим, чего не хватает.
@@ -124,7 +128,7 @@ class MediaAutopilotService
 
             // Слот дня занимает тема, по которой что-то сделано; тема, чьи
             // черновики ещё ждут человека, место следующей не отнимает.
-            if ($drafted > $draftedBefore) {
+            if ($drafted > $draftedBefore && ! $slotFree) {
                 $taken++;
             }
         }
@@ -226,7 +230,10 @@ class MediaAutopilotService
                 continue;
             }
             $ready = $topics->filter(fn (MediaTopic $t) => $due[$t->id]->lte($day));
-            foreach (self::queueFor($ready, $day, $due)->take($perDay) as $topic) {
+            $queue = self::queueFor($ready, $day, $due);
+            $todays = $queue->reject(fn (MediaTopic $t) => self::slotFree($channels[$t->id]))->take($perDay)
+                ->merge($queue->filter(fn (MediaTopic $t) => self::slotFree($channels[$t->id])));
+            foreach ($todays as $topic) {
                 $entries = [];
                 foreach ($channels[$topic->id] as $channel) {
                     $entries[] = [
@@ -254,6 +261,12 @@ class MediaAutopilotService
         }
 
         return $out;
+    }
+
+    /** Тема идёт только в RSS-ленту — дневной слот соцсетей не занимает. */
+    public static function slotFree(Collection $channels): bool
+    {
+        return $channels->isNotEmpty() && $channels->every(fn (MediaChannel $c) => $c->kind === 'rss');
     }
 
     /** publish — уйдёт сама; draft — ляжет в черновик и ждёт человека. */
@@ -293,6 +306,13 @@ class MediaAutopilotService
      */
     public function channelsFor(MediaTopic $topic): Collection
     {
+        // RSS-лента и обзор недели — пара: обзор идёт только в ленту, а
+        // обычные посты (подборки, советы) в ленту не попадают — редакциям
+        // порталов нужна одна статья в неделю, а не каждый пост соцсетей.
+        if ($topic->source === 'weekly_roundup') {
+            return MediaChannel::query()->active()->where('kind', 'rss')->get();
+        }
+
         $usedIds = MediaPublication::query()
             ->where('media_topic_id', $topic->id)
             ->whereNotNull('media_channel_id')
@@ -303,10 +323,12 @@ class MediaAutopilotService
         // материал ему писать не нужно — вышло бы два разных поста об одном.
         if ($usedIds->isNotEmpty()) {
             return MediaChannel::query()->active()->whereNull('mirror_of_channel_id')
+                ->where('kind', '!=', 'rss')
                 ->whereIn('id', $usedIds)->get();
         }
 
         return MediaChannel::query()->active()->whereNull('mirror_of_channel_id')
+            ->where('kind', '!=', 'rss')
             ->where('auto_publish', true)->get();
     }
 }
