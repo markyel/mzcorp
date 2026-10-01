@@ -462,6 +462,10 @@ Route::middleware('auth')->group(function () {
             [MarketingReportController::class, 'download'])
             ->whereNumber('report')
             ->name('marketing.report.download');
+        Route::get('/dashboard/marketing/reports/{report}/act',
+            [MarketingReportController::class, 'act'])
+            ->whereNumber('report')
+            ->name('marketing.report.act');
 
         // Раздел «Директ» — реклама складских позиций через API: сколько
         // объявлений держим, очередь позиций, связь с API. Только админ.

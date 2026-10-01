@@ -45,6 +45,15 @@ class MarketingReportService
 
     public const SETTING_CUSTOMER = 'marketing.customer';
 
+    /** Для акта: город, дата начала действия договора, стоимость в месяц без НДС, ставка НДС. */
+    public const SETTING_CITY = 'marketing.city';
+
+    public const SETTING_CONTRACT_START = 'marketing.contract_start';
+
+    public const SETTING_MONTHLY_FEE = 'marketing.monthly_fee';
+
+    public const SETTING_VAT_RATE = 'marketing.vat_rate';
+
     public function __construct(private readonly SettingsService $settings) {}
 
     /**
@@ -195,6 +204,11 @@ class MarketingReportService
             'contract_date' => (string) $this->settings->get(self::SETTING_CONTRACT_DATE, ''),
             'contractor' => (string) $this->settings->get(self::SETTING_CONTRACTOR, 'ИП Маркелов'),
             'customer' => (string) $this->settings->get(self::SETTING_CUSTOMER, 'ООО «Мой Лифт»'),
+            'city' => (string) $this->settings->get(self::SETTING_CITY, ''),
+            'contract_start' => (string) $this->settings->get(self::SETTING_CONTRACT_START, ''),
+            // п. 3.1–3.2 договора: 160 000 руб. в месяц без НДС, НДС 22% сверху.
+            'monthly_fee' => (string) $this->settings->get(self::SETTING_MONTHLY_FEE, '160000'),
+            'vat_rate' => (string) $this->settings->get(self::SETTING_VAT_RATE, '22'),
         ];
     }
 
@@ -205,6 +219,10 @@ class MarketingReportService
             'contract_date' => self::SETTING_CONTRACT_DATE,
             'contractor' => self::SETTING_CONTRACTOR,
             'customer' => self::SETTING_CUSTOMER,
+            'city' => self::SETTING_CITY,
+            'contract_start' => self::SETTING_CONTRACT_START,
+            'monthly_fee' => self::SETTING_MONTHLY_FEE,
+            'vat_rate' => self::SETTING_VAT_RATE,
         ];
         foreach ($map as $field => $key) {
             $this->settings->set($key, (string) ($values[$field] ?? ''), AppSetting::TYPE_STRING, $by?->id);

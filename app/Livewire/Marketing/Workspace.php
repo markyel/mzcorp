@@ -140,7 +140,13 @@ class Workspace extends Component
     /** Редактируемая форма отчёта (Приложение № 2): regular[section]{status,comment}, projects[], conclusions, next_tasks[]. */
     public array $form = [];
 
-    public array $requisites = ['contract_number' => '', 'contract_date' => '', 'contractor' => '', 'customer' => ''];
+    public array $requisites = [
+        'contract_number' => '', 'contract_date' => '', 'contractor' => '', 'customer' => '',
+        'city' => '', 'contract_start' => '', 'monthly_fee' => '', 'vat_rate' => '',
+    ];
+
+    /** Акт оказанных услуг (Приложение № 3): номер, дата, период с/по. */
+    public array $act = ['number' => '', 'date' => '', 'from' => '', 'to' => ''];
 
     public function mount(): void
     {
@@ -1239,7 +1245,34 @@ class Workspace extends Component
         $report = $this->report;
         $this->form = $report !== null ? $svc->mergeWithSaved($report) : $svc->buildDraft($this->periodDate());
         $this->requisites = array_merge($this->requisites, $svc->requisites());
+        $this->act = array_merge(
+            app(\App\Services\Marketing\MarketingActService::class)->defaults($this->periodDate()),
+            array_filter((array) ($report?->payload['act'] ?? []), fn ($v) => is_string($v) && $v !== ''),
+        );
         $this->normalizeFormArrays();
+    }
+
+    /**
+     * Сумма акта по введённому периоду — видна до выгрузки, чтобы неполный
+     * месяц (п. 3.5 договора) не оказался сюрпризом в документе.
+     *
+     * @return array<string, mixed>|null
+     */
+    #[Computed]
+    public function actAmounts(): ?array
+    {
+        if (($this->act['from'] ?? '') === '' || ($this->act['to'] ?? '') === '') {
+            return null;
+        }
+        $num = fn ($v, $d) => (float) str_replace([' ', "\u{00A0}", ','], ['', '', '.'], (string) ($v !== '' ? $v : $d));
+        try {
+            return app(\App\Services\Marketing\MarketingActService::class)->amounts(
+                $this->act['from'], $this->act['to'],
+                $num($this->requisites['monthly_fee'] ?? '', 160000), $num($this->requisites['vat_rate'] ?? '', 22),
+            );
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /** Пересобрать текст разделов из журнала, затерев ручные правки. */
@@ -1275,11 +1308,24 @@ class Workspace extends Component
             fn ($p) => trim((string) ($p['task'] ?? '')) !== '',
         ));
         $payload['next_tasks'] = $this->cleanList($payload['next_tasks'] ?? []);
+        $payload['act'] = array_map(fn ($v) => trim((string) $v), $this->act);
         $report->payload = $payload;
         $report->save();
 
         unset($this->report);
         $this->flashMessage = 'Отчёт сохранён.';
+    }
+
+    /** Сохранить форму (вместе с параметрами акта) и отдать акт в Word. */
+    public function downloadAct()
+    {
+        $this->saveReport();
+        $report = $this->report;
+        if ($report === null || $this->flashError !== null) {
+            return null;
+        }
+
+        return redirect()->route('marketing.report.act', $report->id);
     }
 
     public function finalizeReport(): void

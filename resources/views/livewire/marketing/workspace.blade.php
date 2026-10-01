@@ -528,6 +528,63 @@
                         <input type="text" wire:model="requisites.customer" class="{{ $inp }}">
                     </div>
                 </div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <div>
+                        <label class="{{ $lbl }}">Город</label>
+                        <input type="text" wire:model="requisites.city" placeholder="Москва" class="{{ $inp }}">
+                    </div>
+                    <div>
+                        <label class="{{ $lbl }}">Договор действует с</label>
+                        <input type="date" wire:model="requisites.contract_start" class="{{ $inp }}">
+                    </div>
+                    <div>
+                        <label class="{{ $lbl }}">Стоимость в месяц, руб. без НДС</label>
+                        <input type="text" wire:model="requisites.monthly_fee" placeholder="160000" class="{{ $inp }} mono">
+                    </div>
+                    <div>
+                        <label class="{{ $lbl }}">НДС, %</label>
+                        <input type="text" wire:model="requisites.vat_rate" placeholder="22" class="{{ $inp }} mono">
+                    </div>
+                </div>
+
+                {{-- Акт оказанных услуг (Приложение № 3). Неполный месяц — пропорционально дням (п. 3.5). --}}
+                <div class="border border-border rounded-md p-3 space-y-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-[13px] font-semibold text-fg-1">Акт оказанных услуг</span>
+                        <span class="text-[11.5px] text-fg-4">форма Приложения № 3; неполный месяц считается по календарным дням (п. 3.5 договора)</span>
+                        <span class="flex-1"></span>
+                        <button type="button" wire:click="downloadAct" class="btn btn-sm">⬇ Акт Word</button>
+                    </div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div>
+                            <label class="{{ $lbl }}">Акт №</label>
+                            <input type="text" wire:model="act.number" class="{{ $inp }}">
+                        </div>
+                        <div>
+                            <label class="{{ $lbl }}">Дата акта</label>
+                            <input type="date" wire:model="act.date" class="{{ $inp }}">
+                        </div>
+                        <div>
+                            <label class="{{ $lbl }}">Период с</label>
+                            <input type="date" wire:model.live="act.from" class="{{ $inp }}">
+                        </div>
+                        <div>
+                            <label class="{{ $lbl }}">по</label>
+                            <input type="date" wire:model.live="act.to" class="{{ $inp }}">
+                        </div>
+                    </div>
+                    @php $amt = $this->actAmounts; @endphp
+                    @if($amt)
+                        <div class="text-[12.5px] text-fg-2">
+                            @if(! $amt['full_month'])
+                                Неполный месяц: {{ collect($amt['parts'])->map(fn ($x) => $x['days'].' из '.$x['of'].' дн.')->implode(', ') }} ·
+                            @endif
+                            без НДС <b class="mono">{{ \App\Services\Marketing\MarketingActService::money($amt['base']) }}</b>,
+                            НДС {{ rtrim(rtrim(number_format($amt['vat_rate'], 2, ',', ''), '0'), ',') }}% <span class="mono">{{ \App\Services\Marketing\MarketingActService::money($amt['vat']) }}</span>,
+                            итого <b class="mono">{{ \App\Services\Marketing\MarketingActService::money($amt['total']) }}</b>
+                        </div>
+                    @endif
+                </div>
 
                 {{-- 1. Регулярные услуги: строка на каждое направление (п. 4.2–4.3 договора). --}}
                 <div>
