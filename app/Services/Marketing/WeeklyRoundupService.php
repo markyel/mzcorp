@@ -38,6 +38,13 @@ class WeeklyRoundupService
 
     private const MIN_DROP_RUB = 300;
 
+    /**
+     * Больше — почти всегда исправление ошибки в цене, а не снижение:
+     * «39 137 → 2 228 ₽ (−94%)» в новости выглядит как опечатка и подрывает
+     * доверие ко всей заметке.
+     */
+    private const MAX_DROP_PCT = 75;
+
     /** Сколько прошлых выпусков смотреть, чтобы позиции не повторялись. */
     private const REPEAT_WEEKS = 8;
 
@@ -66,7 +73,7 @@ class WeeklyRoundupService
             ->whereNotIn('ci.sku', $featured ?: [''])
             // «(ЗАМЕНЕНО НА M…)» — снятая позиция, в новостях ей не место.
             ->where('ci.name', 'not ilike', '%замен%на m%');
-        $cols = ['ci.sku', 'ci.name', 'ci.brand', 'ci.part_type', 'ci.photo_url', 'ci.price', 'ci.stock_available'];
+        $cols = ['ci.sku', 'ci.name', 'ci.brand', 'ci.part_type', 'ci.unit_name', 'ci.photo_url', 'ci.price', 'ci.stock_available'];
 
         // Новинки: заведены за неделю. Сначала то, что уже на складе и с брендом.
         $new = $base()
@@ -84,6 +91,9 @@ class WeeklyRoundupService
             ->whereColumn('pc.new_price', '<', 'pc.old_price')
             ->whereRaw('(pc.old_price - pc.new_price) >= ?', [self::MIN_DROP_RUB])
             ->whereRaw('(pc.old_price - pc.new_price) * 100 >= pc.old_price * ?', [self::MIN_DROP_PCT])
+            ->whereRaw('(pc.old_price - pc.new_price) * 100 <= pc.old_price * ?', [self::MAX_DROP_PCT])
+            // Снижение на позицию со склада — новость; под заказ — во вторую очередь.
+            ->orderByRaw('CASE WHEN ci.stock_available > 0 THEN 0 ELSE 1 END')
             ->orderByRaw('(pc.old_price - pc.new_price) / NULLIF(pc.old_price, 0) DESC')
             ->limit(self::CANDIDATES * 2)
             ->get(array_merge($cols, ['pc.old_price', 'pc.new_price']))
@@ -156,6 +166,7 @@ class WeeklyRoundupService
                 $lines[] = '— sku '.$it['sku'].' · '.$it['name']
                     .($it['brand'] ? ' · бренд '.$it['brand'] : '')
                     .($it['part_type'] ? ' · тип '.$it['part_type'] : '')
+                    .($it['unit'] ? ' · узел лифта: '.$it['unit'] : '')
                     .($kind === 'price' ? ' · цена снижена на '.$it['pct'].'%' : '')
                     .($it['in_stock'] ? ' · есть на складе' : ' · под заказ');
             }
@@ -382,6 +393,7 @@ class WeeklyRoundupService
             'name' => self::shortName((string) $r->name),
             'brand' => trim((string) $r->brand),
             'part_type' => trim((string) $r->part_type),
+            'unit' => trim((string) ($r->unit_name ?? '')),
             'photo' => (string) $r->photo_url,
             'url' => $this->links->productUrl((string) $r->sku, 'rss'),
             'price' => (float) ($new ?? $r->price ?? 0),
