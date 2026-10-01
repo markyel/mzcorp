@@ -113,8 +113,10 @@ class MarketingWorkspaceTest extends TestCase
     {
         $numbers = array_map(fn (MarketingSection $s) => $s->formNumber(), MarketingSection::ordered());
 
-        // Пункты 2–8 формы, по порядку и без пропусков.
-        $this->assertSame([2, 3, 4, 5, 6, 7, 8], $numbers);
+        // Семь направлений Приложения № 1, по порядку и без пропусков.
+        $this->assertSame([1, 2, 3, 4, 5, 6, 7], $numbers);
+        $this->assertSame(MarketingSection::Analytics, MarketingSection::ordered()[0]);
+        $this->assertSame('Организационно-консультационное сопровождение', MarketingSection::ordered()[6]->label());
     }
 
     public function test_every_section_has_fields_and_labels(): void

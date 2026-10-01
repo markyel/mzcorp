@@ -12,14 +12,30 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 /**
- * Сборка ежемесячного отчёта по форме Приложения № 1 из журнала работ и плана.
- *
- * Правило договора (п. 4.2): «Разделы отчёта, не относящиеся к фактически
- * выполнявшимся в соответствующем месяце работам, могут не заполняться» —
- * поэтому пустые разделы остаются пустыми, а не заполняются прочерками.
+ * Сборка ежемесячного отчёта по форме Приложения № 2 к договору из журнала
+ * работ и плана:
+ *   1. Регулярные услуги — все семь направлений Приложения № 1, у каждого
+ *      статус «Выполнялось / не требовалось» и комментарий (п. 4.2–4.3:
+ *      отсутствие изменений — не отсутствие услуги, поэтому строка есть всегда);
+ *   2. Дополнительные (проектные) задачи — записи журнала с отметкой is_project;
+ *   3. Основные выводы и рекомендации — заметки раздела «Аналитика»;
+ *   4. Задачи, переходящие на следующий период — план следующего месяца.
+ * Конкретных дат в тексте отчёта нет: отчётный период — месяц.
  */
 class MarketingReportService
 {
+    public const STATUS_DONE = 'done';
+
+    public const STATUS_NOT_NEEDED = 'not_needed';
+
+    public const STATUS_LABELS = [
+        self::STATUS_DONE => 'Выполнялось',
+        self::STATUS_NOT_NEEDED => 'Не требовалось',
+    ];
+
+    /** Формулировка п. 4.3 для направления, по которому в месяце ничего не менялось. */
+    public const QUIET_COMMENT = 'Регулярный мониторинг осуществлялся; существенных отклонений и необходимости корректирующих действий не выявлено.';
+
     /** Ключи реквизитов договора в app_settings. */
     public const SETTING_CONTRACT_NUMBER = 'marketing.contract_number';
 
@@ -32,10 +48,12 @@ class MarketingReportService
     public function __construct(private readonly SettingsService $settings) {}
 
     /**
-     * Черновик формы за месяц: текст разделов собран из журнала, показатели
-     * раздела «Реклама» просуммированы, пункт 9 — из плана следующего месяца.
+     * Черновик формы за месяц, собранный из журнала.
      *
-     * @return array<string, mixed>
+     * @return array{period: string, requisites: array<string, string>,
+     *     regular: array<string, array{status: string, comment: string}>,
+     *     projects: list<array{task: string, stage: string, result: string}>,
+     *     conclusions: string, next_tasks: list<string>}
      */
     public function buildDraft(Carbon|string $period): array
     {
@@ -47,58 +65,101 @@ class MarketingReportService
             ->orderBy('id')
             ->get();
 
-        $done = $entries->filter(fn (MarketingEntry $e) => $e->countsAsDone());
+        $works = $entries->filter(fn (MarketingEntry $e) => $e->kind !== MarketingEntry::KIND_NOTE);
+        $done = $works->filter(fn (MarketingEntry $e) => $e->countsAsDone() && ! $e->is_project);
 
-        $sections = [];
+        // 1. Регулярные услуги: строка есть у каждого направления.
+        $regular = [];
         foreach (MarketingSection::ordered() as $section) {
             $rows = $done->where('section', $section->value);
-            if ($rows->isEmpty()) {
-                continue;
+            $comment = $this->joinEntries($rows);
+            if ($section === MarketingSection::Ads) {
+                $metrics = $this->metricsLine($this->sumAdMetrics($done->where('section', $section->value)));
+                $comment = trim($comment.($metrics !== '' ? "\n".$metrics : ''));
             }
-            $fields = [];
-            $keys = array_keys($section->fields());
-            // Первое поле раздела — «выполненные работы»: туда идёт журнал.
-            $fields[$keys[0]] = $this->joinEntries($rows);
-            $sections[$section->value] = $fields;
+            $regular[$section->value] = [
+                'status' => $rows->isNotEmpty() ? self::STATUS_DONE : self::STATUS_NOT_NEEDED,
+                'comment' => $comment,
+            ];
         }
+
+        // 2. Проектные задачи: сделанные и начатые в месяце.
+        $projects = $works
+            ->filter(fn (MarketingEntry $e) => $e->is_project && $e->status !== MarketingEntry::STATUS_DROPPED
+                && in_array($e->status, [MarketingEntry::STATUS_DONE, MarketingEntry::STATUS_IN_PROGRESS], true))
+            ->map(fn (MarketingEntry $e) => [
+                'task' => trim((string) $e->title),
+                'stage' => $e->status === MarketingEntry::STATUS_DONE ? 'Выполнено' : 'В работе',
+                'result' => trim((string) $e->body),
+            ])
+            ->values()
+            ->all();
+
+        // 3. Выводы и рекомендации — заметки раздела «Аналитика».
+        $conclusions = $entries
+            ->filter(fn (MarketingEntry $e) => $e->kind === MarketingEntry::KIND_NOTE && $e->section === MarketingSection::Analytics->value)
+            ->map(fn (MarketingEntry $e) => trim((string) $e->title).(trim((string) $e->body) !== '' ? ': '.trim((string) $e->body) : ''))
+            ->implode("\n");
 
         return [
             'period' => $period->toDateString(),
             'requisites' => $this->requisites(),
-            // Пункт 1 формы — до пяти основных задач месяца (приоритет 1, затем остальные).
-            'main_tasks' => $this->mainTasks($done),
-            'sections' => $sections,
-            'ad_metrics' => $this->sumAdMetrics($done),
-            'next_plan' => $this->nextPlan($period),
+            'regular' => $regular,
+            'projects' => $projects,
+            'conclusions' => $conclusions,
+            'next_tasks' => $this->nextPlan($period),
         ];
     }
 
     /**
      * Черновик, дополненный уже сохранённым отчётом: ручные правки админа
-     * всегда важнее пересборки из журнала.
+     * всегда важнее пересборки из журнала. Отчёты старой формы (Приложение
+     * № 1: main_tasks, sections) новых ключей не имеют — для них берётся черновик.
      *
      * @return array<string, mixed>
      */
     public function mergeWithSaved(MarketingReport $report): array
     {
-        $draft = $this->buildDraft($report->period);
+        $merged = $this->buildDraft($report->period);
         $saved = $report->payload ?? [];
 
-        $merged = $draft;
-        foreach (['main_tasks', 'next_plan', 'ad_metrics', 'requisites'] as $key) {
+        if (! empty($saved['requisites'])) {
+            $merged['requisites'] = $saved['requisites'];
+        }
+        foreach ((array) ($saved['regular'] ?? []) as $key => $row) {
+            if (! isset($merged['regular'][$key])) {
+                continue;
+            }
+            if (isset(self::STATUS_LABELS[$row['status'] ?? ''])) {
+                $merged['regular'][$key]['status'] = $row['status'];
+            }
+            if (trim((string) ($row['comment'] ?? '')) !== '') {
+                $merged['regular'][$key]['comment'] = (string) $row['comment'];
+            }
+        }
+        foreach (['projects', 'next_tasks'] as $key) {
             if (! empty($saved[$key])) {
                 $merged[$key] = $saved[$key];
             }
         }
-        foreach ((array) ($saved['sections'] ?? []) as $sectionKey => $fields) {
-            foreach ((array) $fields as $field => $value) {
-                if (is_string($value) && trim($value) !== '') {
-                    $merged['sections'][$sectionKey][$field] = $value;
-                }
-            }
+        if (trim((string) ($saved['conclusions'] ?? '')) !== '') {
+            $merged['conclusions'] = (string) $saved['conclusions'];
         }
 
         return $merged;
+    }
+
+    /** Показатели рекламы одной строкой для комментария направления. */
+    private function metricsLine(array $metrics): string
+    {
+        $parts = [];
+        foreach (MarketingSection::AD_METRICS as $key => $label) {
+            if (($metrics[$key] ?? '') !== '') {
+                $parts[] = $label.': '.$metrics[$key];
+            }
+        }
+
+        return $parts === [] ? '' : 'Показатели: '.implode('; ', $parts).'.';
     }
 
     /** Найти или создать черновик отчёта за месяц. */
@@ -144,23 +205,8 @@ class MarketingReportService
     }
 
     /**
-     * Пункт 1 формы: до пяти основных задач месяца.
-     *
-     * @param  Collection<int, MarketingEntry>  $done
-     * @return array<int, string>
-     */
-    private function mainTasks(Collection $done): array
-    {
-        return $done->sortBy([['priority', 'asc'], ['id', 'asc']])
-            ->take(5)
-            ->map(fn (MarketingEntry $e) => (string) $e->title)
-            ->values()
-            ->all();
-    }
-
-    /**
-     * Пункт 9: план и приоритеты на следующий месяц — записи kind=plan
-     * следующего периода, кроме снятых.
+     * Раздел 4: задачи, переходящие на следующий период — записи kind=plan
+     * следующего месяца, кроме снятых.
      *
      * @return array<int, string>
      */
@@ -172,7 +218,7 @@ class MarketingReportService
             ->where('status', '!=', MarketingEntry::STATUS_DROPPED)
             ->orderBy('priority')
             ->orderBy('id')
-            ->limit(5)
+            ->limit(10)
             ->pluck('title')
             ->map(fn ($t) => (string) $t)
             ->all();
@@ -230,15 +276,15 @@ class MarketingReportService
     }
 
     /**
-     * Журнал раздела в текст отчёта: одна работа — один абзац, с датой факта.
+     * Журнал направления в текст отчёта: одна работа — один абзац. Дат нет:
+     * отчётный период — месяц, а дата отдельной работы в акте не нужна.
      *
      * @param  Collection<int, MarketingEntry>  $rows
      */
     private function joinEntries(Collection $rows): string
     {
         return $rows->map(function (MarketingEntry $e) {
-            $date = $e->happened_on?->format('d.m');
-            $line = ($date !== null ? $date.' — ' : '').trim((string) $e->title);
+            $line = trim((string) $e->title);
             $body = trim((string) $e->body);
 
             return $body !== '' ? $line.': '.$body : $line;

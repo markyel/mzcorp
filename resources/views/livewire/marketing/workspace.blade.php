@@ -391,6 +391,13 @@
                             <textarea wire:model="eBody" rows="3" class="{{ $area }}"></textarea>
                         </div>
 
+                        @if($eKind !== \App\Models\MarketingEntry::KIND_NOTE)
+                            <label class="inline-flex items-center gap-2 text-[12.5px] text-fg-2">
+                                <input type="checkbox" wire:model="eProject">
+                                Дополнительная (проектная) задача — в отчёте идёт отдельной строкой «задача · стадия · результат», а не в регулярные услуги
+                            </label>
+                        @endif
+
                         @if($eSection === \App\Enums\MarketingSection::Ads->value)
                             <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
                                 @foreach(['spend' => 'Расходы, руб.', 'impressions' => 'Показы', 'clicks' => 'Переходы', 'leads' => 'Обращения', 'other' => 'Иные показатели'] as $key => $label)
@@ -423,6 +430,9 @@
                                     <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)">заметка</span>
                                 @endif
                                 <span class="font-medium text-fg-1">{{ $entry->title }}</span>
+                                @if($entry->is_project)
+                                    <span class="chip text-[10.5px]" style="background:var(--sky-50);color:var(--sky-700)" title="Дополнительная (проектная) задача">проект</span>
+                                @endif
                                 <span class="chip text-[10.5px]" style="background:var(--neutral-100);color:var(--fg-3)">
                                     {{ $entry->sectionEnum()?->emoji() }} {{ $entry->sectionLabel() }}
                                 </span>
@@ -477,7 +487,7 @@
         <div class="ds-card">
             <div class="ds-card-header flex-wrap">
                 <h3 class="text-[15px] font-semibold text-fg-1">📄 Отчёт за {{ $this->periodLabel() }}</h3>
-                <span class="text-[12px] text-fg-3">форма Приложения № 1 к договору</span>
+                <span class="text-[12px] text-fg-3">форма Приложения № 2 к договору</span>
                 @if($report)
                     <span class="chip text-[10.5px]"
                           style="background:{{ $final ? 'var(--emerald-50)' : 'var(--neutral-100)' }};color:{{ $final ? 'var(--emerald-700)' : 'var(--fg-3)' }}">
@@ -486,7 +496,7 @@
                 @endif
                 <span class="flex-1"></span>
                 <button type="button" wire:click="rebuildReport" class="btn btn-sm"
-                        wire:confirm="Пересобрать разделы из журнала? Ручные правки текста будут потеряны.">↻ Собрать из журнала</button>
+                        wire:confirm="Пересобрать отчёт из журнала? Ручные правки будут потеряны.">↻ Собрать из журнала</button>
                 @if($report)
                     <a href="{{ route('marketing.report.download', $report->id) }}" class="btn btn-sm">⬇ Word</a>
                 @endif
@@ -519,65 +529,78 @@
                     </div>
                 </div>
 
-                {{-- 1. Основные задачи --}}
+                {{-- 1. Регулярные услуги: строка на каждое направление (п. 4.2–4.3 договора). --}}
                 <div>
-                    <div class="text-[13px] font-semibold text-fg-1 mb-1.5">1. Основные выполненные задачи</div>
-                    <div class="space-y-1.5">
-                        @for($i = 0; $i < 5; $i++)
-                            <div class="flex items-center gap-2">
-                                <span class="mono text-[11.5px] text-fg-4 w-[14px]">{{ $i + 1 }}</span>
-                                <input type="text" wire:model="form.main_tasks.{{ $i }}" class="{{ $inp }}">
+                    <div class="text-[13px] font-semibold text-fg-1 mb-1.5">1. Регулярные услуги</div>
+                    <div class="space-y-3">
+                        @foreach($sections as $section)
+                            <div wire:key="rep-reg-{{ $section->value }}">
+                                <div class="flex flex-wrap items-center gap-2 mb-1">
+                                    <span class="mono text-[11.5px] text-fg-4 w-[14px]">{{ $section->formNumber() }}</span>
+                                    <span class="text-[13px] text-fg-1">{{ $section->emoji() }} {{ $section->label() }}</span>
+                                    <span class="flex-1"></span>
+                                    <select wire:model="form.regular.{{ $section->value }}.status" class="h-[28px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px]">
+                                        @foreach(\App\Services\Marketing\MarketingReportService::STATUS_LABELS as $key => $label)
+                                            <option value="{{ $key }}">{{ $label }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                                <textarea wire:model="form.regular.{{ $section->value }}.comment" rows="2" class="{{ $area }}"
+                                          placeholder="{{ \App\Services\Marketing\MarketingReportService::QUIET_COMMENT }}"></textarea>
                             </div>
-                        @endfor
+                        @endforeach
+                    </div>
+                    <div class="text-[11.5px] text-fg-4 mt-1">
+                        Основные действия, показатели, комментарий. Статус «Выполнялось» ставится сам, если в журнале есть сделанные работы направления.
                     </div>
                 </div>
 
-                {{-- 2–8. Разделы --}}
-                @foreach($sections as $section)
-                    <div>
-                        <div class="text-[13px] font-semibold text-fg-1 mb-1.5">
-                            {{ $section->formNumber() }}. {{ $section->emoji() }} {{ $section->label() }}
-                        </div>
-                        <div class="space-y-2">
-                            @foreach($section->fields() as $field => $label)
-                                <div>
-                                    <label class="{{ $lbl }}">{{ $label }}</label>
-                                    <textarea wire:model="form.sections.{{ $section->value }}.{{ $field }}" rows="2" class="{{ $area }}"></textarea>
-                                </div>
-                            @endforeach
-                            @if($section === \App\Enums\MarketingSection::Ads)
-                                <div class="grid grid-cols-2 md:grid-cols-6 gap-2">
-                                    @foreach(\App\Enums\MarketingSection::AD_METRICS as $key => $label)
-                                        <div>
-                                            <label class="{{ $lbl }}">{{ $label }}</label>
-                                            <input type="text" wire:model="form.ad_metrics.{{ $key }}" class="{{ $inp }} mono">
-                                        </div>
-                                    @endforeach
-                                </div>
-                            @endif
-                        </div>
-                    </div>
-                @endforeach
-
-                {{-- 9. План на следующий месяц --}}
+                {{-- 2. Дополнительные (проектные) задачи --}}
                 <div>
                     <div class="text-[13px] font-semibold text-fg-1 mb-1.5">
-                        9. План и приоритеты на следующий месяц
-                        <span class="text-[11.5px] font-normal text-fg-4">— подтягивается из плана на {{ \App\Models\MarketingReport::monthLabel($this->periodDate()->addMonth()) }}</span>
+                        2. Дополнительные (проектные) задачи
+                        <span class="text-[11.5px] font-normal text-fg-4">— записи журнала с отметкой «проектная задача»; пустые строки в Word не попадают</span>
                     </div>
                     <div class="space-y-1.5">
-                        @for($i = 0; $i < 5; $i++)
-                            <div class="flex items-center gap-2">
-                                <span class="mono text-[11.5px] text-fg-4 w-[14px]">{{ $i + 1 }}</span>
-                                <input type="text" wire:model="form.next_plan.{{ $i }}" class="{{ $inp }}">
+                        @foreach($form['projects'] ?? [] as $i => $p)
+                            <div class="grid grid-cols-1 md:grid-cols-[14px_2fr_1fr_3fr] gap-2 items-start" wire:key="rep-proj-{{ $i }}">
+                                <span class="mono text-[11.5px] text-fg-4 pt-1.5">{{ $i + 1 }}</span>
+                                <input type="text" wire:model="form.projects.{{ $i }}.task" placeholder="Задача" class="{{ $inp }}">
+                                <input type="text" wire:model="form.projects.{{ $i }}.stage" placeholder="Выполнено / стадия" class="{{ $inp }}">
+                                <textarea wire:model="form.projects.{{ $i }}.result" rows="1" placeholder="Результат / комментарий" class="{{ $area }}"></textarea>
                             </div>
-                        @endfor
+                        @endforeach
+                    </div>
+                </div>
+
+                {{-- 3. Выводы и рекомендации --}}
+                <div>
+                    <div class="text-[13px] font-semibold text-fg-1 mb-1.5">
+                        3. Основные выводы и рекомендации
+                        <span class="text-[11.5px] font-normal text-fg-4">— подтягиваются из заметок раздела «Аналитика»</span>
+                    </div>
+                    <textarea wire:model="form.conclusions" rows="5" class="{{ $area }}"></textarea>
+                </div>
+
+                {{-- 4. Задачи на следующий период --}}
+                <div>
+                    <div class="text-[13px] font-semibold text-fg-1 mb-1.5">
+                        4. Задачи, переходящие на следующий период
+                        <span class="text-[11.5px] font-normal text-fg-4">— подтягиваются из плана на {{ \App\Models\MarketingReport::monthLabel($this->periodDate()->addMonth()) }}</span>
+                    </div>
+                    <div class="space-y-1.5">
+                        @foreach($form['next_tasks'] ?? [] as $i => $task)
+                            <div class="flex items-center gap-2" wire:key="rep-next-{{ $i }}">
+                                <span class="mono text-[11.5px] text-fg-4 w-[14px]">{{ $i + 1 }}</span>
+                                <input type="text" wire:model="form.next_tasks.{{ $i }}" class="{{ $inp }}">
+                            </div>
+                        @endforeach
                     </div>
                 </div>
 
                 <div class="flex items-center gap-2 pt-1 border-t border-border-subtle">
                     <span class="text-[11.5px] text-fg-4">
-                        Пустые разделы в Word не попадают — п. 4.2 договора это разрешает.
+                        В Word без дат: отчётный период — месяц. Раздел 2 без задач не выводится.
                     </span>
                     <span class="flex-1"></span>
                     @if(! $final)

@@ -7,7 +7,7 @@ use App\Services\Marketing\MarketingReportDocxService;
 use Tests\TestCase;
 
 /**
- * Вёрстка ежемесячного отчёта в .docx по форме Приложения № 1.
+ * Вёрстка ежемесячного отчёта в .docx по форме Приложения № 2.
  * Проверяем на собранной форме, без БД: renderData() специально отделён
  * от модели ради этого.
  */
@@ -51,13 +51,17 @@ class MarketingReportDocxTest extends TestCase
                 'contractor' => 'ИП Маркелов',
                 'customer' => 'ООО «Мой Лифт»',
             ],
-            'main_tasks' => ['Перезапуск товарной кампании', '', 'Сегментация базы рассылки'],
-            'sections' => [
-                'ads' => ['works' => 'Перебрал группы объявлений', 'changes' => '', 'conclusions' => 'Цена обращения упала'],
-                'base' => ['works' => 'Выгрузил базу', 'campaigns' => 'Две рассылки'],
+            'regular' => [
+                'ads' => ['status' => 'done', 'comment' => "Перебрал группы объявлений\nПоказатели: Рекламные расходы, руб.: 120 000."],
+                'base' => ['status' => 'done', 'comment' => 'Выгрузил базу'],
+                'social' => ['status' => 'not_needed', 'comment' => ''],
             ],
-            'ad_metrics' => ['spend' => '120 000', 'leads' => '48', 'cpl' => '2 500'],
-            'next_plan' => ['Запустить фид', ''],
+            'projects' => [
+                ['task' => 'Перезапуск Директа на своём аккаунте', 'stage' => 'Выполнено', 'result' => 'Три кампании'],
+                ['task' => '', 'stage' => '', 'result' => ''],
+            ],
+            'conclusions' => 'Новые клиенты растут',
+            'next_tasks' => ['Запустить канал в MAX', ''],
         ];
     }
 
@@ -65,61 +69,52 @@ class MarketingReportDocxTest extends TestCase
     {
         $text = $this->docText($this->fullForm());
 
-        $this->assertStringContainsString('ЕЖЕМЕСЯЧНЫЙ ОТЧЁТ', $text);
-        $this->assertStringContainsString('Приложение № 1', $text);
+        $this->assertStringContainsString('ЕЖЕМЕСЯЧНЫЙ ОТЧЁТ ОБ ОКАЗАННЫХ УСЛУГАХ', $text);
+        $this->assertStringContainsString('Приложение № 2', $text);
+        $this->assertStringContainsString('к Договору № 17 от «01» октября 2026 г.', $text);
         $this->assertStringContainsString('Отчётный период: Сентябрь 2026', $text);
-        $this->assertStringContainsString('ИП Маркелов', $text);
-        $this->assertStringContainsString('ООО «Мой Лифт»', $text);
     }
 
-    public function test_numbers_sections_as_in_the_contract_form(): void
+    public function test_every_regular_direction_is_listed_with_a_status(): void
+    {
+        // п. 4.3: направление без изменений — не отсутствие услуги, строка есть всегда.
+        $text = $this->docText($this->fullForm());
+
+        foreach (MarketingSection::ordered() as $section) {
+            $this->assertStringContainsString($section->label(), $text);
+        }
+        $this->assertStringContainsString('Выполнялось', $text);
+        $this->assertStringContainsString('Не требовалось', $text);
+        $this->assertStringContainsString('Перебрал группы объявлений', $text);
+        $this->assertStringContainsString('Показатели: Рекламные расходы, руб.: 120 000.', $text);
+    }
+
+    public function test_project_tasks_skip_blank_rows(): void
     {
         $text = $this->docText($this->fullForm());
 
-        $this->assertStringContainsString('1. Основные выполненные задачи', $text);
-        $this->assertStringContainsString('2. '.MarketingSection::Ads->label(), $text);
-        $this->assertStringContainsString('3. '.MarketingSection::Base->label(), $text);
-        $this->assertStringContainsString('9. План и приоритеты на следующий месяц', $text);
-        $this->assertStringContainsString('10. Итог', $text);
+        $this->assertStringContainsString('2. Дополнительные (проектные) задачи', $text);
+        $this->assertStringContainsString('Перезапуск Директа на своём аккаунте', $text);
+        $this->assertStringContainsString('Три кампании', $text);
     }
 
-    public function test_empty_sections_are_omitted(): void
-    {
-        // п. 4.2 договора: разделы без работ можно не заполнять.
-        $text = $this->docText($this->fullForm());
-
-        $this->assertStringNotContainsString(MarketingSection::Social->label(), $text);
-        $this->assertStringNotContainsString(MarketingSection::Feedback->label(), $text);
-    }
-
-    public function test_blank_task_lines_are_renumbered_without_gaps(): void
-    {
-        $text = $this->docText($this->fullForm());
-
-        $this->assertStringContainsString('1. Перезапуск товарной кампании', $text);
-        $this->assertStringContainsString('2. Сегментация базы рассылки', $text);
-        $this->assertStringNotContainsString('3. Сегментация базы рассылки', $text);
-    }
-
-    public function test_ad_metrics_are_labelled_as_in_the_form(): void
-    {
-        $text = $this->docText($this->fullForm());
-
-        $this->assertStringContainsString('Рекламные расходы, руб.: 120 000', $text);
-        $this->assertStringContainsString('Стоимость обращения, руб.: 2 500', $text);
-        // Показатель без значения не печатаем.
-        $this->assertStringNotContainsString('Показы:', $text);
-    }
-
-    public function test_multiline_field_keeps_every_line(): void
+    public function test_project_section_is_omitted_without_projects(): void
     {
         $data = $this->fullForm();
-        $data['sections']['ads']['works'] = "15.09 — правил ставки\n17.09 — отключил РСЯ";
+        $data['projects'] = [];
 
-        $text = $this->docText($data);
+        $this->assertStringNotContainsString('Дополнительные (проектные) задачи', $this->docText($data));
+    }
 
-        $this->assertStringContainsString('15.09 — правил ставки', $text);
-        $this->assertStringContainsString('17.09 — отключил РСЯ', $text);
+    public function test_conclusions_and_next_tasks(): void
+    {
+        $text = $this->docText($this->fullForm());
+
+        $this->assertStringContainsString('3. Основные выводы и рекомендации', $text);
+        $this->assertStringContainsString('Новые клиенты растут', $text);
+        $this->assertStringContainsString('4. Задачи, переходящие на следующий период', $text);
+        $this->assertStringContainsString('1. Запустить канал в MAX', $text);
+        $this->assertStringNotContainsString('2. ', $this->afterLast($text, '4. Задачи'));
     }
 
     public function test_renders_with_empty_form(): void
@@ -127,6 +122,14 @@ class MarketingReportDocxTest extends TestCase
         $text = $this->docText([]);
 
         $this->assertStringContainsString('ЕЖЕМЕСЯЧНЫЙ ОТЧЁТ', $text);
-        $this->assertStringContainsString('10. Итог', $text);
+        $this->assertStringContainsString(MarketingSection::Analytics->label(), $text);
+        $this->assertStringContainsString('Не требовалось', $text);
+    }
+
+    private function afterLast(string $text, string $marker): string
+    {
+        $pos = mb_strrpos($text, $marker);
+
+        return $pos === false ? '' : mb_substr($text, $pos + mb_strlen($marker));
     }
 }

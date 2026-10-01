@@ -57,6 +57,8 @@ class MarketingEntry extends Model
         'priority',
         'happened_on',
         'created_by_user_id',
+        // Дополнительная (проектная) задача — раздел 2 отчёта, а не регулярные услуги.
+        'is_project',
     ];
 
     protected function casts(): array
@@ -66,6 +68,7 @@ class MarketingEntry extends Model
             'happened_on' => 'date',
             'metrics' => 'array',
             'priority' => 'int',
+            'is_project' => 'bool',
         ];
     }
 

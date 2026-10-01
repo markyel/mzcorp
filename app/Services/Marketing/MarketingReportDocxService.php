@@ -10,9 +10,10 @@ use PhpOffice\PhpWord\SimpleType\Jc;
 use PhpOffice\PhpWord\Style\Language;
 
 /**
- * Выгрузка ежемесячного отчёта в .docx по форме Приложения № 1 к договору:
- * шапка, 10 пунктов формы, подпись. Пустые разделы пропускаем — п. 4.2
- * договора это прямо разрешает.
+ * Выгрузка ежемесячного отчёта в .docx по форме Приложения № 2 к договору:
+ * таблица регулярных услуг (все семь направлений со статусом), таблица
+ * дополнительных задач (если были), выводы, задачи на следующий период,
+ * подпись. Конкретных дат в тексте нет — только отчётный месяц.
  */
 class MarketingReportDocxService
 {
@@ -40,101 +41,88 @@ class MarketingReportDocxService
             'contractor' => '',
             'customer' => '',
         ], (array) ($data['requisites'] ?? []));
+        $contract = '№ '.($req['contract_number'] ?: '___').' от '.($req['contract_date'] ?: '«___» __________ 2026 г.');
 
         $word = new PhpWord;
         $word->getSettings()->setThemeFontLang(new Language(Language::RU_RU));
         $word->setDefaultFontName('Times New Roman');
         $word->setDefaultFontSize(11);
 
-        $word->addTitleStyle(1, ['bold' => true, 'size' => 13], ['spaceAfter' => 160]);
-        $word->addTitleStyle(2, ['bold' => true, 'size' => 11.5], ['spaceBefore' => 200, 'spaceAfter' => 80]);
-
         $section = $word->addSection([
             'marginLeft' => 1134, 'marginRight' => 850, 'marginTop' => 850, 'marginBottom' => 850,
         ]);
 
         $head = ['spaceAfter' => 0, 'alignment' => Jc::END];
-        $section->addText('Приложение № 1', ['italic' => true, 'size' => 10], $head);
-        $section->addText('к Договору оказания маркетинговых и консультационных услуг',
-            ['italic' => true, 'size' => 10], $head);
-        $section->addText(
-            '№ '.($req['contract_number'] ?: '___').' от '.($req['contract_date'] ?: '«___» __________ 2026 г.'),
-            ['italic' => true, 'size' => 10], $head
-        );
+        $section->addText('Приложение № 2', ['italic' => true, 'size' => 10], $head);
+        $section->addText('к Договору '.$contract, ['italic' => true, 'size' => 10], $head);
 
         $section->addTextBreak(1);
-        $section->addText('ЕЖЕМЕСЯЧНЫЙ ОТЧЁТ', ['bold' => true, 'size' => 13], ['alignment' => Jc::CENTER, 'spaceAfter' => 0]);
-        $section->addText('об оказанных маркетинговых и консультационных услугах',
-            ['size' => 11], ['alignment' => Jc::CENTER, 'spaceAfter' => 200]);
+        $section->addText('ЕЖЕМЕСЯЧНЫЙ ОТЧЁТ ОБ ОКАЗАННЫХ УСЛУГАХ', ['bold' => true, 'size' => 13],
+            ['alignment' => Jc::CENTER, 'spaceAfter' => 200]);
 
         $section->addText('Исполнитель: '.($req['contractor'] ?: 'ИП Маркелов'), [], ['spaceAfter' => 0]);
         $section->addText('Заказчик: '.($req['customer'] ?: 'ООО «Мой Лифт»'), [], ['spaceAfter' => 0]);
         $section->addText('Отчётный период: '.$periodLabel, [], ['spaceAfter' => 200]);
 
-        // 1. Основные выполненные задачи
-        $section->addText('1. Основные выполненные задачи', ['bold' => true], ['spaceBefore' => 160, 'spaceAfter' => 80]);
-        $tasks = array_values(array_filter((array) ($data['main_tasks'] ?? []), fn ($t) => trim((string) $t) !== ''));
-        if ($tasks === []) {
+        $table = ['borderSize' => 6, 'borderColor' => '808080', 'cellMargin' => 70];
+        $th = ['bold' => true, 'size' => 10];
+        $td = ['size' => 10];
+        $cellP = ['spaceAfter' => 0];
+
+        // 1. Регулярные услуги — все семь направлений, у каждого статус.
+        $section->addText('1. Регулярные услуги', ['bold' => true], ['spaceBefore' => 160, 'spaceAfter' => 80]);
+        $t = $section->addTable($table);
+        $t->addRow();
+        foreach ([[500, '№'], [2900, 'Направление'], [1500, 'Статус'], [5000, 'Основные действия / показатели / комментарий']] as [$w, $label]) {
+            $t->addCell($w)->addText($label, $th, $cellP);
+        }
+        foreach (MarketingSection::ordered() as $sec) {
+            $row = (array) ($data['regular'][$sec->value] ?? []);
+            $status = MarketingReportService::STATUS_LABELS[$row['status'] ?? ''] ?? MarketingReportService::STATUS_LABELS[MarketingReportService::STATUS_NOT_NEEDED];
+            $t->addRow();
+            $t->addCell(500)->addText((string) $sec->formNumber(), $td, $cellP);
+            $t->addCell(2900)->addText($sec->label(), $td, $cellP);
+            $t->addCell(1500)->addText($status, $td, $cellP);
+            $this->multiline($t->addCell(5000), (string) ($row['comment'] ?? ''), $td, $cellP);
+        }
+
+        // 2. Дополнительные (проектные) задачи — раздел не заполняется, если их не было.
+        $projects = array_values(array_filter((array) ($data['projects'] ?? []),
+            fn ($p) => trim((string) ($p['task'] ?? '')) !== ''));
+        if ($projects !== []) {
+            $section->addText('2. Дополнительные (проектные) задачи', ['bold' => true], ['spaceBefore' => 240, 'spaceAfter' => 80]);
+            $t = $section->addTable($table);
+            $t->addRow();
+            foreach ([[500, '№'], [3600, 'Задача'], [1500, 'Выполнено / стадия'], [4300, 'Результат / комментарий']] as [$w, $label]) {
+                $t->addCell($w)->addText($label, $th, $cellP);
+            }
+            foreach ($projects as $i => $p) {
+                $t->addRow();
+                $t->addCell(500)->addText((string) ($i + 1), $td, $cellP);
+                $t->addCell(3600)->addText(trim((string) $p['task']), $td, $cellP);
+                $t->addCell(1500)->addText(trim((string) ($p['stage'] ?? '')), $td, $cellP);
+                $this->multiline($t->addCell(4300), (string) ($p['result'] ?? ''), $td, $cellP);
+            }
+        }
+
+        // 3. Выводы и рекомендации
+        $section->addText('3. Основные выводы и рекомендации', ['bold' => true], ['spaceBefore' => 240, 'spaceAfter' => 80]);
+        $conclusions = trim((string) ($data['conclusions'] ?? ''));
+        $this->multiline($section, $conclusions !== '' ? $conclusions : '—', [], $cellP);
+
+        // 4. Задачи на следующий период
+        $section->addText('4. Задачи, переходящие на следующий период', ['bold' => true], ['spaceBefore' => 240, 'spaceAfter' => 80]);
+        $next = array_values(array_filter((array) ($data['next_tasks'] ?? []), fn ($v) => trim((string) $v) !== ''));
+        if ($next === []) {
             $section->addText('—');
         }
-        foreach ($tasks as $i => $task) {
-            $section->addText(($i + 1).'. '.$task, [], ['spaceAfter' => 0]);
+        foreach ($next as $i => $task) {
+            $section->addText(($i + 1).'. '.trim((string) $task), [], $cellP);
         }
 
-        // 2–8. Разделы формы
-        foreach (MarketingSection::ordered() as $sec) {
-            $fields = (array) ($data['sections'][$sec->value] ?? []);
-            $metrics = $sec === MarketingSection::Ads ? (array) ($data['ad_metrics'] ?? []) : [];
-            if ($this->isBlank($fields) && $metrics === []) {
-                continue;
-            }
-            $section->addText($sec->formNumber().'. '.$sec->label(), ['bold' => true],
-                ['spaceBefore' => 200, 'spaceAfter' => 80]);
-
-            foreach ($sec->fields() as $key => $label) {
-                $value = trim((string) ($fields[$key] ?? ''));
-                if ($value === '') {
-                    continue;
-                }
-                $section->addText($label.':', ['italic' => true], ['spaceAfter' => 0]);
-                foreach (preg_split('/\R/u', $value) ?: [] as $line) {
-                    if (trim($line) !== '') {
-                        $section->addText(trim($line), [], ['spaceAfter' => 0]);
-                    }
-                }
-            }
-
-            if ($metrics !== []) {
-                $section->addText('Основные показатели:', ['italic' => true], ['spaceBefore' => 80, 'spaceAfter' => 0]);
-                foreach (MarketingSection::AD_METRICS as $key => $label) {
-                    if (($metrics[$key] ?? '') !== '') {
-                        $section->addText($label.': '.$metrics[$key], [], ['spaceAfter' => 0]);
-                    }
-                }
-            }
-        }
-
-        // 9. План на следующий месяц
-        $plan = array_values(array_filter((array) ($data['next_plan'] ?? []), fn ($t) => trim((string) $t) !== ''));
-        if ($plan !== []) {
-            $section->addText('9. План и приоритеты на следующий месяц', ['bold' => true],
-                ['spaceBefore' => 200, 'spaceAfter' => 80]);
-            foreach ($plan as $i => $task) {
-                $section->addText(($i + 1).'. '.$task, [], ['spaceAfter' => 0]);
-            }
-        }
-
-        // 10. Итог
-        $section->addText('10. Итог', ['bold' => true], ['spaceBefore' => 200, 'spaceAfter' => 80]);
-        $section->addText(
-            'Услуги за указанный отчётный период оказаны в рамках Договора оказания маркетинговых '.
-            'и консультационных услуг № '.($req['contract_number'] ?: '___').' от '.
-            ($req['contract_date'] ?: '«___» __________ 2026 г.').'.',
-            [], ['spaceAfter' => 200]
-        );
+        $section->addTextBreak(1);
         $section->addText('Исполнитель: '.($req['contractor'] ?: 'ИП Маркелов'), [], ['spaceAfter' => 160]);
-        $section->addText('________________ /________________/', [], ['spaceAfter' => 0]);
-        $section->addText('«___» __________ 20__ г.');
+        $section->addText('________________ /________________/       «___» __________ 20__ г.');
 
         $path = tempnam(sys_get_temp_dir(), 'mrep').'.docx';
         IOFactory::createWriter($word, 'Word2007')->save($path);
@@ -146,6 +134,18 @@ class MarketingReportDocxService
     public function filename(MarketingReport $report): string
     {
         return 'Отчёт_маркетинг_'.$report->period->format('Y_m').'.docx';
+    }
+
+    /** Текст с переносами строк — абзацами в ячейку или раздел. */
+    private function multiline($container, string $text, array $font, array $para): void
+    {
+        $lines = array_values(array_filter(array_map('trim', preg_split('/\R/u', $text) ?: []), fn ($l) => $l !== ''));
+        if ($lines === []) {
+            $container->addText('', $font, $para);
+        }
+        foreach ($lines as $line) {
+            $container->addText($line, $font, $para);
+        }
     }
 
     private function isBlank(array $fields): bool

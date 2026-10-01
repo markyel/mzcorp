@@ -132,9 +132,12 @@ class Workspace extends Component
     /** Показатели рекламы — только для раздела «Реклама». */
     public array $eMetrics = ['spend' => '', 'impressions' => '', 'clicks' => '', 'leads' => '', 'other' => ''];
 
+    /** Дополнительная (проектная) задача — раздел 2 отчёта. */
+    public bool $eProject = false;
+
     /* ---------------------------- Отчёт ---------------------------- */
 
-    /** Редактируемая форма отчёта: sections[section][field], main_tasks[], next_plan[], ad_metrics[]. */
+    /** Редактируемая форма отчёта (Приложение № 2): regular[section]{status,comment}, projects[], conclusions, next_tasks[]. */
     public array $form = [];
 
     public array $requisites = ['contract_number' => '', 'contract_date' => '', 'contractor' => '', 'customer' => ''];
@@ -1112,6 +1115,7 @@ class Workspace extends Component
         $this->eStatus = (string) $entry->status;
         $this->ePriority = (int) $entry->priority;
         $this->eHappenedOn = $entry->happened_on?->toDateString() ?? '';
+        $this->eProject = (bool) $entry->is_project;
         $this->eMetrics = array_merge(
             ['spend' => '', 'impressions' => '', 'clicks' => '', 'leads' => '', 'other' => ''],
             array_map(fn ($v) => (string) $v, (array) $entry->metrics)
@@ -1157,6 +1161,7 @@ class Workspace extends Component
             'metrics' => $metrics ?: null,
             'status' => $this->eStatus,
             'priority' => $this->ePriority,
+            'is_project' => $this->eKind !== MarketingEntry::KIND_NOTE && $this->eProject,
             'happened_on' => $this->eKind === MarketingEntry::KIND_WORK
                 ? ($this->eHappenedOn ?: $this->periodDate()->toDateString())
                 : ($this->eHappenedOn ?: null),
@@ -1210,7 +1215,7 @@ class Workspace extends Component
 
     private function resetEntryForm(): void
     {
-        $this->reset(['entryEditId', 'eTitle', 'eBody']);
+        $this->reset(['entryEditId', 'eTitle', 'eBody', 'eProject']);
         $this->eSection = 'ads';
         $this->ePriority = 2;
         $this->eHappenedOn = now()->toDateString();
@@ -1265,8 +1270,11 @@ class Workspace extends Component
         $payload = $this->form;
         $payload['period'] = $this->periodDate()->toDateString();
         $payload['requisites'] = $this->requisites;
-        $payload['main_tasks'] = $this->cleanList($payload['main_tasks'] ?? []);
-        $payload['next_plan'] = $this->cleanList($payload['next_plan'] ?? []);
+        $payload['projects'] = array_values(array_filter(
+            (array) ($payload['projects'] ?? []),
+            fn ($p) => trim((string) ($p['task'] ?? '')) !== '',
+        ));
+        $payload['next_tasks'] = $this->cleanList($payload['next_tasks'] ?? []);
         $report->payload = $payload;
         $report->save();
 
@@ -1303,23 +1311,34 @@ class Workspace extends Component
         $this->flashMessage = 'Отчёт снова редактируется.';
     }
 
-    /** Ровно пять строк в списках задач/плана — как в форме Приложения № 1. */
+    /**
+     * Форма Приложения № 2: строка на каждое направление, проектных задач
+     * не меньше четырёх строк (как в бланке), задач на следующий период — пять.
+     */
     private function normalizeFormArrays(): void
     {
-        foreach (['main_tasks', 'next_plan'] as $key) {
-            $list = array_values(array_map(fn ($v) => (string) $v, (array) ($this->form[$key] ?? [])));
-            $this->form[$key] = array_pad(array_slice($list, 0, 5), 5, '');
-        }
-        $this->form['ad_metrics'] = array_merge(
-            array_fill_keys(array_keys(MarketingSection::AD_METRICS), ''),
-            array_map(fn ($v) => (string) $v, (array) ($this->form['ad_metrics'] ?? []))
-        );
         foreach (MarketingSection::ordered() as $section) {
-            foreach (array_keys($section->fields()) as $field) {
-                $this->form['sections'][$section->value][$field] =
-                    (string) ($this->form['sections'][$section->value][$field] ?? '');
-            }
+            $row = (array) ($this->form['regular'][$section->value] ?? []);
+            $this->form['regular'][$section->value] = [
+                'status' => isset(MarketingReportService::STATUS_LABELS[$row['status'] ?? ''])
+                    ? $row['status'] : MarketingReportService::STATUS_NOT_NEEDED,
+                'comment' => (string) ($row['comment'] ?? ''),
+            ];
         }
+
+        $projects = array_values(array_map(fn ($p) => [
+            'task' => (string) ($p['task'] ?? ''),
+            'stage' => (string) ($p['stage'] ?? ''),
+            'result' => (string) ($p['result'] ?? ''),
+        ], (array) ($this->form['projects'] ?? [])));
+        // Одна пустая строка про запас, но не меньше четырёх — как в бланке.
+        $rows = max(4, count(array_filter($projects, fn ($p) => trim($p['task']) !== '')) + 1);
+        $projects = array_slice(array_pad($projects, $rows, ['task' => '', 'stage' => '', 'result' => '']), 0, max($rows, count($projects)));
+        $this->form['projects'] = $projects;
+
+        $next = array_values(array_map(fn ($v) => (string) $v, (array) ($this->form['next_tasks'] ?? [])));
+        $this->form['next_tasks'] = array_pad($next, max(5, count($next) + 1), '');
+        $this->form['conclusions'] = (string) ($this->form['conclusions'] ?? '');
     }
 
     /** @return array<int, string> */
