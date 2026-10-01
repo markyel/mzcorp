@@ -190,22 +190,33 @@ class WeeklyRoundupService
 
         $profile = MediaProfileEntry::asBrief();
         $model = (string) config('services.openai.media_profile_model', 'gpt-4o');
-        try {
-            $response = $this->openai->chat(
-                [
-                    ['role' => 'system', 'content' => WriteWeeklyRoundupPrompt::systemMessage()],
-                    ['role' => 'user', 'content' => WriteWeeklyRoundupPrompt::userMessage($profile, $this->factsText($c))],
-                ],
-                $model,
-                ['response_format' => ['type' => 'json_object'], 'temperature' => 0.5],
-            );
-        } catch (\Throwable $e) {
-            Log::error('WeeklyRoundupService: модель не ответила', ['topic_id' => $topic->id, 'error' => $e->getMessage()]);
+        $messages = [
+            ['role' => 'system', 'content' => WriteWeeklyRoundupPrompt::systemMessage()],
+            ['role' => 'user', 'content' => WriteWeeklyRoundupPrompt::userMessage($profile, $this->factsText($c))],
+        ];
 
-            return ['ok' => false, 'publication' => null, 'message' => 'Не удалось написать обзор: '.$e->getMessage()];
+        // Запрет пустых оборотов модель соблюдает не всегда («что может
+        // заинтересовать» проскочило во втором же черновике). Нашли — одна
+        // повторная попытка с указанием, что именно убрать.
+        $parsed = null;
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            try {
+                $response = $this->openai->chat($messages, $model, ['response_format' => ['type' => 'json_object'], 'temperature' => 0.5]);
+            } catch (\Throwable $e) {
+                Log::error('WeeklyRoundupService: модель не ответила', ['topic_id' => $topic->id, 'error' => $e->getMessage()]);
+
+                return ['ok' => false, 'publication' => null, 'message' => 'Не удалось написать обзор: '.$e->getMessage()];
+            }
+            $parsed = json_decode((string) ($response['content'] ?? ''), true);
+            $filler = is_array($parsed) ? self::fillerFound($parsed) : [];
+            if ($filler === [] || $attempt === 2) {
+                break;
+            }
+            $messages[] = ['role' => 'assistant', 'content' => (string) ($response['content'] ?? '')];
+            $messages[] = ['role' => 'user', 'content' => 'Перепиши, убрав обороты: «'.implode('», «', $filler)
+                .'». Их нельзя использовать. Остальные требования те же, верни тот же JSON.'];
         }
 
-        $parsed = json_decode((string) ($response['content'] ?? ''), true);
         $article = is_array($parsed) ? $this->assemble($parsed, $c) : null;
         if ($article === null) {
             return ['ok' => false, 'publication' => null, 'message' => 'Модель ответила не по форме или выбрала позиции не из данных — попробуйте ещё раз.'];
@@ -267,7 +278,8 @@ class WeeklyRoundupService
                 if ($cand === null || isset($items[$sku]) || count($items) >= self::MAX_ITEMS) {
                     continue;
                 }
-                $items[$sku] = $cand + ['note' => trim((string) ($it['note'] ?? ''))];
+                $note = trim((string) ($it['note'] ?? ''));
+                $items[$sku] = $cand + ['note' => self::restatesName($note, (string) $cand['name']) ? '' : $note];
             }
             if ($items === []) {
                 continue;
@@ -295,6 +307,42 @@ class WeeklyRoundupService
             'stock_proxy' => (bool) $c['stock_proxy'],
             'cover' => $ordered[0]['items'][0]['photo'] ?? null,
         ];
+    }
+
+    /** Обороты, после которых редакция заметку не возьмёт. */
+    public const FILLER = [
+        'что может заинтересовать', 'может заинтересовать', 'что может быть выгодно', 'может быть выгодно',
+        'ряд позиций', 'следующие позиции', 'широкий ассортимент', 'качественные запчасти', 'в наличии имеются',
+        'спешите', 'лучшие цены', 'выгодные цены',
+    ];
+
+    /** @return list<string> какие обороты нашлись в тексте ответа модели */
+    public static function fillerFound(array $parsed): array
+    {
+        $text = mb_strtolower(json_encode($parsed, JSON_UNESCAPED_UNICODE) ?: '');
+
+        return array_values(array_filter(self::FILLER, fn ($f) => str_contains($text, $f)));
+    }
+
+    /**
+     * Пояснение пересказывает название: почти все его слова уже есть в
+     * названии позиции («Модуль фильтра частотного преобразователя V3F25»
+     * под тем же названием). Такое пояснение читателю ничего не даёт.
+     */
+    public static function restatesName(string $note, string $name): bool
+    {
+        $words = fn (string $s) => array_values(array_filter(
+            preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($s)) ?: [],
+            fn ($w) => mb_strlen($w) >= 3,
+        ));
+        $noteWords = $words($note);
+        if ($noteWords === []) {
+            return false;
+        }
+        $nameStems = array_map(fn ($w) => mb_substr($w, 0, 5), $words($name));
+        $hits = count(array_filter($noteWords, fn ($w) => in_array(mb_substr($w, 0, 5), $nameStems, true)));
+
+        return $hits / count($noteWords) >= 0.7;
     }
 
     public static function defaultHeading(string $kind, bool $stockProxy = false): string

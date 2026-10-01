@@ -69,6 +69,23 @@ class WeeklyRoundupAssembleTest extends TestCase
         $this->assertNull($article);
     }
 
+    public function test_a_note_that_restates_the_name_is_dropped(): void
+    {
+        $name = 'Дисковый тормоз BFK466-55 205VDC для лебедок WITTUR WSG';
+        $this->assertTrue(WeeklyRoundupService::restatesName('Электромагнитный тормоз для лебедок WITTUR WSG.', $name));
+        $this->assertTrue(WeeklyRoundupService::restatesName('Модуль фильтра частотного преобразователя V3F25.', 'Модуль фильтра частотного преобразователя V3F25'));
+        // Добавляет узел — оставляем.
+        $this->assertFalse(WeeklyRoundupService::restatesName('Сальник на редуктор главного привода.', 'Сальник на редуктор 160VAT'));
+        $this->assertFalse(WeeklyRoundupService::restatesName('', $name));
+    }
+
+    public function test_filler_phrases_are_found(): void
+    {
+        $this->assertSame(['что может заинтересовать', 'может заинтересовать'],
+            WeeklyRoundupService::fillerFound(['lead' => 'Снижены цены, что может заинтересовать снабженцев.']));
+        $this->assertSame([], WeeklyRoundupService::fillerFound(['lead' => 'В каталоге появились контроллеры Prisma.']));
+    }
+
     public function test_price_is_shown_only_for_price_drops(): void
     {
         $drop = $this->item('M00010', ['old_price' => 8461.0, 'new_price' => 1196.0, 'pct' => 86]);
