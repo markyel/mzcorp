@@ -292,15 +292,27 @@ class MediaPublisherService
         $ownerId = '-'.ltrim((string) $channel->secret('owner_id'), '-');
         $attachments = $images !== [] ? $this->uploadVkPhotos($channel, $ownerId, $images) : [];
 
+        $post = fn (array $attachments) => Http::timeout(self::TIMEOUT)->asForm()->post('https://api.vk.com/method/wall.post', [
+            'owner_id' => $ownerId,
+            'from_group' => 1,
+            'message' => $text,
+            'attachments' => $attachments !== [] ? implode(',', $attachments) : null,
+            'access_token' => $channel->secret('access_token'),
+            'v' => self::VK_API_VERSION,
+        ])->json();
+
         try {
-            $r = Http::timeout(self::TIMEOUT)->asForm()->post('https://api.vk.com/method/wall.post', [
-                'owner_id' => $ownerId,
-                'from_group' => 1,
-                'message' => $text,
-                'attachments' => $attachments !== [] ? implode(',', $attachments) : null,
-                'access_token' => $channel->secret('access_token'),
-                'v' => self::VK_API_VERSION,
-            ])->json();
+            $r = $post($attachments);
+            // Не принял вложения — текст важнее картинки: неудачный wall.post
+            // записи не создаёт, поэтому повтор без фото не задвоит пост.
+            if (isset($r['error']) && $attachments !== []) {
+                Log::warning('MediaPublisherService: vk rejected photos, posting text only', [
+                    'channel_id' => $channel->id,
+                    'error' => $r['error']['error_msg'] ?? 'unknown',
+                    'code' => $r['error']['error_code'] ?? null,
+                ]);
+                $r = $post([]);
+            }
         } catch (\Throwable $e) {
             return ['ok' => false, 'message' => 'ВК не ответил: '.$e->getMessage(), 'url' => null, 'external_id' => null];
         }
@@ -386,20 +398,40 @@ class MediaPublisherService
         $groupId = ltrim($ownerId, '-');
         $out = [];
 
+        // Ключ СООБЩЕСТВА загрузку на стену не пускает: photos.getWallUploadServer
+        // отвечает кодом 27 «method is unavailable with group auth», и все посты
+        // ВК уходили без картинок (даже «Поступления» с шестью фото в базе).
+        // Тем же ключом фото грузится через сервер сообщений — владельцем
+        // становится сообщество, и такое фото прикладывается к записи с
+        // access_key. Ключ пользователя (если когда-нибудь будет) пойдёт
+        // обычным путём через стену.
+        $server = Http::timeout(self::TIMEOUT)->asForm()
+            ->post('https://api.vk.com/method/photos.getWallUploadServer', [
+                'group_id' => $groupId,
+                'access_token' => $token,
+                'v' => self::VK_API_VERSION,
+            ])->json();
+        $viaMessages = ($server['error']['error_code'] ?? null) === 27;
+        if ($viaMessages) {
+            $server = Http::timeout(self::TIMEOUT)->asForm()
+                ->post('https://api.vk.com/method/photos.getMessagesUploadServer', [
+                    'peer_id' => 0,
+                    'access_token' => $token,
+                    'v' => self::VK_API_VERSION,
+                ])->json();
+        }
+        $uploadUrl = $server['response']['upload_url'] ?? null;
+        if ($uploadUrl === null) {
+            Log::warning('MediaPublisherService: vk upload server unavailable', [
+                'channel_id' => $channel->id,
+                'error' => $server['error']['error_msg'] ?? 'no upload_url',
+            ]);
+
+            return [];
+        }
+
         foreach (array_slice($images, 0, self::MAX_PHOTOS) as $url) {
             try {
-                $server = Http::timeout(self::TIMEOUT)->asForm()
-                    ->post('https://api.vk.com/method/photos.getWallUploadServer', [
-                        'group_id' => $groupId,
-                        'access_token' => $token,
-                        'v' => self::VK_API_VERSION,
-                    ])->json();
-
-                $uploadUrl = $server['response']['upload_url'] ?? null;
-                if ($uploadUrl === null) {
-                    continue;
-                }
-
                 $file = Http::timeout(self::TIMEOUT)->get($url);
                 if (! $file->successful() || $file->body() === '') {
                     continue;
@@ -411,20 +443,27 @@ class MediaPublisherService
                     ->json();
 
                 $saved = Http::timeout(self::TIMEOUT)->asForm()
-                    ->post('https://api.vk.com/method/photos.saveWallPhoto', [
-                        'group_id' => $groupId,
+                    ->post('https://api.vk.com/method/'.($viaMessages ? 'photos.saveMessagesPhoto' : 'photos.saveWallPhoto'), array_filter([
+                        'group_id' => $viaMessages ? null : $groupId,
                         'photo' => $uploaded['photo'] ?? '',
                         'server' => $uploaded['server'] ?? '',
                         'hash' => $uploaded['hash'] ?? '',
                         'access_token' => $token,
                         'v' => self::VK_API_VERSION,
-                    ])->json();
+                    ], fn ($v) => $v !== null))->json();
 
                 $photo = $saved['response'][0] ?? null;
                 if ($photo === null) {
+                    Log::warning('MediaPublisherService: vk photo not saved', [
+                        'channel_id' => $channel->id,
+                        'photo_url' => $url,
+                        'error' => $saved['error']['error_msg'] ?? 'unknown',
+                    ]);
+
                     continue;
                 }
-                $out[] = 'photo'.$photo['owner_id'].'_'.$photo['id'];
+                $out[] = 'photo'.$photo['owner_id'].'_'.$photo['id']
+                    .(! empty($photo['access_key']) ? '_'.$photo['access_key'] : '');
             } catch (\Throwable $e) {
                 Log::warning('MediaPublisherService: vk photo upload failed (non-fatal)', [
                     'channel_id' => $channel->id,

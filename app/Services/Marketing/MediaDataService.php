@@ -183,8 +183,12 @@ class MediaDataService
      *
      * @return list<string>
      */
-    public function photosFor(MediaTopic $topic): array
+    public function photosFor(MediaTopic $topic, ?string $subjectKey = null): array
     {
+        if ($topic->source === 'request_tips') {
+            return $this->categoryPhoto($subjectKey);
+        }
+
         $days = max(1, (int) ($topic->cadence_days ?: self::DEFAULT_WINDOW_DAYS));
 
         $rows = match ($topic->source) {
@@ -221,6 +225,48 @@ class MediaDataService
             ->take(self::MAX_PHOTOS)
             ->values()
             ->all();
+    }
+
+    /**
+     * Одна фотография к совету по категории детали («Кнопка лифтовая»): пост
+     * без картинки в ленте ВК пролистывают, а деталь на фото сразу объясняет,
+     * о чём речь. Берём позицию этой категории, которую клиенты спрашивают
+     * чаще всего за 90 дней (при равенстве — ту, что есть на складе), — самую
+     * узнаваемую. Нет категории в ключе выпуска или фото у её позиций — пост
+     * уходит без картинки, как раньше.
+     *
+     * @return list<string>
+     */
+    private function categoryPhoto(?string $subjectKey): array
+    {
+        if ($subjectKey === null || ! str_starts_with($subjectKey, self::TIPS_KEY_PREFIX)) {
+            return [];
+        }
+        $categoryId = DB::table('equipment_categories')
+            ->where('slug', substr($subjectKey, strlen(self::TIPS_KEY_PREFIX)))
+            ->value('id');
+        if ($categoryId === null) {
+            return [];
+        }
+
+        $asked = DB::table('request_items')
+            ->where('created_at', '>=', now()->subDays(90))
+            ->whereNotNull('catalog_item_id')
+            ->groupBy('catalog_item_id')
+            ->selectRaw('catalog_item_id, COUNT(*) AS c');
+
+        $url = DB::table('catalog_items as ci')
+            ->leftJoinSub($asked, 'a', 'a.catalog_item_id', '=', 'ci.id')
+            ->where('ci.equipment_category_id', $categoryId)
+            ->where('ci.is_active', true)
+            ->whereNotNull('ci.photo_url')
+            ->where('ci.photo_url', '!=', '')
+            ->orderByRaw('COALESCE(a.c, 0) DESC')
+            ->orderByRaw('CASE WHEN ci.stock_available > 0 THEN 0 ELSE 1 END')
+            ->orderBy('ci.id')
+            ->value('ci.photo_url');
+
+        return $url !== null ? [(string) $url] : [];
     }
 
     /**
