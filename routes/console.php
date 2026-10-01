@@ -375,6 +375,14 @@ Schedule::command('quotes:complete-partial')
     ->onOneServer()
     ->runInBackground();
 
+// Сторож цены «закупка + наценка»: документы со строками на неактуальной цене
+// каталога ждут импорта из 1С и перепроверяются здесь (CostPlusPriceGuard).
+Schedule::command('quotes:cost-plus-recheck')
+    ->hourlyAt(40)
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Разрезы статистики Директа: что принесло показы — наши фразы или подбор
 // Яндекса, и по каким реальным запросам пришли люди. Живой счётчик кампании
 // этого не говорит, а сервис отчётов отстаёт на часы и уточняет данные задним

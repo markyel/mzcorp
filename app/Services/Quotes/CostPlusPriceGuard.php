@@ -24,6 +24,15 @@ use Illuminate\Support\Facades\Log;
  * ушли выше режима, самые крупные — по полной цене каталога.
  *
  * Ниже режима — не сигнал: скидку сверх режима менеджер вправе дать сам.
+ *
+ * Строка с НЕАКТУАЛЬНОЙ ценой каталога сразу письма не даёт: менеджер
+ * обновляет закупку в 1С и тут же выставляет КП, а до нас новая цена доходит
+ * только со следующим импортом каталога (дважды в сутки). Сравнивать со
+ * старой закупкой — ложная тревога (КП 369149 и 369162 от 01.10.2026, все три
+ * строки — с неактуальной ценой). Такой документ ставим в ожидание
+ * (payload.cost_plus_guard.pending_since) и перепроверяем командой
+ * `quotes:cost-plus-recheck`, когда цена в каталоге станет актуальной; не
+ * стала за неделю — снимаем без письма.
  */
 class CostPlusPriceGuard
 {
@@ -34,7 +43,7 @@ class CostPlusPriceGuard
     /**
      * Проверить документ; письмо — не больше одного на документ.
      *
-     * @return list<array{sku: string, name: string, qty: float, price: float, expected: float, purchase: float}>|null  завышенные строки; null — проверка не применима
+     * @return list<array{sku: string, name: string, qty: float, price: float, expected: float, purchase: float, stale: bool}>|null  завышенные строки (stale — цена каталога неактуальна, закупка могла устареть); null — проверка не применима
      */
     public function check(OutboundQuote $quote, Request $request, bool $notify = true): ?array
     {
@@ -63,15 +72,38 @@ class CostPlusPriceGuard
                     'price' => $price,
                     'expected' => $expected,
                     'purchase' => $purchase,
+                    'stale' => ! $catalog->is_price_actual,
                 ];
             }
         }
 
-        $overSum = array_sum(array_map(fn ($l) => ($l['price'] - $l['expected']) * $l['qty'], $over));
-        $tooSmall = $overSum < (float) config('services.pricing.cost_plus_guard_min_rub', 500);
-        if ($over === [] || $tooSmall || ! $notify || ! $this->fresh($quote) || $this->alreadyNotified($quote)) {
+        if (! $notify || $this->alreadyNotified($quote)) {
             return $over;
         }
+        $pending = $this->pendingSince($quote);
+        $pendingAlive = $pending !== null
+            && $pending->gte(now()->subDays((int) config('services.pricing.cost_plus_guard_pending_days', 7)));
+        if (! $this->fresh($quote) && ! $pendingAlive) {
+            // Старый документ или ожидание истекло: цена так и не стала
+            // актуальной — судить не по чему, молча снимаем.
+            if ($pending !== null) {
+                $this->markPending($quote, null);
+            }
+
+            return $over;
+        }
+
+        // Неактуальная цена каталога — ждём импорта, письмо только по строкам,
+        // где закупка подтверждена.
+        $stale = array_values(array_filter($over, fn ($l) => $l['stale']));
+        $confirmed = array_values(array_filter($over, fn ($l) => ! $l['stale']));
+        $this->markPending($quote, $stale === [] ? null : array_column($stale, 'sku'));
+
+        $overSum = array_sum(array_map(fn ($l) => ($l['price'] - $l['expected']) * $l['qty'], $confirmed));
+        if ($confirmed === [] || $overSum < (float) config('services.pricing.cost_plus_guard_min_rub', 500)) {
+            return $over;
+        }
+        $over = $confirmed;
 
         $user = $this->responsible($quote, $request);
         if ($user === null || trim((string) $user->email) === '') {
@@ -83,11 +115,11 @@ class CostPlusPriceGuard
         try {
             $this->mailer->sendMailable($user->email, new CostPlusOverpriceMail($quote, $request, $organization, $over, $markup));
             $quote->payload = array_merge(is_array($quote->payload) ? $quote->payload : [], [
-                'cost_plus_guard' => [
+                'cost_plus_guard' => array_merge((array) (($quote->payload ?? [])['cost_plus_guard'] ?? []), [
                     'notified_at' => now()->toIso8601String(),
                     'user_id' => $user->id,
                     'lines' => count($over),
-                ],
+                ]),
             ]);
             $quote->save();
             Log::info('CostPlusPriceGuard: overprice notified', [
@@ -128,6 +160,40 @@ class CostPlusPriceGuard
     private function alreadyNotified(OutboundQuote $quote): bool
     {
         return ! empty(($quote->payload ?? [])['cost_plus_guard']['notified_at'] ?? null);
+    }
+
+    private function pendingSince(OutboundQuote $quote): ?\Illuminate\Support\Carbon
+    {
+        $since = ($quote->payload ?? [])['cost_plus_guard']['pending_since'] ?? null;
+
+        return $since ? \Illuminate\Support\Carbon::parse($since) : null;
+    }
+
+    /**
+     * Поставить документ в ожидание импорта (список артикулов с неактуальной
+     * ценой) или снять с него (null). Дата постановки не сдвигается.
+     *
+     * @param  list<string>|null  $skus
+     */
+    private function markPending(OutboundQuote $quote, ?array $skus): void
+    {
+        $payload = is_array($quote->payload) ? $quote->payload : [];
+        $guard = (array) ($payload['cost_plus_guard'] ?? []);
+        if ($skus === null) {
+            if (! isset($guard['pending_since'])) {
+                return;
+            }
+            unset($guard['pending_since'], $guard['pending_skus']);
+        } else {
+            $guard['pending_since'] ??= now()->toIso8601String();
+            $guard['pending_skus'] = array_values($skus);
+        }
+        $payload['cost_plus_guard'] = $guard;
+        if ($guard === []) {
+            unset($payload['cost_plus_guard']);
+        }
+        $quote->payload = $payload;
+        $quote->save();
     }
 
     /** Кто отправил документ; если не сотрудник — менеджер заявки. */

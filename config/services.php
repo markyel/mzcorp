@@ -788,6 +788,10 @@ return [
         'cost_plus_guard_max_age_days' => (int) env('PRICING_COST_PLUS_GUARD_MAX_AGE_DAYS', 3),
         // Разница по документу меньше этой суммы (₽) — не пишем: 16 ₽ на строке это шум.
         'cost_plus_guard_min_rub' => (float) env('PRICING_COST_PLUS_GUARD_MIN_RUB', 500),
+        // Строки с неактуальной ценой каталога ждут импорта из 1С (менеджер
+        // обновил закупку в 1С, до нас ещё не дошло). Не стала актуальной за
+        // столько дней — проверку снимаем без письма.
+        'cost_plus_guard_pending_days' => (int) env('PRICING_COST_PLUS_GUARD_PENDING_DAYS', 7),
     ],
 
     /*
