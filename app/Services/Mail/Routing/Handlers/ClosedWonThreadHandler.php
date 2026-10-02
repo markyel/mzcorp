@@ -88,7 +88,9 @@ final class ClosedWonThreadHandler implements InboundRoutingHandler
                 && $this->postSale->opensNewTopic((string) $message->subject, (string) $linkedRequest->subject, $own);
             if ($cited === null && (($wantsNew
                 && ($message->category === EmailCategory::ClientRequest->value || $citedRaw !== null)) || $opensNewTopic)) {
-                if ($this->parseGate->shouldParse($message)) {
+                // Для новой темы маркер потребности («необходим шкив») и есть
+                // сигнал позиции: артикула и «шт» в таком письме обычно нет.
+                if ($opensNewTopic || $this->parseGate->shouldParse($message)) {
                     $new = $this->extension->spinOffNewRequest($message, $linkedRequest);
                     if ($new !== null) {
                         Log::info('MailRouter: new order in a closed_won thread → spun off into a new request', [
