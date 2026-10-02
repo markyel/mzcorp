@@ -71,4 +71,26 @@ class CitedOutboundQuoteRouterOwnTextTest extends TestCase
         $this->assertTrue($this->router->hasInvoiceIntent('Счёт по КП 364274', 'Добрый день'));
         $this->assertFalse($this->router->hasInvoiceIntent('Re: Запрос приводное колесо', 'Есть ли в наличии?'));
     }
+
+    /** M-2026-17776: хвост UUID в имени фото («…4f49dea10304.jpg») — не номер нашего КП. */
+    public function test_uuid_photo_name_gives_no_document_number(): void
+    {
+        $candidates = fn (string $filename): array => $this->candidates($filename);
+
+        $this->assertSame([[], false], $candidates('c7b0d328-3361-47b1-a905-4f49dea10304.jpg'));
+        $this->assertSame([[], false], $candidates('IMG_3f9a0c1e4b7d10304a.jpg'));
+        $this->assertSame([['355979'], true], $candidates('Предложение МЗ-355979.pdf'));
+        $this->assertSame([['10304'], true], $candidates('Счет 10304.jpg'));
+    }
+
+    /** @return array{0: list<string>, 1: bool} */
+    private function candidates(string $filename): array
+    {
+        $att = new \App\Models\EmailAttachment();
+        $att->filename = $filename;
+        $m = $this->msg('Добрый день! Есть ли такой шкив', 'запрос');
+        $m->setRelation('attachments', collect([$att]));
+
+        return (fn () => $this->collectCandidates($m))->call($this->router);
+    }
 }

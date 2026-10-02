@@ -56,6 +56,21 @@ class CitedOutboundQuoteRouter
     private const NUMBER_RE = '/\d{5,8}/';
 
     /**
+     * UUID и длинные hex-хэши (имена фото с телефона, cid картинок) — вырезаем
+     * до поиска номеров. Кейс M-2026-17776: фото «c7b0d328-…-4f49dea10304.jpg»
+     * от другого клиента дало «10304» = номер нашего КП, а номер из вложения
+     * считается надёжным → письмо приклеилось к чужой закрытой сделке.
+     */
+    private const HASH_RE = '/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|(?<![0-9a-z])(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{12,}(?![0-9a-z])/i';
+
+    /**
+     * Наши коды — номер заявки «M-2026-10317» и артикул каталога «M10317».
+     * Счета с сентября 2026 пятизначные (10246…), и хвосты этих кодов совпадают
+     * с номерами чужих счетов. Вырезаем до поиска номеров.
+     */
+    private const OWN_CODE_RE = '/(?<![\p{L}\d])[mм]-\d{4}-\d{3,6}(?!\d)|(?<![\p{L}\d])[mм]\d{4,6}(?!\d)/iu';
+
+    /**
      * Контекст, в котором шестизначное число — не номер документа, а адрес.
      *
      * Кейс M-2026-3642: клиент ООО «Санаторий Русь» прислал новую заявку, а в
@@ -265,7 +280,7 @@ class CitedOutboundQuoteRouter
         $texts = array_merge($texts, $this->numbersOutsideAddresses((string) $message->body_plain));
 
         foreach ($message->attachments as $att) {
-            $fn = (string) $att->filename;
+            $fn = (string) preg_replace(self::HASH_RE, ' ', (string) $att->filename);
             if ($fn !== '') {
                 $texts[] = $fn;
                 if (preg_match(self::NUMBER_RE, $fn) === 1) {
@@ -279,7 +294,7 @@ class CitedOutboundQuoteRouter
             }
         }
 
-        preg_match_all(self::NUMBER_RE, implode(' ', $texts), $m);
+        preg_match_all(self::NUMBER_RE, (string) preg_replace([self::HASH_RE, self::OWN_CODE_RE], ' ', implode(' ', $texts)), $m);
 
         return [array_values(array_unique($m[0] ?? [])), $hasAttachmentSource];
     }
