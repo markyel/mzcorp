@@ -81,8 +81,13 @@ final class ClosedWonThreadHandler implements InboundRoutingHandler
             // цитата КП с новыми позициями), сигналы позиций есть — разворачиваем
             // в отдельную заявку (spin-off, как для intent=new_request); позиции
             // распарсятся из письма. Кейсы M-2026-8429 (101376), M-2026-15205 (101843).
-            if ($cited === null && $wantsNew
-                && ($message->category === EmailCategory::ClientRequest->value || $citedRaw !== null)) {
+            // Новая тема в старом треде без слов про цену/счёт («необходим шкив
+            // КВШ…») — тоже новая заявка, если и LLM видит заявку (M-2026-8369).
+            $opensNewTopic = ! $wantsNew
+                && $message->category === EmailCategory::ClientRequest->value
+                && $this->postSale->opensNewTopic((string) $message->subject, (string) $linkedRequest->subject, $own);
+            if ($cited === null && (($wantsNew
+                && ($message->category === EmailCategory::ClientRequest->value || $citedRaw !== null)) || $opensNewTopic)) {
                 if ($this->parseGate->shouldParse($message)) {
                     $new = $this->extension->spinOffNewRequest($message, $linkedRequest);
                     if ($new !== null) {

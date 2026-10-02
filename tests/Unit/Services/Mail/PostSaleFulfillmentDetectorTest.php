@@ -203,4 +203,29 @@ class PostSaleFulfillmentDetectorTest extends TestCase
     {
         $this->assertSame($expected, $this->detector->wantsNewInvoiceOrOrder($subject, $own, $isReply));
     }
+
+    // ---- opensNewTopic: новая тема в треде выигранной сделки ----
+
+    /** @return array<string, array{0:string,1:string,2:string,3:bool}> subject, thread subject, own text, expected */
+    public static function newTopicCases(): array
+    {
+        $thread = 'Запрос на отводку Hidral';
+
+        return [
+            // M-2026-8369: своя тема + «необходим шкив» → новая заявка.
+            'kvsh_new_topic' => ['Запрос на КВШ малого грузового лифта SEC', $thread,
+                "Добрый день!\nНеобходим шкив КВШ на малый грузовой лифт, но мы не уверены возможно ли его найти..", true],
+            'reply_prefix' => ['Re: Запрос на КВШ малого грузового лифта SEC', $thread, 'Необходим шкив КВШ', false],
+            'same_topic' => ['Запрос на отводку Hidral', $thread, 'Нужна ещё одна отводка', false],
+            'documents' => ['Закрывающие', $thread, 'Нужны УПД по заказу', false],
+            'delivery' => ['Заказ', $thread, 'Нужно уточнить дату отгрузки', false],
+            'no_need' => ['Спасибо', $thread, 'Всё получили, спасибо!', false],
+        ];
+    }
+
+    /** @dataProvider newTopicCases */
+    public function test_opens_new_topic(string $subject, string $thread, string $own, bool $expected): void
+    {
+        $this->assertSame($expected, $this->detector->opensNewTopic($subject, $thread, $own));
+    }
 }

@@ -179,6 +179,47 @@ class PostSaleFulfillmentDetector
     private const REPLY_DELIVERY_RE = '/срок\w*\s+поставк|когда\s+((можно\s+)?(будет|будем)\s+)?(поставите|отгруз\w+|отправ\w+|привез\w+|прид[её]т|приход\w+|получим|забрать|забер[её]м|планируется)|доплат\w*\s+(за\s+)?доставк|успеете\s+(\p{L}+\s+){0,2}(отдать|отгрузить|отправить|передать)/iu';
 
     /**
+     * Клиент открыл в старом треде НОВУЮ тему: тема письма своя (не Re:/Fwd: и не
+     * тема заявки), а в тексте — потребность в детали («необходим шкив», «нужна
+     * плата», «подберите»), без вопросов про отгрузку, документы, оплату или
+     * брак. Цен и «шт» в таком письме часто нет — wantsNewInvoiceOrOrder его не
+     * видит. Кейс M-2026-8369: «Запрос на КВШ малого грузового лифта SEC» ответом
+     * на июльский тред «Запрос на отводку Hidral» ушёл в постпродажу.
+     */
+    public function opensNewTopic(string $subject, string $threadSubject, string $ownText): bool
+    {
+        $subj = $this->topicKey($subject);
+        if ($subj === '' || preg_match('/^\s*(re|fwd?|отв|ответ|пересл)\s*(\[\d+\])?\s*:/iu', $subject) === 1) {
+            return false;
+        }
+        $thread = $this->topicKey($threadSubject);
+        if ($thread !== '' && (str_contains($subj, $thread) || str_contains($thread, $subj))) {
+            return false;
+        }
+
+        $haystack = mb_strtolower($subject . "\n" . $ownText);
+        if (preg_match(self::DELIVERY_STATUS_RE, $haystack) === 1 || preg_match(self::POST_SALE_TOPIC_RE, $haystack) === 1) {
+            return false;
+        }
+
+        return preg_match(self::NEW_NEED_RE, $haystack) === 1;
+    }
+
+    /** Потребность в детали: «необходим/нужен/требуется …», «подберите», «запрос на …». */
+    private const NEW_NEED_RE = '/(?<!\p{L})(необходим[аыо]?|нуж(ен|на|ны|но)|требу(ется|ются)|подбер(ите|[её]те)|подобрать|ищем|найти|есть\s+ли\s+(у\s+вас\s+)?в\s+наличии|запрос\s+на)(?!\p{L})/u';
+
+    /** Темы постпродажи — документы, оплата, отгрузка, брак, возврат. */
+    private const POST_SALE_TOPIC_RE = '/упд|документ|накладн|сч[её]т[\s-]*фактур|(?<!\p{L})акт(?!\p{L})|паспорт|сертификат|декларац|рекламац|возврат|брак|гаранти|оплат|отгруз|доставк|трек|транспортн/u';
+
+    private function topicKey(string $subject): string
+    {
+        $s = mb_strtolower($subject);
+        $s = (string) preg_replace('/^(\s*(re|fwd?|отв|ответ|пересл)\s*(\[\d+\])?\s*:\s*)+/iu', '', $s);
+
+        return trim((string) preg_replace('/[^\p{L}\p{N}]+/u', ' ', $s));
+    }
+
+    /**
      * Просит ли клиент в СВОЁМ тексте новый счёт / новую продажу (а не спрашивает
      * про уже оформленный заказ). Для ветки MailRouter «цитата нашего КП/счёта по
      * выигранной сделке»: дочернюю заявку на счёт заводим только когда это
