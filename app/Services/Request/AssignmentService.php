@@ -295,9 +295,14 @@ class AssignmentService
         //  - is_enabled шаблона (по умолчанию выключен — admin включает явно);
         //  - идемпотентность (повторный autoAssign не задвоит);
         //  - client_email != null.
+        // Исключение для in_reply_to: заявку выделили из ответа в старом треде
+        // (spin-off) — это отдельная заявка, клиенту нужен её номер. Spin-off
+        // шлёт сам, если менеджер назначен сразу; назначение из очереди
+        // приходит сюда (кейс M-2026-18160).
         if ($email
             && $request->inheritance_parent_id === null
-            && empty($email->in_reply_to)
+            && (empty($email->in_reply_to)
+                || $request->stateChanges()->where('event', 'created_from_thread_reply')->exists())
         ) {
             try {
                 app(ClientNotificationService::class)
