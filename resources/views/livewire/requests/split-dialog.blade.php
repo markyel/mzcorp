@@ -107,6 +107,13 @@
                     <div>
                         <div class="text-[11.5px] uppercase tracking-wider text-fg-3 font-semibold mb-1.5">Назначить новую заявку</div>
                         <div class="space-y-2">
+                            @if($request->assignedUser)
+                                <label class="flex items-center gap-2 text-[12.5px] cursor-pointer">
+                                    <input type="radio" value="same" wire:model.live="assignMode">
+                                    Тот же менеджер — {{ $request->assignedUser->name }}
+                                    <span class="text-fg-4 text-[11.5px]">(ведёт переписку с клиентом)</span>
+                                </label>
+                            @endif
                             <label class="flex items-center gap-2 text-[12.5px] cursor-pointer">
                                 <input type="radio" value="auto" wire:model.live="assignMode">
                                 Авто-распределение

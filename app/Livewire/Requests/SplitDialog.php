@@ -38,8 +38,8 @@ class SplitDialog extends Component
     /** @var array<int> id выбранных позиций */
     public array $selectedItemIds = [];
 
-    /** 'auto' | 'manager' */
-    public string $assignMode = 'auto';
+    /** 'same' (менеджер исходной заявки) | 'auto' | 'manager' */
+    public string $assignMode = 'same';
 
     public ?int $assignToUserId = null;
 
@@ -57,7 +57,7 @@ class SplitDialog extends Component
     {
         $this->selectedEmailIds = [];
         $this->selectedItemIds = [];
-        $this->assignMode = 'auto';
+        $this->assignMode = $this->request()->assigned_user_id !== null ? 'same' : 'auto';
         $this->assignToUserId = null;
         $this->resetErrorBag();
         $this->open = true;

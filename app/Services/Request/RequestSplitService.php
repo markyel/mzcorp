@@ -30,8 +30,9 @@ use Illuminate\Support\Facades\Log;
  *   - КП (Quotation) и уточнения (ClarificationBatch), отправленные одним из
  *     выносимых писем (sent_email_message_id / sent_message_id ∈ выбранным),
  *     тоже переезжают.
- *   - Новая заявка назначается: auto (round-robin + sticky, в т.ч. Level 0
- *     «личный ящик → его владелец») ИЛИ конкретному менеджеру.
+ *   - Новая заявка назначается: по умолчанию тому же менеджеру, что у исходной
+ *     (same), либо auto (round-robin + sticky, в т.ч. Level 0 «личный ящик →
+ *     его владелец»), либо конкретному менеджеру.
  *   - Аудит в обеих: state_changes `split_into` (исходная) / `split_from` (новая).
  *
  * Провенанс позиция → письмо берётся из request_items.source_email_message_id
@@ -53,7 +54,7 @@ class RequestSplitService
     /**
      * @param  array<int>  $emailIds  письма исходной заявки, выносимые в новую
      * @param  array<int>  $itemIds   позиции исходной заявки, выносимые в новую
-     * @param  'auto'|'manager'  $assignMode
+     * @param  'same'|'auto'|'manager'  $assignMode
      * @return array{new_request_id:int,new_internal_code:string,emails_moved:int,items_moved:int,quotes_moved:int,batches_moved:int,assigned_to:?string}
      */
     public function split(
@@ -165,7 +166,7 @@ class RequestSplitService
 
         // 7. Назначение новой заявки (вне транзакции split — assignment-сервисы
         //    сами оборачивают свою запись в транзакцию и шлют async-jobs).
-        $assignedTo = $this->assignNewRequest($newRequest, $assignMode, $assignToUserId, $by);
+        $assignedTo = $this->assignNewRequest($source, $newRequest, $assignMode, $assignToUserId, $by);
 
         Log::info('RequestSplitService: split done', [
             'source_id' => $source->id,
@@ -188,8 +189,28 @@ class RequestSplitService
         ];
     }
 
-    private function assignNewRequest(Request $new, string $assignMode, ?int $assignToUserId, User $by): ?string
+    private function assignNewRequest(Request $source, Request $new, string $assignMode, ?int $assignToUserId, User $by): ?string
     {
+        // same: выделенная заявка остаётся у менеджера исходной — он уже ведёт
+        // переписку с клиентом. Нет менеджера или он в архиве → auto.
+        if ($assignMode === 'same' && $source->assigned_user_id !== null) {
+            $manager = User::query()
+                ->role(RoleEnum::requestHandlerRoles())
+                ->active()
+                ->whereKey($source->assigned_user_id)
+                ->first();
+            if ($manager !== null) {
+                $this->reassign->reassign(
+                    request: $new,
+                    newAssignee: $manager,
+                    reason: 'split: тот же менеджер, что у ' . $source->internal_code,
+                    by: $by,
+                );
+
+                return $manager->name;
+            }
+        }
+
         if ($assignMode === 'manager' && $assignToUserId !== null) {
             $manager = User::query()
                 ->role(RoleEnum::requestHandlerRoles())
