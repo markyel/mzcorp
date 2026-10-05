@@ -182,7 +182,17 @@ Cross-mailbox дедуп — 3 защитных слоя против Request-д
 
 ## Открытые вопросы / TODO
 
-### ▶ Сессия 2026-10-02 — итог (ТОЧКА ВХОДА для следующей сессии)
+### ▶ Сессия 2026-10-05 — инцидент прода (ТОЧКА ВХОДА для следующей сессии)
+
+Код не менялся, HEAD `3fa43fe`. **Прод стоял 2,5 дня (03.10 09:30 → 05.10 08:00 МСК):** заявки не создавались, почта не синкалась, рассылки не шли. Все `mzcorp-worker`/`mzcorp-default-worker` были в supervisor FATAL. Цепочка: на сервере с 02.10 висел забытый `psysh (loop)` под root (tinker-цикл, спамил `CitedOutboundQuoteRouter` ~330 МБ/сутки) → в полночь 03.10 он первым создал `storage/logs/laravel-2026-10-03.log` под `root:root 0644` → воркеры (`www-data`) падали на любой записи в лог (`could not be opened in append mode`) → supervisor отключил пул. Web работал, поэтому снаружи «письма есть, заявок нет».
+
+**Починка:** kill psysh; `chown www-data storage/logs/*.log`; удалены 9337 стухших периодических джоб (`SyncImapFoldersJob`/`PullImapSeenFlagsJob`/`SyncMailboxFolderJob` — планировщик ставит их заново каждую минуту); `supervisorctl restart`; ретрай 6 упавших джоб. Хвост выходных дотянулся по watermark UID (41 входящее → 17 заявок), потерь нет.
+
+**Защита (поставлено):** `apt install acl`, `chmod g+s storage/logs`, `setfacl -R -m g:www-data:rwX -m d:g:www-data:rwX storage/logs` — файл, созданный root, остаётся доступным www-data для записи (проверено). Подробнее — § «Известные грабли» (две записи 2026-10-05).
+
+**Открыто:** всё из блока сессии 2026-10-02 ниже.
+
+### ▶ Сессия 2026-10-02 — итог (предыдущая точка входа)
 
 Всё на проде, HEAD `3ada22b` (+ этот коммит памяти). Продолжение сессии 30.09–01.10 (ниже).
 
@@ -726,6 +736,8 @@ Supervisor (все 4 воркера): `--queue=mail-sync,default,catalog-resolve
 
 ## Известные грабли
 
+- **Дневной лог, созданный под root, валит ВСЕ воркеры в FATAL** (2026-10-05, прод стоял 2,5 дня). Первый процесс, который пишет в лог после полуночи, создаёт `laravel-<date>.log` со своим владельцем. Если это root (tinker, artisan без `sudo -u www-data`, забытый цикл) — воркеры `www-data` падают на каждой попытке логирования, supervisor после серии быстрых падений переводит пул в FATAL, очередь стоит молча, сайт при этом работает. Диагностика: `supervisorctl status` → `ls -la storage/logs/*.log` (владелец) → `ps -eo user,pid,lstart,cmd | grep -E "psysh|artisan"` → `lsof storage/logs/laravel-<today>.log`. Защита стоит: default ACL `g:www-data:rwX` на `storage/logs` + setgid. Правило: на проде artisan/tinker ТОЛЬКО через `sudo -u www-data`; после сессии проверять `ps | grep psysh` — незакрытый tinker с циклом живёт сутками.
+- **Удаление строк из `jobs` НЕ снимает замки `ShouldBeUnique`** (2026-10-05). У `SyncMailboxFolderJob`/`SyncImapFoldersJob`/`PullImapSeenFlagsJob` uniqueFor 15 мин, замок лежит в `cache_locks` (`laravel_unique_job:App\Jobs\Mail\…`). После `DELETE FROM jobs` замки живут до истечения, и новые dispatch тихо отбрасываются: `mail:sync` печатает «Dispatched», а в очереди и логе пусто. Чистя очередь — удалять и замки, либо ждать 15 мин.
 - **Каталоги в `storage/` создаёт только приложение, не ssh-скрипт под root** (2026-09-04). `Storage::disk('local')->put()` из tinker под root создал `storage/app/private/marketing` как root:700 → php-fpm (www-data) туда не пишет. При этом Livewire `TemporaryUploadedFile::storeAs()` **возвращает путь даже при неудачной записи** (Flysystem `put()` отдаёт `false` без исключения) → в БД путь, файла нет, битая картинка. Лечение: `chown -R www-data:www-data storage/app/private/<dir> && chmod 775`; в коде после `storeAs` — `Storage::exists()`. Если диагностический скрипт должен что-то писать в storage — запускать `sudo -u www-data php artisan tinker …`.
 - **На проде было 217 tracked-файлов под root (scp-заливки 09-04) — `git pull` под www-data падал «local changes would be overwritten», применяясь частично** (2026-09-07, дважды за день). Лечение выполнено: `chown -R www-data:www-data /var/www/mzcorp`, root-owned = 0. Диагностика: `find app resources tests database -user root -type f`. Если снова что-то заливается scp под root — сразу chown. Признак частичного pull: HEAD не сдвинулся, `git status` показывает M на файлах из входящего коммита; чинить `git diff <sha> --stat -- <files>` (пусто = безопасно) → `git checkout -- <files>` → `rm` новых untracked из коммита → pull.
 - **Одноразовые скрипты на проде — cleanup в `finally`/до рискованных вызовов** (2026-09-04). Скрипт создал тестовую запись, упал на середине (неверное имя класса в `app()`), запись осталась в проде. Создавать тестовые сущности ПОСЛЕ всех «угадываемых» вызовов или оборачивать в try/finally с удалением; помечать их узнаваемым префиксом (`__E2E`, `__POS`) и в конце сессии проверять `where title like '\_\_%'`.
