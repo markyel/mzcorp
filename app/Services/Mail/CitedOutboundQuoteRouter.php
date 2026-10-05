@@ -277,7 +277,12 @@ class CitedOutboundQuoteRouter
         $hasAttachmentSource = false;
 
         // Тело — всё, кроме чисел в адресной строке (индекс почты).
-        $texts = array_merge($texts, $this->numbersOutsideAddresses((string) $message->body_plain));
+        // Наши коды и хэши вырезаем ДО извлечения: дальше в $texts уже числа,
+        // а не текст (M-2026-17687: «по следующим позициям: M10258» от Liftway
+        // = номер чужого счёта 10258).
+        $texts = array_merge($texts, $this->numbersOutsideAddresses(
+            (string) preg_replace([self::HASH_RE, self::OWN_CODE_RE], ' ', (string) $message->body_plain)
+        ));
 
         foreach ($message->attachments as $att) {
             $fn = (string) preg_replace(self::HASH_RE, ' ', (string) $att->filename);

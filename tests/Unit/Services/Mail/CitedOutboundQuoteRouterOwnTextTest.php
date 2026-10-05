@@ -83,12 +83,20 @@ class CitedOutboundQuoteRouterOwnTextTest extends TestCase
         $this->assertSame([['10304'], true], $candidates('Счет 10304.jpg'));
     }
 
+    /** M-2026-17687: артикул каталога и номер заявки в теле — не номера наших счетов. */
+    public function test_own_codes_in_body_give_no_document_number(): void
+    {
+        $this->assertSame([[], false], $this->candidates('', 'Просим предоставить СЧЁТ по следующим позициям: M10258'));
+        $this->assertSame([[], false], $this->candidates('', 'По заявке M-2026-10317 ждём счёт'));
+        $this->assertSame([['10396'], false], $this->candidates('', 'Оплатили счет 10396'));
+    }
+
     /** @return array{0: list<string>, 1: bool} */
-    private function candidates(string $filename): array
+    private function candidates(string $filename, string $body = 'Добрый день! Есть ли такой шкив'): array
     {
         $att = new \App\Models\EmailAttachment();
         $att->filename = $filename;
-        $m = $this->msg('Добрый день! Есть ли такой шкив', 'запрос');
+        $m = $this->msg($body, 'запрос');
         $m->setRelation('attachments', collect([$att]));
 
         return (fn () => $this->collectCandidates($m))->call($this->router);
