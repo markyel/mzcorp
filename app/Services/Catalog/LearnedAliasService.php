@@ -53,6 +53,14 @@ class LearnedAliasService
             if ($this->exactMatchable($norm, $catalog)) {
                 continue;
             }
+            // Наш M-артикул другой позиции каталога — однозначный адрес, не
+            // синоним. M-2026-10667: позицию «M29119 Мотор SG80K» руками
+            // перепривязали к M00188 (частотник Schindler) — родился алиас
+            // M29119 → частотник, и вкладка «Поставщики» показала цены частотника.
+            if (preg_match('/^[MМ]\d{4,}$/u', $tok) === 1
+                && CatalogItem::query()->where('sku', mb_strtoupper(str_replace('М', 'M', $tok)))->whereKeyNot($catalog->id)->exists()) {
+                continue;
+            }
 
             $alias = LearnedArticleAlias::query()
                 ->where('article_normalized', $norm)
