@@ -55,6 +55,9 @@ class InboundReplyLinker
      */
     private const ARCHIVE_CANDIDATE_LOOKBACK_DAYS = 180;
 
+    /** Окно «клиент процитировал своё письмо» — matchBySelfQuote. */
+    private const SELF_QUOTE_MINUTES = 60;
+
     /**
      * @return Request|null  null = thread не найден, обычный flow.
      */
@@ -253,6 +256,14 @@ class InboundReplyLinker
         if (! $matched) {
             $matched = $this->matchByExternalCode($message);
             $matchedBy = $matched ? 'external_code' : null;
+        }
+
+        // Уровень 3.7: клиент процитировал своё же недавнее письмо (ответ из
+        // «Отправленных» без In-Reply-To). Работает и для client_request:
+        // уточнение количества LLM видит как новую заявку.
+        if (! $matched) {
+            $matched = $this->matchBySelfQuote($message);
+            $matchedBy = $matched ? 'self_quote' : null;
         }
 
         // Уровень 4: по from_email + open Requests того же клиента.
@@ -547,6 +558,69 @@ class InboundReplyLinker
      *          (или возвращает null если AI считает что это новая тема).
      *   - Иначе — не линкуем.
      */
+    /**
+     * Клиент ответил на СВОЁ письмо (из «Отправленных») — Outlook не ставит
+     * In-Reply-To, в теле только шапка цитаты «From: <его адрес> … Subject:
+     * <тема>». M-2026-18558/18559: «Запрос» со ссылкой на M26067, через 32 с
+     * «RE: Запрос» с количеством — вторая заявка и второе «принята в работу».
+     *
+     * Условия: тема ответа (RE/FW) совпадает с темой недавнего (SELF_QUOTE_MINUTES)
+     * письма того же отправителя; в теле есть его адрес в шапке цитаты и
+     * исходная тема; исходное письмо уже лежит в заявке этого клиента.
+     */
+    private function matchBySelfQuote(EmailMessage $message): ?EmailMessage
+    {
+        $from = mb_strtolower(trim((string) $message->from_email));
+        $subject = (string) $message->subject;
+        if ($from === '' || ! $this->subjectLooksLikeReply($subject)) {
+            return null;
+        }
+        $base = $this->baseSubject($subject);
+        $body = mb_strtolower((string) $message->body_plain);
+        if ($base === '' || ! str_contains($body, $from)
+            || preg_match('/(^|\n)\s*(from|от|отправитель)\s*:/u', $body) !== 1) {
+            return null;
+        }
+
+        $since = ($message->sent_at ?? now())->copy()->subMinutes(self::SELF_QUOTE_MINUTES);
+        $parents = EmailMessage::query()
+            ->where('id', '!=', $message->id)
+            ->whereRaw('lower(from_email) = ?', [$from])
+            ->where('direction', 'inbound')
+            ->whereNotNull('related_request_id')
+            ->where('sent_at', '>=', $since)
+            ->where('sent_at', '<=', $message->sent_at ?? now())
+            ->orderByDesc('sent_at')
+            ->limit(20)
+            ->get(['id', 'subject', 'related_request_id', 'sent_at']);
+
+        foreach ($parents as $p) {
+            if ($this->baseSubject((string) $p->subject) !== $base) {
+                continue;
+            }
+            // Тема исходного письма должна стоять в шапке цитаты.
+            if (! str_contains($body, mb_strtolower(trim((string) $p->subject)))) {
+                continue;
+            }
+            $req = Request::query()->find($p->related_request_id);
+            if ($req === null || mb_strtolower(trim((string) $req->client_email)) !== $from) {
+                continue;
+            }
+
+            return $p;
+        }
+
+        return null;
+    }
+
+    /** Тема без префиксов Re:/Fw:/Fwd: (в любом количестве), в нижнем регистре. */
+    private function baseSubject(string $subject): string
+    {
+        $s = (string) preg_replace('/^(\s*(re|fwd?|отв|ответ)\s*(\[\d+\])?\s*:\s*)+/iu', '', $subject);
+
+        return mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $s)));
+    }
+
     private function matchByOpenRequestForFromEmail(EmailMessage $message): ?Request
     {
         if (! $message->from_email) {
