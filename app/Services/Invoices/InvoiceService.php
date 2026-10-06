@@ -128,14 +128,19 @@ class InvoiceService
      * новые заказы, отправляя новую версию в тред каждой заявки. M-2026-17478:
      * счёт 10339 ушёл tk-e.ru в пяти заявках (01.10–05.10, 10 → 293 тыс. ₽), а
      * защита от дублей оставила его только в первой — остальные висели «В
-     * работе». Признаки: тот же клиент, другое письмо (не копия одного письма
-     * в двух тредах), отправлено позже, и это новая версия документа — новее
-     * дата или другая сумма. Переотправка старого счёта без изменений сюда не
+     * работе». Признаки: заявка не закрыта, тот же клиент, другое письмо (не
+     * копия одного письма в двух тредах) и это другая версия документа — иная
+     * дата или сумма. Переотправка старого счёта без изменений сюда не
      * попадает (M-2026-11318).
      */
     private function isCumulativeRevision(\App\Models\OutboundQuote $quote, Request $request, Invoice $dup): bool
     {
         if (! in_array($dup->status, [InvoiceStatus::Pending, InvoiceStatus::Expired], true)) {
+            return false;
+        }
+        // Закрытую заявку не трогаем: оплата сквозного счёта иначе воскресит
+        // заявку, которую менеджер закрыл сам.
+        if ($request->status->isTerminal()) {
             return false;
         }
         $other = Request::query()->find($dup->request_id);
@@ -151,13 +156,11 @@ class InvoiceService
 
         $here = $quote->email_message_id ? EmailMessage::withHistory()->find($quote->email_message_id) : null;
         $there = $dup->email_message_id ? EmailMessage::withHistory()->find($dup->email_message_id) : null;
-        if ($here === null || $there === null || $here->sent_at === null || $there->sent_at === null) {
-            return false;
-        }
-        if ($here->message_id !== null && $here->message_id === $there->message_id) {
-            return false;
-        }
-        if (! $here->sent_at->greaterThan($there->sent_at)) {
+        // Одно письмо, разложенное в два треда, — не новая версия. Порядок
+        // отправки не важен: источник счёта уже мог обновиться до более
+        // поздней версии из третьей заявки.
+        if ($here === null || $there === null || $here->id === $there->id
+            || ($here->message_id !== null && $here->message_id === $there->message_id)) {
             return false;
         }
 
