@@ -53,12 +53,14 @@ class LearnedAliasService
             if ($this->exactMatchable($norm, $catalog)) {
                 continue;
             }
-            // Наш M-артикул другой позиции каталога — однозначный адрес, не
-            // синоним. M-2026-10667: позицию «M29119 Мотор SG80K» руками
-            // перепривязали к M00188 (частотник Schindler) — родился алиас
-            // M29119 → частотник, и вкладка «Поставщики» показала цены частотника.
+            // Наш M-артикул другой ДЕЙСТВУЮЩЕЙ позиции каталога — однозначный
+            // адрес, не синоним. M-2026-10667: позицию «M29119 Мотор SG80K»
+            // руками перепривязали к M00188 (частотник Schindler) — родился
+            // алиас M29119 → частотник. Снятая позиция («ЗАМЕНЕНО НА …») —
+            // другое дело: там алиас на замену и нужен.
             if (preg_match('/^[MМ]\d{4,}$/u', $tok) === 1
-                && CatalogItem::query()->where('sku', mb_strtoupper(str_replace('М', 'M', $tok)))->whereKeyNot($catalog->id)->exists()) {
+                && CatalogItem::query()->where('sku', mb_strtoupper(str_replace('М', 'M', $tok)))
+                    ->where('is_active', true)->whereKeyNot($catalog->id)->exists()) {
                 continue;
             }
 
