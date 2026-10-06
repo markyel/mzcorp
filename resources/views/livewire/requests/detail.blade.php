@@ -1212,8 +1212,16 @@
                     && $req->status !== $RS::Assigned
                     && $req->status !== $RS::New
                 )
+                    {{-- Из «КП/счёт отправлены» возврат к работе — не следующий шаг, а
+                         откат: без акцента и с подтверждением. M-2026-17866: менеджер
+                         отправил счёт и через 10 с нажал синюю кнопку — заявка ушла
+                         из «Счёт отправлен». --}}
+                    @php($returnIsRollback = in_array($req->status, [$RS::Quoted, $RS::PartiallyQuoted, $RS::AwaitingInvoice, $RS::Invoiced], true))
                     <button type="button" wire:click="transitionStatus('in_progress')"
-                            class="btn btn-primary"
+                            class="btn {{ $returnIsRollback ? 'btn-sm' : 'btn-primary' }}"
+                            @if($returnIsRollback)
+                                wire:confirm="Заявка уйдёт из статуса «{{ $req->status->label() }}» в «В работе». Точно?"
+                            @endif
                             @disabled(! $canManage)>
                         @if($req->status === $RS::AwaitingClientClarification)
                             ✓ Клиент ответил
