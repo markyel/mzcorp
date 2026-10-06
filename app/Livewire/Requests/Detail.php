@@ -2603,7 +2603,19 @@ class Detail extends Component
 
         try {
             $req = $this->request->fresh();
-            $service->transitionTo($req, $target, auth()->user());
+            // Источник ручного перехода — чтобы спорный случай («я не нажимал»,
+            // M-2026-17866) можно было разобрать: офис ходит с одного IP, а лог
+            // nginx не знает ни пользователя, ни вызванный метод.
+            $service->transitionTo($req, $target, auth()->user(), [
+                'event' => 'manual',
+                'payload' => [
+                    'via' => 'card_button:transitionStatus',
+                    'from' => $req->status->value,
+                    'ip' => request()->ip(),
+                    'ua' => mb_substr((string) request()->userAgent(), 0, 200),
+                    'session' => mb_substr((string) session()->getId(), 0, 8),
+                ],
+            ]);
             $this->reloadRequest();
             session()->flash('status', 'Статус обновлён: '.$target->label());
         } catch (\DomainException $e) {
