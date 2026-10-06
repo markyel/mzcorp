@@ -1216,7 +1216,9 @@
                          откат: без акцента и с подтверждением. M-2026-17866: менеджер
                          отправил счёт и через 10 с нажал синюю кнопку — заявка ушла
                          из «Счёт отправлен». --}}
-                    @php($returnIsRollback = in_array($req->status, [$RS::Quoted, $RS::PartiallyQuoted, $RS::AwaitingInvoice, $RS::Invoiced], true))
+                    @php
+                        $returnIsRollback = in_array($req->status, [$RS::Quoted, $RS::PartiallyQuoted, $RS::AwaitingInvoice, $RS::Invoiced], true);
+                    @endphp
                     <button type="button" wire:click="transitionStatus('in_progress')"
                             class="btn {{ $returnIsRollback ? 'btn-sm' : 'btn-primary' }}"
                             @if($returnIsRollback)
