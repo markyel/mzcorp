@@ -123,6 +123,131 @@ class InvoiceService
         return $sentHere !== null && $sentThere !== null && Carbon::parse($sentHere)->gt(Carbon::parse($sentThere));
     }
 
+    /**
+     * Сквозной счёт: менеджер ведёт для клиента один счёт и дописывает в него
+     * новые заказы, отправляя новую версию в тред каждой заявки. M-2026-17478:
+     * счёт 10339 ушёл tk-e.ru в пяти заявках (01.10–05.10, 10 → 293 тыс. ₽), а
+     * защита от дублей оставила его только в первой — остальные висели «В
+     * работе». Признаки: тот же клиент, другое письмо (не копия одного письма
+     * в двух тредах), отправлено позже, и это новая версия документа — новее
+     * дата или другая сумма. Переотправка старого счёта без изменений сюда не
+     * попадает (M-2026-11318).
+     */
+    private function isCumulativeRevision(\App\Models\OutboundQuote $quote, Request $request, Invoice $dup): bool
+    {
+        if (! in_array($dup->status, [InvoiceStatus::Pending, InvoiceStatus::Expired], true)) {
+            return false;
+        }
+        $other = Request::query()->find($dup->request_id);
+        if ($other === null) {
+            return false;
+        }
+        $email = mb_strtolower(trim((string) $request->client_email));
+        $sameClient = ($email !== '' && $email === mb_strtolower(trim((string) $other->client_email)))
+            || ($request->organization_id !== null && $request->organization_id === $other->organization_id);
+        if (! $sameClient) {
+            return false;
+        }
+
+        $here = $quote->email_message_id ? EmailMessage::withHistory()->find($quote->email_message_id) : null;
+        $there = $dup->email_message_id ? EmailMessage::withHistory()->find($dup->email_message_id) : null;
+        if ($here === null || $there === null || $here->sent_at === null || $there->sent_at === null) {
+            return false;
+        }
+        if ($here->message_id !== null && $here->message_id === $there->message_id) {
+            return false;
+        }
+        if (! $here->sent_at->greaterThan($there->sent_at)) {
+            return false;
+        }
+
+        $newerDate = $quote->document_date !== null && $dup->issued_at !== null
+            && Carbon::parse((string) $quote->document_date)->startOfDay()->greaterThan($dup->issued_at->copy()->startOfDay());
+        $otherSum = $quote->total_amount !== null && $dup->amount_snapshot !== null
+            && abs((float) $quote->total_amount - (float) $dup->amount_snapshot) > 1.0;
+
+        return $newerDate || $otherSum;
+    }
+
+    /**
+     * Заявка входит в сквозной счёт: запись счёта остаётся одна (в первой
+     * заявке, сумма — по последней версии), эта заявка переходит в «Счёт
+     * отправлен» со ссылкой на него. Оплата счёта закрывает все такие заявки
+     * (transitionAfterPayment → sharedRequestIds). Отдельную запись не
+     * создаём — иначе сумма сквозного счёта задвоится в аналитике.
+     */
+    private function shareCumulativeInvoice(Invoice $dup, \App\Models\OutboundQuote $quote, Request $request, string $number): Invoice
+    {
+        $this->refreshFromNewerQuote($dup, $quote, $number);
+        $dup->refresh();
+
+        $author = $request->assignedUser
+            ?? \App\Models\User::role(\App\Enums\Role::Admin->value)->first();
+        $primary = $dup->request?->internal_code ?? ('#'.$dup->request_id);
+        $context = [
+            'event' => 'invoice_shared',
+            'comment' => sprintf(
+                'Сквозной счёт №%s: тот же счёт, что в %s, дополнен позициями этой заявки (%s ₽).',
+                $number,
+                $primary,
+                $quote->total_amount !== null ? number_format((float) $quote->total_amount, 2, '.', ' ') : '—',
+            ),
+            'payload' => [
+                'invoice_id' => $dup->id,
+                'invoice_number' => $number,
+                'primary_request_id' => $dup->request_id,
+                'outbound_quote_id' => $quote->id,
+            ],
+        ];
+
+        try {
+            if ($author !== null && in_array(RequestStatus::Invoiced, $request->status->allowedTransitions(), true)) {
+                $this->stateService->transitionTo($request, RequestStatus::Invoiced, $author, $context);
+            } else {
+                \App\Models\RequestStateChange::create([
+                    'request_id' => $request->id,
+                    'from_status' => $request->status->value,
+                    'to_status' => $request->status->value,
+                    'by_user_id' => null,
+                ] + $context);
+            }
+        } catch (\Throwable $e) {
+            Log::info('InvoiceService: shared invoice transition skipped', [
+                'request_id' => $request->id,
+                'invoice_id' => $dup->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        Log::info('InvoiceService: cumulative invoice shared with another request', [
+            'invoice_id' => $dup->id,
+            'invoice_number' => $number,
+            'primary_request_id' => $dup->request_id,
+            'request_id' => $request->id,
+            'outbound_quote_id' => $quote->id,
+        ]);
+
+        return $dup;
+    }
+
+    /**
+     * Заявки, вошедшие в сквозной счёт (событие invoice_shared), кроме заявки
+     * самого счёта.
+     *
+     * @return list<int>
+     */
+    public function sharedRequestIds(Invoice $invoice): array
+    {
+        return \App\Models\RequestStateChange::query()
+            ->where('event', 'invoice_shared')
+            ->whereRaw("(payload->>'invoice_id')::bigint = ?", [$invoice->id])
+            ->where('request_id', '!=', $invoice->request_id)
+            ->distinct()
+            ->pluck('request_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
     /** Клиент заявки — эта организация: сама заявка к ней привязана или адрес клиента связан с ней. */
     private function requestBuyerInn(Request $request, string $inn): bool
     {
@@ -515,6 +640,9 @@ class InvoiceService
         }
         if ($dup !== null && $this->shouldReviveDuplicateHere($quote, $request, $dup)) {
             return $this->moveDuplicateHere($dup, $quote, $request, $number, revived: true);
+        }
+        if ($dup !== null && $this->isCumulativeRevision($quote, $request, $dup)) {
+            return $this->shareCumulativeInvoice($dup, $quote, $request, $number);
         }
 
         if ($dup !== null) {
@@ -1020,8 +1148,29 @@ class InvoiceService
         array $context,
         bool $systemTransition,
     ): void {
+        $this->transitionRequestAfterPayment($invoice, $invoice->request, $to, $author, $context, $systemTransition);
+
+        // Сквозной счёт: оплата закрывает и заявки, вошедшие в него.
+        foreach ($this->sharedRequestIds($invoice) as $requestId) {
+            $shared = Request::query()->find($requestId);
+            if ($shared === null) {
+                continue;
+            }
+            $sharedContext = $context;
+            $sharedContext['comment'] = trim((string) ($context['comment'] ?? '')).' Сквозной счёт — оплата и по этой заявке.';
+            $this->transitionRequestAfterPayment($invoice, $shared, $to, $author, $sharedContext, $systemTransition);
+        }
+    }
+
+    private function transitionRequestAfterPayment(
+        Invoice $invoice,
+        ?Request $request,
+        RequestStatus $to,
+        User $author,
+        array $context,
+        bool $systemTransition,
+    ): void {
         try {
-            $request = $invoice->request;
             if ($request === null) {
                 return;
             }
@@ -1066,7 +1215,7 @@ class InvoiceService
             $this->stateService->transitionTo($request, $to, $author, $context, $systemTransition);
         } catch (\Throwable $e) {
             Log::warning('InvoiceService: post-payment transition failed (non-fatal)', [
-                'request_id' => $invoice->request_id,
+                'request_id' => $request?->id,
                 'invoice_id' => $invoice->id,
                 'to' => $to->value,
                 'error' => $e->getMessage(),
