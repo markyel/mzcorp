@@ -172,6 +172,19 @@ class PostSaleFulfillmentDetectorTest extends TestCase
     // ---- wantsNewInvoiceOrOrder: цитата КП/счёта по выигранной сделке (MailRouter closed_won) ----
 
     /** @return array<string, array{0:string,1:string,2:bool,3:bool}> subject, own text, isReply, expected */
+    /** M-2026-18707: подтверждение заказа по счёту — не новая заявка. */
+    public function test_confirms_placed_order(): void
+    {
+        $d = $this->detector;
+        $this->assertTrue($d->confirmsPlacedOrder('Добрый день, Прошу принять заказ ЦБ-2237 Спасибо'));
+        $this->assertTrue($d->confirmsPlacedOrder('Направляю подписанную спецификацию №16.'));
+        $this->assertTrue($d->confirmsPlacedOrder('Заказ поставщику № 00123 во вложении, оплатим по счёту завтра'));
+        $this->assertTrue($d->confirmsPlacedOrder('Подтверждаем заказ по КП 369544.'));
+        $this->assertFalse($d->confirmsPlacedOrder('А ещё нужен шкив КВШ 520 мм, посчитайте отдельно'));
+        $this->assertFalse($d->confirmsPlacedOrder('Когда ожидать поставку по данному счёту?'));
+        $this->assertFalse($d->confirmsPlacedOrder('Пришлите, пожалуйста, сертификаты на товар'));
+    }
+
     public static function citedQuoteCases(): array
     {
         return [

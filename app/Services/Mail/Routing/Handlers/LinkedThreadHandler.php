@@ -16,7 +16,9 @@ use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Services\DocumentDetector\AiDecisionService;
 use App\Services\DocumentDetector\InboundIntentClassifier;
+use App\Services\Mail\EmailTextCleanerService;
 use App\Services\Mail\InternalSenderDetector;
+use App\Services\Mail\PostSaleFulfillmentDetector;
 use App\Services\Mail\ReplyParseGate;
 use App\Services\Mail\Routing\InboundRoutingHandler;
 use App\Services\Mail\Routing\RoutingContext;
@@ -60,6 +62,8 @@ final class LinkedThreadHandler implements InboundRoutingHandler
         private readonly AiDecisionService $aiDecisions,
         private readonly AttentionService $attention,
         private readonly RequestExtensionService $extension,
+        private readonly PostSaleFulfillmentDetector $postSale,
+        private readonly EmailTextCleanerService $cleaner,
     ) {
     }
 
@@ -138,7 +142,24 @@ final class LinkedThreadHandler implements InboundRoutingHandler
         // Разворачиваем письмо в отдельную Request (с авто-назначением),
         // текущую не трогаем и выходим. Гейт: сигналы позиций (shouldParse) +
         // порог уверенности. Ошибка LLM обратима (merge назад).
+        $confirmsOrder = false;
+        if ($linkedRequest->status->isPostQuote()) {
+            // Подтверждение уже размещённого заказа («прошу принять заказ ЦБ-2237»,
+            // PDF «Заказ поставщику № …», подписанная спецификация) после нашего
+            // КП/счёта — не новая заявка, даже если LLM уверен и в PDF есть
+            // позиции (они те же). Кейс M-2026-18707 из треда счёта 10536.
+            $confirmsOrder = $this->postSale->confirmsPlacedOrder($this->cleaner->clientOwnText($message));
+            if ($confirmsOrder && ($intentResult['payload']['intent'] ?? null) === 'new_request') {
+                Log::info('MailRouter: order confirmation in a post-quote thread — new_request intent ignored, no spin-off', [
+                    'email_message_id' => $message->id,
+                    'request_id' => $linkedRequest->id,
+                    'intent_confidence' => (float) ($intentResult['confidence'] ?? 0),
+                ]);
+            }
+        }
+
         if ($shouldParse
+            && ! $confirmsOrder
             && ($intentResult['payload']['intent'] ?? null) === 'new_request'
             && (float) ($intentResult['confidence'] ?? 0) >= self::NEW_REQUEST_CONFIDENCE
         ) {
