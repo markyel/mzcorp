@@ -66,8 +66,11 @@ final class ClosedWonThreadHandler implements InboundRoutingHandler
             // asksInvoice считается только внутри wantsNew: наш же subject «Счет на
             // оплату № 6272» иначе выглядит как просьба о счёте (93741).
             $wantsNew = $this->postSale->wantsNewInvoiceOrOrder((string) $message->subject, $own, $isReply);
+            // В ответе тема — наследство треда, а не слова клиента (см.
+            // wantsNewInvoiceOrOrder): просьбу о счёте ищем только в его тексте.
+            $intentSubject = $isReply ? '' : (string) $message->subject;
             $asksInvoice = $wantsNew
-                && (new InvoiceMentionMatcher)->requestsInvoiceOrIntendsToPay((string) $message->subject . "\n" . $own);
+                && (new InvoiceMentionMatcher)->requestsInvoiceOrIntendsToPay($intentSubject . "\n" . $own);
             if ($cited !== null && ! $asksInvoice) {
                 Log::info('MailRouter: cited quote on closed_won without invoice request → no invoice child', [
                     'email_message_id' => $message->id,

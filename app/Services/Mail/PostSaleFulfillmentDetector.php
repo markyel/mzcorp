@@ -232,7 +232,11 @@ class PostSaleFulfillmentDetector
      */
     public function wantsNewInvoiceOrOrder(string $subject, string $ownText, bool $isReply): bool
     {
-        $haystack = mb_strtolower($subject . "\n" . $ownText);
+        // В ответе тема унаследована от треда и не является словами клиента:
+        // «Re: Просим выставить счёт по КП 367216» + «кнопка вызова не реагирует»
+        // — это рекламация, а не просьба о счёте (M-2026-18738: из такой темы
+        // родилась дочерняя заявка «на счёт» по выигранной сделке).
+        $haystack = mb_strtolower(($isReply ? '' : $subject) . "\n" . $ownText);
 
         // Вопрос о статусе/сроках/самовывозе уже размещённого заказа — постпродажа.
         if (preg_match(self::DELIVERY_STATUS_RE, $haystack) === 1
