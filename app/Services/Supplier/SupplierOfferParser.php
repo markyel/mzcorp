@@ -79,7 +79,7 @@ class SupplierOfferParser
         // письма (и предыдущей переписки) срезаем. Иначе LLM цепляется за
         // содержимое цитаты: путает обсуждение артикулов/«альтернатива» в
         // истории с отказом (кейсы inquiry 1143 «M02690/M13261», 1231).
-        $text = $this->stripQuotedReply($text);
+        $text = $this->relevantReplyText($text, $reply);
 
         // Вложения-прайсы: текст (PDF/Excel/Word) + изображения (фото/скан) для Vision.
         [$attachmentText, $images] = $this->extractAttachments($reply);
@@ -235,6 +235,137 @@ class SupplierOfferParser
         return $this->loadItems($inquiry);
     }
 
+    /** Маркеры начала ПЕРЕСЫЛКИ (не цитаты ответа): дальше идёт чужое письмо целиком. */
+    private const FORWARD_MARKERS = '/^\s*(?:-{2,}\s*)?(?:Begin forwarded message|Forwarded message|Пересылаемое сообщение|Пересланное сообщение|Начало переадресованного письма|Weitergeleitete Nachricht|Messaggio inoltrato)\s*:?(?:\s*-{2,})?\s*$/imu';
+
+    /** Своё письмо отсылает к пересылке: «см кп ниже», «see below», «forwarding». */
+    private const POINTS_BELOW = '/\bниже\b|\bbelow\b|\bсм\.?\s|\bsee\b|перес[ыл]|forward|inoltr|weiterleit/iu';
+
+    /** Сколько символов пересланного письма отдаём модели. */
+    private const MAX_FORWARDED_CHARS = 6000;
+
+    /**
+     * Текст ответа, который имеет смысл разбирать: собственные слова поставщика
+     * и — когда он ПЕРЕСЫЛАЕТ чужое письмо — тело этого письма.
+     *
+     * Срез цитат защищает от мусора истории (обсуждение артикулов, старые
+     * отказы). Но посредник-закупщик часто отвечает «См кп ниже» и прикладывает
+     * предложение реального поставщика пересылкой: кейс M-2026-18330 — UniSystem
+     * переслала оффер Fox «N°5 K4TAO1 Unit net price Euro 39,58», а срез по
+     * маркеру «Начало переадресованного письма» выкинул его целиком → 0 офферов.
+     *
+     * Условия, при которых заглядываем в пересылку (все сразу):
+     *   • своё письмо короткое ИЛИ явно отсылает к тексту ниже;
+     *   • блок начинается с маркера пересылки либо с заголовка From:/От:/Da:
+     *     (Outlook без слова «forwarded»);
+     *   • отправитель пересланного письма — не наш домен (иначе это эхо нашего
+     *     же RFQ без цен).
+     * Из пересланного письма берём только его собственный текст: вложенная
+     * история (наш RFQ под «Da: UniSystem … Oggetto:») режется тем же срезом.
+     */
+    private function relevantReplyText(string $text, EmailMessage $reply): string
+    {
+        $text = trim($text);
+        // Строгий срез (без гарда «цитата с самого верха»): нужен, чтобы увидеть
+        // хвост даже при коротком «См кп ниже».
+        $own = $this->stripQuotedReply($text, guardTop: false);
+        $rest = trim(mb_substr($text, mb_strlen($own)));
+        if ($rest === '') {
+            return $this->stripQuotedReply($text);
+        }
+
+        $forwarded = $this->forwardedBody($rest);
+        if ($forwarded === null) {
+            return $this->stripQuotedReply($text); // обычная цитата — прежнее поведение
+        }
+        if ($forwarded['body'] === null) {
+            // Переслано наше же письмо (RFQ без цен) — его не разбираем даже
+            // при коротком собственном тексте.
+            return $own !== '' ? $own : $this->stripQuotedReply($text);
+        }
+
+        $pointsBelow = preg_match(self::POINTS_BELOW, $own) === 1;
+        if (mb_strlen($own) > 400 && ! $pointsBelow) {
+            return $this->stripQuotedReply($text); // содержательный ответ сам по себе
+        }
+
+        Log::info('SupplierOfferParser: forwarded letter included into parse', [
+            'message_id' => $reply->id,
+            'from' => $forwarded['from'],
+            'chars' => mb_strlen($forwarded['body']),
+        ]);
+
+        return trim($own."
+
+[Пересланное письмо от ".$forwarded['from']."]
+".$forwarded['body']);
+    }
+
+    /**
+     * Тело первого пересланного письма из хвоста: заголовок (От/Дата/Кому/Тема)
+     * пропускаем, текст берём до следующей вложенной цитаты.
+     *
+     * @return array{from: string, body: ?string}|null  null — это не пересылка;
+     *                                                   body=null — переслано наше же письмо
+     */
+    private function forwardedBody(string $rest): ?array
+    {
+        $lines = preg_split('/\r?\n/', $rest) ?: [];
+        $i = 0;
+        // Маркер пересылки — необязателен (Outlook даёт сразу заголовок).
+        if (isset($lines[0]) && preg_match(self::FORWARD_MARKERS, $lines[0]) === 1) {
+            $i = 1;
+        }
+        // Заголовок: несколько строк «Поле: значение» (с пустыми между ними).
+        $from = null;
+        $sawSubject = false;
+        $headerLines = 0;
+        for (; $i < count($lines) && $headerLines < 12; $i++) {
+            $line = trim($lines[$i]);
+            if ($line === '') {
+                if ($sawSubject) {
+                    $i++;
+                    break;
+                }
+                continue;
+            }
+            if (! preg_match('/^(?:>\s*)?([\p{L}][\p{L} -]{1,24})\s*[：:]\s*(.*)$/u', $line, $m)) {
+                break;
+            }
+            $headerLines++;
+            $field = mb_strtolower(trim($m[1]));
+            if (in_array($field, ['from', 'от', 'отправитель', 'da', 'von', 'de', 'fra', 'van', '发件人'], true)) {
+                $from = trim($m[2]);
+            }
+            if (in_array($field, ['subject', 'тема', 'oggetto', 'betreff', 'objet', 'onderwerp', '主题'], true)) {
+                $sawSubject = true;
+            }
+        }
+        if ($from === null) {
+            return null; // заголовка письма нет — обычная цитата, не пересылка
+        }
+
+        // Эхо нашего же письма (RFQ без цен) — не берём.
+        if (preg_match('/[\w.+-]+@([\w.-]+)/u', $from, $em) === 1) {
+            $domain = mb_strtolower($em[1]);
+            foreach ((array) config('services.mail.internal_domains', []) as $ours) {
+                if ($domain === mb_strtolower((string) $ours)) {
+                    return ['from' => $from, 'body' => null];
+                }
+            }
+        }
+
+        $body = trim(implode("\n", array_slice($lines, $i)));
+        if ($body === '') {
+            return null;
+        }
+        // Внутри пересланного письма — своя история (наш RFQ): режем тем же
+        // срезом, но без гарда «цитата с самого верха».
+        $body = $this->stripQuotedReply($body, guardTop: false);
+
+        return ['from' => $from, 'body' => mb_substr($body, 0, self::MAX_FORWARDED_CHARS)];
+    }
+
     /**
      * Срезать цитируемую историю из ответа поставщика — оставить только новый
      * текст (обычно top-posting). Режем всё, начиная с САМОГО РАННЕГО маркера
@@ -245,7 +376,7 @@ class SupplierOfferParser
      * нет (< 30 симв), вероятно ответ написан ПОД цитатой — тогда не режем,
      * отдаём как есть (лучше лишний контекст, чем потерять сам ответ).
      */
-    private function stripQuotedReply(string $text): string
+    private function stripQuotedReply(string $text, bool $guardTop = true): string
     {
         $text = trim($text);
         if ($text === '') {
@@ -254,8 +385,10 @@ class SupplierOfferParser
 
         $markers = [
             '/^\s*发件人\s*[：:]/mu',                                                   // From (Foxmail/CN)
-            '/^\s*(?:From|От(?:правитель)?)\s*:\s*\S.*$/mu',                          // From:/От: заголовок цитаты (в т.ч. Foxmail «From:Name» без пробела)
+            '/^\s*(?:From|От(?:правитель)?)\s*:\s*\S.*$/mu',
+            '/^\s*(?:Da|Von|De|Fra|Van)\s*:\s*\S.*$/mu',                                   // From: в итальянских/немецких/французских заголовках цитаты                          // From:/От: заголовок цитаты (в т.ч. Foxmail «From:Name» без пробела)
             '/^\s*-{2,}\s*(?:Original Message|Пересланное сообщение)\s*-{2,}/imu',
+            self::FORWARD_MARKERS,                                                     // начало пересылки (само пересланное письмо разбирает relevantReplyText)
             '/^\s*[-_]{10,}\s*$/mu',                                                   // Outlook/Foxmail-разделитель (длинная линия)
             '/^.*\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}.*(?:пишет|написал(?:а)?|wrote)\s*[:：]\s*$/imu', // «15.07.2026 …, X пишет:»
             '/^\s*On\b.{0,160}\bwrote:\s*$/imu',                                      // «On … wrote:»
@@ -270,7 +403,7 @@ class SupplierOfferParser
             }
         }
 
-        if ($cut < 30) {
+        if ($guardTop && $cut < 30) {
             return $text; // bottom-posting или цитата с самого верха — не режем
         }
 
