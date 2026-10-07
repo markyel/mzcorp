@@ -86,6 +86,18 @@ class OutboundQuoteItemMatcher
         // Step 3: Fuzzy для тех, у кого ещё нет matched_request_item_id.
         $this->matchByFuzzy($items, $request);
 
+        // Step 3.5: строка КП резолвится в каталог (M-SKU), но ни одна позиция
+        // заявки к ней не привязалась — клиент описал деталь своими словами и
+        // без M-кода. Раньше такая строка оставалась «catalog hit без request
+        // match», а ParseOutboundQuoteJob сеял её в заявку ОТДЕЛЬНОЙ позицией —
+        // дубль запрошенного (M-2026-18523: «Направляющая поручня … DAA402NVB5»
+        // и наша «Алюминиевая направляющая поручня Otis 506NCE M12077»; за 30
+        // дней — 469 заявок с такими дублями). Теперь: одна такая строка против
+        // одной свободной позиции без каталога — связываем напрямую; несколько —
+        // LLM решает, какая позиция заявки какой строке соответствует (каталог
+        // строки при этом не трогаем).
+        $this->matchOrphansToUnlinkedRequestItems($items, $request);
+
         // Step 4: LLM-fallback ТОЛЬКО для item'ов без resolved catalog. Если
         // matched_catalog_item_id уже найден через Step 1 — значит позиция
         // КП валидно резолвится в catalog_items, и LLM не должен переписывать
@@ -152,6 +164,46 @@ class OutboundQuoteItemMatcher
         }
 
         return $stats;
+    }
+
+    /**
+     * Step 3.5. Строки с каталогом, но без позиции заявки ↔ активные позиции
+     * заявки без каталога, которые ещё не заняты другой строкой этого КП.
+     *
+     * @param  Collection<int, OutboundQuoteItem>  $items
+     */
+    private function matchOrphansToUnlinkedRequestItems(Collection $items, Request $request): void
+    {
+        $orphans = $items->filter(
+            fn (OutboundQuoteItem $it) => $it->matched_catalog_item_id !== null
+                && $it->matched_request_item_id === null
+        )->values();
+        if ($orphans->isEmpty()) {
+            return;
+        }
+        $taken = $items->pluck('matched_request_item_id')->filter()->all();
+        $free = $request->items
+            ->where('is_active', true)
+            ->whereNull('catalog_item_id')
+            ->reject(fn (RequestItem $ri) => in_array($ri->id, $taken, true))
+            ->values();
+        if ($free->isEmpty()) {
+            return;
+        }
+
+        if ($orphans->count() === 1 && $free->count() === 1) {
+            $qi = $orphans->first();
+            $ri = $free->first();
+            $qi->matched_request_item_id = $ri->id;
+            $qi->match_score = 0.8;
+            $qi->match_source = OutboundQuoteItem::MATCH_SOURCE_SINGLE_PAIR;
+            $qi->match_reason = sprintf('single quote line without request match ↔ single request item without catalog (#%d)', $ri->id);
+            $qi->save();
+
+            return;
+        }
+
+        $this->matchByLlm($orphans, $request);
     }
 
     /**

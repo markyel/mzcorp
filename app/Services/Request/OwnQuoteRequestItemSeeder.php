@@ -67,6 +67,25 @@ class OwnQuoteRequestItemSeeder
             return 0;
         }
 
+        // Гард 2: у заявки уже есть позиции клиента из ДРУГИХ писем (или ручные).
+        // Строка КП, не сматченная с ними, — это задача матчинга (Step 3.5 /
+        // LLM в OutboundQuoteItemMatcher + enricher), а не повод завести дубль
+        // запрошенного. Кейс M-2026-18523, за 30 дней — 469 заявок с дублями.
+        $hasClientItems = $request->items()
+            ->where('is_active', true)
+            ->where(fn ($q) => $q->whereNull('source_email_message_id')
+                ->orWhere('source_email_message_id', '!=', (int) $sourceMessageId)
+                ->orWhere('data_source', 'manual'))
+            ->exists();
+        if ($hasClientItems) {
+            Log::info('OwnQuoteRequestItemSeeder: skipped — request already has client items', [
+                'request_id' => $request->id,
+                'source_message_id' => $sourceMessageId,
+            ]);
+
+            return 0;
+        }
+
         return DB::transaction(function () use ($request, $matched, $sourceMessageId) {
             // Деактивировать несматченный авто-шум ИЗ письма-источника КП (позиции
             // из процитированного треда — как «КВШ» из тела/спеков). Ручные и позиции

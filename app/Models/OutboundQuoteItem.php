@@ -25,6 +25,8 @@ class OutboundQuoteItem extends Model
     public const MATCH_SOURCE_FUZZY_ARTICLE = 'fuzzy_article';
     public const MATCH_SOURCE_FUZZY_NAME = 'fuzzy_name';
     public const MATCH_SOURCE_LLM = 'llm';
+    /** Единственная строка КП без позиции ↔ единственная позиция заявки без каталога. */
+    public const MATCH_SOURCE_SINGLE_PAIR = 'single_pair';
     public const MATCH_SOURCE_UNMATCHED = 'unmatched';
     // Ручная привязка оператором через UI (Phase следующая — таб «КП»).
     public const MATCH_SOURCE_MANUAL = 'manual';
