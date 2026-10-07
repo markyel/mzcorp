@@ -91,6 +91,30 @@ class CitedOutboundQuoteRouterOwnTextTest extends TestCase
         $this->assertSame([['10396'], false], $this->candidates('', 'Оплатили счет 10396'));
     }
 
+    /** M-2026-18326: «ВП73-10432» — артикул, а 10432 — номер нашего КП по чужой заявке. */
+    public function test_article_with_alnum_prefix_is_not_a_document_number(): void
+    {
+        $body = "Прошу прислать счет с доставкой в Спб\nВыключатель ВП73-10432 00 УХЛЗ с продольным роликом - 5 шт";
+        $this->assertSame([[], false], $this->candidates('', $body));
+
+        $this->assertSame([[], false], $this->candidates('', 'Счёт по КС00-002365 оплатили'));
+        $this->assertSame([[], false], $this->candidates('', 'Нужен FAA24-350BL2 1 шт, выставите счёт'));
+
+        // Чисто буквенный префикс — это наши документы.
+        $this->assertSame([['364274'], false], $this->candidates('', 'Выставите счёт по КП МЗ-364274'));
+        // Число через дефис от числа — не артикул.
+        $this->assertSame([['10432'], false], $this->candidates('', 'Тема: 21-10432 Re: счёт'));
+    }
+
+    /** Числа в ссылках (слаг каталога, ysclid) — не номера наших документов. */
+    public function test_numbers_inside_urls_are_ignored(): void
+    {
+        $body = "Нужен выключатель, счёт прошу\nhttps://snab-lift.ru/catalog/mikropereklyuchatel-vp-73-21-10432.html?ysclid=muxu0q33is125164145\nСпасибо";
+        $this->assertSame([[], false], $this->candidates('', $body));
+
+        $this->assertSame([['10432'], false], $this->candidates('', "Счёт 10432 оплатим\nhttp://example.com/x-10433"));
+    }
+
     /** @return array{0: list<string>, 1: bool} */
     private function candidates(string $filename, string $body = 'Добрый день! Есть ли такой шкив'): array
     {

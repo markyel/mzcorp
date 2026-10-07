@@ -71,6 +71,25 @@ class CitedOutboundQuoteRouter
     private const OWN_CODE_RE = '/(?<![\p{L}\d])[mм]-\d{4}-\d{3,6}(?!\d)|(?<![\p{L}\d])[mм]\d{4,6}(?!\d)/iu';
 
     /**
+     * Артикул с буквенно-цифровым префиксом через дефис: «ВП73-10432»,
+     * «FAA24-350BL2», «КС00-002365». Число после дефиса — часть артикула, а не
+     * номер документа. Кейс M-2026-18326: клиент другой компании попросил счёт
+     * на «Выключатель ВП73-10432», а 10432 — номер нашего КП по чужой заявке
+     * → письмо и позиция приклеились к ней.
+     *
+     * Префикс только «буквы+цифры» (ВП73, КС00): чисто буквенный «МЗ-364274» —
+     * это наши документы, его не трогаем. Чисто цифровой «21-10432» тоже
+     * остаётся — числа через дефис встречаются и в цитатах наших писем.
+     */
+    private const ARTICLE_RE = '/(?<![\p{L}\d])\p{L}{1,6}\d{1,4}-\d{5,8}(?![\p{L}\d])/u';
+
+    /**
+     * Ссылки: слаги каталогов («…/mikropereklyuchatel-vp-73-21-10432.html»),
+     * метки ysclid/utm — числа внутри URL никогда не номер нашего документа.
+     */
+    private const URL_RE = '~https?://\S+~iu';
+
+    /**
      * Контекст, в котором шестизначное число — не номер документа, а адрес.
      *
      * Кейс M-2026-3642: клиент ООО «Санаторий Русь» прислал новую заявку, а в
@@ -281,11 +300,11 @@ class CitedOutboundQuoteRouter
         // а не текст (M-2026-17687: «по следующим позициям: M10258» от Liftway
         // = номер чужого счёта 10258).
         $texts = array_merge($texts, $this->numbersOutsideAddresses(
-            (string) preg_replace([self::HASH_RE, self::OWN_CODE_RE], ' ', (string) $message->body_plain)
+            $this->scrub((string) $message->body_plain)
         ));
 
         foreach ($message->attachments as $att) {
-            $fn = (string) preg_replace(self::HASH_RE, ' ', (string) $att->filename);
+            $fn = $this->scrub((string) $att->filename);
             if ($fn !== '') {
                 $texts[] = $fn;
                 if (preg_match(self::NUMBER_RE, $fn) === 1) {
@@ -299,9 +318,23 @@ class CitedOutboundQuoteRouter
             }
         }
 
-        preg_match_all(self::NUMBER_RE, (string) preg_replace([self::HASH_RE, self::OWN_CODE_RE], ' ', implode(' ', $texts)), $m);
+        preg_match_all(self::NUMBER_RE, $this->scrub(implode(' ', $texts)), $m);
 
         return [array_values(array_unique($m[0] ?? [])), $hasAttachmentSource];
+    }
+
+    /**
+     * Убрать из текста всё, что похоже на число, но номером документа быть не
+     * может: ссылки, UUID/хэши, наши коды, артикулы. Порядок важен: ссылка
+     * вырезается целиком до того, как её слаг разберут на артикулы.
+     */
+    private function scrub(string $text): string
+    {
+        return (string) preg_replace(
+            [self::URL_RE, self::HASH_RE, self::OWN_CODE_RE, self::ARTICLE_RE],
+            ' ',
+            $text,
+        );
     }
 
     /**
