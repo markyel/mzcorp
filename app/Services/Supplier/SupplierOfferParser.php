@@ -49,7 +49,7 @@ class SupplierOfferParser
             // ветка привязана к заявке, позиции берём из неё — иначе ответ с
             // ценами молча остаётся без офферов. Кейс M-2026-12942: два мотора
             // (22 кВт €619, 16 кВт в PDF COAM) — ни одной цены в «Поставщиках».
-            $items = $this->seedItemsFromRequest($inquiry);
+            $items = $this->seedItemsFromRequest($inquiry, $reply);
         }
         if ($items->isEmpty()) {
             return $zero;
@@ -195,17 +195,25 @@ class SupplierOfferParser
 
     /**
      * Засеять позиции инквайри активными позициями связанной заявки — так же,
-     * как их создаёт SupplierDispatchService при отправке RFQ.
+     * как их создаёт SupplierDispatchService при отправке RFQ. Берём позиции,
+     * существовавшие на момент ответа поставщика.
      *
      * @return \Illuminate\Database\Eloquent\Collection<int, SupplierInquiryItem>
      */
-    private function seedItemsFromRequest(SupplierInquiry $inquiry): \Illuminate\Database\Eloquent\Collection
+    private function seedItemsFromRequest(SupplierInquiry $inquiry, EmailMessage $reply): \Illuminate\Database\Eloquent\Collection
     {
         $request = $inquiry->relatedRequest;
         if ($request === null) {
             return new \Illuminate\Database\Eloquent\Collection;
         }
-        $requestItems = $request->items()->where('is_active', true)->orderBy('id')->get();
+        // Только позиции, которые уже были в заявке к моменту ответа: позиции,
+        // добавленные позже (другой тред, другой поставщик), этому поставщику
+        // не задавали — иначе модель отметит их «нет в прайсе» = ложный отказ.
+        $requestItems = $request->items()
+            ->where('is_active', true)
+            ->when($reply->sent_at !== null, fn ($q) => $q->where('created_at', '<=', $reply->sent_at))
+            ->orderBy('id')
+            ->get();
         if ($requestItems->isEmpty()) {
             return new \Illuminate\Database\Eloquent\Collection;
         }
