@@ -117,6 +117,23 @@ UniSystem d.o.o.
         $this->assertStringNotContainsString('39,58', $out);
     }
 
+    /** Outlook даёт только имя без адреса: «From: Alexander R MyZiP» — наше эхо. */
+    public function test_forwarded_own_letter_by_brand_name_is_not_included(): void
+    {
+        $body = "See below
+
+From: Alexander R MyZiP
+Date: 2026-08-18 19:13
+To: steven@oss-elevator-parts.com
+Subject: OSS-222
+
+Hi Steve, all is OK, price 1 234,00 USD confirmed.
+";
+        $out = $this->relevant($body);
+
+        $this->assertSame('See below', $out);
+    }
+
     public function test_substantive_reply_without_pointer_keeps_only_own_text(): void
     {
         $own = str_repeat('Мы проверили позицию, аналог есть под заказ, срок четыре недели, уточняем условия. ', 6);

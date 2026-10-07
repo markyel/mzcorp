@@ -310,7 +310,8 @@ class SupplierOfferParser
      */
     private function forwardedBody(string $rest): ?array
     {
-        $lines = preg_split('/?
+        $lines = preg_split('/
+?
 /', $rest) ?: [];
         // Apple Mail/Outlook пересылают с «> » перед КАЖДОЙ строкой чужого письма
         // («> Начало переадресованного письма: > > Отправитель: …»). Снимаем один
@@ -359,13 +360,8 @@ class SupplierOfferParser
         }
 
         // Эхо нашего же письма (RFQ без цен) — не берём.
-        if (preg_match('/[\w.+-]+@([\w.-]+)/u', $from, $em) === 1) {
-            $domain = mb_strtolower($em[1]);
-            foreach ((array) config('services.mail.internal_domains', []) as $ours) {
-                if ($domain === mb_strtolower((string) $ours)) {
-                    return ['from' => $from, 'body' => null];
-                }
-            }
+        if ($this->isOurSender($from)) {
+            return ['from' => $from, 'body' => null];
         }
 
         $body = trim(implode("\n", array_slice($lines, $i)));
@@ -377,6 +373,37 @@ class SupplierOfferParser
         $body = $this->stripQuotedReply($body, guardTop: false);
 
         return ['from' => $from, 'body' => mb_substr($body, 0, self::MAX_FORWARDED_CHARS)];
+    }
+
+    /**
+     * Отправитель пересланного письма — мы сами? По домену адреса; а если
+     * Outlook/Foxmail дали только имя («From: Alexander R MyZiP»), — по бренду
+     * в имени или совпадению с именем пользователя системы.
+     */
+    private function isOurSender(string $from): bool
+    {
+        $domains = array_map(fn ($d) => mb_strtolower((string) $d), (array) config('services.mail.internal_domains', []));
+        if (preg_match('/[\w.+-]+@([\w.-]+)/u', $from, $em) === 1) {
+            return in_array(mb_strtolower($em[1]), $domains, true);
+        }
+
+        $name = mb_strtolower(trim($from));
+        $brands = array_merge(
+            ['myzip', 'мой зип', 'mylift', 'мой лифт', 'mzcorp'],
+            array_map(fn ($d) => (string) strtok($d, '.'), $domains),
+        );
+        foreach ($brands as $brand) {
+            if ($brand !== '' && str_contains($name, $brand)) {
+                return true;
+            }
+        }
+        try {
+            return \App\Models\User::query()
+                ->whereRaw('lower(name) = ?', [$name])
+                ->exists();
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     /**
