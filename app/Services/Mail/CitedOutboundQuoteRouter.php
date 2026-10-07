@@ -52,22 +52,27 @@ class CitedOutboundQuoteRouter
      *   1. Слово-документ + номер: «счёт № 10432», «по счету 10432», «КП 364274»,
      *      «коммерческое предложение №369647 от …», «invoice 10432».
      *   2. Наш префикс: «МЗ-10551» (так называются наши файлы и так мы пишем в теле).
-     *   3. Наш формат темы: номер первым словом («369647 Re: Заявка», «[369796]»),
-     *      в т.ч. в строке «Тема:/Subject:» цитаты.
-     *   4. Приложен НАШ документ: PDF, в тексте которого заголовок «Счет на оплату
-     *      № N» / «Коммерческое предложение №N» И наш ИНН (services.company.own_inns).
-     *      Картинки (фото/сканы) не смотрим вовсе; имена не-картинок — только по п.2.
+     *   3. Тема письма: наши темы несут номер документа в любом месте («369647 Re:
+     *      Заявка», «Re: Фотобарьер (366639)», «Re: 1399/ 360560», «[369796]»), а
+     *      адресов и реквизитов в теме не бывает — берём все числа темы, в т.ч. из
+     *      строки «Тема:/Subject:» цитаты в теле.
+     *   4. PDF-вложение: текст любого PDF — по п.1–2 (заказ клиента со строкой
+     *      «КП № N»); НАШ документ (заголовок 1С «Счет на оплату № N» /
+     *      «Коммерческое предложение №N» И наш ИНН, services.company.own_inns) —
+     *      по номеру из заголовка, и это источник «вложение». Картинки (фото/сканы)
+     *      не смотрим вовсе; имена не-картинок — только по п.2.
      */
-    private const DOC_REF_RE = '/(?<![\p{L}\d])(?:сч[её]т(?:а|у|ом|е|ы|ов|ах)?|сч[её]т-фактур\p{L}*|с\/ф|кп|коммерческ\p{L}+\s+предложени\p{L}+|предложени\p{L}+|оферт\p{L}*|invoice|proforma|инвойс\p{L}*|quot(?:e|ation))\s*(?:на\s+оплату\s*)?(?:от\s+\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}\s*(?:г\.?\s*)?)?(?:№|#|no\.?|n|номер)?\s*(?:мз-?\s?)?(\d{5,8})(?!\d)/iu';
+    private const DOC_REF_RE = '/(?<![\p{L}\d])(?:сч[её]т(?:а|у|ом|е|ы|ов|ах)?|сч[её]т-фактур\p{L}*|с\/ф|кп|коммерческ\p{L}+\s+предложени\p{L}+|предложени\p{L}+|оферт\p{L}*|invoice|proforma|инвойс\p{L}*|quot(?:e|ation))\s*(?:на\s+оплату\s*)?(?:от\s+\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}\s*(?:г\.?\s*)?)?(?:№|#|no\.?|n|номер)?[\s*_«»"(]*(?:мз-?\s?)?(\d{5,8})(?!\d)/iu';
 
     /** «МЗ-10551» / «МЗ 369647» — наш префикс документов (файлы и тело наших писем). */
     private const OUR_PREFIX_RE = '/(?<![\p{L}\d])мз-?\s?(\d{5,8})(?!\d)/iu';
 
-    /** Тема в нашем формате: номер первым словом после Re:/Fwd:, возможно в скобках. */
-    private const SUBJECT_LEAD_RE = '/^\s*(?:(?:re|fwd?|fw|aw|sv|отв)\s*:\s*)*\[?(\d{5,8})\]?(?!\d)/iu';
+    /** Любое число темы (после scrub: без ссылок, артикулов и наших кодов). */
+    private const SUBJECT_NUMBER_RE = '/(?<!\d)(\d{5,8})(?!\d)/';
 
-    /** Та же тема в заголовке цитаты/пересылки внутри тела. */
-    private const QUOTED_SUBJECT_RE = '/^\s*>?\s*(?:тема|subject)\s*:\s*(?:(?:re|fwd?|fw|aw|sv|отв)\s*:\s*)*\[?(\d{5,8})\]?(?!\d)/imu';
+    /** Строка темы в заголовке цитаты/пересылки внутри тела — числа берём из неё целиком. */
+    private const QUOTED_SUBJECT_LINE_RE = '/^[\s>]*(?:тема|subject)\s*:([^
+]*)/imu';
 
     /** Заголовок нашего документа в тексте PDF (1С). */
     private const OUR_PDF_HEADER_RE = '/(?:сч[её]т\s+на\s+оплату|коммерческое\s+предложение)\s*№\s*(\d{5,8})(?!\d)/iu';
@@ -283,14 +288,13 @@ class CitedOutboundQuoteRouter
         $numbers = [];
 
         $subject = $this->scrub((string) $message->subject);
-        $numbers = array_merge($numbers, $this->matchAll(self::SUBJECT_LEAD_RE, $subject));
-        $numbers = array_merge($numbers, $this->matchAll(self::DOC_REF_RE, $subject));
-        $numbers = array_merge($numbers, $this->matchAll(self::OUR_PREFIX_RE, $subject));
+        $numbers = array_merge($numbers, $this->matchAll(self::SUBJECT_NUMBER_RE, $subject));
 
         $body = $this->scrub((string) $message->body_plain);
-        $numbers = array_merge($numbers, $this->matchAll(self::DOC_REF_RE, $body));
-        $numbers = array_merge($numbers, $this->matchAll(self::OUR_PREFIX_RE, $body));
-        $numbers = array_merge($numbers, $this->matchAll(self::QUOTED_SUBJECT_RE, $body));
+        $numbers = array_merge($numbers, $this->explicitReferences($body));
+        foreach ($this->matchAll(self::QUOTED_SUBJECT_LINE_RE, $body) as $quotedSubject) {
+            $numbers = array_merge($numbers, $this->matchAll(self::SUBJECT_NUMBER_RE, $quotedSubject));
+        }
 
         $hasOurDocument = false;
         foreach ($message->attachments as $att) {
@@ -303,14 +307,33 @@ class CitedOutboundQuoteRouter
                 $numbers = array_merge($numbers, $fromName);
                 $hasOurDocument = true;
             }
-            $fromPdf = $this->ourDocumentNumbers($this->attachmentPdfText($att));
-            if ($fromPdf !== []) {
-                $numbers = array_merge($numbers, $fromPdf);
+            $pdfText = $this->attachmentPdfText($att);
+            if ($pdfText === '') {
+                continue;
+            }
+            // Чужой PDF (заказ клиента, спецификация) — только явная ссылка в тексте.
+            $numbers = array_merge($numbers, $this->explicitReferences($this->scrub($pdfText)));
+            $fromOurPdf = $this->ourDocumentNumbers($pdfText);
+            if ($fromOurPdf !== []) {
+                $numbers = array_merge($numbers, $fromOurPdf);
                 $hasOurDocument = true;
             }
         }
 
         return [array_values(array_unique($numbers)), $hasOurDocument];
+    }
+
+    /**
+     * Явные ссылки в тексте: слово-документ + номер и наш префикс «МЗ-N».
+     *
+     * @return list<string>
+     */
+    private function explicitReferences(string $text): array
+    {
+        return array_merge(
+            $this->matchAll(self::DOC_REF_RE, $text),
+            $this->matchAll(self::OUR_PREFIX_RE, $text),
+        );
     }
 
     /**

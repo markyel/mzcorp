@@ -101,18 +101,45 @@ class CitedOutboundQuoteRouterOwnTextTest extends TestCase
         $this->assertSame([[], false], $this->candidates('', 'Россия, 357600, Ставропольский край — выставите счёт'));
     }
 
-    /** Наш формат темы: номер первым словом, в т.ч. в заголовке цитаты. */
-    public function test_subject_in_our_format(): void
+    /** Тема: наши темы несут номер в любом месте; в теле — только строка «Тема:/Subject:» цитаты. */
+    public function test_subject_numbers_anywhere_and_quoted_subject_line(): void
     {
         $this->assertSame([['369647'], false], $this->candidatesWithSubject('Re: 369647 Re: Заявка на ролик', 'Готовы заказать'));
         $this->assertSame([['369796'], false], $this->candidatesWithSubject('Re: [369796] Запрос', 'ок'));
+        $this->assertSame([['366639'], false], $this->candidatesWithSubject('Re: Фотобарьер (366639)', 'Пришлите счет на тот, что в наличии'));
+        $this->assertSame([['360560'], false], $this->candidatesWithSubject('Re: 1399/ 360560', 'пришлите счет на 1 шт Карта 20006175'));
+        // Артикул и ссылка в теме вырезаются, как и в теле.
+        $this->assertSame([[], false], $this->candidatesWithSubject('Re: Выключатель ВП73-10432', 'ок'));
+
+        $this->assertSame([['364531'], false], $this->candidates('', "Счет во вложении?
+
+From: Дмитрий
+Subject: Re: Заказ Жемчужная Плаза/ 364531/ 8728
+Счет во вложении."));
         $this->assertSame([['368531'], false], $this->candidates('', "Выставите счёт
 
-От: Агрызков
-Тема: 368531 Re: Заявка
+> От: Агрызков
+> Тема: 368531 Re: Заявка
 "));
-        // Число не первым словом темы и без слова-документа — не сигнал.
-        $this->assertSame([[], false], $this->candidatesWithSubject('Re: Заявка 369647 ролик', 'ок'));
+        // Число в произвольной строке цитаты — не сигнал.
+        $this->assertSame([[], false], $this->candidates('', "ок
+
+> Карта: 10000982
+> Бонус 365145 начислен"));
+    }
+
+    /** Цитата нашего напоминания: «коммерческое предложение *364657* от …» — звёздочки не мешают. */
+    public function test_our_reminder_quote_is_an_explicit_reference(): void
+    {
+        $body = "Прошу выставить счет.
+
+> Здравствуйте, Николай!
+> Мы отправляли вам коммерческое предложение *364657* от 19.08.2026 по заявке *M-2026-12659* (4 дн. назад).
+";
+        $this->assertSame([['364657'], false], $this->candidates('', $body));
+        $this->assertSame([['366118'], false], $this->candidates('', "Чем отличаются?
+
+02.09.2026, Илья: Добрый день! КП366118 во вложении"));
     }
 
     /** M-2026-18326: «ВП73-10432» — артикул, а 10432 — номер нашего КП по чужой заявке. */
