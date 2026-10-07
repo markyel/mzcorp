@@ -41,12 +41,16 @@ class SupplierOfferParser
     {
         $zero = ['quoted' => 0, 'refused' => 0, 'skipped' => 0];
 
-        $items = $inquiry->items()->with([
-            'requestItem:id,parsed_name,parsed_article,parsed_qty,parsed_unit',
-            // Позиция-центричный RFQ из «Снабжения» (Фаза 4B): request_item_id=null,
-            // имя/OEM берём из каталога — иначе LLM сопоставляет ответ вслепую.
-            'catalogItem:id,name,brand_article',
-        ])->get();
+        $items = $this->loadItems($inquiry);
+        if ($items->isEmpty()) {
+            // Инквайри без позиций — ветка, которой не было при отправке RFQ
+            // (запрос ушёл внутреннему коллеге-закупщику, а ответ поставщика
+            // пришёл пересылкой и завёл инквайри задним числом по теме). Если
+            // ветка привязана к заявке, позиции берём из неё — иначе ответ с
+            // ценами молча остаётся без офферов. Кейс M-2026-12942: два мотора
+            // (22 кВт €619, 16 кВт в PDF COAM) — ни одной цены в «Поставщиках».
+            $items = $this->seedItemsFromRequest($inquiry);
+        }
         if ($items->isEmpty()) {
             return $zero;
         }
@@ -172,6 +176,55 @@ class SupplierOfferParser
         Log::info('SupplierOfferParser: parsed reply', ['inquiry_id' => $inquiry->id, 'message_id' => $reply->id] + $counts);
 
         return $counts;
+    }
+
+    /**
+     * Позиции инквайри с данными для промпта.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, SupplierInquiryItem>
+     */
+    private function loadItems(SupplierInquiry $inquiry): \Illuminate\Database\Eloquent\Collection
+    {
+        return $inquiry->items()->with([
+            'requestItem:id,parsed_name,parsed_article,parsed_qty,parsed_unit',
+            // Позиция-центричный RFQ из «Снабжения» (Фаза 4B): request_item_id=null,
+            // имя/OEM берём из каталога — иначе LLM сопоставляет ответ вслепую.
+            'catalogItem:id,name,brand_article',
+        ])->get();
+    }
+
+    /**
+     * Засеять позиции инквайри активными позициями связанной заявки — так же,
+     * как их создаёт SupplierDispatchService при отправке RFQ.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, SupplierInquiryItem>
+     */
+    private function seedItemsFromRequest(SupplierInquiry $inquiry): \Illuminate\Database\Eloquent\Collection
+    {
+        $request = $inquiry->relatedRequest;
+        if ($request === null) {
+            return new \Illuminate\Database\Eloquent\Collection;
+        }
+        $requestItems = $request->items()->where('is_active', true)->orderBy('id')->get();
+        if ($requestItems->isEmpty()) {
+            return new \Illuminate\Database\Eloquent\Collection;
+        }
+        foreach ($requestItems as $ri) {
+            SupplierInquiryItem::create([
+                'supplier_inquiry_id' => $inquiry->id,
+                'request_item_id' => $ri->id,
+                'catalog_item_id' => $ri->catalog_item_id,
+                'item_name' => $ri->parsed_name,
+                'status' => 'pending',
+            ]);
+        }
+        Log::info('SupplierOfferParser: inquiry had no items — seeded from request', [
+            'inquiry_id' => $inquiry->id,
+            'request_id' => $request->id,
+            'items' => $requestItems->count(),
+        ]);
+
+        return $this->loadItems($inquiry);
     }
 
     /**
