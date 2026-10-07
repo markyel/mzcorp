@@ -77,6 +77,37 @@ TXT;
         $this->assertStringNotContainsString('Oggetto:', $out);
     }
 
+    /** Apple Mail: пересланное письмо целиком под «> » (inquiry 4727, 5116). */
+    public function test_quoted_forward_apple_mail_style_is_parsed(): void
+    {
+        $body = "См ниже
+With best regards,
+Alexander Rodenkov
+UniSystem d.o.o.
+
+> Начало переадресованного письма:
+> 
+> Отправитель: Gloria Bergamaschi <gloria.bergamaschi@hydroniclift.it>
+> Тема: R: Request [M-2026-15199] / [366855] [RFQ-ZHSKTBK]
+> Дата: 9 сентября 2026 г. в 16:54:41 GMT+2
+> Кому: UniSystem Alex <alex@unisystem.si>
+> 
+> Dear Alexander,
+> please find our offer: valve VL 1/2 — 85,00 EUR net each, delivery 2 weeks.
+> 
+> Best regards
+> Gloria
+> 
+>> Il 09/09/2026 10:12, UniSystem Alex ha scritto:
+>> Please quote valve VL 1/2 - 2 pcs
+";
+        $out = $this->relevant($body);
+
+        $this->assertStringContainsString('[Пересланное письмо от Gloria Bergamaschi', $out);
+        $this->assertStringContainsString('85,00 EUR', $out);
+        $this->assertStringNotContainsString('Please quote valve', $out);
+    }
+
     public function test_forwarded_own_letter_is_not_included(): void
     {
         $body = "См ниже\n\n-------- Пересылаемое сообщение --------\nОт: Андрей Васюхно <andrey.vasukhno@myzip.ru>\nТема: Price request — [M-2026-18330]\n\nDear Clara, please quote 1) K4TA 5 pcs, price 39,58\n";

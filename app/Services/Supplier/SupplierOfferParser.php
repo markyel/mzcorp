@@ -310,11 +310,24 @@ class SupplierOfferParser
      */
     private function forwardedBody(string $rest): ?array
     {
-        $lines = preg_split('/\r?\n/', $rest) ?: [];
+        $lines = preg_split('/?
+/', $rest) ?: [];
+        // Apple Mail/Outlook пересылают с «> » перед КАЖДОЙ строкой чужого письма
+        // («> Начало переадресованного письма: > > Отправитель: …»). Снимаем один
+        // уровень цитирования, если он у большинства непустых строк — иначе
+        // заголовок не распознать, а тело срежется как цитата.
+        $nonEmpty = array_values(array_filter($lines, fn ($l) => trim($l) !== ''));
+        $quoted = count(array_filter($nonEmpty, fn ($l) => preg_match('/^\s*>/', $l) === 1));
+        if ($nonEmpty !== [] && $quoted >= (int) ceil(count($nonEmpty) * 0.8)) {
+            $lines = array_map(fn ($l) => preg_replace('/^\s*>\s?/', '', $l) ?? $l, $lines);
+        }
         $i = 0;
+        while ($i < count($lines) && trim($lines[$i]) === '') {
+            $i++;
+        }
         // Маркер пересылки — необязателен (Outlook даёт сразу заголовок).
-        if (isset($lines[0]) && preg_match(self::FORWARD_MARKERS, $lines[0]) === 1) {
-            $i = 1;
+        if (isset($lines[$i]) && preg_match(self::FORWARD_MARKERS, $lines[$i]) === 1) {
+            $i++;
         }
         // Заголовок: несколько строк «Поле: значение» (с пустыми между ними).
         $from = null;
