@@ -18,16 +18,16 @@ use Smalot\PdfParser\Parser;
  * Детектор «клиент цитирует наш КП/счёт».
  *
  * Клиент присылает письмо со ссылкой на наш ранее выданный КП (или счёт) —
- * по номеру в теме/теле, ИЛИ приложив наш КП файлом (номер в имени файла или
- * в тексте PDF). Не важно, на какой e-mail был выдан КП (его мог переслать
- * коллега). Мы находим заявку, по которой выдан цитируемый КП, и маршрутизируем
- * письмо туда со статусом «ждёт счёт» вместо создания новой заявки.
+ * явно называет номер («счёт № 10432», «КП 364274», «МЗ-10551», наша тема
+ * «369647 Re: …») ИЛИ прикладывает наш PDF. Не важно, на какой e-mail был
+ * выдан КП (его мог переслать коллега). Мы находим заявку, по которой выдан
+ * цитируемый документ, и маршрутизируем письмо туда со статусом «ждёт счёт»
+ * вместо создания новой заявки.
  *
- * Матчинг надёжный: из письма/вложений достаём числа-кандидаты и ПЕРЕСЕКАЕМ с
- * реальными `outbound_quotes.document_number` наших исходящих документов —
- * совпадение с нашим номером = сильный сигнал (не парсим хрупкие «КП №…»).
- * Гейт от ложных совпадений: письмо должно упоминать счёт/КП/оплату ЛИБО номер
- * пришёл из вложения. Несколько КП → берём с наибольшей суммой.
+ * Кандидаты — только ЯВНЫЕ ссылки (см. константы ниже), и они ПЕРЕСЕКАЮТСЯ с
+ * реальными `outbound_quotes.document_number`. Голое число без контекста,
+ * число в имени файла или на картинке — не сигнал: оно имеет право случайно
+ * совпасть с номером нашего документа. Несколько КП → берём с наибольшей суммой.
  *
  * ВАЖНО: просьбу о счёте (invoice_intent) ищем только в СОБСТВЕННОМ тексте
  * клиента, без цитаты нашего письма. Кейс M-2026-12166: клиент ответил «а с
@@ -41,19 +41,36 @@ use Smalot\PdfParser\Parser;
  */
 class CitedOutboundQuoteRouter
 {
-    /** Контекст «счёт/КП/оплата» в тексте письма (гейт матчинга номера). */
-    private const KEYWORD_RE = '/сч[её]т|на\s+оплат|коммерческое\s+предложение|\bкп\b|invoice|инвойс/iu';
-
     /**
-     * Числа-кандидаты: 5–8 цифр (наши document_number обычно 6).
+     * Политика (2026-10-07): номер нашего документа ищем ТОЛЬКО там, где клиент
+     * на него явно ссылается. Голое число в тексте, число в имени файла или на
+     * картинке имеет право случайно совпасть с номером нашего КП/счёта (с
+     * сентября 2026 номера пятизначные — коллизии регулярные: индекс в подписи
+     * M-2026-3642, хвост UUID фото M-2026-17776, артикул ВП73-10432 M-2026-18326).
      *
-     * Границ сознательно нет. Пробовал ограничить буквами (чтобы не ловить
-     * середину артикула FAA24350BL2) — корпус из 542 писем разошёлся в 39
-     * местах: номера в реальных письмах стоят вплотную к буквам и служебным
-     * знакам чаще, чем кажется. Лишние кандидаты безвредны: они всё равно
-     * сверяются с таблицей наших документов.
+     * Сигналы:
+     *   1. Слово-документ + номер: «счёт № 10432», «по счету 10432», «КП 364274»,
+     *      «коммерческое предложение №369647 от …», «invoice 10432».
+     *   2. Наш префикс: «МЗ-10551» (так называются наши файлы и так мы пишем в теле).
+     *   3. Наш формат темы: номер первым словом («369647 Re: Заявка», «[369796]»),
+     *      в т.ч. в строке «Тема:/Subject:» цитаты.
+     *   4. Приложен НАШ документ: PDF, в тексте которого заголовок «Счет на оплату
+     *      № N» / «Коммерческое предложение №N» И наш ИНН (services.company.own_inns).
+     *      Картинки (фото/сканы) не смотрим вовсе; имена не-картинок — только по п.2.
      */
-    private const NUMBER_RE = '/\d{5,8}/';
+    private const DOC_REF_RE = '/(?<![\p{L}\d])(?:сч[её]т(?:а|у|ом|е|ы|ов|ах)?|сч[её]т-фактур\p{L}*|с\/ф|кп|коммерческ\p{L}+\s+предложени\p{L}+|предложени\p{L}+|оферт\p{L}*|invoice|proforma|инвойс\p{L}*|quot(?:e|ation))\s*(?:на\s+оплату\s*)?(?:от\s+\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}\s*(?:г\.?\s*)?)?(?:№|#|no\.?|n|номер)?\s*(?:мз-?\s?)?(\d{5,8})(?!\d)/iu';
+
+    /** «МЗ-10551» / «МЗ 369647» — наш префикс документов (файлы и тело наших писем). */
+    private const OUR_PREFIX_RE = '/(?<![\p{L}\d])мз-?\s?(\d{5,8})(?!\d)/iu';
+
+    /** Тема в нашем формате: номер первым словом после Re:/Fwd:, возможно в скобках. */
+    private const SUBJECT_LEAD_RE = '/^\s*(?:(?:re|fwd?|fw|aw|sv|отв)\s*:\s*)*\[?(\d{5,8})\]?(?!\d)/iu';
+
+    /** Та же тема в заголовке цитаты/пересылки внутри тела. */
+    private const QUOTED_SUBJECT_RE = '/^\s*>?\s*(?:тема|subject)\s*:\s*(?:(?:re|fwd?|fw|aw|sv|отв)\s*:\s*)*\[?(\d{5,8})\]?(?!\d)/imu';
+
+    /** Заголовок нашего документа в тексте PDF (1С). */
+    private const OUR_PDF_HEADER_RE = '/(?:сч[её]т\s+на\s+оплату|коммерческое\s+предложение)\s*№\s*(\d{5,8})(?!\d)/iu';
 
     /**
      * UUID и длинные hex-хэши (имена фото с телефона, cid картинок) — вырезаем
@@ -62,14 +79,12 @@ class CitedOutboundQuoteRouter
      * считается надёжным → письмо приклеилось к чужой закрытой сделке.
      */
     private const HASH_RE = '/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|(?<![0-9a-z])(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{12,}(?![0-9a-z])/i';
-
     /**
      * Наши коды — номер заявки «M-2026-10317» и артикул каталога «M10317».
      * Счета с сентября 2026 пятизначные (10246…), и хвосты этих кодов совпадают
      * с номерами чужих счетов. Вырезаем до поиска номеров.
      */
     private const OWN_CODE_RE = '/(?<![\p{L}\d])[mм]-\d{4}-\d{3,6}(?!\d)|(?<![\p{L}\d])[mм]\d{4,6}(?!\d)/iu';
-
     /**
      * Артикул с буквенно-цифровым префиксом через дефис: «ВП73-10432»,
      * «FAA24-350BL2», «КС00-002365». Число после дефиса — часть артикула, а не
@@ -82,31 +97,11 @@ class CitedOutboundQuoteRouter
      * остаётся — числа через дефис встречаются и в цитатах наших писем.
      */
     private const ARTICLE_RE = '/(?<![\p{L}\d])\p{L}{1,6}\d{1,4}-\d{5,8}(?![\p{L}\d])/u';
-
     /**
      * Ссылки: слаги каталогов («…/mikropereklyuchatel-vp-73-21-10432.html»),
      * метки ysclid/utm — числа внутри URL никогда не номер нашего документа.
      */
     private const URL_RE = '~https?://\S+~iu';
-
-    /**
-     * Контекст, в котором шестизначное число — не номер документа, а адрес.
-     *
-     * Кейс M-2026-3642: клиент ООО «Санаторий Русь» прислал новую заявку, а в
-     * подписи стоял почтовый индекс «Россия, 357600, Ставропольский край» —
-     * ровно номер нашего счёта по чужой закрытой сделке трёхмесячной давности.
-     * Письмо приклеилось к ней как постпродажа.
-     *
-     * Требовать маркер «счёт/№» рядом с числом нельзя: в цитате нашего письма
-     * номер стоит просто в теме («Тема: 368531 Re: Заявка …»), и корпус из 542
-     * писем на такой строгости разошёлся в 134 местах. Поэтому глушим узко —
-     * только индекс, стоящий вплотную к стране или к населённому пункту.
-     */
-    /** Что стоит прямо перед индексом: «Россия, 357600». */
-    private const ADDRESS_BEFORE_RE = '/(?:росси[яи]|\bрф)\s*,?\s*$/iu';
-
-    /** Что идёт сразу после индекса: «357600, Ставропольский край», «357600, г. Ессентуки». */
-    private const ADDRESS_AFTER_RE = '/^\s*,?\s*(?:г\.|город|пос\.|с\.|обл\.|область|респ|[А-ЯЁ][а-яё-]+\s+(?:кра[йя]|обл|респ))/u';
 
     private const MAX_PDF_BYTES = 8 * 1024 * 1024;
 
@@ -119,21 +114,15 @@ class CitedOutboundQuoteRouter
      */
     public function detect(EmailMessage $message): ?array
     {
-        // Номер КП ищем во ВСЁМ тексте (в т.ч. в цитате нашего письма — клиент
-        // часто отвечает «выставите счёт» под нашим КП, и номер только там):
-        // это нужно для ПРИВЯЗКИ письма к заявке. А вот просьба о счёте
-        // (invoice_intent) — только из собственного текста клиента.
+        // Явные ссылки на наш документ ищем во ВСЁМ тексте (в т.ч. в цитате
+        // нашего письма — клиент часто отвечает «выставите счёт» под нашим КП,
+        // и номер только там): это нужно для ПРИВЯЗКИ письма к заявке. А вот
+        // просьба о счёте (invoice_intent) — только из собственного текста клиента.
         [$candidates, $hasAttachmentSource] = $this->collectCandidates($message);
         if ($candidates === []) {
             return null;
         }
 
-        $text = mb_strtolower((string) $message->subject."\n".(string) $message->body_plain);
-        $keywordHit = preg_match(self::KEYWORD_RE, $text) === 1;
-        if (! $keywordHit && ! $hasAttachmentSource) {
-            // Числа без контекста счёта/КП и не из вложения — не доверяем.
-            return null;
-        }
         $invoiceIntent = $this->hasInvoiceIntent((string) $message->subject, $this->ownBodyText($message));
 
         $rows = DB::table('outbound_quotes')
@@ -284,43 +273,81 @@ class CitedOutboundQuoteRouter
     }
 
     /**
-     * Числа-кандидаты из темы/тела/имён вложений/текста PDF-вложений.
+     * Номера наших документов, на которые письмо ссылается явно (см. политику
+     * у констант). Картинки игнорируются целиком.
      *
-     * @return array{0: array<int,string>, 1: bool} [числа, был ли источник-вложение]
+     * @return array{0: array<int,string>, 1: bool} [номера, приложен ли наш документ]
      */
     private function collectCandidates(EmailMessage $message): array
     {
-        // Тема — свободно: наши же письма выглядят как «368531 Re: Заявка …»,
-        // а адресов и реквизитов в теме не бывает.
-        $texts = [(string) $message->subject];
-        $hasAttachmentSource = false;
+        $numbers = [];
 
-        // Тело — всё, кроме чисел в адресной строке (индекс почты).
-        // Наши коды и хэши вырезаем ДО извлечения: дальше в $texts уже числа,
-        // а не текст (M-2026-17687: «по следующим позициям: M10258» от Liftway
-        // = номер чужого счёта 10258).
-        $texts = array_merge($texts, $this->numbersOutsideAddresses(
-            $this->scrub((string) $message->body_plain)
-        ));
+        $subject = $this->scrub((string) $message->subject);
+        $numbers = array_merge($numbers, $this->matchAll(self::SUBJECT_LEAD_RE, $subject));
+        $numbers = array_merge($numbers, $this->matchAll(self::DOC_REF_RE, $subject));
+        $numbers = array_merge($numbers, $this->matchAll(self::OUR_PREFIX_RE, $subject));
 
+        $body = $this->scrub((string) $message->body_plain);
+        $numbers = array_merge($numbers, $this->matchAll(self::DOC_REF_RE, $body));
+        $numbers = array_merge($numbers, $this->matchAll(self::OUR_PREFIX_RE, $body));
+        $numbers = array_merge($numbers, $this->matchAll(self::QUOTED_SUBJECT_RE, $body));
+
+        $hasOurDocument = false;
         foreach ($message->attachments as $att) {
-            $fn = $this->scrub((string) $att->filename);
-            if ($fn !== '') {
-                $texts[] = $fn;
-                if (preg_match(self::NUMBER_RE, $fn) === 1) {
-                    $hasAttachmentSource = true; // номер в имени файла
-                }
+            if (str_starts_with(mb_strtolower((string) $att->mime_type), 'image/')) {
+                continue; // фото/сканы: число на картинке — не ссылка на документ
             }
-            $pdfText = $this->attachmentPdfText($att);
-            if ($pdfText !== '') {
-                $texts[] = $pdfText;
-                $hasAttachmentSource = true;
+            // Имя файла — только наш префикс («Счет МЗ-10551 от ….pdf»).
+            $fromName = $this->matchAll(self::OUR_PREFIX_RE, $this->scrub((string) $att->filename));
+            if ($fromName !== []) {
+                $numbers = array_merge($numbers, $fromName);
+                $hasOurDocument = true;
+            }
+            $fromPdf = $this->ourDocumentNumbers($this->attachmentPdfText($att));
+            if ($fromPdf !== []) {
+                $numbers = array_merge($numbers, $fromPdf);
+                $hasOurDocument = true;
             }
         }
 
-        preg_match_all(self::NUMBER_RE, $this->scrub(implode(' ', $texts)), $m);
+        return [array_values(array_unique($numbers)), $hasOurDocument];
+    }
 
-        return [array_values(array_unique($m[0] ?? [])), $hasAttachmentSource];
+    /**
+     * Номера из текста PDF, если это НАШ документ: заголовок 1С
+     * («Счет на оплату № N» / «Коммерческое предложение №N») и наш ИНН.
+     * Чужой счёт с таким же заголовком, но без нашего ИНН — не сигнал.
+     *
+     * @return list<string>
+     */
+    private function ourDocumentNumbers(string $pdfText): array
+    {
+        if ($pdfText === '') {
+            return [];
+        }
+        $digits = (string) preg_replace('/\s+/u', '', $pdfText);
+        $isOurs = false;
+        foreach ((array) config('services.company.own_inns', []) as $inn) {
+            if ((string) $inn !== '' && str_contains($digits, (string) $inn)) {
+                $isOurs = true;
+                break;
+            }
+        }
+        if (! $isOurs) {
+            return [];
+        }
+
+        return $this->matchAll(self::OUR_PDF_HEADER_RE, $pdfText);
+    }
+
+    /** @return list<string> первая группа каждого совпадения */
+    private function matchAll(string $re, string $text): array
+    {
+        if ($text === '' || ! preg_match_all($re, $text, $m)) {
+            return [];
+        }
+
+        return array_values(array_filter($m[1] ?? [], fn ($v) => $v !== ''));
     }
 
     /**
@@ -335,46 +362,6 @@ class CitedOutboundQuoteRouter
             ' ',
             $text,
         );
-    }
-
-    /**
-     * Числа из тела письма, кроме стоящих в адресе.
-     *
-     * Смотрим окно вокруг числа: если рядом «Россия», «край», «ул.» — это
-     * индекс из подписи, а не номер счёта. Окно небольшое (±60 знаков): адрес
-     * пишется одной строкой, а упоминание документа в том же предложении, что
-     * и город, встречается редко.
-     *
-     * @return list<string>
-     */
-    private function numbersOutsideAddresses(string $body): array
-    {
-        if (trim($body) === '') {
-            return [];
-        }
-
-        if (! preg_match_all(self::NUMBER_RE, $body, $m, PREG_OFFSET_CAPTURE)) {
-            return [];
-        }
-
-        $out = [];
-        foreach ($m[0] as [$number, $offset]) {
-            // Куски режутся по байтам и могут начаться с половины буквы —
-            // regex с /u на битой строке молча не сработает. Чиним кодировку.
-            $before = mb_convert_encoding(substr($body, max(0, $offset - 24), min(24, $offset)), 'UTF-8', 'UTF-8');
-            $after = mb_convert_encoding(substr($body, $offset + strlen($number), 28), 'UTF-8', 'UTF-8');
-
-            $isPostalIndex = strlen($number) === 6
-                && (preg_match(self::ADDRESS_BEFORE_RE, $before) === 1
-                    || preg_match(self::ADDRESS_AFTER_RE, $after) === 1);
-            if ($isPostalIndex) {
-                continue;
-            }
-
-            $out[] = $number;
-        }
-
-        return $out;
     }
 
     /** Текст-слой PDF-вложения (Smalot). '' если не PDF/большой/сбой. */

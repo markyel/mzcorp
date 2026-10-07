@@ -72,23 +72,47 @@ class CitedOutboundQuoteRouterOwnTextTest extends TestCase
         $this->assertFalse($this->router->hasInvoiceIntent('Re: Запрос приводное колесо', 'Есть ли в наличии?'));
     }
 
-    /** M-2026-17776: хвост UUID в имени фото («…4f49dea10304.jpg») — не номер нашего КП. */
-    public function test_uuid_photo_name_gives_no_document_number(): void
+    /** M-2026-17776: картинки не смотрим вовсе; имя не-картинки — только наш префикс «МЗ-N». */
+    public function test_attachment_names_count_only_with_our_prefix_and_never_for_images(): void
     {
-        $candidates = fn (string $filename): array => $this->candidates($filename);
-
-        $this->assertSame([[], false], $candidates('c7b0d328-3361-47b1-a905-4f49dea10304.jpg'));
-        $this->assertSame([[], false], $candidates('IMG_3f9a0c1e4b7d10304a.jpg'));
-        $this->assertSame([['355979'], true], $candidates('Предложение МЗ-355979.pdf'));
-        $this->assertSame([['10304'], true], $candidates('Счет 10304.jpg'));
+        $this->assertSame([[], false], $this->candidates('c7b0d328-3361-47b1-a905-4f49dea10304.jpg', 'Добрый день', 'image/jpeg'));
+        $this->assertSame([[], false], $this->candidates('Счет 10304.jpg', 'Добрый день', 'image/jpeg'));
+        $this->assertSame([[], false], $this->candidates('Счет МЗ-10304.jpg', 'Добрый день', 'image/jpeg'));
+        $this->assertSame([['355979'], true], $this->candidates('Предложение МЗ-355979 от 2026-10-07_12-21-48.pdf', 'Добрый день', 'application/pdf'));
+        $this->assertSame([[], false], $this->candidates('Счет 10304.pdf', 'Добрый день', 'application/pdf'));
+        $this->assertSame([[], false], $this->candidates('Заявка 123456.xlsx', 'Добрый день', 'application/vnd.ms-excel'));
     }
 
-    /** M-2026-17687: артикул каталога и номер заявки в теле — не номера наших счетов. */
-    public function test_own_codes_in_body_give_no_document_number(): void
+    /** M-2026-17687: артикул каталога и номер заявки — не номера наших счетов; явная ссылка — да. */
+    public function test_only_explicit_document_references_count(): void
     {
         $this->assertSame([[], false], $this->candidates('', 'Просим предоставить СЧЁТ по следующим позициям: M10258'));
         $this->assertSame([[], false], $this->candidates('', 'По заявке M-2026-10317 ждём счёт'));
         $this->assertSame([['10396'], false], $this->candidates('', 'Оплатили счет 10396'));
+        $this->assertSame([['10396'], false], $this->candidates('', 'по счету №10396 от 01.10.2026 г. оплата прошла'));
+        $this->assertSame([['364274'], false], $this->candidates('', 'Коммерческое предложение № 364274 от 12.08.2026 согласовано'));
+        $this->assertSame([['10551'], false], $this->candidates('', "Счет МЗ-10551 от 2026-10-07_12-20-43
+-- С уважением"));
+        $this->assertSame([['10432'], false], $this->candidates('', 'please send proforma invoice 10432 signed'));
+
+        // Голое число — не сигнал, даже рядом со словом «счёт» в другом смысле.
+        $this->assertSame([[], false], $this->candidates('', 'Нужен счет на сумму 123456 руб, индекс 357600, Россия'));
+        $this->assertSame([[], false], $this->candidates('', 'Прошу выставить счет. Наш заказ 10432 готов?'));
+        $this->assertSame([[], false], $this->candidates('', 'Россия, 357600, Ставропольский край — выставите счёт'));
+    }
+
+    /** Наш формат темы: номер первым словом, в т.ч. в заголовке цитаты. */
+    public function test_subject_in_our_format(): void
+    {
+        $this->assertSame([['369647'], false], $this->candidatesWithSubject('Re: 369647 Re: Заявка на ролик', 'Готовы заказать'));
+        $this->assertSame([['369796'], false], $this->candidatesWithSubject('Re: [369796] Запрос', 'ок'));
+        $this->assertSame([['368531'], false], $this->candidates('', "Выставите счёт
+
+От: Агрызков
+Тема: 368531 Re: Заявка
+"));
+        // Число не первым словом темы и без слова-документа — не сигнал.
+        $this->assertSame([[], false], $this->candidatesWithSubject('Re: Заявка 369647 ролик', 'ок'));
     }
 
     /** M-2026-18326: «ВП73-10432» — артикул, а 10432 — номер нашего КП по чужой заявке. */
@@ -102,8 +126,8 @@ class CitedOutboundQuoteRouterOwnTextTest extends TestCase
 
         // Чисто буквенный префикс — это наши документы.
         $this->assertSame([['364274'], false], $this->candidates('', 'Выставите счёт по КП МЗ-364274'));
-        // Число через дефис от числа — не артикул.
-        $this->assertSame([['10432'], false], $this->candidates('', 'Тема: 21-10432 Re: счёт'));
+        // «21-10432» — не артикул, но и не номер нашего документа (число не стоит сразу за словом).
+        $this->assertSame([[], false], $this->candidates('', 'счёт 21-10432 оплачен'));
     }
 
     /** Числа в ссылках (слаг каталога, ysclid) — не номера наших документов. */
@@ -116,12 +140,26 @@ class CitedOutboundQuoteRouterOwnTextTest extends TestCase
     }
 
     /** @return array{0: list<string>, 1: bool} */
-    private function candidates(string $filename, string $body = 'Добрый день! Есть ли такой шкив'): array
+    private function candidates(string $filename, string $body = 'Добрый день! Есть ли такой шкив', string $mime = 'application/pdf'): array
     {
-        $att = new \App\Models\EmailAttachment();
-        $att->filename = $filename;
         $m = $this->msg($body, 'запрос');
-        $m->setRelation('attachments', collect([$att]));
+        $atts = [];
+        if ($filename !== '') {
+            $att = new \App\Models\EmailAttachment();
+            $att->filename = $filename;
+            $att->mime_type = $mime;
+            $atts[] = $att;
+        }
+        $m->setRelation('attachments', collect($atts));
+
+        return (fn () => $this->collectCandidates($m))->call($this->router);
+    }
+
+    /** @return array{0: list<string>, 1: bool} */
+    private function candidatesWithSubject(string $subject, string $body): array
+    {
+        $m = $this->msg($body, $subject);
+        $m->setRelation('attachments', collect([]));
 
         return (fn () => $this->collectCandidates($m))->call($this->router);
     }
