@@ -14,7 +14,7 @@
                       data-user="{{ auth()->id() }}"
                       data-mail-page="{{ request()->routeIs('mail.inbox') ? '1' : '0' }}">
                 {{-- Почта как отдельное приложение (своё окно, значок в панели задач). --}}
-                <link rel="manifest" href="{{ asset('mail.webmanifest') }}">
+                <link rel="manifest" href="{{ asset('mail-manifest.json') }}">
                 <meta name="theme-color" content="#ffffff">
             @endif
         @endauth

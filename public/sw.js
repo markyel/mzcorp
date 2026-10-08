@@ -1,5 +1,5 @@
 /*
- * Service worker приложения «mzCorp Почта» (public/mail.webmanifest).
+ * Service worker приложения «mzCorp Почта» (public/mail-manifest.json).
  *
  * Ничего не кэширует и запросы не перехватывает: данные CRM всегда свежие
  * с сервера, без офлайна. Нужен для установки почты как приложения и для

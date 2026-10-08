@@ -15,7 +15,7 @@
  *
  * Включение уведомлений ОС — кнопка [data-mail-notify-toggle] в меню профиля.
  * В самой «Почте» — кнопка «Открыть почту отдельным окном» [data-mail-install]:
- * своё окно и значок в панели задач с числом непрочитанных (public/mail.webmanifest, sw.js).
+ * своё окно и значок в панели задач с числом непрочитанных (public/mail-manifest.json, sw.js).
  */
 
 const VISIBLE_MS = 30000;
@@ -203,7 +203,7 @@ export function initMailSignal() {
         Notification.requestPermission().then(syncNotifyToggle).catch(() => {});
     });
 
-    // ── Почта как приложение (PWA, public/mail.webmanifest) ──────────
+    // ── Почта как приложение (PWA, public/mail-manifest.json) ──────────
 
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js')
