@@ -6,6 +6,7 @@ use App\Models\EmailMessage;
 use App\Models\Quotation;
 use App\Models\User;
 use App\Services\Mail\EmailDraftService;
+use App\Support\ClientText;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -85,14 +86,25 @@ class QuotationDispatchService
         $template = (string) config(
             'services.quotations.email_body_template',
             "Здравствуйте, {client_name}!\n\nВысылаем коммерческое предложение по запросу {internal_code}.\n"
-            ."Итого: {total} ₽ (вкл. НДС).\nСрок действия: {valid_until}.\n\nС уважением,\n{sender_name}"
+            ."Итого: {total} ₽ (вкл. НДС).\nСрок действия: {valid_until}."
         );
 
+        // Подпись добавляет OutgoingMailMimeBuilder ко всем письмам; «С уважением,
+        // {sender_name}» в конце шаблона (старый вариант, переопределение в .env)
+        // давал в письме две подписи подряд.
+        $template = preg_replace('/\s*С уважением,?\s*\{sender_name\}\s*$/u', '', $template) ?? $template;
+
+        // Имя — только если похоже на человека; иначе «Здравствуйте!» без запятой.
+        $clientName = ClientText::personName($request?->client_name);
+        if ($clientName === null) {
+            $template = preg_replace('/,\s*\{client_name\}\s*([!.])/u', '$1', $template) ?? $template;
+        }
+
         $body = strtr($template, [
-            '{client_name}' => $request?->client_name ?: 'коллеги',
+            '{client_name}' => (string) $clientName,
             '{internal_code}' => (string) $request?->internal_code,
             '{quotation_code}' => $quotation->internal_code.' v'.$quotation->version,
-            '{total}' => number_format((float) $quotation->total, 2, '.', ' '),
+            '{total}' => number_format((float) $quotation->total, 2, ',', ' '),
             '{valid_until}' => $quotation->valid_until?->format('d.m.Y') ?? '—',
             '{sender_name}' => (string) $author->name,
         ]);

@@ -20,6 +20,7 @@ use App\Models\Request;
 use App\Services\Calendar\RussianWorkingDayService;
 use App\Services\Mail\ClientNotificationService;
 use App\Services\Settings\SettingsService;
+use App\Support\ClientText;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -622,14 +623,14 @@ class NotificationsDispatchClientCommand extends Command
             // Показываем только % снижения: он одинаков для каталога и для цены
             // клиента (скидка — множитель, в проценте сокращается). Абсолюты не
             // показываем — каталожная розница ≠ цене из КП клиента (со скидкой).
-            $lines[] = sprintf(
-                '· %s — дешевле на %s%%',
-                mb_substr((string) $d['name'], 0, 80),
-                rtrim(rtrim(number_format($d['pct'], 1, '.', ''), '0'), '.'),
+            // Пункт Markdown-списка (строки через «· » в HTML сливались в
+            // один абзац), процент по-русски — «12,5%».
+            $lines[] = ClientText::listItem(
+                mb_substr((string) $d['name'], 0, 80).' — дешевле на '.ClientText::percent((float) $d['pct'])
             );
         }
         if (count($dropped) > 5) {
-            $lines[] = '· … и другие позиции';
+            $lines[] = ClientText::listItem('…и другие позиции');
         }
 
         return implode("\n", $lines);
@@ -659,11 +660,10 @@ class NotificationsDispatchClientCommand extends Command
         }
         $lines = [];
         if ($batch->general_question) {
-            $lines[] = '· '.trim($batch->general_question);
+            $lines[] = ClientText::listItem(trim($batch->general_question));
         }
         foreach ($questions as $q) {
-            $line = '· '.trim((string) $q->question);
-            $lines[] = mb_substr($line, 0, 150);
+            $lines[] = ClientText::listItem(mb_substr(trim((string) $q->question), 0, 150));
         }
 
         return implode("\n", $lines);

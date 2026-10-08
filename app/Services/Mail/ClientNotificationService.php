@@ -12,9 +12,9 @@ use App\Models\EmailMessage;
 use App\Models\Request;
 use App\Models\RequestStateChange;
 use App\Models\User;
+use App\Support\ClientText;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use League\CommonMark\GithubFlavoredMarkdownConverter;
 
 /**
@@ -319,7 +319,10 @@ class ClientNotificationService
             'manager_name' => (string) ($manager?->name ?? 'отдел продаж'),
             'manager_email' => (string) ($manager?->email ?? config('mail.from.address', 'info@myzip.ru')),
             'manager_phone' => (string) ($manager?->phone ?? ''),
-            'client_name' => (string) ($request->client_name ?: $this->guessClientNameFromEmail($request->client_email)),
+            // Только имя человека: «Liftway.ru — [ЗАКУПКИ]», «СП Евролифт» или
+            // адрес вместо имени дают пустую строку, и renderPlaceholders
+            // превращает «Здравствуйте, {{ client_name }}!» в «Здравствуйте!».
+            'client_name' => ClientText::personName($request->client_name) ?? '',
             'company_name' => 'MyZip',
             // Conditional: для OrderReceived (и любого другого где это
             // полезно) — заполняем «Ответственный менеджер: ...» ТОЛЬКО
@@ -365,7 +368,14 @@ class ClientNotificationService
      */
     private function renderPlaceholders(string $template, array $placeholders): string
     {
-        return preg_replace_callback(
+        // Нет имени клиента — обращение без запятой: «Здравствуйте!», а не
+        // «Здравствуйте, !». Шаблоны правят в админке, поэтому ловим любую
+        // форму «…, {{ client_name }}!».
+        if (($placeholders['client_name'] ?? '') === '') {
+            $template = preg_replace('/,\s*\{\{\s*client_name\s*\}\}\s*([!.])/u', '$1', $template) ?? $template;
+        }
+
+        $rendered = preg_replace_callback(
             '/\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}/i',
             function ($m) use ($placeholders) {
                 $key = $m[1];
@@ -376,6 +386,9 @@ class ClientNotificationService
             },
             $template
         );
+
+        // «7 дн.» → «7 дней»: сокращение в письме клиенту выглядит машинным.
+        return ClientText::expandDays($rendered);
     }
 
     private function buildItemsSummary(Request $request): string
@@ -389,31 +402,14 @@ class ClientNotificationService
         foreach ($items as $i) {
             $name = mb_substr((string) $i->parsed_name, 0, 80);
             $art = $i->parsed_article ? ' (' . $i->parsed_article . ')' : '';
-            $qty = $i->parsed_qty ? ' — ' . (int) $i->parsed_qty . ' шт' : '';
-            $lines[] = '· ' . $name . $art . $qty;
+            $qty = $i->parsed_qty ? ' — ' . (int) $i->parsed_qty . ' шт.' : '';
+            // Пункт Markdown-списка: строки через «· » в HTML-письме сливались в один абзац.
+            $lines[] = ClientText::listItem($name . $art . $qty);
         }
         if ($request->items()->where('is_active', true)->count() > 5) {
-            $lines[] = '… и ещё';
+            $lines[] = ClientText::listItem('…и другие позиции');
         }
 
         return implode("\n", $lines);
-    }
-
-    /**
-     * Если client_name не заполнен — попробуем достать username из email
-     * (`ivanov@example.com` → «ivanov»). Лучше чем «уважаемый клиент».
-     */
-    private function guessClientNameFromEmail(?string $email): string
-    {
-        if (! $email) {
-            return 'уважаемый клиент';
-        }
-        $local = explode('@', $email, 2)[0] ?? '';
-        $local = trim($local);
-        if ($local === '') {
-            return 'уважаемый клиент';
-        }
-
-        return Str::title(str_replace(['.', '_', '-'], ' ', $local));
     }
 }

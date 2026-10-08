@@ -689,15 +689,18 @@ return [
     'quotations' => [
         /*
         | Шаблон тела письма при отправке КП. Plain-text. Placeholders:
-        |   {client_name}     — Request.client_name (fallback «коллеги»)
+        |   {client_name}     — имя клиента, если похоже на человека (ClientText::personName);
+        |                       иначе «Здравствуйте, {client_name}!» → «Здравствуйте!»
         |   {internal_code}   — код заявки M-YYYY-NNNN
         |   {quotation_code}  — Quotation.internal_code + версия (vN)
-        |   {total}           — total ₽ с двумя знаками + thousand-separator
+        |   {total}           — total ₽: «125 400,00»
         |   {valid_until}     — дата действия КП DD.MM.YYYY
         |   {sender_name}     — имя менеджера-отправителя
+        | Подпись («С уважением» + имя) в шаблон не пишем: её добавляет
+        | OutgoingMailMimeBuilder ко всем письмам — иначе в письме две подписи.
         */
         'email_body_template' => env('QUOTATION_EMAIL_BODY_TEMPLATE')
-            ?: "Здравствуйте, {client_name}!\n\nВысылаем коммерческое предложение по запросу {internal_code} (КП {quotation_code}).\n\nИтого: {total} ₽ (вкл. НДС).\nСрок действия: {valid_until}.\n\nС уважением,\n{sender_name}",
+            ?: "Здравствуйте, {client_name}!\n\nВысылаем коммерческое предложение по запросу {internal_code} (КП {quotation_code}).\n\nИтого: {total} ₽ (вкл. НДС).\nСрок действия: {valid_until}.",
     ],
 
     /*
