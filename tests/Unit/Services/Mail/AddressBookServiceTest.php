@@ -50,6 +50,17 @@ class AddressBookServiceTest extends TestCase
         $this->assertSame(0, $this->invokePrivate('startsWith', $row, 'zip'));
     }
 
+    public function test_name_equal_to_address_is_dropped(): void
+    {
+        $rows = $this->invokePrivate('withoutEchoNames', [
+            ['email' => 'info@revator.ru', 'name' => 'Info@Revator.ru', 'org' => null, 'source' => 'recent'],
+            ['email' => 'ivan@client.ru', 'name' => 'Иван', 'org' => null, 'source' => 'client'],
+        ]);
+
+        $this->assertNull($rows[0]['name']);
+        $this->assertSame('Иван', $rows[1]['name']);
+    }
+
     public function test_like_escapes_wildcards(): void
     {
         $this->assertSame('%50\\%\\_off%', $this->invokePrivate('like', '50%_off'));

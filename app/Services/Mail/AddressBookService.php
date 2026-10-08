@@ -46,16 +46,16 @@ class AddressBookService
     {
         $term = trim($term);
         if ($term === '') {
-            return array_slice($this->recent($user), 0, $limit);
+            return $this->withoutEchoNames(array_slice($this->recent($user), 0, $limit));
         }
 
-        $merged = $this->dedupe(array_merge(
+        $merged = $this->withoutEchoNames($this->dedupe(array_merge(
             $this->mine($user, $term, $limit),
             $this->filterRecent($this->recent($user), $term, $limit),
             $this->colleagues($term, $limit),
             $this->clients($term, $limit),
             $this->suppliers($term, $limit),
-        ));
+        )));
 
         // Совпадение с начала адреса или слова в имени — выше, порядок
         // источников внутри группы сохраняется (usort стабилен в PHP 8).
@@ -74,13 +74,31 @@ class AddressBookService
     {
         $term = trim($term);
 
-        return match ($source) {
+        return $this->withoutEchoNames(match ($source) {
             'mine' => $this->mine($user, $term, $limit),
             'colleague' => $this->colleagues($term, $limit),
             'client' => $this->clients($term, $limit),
             'supplier' => $this->suppliers($term, $limit),
             default => $this->filterRecent($this->recent($user), $term, $limit),
-        };
+        });
+    }
+
+    /**
+     * Имя, повторяющее сам адрес («info@x.ru <info@x.ru>»), — не имя: убираем,
+     * иначе в поле адресатов адрес задваивается.
+     *
+     * @param  list<array>  $rows
+     * @return list<array>
+     */
+    private function withoutEchoNames(array $rows): array
+    {
+        foreach ($rows as &$row) {
+            if ($row['name'] !== null && mb_strtolower(trim($row['name'])) === $row['email']) {
+                $row['name'] = null;
+            }
+        }
+
+        return $rows;
     }
 
     /** Добавить или обновить личный контакт (по адресу). */
