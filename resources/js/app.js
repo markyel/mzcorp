@@ -45,3 +45,6 @@ if (document.readyState === 'loading') {
 } else {
     initMailSignal();
 }
+
+// Адресная книга почты: подсказки в полях адресатов и окно выбора (address-book.js).
+import './address-book';

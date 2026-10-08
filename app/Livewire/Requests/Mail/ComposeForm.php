@@ -59,6 +59,10 @@ class ComposeForm extends Component
     #[Validate('nullable|string|max:4000')]
     public string $ccRaw = '';
 
+    /** Скрытая копия — адресаты не видны остальным получателям. */
+    #[Validate('nullable|string|max:4000')]
+    public string $bccRaw = '';
+
     /**
      * Только то, что менеджер ввёл в textarea. Подпись и цитата
      * оригинала приклеиваются при send в OutgoingMailMimeBuilder.
@@ -264,6 +268,7 @@ class ComposeForm extends Component
         $this->subject = (string) $draft->subject;
         $this->toRaw = $this->formatRecipients((array) ($draft->to_recipients ?? []));
         $this->ccRaw = $this->formatRecipients((array) ($draft->cc_recipients ?? []));
+        $this->bccRaw = $this->formatRecipients((array) ($draft->bcc_recipients ?? []));
         // В textarea показываем ТОЛЬКО plain текст, который менеджер ввёл.
         // Подпись и quote оригинала рисуются ниже отдельным preview-блоком.
         $this->bodyText = (string) $draft->body_plain;
@@ -397,6 +402,11 @@ class ComposeForm extends Component
         $this->autoSave($drafts);
     }
 
+    public function updatedBccRaw(EmailDraftService $drafts): void
+    {
+        $this->autoSave($drafts);
+    }
+
     public function updatedBodyText(EmailDraftService $drafts): void
     {
         $this->autoSave($drafts);
@@ -418,6 +428,7 @@ class ComposeForm extends Component
             'subject' => mb_substr($this->subject, 0, 998),
             'to_recipients' => $this->parseRecipients($this->toRaw),
             'cc_recipients' => $this->parseRecipients($this->ccRaw),
+            'bcc_recipients' => $this->parseRecipients($this->bccRaw) ?: null,
             // В БД храним только plain (что менеджер ввёл). body_html
             // перезапишется при send в Sender → composeFinalBody().
             'body_plain' => $this->bodyText,
@@ -562,7 +573,7 @@ class ComposeForm extends Component
             // Убрать бейдж черновика из треда без перезагрузки.
             $this->dispatch('composer-draft-discarded', draftId: $draft->id, requestId: $this->requestId);
         }
-        $this->reset(['draftId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bodyText']);
+        $this->reset(['draftId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bccRaw', 'bodyText']);
         $this->open = false;
     }
 

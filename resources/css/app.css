@@ -437,3 +437,95 @@
 @media (prefers-reduced-motion: reduce) {
     .toast-anim { transition: none; }
 }
+
+/* ── Адресная книга почты (resources/js/address-book.js) ─────────────────
+   Поле адресатов с подсказками — components/mail/recipient-input,
+   окно выбора — components/mail/address-book-modal. Вне @layer: правила
+   общие для обоих композеров и должны перебивать утилиты полей. */
+.rcpt-field { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; }
+.rcpt-field > input { flex: 1; min-width: 60px; padding-right: 30px; }
+.rcpt-book {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
+    border: 0; border-radius: 5px; background: none; color: var(--fg-3); cursor: pointer;
+}
+.rcpt-book:hover { color: var(--accent); background: var(--bg-hover); }
+.rcpt-book svg { width: 16px; height: 16px; }
+.rcpt-drop {
+    position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 80;
+    max-height: 280px; overflow-y: auto; padding: 4px;
+    background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md);
+    box-shadow: var(--shadow-lg);
+}
+.rcpt-opt {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+    padding: 6px 8px; border: 0; border-radius: 6px; background: none; cursor: pointer; text-align: left;
+    font: var(--fw-regular) 12.5px/1.3 var(--font-sans); color: var(--fg-1);
+}
+.rcpt-opt.is-active { background: var(--sky-50); }
+.rcpt-opt-main { display: flex; flex-direction: column; min-width: 0; }
+.rcpt-opt-name { font-weight: var(--fw-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rcpt-opt-email { font: var(--fw-regular) 11.5px/1.3 var(--font-mono); color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rcpt-opt-src { flex-shrink: 0; max-width: 45%; font-size: 11px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.ab-overlay {
+    position: fixed; inset: 0; z-index: 9000; display: flex; align-items: flex-start; justify-content: center;
+    padding: 8vh 16px 16px; background: rgba(15, 23, 42, .35);
+}
+.ab-modal {
+    width: min(760px, 100%); max-height: 84vh; display: flex; flex-direction: column; overflow: hidden;
+    background: var(--bg-surface); border-radius: 10px; box-shadow: var(--shadow-lg);
+    font-family: var(--font-sans); color: var(--fg-1);
+}
+.ab-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border-subtle); }
+.ab-title { font: var(--fw-semibold) 15px/1.2 var(--font-sans); }
+.ab-x { border: 0; background: none; font-size: 20px; line-height: 1; color: var(--fg-3); cursor: pointer; }
+.ab-x:hover { color: var(--fg-1); }
+.ab-search { padding: 10px 16px 0; }
+.ab-search input, .ab-form input {
+    width: 100%; height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-md);
+    background: var(--bg-app); font: var(--fw-regular) 13px/1 var(--font-sans); color: var(--fg-1); outline: none;
+}
+.ab-search input:focus, .ab-form input:focus { border-color: var(--sky-500); }
+.ab-tabs { display: flex; gap: 4px; padding: 10px 16px 0; border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; }
+.ab-tab {
+    padding: 7px 10px; border: 0; border-bottom: 2px solid transparent; background: none; cursor: pointer;
+    font: var(--fw-medium) 12.5px/1 var(--font-sans); color: var(--fg-3);
+}
+.ab-tab:hover { color: var(--fg-1); }
+.ab-tab.is-active { color: var(--fg-1); border-bottom-color: var(--accent); }
+.ab-form { display: grid; grid-template-columns: 1.3fr 1fr 1fr auto; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border-subtle); }
+.ab-form button {
+    height: 32px; padding: 0 14px; border: 1px solid var(--accent); border-radius: var(--r-md);
+    background: var(--accent); color: var(--fg-on-accent); font: var(--fw-semibold) 12.5px/1 var(--font-sans); cursor: pointer;
+}
+.ab-form-err { grid-column: 1 / -1; color: var(--status-overdue-fg); font-size: 12px; }
+.ab-list { flex: 1; min-height: 160px; overflow-y: auto; padding: 4px 8px; }
+.ab-empty { padding: 24px 8px; text-align: center; color: var(--fg-3); font-size: 12.5px; }
+.ab-row { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 6px; }
+.ab-row:hover { background: var(--bg-hover); }
+.ab-who { flex: 1; min-width: 0; }
+.ab-name { font: var(--fw-medium) 13px/1.3 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ab-meta { font-size: 11.5px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ab-acts { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.ab-add {
+    height: 26px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface);
+    font: var(--fw-medium) 11.5px/1 var(--font-sans); color: var(--fg-1); cursor: pointer; white-space: nowrap;
+}
+.ab-add:hover { border-color: var(--sky-500); color: var(--sky-700); }
+.ab-add.is-added { border-color: var(--status-ok-fg); color: var(--status-ok-fg); background: var(--status-ok-bg); }
+.ab-icon { width: 26px; height: 26px; border: 0; border-radius: 6px; background: none; color: var(--fg-4); cursor: pointer; font-size: 14px; }
+.ab-icon:hover { color: var(--amber-600); background: var(--bg-surface-2); }
+.ab-icon.is-saved { color: var(--amber-600); }
+.ab-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px;
+    border-top: 1px solid var(--border-subtle); font-size: 11.5px; color: var(--fg-3);
+}
+.ab-done {
+    height: 30px; padding: 0 16px; border: 1px solid var(--accent); border-radius: var(--r-md);
+    background: var(--accent); color: var(--fg-on-accent); font: var(--fw-semibold) 12.5px/1 var(--font-sans); cursor: pointer;
+}
+@media (max-width: 640px) {
+    .ab-form { grid-template-columns: 1fr; }
+    .ab-row { flex-wrap: wrap; }
+}

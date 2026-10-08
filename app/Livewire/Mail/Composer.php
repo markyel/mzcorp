@@ -64,6 +64,10 @@ class Composer extends Component
     #[Validate('nullable|string|max:4000')]
     public string $ccRaw = '';
 
+    /** Скрытая копия — адресаты не видны остальным получателям. */
+    #[Validate('nullable|string|max:4000')]
+    public string $bccRaw = '';
+
     /** Богатый HTML из редактора — уходит в body_html письма. */
     public string $bodyHtml = '';
 
@@ -220,6 +224,7 @@ class Composer extends Component
         $this->subject = (string) $draft->subject;
         $this->toRaw = $this->formatRecipients((array) ($draft->to_recipients ?? []));
         $this->ccRaw = $this->formatRecipients((array) ($draft->cc_recipients ?? []));
+        $this->bccRaw = $this->formatRecipients((array) ($draft->bcc_recipients ?? []));
         // Богатый редактор: seed HTML из body_html; для пересылки/чернового
         // plain (body_html пуст, но body_plain есть) — переводим plain→html.
         $html = trim((string) $draft->body_html);
@@ -249,6 +254,11 @@ class Composer extends Component
         $this->autoSave($drafts);
     }
 
+    public function updatedBccRaw(EmailDraftService $drafts): void
+    {
+        $this->autoSave($drafts);
+    }
+
     public function updatedBodyHtml(EmailDraftService $drafts): void
     {
         $this->bodyHtml = app(HtmlSanitizer::class)->sanitize($this->bodyHtml);
@@ -266,6 +276,7 @@ class Composer extends Component
             'subject' => mb_substr($this->subject, 0, 998),
             'to_recipients' => $this->parseRecipients($this->toRaw),
             'cc_recipients' => $this->parseRecipients($this->ccRaw),
+            'bcc_recipients' => $this->parseRecipients($this->bccRaw) ?: null,
             'body_plain' => $this->bodyText,
             'body_html' => $this->bodyHtml,
         ]);
@@ -512,7 +523,7 @@ class Composer extends Component
             }
         }
 
-        $this->reset(['draftId', 'relatedRequestId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bodyText', 'bodyHtml', 'newFiles']);
+        $this->reset(['draftId', 'relatedRequestId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bccRaw', 'bodyText', 'bodyHtml', 'newFiles']);
         $this->open = false;
         $this->dispatch('mail-sent');
         $this->dispatch('toast', message: 'Письмо отправлено.', type: 'success');
@@ -526,7 +537,7 @@ class Composer extends Component
         if ($draft) {
             $drafts->delete($draft);
         }
-        $this->reset(['draftId', 'relatedRequestId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bodyText', 'bodyHtml', 'newFiles']);
+        $this->reset(['draftId', 'relatedRequestId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bccRaw', 'bodyText', 'bodyHtml', 'newFiles']);
         $this->open = false;
         $this->dispatch('mail-sent'); // обновить список (черновик исчез)
     }

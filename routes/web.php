@@ -6,6 +6,7 @@ use App\Http\Controllers\DocsController;
 use App\Http\Controllers\HeartbeatController;
 use App\Http\Controllers\LiftwayFeedController;
 use App\Http\Controllers\LoginArcadeController;
+use App\Http\Controllers\Mail\AddressBookController;
 use App\Http\Controllers\Mail\NewMailSignalController;
 use App\Http\Controllers\OAuthYandexController;
 use App\Http\Controllers\ProfileController;
@@ -139,6 +140,17 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/mail/inbox', function () {
             return view('mail.inbox');
         })->middleware('role:manager,head_of_sales,admin,director')->name('mail.inbox');
+
+        // Адресная книга почты — подсказки адресатов и личные контакты для обоих
+        // композеров (почта и карточка заявки). Роли — как у почтового клиента.
+        Route::middleware('role:manager,head_of_sales,admin,director')
+            ->prefix('/dashboard/address-book')->name('address-book.')
+            ->controller(AddressBookController::class)->group(function () {
+                Route::get('/suggest', 'suggest')->name('suggest');
+                Route::get('/', 'browse')->name('browse');
+                Route::post('/contacts', 'store')->name('store');
+                Route::delete('/contacts/{contact}', 'destroy')->whereNumber('contact')->name('destroy');
+            });
 
         // ВАЖНО: статичные роуты должны быть ОБЪЯВЛЕНЫ ДО `{request}`-биндинга,
         // иначе Laravel матчит `auto-closed` как ID модели → invalid integer

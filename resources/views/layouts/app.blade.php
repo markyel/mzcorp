@@ -15,6 +15,11 @@
                       data-mail-page="{{ request()->routeIs('mail.inbox') ? '1' : '0' }}">
                 {{-- Почта как отдельное приложение (своё окно, значок в панели задач). --}}
                 <link rel="manifest" href="{{ asset('mail-manifest.json') }}">
+                {{-- Адресная книга почты: resources/js/address-book.js. --}}
+                <meta name="address-book" content="{{ route('address-book.suggest') }}"
+                      data-browse="{{ route('address-book.browse') }}"
+                      data-store="{{ route('address-book.store') }}"
+                      data-destroy="{{ route('address-book.destroy', 0) }}">
                 <meta name="theme-color" content="#ffffff">
             @endif
         @endauth
@@ -88,6 +93,13 @@
         {{-- Глобальные тосты: ловят window-событие `toast` из
              $this->dispatch('toast', message: …, type: …) любого компонента. --}}
         <x-toast-stack />
+
+        @auth
+            @if(auth()->user()->hasAnyRole(['manager', 'head_of_sales', 'admin', 'director']))
+                {{-- Окно адресной книги для полей адресатов обоих композеров. --}}
+                <x-mail.address-book-modal />
+            @endif
+        @endauth
 
         @auth
             <script>

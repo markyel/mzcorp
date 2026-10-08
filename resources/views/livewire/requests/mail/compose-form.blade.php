@@ -128,8 +128,9 @@
                         title="Закрыть — черновик сохранится (бейдж в переписке)">✕</button>
             </div>
 
-            {{-- Содержимое (скрывается при сворачивании). --}}
-            <div x-show="!min"
+            {{-- Содержимое (скрывается при сворачивании). data-rcpt-group —
+                 окно адресной книги дописывает адресатов в поля этой формы. --}}
+            <div x-show="!min" data-rcpt-group
                  style="flex: 1 1 auto; overflow: auto; display: flex; flex-direction: column;
                         gap: 10px; padding: 12px 14px; background: var(--bg-surface-2);">
 
@@ -143,9 +144,9 @@
                 <div style="flex: 0 0 auto;">
                     <div class="flex items-start gap-2">
                         <label class="text-[12px] text-fg-3 uppercase tracking-wider font-semibold w-[60px] pt-1.5">Кому</label>
-                        <input type="text" wire:model.live.debounce.1500ms="toRaw"
-                               class="flex-1 h-[32px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)]"
-                               placeholder="email@клиента; ещё@клиент.ru" />
+                        <x-mail.recipient-input field="to" model="toRaw" debounce="1500ms" class="flex-1"
+                               input-class="w-full h-[32px] pl-2 pr-8 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)]"
+                               placeholder="Начните вводить имя или адрес" />
                     </div>
                     @error('toRaw') <div class="text-red-700 text-[12px] ml-[68px]">{{ $message }}</div> @enderror
                 </div>
@@ -153,8 +154,17 @@
                 {{-- Cc --}}
                 <div class="flex items-start gap-2" style="flex: 0 0 auto;">
                     <label class="text-[12px] text-fg-3 uppercase tracking-wider font-semibold w-[60px] pt-1.5">Cc</label>
-                    <input type="text" wire:model.live.debounce.1500ms="ccRaw"
-                           class="flex-1 h-[32px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)]"
+                    <x-mail.recipient-input field="cc" model="ccRaw" debounce="1500ms" class="flex-1"
+                           input-class="w-full h-[32px] pl-2 pr-8 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)]"
+                           placeholder="(опционально)" />
+                </div>
+
+                {{-- Bcc — скрытая копия --}}
+                <div class="flex items-start gap-2" style="flex: 0 0 auto;">
+                    <label class="text-[12px] text-fg-3 uppercase tracking-wider font-semibold w-[60px] pt-1.5"
+                           title="Адресаты скрытой копии не видны остальным получателям">Bcc</label>
+                    <x-mail.recipient-input field="bcc" model="bccRaw" debounce="1500ms" class="flex-1"
+                           input-class="w-full h-[32px] pl-2 pr-8 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)]"
                            placeholder="(опционально)" />
                 </div>
 

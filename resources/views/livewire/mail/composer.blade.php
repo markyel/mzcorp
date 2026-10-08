@@ -213,7 +213,7 @@
         <div class="dropveil" x-show="dragging" x-cloak>
             <div class="dropveil-in">📎 Отпустите, чтобы прикрепить</div>
         </div>
-        <div class="cfields">
+        <div class="cfields" data-rcpt-group>
             <div class="crow">
                 <span class="k">От</span>
                 <span class="from"><span class="dot"></span>{{ $this->fromMailboxLabel }}</span>
@@ -221,11 +221,15 @@
             </div>
             <div class="crow">
                 <span class="k">Кому</span>
-                <input type="text" wire:model.live.debounce.1200ms="toRaw" placeholder="email, email …">
+                <x-mail.recipient-input field="to" model="toRaw" placeholder="Начните вводить имя или адрес" />
             </div>
             <div class="crow">
                 <span class="k">Копия</span>
-                <input type="text" wire:model.live.debounce.1200ms="ccRaw" placeholder="—">
+                <x-mail.recipient-input field="cc" model="ccRaw" placeholder="—" />
+            </div>
+            <div class="crow">
+                <span class="k" title="Адресаты скрытой копии не видны остальным получателям">Скрытая</span>
+                <x-mail.recipient-input field="bcc" model="bccRaw" placeholder="—" />
             </div>
             <div class="crow">
                 <span class="k">Тема</span>

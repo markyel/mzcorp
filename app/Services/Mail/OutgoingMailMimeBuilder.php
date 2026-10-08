@@ -179,6 +179,11 @@ class OutgoingMailMimeBuilder
         foreach ((array) ($draft->cc_recipients ?? []) as $rcpt) {
             $email->addCc($this->toAddress($rcpt));
         }
+        // Скрытая копия: адресаты попадают в SMTP-конверт, а заголовок Bcc
+        // Symfony Mime сам убирает из отправляемого письма (Message::getPreparedHeaders).
+        foreach ((array) ($draft->bcc_recipients ?? []) as $rcpt) {
+            $email->addBcc($this->toAddress($rcpt));
+        }
 
         $email->subject((string) ($draft->subject ?: ''));
 

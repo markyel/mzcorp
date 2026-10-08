@@ -318,7 +318,7 @@ class EmailDraftService
     /**
      * Частичный апдейт draft'а (auto-save из Livewire).
      *
-     * @param  array{subject?: string, to_recipients?: array, cc_recipients?: array, body_html?: string, body_plain?: string}  $data
+     * @param  array{subject?: string, to_recipients?: array, cc_recipients?: array, bcc_recipients?: array, body_html?: string, body_plain?: string}  $data
      */
     public function update(EmailMessage $draft, array $data): void
     {
@@ -327,7 +327,7 @@ class EmailDraftService
         }
 
         $allowed = array_intersect_key($data, array_flip([
-            'subject', 'to_recipients', 'cc_recipients', 'body_html', 'body_plain',
+            'subject', 'to_recipients', 'cc_recipients', 'bcc_recipients', 'body_html', 'body_plain',
         ]));
         if ($allowed === []) {
             return;

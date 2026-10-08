@@ -37,6 +37,8 @@ class EmailMessage extends Model
         'from_name',
         'to_recipients',
         'cc_recipients',
+        // Скрытая копия исходящего: в само письмо заголовок не уходит, храним для автора.
+        'bcc_recipients',
         'sent_at',
         'body_plain',
         'body_html',
@@ -101,6 +103,7 @@ class EmailMessage extends Model
             'references_header' => 'array',
             'to_recipients' => 'array',
             'cc_recipients' => 'array',
+            'bcc_recipients' => 'array',
             'headers' => 'array',
             'imap_flags' => 'array',
             'detected_artifacts' => 'array',
