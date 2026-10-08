@@ -7,6 +7,10 @@
     "start_url": "/dashboard/mail/inbox",
     "scope": "/",
     "display": "standalone",
+    "launch_handler": { "client_mode": "focus-existing" },
+    "protocol_handlers": [
+        { "protocol": "web+mzmail", "url": "/dashboard/mail/inbox?app=%s" }
+    ],
     "background_color": "#f9fafb",
     "theme_color": "#ffffff",
     "icons": [

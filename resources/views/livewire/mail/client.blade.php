@@ -92,7 +92,8 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .paneA-link{display:block;margin-top:8px;font:500 11.5px/1.3 var(--font-sans);color:var(--sky-700);text-decoration:none}
 .mailapp .paneA-link:hover{text-decoration:underline}
 .mailapp .app-install{margin-top:auto;padding:10px;border-top:1px solid var(--border-subtle)}
-.mailapp .app-install[hidden]{display:none}
+.mailapp .app-install[hidden],.mailapp .app-install-btn[hidden]{display:none}
+.mailapp a.app-install-btn{text-decoration:none}
 .mailapp .app-install-btn{display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-md);
     background:var(--bg-surface);color:var(--fg-1);font:500 12px/1.3 var(--font-sans);cursor:pointer;text-align:left}
 .mailapp .app-install-btn:hover{border-color:var(--sky-500);color:var(--sky-700)}
@@ -499,7 +500,13 @@ body.mail-resizing iframe{pointer-events:none}
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/><path d="m9 10 3 3 3-3"/><path d="M12 6v7"/></svg>
                 <span>Открыть почту отдельным окном</span>
             </button>
-            <div class="app-install-hint">Своё окно и значок в панели задач с числом новых писем</div>
+            {{-- Уже установлено: ссылка по схеме, которую регистрирует приложение
+                 (protocol_handlers в public/mail-manifest.json), открывает его окно. --}}
+            <a class="app-install-btn" href="web+mzmail://inbox" data-mail-open-app hidden>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/><path d="M10 7h5v5"/><path d="m15 7-6 6"/></svg>
+                <span>Открыть приложение почты</span>
+            </a>
+            <div class="app-install-hint" data-mail-install-hint>Своё окно и значок в панели задач с числом новых писем</div>
         </div>
     </div>
 

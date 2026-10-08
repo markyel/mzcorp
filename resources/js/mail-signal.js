@@ -211,17 +211,50 @@ export function initMailSignal() {
             .catch(() => { /* без SW уведомления идут из страницы, установка недоступна */ });
     }
 
-    // Кнопка «Открыть почту отдельным окном» в «Почте» ([data-mail-install-box]).
-    // Видна везде, кроме самого окна приложения и браузера, где оно уже
-    // установлено. Браузер готов установить сам — системный диалог установки;
-    // не готов (Яндекс.Браузер, уже установлено, Firefox) — подсказка, где это в меню.
+    // Блок в «Почте» ([data-mail-install-box]), скрыт только в самом окне приложения:
+    //   - не установлено — «Открыть почту отдельным окном» [data-mail-install]:
+    //     системный диалог установки, а если браузер не готов (Яндекс.Браузер,
+    //     Firefox) — подсказка, где это в меню;
+    //   - установлено — «Открыть приложение почты» [data-mail-open-app]: ссылка
+    //     web+mzmail://, которую регистрирует приложение (protocol_handlers в
+    //     манифесте), запускает его окно или выводит открытое вперёд.
+    // «Установлено» помним сами (appinstalled / согласие в диалоге): страница не
+    // может спросить браузер об этом напрямую. beforeinstallprompt — знак, что
+    // приложения нет (удалили), и флаг сбрасывается.
     const installedKey = `mzc:mail-app:installed:${userId}`;
     const isInstalledApp = () => window.matchMedia('(display-mode: standalone)').matches;
 
     function syncInstallButton() {
-        const hide = isInstalledApp() || store.get(installedKey) === '1';
-        document.querySelectorAll('[data-mail-install-box]').forEach((el) => { el.hidden = hide; });
+        const installed = store.get(installedKey) === '1';
+        document.querySelectorAll('[data-mail-install-box]').forEach((el) => { el.hidden = isInstalledApp(); });
+        document.querySelectorAll('[data-mail-install]').forEach((el) => { el.hidden = installed; });
+        document.querySelectorAll('[data-mail-open-app]').forEach((el) => { el.hidden = !installed; });
+        document.querySelectorAll('[data-mail-install-hint]').forEach((el) => {
+            el.textContent = installed
+                ? 'Окно почты со значком в панели задач. Не открывается — «Пуск» → «mzCorp Почта»'
+                : 'Своё окно и значок в панели задач с числом новых писем';
+        });
     }
+
+    // Окно приложения при запуске забирает фокус. Не забрало за 2 с — приложение
+    // удалено или ещё не узнало о ссылке (установлено до её появления): подсказываем.
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('[data-mail-open-app]')) return;
+        let launched = false;
+        const onBlur = () => { launched = true; };
+        window.addEventListener('blur', onBlur, { once: true });
+        setTimeout(() => {
+            window.removeEventListener('blur', onBlur);
+            if (launched || document.hidden) return;
+            window.dispatchEvent(new CustomEvent('toast', {
+                detail: {
+                    message: 'Если браузер спросил, открыть ли приложение, — подтвердите. Если окно почты не открылось, запустите «mzCorp Почта» из меню «Пуск» или панели задач — после этого кнопка заработает. Если приложение удалено, установите его заново: значок установки в адресной строке.',
+                    type: 'info',
+                    duration: 15000,
+                },
+            }));
+        }, 2000);
+    });
 
     function markInstalled() {
         store.set(installedKey, '1');
