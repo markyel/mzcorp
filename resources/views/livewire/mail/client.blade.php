@@ -260,7 +260,9 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .trow.unread .subj{font-weight:600}
 .mailapp .trow .l3{display:flex;align-items:center;gap:6px;margin-top:3px}
 .mailapp .trow .snip{font:400 12px/1.3 var(--font-sans);color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
-.mailapp .trow .metaicons{display:flex;align-items:center;gap:6px;flex-shrink:0}
+/* Чипов бывает много (КП готово, заявка, стадия, 1С) — в узкой колонке они
+   переносятся на вторую строку, а не вылезают за край. */
+.mailapp .trow .metaicons{display:flex;align-items:center;gap:6px;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end;row-gap:3px;min-width:0}
 /* Флажок живёт под кружком, а не в строке метаданных: там он терялся среди
    скрепки и номера заявки. Непомеченное письмо флажка не показывает вовсе —
    проступает при наведении на строку, как и галочка выбора слева. */
@@ -272,6 +274,8 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .trow .clip{color:var(--fg-3);font-size:12px}
 .mailapp .trow .reqchip{font:600 10.5px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px;border:0;cursor:pointer}
 .mailapp .trow .reqchip:hover{background:var(--violet-100);text-decoration:underline}
+/* Стадия заявки рядом с её номером — чип в цветах списка заявок (RequestStatus::chipClass), компактнее. */
+.mailapp .trow .stchip{padding:1px 6px;font-size:10.5px;line-height:1.4}
 .mailapp .trow .onecchip{font:600 10.5px/1.4 var(--font-mono);background:var(--emerald-50);color:var(--emerald-700);padding:1px 6px;border-radius:4px;white-space:nowrap}
 /* Шапка списка в режиме «письма заявки» (?request=). */
 .mailapp .sscope{display:flex;align-items:center;gap:6px;font:400 11.5px/1 var(--font-sans);color:var(--fg-3)}
@@ -787,6 +791,7 @@ body.mail-resizing iframe{pointer-events:none}
                                          а не только то письмо, что попалось в папке. --}}
                                     <button type="button" class="reqchip" wire:click.stop="filterByRequest({{ $m->related_request_id }})"
                                             title="Показать все письма заявки {{ $m->relatedRequest->internal_code }}">{{ $m->relatedRequest->internal_code }}</button>
+                                    @if($rrs)<span class="chip {{ $rrs->chipClass() }} stchip" title="Стадия заявки">{{ $rrs->label() }}</span>@endif
                                     @if($m->relatedRequest->onec_number)<span class="onecchip" title="Номер заявки/КП в 1С">1С {{ $m->relatedRequest->onec_number }}</span>@endif
                                 @elseif($cat)
                                     <span class="catchip {{ $cat[1] }}">{{ $cat[0] }}</span>
@@ -924,7 +929,7 @@ body.mail-resizing iframe{pointer-events:none}
                                 ? $req->status
                                 : \App\Enums\RequestStatus::tryFrom((string) $req->status);
                         @endphp
-                        <span class="st">· {{ $reqStatus?->label() ?? $req->status }}</span>
+                        <span class="chip {{ $reqStatus?->chipClass() ?? 'chip-neutral' }}" title="Стадия заявки">{{ $reqStatus?->label() ?? $req->status }}</span>
                         <span class="spacer"></span>
                         <a href="{{ route('requests.show', $req->id) }}" wire:navigate>Открыть заявку →</a>
                     </div>
@@ -943,7 +948,7 @@ body.mail-resizing iframe{pointer-events:none}
                         <span>Переписка по заявке</span>
                         <span class="code">{{ $hintReq->internal_code }}</span>
                         @if($hintReq->onec_number)<span class="onec" title="Номер заявки/КП в 1С">1С: {{ $hintReq->onec_number }}</span>@endif
-                        <span class="st">· {{ $hintStatus?->label() ?? $hintReq->status }}</span>
+                        <span class="chip {{ $hintStatus?->chipClass() ?? 'chip-neutral' }}" title="Стадия заявки">{{ $hintStatus?->label() ?? $hintReq->status }}</span>
                         <span class="spacer"></span>
                         <button type="button" class="linkbtn" wire:click="filterByRequest({{ $hintReq->id }})"
                                 title="Показать все письма этой заявки">Все письма заявки</button>

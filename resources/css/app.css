@@ -73,6 +73,10 @@
     .chip-ok       { background: var(--status-ok-bg);      color: var(--status-ok-fg); }
     .chip-paused   { background: var(--status-paused-bg);  color: var(--status-paused-fg); }
     .chip-neutral  { background: var(--status-neutral-bg); color: var(--status-neutral-fg); }
+    /* RequestStatus::chipClass() отдаёт ещё warn/danger — без них «Жду клиента»
+       и «Закрыто · потеря» шли без цвета. */
+    .chip-warn     { background: var(--status-attn-bg);    color: var(--status-attn-fg); }
+    .chip-danger   { background: var(--status-overdue-bg); color: var(--status-overdue-fg); }
 
     /* Buttons — enterprise CRM density (30px / 26px sm) */
     .btn {
