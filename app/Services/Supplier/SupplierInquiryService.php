@@ -285,6 +285,59 @@ class SupplierInquiryService
     }
 
     /**
+     * Копия письма поставщика в ящике rfq@, уже привязанная к заявке по номеру
+     * в теме: прицепить к запросу ЭТОМУ поставщику по ЭТОЙ заявке (точный адрес
+     * или общий корпоративный домен). Тогда письмо видно в запросе, а цены из
+     * него разбирает парсер. Кейс M-2026-18774: ответ Paul Schaab лёг на rfq@,
+     * а запрос #6988 ему по этой заявке уже был.
+     *
+     * Своё письмо поставщику (копия на rfq@ от сотрудника) не цепляем: его
+     * исходящую копию из личного ящика привяжет createFromOutbound, вторая
+     * копия в запросе — дубль, а парсер принял бы наше письмо за ответ.
+     *
+     * Запроса нет — null: письмо остаётся в заявке и видно во вкладке
+     * «Поставщики» в ленте переписки.
+     */
+    public function linkRfqCopy(EmailMessage $message, int $requestId): ?SupplierInquiry
+    {
+        if ($message->direction !== MailDirection::Inbound || $this->internal->detect($message) !== null) {
+            return null;
+        }
+        $from = mb_strtolower(trim((string) $message->from_email));
+        if ($from === '') {
+            return null;
+        }
+
+        $inquiry = SupplierInquiry::query()
+            ->where('related_request_id', $requestId)
+            ->orderByRaw("case when status = 'open' then 0 else 1 end")
+            ->orderByDesc('id')
+            ->get()
+            ->first(fn (SupplierInquiry $i) => $this->sameSupplier((string) $i->supplier_email, $from));
+        if ($inquiry === null) {
+            return null;
+        }
+
+        $this->attachMessage($inquiry, $message);
+
+        return $inquiry;
+    }
+
+    /** Тот же поставщик: точный адрес или общий домен, кроме бесплатных почт и наших. */
+    private function sameSupplier(string $a, string $b): bool
+    {
+        if (! $this->sameParty($a, $b)) {
+            return false;
+        }
+        if (mb_strtolower(trim($a)) === mb_strtolower(trim($b))) {
+            return true;
+        }
+        $domain = mb_strtolower((string) substr((string) strrchr($b, '@'), 1));
+
+        return ! in_array($domain, self::FREE_MAIL_DOMAINS, true) && ! $this->isInternalDomain($domain);
+    }
+
+    /**
      * Найти запрос поставщику, к которому относится входящее письмо, СТРОГО по
      * цепочке треда. null — не относится ни к одному помеченному треду.
      */

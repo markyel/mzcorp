@@ -204,15 +204,18 @@ class Detail extends Component
                     $q->orWhere('id', $this->request->email_message_id);
                 }
             })
-            // Переписка с ПОСТАВЩИКОМ, ПРИВЯЗАННАЯ к инквайри (supplier_inquiry_id),
-            // живёт в табе «Поставщики» и в клиентский тред не попадает. НО письма
-            // rfq@mzcorp.ru CC / супплаер-реплаи без инквайри (supplier_inquiry_id
-            // =NULL, category=supplier_reply) линкуются к заявке для КОНТЕКСТА и
-            // ДОЛЖНЫ быть видны здесь (менеджер шлёт их на rfq@ и ждёт увидеть —
-            // кейс M-2026-12942). Их НЕ прячем; вместо этого запрещаем отвечать на
-            // них клиентским reply (иначе КП уходит поставщику — кейс M-2026-11814):
-            // $lastInbound (якорь) и inline-кнопки пропускают их, ComposeForm гардит.
+            // Вся переписка с ПОСТАВЩИКАМИ — во вкладке «Поставщики», в клиентский
+            // тред не попадает (решение заказчика 08.10.2026, кейс M-2026-18774):
+            // и привязанная к запросу (supplier_inquiry_id), и копии на rfq@ /
+            // ответы поставщиков без запроса (category=supplier_reply). Раньше
+            // последние показывались здесь (кейс M-2026-12942), теперь их видно в
+            // ленте «Переписка с поставщиками» вкладки «Поставщики»
+            // (SupplierDispatchPanel::supplierCorrespondence). Гарды от ответа
+            // клиентским reply поставщику (кейс M-2026-11814) остаются.
             ->whereNull('supplier_inquiry_id')
+            ->where(fn ($q) => $q->whereNull('category')
+                ->orWhere('category', '!=', \App\Enums\EmailCategory::SupplierReply->value))
+            ->whereNotIn('mailbox_id', $this->supplierCcMailboxIds())
             ->visibleTo($user)
             ->with([
                 'attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline',
@@ -478,6 +481,18 @@ class Detail extends Component
         ]);
 
         $this->reloadRequest();
+    }
+
+    /**
+     * Ящик копий переписки с поставщиками (rfq@) — его письма к клиентскому
+     * треду не относятся. @return list<int>
+     */
+    private function supplierCcMailboxIds(): array
+    {
+        $email = app(\App\Services\Mail\SupplierCcInboxService::class)->inboxEmail();
+
+        return \App\Models\Mailbox::query()->whereRaw('LOWER(email) = ?', [$email])
+            ->pluck('id')->map(fn ($id) => (int) $id)->all() ?: [0];
     }
 
     private function reloadRequest(): void

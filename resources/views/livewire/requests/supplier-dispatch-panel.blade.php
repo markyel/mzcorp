@@ -45,6 +45,52 @@
         </div>
     @endif
 
+    {{-- 0.3 Переписка с поставщиками — вся, включая копии на rfq@ без запроса.
+         В клиентский тред («Переписка») письма поставщиков не попадают. --}}
+    @php $corr = $this->supplierCorrespondence; @endphp
+    @if($corr !== [])
+        <div class="ds-card">
+            <div class="ds-card-header"><h3>Переписка с поставщиками</h3><span class="text-[12px] text-fg-3 ml-2">писем: {{ count($corr) }}</span></div>
+            <div class="ds-card-body p-0">
+                @foreach($corr as $mail)
+                    <div wire:key="corr-{{ $mail['id'] }}" x-data="{ open: false }" class="border-b border-border-subtle last:border-b-0">
+                        <button type="button" x-on:click="open = !open"
+                                class="w-full text-left px-3 py-2 hover:bg-hover flex items-start gap-3">
+                            <span class="shrink-0 text-[11px] font-semibold mt-0.5 {{ $mail['ours'] ? 'text-sky-700' : 'text-emerald-700' }}"
+                                  title="{{ $mail['ours'] ? 'Наше письмо поставщику' : 'Письмо от поставщика' }}">{{ $mail['ours'] ? '→' : '←' }}</span>
+                            <span class="min-w-0 flex-1">
+                                <span class="flex items-baseline gap-2">
+                                    <span class="text-[12.5px] font-medium text-fg-1 truncate">{{ $mail['ours'] ? 'Кому: ' : '' }}{{ $mail['who'] }}</span>
+                                    @if($mail['inquiry_id'])
+                                        <a href="{{ route('suppliers.show', $mail['inquiry_id']) }}" wire:navigate x-on:click.stop
+                                           class="shrink-0 text-[11px] text-sky-700 hover:underline">запрос #{{ $mail['inquiry_id'] }}</a>
+                                    @else
+                                        <span class="shrink-0 text-[11px] text-fg-3" title="Письмо пришло копией на rfq@ и не привязано к запросу поставщику">без запроса</span>
+                                    @endif
+                                    @if($mail['attachments'] !== [])<span class="shrink-0 text-[11px] text-fg-3">📎 {{ count($mail['attachments']) }}</span>@endif
+                                    <span class="ml-auto shrink-0 mono text-[11px] text-fg-3">{{ $mail['at']?->format('d.m H:i') }}</span>
+                                </span>
+                                <span class="block text-[12px] text-fg-2 truncate">{{ $mail['subject'] }}</span>
+                                <span class="block text-[11.5px] text-fg-3 truncate" x-show="!open">{{ $mail['snippet'] }}</span>
+                            </span>
+                        </button>
+                        <div x-show="open" x-cloak class="px-3 pb-3 pl-9">
+                            <div class="text-[12.5px] text-fg-1 whitespace-pre-wrap break-words max-h-[420px] overflow-y-auto border border-border-subtle rounded-md p-2.5 bg-[var(--bg-app)]">{{ $mail['body'] !== '' ? $mail['body'] : '(текст письма не загружен)' }}</div>
+                            @if($mail['attachments'] !== [])
+                                <div class="mt-2 flex flex-wrap gap-2">
+                                    @foreach($mail['attachments'] as $att)
+                                        <a href="{{ route('attachments.download', $att['id']) }}" target="_blank"
+                                           class="text-[11.5px] text-sky-700 hover:underline">📎 {{ $att['name'] }}</a>
+                                    @endforeach
+                                </div>
+                            @endif
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+        </div>
+    @endif
+
     {{-- 0.5 Расценки от поставщиков (полученные предложения по позициям) --}}
     @php
         $offerRows = $this->offersByPosition;

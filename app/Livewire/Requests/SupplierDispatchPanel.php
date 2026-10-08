@@ -181,6 +181,68 @@ class SupplierDispatchPanel extends Component
             ->get();
     }
 
+    /**
+     * Лента всей переписки с поставщиками по заявке — она живёт здесь, а не в
+     * клиентском треде: письма запросов этой заявки, ответы поставщиков и
+     * копии на rfq@, в том числе не привязанные к запросу. Одно письмо,
+     * пойманное в двух ящиках (rfq@ и «Отправленные»), — одной строкой.
+     *
+     * @return list<array{id:int, at:?\Illuminate\Support\Carbon, ours:bool, who:string, subject:string, snippet:string, body:string, inquiry_id:?int, attachments:list<array{id:int, name:string}>}>
+     */
+    #[Computed]
+    public function supplierCorrespondence(): array
+    {
+        $inquiryIds = $this->sentInquiries->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $ccEmail = app(\App\Services\Mail\SupplierCcInboxService::class)->inboxEmail();
+        $ccMailboxIds = \App\Models\Mailbox::query()->whereRaw('LOWER(email) = ?', [$ccEmail])->pluck('id')->all() ?: [0];
+
+        $messages = \App\Models\EmailMessage::query()
+            ->where('is_draft', false)
+            ->where(function ($q) use ($inquiryIds, $ccMailboxIds) {
+                if ($inquiryIds !== []) {
+                    $q->whereIn('supplier_inquiry_id', $inquiryIds);
+                }
+                $q->orWhere(fn ($w) => $w->where('related_request_id', $this->requestId)
+                    ->where(fn ($c) => $c->where('category', \App\Enums\EmailCategory::SupplierReply->value)
+                        ->orWhereIn('mailbox_id', $ccMailboxIds)));
+            })
+            ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
+            ->with(['attachments' => fn ($a) => $a->where('is_inline', false)->select('id', 'email_message_id', 'filename')])
+            ->orderByRaw('sent_at IS NULL, sent_at DESC')
+            ->orderByDesc('id')
+            ->limit(200)
+            ->get();
+
+        $internal = app(\App\Services\Mail\InternalSenderDetector::class);
+
+        return $messages
+            ->groupBy(fn ($m) => $m->message_id ? mb_strtolower((string) $m->message_id) : 'id'.$m->id)
+            ->map(fn ($copies) => $copies->sortByDesc(fn ($m) => $m->supplier_inquiry_id !== null ? 1 : 0)->first())
+            ->sortByDesc(fn ($m) => $m->sent_at?->getTimestamp() ?? 0)
+            ->values()
+            ->map(function ($m) use ($internal) {
+                $ours = $m->direction === \App\Enums\MailDirection::Outbound || $internal->detect($m) !== null;
+                $to = (array) (($m->to_recipients ?? [])[0] ?? []);
+                $who = $ours
+                    ? trim((string) (($to['name'] ?? '') ?: ($to['email'] ?? '')))
+                    : trim((string) ($m->from_name ?: $m->from_email));
+                $body = trim((string) $m->body_plain);
+
+                return [
+                    'id' => (int) $m->id,
+                    'at' => $m->sent_at,
+                    'ours' => $ours,
+                    'who' => trim($who, " \"'") ?: '—',
+                    'subject' => (string) ($m->subject ?: '(без темы)'),
+                    'snippet' => Str::limit(preg_replace('/\s+/u', ' ', $body) ?? '', 140),
+                    'body' => Str::limit($body, 6000),
+                    'inquiry_id' => $m->supplier_inquiry_id !== null ? (int) $m->supplier_inquiry_id : null,
+                    'attachments' => $m->attachments->map(fn ($a) => ['id' => (int) $a->id, 'name' => (string) $a->filename])->all(),
+                ];
+            })
+            ->all();
+    }
+
     /* --------------------------- Расценки (офферы) ------------------------ */
 
     /**

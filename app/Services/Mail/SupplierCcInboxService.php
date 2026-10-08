@@ -7,6 +7,7 @@ use App\Enums\MailDirection;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use App\Models\Request;
+use App\Services\Supplier\SupplierInquiryService;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
@@ -19,7 +20,8 @@ use Symfony\Component\Mime\Email;
  * Входящие на этот ящик НЕ создают клиентских заявок. Пайплайн:
  *   1. вытащить номер заявки из темы/тела;
  *   2. найти Request, привязать письмо (related_request_id, category=
- *      supplier_reply → видно во вкладке «Переписка», статус не трогает);
+ *      supplier_reply → видно во вкладке «Поставщики», статус не трогает);
+ *      ответ поставщика — ещё и к его запросу по этой заявке (linkRfqCopy);
  *   3. уведомить ответственного менеджера письмом С ЭТОГО ЖЕ ящика (rfq@) —
  *      «по заявке … новое сообщение в переписке с поставщиком» + ссылка.
  *
@@ -122,10 +124,23 @@ class SupplierCcInboxService
             'classified_at' => now(),
         ])->save();
 
+        // Ответ поставщика — ещё и к запросу этому поставщику по заявке, если он
+        // есть: письмо видно в запросе, цены из него разбирает парсер.
+        try {
+            $inquiry = app(SupplierInquiryService::class)->linkRfqCopy($message, (int) $request->id);
+        } catch (\Throwable $e) {
+            $inquiry = null;
+            Log::warning('SupplierCcInbox: link to inquiry failed (non-fatal)', [
+                'email_message_id' => $message->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         Log::info('SupplierCcInbox: attached to request', [
             'email_message_id' => $message->id,
             'request_id' => $request->id,
             'code' => $request->internal_code,
+            'supplier_inquiry_id' => $inquiry?->id,
         ]);
 
         $this->notifyManager($request, $message);
