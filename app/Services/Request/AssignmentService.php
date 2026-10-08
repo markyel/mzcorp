@@ -8,6 +8,8 @@ use App\Enums\RequestStatus;
 use App\Enums\Role as RoleEnum;
 use App\Jobs\Mail\DeliverToManagerInboxJob;
 use App\Models\CatalogItem;
+use App\Models\EmailMessage;
+use App\Models\Mailbox;
 use App\Models\Request;
 use App\Models\RequestAssignment;
 use App\Models\User;
@@ -709,7 +711,7 @@ class AssignmentService
      *     (личные ящики директора/секретаря/админа не должны синкаться
      *     согласно `Mailbox::scopeSyncable`, но defensive).
      *
-     * @return array{user: User, linked: array<int>, kind: 'direct_mailbox'}|null
+     * @return array{user: User, linked: array<int>, kind: 'direct_mailbox'|'addressed_mailbox'}|null
      */
     private function pickStickyByDirectMailbox(Request $request): ?array
     {
@@ -719,8 +721,15 @@ class AssignmentService
         }
 
         $mailbox = $message->mailbox;
-        if (! $mailbox || $mailbox->type !== MailboxType::Personal) {
+        if (! $mailbox) {
             return null;
+        }
+        // Письмо в общем ящике, но клиент адресовал его менеджеру лично
+        // (Кому: менеджер, Копия: info@) — та же прямая связь, что и у письма
+        // в личный ящик. Копия из общего ящика часто синкается раньше личной
+        // и создаёт заявку первой (кейс M-2026-12505).
+        if ($mailbox->type !== MailboxType::Personal) {
+            return $this->pickStickyByAddressedMailbox($message);
         }
         if (! $mailbox->owner_user_id) {
             return null;
@@ -746,6 +755,59 @@ class AssignmentService
         }
 
         return ['user' => $owner, 'linked' => [], 'kind' => 'direct_mailbox'];
+    }
+
+    /**
+     * Level 0b: письмо пришло в ОБЩИЙ ящик, но среди адресатов — личный ящик
+     * менеджера. Клиент написал лично ему (общий адрес — в копии или рядом),
+     * значит заявка его, как и у письма в личный ящик.
+     *
+     * Порядок: сначала «Кому», потом «Копия»; в пределах поля — как указал
+     * клиент. Берём первого, кто ведёт заявки и сейчас доступен; недоступного
+     * пропускаем (как pickStickyByDirectMailbox) — тогда общее распределение.
+     *
+     * @return array{user: User, linked: array<int>, kind: 'addressed_mailbox'}|null
+     */
+    private function pickStickyByAddressedMailbox(EmailMessage $message): ?array
+    {
+        $addresses = [];
+        foreach ([$message->to_recipients, $message->cc_recipients] as $bag) {
+            foreach ((array) $bag as $r) {
+                $email = mb_strtolower(trim((string) (is_array($r) ? ($r['email'] ?? '') : $r)));
+                if ($email !== '' && ! in_array($email, $addresses, true)) {
+                    $addresses[] = $email;
+                }
+            }
+        }
+        if ($addresses === []) {
+            return null;
+        }
+
+        $ownerByAddress = Mailbox::query()
+            ->where('type', MailboxType::Personal->value)
+            ->whereNotNull('owner_user_id')
+            ->whereIn(DB::raw('LOWER(email)'), $addresses)
+            ->get(['email', 'owner_user_id'])
+            ->mapWithKeys(fn ($m) => [mb_strtolower($m->email) => (int) $m->owner_user_id]);
+        if ($ownerByAddress->isEmpty()) {
+            return null;
+        }
+
+        $owners = User::query()
+            ->active()
+            ->role(RoleEnum::requestHandlerRoles())
+            ->whereIn('id', $ownerByAddress->values()->unique()->all())
+            ->get()
+            ->keyBy('id');
+
+        foreach ($addresses as $email) {
+            $owner = $owners->get($ownerByAddress->get($email));
+            if ($owner && ! $owner->isUnavailable()) {
+                return ['user' => $owner, 'linked' => [], 'kind' => 'addressed_mailbox'];
+            }
+        }
+
+        return null;
     }
 
     /**

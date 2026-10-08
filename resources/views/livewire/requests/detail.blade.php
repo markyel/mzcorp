@@ -479,6 +479,7 @@
                         // Старые записи без kind рендерятся нейтрально.
                         $stickyKindLabel = match ($sticky['kind'] ?? null) {
                             'direct_mailbox' => '📬 личный ящик',
+                            'addressed_mailbox' => '📬 адресовано лично',
                             'catalog' => '📦 каталог',
                             'client' => '👤 клиент',
                             'text' => '🔤 текст',
@@ -486,6 +487,7 @@
                         };
                         $stickyHoverTitle = match ($sticky['kind'] ?? null) {
                             'direct_mailbox' => 'Письмо пришло напрямую в личный ящик менеджера — назначение в обход round-robin',
+                            'addressed_mailbox' => 'Письмо пришло в общий ящик, но клиент адресовал его менеджеру лично (его адрес в «Кому» или «Копии») — назначение в обход распределения',
                             'catalog' => 'Sticky сработал по совпадению catalog_item_id — тот же товар каталога уже у этого менеджера',
                             'client' => 'Sticky сработал по client_email — у менеджера есть открытая заявка от того же клиента',
                             'text' => 'Sticky сработал по парсеному артикулу/названию позиции',
@@ -526,7 +528,7 @@
                         </span>
                     @elseif($sticky['legacy'])
                         <span class="text-fg-2 text-[12px]"
-                              title="{{ ($sticky['kind'] ?? null) === 'direct_mailbox' ? $stickyHoverTitle : 'Старая запись sticky — детали привязки не сохранены' }}">{{ $stickyKindLabel ?? 'sticky' }}</span>
+                              title="{{ in_array($sticky['kind'] ?? null, ['direct_mailbox', 'addressed_mailbox'], true) ? $stickyHoverTitle : 'Старая запись sticky — детали привязки не сохранены' }}">{{ $stickyKindLabel ?? 'sticky' }}</span>
                     @else
                         <span class="text-fg-3">—</span>
                     @endif
