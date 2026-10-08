@@ -91,6 +91,13 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .cur .em{font:400 11px/1.2 var(--font-mono);color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mailapp .paneA-link{display:block;margin-top:8px;font:500 11.5px/1.3 var(--font-sans);color:var(--sky-700);text-decoration:none}
 .mailapp .paneA-link:hover{text-decoration:underline}
+.mailapp .app-install{margin-top:auto;padding:10px;border-top:1px solid var(--border-subtle)}
+.mailapp .app-install[hidden]{display:none}
+.mailapp .app-install-btn{display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-md);
+    background:var(--bg-surface);color:var(--fg-1);font:500 12px/1.3 var(--font-sans);cursor:pointer;text-align:left}
+.mailapp .app-install-btn:hover{border-color:var(--sky-500);color:var(--sky-700)}
+.mailapp .app-install-btn svg{width:16px;height:16px;flex-shrink:0}
+.mailapp .app-install-hint{margin-top:6px;font:400 11px/1.35 var(--font-sans);color:var(--fg-3)}
 .mailapp .flist{padding:8px}
 .mailapp .fgroup-label{font:600 10px/1 var(--font-sans);color:var(--fg-3);text-transform:uppercase;letter-spacing:.06em;padding:12px 8px 6px}
 .mailapp .fitem{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--r-md);font-size:12.5px;color:var(--fg-2);cursor:pointer;border:none;background:none;width:100%;text-align:left}
@@ -483,6 +490,16 @@ body.mail-resizing iframe{pointer-events:none}
                     </button>
                 @endforeach
             @endif
+        </div>
+
+        {{-- Почта отдельным окном (PWA). Видимость и клик — resources/js/mail-signal.js;
+             wire:ignore — чтобы автообновление не сбрасывало выставленный скриптом hidden. --}}
+        <div class="app-install" wire:ignore data-mail-install-box hidden>
+            <button type="button" class="app-install-btn" data-mail-install>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/><path d="m9 10 3 3 3-3"/><path d="M12 6v7"/></svg>
+                <span>Открыть почту отдельным окном</span>
+            </button>
+            <div class="app-install-hint">Своё окно и значок в панели задач с числом новых писем</div>
         </div>
     </div>
 

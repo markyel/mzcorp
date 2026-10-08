@@ -232,6 +232,9 @@
                     <x-dropdown-link :href="route('profile.edit')">{{ __('Profile') }}</x-dropdown-link>
                     <x-dropdown-link :href="route('docs.index')">Документация</x-dropdown-link>
                     <x-dropdown-link :href="route('support.my')">Мои обращения</x-dropdown-link>
+                    {{-- Разрешение на уведомления ОС о новой почте; подпись и
+                         видимость выставляет resources/js/mail-signal.js. --}}
+                    <x-dropdown-link href="#" data-mail-notify-toggle hidden>Включить уведомления о почте</x-dropdown-link>
                     @if($user?->hasRole('admin'))
                         <x-dropdown-link :href="route('support.inbox')">Обращения · инбокс</x-dropdown-link>
                     @endif

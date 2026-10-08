@@ -88,6 +88,10 @@
         <a href="{{ $r['href'] }}" class="{{ $cls }}" title="{{ $r['label'] }}">
             @if($isActive)<span class="absolute -left-2 top-2 bottom-2 w-0.5 bg-[var(--accent)] rounded-r"></span>@endif
             {{ $r['icon'] }}
+            @if($r['key'] === 'mail')
+                {{-- Число выставляет опрос новой почты (layouts/app.blade.php). --}}
+                <span class="rail-mail-badge" data-mail-signal-badge hidden></span>
+            @endif
         </a>
     @endforeach
 

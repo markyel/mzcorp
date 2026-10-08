@@ -18,13 +18,12 @@ use App\Models\SupplierInquiry;
 use App\Models\User;
 use App\Services\Mail\EmailDraftService;
 use App\Services\Mail\EmailToRequestPromoter;
-use App\Services\Mail\ImapFolderSyncService;
 use App\Services\Mail\ImapSeenSyncService;
 use App\Services\Mail\MailboxAccessService;
 use App\Services\Mail\MailboxFolderService;
 use App\Services\Mail\MailHistoryMirrorService;
 use App\Services\Mail\MailReadService;
-use App\Services\Mail\MailReassignArchiverService;
+use App\Services\Mail\MailUnreadCounter;
 use App\Services\Mail\MessageLabelService;
 use App\Services\Mail\SharedMailService;
 use App\Services\Mail\SupplierCcInboxService;
@@ -1269,18 +1268,7 @@ class Client extends Component
      */
     private function hideGoneFromServer(Builder $q, array $mailboxIds): void
     {
-        $sync = app(ImapFolderSyncService::class);
-        $synced = Mailbox::query()->whereIn('id', $mailboxIds)->get()
-            ->filter(fn ($m) => $sync->isServerSynced($m))
-            ->pluck('id')->map(fn ($id) => (int) $id)->all();
-        if ($synced === []) {
-            return;
-        }
-        $q->where(function (Builder $w) use ($synced) {
-            $w->whereNotIn('email_messages.mailbox_id', $synced)
-                ->orWhere('email_messages.direction', '!=', MailDirection::Inbound->value)
-                ->orWhereNotNull('email_messages.imap_uid');
-        });
+        app(MailUnreadCounter::class)->hideGoneFromServer($q, $mailboxIds);
     }
 
     /**
@@ -1291,7 +1279,7 @@ class Client extends Component
      */
     private function hideReassignedCopies(Builder $q): void
     {
-        $q->whereNotIn('email_messages.folder', MailReassignArchiverService::archivePaths());
+        app(MailUnreadCounter::class)->hideReassignedCopies($q);
     }
 
     /**
@@ -1478,29 +1466,19 @@ class Client extends Component
     }
 
     /**
-     * Сколько держим бейдж ящика. Прочтение сбрасывает его сразу
-     * (applyReadState); новые письма догоняют за минуту — зато автообновление
-     * раз в 30 с не пересчитывает ~700 тыс. входящих у каждого, кто держит
-     * почту открытой.
+     * Прочтение сбрасывает бейдж ящика сразу; глобальному сигналу о новой
+     * почте (layouts/app) — событие, чтобы счётчик в шапке не ждал опроса.
+     *
+     * @param  list<int>  $ids  письма, чья прочитанность только что изменилась
      */
-    private const UNREAD_BADGES_TTL = 60;
-
-    /**
-     * Ключ — ящик и ЧЬЯ прочитанность: у личного ящика она владельца, кто бы
-     * ни смотрел, поэтому директор, РОП и сам менеджер делят одно число.
-     */
-    private static function unreadCacheKey(int $mailboxId, int $stateUserId): string
-    {
-        return 'mail:unread:'.$mailboxId.':'.$stateUserId;
-    }
-
-    /** @param  list<int>  $ids  письма, чья прочитанность только что изменилась */
     private function forgetUnreadBadges(array $ids, int $stateUserId): void
     {
+        $counter = app(MailUnreadCounter::class);
         $mailboxIds = EmailMessage::withHistory()->whereIn('id', $ids)->distinct()->pluck('mailbox_id');
         foreach ($mailboxIds as $mailboxId) {
-            Cache::forget(self::unreadCacheKey((int) $mailboxId, $stateUserId));
+            $counter->forget((int) $mailboxId, $stateUserId);
         }
+        $this->dispatch('mail-unread-changed');
     }
 
     /** Непрочитанные по каждому ящику (для бейджей переключателя). @return array<int,int> */
@@ -1510,37 +1488,13 @@ class Client extends Component
             return [];
         }
 
+        $counter = app(MailUnreadCounter::class);
         $out = [];
         foreach ($this->readStateUserByMailbox($mailboxIds) as $mailboxId => $stateUserId) {
-            $out[$mailboxId] = (int) Cache::remember(
-                self::unreadCacheKey($mailboxId, $stateUserId),
-                self::UNREAD_BADGES_TTL,
-                fn () => $this->countUnreadByMailbox([$mailboxId])[$mailboxId] ?? 0,
-            );
+            $out[$mailboxId] = $counter->count($mailboxId, $stateUserId);
         }
 
         return $out;
-    }
-
-    /** @return array<int,int> */
-    private function countUnreadByMailbox(array $mailboxIds): array
-    {
-        // Бейдж ящика = то, что физически лежит в ЭТОМ ящике (как и список при
-        // выборе одного ящика), поэтому копии здесь не прячем: копия и её
-        // оригинал никогда не лежат в одном ящике.
-        return EmailMessage::withHistory()
-            ->whereIn('email_messages.mailbox_id', $mailboxIds)
-            ->where('email_messages.is_draft', false)
-            ->where('email_messages.direction', MailDirection::Inbound->value)
-            ->tap(fn (Builder $q) => $this->hideReassignedCopies($q))
-            ->tap(fn (Builder $q) => $this->hideGoneFromServer($q, $mailboxIds))
-            ->tap(fn (Builder $q) => $this->joinReadState($q, $mailboxIds))
-            ->whereNull('ustate.read_at')
-            ->groupBy('email_messages.mailbox_id')
-            ->selectRaw('email_messages.mailbox_id, COUNT(*) as c')
-            ->pluck('c', 'mailbox_id')
-            ->map(fn ($c) => (int) $c)
-            ->all();
     }
 
     /** Собрать тред вокруг письма: по заявке (если привязано) иначе по заголовкам. */

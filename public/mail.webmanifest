@@ -1,0 +1,17 @@
+{
+    "id": "/dashboard/mail/inbox",
+    "name": "mzCorp Почта",
+    "short_name": "Почта",
+    "description": "Почтовый клиент mzCorp в отдельном окне",
+    "lang": "ru",
+    "start_url": "/dashboard/mail/inbox",
+    "scope": "/",
+    "display": "standalone",
+    "background_color": "#f9fafb",
+    "theme_color": "#ffffff",
+    "icons": [
+        { "src": "/images/pwa/icon-96.png", "sizes": "96x96", "type": "image/png" },
+        { "src": "/images/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" },
+        { "src": "/images/pwa/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    ]
+}

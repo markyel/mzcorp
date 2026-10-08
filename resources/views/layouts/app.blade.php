@@ -7,6 +7,18 @@
 
         <title>{{ $title ?? config('app.name', 'MyLift CRM') }}</title>
 
+        @auth
+            @if(auth()->user()->hasAnyRole(['manager', 'head_of_sales', 'admin', 'director']))
+                {{-- Сигнал о новой почте в любом разделе: resources/js/mail-signal.js. --}}
+                <meta name="mail-signal" content="{{ route('mail.signal') }}"
+                      data-user="{{ auth()->id() }}"
+                      data-mail-page="{{ request()->routeIs('mail.inbox') ? '1' : '0' }}">
+                {{-- Почта как отдельное приложение (своё окно, значок в панели задач). --}}
+                <link rel="manifest" href="{{ asset('mail.webmanifest') }}">
+                <meta name="theme-color" content="#ffffff">
+            @endif
+        @endauth
+
         {{-- Шрифты дизайн-системы. Inter — основной UI; JetBrains Mono — коды/таймстампы. --}}
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

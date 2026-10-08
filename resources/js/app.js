@@ -36,3 +36,12 @@ document.addEventListener('livewire:init', () => {
         fail(() => emit(false));
     });
 });
+
+// Сигнал о новой почте в любом разделе: бейдж «Почты», заголовок вкладки,
+// тост и уведомление ОС (см. mail-signal.js, мета-тег в layouts/app.blade.php).
+import { initMailSignal } from './mail-signal';
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initMailSignal);
+} else {
+    initMailSignal();
+}

@@ -7,6 +7,7 @@
     Из Alpine/JS можно так же: $dispatch('toast', { message: '…', type: 'error' }).
 
     type: success | error | warning | info. Без type или с неизвестным — info.
+    Необязательно: href — тост становится ссылкой; duration — время показа в мс.
     Скрытие: ~5 с, error/warning — ~8 с; наведение мыши останавливает таймер.
     Одинаковый тост, уже висящий на экране, не дублируется — перезапускается таймер.
     Стили — .toast-* в resources/css/app.css (токены status-*).
@@ -29,7 +30,10 @@
             let type = String(d.type ?? '').toLowerCase();
             type = this.aliases[type] ?? type;
             if (! (type in this.durations)) type = 'info';
-            return { message, type };
+            // href — тост-ссылка (клик ведёт по адресу), duration — своё время показа, мс.
+            const href = typeof d.href === 'string' && d.href !== '' ? d.href : null;
+            const duration = Number(d.duration) > 0 ? Number(d.duration) : null;
+            return { message, type, href, duration };
         },
         push(detail) {
             const n = this.normalize(detail);
@@ -48,7 +52,7 @@
         find(id) { return this.toasts.find(t => t.id === id); },
         arm(t) {
             clearTimeout(t.timer);
-            t.timer = setTimeout(() => this.dismiss(t.id), this.durations[t.type]);
+            t.timer = setTimeout(() => this.dismiss(t.id), t.duration ?? this.durations[t.type]);
         },
         hold(t) { clearTimeout(t.timer); },
         dismiss(id) {
@@ -81,7 +85,12 @@
                 <svg x-show="t.type === 'warning'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
                 <svg x-show="t.type === 'info'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
             </span>
-            <span class="toast-message" x-text="t.message"></span>
+            <template x-if="t.href">
+                <a class="toast-message toast-link" :href="t.href" x-text="t.message"></a>
+            </template>
+            <template x-if="! t.href">
+                <span class="toast-message" x-text="t.message"></span>
+            </template>
             <button type="button" class="toast-close" x-on:click="dismiss(t.id)" aria-label="Закрыть" title="Закрыть">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>

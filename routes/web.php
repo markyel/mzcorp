@@ -6,6 +6,7 @@ use App\Http\Controllers\DocsController;
 use App\Http\Controllers\HeartbeatController;
 use App\Http\Controllers\LiftwayFeedController;
 use App\Http\Controllers\LoginArcadeController;
+use App\Http\Controllers\Mail\NewMailSignalController;
 use App\Http\Controllers\OAuthYandexController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\CorrespondencePdfController;
@@ -85,6 +86,10 @@ Route::middleware('auth')->group(function () {
     // вкладка видима. Доступен всем авторизованным (менеджеры тоже пишут).
     // Питает раздел «Использование системы» (admin/director).
     Route::post('/heartbeat', HeartbeatController::class)->name('heartbeat.ping');
+
+    // Сигнал о новой почте — опрашивается из layouts/app.blade.php в любом
+    // разделе. Без личного ящика отвечает enabled=false, поэтому без ролей.
+    Route::get('/dashboard/mail-signal', NewMailSignalController::class)->name('mail.signal');
 
     // «Честный знак» — разбор PDF с кодами маркировки (DataMatrix, одна
     // страница = один код) и заполнение файла поставки (GTIN/КИЗ по MZ-ID).
