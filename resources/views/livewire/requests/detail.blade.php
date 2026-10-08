@@ -756,7 +756,10 @@
             $allow = fn (\App\Enums\RequestStatus $t) => in_array($t, $allowed, true);
             $RS = \App\Enums\RequestStatus::class;
         @endphp
-        <div class="flex flex-col gap-2 min-w-[200px]">
+        {{-- max-w: колонка героя — auto, и без потолка длинный текст (комментарий
+             к закрытию, системная причина) растягивал её на всю ширину строкой,
+             сжимая левую часть карточки в узкую полосу. --}}
+        <div class="flex flex-col gap-2 min-w-[200px] max-w-[380px]">
 
             {{-- Ручной флаг attention. Менеджер/acting/РОП — toggle через
                  AttentionService::setManual/clearManual. Sticky: не затирается
