@@ -153,7 +153,7 @@
     @endif
     @if(!empty($warm['price_ready']))
       <div class="grp sky">
-        <div class="gh"><span class="dot sky"></span>Появилась актуальная цена, но КП не отправлен <span class="cnt">{{ count($warm['price_ready']) }}</span></div>
+        <div class="gh"><span class="dot sky"></span>Появилась актуальная цена, но КП не отправлено <span class="cnt">{{ count($warm['price_ready']) }}</span></div>
         <div class="rows">@foreach($warm['price_ready'] as $x)
           <div class="r"><a class="code" href="{{ $rurl($x['id']) }}">{{ $x['code'] }}</a><span class="st">{{ $x['status'] }}</span><span class="m">{{ $x['meta'] }}</span></div>
         @endforeach</div>

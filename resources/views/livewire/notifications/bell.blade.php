@@ -17,7 +17,7 @@
              wire:click.stop>
             <div class="px-3 py-2 border-b border-border-subtle flex items-center gap-2">
                 <span class="font-semibold text-fg-1">Уведомления</span>
-                <span class="text-fg-3 text-[11.5px]">{{ $count }} непрочитано</span>
+                <span class="text-fg-3 text-[11.5px]">непрочитанных: {{ $count }}</span>
                 <span class="flex-1"></span>
                 @if($count > 0)
                     <button type="button" wire:click="markAllRead" class="text-[11.5px] text-sky-700 hover:underline">Прочитать всё</button>
@@ -47,10 +47,10 @@
                                 'request_assigned' => 'Новая заявка ' . ($data['internal_code'] ?? ''),
                                 'delegated_activity' => 'Делегированная ' . ($data['internal_code'] ?? '') . ' · новое сообщение',
                                 'attention_overdue' => 'Просрочено: ' . ($data['internal_code'] ?? ''),
-                                'organization_link_pending' => 'Проверьте реквизиты в КП ' . ($data['internal_code'] ?? ''),
+                                'organization_link_pending' => 'Проверьте реквизиты в ' . ($data['document_in'] ?? 'КП') . ' ' . ($data['internal_code'] ?? ''),
                                 'openai_circuit_opened' => 'OpenAI недоступен — категоризатор на паузе',
                                 'queue_stalled' => 'Очередь задач встала — письма не разбираются',
-                                'support_reply' => 'Ответ создателя по тикету #' . ($data['ticket_id'] ?? ''),
+                                'support_reply' => 'Ответ по обращению #' . ($data['ticket_id'] ?? ''),
                                 default => 'Уведомление',
                             };
                             $subtitle = match($kind) {

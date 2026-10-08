@@ -22,6 +22,8 @@ class OrganizationLinkPendingNotification extends Notification
         public readonly ?string $internalCode,
         public readonly string $organizationName,
         public readonly string $email,
+        /** «в КП / в счёте / в документе» — заголовок в колокольчике. */
+        public readonly string $documentIn = 'КП',
     ) {}
 
     public static function from(OrganizationLinkRequest $pending): self
@@ -32,6 +34,11 @@ class OrganizationLinkPendingNotification extends Notification
             internalCode: $pending->request?->internal_code,
             organizationName: (string) $pending->organization?->name,
             email: (string) $pending->contact?->email,
+            documentIn: match ($pending->document_type) {
+                'outbound_invoice' => 'счёте',
+                null, '' => 'документе',
+                default => 'КП',
+            },
         );
     }
 
@@ -49,6 +56,7 @@ class OrganizationLinkPendingNotification extends Notification
             'internal_code' => $this->internalCode,
             'organization_name' => mb_substr($this->organizationName, 0, 120),
             'email' => $this->email,
+            'document_in' => $this->documentIn,
         ];
     }
 }

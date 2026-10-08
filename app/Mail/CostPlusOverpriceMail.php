@@ -61,8 +61,9 @@ class CostPlusOverpriceMail extends Mailable
         $button = 'display:inline-block;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:600;background:#D32027;color:#fff';
 
         $html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1f2937;line-height:1.5">'
-            .'<p>По заявке <b>'.e($this->request->internal_code).'</b> для <b>'.e($this->organization->name).'</b> ушёл '
-            .e($this->documentWord()).' '.e($doc).'. У этого покупателя цена — <b>закупка + '.e($this->num($this->markup, 0)).'%</b>, '
+            // «КП» — среднего рода: «ушло КП», «исправленное КП»; «счёт» — мужского.
+            .'<p>По заявке <b>'.e($this->request->internal_code).'</b> для <b>'.e($this->organization->name).'</b> '
+            .($this->isInvoice() ? 'ушёл' : 'ушло').' '.e($this->documentWord()).' '.e($doc).'. У этого покупателя цена — <b>закупка + '.e($this->num($this->markup, 0)).'%</b>, '
             .'без скидок от каталога. В документе цена выше:</p>'
             .'<table style="border-collapse:collapse;font-size:13px;margin:8px 0 12px">'
             .'<tr style="color:#6b7280;font-size:12px"><th style="'.$cell.'text-align:left">Артикул</th><th style="'.$cell.'text-align:left">Позиция</th>'
@@ -70,7 +71,8 @@ class CostPlusOverpriceMail extends Mailable
             .$rows
             .'</table>'
             .'<p>Разница по документу: <b>'.e($money($overTotal)).'</b>.</p>'
-            .'<p>Пересчитайте цены и вышлите клиенту исправленный '.e($this->documentWord()).', пока он не ответил.</p>'
+            .'<p>Пересчитайте цены и вышлите клиенту '.($this->isInvoice() ? 'исправленный' : 'исправленное').' '
+            .e($this->documentWord()).', пока он не ответил.</p>'
             .'<p style="margin:14px 0"><a href="'.e($url).'" style="'.$button.'">Открыть заявку</a></p>'
             .'<p style="color:#6b7280;font-size:12px">Цена «должно быть» — закупочная из каталога на сегодня плюс '
             .e($this->num($this->markup, 0)).'%. Если закупка изменилась, а каталог ещё нет, — сверьтесь с 1С.</p>'
@@ -81,7 +83,12 @@ class CostPlusOverpriceMail extends Mailable
 
     private function documentWord(): string
     {
-        return $this->quote->document_type === \App\Enums\DetectorType::OutboundInvoice ? 'счёт' : 'КП';
+        return $this->isInvoice() ? 'счёт' : 'КП';
+    }
+
+    private function isInvoice(): bool
+    {
+        return $this->quote->document_type === \App\Enums\DetectorType::OutboundInvoice;
     }
 
     private function num(float $v, int $decimals): string
