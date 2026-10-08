@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Requests;
 
+use App\Services\Supplier\SupplierOrganizationService;
 use App\Enums\Role;
 use App\Models\CatalogItem;
 use App\Models\Request as RequestModel;
@@ -542,7 +543,9 @@ class SupplierDispatchPanel extends Component
                     'id' => (int) $g->id,
                     'name' => (string) $g->name,
                     'ids' => $ids,
-                    'selected' => $ids !== [] && collect($ids)->every(fn ($id) => ! empty($this->selectedSuppliers[$id])),
+                    // Выбрана, если от каждой организации группы отмечен хоть один адрес:
+                    // по умолчанию от организации отмечаем один (onePerOrganization).
+                    'selected' => $ids !== [] && SupplierOrganizationService::everyOrganizationSelected($g->suppliers, $this->selectedSuppliers),
                 ];
             })
             ->filter(fn ($g) => $g['ids'] !== [])
@@ -583,11 +586,23 @@ class SupplierDispatchPanel extends Component
         if ($group === null) {
             return;
         }
-        foreach ($group['ids'] as $id) {
-            if ($group['selected']) {
+        if ($group['selected']) {
+            foreach ($group['ids'] as $id) {
                 unset($this->selectedSuppliers[$id]);
-            } else {
-                $this->selectedSuppliers[$id] = true;
+            }
+        } else {
+            // От организации — один адрес: уже отмеченный, подходящий под позиции
+            // или чаще всех присылавший цены. Остальные адреса попадают в список
+            // неотмеченными — их можно добавить вручную или «отметить всех».
+            $prefer = array_merge(
+                array_values(array_filter($group['ids'], fn ($id) => ! empty($this->selectedSuppliers[$id]))),
+                array_map(fn ($o) => (int) $o['id'], array_filter($this->supplierOptions, fn ($o) => ! empty($o['matched']))),
+            );
+            $pick = SupplierOrganizationService::onePerOrganization($group['ids'], $prefer);
+            foreach ($group['ids'] as $id) {
+                if (in_array($id, $pick, true)) {
+                    $this->selectedSuppliers[$id] = true;
+                }
                 if (! in_array($id, $this->addedSupplierIds, true)) {
                     $this->addedSupplierIds[] = $id;
                 }

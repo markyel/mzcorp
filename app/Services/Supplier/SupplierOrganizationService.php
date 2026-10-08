@@ -200,6 +200,111 @@ class SupplierOrganizationService
         }, $options);
     }
 
+    /**
+     * По одному адресу на организацию — для выбора группы поставщиков целиком
+     * («Китай запросы»): письмо одной компании на два-три её адреса — дубль
+     * для поставщика. Адреса без организации проходят все.
+     *
+     * Кого оставить от организации, по порядку:
+     *   1) адрес из $prefer (уже отмечен или подходит под позиции) — в его порядке;
+     *   2) кто чаще присылал цены на наши запросы;
+     *   3) самый старый адрес реестра.
+     *
+     * @param  list<int>  $supplierIds
+     * @param  list<int>  $prefer
+     * @return list<int>
+     */
+    public static function onePerOrganization(array $supplierIds, array $prefer = []): array
+    {
+        if ($supplierIds === []) {
+            return [];
+        }
+
+        $suppliers = Supplier::query()->whereIn('id', $supplierIds)
+            ->get(['id', 'email', 'supplier_organization_id'])->keyBy('id');
+
+        $byOrg = [];
+        $out = [];
+        foreach ($supplierIds as $id) {
+            $s = $suppliers->get($id);
+            if ($s === null) {
+                continue;
+            }
+            if ($s->supplier_organization_id === null) {
+                $out[] = (int) $id;
+            } else {
+                $byOrg[(int) $s->supplier_organization_id][] = $s;
+            }
+        }
+        if ($byOrg === []) {
+            return $out;
+        }
+
+        $quoted = self::quotedCountsByEmail(
+            collect($byOrg)->flatten()->filter(fn ($s) => count($byOrg[(int) $s->supplier_organization_id]) > 1)
+                ->pluck('email')->all()
+        );
+        $preferRank = array_flip(array_map('intval', $prefer));
+
+        foreach ($byOrg as $list) {
+            usort($list, function (Supplier $a, Supplier $b) use ($preferRank, $quoted) {
+                $ra = $preferRank[$a->id] ?? PHP_INT_MAX;
+                $rb = $preferRank[$b->id] ?? PHP_INT_MAX;
+                $qa = $quoted[mb_strtolower((string) $a->email)] ?? 0;
+                $qb = $quoted[mb_strtolower((string) $b->email)] ?? 0;
+
+                return [$ra, $qb, $a->id] <=> [$rb, $qa, $b->id];
+            });
+            $out[] = (int) $list[0]->id;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Группа «выбрана», если от каждой её организации (и каждого адреса без
+     * организации) отмечен хотя бы один адрес.
+     *
+     * @param  iterable<Supplier>  $suppliers  адреса группы (с supplier_organization_id)
+     * @param  array<int, bool>  $selected  id адреса => отмечен
+     */
+    public static function everyOrganizationSelected(iterable $suppliers, array $selected): bool
+    {
+        $buckets = [];
+        foreach ($suppliers as $s) {
+            $key = $s->supplier_organization_id !== null ? 'o'.$s->supplier_organization_id : 's'.$s->id;
+            $buckets[$key] = ($buckets[$key] ?? false) || ! empty($selected[(int) $s->id]);
+        }
+
+        return $buckets !== [] && ! in_array(false, $buckets, true);
+    }
+
+    /**
+     * Сколько раз адрес присылал цену на наш запрос (supplier_offers.outcome = quoted).
+     *
+     * @param  list<?string>  $emails
+     * @return array<string, int> lower(email) => count
+     */
+    private static function quotedCountsByEmail(array $emails): array
+    {
+        $emails = array_values(array_unique(array_filter(array_map(
+            fn ($e) => mb_strtolower(trim((string) $e)), $emails
+        ))));
+        if ($emails === []) {
+            return [];
+        }
+
+        return DB::table('supplier_offers as o')
+            ->join('supplier_inquiries as i', 'i.id', '=', 'o.supplier_inquiry_id')
+            ->where('o.outcome', 'quoted')
+            ->whereIn(DB::raw('lower(i.supplier_email)'), $emails)
+            ->groupBy(DB::raw('lower(i.supplier_email)'))
+            ->selectRaw('lower(i.supplier_email) as email, count(*) as c')
+            ->pluck('c', 'email')
+            ->map(fn ($c) => (int) $c)
+            ->all();
+    }
+
     public static function domainOf(Supplier $supplier): ?string
     {
         $domain = mb_strtolower(trim((string) $supplier->domain));
