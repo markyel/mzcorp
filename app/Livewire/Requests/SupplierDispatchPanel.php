@@ -808,6 +808,26 @@ class SupplierDispatchPanel extends Component
 
     /* --------------------------- Отправка --------------------------------- */
 
+    /**
+     * Может ли пользователь отправлять запросы поставщикам по этой заявке —
+     * то же правило, что в send(). Форму запроса остальным не показываем.
+     */
+    #[Computed]
+    public function canDispatch(): bool
+    {
+        $user = auth()->user();
+        if ($user === null || $user->hasRole(Role::Secretary->value)) {
+            return false;
+        }
+        // Снабжение ведёт поставщиков по любой заявке (заказчик, 2026-09-29):
+        // запрос уходит с ящика менеджера заявки, ответы ложатся в её тред.
+        if ($user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value, Role::Admin->value, Role::Procurement->value])) {
+            return true;
+        }
+
+        return RequestModel::find($this->requestId)?->isAccessibleBy($user) ?? false;
+    }
+
     public function send(SupplierDispatchService $dispatcher)
     {
         $req = RequestModel::findOrFail($this->requestId);
@@ -815,10 +835,7 @@ class SupplierDispatchPanel extends Component
         if ($user === null) {
             abort(403);
         }
-        // Снабжение ведёт поставщиков по любой заявке (заказчик, 2026-09-29):
-        // запрос уходит с ящика менеджера заявки, ответы ложатся в её тред.
-        $privileged = $user->hasAnyRole([Role::HeadOfSales->value, Role::Director->value, Role::Admin->value, Role::Procurement->value]);
-        if ($user->hasRole(Role::Secretary->value) || (! $privileged && ! $req->isAccessibleBy($user))) {
+        if (! $this->canDispatch) {
             abort(403, 'Доступно назначенному менеджеру, acting, РОПу или снабжению.');
         }
 

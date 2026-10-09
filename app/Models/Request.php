@@ -541,12 +541,17 @@ class Request extends Model
      * Можно открыть и читать заявку (карточка, переписка, вложения, PDF), но
      * не обязательно работать с ней. Шире isAccessibleBy на снабжение: оно
      * ищет по чужим заявкам и смотрит переписку менеджера с клиентом и
-     * поставщиками. Действия в заявке по-прежнему проверяет isAccessibleBy.
+     * поставщиками. Менеджер по рекламациям — то же самое: читает переписку и
+     * скачивает файлы по заявке, на которую пришла претензия. Действия в заявке
+     * по-прежнему проверяет isAccessibleBy.
      */
     public function isViewableBy(?User $user): bool
     {
         return $this->isAccessibleBy($user)
-            || (bool) $user?->hasRole(\App\Enums\Role::Procurement->value);
+            || (bool) $user?->hasAnyRole([
+                \App\Enums\Role::Procurement->value,
+                \App\Enums\Role::ClaimsManager->value,
+            ]);
     }
 
     /**

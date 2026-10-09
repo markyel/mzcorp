@@ -240,7 +240,9 @@ class Detail extends Component
         // статусу или null). Не делаем для secretary — он не «менеджер»
         // заявки, только просматривает; и не для гостей (тогда mount абортит
         // выше).
-        if ($user !== null && ! $user->hasRole(Role::Secretary->value)) {
+        // Менеджер по рекламациям тоже только читает — его просмотр не должен
+        // ни отмечать заявку просмотренной, ни снимать сигналы менеджера.
+        if ($user !== null && ! $user->hasAnyRole([Role::Secretary->value, Role::ClaimsManager->value])) {
             RequestUserView::updateOrCreate(
                 ['request_id' => $this->request->id, 'user_id' => $user->id],
                 ['last_seen_at' => now()],
@@ -1968,6 +1970,11 @@ class Detail extends Component
 
     public function applyAiDecision(int $decisionId, AiDecisionService $svc): void
     {
+        // Карточку на чтение открывают снабжение и рекламации — подсказки ИИ
+        // применяет только тот, кто работает с заявкой (кнопки им не видны,
+        // но прямой вызов Livewire-метода проходил без проверки).
+        abort_unless($this->request->isAccessibleBy(auth()->user()), 403);
+
         $decision = AiDecision::query()
             ->where('request_id', $this->request->id)
             ->whereKey($decisionId)
@@ -1985,6 +1992,8 @@ class Detail extends Component
 
     public function dismissAiDecision(int $decisionId, AiDecisionService $svc): void
     {
+        abort_unless($this->request->isAccessibleBy(auth()->user()), 403);
+
         $decision = AiDecision::query()
             ->where('request_id', $this->request->id)
             ->whereKey($decisionId)

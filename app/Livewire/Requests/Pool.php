@@ -307,6 +307,8 @@ class Pool extends Component
             Role::Secretary->value,
             // Снабжение заявки тоже не ведёт — «Мои» у него всегда пусто.
             Role::Procurement->value,
+            // Менеджер по рекламациям — тоже: ищет заявку по претензии среди всех.
+            Role::ClaimsManager->value,
             Role::Admin->value,
         ]) && ! $user->hasRole(Role::HeadOfSales->value)
             && ! $user->hasRole(Role::Manager->value);
@@ -593,6 +595,8 @@ class Pool extends Component
             // клиентом и поставщиком, которую вёл менеджер. Без общего пула
             // поиск отдавал пустоту — своих заявок у снабженца нет.
             Role::Procurement->value,
+            // Менеджер по рекламациям ищет заявку, по которой пришла претензия.
+            Role::ClaimsManager->value,
             Role::Admin->value,
         ]));
     }

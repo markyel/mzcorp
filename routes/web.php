@@ -69,6 +69,13 @@ Route::get('/feeds/direct/{token}/products.yml', [YandexDirectFeedController::cl
     ->name('feeds.direct.products');
 
 Route::get('/dashboard', function () {
+    // Менеджеру по рекламациям дашборд ни к чему (своих заявок нет) — сразу в заявки.
+    $user = auth()->user();
+    if ($user->hasRole('claims_manager')
+        && ! $user->hasAnyRole(['manager', 'head_of_sales', 'secretary', 'director', 'admin', 'procurement'])) {
+        return redirect()->route('requests.index');
+    }
+
     return view('dashboard');
 })->middleware('auth')->name('dashboard');
 
@@ -119,8 +126,10 @@ Route::middleware('auth')->group(function () {
     });
 
     // Заявки — пул менеджера и карточка. Все 4 роли;
-    // фильтрация «своё/всё» — внутри Pool component.
-    Route::middleware('role:manager,head_of_sales,director,secretary,admin,procurement')->group(function () {
+    // фильтрация «своё/всё» — внутри Pool component. claims_manager — менеджер по
+    // рекламациям: карточки только на чтение (Request::isViewableBy), вложения,
+    // экспорт переписки; почта и адресная книга ниже закрыты своими списками ролей.
+    Route::middleware('role:manager,head_of_sales,director,secretary,admin,procurement,claims_manager')->group(function () {
         Route::get('/dashboard/requests', function () {
             return view('requests.index');
         })->name('requests.index');

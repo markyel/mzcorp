@@ -18,17 +18,21 @@
     // поставщикам по M-артикулу). Снабжение + менеджер (частый инициатор) +
     // РОП/директор/админ. Секретарю не показываем.
     $canSeeProcurement = $railUser?->hasAnyRole(['procurement', 'manager', 'head_of_sales', 'director', 'admin']);
+    // Менеджер по рекламациям (без других ролей): только заявки на чтение и
+    // каталог — дашборда, клиентов и поставщиков у роли нет.
+    $isClaimsOnly = $railUser?->hasRole('claims_manager')
+        && ! $railUser->hasAnyRole(['manager', 'head_of_sales', 'secretary', 'director', 'admin', 'procurement']);
 
     // Единый список левого rail для всех страниц с 3-col shell.
     // active маркируется по значению атрибута компонента, не по route()
     // — позволяет вручную задать «к какому разделу относится текущая
     // страница» (на /dashboard/catalog/search active='catalog'
     // даже если внутренний роут другой).
-    $rail = [
-        ['icon' => '⌂', 'label' => 'Дашборд',          'href' => route('dashboard'),        'key' => 'dashboard'],
+    $rail = array_values(array_filter([
+        $isClaimsOnly ? null : ['icon' => '⌂', 'label' => 'Дашборд', 'href' => route('dashboard'), 'key' => 'dashboard'],
         ['icon' => '≡', 'label' => 'Заявки',           'href' => route('requests.index'),   'key' => 'requests'],
         ['icon' => '⌕', 'label' => 'Поиск по каталогу', 'href' => route('catalog.search'),   'key' => 'catalog'],
-    ];
+    ]));
 
     if ($railUser?->hasAnyRole(['manager', 'head_of_sales', 'admin', 'director'])) {
         // Менеджер / РОП / админ / директорат — почтовый клиент. У менеджера
@@ -43,11 +47,13 @@
         $rail[] = ['icon' => '₽', 'label' => 'Счета', 'href' => route('invoices.index'), 'key' => 'invoices'];
     }
 
-    // «Клиенты» — реестр организаций/контактов. Доступен всем ролям.
-    $rail[] = ['icon' => '◈', 'label' => 'Клиенты', 'href' => route('clients.index'), 'key' => 'clients'];
+    if (! $isClaimsOnly) {
+        // «Клиенты» — реестр организаций/контактов. Доступен всем ролям, кроме рекламаций.
+        $rail[] = ['icon' => '◈', 'label' => 'Клиенты', 'href' => route('clients.index'), 'key' => 'clients'];
 
-    // «Поставщики» — запросы расценки поставщикам (SupplierInquiry). Все роли.
-    $rail[] = ['icon' => '◇', 'label' => 'Поставщики', 'href' => route('suppliers.index'), 'key' => 'suppliers'];
+        // «Поставщики» — запросы расценки поставщикам (SupplierInquiry). Все роли, кроме рекламаций.
+        $rail[] = ['icon' => '◇', 'label' => 'Поставщики', 'href' => route('suppliers.index'), 'key' => 'suppliers'];
+    }
 
     // «Снабжение» — топ позиций, сдерживающих выдачу КП + запросы поставщикам.
     if ($canSeeProcurement) {
