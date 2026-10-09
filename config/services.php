@@ -404,6 +404,8 @@ return [
     // здесь только адрес Bot API (менялся: platform-api → platform-api2).
     'max' => [
         'api_base' => env('MAX_API_BASE', 'https://platform-api2.max.ru'),
+        // Корневой сертификат Минцифры: им подписаны сервера MAX. Доверие — только в запросах к MAX.
+        'extra_ca' => env('MAX_EXTRA_CA', resource_path('certs/russian_trusted_root_ca.pem')),
     ],
 
     'marketing' => [

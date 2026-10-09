@@ -600,7 +600,42 @@ class MediaPublisherService
     private function maxHttp(MediaChannel $channel, int $timeout = self::TIMEOUT): \Illuminate\Http\Client\PendingRequest
     {
         return Http::timeout($timeout)->acceptJson()
+            ->withOptions(['verify' => self::maxVerify()])
             ->withHeaders(['Authorization' => (string) $channel->secret('bot_token')]);
+    }
+
+    /**
+     * Проверка TLS для MAX. Сервера MAX подписаны сертификатом Минцифры
+     * («Russian Trusted Root CA»), которого нет в системном хранилище. Доверяем
+     * ему только в запросах к MAX: системные корни + этот сертификат собираются
+     * в отдельный файл в storage. Нет файла сертификата — обычная проверка.
+     */
+    public static function maxVerify(): string|bool
+    {
+        $extra = (string) config('services.max.extra_ca', '');
+        if ($extra === '' || ! is_readable($extra)) {
+            return true;
+        }
+
+        $bundle = storage_path('app/certs/max-ca-bundle.pem');
+        if (is_readable($bundle) && filemtime($bundle) >= filemtime($extra)) {
+            return $bundle;
+        }
+
+        try {
+            $system = (string) (openssl_get_cert_locations()['default_cert_file'] ?? '');
+            $roots = $system !== '' && is_readable($system) ? (string) file_get_contents($system) : '';
+            if (! is_dir(dirname($bundle))) {
+                mkdir(dirname($bundle), 0755, true);
+            }
+            file_put_contents($bundle, rtrim($roots)."\n".file_get_contents($extra), LOCK_EX);
+
+            return $bundle;
+        } catch (\Throwable $e) {
+            Log::warning('MediaPublisherService: MAX CA bundle build failed', ['error' => $e->getMessage()]);
+
+            return $extra;
+        }
     }
 
     /** Текст ошибки MAX: {"code": "...", "message": "..."}. */
@@ -738,6 +773,7 @@ class MediaPublisherService
 
             $name = basename((string) parse_url($imageUrl, PHP_URL_PATH)) ?: 'photo.jpg';
             $up = Http::timeout(self::TIMEOUT * 3)
+                ->withOptions(['verify' => self::maxVerify()])
                 ->withHeaders(['Authorization' => (string) $channel->secret('bot_token')])
                 ->attach('data', $file->body(), $name)
                 ->post($uploadUrl);
