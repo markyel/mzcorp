@@ -130,6 +130,16 @@ class MaxPublisherTest extends TestCase
         Http::assertSent(fn (Request $r) => str_contains($r->url(), '/updates') && str_contains($r->url(), 'types=bot_added'));
     }
 
+    public function test_telegram_bot_token_is_cut_from_error_text(): void
+    {
+        $msg = 'cURL error 28: Timeout for https://api.telegram.org/bot8923878592:AAG4-x_Y/sendMessage';
+
+        $this->assertSame(
+            'cURL error 28: Timeout for https://api.telegram.org/bot***/sendMessage',
+            MediaPublisherService::redactSecrets($msg),
+        );
+    }
+
     public function test_upload_token_from_photos_map_or_plain_token(): void
     {
         $this->assertSame('t1', MediaPublisherService::maxUploadToken(['photos' => ['9' => ['token' => 't1']]]));

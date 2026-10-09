@@ -177,8 +177,17 @@ class MediaPublisherService
 
             return ['ok' => true, 'message' => 'Telegram отвечает: '.($r['result']['title'] ?? 'канал').'.'];
         } catch (\Throwable $e) {
-            return ['ok' => false, 'message' => 'Площадка не ответила: '.$e->getMessage()];
+            return ['ok' => false, 'message' => 'Площадка не ответила: '.self::redactSecrets($e->getMessage())];
         }
+    }
+
+    /**
+     * Ошибка HTTP-клиента несёт адрес запроса, а у Telegram токен бота — в
+     * адресе (/bot<token>/…). В last_error и лог он попадать не должен.
+     */
+    public static function redactSecrets(string $message): string
+    {
+        return (string) preg_replace('~/bot\d+:[A-Za-z0-9_-]+~', '/bot***', $message);
     }
 
     /**
@@ -568,7 +577,7 @@ class MediaPublisherService
                     'disable_web_page_preview' => true,
                 ]))->json();
         } catch (\Throwable $e) {
-            return ['ok' => false, 'message' => 'Telegram не ответил: '.$e->getMessage(), 'url' => null, 'external_id' => null];
+            return ['ok' => false, 'message' => 'Telegram не ответил: '.self::redactSecrets($e->getMessage()), 'url' => null, 'external_id' => null];
         }
 
         if (! ($r['ok'] ?? false)) {
