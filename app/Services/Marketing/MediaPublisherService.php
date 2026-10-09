@@ -35,6 +35,11 @@ class MediaPublisherService
     /** Столько картинок вмещает альбом Telegram; ВК ограничивает стену десятью вложениями. */
     private const MAX_PHOTOS = 10;
 
+    /** Попыток при сбое соединения с площадкой и пауза между ними. */
+    private const CONNECT_ATTEMPTS = 3;
+
+    private const CONNECT_RETRY_PAUSE_MS = 3000;
+
     /** Telegram принимает картинку по ссылке до 5 МБ — больше не отправляем. */
     private const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
@@ -188,6 +193,27 @@ class MediaPublisherService
     public static function redactSecrets(string $message): string
     {
         return (string) preg_replace('~/bot\d+:[A-Za-z0-9_-]+~', '/bot***', $message);
+    }
+
+    /**
+     * Повтор запроса к площадке, если соединение не установилось. Связь с
+     * Telegram с сервера временами пропадает на минуты (09.10: три попытки из
+     * пяти без соединения) — одна неудача роняла публикацию по расписанию.
+     */
+    private function retryConnect(\Illuminate\Http\Client\PendingRequest $request): \Illuminate\Http\Client\PendingRequest
+    {
+        return $request->retry(self::CONNECT_ATTEMPTS, self::CONNECT_RETRY_PAUSE_MS, fn ($e) => self::isConnectFailure($e), throw: false);
+    }
+
+    /**
+     * Сбой до отправки запроса: адрес не разрешился, TCP или TLS не
+     * установились. Только такой повторять безопасно — обрыв после отправки
+     * мог уже опубликовать пост, повтор дал бы дубль.
+     */
+    public static function isConnectFailure(\Throwable $e): bool
+    {
+        return $e instanceof \Illuminate\Http\Client\ConnectionException
+            && (bool) preg_match('~cURL error (6|7|35):|Failed to connect|Connection timed out|SSL connection timeout~i', $e->getMessage());
     }
 
     /**
@@ -527,7 +553,7 @@ class MediaPublisherService
             if ($images !== []) {
                 $fits = mb_strlen($html ? strip_tags($text) : $text) <= 1024;
                 $media = [];
-                $request = Http::timeout(self::TIMEOUT * 3);
+                $request = $this->retryConnect(Http::timeout(self::TIMEOUT * 3));
 
                 // Картинки грузим файлами, а не ссылками. По ссылке Telegram
                 // качает их сам со своей стороны и на седьмой картинке ответил
@@ -569,7 +595,7 @@ class MediaPublisherService
                 }
             }
 
-            $r = Http::timeout(self::TIMEOUT)
+            $r = $this->retryConnect(Http::timeout(self::TIMEOUT))
                 ->post($api.'sendMessage', array_filter([
                     'chat_id' => $chatId,
                     'text' => mb_substr($text, 0, 4096),
@@ -615,7 +641,7 @@ class MediaPublisherService
 
     private function maxHttp(MediaChannel $channel, int $timeout = self::TIMEOUT): \Illuminate\Http\Client\PendingRequest
     {
-        return Http::timeout($timeout)->acceptJson()
+        return $this->retryConnect(Http::timeout($timeout))->acceptJson()
             ->withOptions(['verify' => self::maxVerify()])
             ->withHeaders(['Authorization' => (string) $channel->secret('bot_token')]);
     }
@@ -788,7 +814,7 @@ class MediaPublisherService
             }
 
             $name = basename((string) parse_url($imageUrl, PHP_URL_PATH)) ?: 'photo.jpg';
-            $up = Http::timeout(self::TIMEOUT * 3)
+            $up = $this->retryConnect(Http::timeout(self::TIMEOUT * 3))
                 ->withOptions(['verify' => self::maxVerify()])
                 ->withHeaders(['Authorization' => (string) $channel->secret('bot_token')])
                 ->attach('data', $file->body(), $name)

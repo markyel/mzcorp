@@ -4,8 +4,10 @@ namespace Tests\Unit\Marketing;
 
 use App\Models\MediaChannel;
 use App\Services\Marketing\MediaPublisherService;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 use ReflectionMethod;
 use Tests\TestCase;
 
@@ -138,6 +140,33 @@ class MaxPublisherTest extends TestCase
             'cURL error 28: Timeout for https://api.telegram.org/bot***/sendMessage',
             MediaPublisherService::redactSecrets($msg),
         );
+    }
+
+    public function test_retries_post_when_connection_was_not_established(): void
+    {
+        config(['services.max.api_base' => 'https://max.test']);
+        Sleep::fake();
+        $calls = 0;
+        Http::fake(function () use (&$calls) {
+            if (++$calls < 3) {
+                throw new ConnectionException('cURL error 28: Failed to connect to max.test port 443 after 10002 ms');
+            }
+
+            return Http::response(['message' => ['body' => ['mid' => 'mid.ok'], 'url' => null]]);
+        });
+
+        $res = $this->publishToMax($this->channel(), 'Текст');
+
+        $this->assertTrue($res['ok'], $res['message']);
+        $this->assertSame(3, $calls);
+    }
+
+    public function test_only_pre_send_failures_count_as_connect_failure(): void
+    {
+        $this->assertTrue(MediaPublisherService::isConnectFailure(new ConnectionException('cURL error 28: SSL connection timeout')));
+        $this->assertTrue(MediaPublisherService::isConnectFailure(new ConnectionException('cURL error 7: Failed to connect to api.telegram.org')));
+        $this->assertFalse(MediaPublisherService::isConnectFailure(new ConnectionException('cURL error 28: Operation timed out after 20001 milliseconds with 0 bytes received')));
+        $this->assertFalse(MediaPublisherService::isConnectFailure(new \RuntimeException('Failed to connect')));
     }
 
     public function test_upload_token_from_photos_map_or_plain_token(): void
