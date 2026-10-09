@@ -4,6 +4,7 @@ namespace App\Services\Marketing;
 
 use App\Models\MediaChannel;
 use App\Models\MediaPublication;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -133,6 +134,12 @@ class MediaPublisherService
     {
         if (! $channel->isPostable()) {
             return ['ok' => false, 'message' => 'Для этого канала автопубликации нет — проверять нечего.'];
+        }
+        if ($channel->kind === 'max' && ! $channel->isConnected() && (string) $channel->secret('bot_token') !== '') {
+            $found = $this->discoverMaxChat($channel);
+            if (! $found['ok']) {
+                return $found;
+            }
         }
         if (! $channel->isConnected()) {
             return ['ok' => false, 'message' => 'Заполните токен и адрес места публикации.'];
@@ -886,27 +893,74 @@ class MediaPublisherService
     }
 
     /**
-     * Чаты и каналы, где состоит бот (GET /chats).
+     * Канал не указан: берём его из событий «бота добавили». Один канал —
+     * сохраняем его id в доступ канала, несколько — просим выбрать.
+     *
+     * @return array{ok: bool, message: string}
+     */
+    private function discoverMaxChat(MediaChannel $channel): array
+    {
+        try {
+            $chats = collect($this->maxChats($channel));
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'message' => 'MAX не ответил: '.$e->getMessage()];
+        }
+        $channels = $chats->where('type', 'channel')->values();
+        $pick = $channels->count() === 1 ? $channels->first() : ($chats->count() === 1 ? $chats->first() : null);
+
+        if ($pick === null) {
+            $list = $chats->map(fn ($c) => '«'.$c['title'].'» — '.$c['id'])->implode('; ');
+
+            return ['ok' => false, 'message' => $list !== ''
+                ? 'Бот состоит в нескольких местах: '.$list.'. Впишите нужный id в «Доступ».'
+                : 'Бот пока не добавлен ни в один канал MAX. Добавьте его администратором канала и нажмите «Проверить связь» ещё раз.'];
+        }
+
+        $channel->writeSecrets(['chat_id' => $pick['id']] + $channel->secrets());
+        $channel->save();
+
+        return ['ok' => true, 'message' => ''];
+    }
+
+    /**
+     * Чаты и каналы, где состоит бот. Списка у MAX больше нет (GET /chats
+     * отключён), id приходит только событием bot_added (GET /updates). Лента
+     * событий отдаёт каждое один раз и недолго хранит — найденные id копим
+     * в кэше по боту, детали канала берём из GET /chats/{id}.
      *
      * @return list<array{id: string, title: string, link: ?string, type: ?string}>
      */
     public function maxChats(MediaChannel $channel): array
     {
-        $r = $this->maxHttp($channel)->get($this->maxApi().'/chats', ['count' => 100]);
-        if (! $r->successful()) {
-            return [];
+        $key = 'media:max:chats:'.sha1((string) $channel->secret('bot_token'));
+        $ids = (array) Cache::get($key, []);
+
+        $r = $this->maxHttp($channel)->get($this->maxApi().'/updates', ['types' => 'bot_added', 'limit' => 100, 'timeout' => 0]);
+        if ($r->successful()) {
+            foreach ((array) ($r->json('updates') ?? []) as $u) {
+                $id = (string) ($u['chat_id'] ?? '');
+                if ($id !== '' && ($u['update_type'] ?? 'bot_added') === 'bot_added') {
+                    $ids[$id] = true;
+                }
+            }
+            Cache::forever($key, $ids);
         }
 
-        return collect((array) ($r->json('chats') ?? []))
-            ->map(fn ($c) => [
-                'id' => (string) ($c['chat_id'] ?? ''),
-                'title' => trim((string) ($c['title'] ?? '')),
-                'link' => isset($c['link']) ? (string) $c['link'] : null,
-                'type' => isset($c['type']) ? (string) $c['type'] : null,
-            ])
-            ->filter(fn ($c) => $c['id'] !== '')
-            ->values()
-            ->all();
+        $chats = [];
+        foreach (array_keys($ids) as $id) {
+            $c = $this->maxHttp($channel)->get($this->maxApi().'/chats/'.rawurlencode((string) $id));
+            if (! $c->successful()) {
+                continue;
+            }
+            $chats[] = [
+                'id' => (string) ($c->json('chat_id') ?? $id),
+                'title' => trim((string) ($c->json('title') ?? '')),
+                'link' => $c->json('link') !== null ? (string) $c->json('link') : null,
+                'type' => $c->json('type') !== null ? (string) $c->json('type') : null,
+            ];
+        }
+
+        return $chats;
     }
 
     /**

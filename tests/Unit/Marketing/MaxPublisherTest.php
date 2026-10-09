@@ -110,6 +110,26 @@ class MaxPublisherTest extends TestCase
         $this->assertSame(['коротко'], MediaPublisherService::splitForMax('коротко', 100));
     }
 
+    public function test_check_discovers_channel_from_bot_added_update(): void
+    {
+        config(['services.max.api_base' => 'https://max.test', 'cache.default' => 'array']);
+        Http::fake([
+            'https://max.test/updates*' => Http::response(['updates' => [
+                ['update_type' => 'bot_added', 'chat_id' => -7020, 'is_channel' => true],
+            ]]),
+            'https://max.test/chats/-7020' => Http::response(['chat_id' => -7020, 'type' => 'channel', 'title' => 'MyZip', 'link' => 'https://max.ru/myzip']),
+            'https://max.test/me' => Http::response(['name' => 'MyZip', 'username' => 'myzip_bot']),
+        ]);
+
+        $ch = new MediaChannel();
+        $ch->kind = 'max';
+        $ch->writeSecrets(['bot_token' => 'tok-123']);
+        $chats = (new MediaPublisherService())->maxChats($ch);
+
+        $this->assertSame([['id' => '-7020', 'title' => 'MyZip', 'link' => 'https://max.ru/myzip', 'type' => 'channel']], $chats);
+        Http::assertSent(fn (Request $r) => str_contains($r->url(), '/updates') && str_contains($r->url(), 'types=bot_added'));
+    }
+
     public function test_upload_token_from_photos_map_or_plain_token(): void
     {
         $this->assertSame('t1', MediaPublisherService::maxUploadToken(['photos' => ['9' => ['token' => 't1']]]));
