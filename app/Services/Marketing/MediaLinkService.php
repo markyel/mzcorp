@@ -66,7 +66,8 @@ class MediaLinkService
             return ['text' => $text, 'html' => false];
         }
 
-        if ($channelKind === 'telegram') {
+        // Telegram и MAX понимают HTML-ссылки: артикул остаётся кликабельным словом.
+        if (in_array($channelKind, ['telegram', 'max'], true)) {
             // Экранируем весь текст ДО вставки тегов: иначе «<» из названия
             // позиции сломает разметку сообщения.
             $escaped = htmlspecialchars($text, ENT_NOQUOTES | ENT_HTML5, 'UTF-8');

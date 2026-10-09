@@ -399,6 +399,13 @@ return [
         ],
     ],
 
+    // Мессенджер MAX (VK): публикация медиаплана в канал ботом. Токен бота и
+    // id канала — в доступах канала раздела «Маркетинг» (зашифрованы в БД);
+    // здесь только адрес Bot API (менялся: platform-api → platform-api2).
+    'max' => [
+        'api_base' => env('MAX_API_BASE', 'https://platform-api2.max.ru'),
+    ],
+
     'marketing' => [
         'block_position' => env('MARKETING_BLOCK_POSITION', 'below'),
         // Карточка товара для ссылок в публикациях медиаплана. По умолчанию —

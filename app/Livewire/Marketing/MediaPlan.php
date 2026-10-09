@@ -312,6 +312,21 @@ class MediaPlan extends Component
             $this->flash = $resolved['message'].' ';
         }
 
+        // MAX: id канала в приложении не виден. Принимаем ссылку на канал или его
+        // название и находим id среди каналов, где бот администратор.
+        if ($ch->kind === 'max' && ! empty($secrets['chat_id']) && ! empty($secrets['bot_token'])) {
+            $probe = new MediaChannel(['kind' => 'max']);
+            $probe->writeSecrets($secrets);
+            $resolved = app(MediaPublisherService::class)->resolveMaxChatId($probe, (string) $secrets['chat_id']);
+            if (! $resolved['ok']) {
+                $this->error = 'Не удалось определить канал MAX: '.$resolved['message'];
+
+                return;
+            }
+            $secrets['chat_id'] = $resolved['id'];
+            $this->flash = $resolved['message'] !== '' ? $resolved['message'].' ' : null;
+        }
+
         $ch->writeSecrets($secrets);
         $ch->save();
 

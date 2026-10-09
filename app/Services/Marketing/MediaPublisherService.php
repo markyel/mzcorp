@@ -10,9 +10,10 @@ use Illuminate\Support\Facades\Log;
 /**
  * Размещение материала на площадке.
  *
- * Сейчас умеем два канала, у которых есть честный API записи:
+ * Умеем каналы, у которых есть честный API записи:
  *   ВКонтакте  — wall.post от имени сообщества (токен сообщества, права wall);
- *   Telegram   — sendMessage ботом-администратором канала.
+ *   Telegram   — sendMessage ботом-администратором канала;
+ *   MAX        — POST /messages ботом-администратором канала (Bot API, config services.max).
  *
  * У Дзена открытого API публикаций нет: туда материалы уезжают либо руками,
  * либо импортом по RSS. Поэтому канал «Дзен» остаётся с ручной отметкой о
@@ -83,6 +84,7 @@ class MediaPublisherService
         $res = match ($channel->kind) {
             'vk' => $this->postToVk($channel, $text, $images),
             'telegram' => $this->postToTelegram($channel, $text, $images, $html),
+            'max' => $this->postToMax($channel, $text, $images, $html),
             default => ['ok' => false, 'message' => 'Канал не поддержан.', 'url' => null, 'external_id' => null],
         };
 
@@ -134,6 +136,10 @@ class MediaPublisherService
         }
         if (! $channel->isConnected()) {
             return ['ok' => false, 'message' => 'Заполните токен и адрес места публикации.'];
+        }
+
+        if ($channel->kind === 'max') {
+            return $this->checkMax($channel);
         }
 
         try {
@@ -580,5 +586,320 @@ class MediaPublisherService
             : null;
 
         return ['ok' => true, 'message' => 'Опубликовано.', 'url' => $url, 'external_id' => $messageId ?: null];
+    }
+    /* ───────────────────────────── MAX ───────────────────────────── */
+
+    /** Лимит текста одного сообщения MAX (POST /messages). */
+    private const MAX_TEXT_LIMIT = 4000;
+
+    private function maxApi(): string
+    {
+        return rtrim((string) config('services.max.api_base', 'https://platform-api2.max.ru'), '/');
+    }
+
+    private function maxHttp(MediaChannel $channel, int $timeout = self::TIMEOUT): \Illuminate\Http\Client\PendingRequest
+    {
+        return Http::timeout($timeout)->acceptJson()
+            ->withHeaders(['Authorization' => (string) $channel->secret('bot_token')]);
+    }
+
+    /** Текст ошибки MAX: {"code": "...", "message": "..."}. */
+    private function maxError(\Illuminate\Http\Client\Response $r): string
+    {
+        $j = (array) ($r->json() ?? []);
+        $text = is_string($j['message'] ?? null) ? $j['message'] : (is_string($j['code'] ?? null) ? $j['code'] : 'HTTP '.$r->status());
+
+        return 'MAX: '.trim($text);
+    }
+
+    /**
+     * Пост в канал MAX ботом-администратором.
+     *
+     * Картинки грузим файлами (POST /uploads → загрузка в выданный адрес → токен),
+     * а не ссылками: опыт Telegram — площадка сама наш сайт качает ненадёжно.
+     * После загрузки MAX ещё обрабатывает файл и на отправку отвечает
+     * «attachment.not.ready» — повторяем с паузой. Не вышло с картинками —
+     * пост уходит текстом, как в ВК: материал важнее альбома.
+     * Текст длиннее лимита делим по абзацам на несколько сообщений.
+     *
+     * @param  list<string>  $images
+     * @return array{ok: bool, message: string, url: ?string, external_id: ?string}
+     */
+    private function postToMax(MediaChannel $channel, string $text, array $images = [], bool $html = false): array
+    {
+        $chunks = self::splitForMax($text);
+
+        try {
+            $attachments = [];
+            foreach (array_slice($images, 0, self::MAX_PHOTOS) as $url) {
+                $token = $this->uploadMaxImage($channel, $url);
+                if ($token !== null) {
+                    $attachments[] = ['type' => 'image', 'payload' => ['token' => $token]];
+                }
+            }
+
+            $first = null;
+            if ($attachments !== []) {
+                $first = $this->sendMax($channel, $chunks[0], $html, $attachments);
+                if (! $first['ok']) {
+                    Log::warning('MediaPublisherService: MAX post with images failed, falling back to text', [
+                        'channel_id' => $channel->id,
+                        'error' => $first['message'],
+                    ]);
+                    $first = null;
+                }
+            }
+            $first ??= $this->sendMax($channel, $chunks[0], $html, []);
+            if (! $first['ok']) {
+                return ['ok' => false, 'message' => $first['message'], 'url' => null, 'external_id' => null];
+            }
+
+            // Продолжение длинного материала — следующими сообщениями. Ошибка на
+            // хвосте пост не отменяет (он уже вышел), но видна в канале.
+            foreach (array_slice($chunks, 1) as $chunk) {
+                $next = $this->sendMax($channel, $chunk, $html, []);
+                if (! $next['ok']) {
+                    $channel->forceFill(['last_error' => mb_substr('Продолжение поста не ушло: '.$next['message'], 0, 500)])->save();
+                    break;
+                }
+            }
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'message' => 'MAX не ответил: '.$e->getMessage(), 'url' => null, 'external_id' => null];
+        }
+
+        return ['ok' => true, 'message' => 'Опубликовано.', 'url' => $first['url'], 'external_id' => $first['external_id']];
+    }
+
+    /**
+     * Одно сообщение в канал. «attachment.not.ready» — файл ещё обрабатывается,
+     * повторяем с нарастающей паузой.
+     *
+     * @param  list<array<string, mixed>>  $attachments
+     * @return array{ok: bool, message: string, url: ?string, external_id: ?string}
+     */
+    private function sendMax(MediaChannel $channel, string $text, bool $html, array $attachments): array
+    {
+        $body = array_filter([
+            'text' => $text,
+            'format' => $html ? 'html' : null,
+            'attachments' => $attachments ?: null,
+        ], fn ($v) => $v !== null);
+        $query = http_build_query(['chat_id' => (string) $channel->secret('chat_id'), 'disable_link_preview' => 'true']);
+
+        $r = null;
+        foreach ([0, 2, 4, 6] as $pause) {
+            if ($pause > 0) {
+                sleep($pause);
+            }
+            $r = $this->maxHttp($channel, self::TIMEOUT * 2)->post($this->maxApi().'/messages?'.$query, $body);
+            // В успешном ответе «message» — сам пост (массив), в ошибке — строка.
+            $error = $r->successful() ? '' : (string) $r->json('code').' '.(is_string($r->json('message')) ? $r->json('message') : '');
+            if ($attachments === [] || ! str_contains($error, 'attachment.not.ready')) {
+                break;
+            }
+        }
+
+        if (! $r->successful()) {
+            return ['ok' => false, 'message' => $this->maxError($r), 'url' => null, 'external_id' => null];
+        }
+
+        $message = (array) ($r->json('message') ?? []);
+        $mid = (string) ($message['body']['mid'] ?? '');
+
+        return [
+            'ok' => true,
+            'message' => 'Опубликовано.',
+            // Публичная ссылка на пост канала; у закрытого канала её нет.
+            'url' => is_string($message['url'] ?? null) && $message['url'] !== '' ? $message['url'] : null,
+            'external_id' => $mid !== '' ? mb_substr($mid, 0, 64) : null,
+        ];
+    }
+
+    /**
+     * Загрузить картинку в MAX: POST /uploads?type=image → адрес загрузки →
+     * multipart с полем «data» → токен (в ответе загрузки photos.{id}.token,
+     * у части ответов — token сразу). null — картинку пропускаем.
+     */
+    private function uploadMaxImage(MediaChannel $channel, string $imageUrl): ?string
+    {
+        try {
+            $file = Http::timeout(self::TIMEOUT)->get($imageUrl);
+            if (! $file->successful() || $file->body() === '') {
+                return null;
+            }
+
+            $slot = $this->maxHttp($channel)->post($this->maxApi().'/uploads?type=image');
+            $uploadUrl = (string) ($slot->json('url') ?? '');
+            if (! $slot->successful() || $uploadUrl === '') {
+                Log::warning('MediaPublisherService: MAX upload slot failed', ['channel_id' => $channel->id, 'error' => $this->maxError($slot)]);
+
+                return null;
+            }
+
+            $name = basename((string) parse_url($imageUrl, PHP_URL_PATH)) ?: 'photo.jpg';
+            $up = Http::timeout(self::TIMEOUT * 3)
+                ->withHeaders(['Authorization' => (string) $channel->secret('bot_token')])
+                ->attach('data', $file->body(), $name)
+                ->post($uploadUrl);
+            if (! $up->successful()) {
+                Log::warning('MediaPublisherService: MAX image upload failed', ['channel_id' => $channel->id, 'status' => $up->status()]);
+
+                return null;
+            }
+
+            return self::maxUploadToken((array) ($up->json() ?? []), (array) ($slot->json() ?? []));
+        } catch (\Throwable $e) {
+            Log::warning('MediaPublisherService: MAX image upload error', ['channel_id' => $channel->id, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Токен картинки из ответа загрузки MAX: {"photos": {"<id>": {"token": "…"}}}
+     * или {"token": "…"}; запасной — токен, выданный вместе с адресом загрузки.
+     *
+     * @param  array<string, mixed>  $upload
+     * @param  array<string, mixed>  $slot
+     */
+    public static function maxUploadToken(array $upload, array $slot = []): ?string
+    {
+        $photos = $upload['photos'] ?? null;
+        if (is_array($photos) && $photos !== []) {
+            $firstPhoto = reset($photos);
+            if (is_array($firstPhoto) && ! empty($firstPhoto['token'])) {
+                return (string) $firstPhoto['token'];
+            }
+        }
+        $token = (string) ($upload['token'] ?? $slot['token'] ?? '');
+
+        return $token !== '' ? $token : null;
+    }
+
+    /**
+     * Текст на части до лимита сообщения MAX — по абзацам, длинный абзац по строкам.
+     * Режем только по переводам строк: HTML-ссылки живут внутри строки и не рвутся.
+     *
+     * @return list<string>
+     */
+    public static function splitForMax(string $text, int $limit = self::MAX_TEXT_LIMIT): array
+    {
+        if (mb_strlen($text) <= $limit) {
+            return [$text];
+        }
+
+        $chunks = [];
+        $current = '';
+        foreach (preg_split('/(?<=\n)/u', $text) ?: [] as $line) {
+            if ($current !== '' && mb_strlen($current.$line) > $limit) {
+                $chunks[] = rtrim($current);
+                $current = '';
+            }
+            $current .= $line;
+        }
+        if (trim($current) !== '') {
+            $chunks[] = rtrim($current);
+        }
+
+        // Строка длиннее лимита целиком (без переводов строк) — режем по длине.
+        $out = [];
+        foreach ($chunks as $chunk) {
+            foreach (mb_str_split($chunk, $limit) as $part) {
+                if (trim($part) !== '') {
+                    $out[] = $part;
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Проверка связи с MAX: бот отвечает (GET /me) и видит канал (GET /chats/{id}).
+     * Не видит — перечисляем каналы, где бот состоит, с их id: найти id канала
+     * руками в MAX неудобно.
+     *
+     * @return array{ok: bool, message: string}
+     */
+    private function checkMax(MediaChannel $channel): array
+    {
+        try {
+            $me = $this->maxHttp($channel)->get($this->maxApi().'/me');
+            if (! $me->successful()) {
+                return ['ok' => false, 'message' => $this->maxError($me).' (проверьте токен бота)'];
+            }
+            $bot = trim((string) ($me->json('name') ?? $me->json('username') ?? 'бот'));
+
+            $chatId = (string) $channel->secret('chat_id');
+            $chat = $this->maxHttp($channel)->get($this->maxApi().'/chats/'.rawurlencode($chatId));
+            if ($chat->successful()) {
+                $title = trim((string) ($chat->json('title') ?? 'канал'));
+
+                return ['ok' => true, 'message' => 'MAX отвечает: бот «'.$bot.'», канал «'.$title.'».'];
+            }
+
+            $list = collect($this->maxChats($channel))
+                ->map(fn ($c) => '«'.$c['title'].'» — '.$c['id'])
+                ->implode('; ');
+
+            return ['ok' => false, 'message' => 'Бот «'.$bot.'» не видит канал '.$chatId.'. '
+                .($list !== '' ? 'Доступные боту: '.$list.'.' : 'Добавьте бота администратором канала.')];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'message' => 'MAX не ответил: '.$e->getMessage()];
+        }
+    }
+
+    /**
+     * Чаты и каналы, где состоит бот (GET /chats).
+     *
+     * @return list<array{id: string, title: string, link: ?string, type: ?string}>
+     */
+    public function maxChats(MediaChannel $channel): array
+    {
+        $r = $this->maxHttp($channel)->get($this->maxApi().'/chats', ['count' => 100]);
+        if (! $r->successful()) {
+            return [];
+        }
+
+        return collect((array) ($r->json('chats') ?? []))
+            ->map(fn ($c) => [
+                'id' => (string) ($c['chat_id'] ?? ''),
+                'title' => trim((string) ($c['title'] ?? '')),
+                'link' => isset($c['link']) ? (string) $c['link'] : null,
+                'type' => isset($c['type']) ? (string) $c['type'] : null,
+            ])
+            ->filter(fn ($c) => $c['id'] !== '')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * id канала MAX по тому, что вставил человек: число — как есть; ссылка или
+     * название — ищем среди каналов бота.
+     *
+     * @return array{ok: bool, id: ?string, message: string}
+     */
+    public function resolveMaxChatId(MediaChannel $channel, string $target): array
+    {
+        $target = trim($target);
+        if (preg_match('/^-?\d+$/', $target)) {
+            return ['ok' => true, 'id' => $target, 'message' => ''];
+        }
+
+        $needle = mb_strtolower(rtrim($target, '/'));
+        $tail = mb_strtolower(basename((string) parse_url($needle, PHP_URL_PATH)));
+        $chats = $this->maxChats($channel);
+        foreach ($chats as $c) {
+            $link = mb_strtolower(rtrim((string) $c['link'], '/'));
+            $byLink = $link !== '' && ($link === $needle || ($tail !== '' && str_ends_with($link, '/'.$tail)));
+            if ($byLink || mb_strtolower($c['title']) === $needle) {
+                return ['ok' => true, 'id' => $c['id'], 'message' => 'Канал «'.$c['title'].'», id '.$c['id'].'.'];
+            }
+        }
+
+        $list = collect($chats)->map(fn ($c) => '«'.$c['title'].'» — '.$c['id'])->implode('; ');
+
+        return ['ok' => false, 'id' => null, 'message' => 'бот не состоит в таком канале.'
+            .($list !== '' ? ' Доступные боту: '.$list.'.' : ' Сначала добавьте бота администратором канала.')];
     }
 }
