@@ -96,7 +96,8 @@ class GenerateWeeklyReportsCommand extends Command
                 ->subject("Ваш отчёт за неделю {$label}")
                 ->html($html);
             $email->getHeaders()->addTextHeader('X-MyLift-System-Notification', '1');
-            $sender->buildSmtpTransport($mailbox)->send($email);
+            // sendAdHoc: свежий OAuth-токен + резервный канал при сбое Яндекса.
+            $sender->sendAdHoc($mailbox, $email);
 
             return true;
         } catch (\Throwable $e) {

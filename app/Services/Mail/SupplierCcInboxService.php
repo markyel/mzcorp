@@ -194,7 +194,8 @@ class SupplierCcInboxService
             // линковаться к заявкам / плодить обработку (гард в MailRouter).
             $email->getHeaders()->addTextHeader('X-MyLift-System-Notification', '1');
 
-            $this->sender->buildSmtpTransport($rfq)->send($email);
+            // sendAdHoc: свежий OAuth-токен + резервный канал при сбое Яндекса.
+            $this->sender->sendAdHoc($rfq, $email);
 
             Log::info('SupplierCcInbox: manager notified', [
                 'request_id' => $request->id, 'manager_id' => $manager->id,

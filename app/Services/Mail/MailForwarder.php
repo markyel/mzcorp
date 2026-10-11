@@ -5,11 +5,6 @@ namespace App\Services\Mail;
 use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use Illuminate\Support\Facades\Log;
-use Symfony\Component\Mailer\Mailer;
-use Symfony\Component\Mailer\Transport\Dsn;
-use Symfony\Component\Mailer\Transport\Smtp\Auth\XOAuth2Authenticator;
-use Symfony\Component\Mailer\Transport\Smtp\EsmtpTransportFactory;
-use Symfony\Component\Mailer\Transport\TransportInterface;
 use Symfony\Component\Mime\Email as SymfonyEmail;
 
 /**
@@ -22,14 +17,15 @@ use Symfony\Component\Mime\Email as SymfonyEmail;
  *   - Используем SMTP того ящика (mailbox), на который письмо пришло —
  *     чтобы From/Reply-To был корректный, и Yandex не банил за рассылку
  *     с чужого домена.
- *   - Для XOAUTH2 SMTP используем кастомную SMTP-аутентификацию через
- *     Symfony Mailer (XOAuth2Authenticator).
+ *   - Отправка — OutgoingMailSender::sendAdHoc (XOAUTH2 SMTP ящика; при
+ *     сбое Яндекса — резервный канал). Своя копия сборки SMTP-транспорта
+ *     здесь была дублем и удалена 2026-10-11.
  *   - Тело сообщения — оригинальное body_html / body_plain + краткое
  *     служебное сообщение «Переслано MyLift по правилу X».
  */
 class MailForwarder
 {
-    public function __construct(private readonly YandexOAuthService $oauth)
+    public function __construct(private readonly OutgoingMailSender $sender)
     {
     }
 
@@ -44,15 +40,11 @@ class MailForwarder
         }
 
         try {
-            // Гарантируем актуальный access_token (для XOAUTH2 SMTP).
-            $this->oauth->ensureFreshToken($mailbox);
-
-            $transport = $this->buildSmtpTransport($mailbox);
-            $mailer = new Mailer($transport);
-
             $email = $this->buildForwardEmail($message, $mailbox, $toEmail, $ruleName);
 
-            $mailer->send($email);
+            // SMTP ящика (свежий OAuth-токен, XOAUTH2) — общий путь
+            // OutgoingMailSender: при сбое Яндекса уходит резервным каналом.
+            $this->sender->sendAdHoc($mailbox, $email);
 
             return true;
         } catch (\Throwable $e) {
@@ -65,40 +57,6 @@ class MailForwarder
 
             return false;
         }
-    }
-
-    private function buildSmtpTransport(Mailbox $mailbox): TransportInterface
-    {
-        // Symfony EsmtpTransportFactory + кастомный authenticator для XOAUTH2.
-        // Альтернатива: ставим webklex/oauth2-yandex или свой DSN. Здесь —
-        // явно конструируем EsmtpTransport с XOAuth2Authenticator.
-
-        $factory = new EsmtpTransportFactory();
-        $dsn = new Dsn(
-            scheme: 'smtps',
-            host: $mailbox->smtp_host,
-            user: $mailbox->smtp_username,
-            password: '', // Не используется — XOAuth2Authenticator берёт токен из окружения
-            port: $mailbox->smtp_port,
-        );
-
-        $transport = $factory->create($dsn);
-
-        if ($mailbox->isOAuth() && method_exists($transport, 'addAuthenticator')) {
-            $transport->addAuthenticator(new XOAuth2Authenticator());
-            // Symfony XOAuth2Authenticator ожидает password = access_token.
-            $transport->setPassword((string) $mailbox->accessToken());
-        } elseif ($mailbox->isOAuth()) {
-            // На случай старой версии Symfony Mailer.
-            throw new \RuntimeException(
-                'Symfony Mailer too old: addAuthenticator() not available — XOAUTH2 SMTP unavailable.'
-            );
-        } else {
-            // App-password путь.
-            $transport->setPassword((string) $mailbox->password());
-        }
-
-        return $transport;
     }
 
     private function buildForwardEmail(EmailMessage $msg, Mailbox $mailbox, string $toEmail, string $ruleName): SymfonyEmail

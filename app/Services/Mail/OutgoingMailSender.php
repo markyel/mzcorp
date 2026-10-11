@@ -91,8 +91,8 @@ class OutgoingMailSender
         }
 
         // SMTP ящика известен как недоступный (mail:smtp-health) — письмо
-        // человека не ждёт очереди, а сразу идёт резервным каналом.
-        if (! $viaFallback && $queueOnTransientFailure && $this->retry->fallbackEnabled()
+        // (и человека, и автоматическое) сразу идёт резервным каналом.
+        if (! $viaFallback && $this->retry->fallbackEnabled()
             && $this->probe->isKnownDown((string) $mailbox->smtp_host, (int) $mailbox->smtp_port)) {
             $viaFallback = true;
         }
@@ -108,6 +108,11 @@ class OutgoingMailSender
                     'mailbox_id' => $mailbox->id,
                     'error' => $e->getMessage(),
                 ]);
+
+                // Яндекс не обновил токен — резерву токен не нужен.
+                if ($this->retry->fallbackEnabled()) {
+                    return $this->sendDraftLocked($draftId, $queueOnTransientFailure, true);
+                }
 
                 return ['success' => false, 'draft' => $draft, 'error' => 'oauth_refresh_failed'];
             }
@@ -150,6 +155,13 @@ class OutgoingMailSender
                 'via' => $viaFallback ? 'fallback' : 'mailbox',
                 'error' => $e->getMessage(),
             ]);
+
+            // SMTP ящика не принял соединение (письмо точно не ушло) — сразу
+            // резервным каналом, не дожидаясь очереди. Черновик перечитаем:
+            // финальные message_id/тело соберутся заново.
+            if (! $viaFallback && $this->retry->fallbackEnabled() && $this->retry->isTransient($e)) {
+                return $this->sendDraftLocked($draftId, $queueOnTransientFailure, true);
+            }
 
             // Отказ резерва (ключ, лимит тарифа) — тоже не приговор: письмо
             // ждёт в очереди, следующая попытка пойдёт и через SMTP ящика.
@@ -229,19 +241,66 @@ class OutgoingMailSender
     }
 
     /**
-     * Отправить готовое Symfony Email с ящика мимо EmailMessage/драфта
-     * (тестовое письмо рекламного блока и т.п.). Обновляет OAuth-токен,
-     * бросает исключение при сбое — вызывающий решает, что показать.
+     * Отправить готовое Symfony Email с ящика мимо EmailMessage/драфта:
+     * системные уведомления, недельные отчёты, пересылка по правилам почты,
+     * тестовое письмо рекламного блока. Обновляет OAuth-токен, бросает
+     * исключение при сбое — вызывающий решает, что показать.
+     *
+     * SMTP ящика недоступен (известно заранее, не соединился, не обновился
+     * токен) — письмо уходит резервным каналом, если он включён.
      */
     public function sendAdHoc(\App\Models\Mailbox $mailbox, \Symfony\Component\Mime\Email $email): void
     {
         if (! $mailbox->canSendOutbound()) {
             throw new \RuntimeException("Ящик {$mailbox->email} не может отправлять письма (нет OAuth/пароля или неактивен).");
         }
-        $this->oauth->ensureFreshToken($mailbox);
-        $mailbox->refresh();
 
-        (new Mailer($this->buildSmtpTransport($mailbox)))->send($email);
+        $fallbackOn = $this->retry->fallbackEnabled();
+        if (! ($fallbackOn && $this->probe->isKnownDown((string) $mailbox->smtp_host, (int) $mailbox->smtp_port))) {
+            try {
+                $this->oauth->ensureFreshToken($mailbox);
+                $mailbox->refresh();
+            } catch (\Throwable $e) {
+                if (! $fallbackOn) {
+                    throw $e;
+                }
+                $this->sendAdHocViaFallback($mailbox, $email, 'oauth: '.$e->getMessage());
+
+                return;
+            }
+
+            try {
+                $this->probe->assertReachable((string) $mailbox->smtp_host, (int) $mailbox->smtp_port);
+                (new Mailer($this->buildSmtpTransport($mailbox)))->send($email);
+
+                return;
+            } catch (\Throwable $e) {
+                if (! $fallbackOn || ! $this->retry->isTransient($e)) {
+                    throw $e;
+                }
+                $this->sendAdHocViaFallback($mailbox, $email, $e->getMessage());
+
+                return;
+            }
+        }
+
+        $this->sendAdHocViaFallback($mailbox, $email, 'SMTP ящика известен как недоступный');
+    }
+
+    private function sendAdHocViaFallback(\App\Models\Mailbox $mailbox, \Symfony\Component\Mime\Email $email, string $reason): void
+    {
+        $outgoing = clone $email;
+        foreach ($this->fallback->headers() as $name => $value) {
+            $outgoing->getHeaders()->addTextHeader($name, $value);
+        }
+        (new Mailer($this->fallback->transport()))->send($outgoing);
+
+        Log::warning('OutgoingMailSender: ad-hoc sent via fallback channel', [
+            'mailbox_id' => $mailbox->id,
+            'subject' => mb_substr((string) $email->getSubject(), 0, 120),
+            'channel' => $this->fallback->name(),
+            'reason' => mb_substr($reason, 0, 300),
+        ]);
     }
 
     public function buildSmtpTransport(\App\Models\Mailbox $mailbox): TransportInterface

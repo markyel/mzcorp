@@ -56,7 +56,8 @@ class SystemNotificationMailer
             // заявки / попадать в mail-review (гард в MailRouter::route).
             $email->getHeaders()->addTextHeader('X-MyLift-System-Notification', '1');
 
-            $this->sender->buildSmtpTransport($mailbox)->send($email);
+            // sendAdHoc: свежий OAuth-токен + резервный канал при сбое Яндекса.
+            $this->sender->sendAdHoc($mailbox, $email);
 
             return true;
         } catch (\Throwable $e) {
