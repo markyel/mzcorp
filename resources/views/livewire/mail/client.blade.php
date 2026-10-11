@@ -1173,7 +1173,7 @@ body.mail-resizing iframe{pointer-events:none}
                                         — письмо не ушло, попыток: {{ (int) $msg->send_attempts }}.
                                     @else
                                         — почтовый сервер не ответил, отправим автоматически{{ $msg->send_next_attempt_at ? ' в '.$msg->send_next_attempt_at->format('H:i') : '' }}
-                                        (попытка {{ (int) $msg->send_attempts }} из {{ (int) config('services.mail_outbound.retry_max_attempts') }}{{ app(\App\Services\Mail\OutgoingSendRetryService::class)->shouldUseFallback($msg) ? ', следующая — через '.config('services.mail_outbound.fallback.name') : '' }}).
+                                        (попытка {{ (int) $msg->send_attempts }} из {{ (int) config('services.mail_outbound.retry_max_attempts') }}{{ app(\App\Services\Mail\OutgoingSendRetryService::class)->shouldUseFallback($msg) ? ', следующая — через '.app(\App\Services\Mail\MailFallbackSettings::class)->name() : '' }}).
                                     @endif
                                     @if($msg->send_last_error)
                                         <span class="err" title="{{ $msg->send_last_error }}">{{ \Illuminate\Support\Str::limit($msg->send_last_error, 90) }}</span>

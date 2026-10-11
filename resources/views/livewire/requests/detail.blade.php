@@ -1907,7 +1907,7 @@
                                                             @endif
                                                             · попытка {{ (int) $msg->send_attempts }} из {{ (int) config('services.mail_outbound.retry_max_attempts') }}
                                                             @if(app(\App\Services\Mail\OutgoingSendRetryService::class)->shouldUseFallback($msg))
-                                                                · следующая — через {{ config('services.mail_outbound.fallback.name') }}
+                                                                · следующая — через {{ app(\App\Services\Mail\MailFallbackSettings::class)->name() }}
                                                             @endif
                                                         @else
                                                             Письмо не ушло клиенту, попыток: {{ (int) $msg->send_attempts }}

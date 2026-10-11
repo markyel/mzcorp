@@ -53,6 +53,9 @@
     </div>
 
 
+    {{-- Свой блок со своим сохранением: ключ API хранится зашифрованным. --}}
+    <livewire:admin.settings.mail-fallback />
+
     <form wire:submit.prevent="save">
         @foreach($this->grouped as $group => $items)
             <div class="ds-card mb-3">

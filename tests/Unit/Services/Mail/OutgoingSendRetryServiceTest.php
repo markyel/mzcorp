@@ -3,8 +3,11 @@
 namespace Tests\Unit\Services\Mail;
 
 use App\Models\EmailMessage;
+use App\Services\Mail\MailFallbackSettings;
 use App\Services\Mail\OutgoingSendRetryService;
+use App\Services\Settings\SettingsService;
 use Carbon\Carbon;
+use Mockery;
 use Symfony\Component\Mailer\Exception\TransportException;
 use Symfony\Component\Mailer\Exception\UnexpectedResponseException;
 use Tests\TestCase;
@@ -23,7 +26,17 @@ class OutgoingSendRetryServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->svc = new OutgoingSendRetryService();
+        // В «Настройках» канал не сохраняли — действуют значения config/.env.
+        $settings = Mockery::mock(SettingsService::class);
+        $settings->shouldReceive('all')->andReturn([]);
+        $settings->shouldReceive('get')->andReturnUsing(fn ($key, $default = null) => $default);
+        $this->svc = new OutgoingSendRetryService(new MailFallbackSettings($settings));
+    }
+
+    protected function tearDown(): void
+    {
+        Mockery::close();
+        parent::tearDown();
     }
 
     public function test_connection_not_established_is_transient(): void

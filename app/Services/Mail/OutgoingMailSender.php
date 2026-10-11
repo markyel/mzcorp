@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Mailer\Mailer;
-use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mailer\Transport\Dsn;
 use Symfony\Component\Mailer\Transport\Smtp\Auth\XOAuth2Authenticator;
 use Symfony\Component\Mailer\Transport\Smtp\EsmtpTransportFactory;
@@ -38,6 +37,7 @@ class OutgoingMailSender
         private readonly YandexOAuthService $oauth,
         private readonly OutgoingMailMimeBuilder $mimeBuilder,
         private readonly OutgoingSendRetryService $retry,
+        private readonly MailFallbackSettings $fallback,
     ) {
     }
 
@@ -122,10 +122,10 @@ class OutgoingMailSender
                 // Служебные заголовки провайдеру — только в отправляемую копию,
                 // в «Отправленные» (rawMime) они не попадают.
                 $outgoing = clone $email;
-                foreach ((array) config('services.mail_outbound.fallback.headers', []) as $name => $value) {
-                    $outgoing->getHeaders()->addTextHeader((string) $name, is_string($value) ? $value : json_encode($value));
+                foreach ($this->fallback->headers() as $name => $value) {
+                    $outgoing->getHeaders()->addTextHeader($name, $value);
                 }
-                (new Mailer($this->buildFallbackTransport()))->send($outgoing);
+                (new Mailer($this->fallback->transport()))->send($outgoing);
             } else {
                 $transport = $this->buildSmtpTransport($mailbox);
                 $mailer = new Mailer($transport);
@@ -165,7 +165,7 @@ class OutgoingMailSender
             Log::warning('OutgoingMailSender: sent via fallback channel', [
                 'draft_id' => $draft->id,
                 'mailbox_id' => $mailbox->id,
-                'channel' => config('services.mail_outbound.fallback.name'),
+                'channel' => $this->fallback->name(),
             ]);
         }
 
@@ -182,7 +182,7 @@ class OutgoingMailSender
                 'send_status' => null,
                 'send_next_attempt_at' => null,
                 'send_last_error' => null,
-                'sent_via' => $viaFallback ? mb_substr((string) config('services.mail_outbound.fallback.name'), 0, 60) : null,
+                'sent_via' => $viaFallback ? mb_substr($this->fallback->name(), 0, 60) : null,
             ]);
         });
 
@@ -230,17 +230,6 @@ class OutgoingMailSender
         $mailbox->refresh();
 
         (new Mailer($this->buildSmtpTransport($mailbox)))->send($email);
-    }
-
-    /** SMTP резервного канала из services.mail_outbound.fallback.dsn. */
-    public function buildFallbackTransport(): TransportInterface
-    {
-        $dsn = (string) config('services.mail_outbound.fallback.dsn');
-        if ($dsn === '') {
-            throw new \RuntimeException('Резервный канал отправки не настроен (MAIL_OUTBOUND_FALLBACK_DSN).');
-        }
-
-        return Transport::fromDsn($dsn);
     }
 
     public function buildSmtpTransport(\App\Models\Mailbox $mailbox): TransportInterface

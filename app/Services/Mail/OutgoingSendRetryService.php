@@ -30,6 +30,10 @@ use Symfony\Component\Mailer\Exception\UnexpectedResponseException;
  */
 class OutgoingSendRetryService
 {
+    public function __construct(private readonly MailFallbackSettings $fallback)
+    {
+    }
+
     /** SMTP-коды временного отказа: письмо не принято, можно повторить. */
     private const TRANSIENT_SMTP_CODES = [421, 450, 451, 452, 454];
 
@@ -160,7 +164,7 @@ class OutgoingSendRetryService
 
     public function fallbackEnabled(): bool
     {
-        return trim((string) config('services.mail_outbound.fallback.dsn')) !== '';
+        return $this->fallback->enabled();
     }
 
     /**
@@ -174,7 +178,7 @@ class OutgoingSendRetryService
         if (! $this->fallbackEnabled()) {
             return false;
         }
-        $after = max(1, (int) config('services.mail_outbound.fallback.after_attempts', 3));
+        $after = $this->fallback->afterAttempts();
         $attempts = (int) $draft->send_attempts;
 
         return $attempts >= $after && ($attempts - $after) % 2 === 0;
