@@ -2,6 +2,7 @@
 
 namespace App\Services\Supplier;
 
+use App\Models\EmailMessage;
 use App\Models\Supplier;
 use App\Models\SupplierInquiry;
 use App\Models\User;
@@ -108,6 +109,7 @@ class SupplierReminderService
         $supplier = Supplier::query()->where('email', mb_strtolower(trim((string) $inquiry->supplier_email)))->first();
         $lang = $supplier && $supplier->language === 'en' ? 'en' : 'ru';
 
+        $draft = null;
         try {
             $draft = $request !== null
                 ? $this->drafts->createCompose($request, $author)
@@ -146,6 +148,7 @@ class SupplierReminderService
             $result = $this->sender->sendDraft($draft->id);
             if (! ($result['success'] ?? false)) {
                 Log::warning('SupplierReminder: send failed', ['inquiry_id' => $inquiry->id, 'error' => $result['error'] ?? 'unknown']);
+                $this->discardFailedDraft($draft);
 
                 return false;
             }
@@ -162,8 +165,30 @@ class SupplierReminderService
             return true;
         } catch (\Throwable $e) {
             Log::error('SupplierReminder: exception', ['inquiry_id' => $inquiry->id, 'error' => $e->getMessage()]);
+            $this->discardFailedDraft($draft);
 
             return false;
+        }
+    }
+
+    /**
+     * Неотправленное напоминание — не черновик менеджера: следующий прогон
+     * suppliers:remind пришлёт его заново (отправка не засчитана). Без
+     * удаления оно висело «Черновиком» в треде заявки от имени менеджера
+     * (сбой SMTP Яндекса 2026-10-11 — 23 таких).
+     */
+    private function discardFailedDraft(?EmailMessage $draft): void
+    {
+        if ($draft === null) {
+            return;
+        }
+        try {
+            $draft->refresh();
+            if ($draft->is_draft) {
+                $this->drafts->delete($draft);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('SupplierReminder: failed draft cleanup failed', ['draft_id' => $draft->id, 'error' => $e->getMessage()]);
         }
     }
 
