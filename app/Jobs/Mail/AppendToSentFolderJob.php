@@ -30,13 +30,17 @@ class AppendToSentFolderJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $tries = 3;
+    // Копию кладём и тогда, когда письмо ушло резервным каналом (smtp.bz) при
+    // сбое Яндекса, — а его хранилище в такой сбой тоже отвечает «NO
+    // [UNAVAILABLE] APPEND … try again later» (2026-10-11). Ждём восстановления
+    // часами, а не 20 минутами: 1+5+15+30+60+60+120 мин ≈ 5 ч.
+    public int $tries = 8;
     public int $timeout = 60;
 
     /** @return int[] */
     public function backoff(): array
     {
-        return [60, 300, 900];
+        return [60, 300, 900, 1800, 3600, 3600, 7200];
     }
 
     public function __construct(
