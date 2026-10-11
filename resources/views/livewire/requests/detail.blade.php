@@ -874,6 +874,13 @@
                     ✓ {{ session('status') }}
                 </div>
             @endif
+            {{-- SMTP не ответил — письмо в очереди автоповтора (OutgoingSendRetryService). --}}
+            @if(session('send_queued'))
+                <div class="ds-card p-2 text-[12px]"
+                     style="background:var(--amber-50);border-color:var(--amber-600)">
+                    ⏳ {{ session('send_queued') }}
+                </div>
+            @endif
             {{-- Отказ смены статуса (transitionStatus / «Мяч у клиента») — раньше
                  addError('status') нигде не выводился, и кнопка молча не работала. --}}
             @error('status')
@@ -1883,7 +1890,41 @@
                                             $isMyDraft = $isDraftMsg && $msg->draft_author_user_id === auth()->id();
                                         @endphp
                                         @if($isDraftMsg)
-                                            @php $canDiscardDraft = $isMyDraft || auth()->user()?->hasAnyRole(['admin', 'head_of_sales', 'director']); @endphp
+                                            @php
+                                                $canDiscardDraft = $isMyDraft || auth()->user()?->hasAnyRole(['admin', 'head_of_sales', 'director']);
+                                                // Не ушло из-за недоступного SMTP (OutgoingSendRetryService).
+                                                $sendStatus = $msg->send_status;
+                                            @endphp
+                                            @if($sendStatus)
+                                                <div class="mt-2 ds-card p-2 text-[11.5px] flex flex-wrap items-center gap-x-3 gap-y-1"
+                                                     style="{{ $sendStatus === \App\Enums\DraftSendStatus::Failed ? 'background:var(--red-50);border-color:var(--red-300)' : 'background:var(--amber-50);border-color:var(--amber-600)' }}">
+                                                    <span class="chip {{ $sendStatus === \App\Enums\DraftSendStatus::Failed ? 'chip-danger' : 'chip-attn' }}">{{ $sendStatus->icon() }} {{ $sendStatus->label() }}</span>
+                                                    <span class="text-fg-2">
+                                                        @if($sendStatus === \App\Enums\DraftSendStatus::Queued)
+                                                            Почтовый сервер не ответил, отправим автоматически
+                                                            @if($msg->send_next_attempt_at)
+                                                                в {{ $msg->send_next_attempt_at->format('H:i') }}
+                                                            @endif
+                                                            · попытка {{ (int) $msg->send_attempts }} из {{ (int) config('services.mail_outbound.retry_max_attempts') }}
+                                                        @else
+                                                            Письмо не ушло клиенту, попыток: {{ (int) $msg->send_attempts }}
+                                                        @endif
+                                                    </span>
+                                                    @if($msg->send_last_error)
+                                                        <span class="text-fg-4 truncate max-w-full" title="{{ $msg->send_last_error }}">{{ \Illuminate\Support\Str::limit($msg->send_last_error, 90) }}</span>
+                                                    @endif
+                                                    <span class="flex gap-2 ml-auto">
+                                                        @if($isMyDraft)
+                                                            <button type="button" wire:click="sendThreadDraftNow({{ $msg->id }})" class="btn btn-sm">
+                                                                {{ $sendStatus === \App\Enums\DraftSendStatus::Failed ? 'Отправить ещё раз' : 'Отправить сейчас' }}
+                                                            </button>
+                                                        @endif
+                                                        @if($sendStatus === \App\Enums\DraftSendStatus::Queued && $canDiscardDraft)
+                                                            <button type="button" wire:click="cancelThreadDraftSend({{ $msg->id }})" class="btn btn-sm">Не отправлять</button>
+                                                        @endif
+                                                    </span>
+                                                </div>
+                                            @endif
                                             <div class="mt-2 flex items-center gap-2 text-[11.5px] text-amber-700">
                                                 <span class="chip chip-attn"><span class="dot"></span>Черновик</span>
                                                 @if($isMyDraft)

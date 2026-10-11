@@ -15,6 +15,7 @@ use App\Services\Mail\LetterTemplateService;
 use App\Services\Mail\MailQuoteBuilder;
 use App\Services\Mail\OutboundReplyHooks;
 use App\Services\Mail\OutgoingMailSender;
+use App\Services\Mail\OutgoingSendRetryService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -528,7 +529,21 @@ class ComposeForm extends Component
         }
         $draft = $this->loadDraftOrFail();
 
-        $result = $sender->sendDraft($draft->id);
+        // Ручная отправка — новая серия попыток.
+        app(OutgoingSendRetryService::class)->reset($draft);
+        $result = $sender->sendDraft($draft->id, queueOnTransientFailure: true);
+        if ($result['queued'] ?? false) {
+            // SMTP недоступен — письмо в очереди автоповтора; хуки после
+            // отправки (статусы, детект документов) выполнит SendQueuedDraftJob.
+            session()->flash('send_queued', OutgoingSendRetryService::queuedMessage($result['next_attempt_at']));
+            $this->open = false;
+
+            return $this->redirect(
+                \Illuminate\Support\Facades\Request::header('Referer')
+                    ?: route('requests.show', $this->requestId),
+                navigate: false,
+            );
+        }
         if (! ($result['success'] ?? false)) {
             $this->addError('subject', $this->describeError((string) ($result['error'] ?? 'unknown')));
 
@@ -743,6 +758,7 @@ class ComposeForm extends Component
             'oauth_refresh_failed' => 'Не удалось обновить OAuth-токен — РОП должен переподключить ящик.',
             'smtp_send_failed' => 'Не удалось отправить через SMTP — попробуйте ещё раз.',
             'not_a_draft' => 'Черновик уже отправлен.',
+            'send_in_progress' => 'Письмо уже отправляется — подождите минуту.',
             default => 'Не удалось отправить письмо: '.$code,
         };
     }

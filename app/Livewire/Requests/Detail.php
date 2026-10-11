@@ -9,6 +9,7 @@ use App\Enums\RequestActivityType;
 use App\Enums\RequestStatus;
 use App\Enums\Role;
 use App\Jobs\Mail\ParseRequestItemsJob;
+use App\Jobs\Mail\SendQueuedDraftJob;
 use App\Livewire\Concerns\RendersEmailBody;
 use App\Models\AiDecision;
 use App\Models\AutoQuoteSnapshot;
@@ -30,6 +31,7 @@ use App\Services\Catalog\RequestItemEditor;
 use App\Services\DocumentDetector\AiDecisionService;
 use App\Services\Invoices\InvoiceService;
 use App\Services\Mail\EmailDraftService;
+use App\Services\Mail\OutgoingSendRetryService;
 use App\Services\Quotations\PartialQuoteService;
 use App\Services\Quotes\AutoQuoteOfferService;
 use App\Services\Request\AttentionService;
@@ -385,6 +387,71 @@ class Detail extends Component
         // удалённый черновик остаётся в UI до перезагрузки страницы.
         $this->thread = $this->thread->reject(fn ($m) => $m->id === $draftId)->values();
         session()->flash('status', 'Черновик удалён.');
+    }
+
+    /**
+     * «Отправить сейчас» / «Отправить ещё раз» у письма, которое не ушло из-за
+     * недоступного SMTP (OutgoingSendRetryService). Шлёт SendQueuedDraftJob —
+     * без ожидания SMTP в веб-запросе. Только автор: письмо уходит от его имени.
+     */
+    public function sendThreadDraftNow(int $draftId, OutgoingSendRetryService $retry): void
+    {
+        $draft = $this->threadDraftForSendAction($draftId, authorOnly: true);
+        if ($draft === null) {
+            return;
+        }
+        $retry->requeueNow($draft);
+        SendQueuedDraftJob::dispatch($draft->id);
+        $this->replaceThreadMessage($draft->fresh());
+        session()->flash('status', 'Отправляем письмо — статус обновится через минуту.');
+    }
+
+    /** Снять письмо с очереди автоповтора — снова обычный черновик. */
+    public function cancelThreadDraftSend(int $draftId, OutgoingSendRetryService $retry): void
+    {
+        $draft = $this->threadDraftForSendAction($draftId, authorOnly: false);
+        if ($draft === null) {
+            return;
+        }
+        $retry->reset($draft);
+        $this->replaceThreadMessage($draft->fresh());
+        session()->flash('status', 'Письмо снято с очереди и осталось черновиком.');
+    }
+
+    private function threadDraftForSendAction(int $draftId, bool $authorOnly): ?EmailMessage
+    {
+        $draft = EmailMessage::query()
+            ->where('related_request_id', $this->request->id)
+            ->where('is_draft', true)
+            ->whereKey($draftId)
+            ->first();
+        if ($draft === null) {
+            return null;
+        }
+        $user = auth()->user();
+        $isAuthor = $draft->draft_author_user_id === $user?->id;
+        $privileged = $user?->hasAnyRole(['admin', 'head_of_sales', 'director']) ?? false;
+        if (! $isAuthor && ($authorOnly || ! $privileged)) {
+            abort(403, 'Это письмо может отправить только его автор.');
+        }
+
+        return $draft;
+    }
+
+    /** $thread — snapshot из mount(): подменяем письмо, чтобы статус обновился без перезагрузки. */
+    private function replaceThreadMessage(?EmailMessage $fresh): void
+    {
+        if ($fresh === null) {
+            return;
+        }
+        $this->thread = $this->thread->map(function ($m) use ($fresh) {
+            if ($m->id !== $fresh->id) {
+                return $m;
+            }
+            $m->forceFill($fresh->only(['send_status', 'send_attempts', 'send_next_attempt_at', 'send_last_error']));
+
+            return $m;
+        })->values();
     }
 
     /**

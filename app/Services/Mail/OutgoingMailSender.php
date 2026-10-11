@@ -4,6 +4,7 @@ namespace App\Services\Mail;
 
 use App\Jobs\Mail\AppendToSentFolderJob;
 use App\Models\EmailMessage;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Mailer\Mailer;
@@ -29,16 +30,44 @@ use Symfony\Component\Mailer\Transport\TransportInterface;
  */
 class OutgoingMailSender
 {
+    /** Сколько держим замок отправки черновика: SMTP с вложениями идёт до ~40 с. */
+    private const SEND_LOCK_SECONDS = 300;
+
     public function __construct(
         private readonly YandexOAuthService $oauth,
         private readonly OutgoingMailMimeBuilder $mimeBuilder,
+        private readonly OutgoingSendRetryService $retry,
     ) {
     }
 
     /**
-     * @return array{success: bool, draft: EmailMessage, error?: string}
+     * $queueOnTransientFailure — письмо, написанное человеком: если SMTP
+     * недоступен (сеть, 4xx), не отказываем, а ставим в очередь повторов
+     * (OutgoingSendRetryService) и возвращаем queued=true + next_attempt_at.
+     * Автоматические рассылки зовут без флага — у них своя логика сбоя.
+     *
+     * @return array{success: bool, draft: EmailMessage, error?: string, error_message?: string, queued?: bool, next_attempt_at?: \Carbon\CarbonInterface}
      */
-    public function sendDraft(int $draftId): array
+    public function sendDraft(int $draftId, bool $queueOnTransientFailure = false): array
+    {
+        // Один черновик — одна отправка за раз: «Отправить» автора и повтор из
+        // очереди не должны встретиться и отправить клиенту письмо дважды.
+        $lock = Cache::lock('outgoing-draft-send:'.$draftId, self::SEND_LOCK_SECONDS);
+        if (! $lock->get()) {
+            return ['success' => false, 'draft' => EmailMessage::findOrFail($draftId), 'error' => 'send_in_progress'];
+        }
+
+        try {
+            return $this->sendDraftLocked($draftId, $queueOnTransientFailure);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * @return array{success: bool, draft: EmailMessage, error?: string, error_message?: string, queued?: bool, next_attempt_at?: \Carbon\CarbonInterface}
+     */
+    private function sendDraftLocked(int $draftId, bool $queueOnTransientFailure): array
     {
         $draft = EmailMessage::with(['mailbox', 'attachments'])->findOrFail($draftId);
 
@@ -91,7 +120,24 @@ class OutgoingMailSender
                 'error' => $e->getMessage(),
             ]);
 
-            return ['success' => false, 'draft' => $draft, 'error' => 'smtp_send_failed'];
+            if ($queueOnTransientFailure && $this->retry->isTransient($e)) {
+                // Финальные message_id/тело на инстансе не сохраняем: повтор
+                // соберёт письмо заново из черновика.
+                $draft->refresh();
+                $next = $this->retry->schedule($draft, $e->getMessage());
+                if ($next !== null) {
+                    return [
+                        'success' => false,
+                        'draft' => $draft,
+                        'error' => 'smtp_send_queued',
+                        'error_message' => $e->getMessage(),
+                        'queued' => true,
+                        'next_attempt_at' => $next,
+                    ];
+                }
+            }
+
+            return ['success' => false, 'draft' => $draft, 'error' => 'smtp_send_failed', 'error_message' => $e->getMessage()];
         }
 
         DB::transaction(function () use ($draft, $finalMessageId, $finalBody) {
@@ -103,6 +149,10 @@ class OutgoingMailSender
                 'message_id' => $finalMessageId,
                 'body_plain' => $finalBody['plain'],
                 'body_html' => $finalBody['html'],
+                // Ушло (возможно, с повтора) — следы очереди не нужны.
+                'send_status' => null,
+                'send_next_attempt_at' => null,
+                'send_last_error' => null,
             ]);
         });
 

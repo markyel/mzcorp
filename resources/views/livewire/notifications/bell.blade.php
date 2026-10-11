@@ -41,6 +41,7 @@
                                 'openai_circuit_opened' => '⛔',
                                 'queue_stalled' => '⏳',
                                 'support_reply' => '✉',
+                                'outgoing_send_failed' => '⚠',
                                 default => '🔔',
                             };
                             $title = match($kind) {
@@ -51,6 +52,7 @@
                                 'openai_circuit_opened' => 'OpenAI недоступен — категоризатор на паузе',
                                 'queue_stalled' => 'Очередь задач встала — письма не разбираются',
                                 'support_reply' => 'Ответ по обращению #' . ($data['ticket_id'] ?? ''),
+                                'outgoing_send_failed' => 'Письмо не отправлено' . (! empty($data['internal_code']) ? ' · ' . $data['internal_code'] : ''),
                                 default => 'Уведомление',
                             };
                             $subtitle = match($kind) {
@@ -61,6 +63,7 @@
                                 'openai_circuit_opened' => 'Подряд ошибок: ' . ($data['fail_count'] ?? 0) . ' · пауза ' . ($data['cooldown_minutes'] ?? 15) . ' мин',
                                 'queue_stalled' => collect($data['stalled'] ?? [])->map(fn ($m, $q) => $q . ': ' . ($m['count'] ?? 0) . ' задач, ждут ' . ($m['oldest_minutes'] ?? 0) . ' мин')->implode(' · '),
                                 'support_reply' => ($data['subject'] ?? '') . ' · ' . \Illuminate\Support\Str::limit($data['reply_preview'] ?? '', 60),
+                                'outgoing_send_failed' => ($data['recipient'] ?? '') . ' · ' . ($data['subject'] ?? '') . ' · осталось черновиком',
                                 default => '',
                             };
                             $reqId = $data['request_id'] ?? null;
@@ -68,6 +71,9 @@
                                 'openai_circuit_opened' => 'https://platform.openai.com/account/billing',
                                 'queue_stalled' => '#',
                                 'support_reply' => $data['ticket_id'] ?? null ? route('support.show', $data['ticket_id']) : '#',
+                                'outgoing_send_failed' => $reqId
+                                    ? route('requests.show', $reqId)
+                                    : route('mail.inbox', ['mbox' => $data['mailbox_id'] ?? null, 'folder' => 'drafts', 'open' => $data['draft_id'] ?? null]),
                                 'organization_link_pending' => isset($data['link_request_id']) ? route('clients.link-requests.show', $data['link_request_id']) : '#',
                                 default => $reqId ? route('requests.show', $reqId) : '#',
                             };

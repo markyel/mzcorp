@@ -16,6 +16,7 @@ use App\Services\Mail\MailboxAccessService;
 use App\Services\Mail\MailHistoryMirrorService;
 use App\Services\Mail\OutboundReplyHooks;
 use App\Services\Mail\OutgoingMailSender;
+use App\Services\Mail\OutgoingSendRetryService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -499,7 +500,19 @@ class Composer extends Component
             return null;
         }
 
-        $result = $sender->sendDraft($draft->id);
+        // Ручная отправка — новая серия попыток.
+        app(OutgoingSendRetryService::class)->reset($draft);
+        $result = $sender->sendDraft($draft->id, queueOnTransientFailure: true);
+        if ($result['queued'] ?? false) {
+            // SMTP недоступен — письмо ушло в очередь автоповтора; хуки
+            // после отправки выполнит SendQueuedDraftJob.
+            $this->reset(['draftId', 'relatedRequestId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bccRaw', 'bodyText', 'bodyHtml', 'newFiles']);
+            $this->open = false;
+            $this->dispatch('mail-sent');
+            $this->dispatch('toast', message: OutgoingSendRetryService::queuedMessage($result['next_attempt_at']), type: 'warning');
+
+            return null;
+        }
         if (! ($result['success'] ?? false)) {
             $this->addError('subject', $this->describeError((string) ($result['error'] ?? 'unknown')));
 
@@ -672,6 +685,7 @@ class Composer extends Component
             'oauth_refresh_failed' => 'Не удалось обновить OAuth-токен — переподключите ящик.',
             'smtp_send_failed' => 'Не удалось отправить через SMTP — попробуйте ещё раз.',
             'not_a_draft' => 'Черновик уже отправлен.',
+            'send_in_progress' => 'Письмо уже отправляется — подождите минуту.',
             default => 'Не удалось отправить письмо: '.$code,
         };
     }

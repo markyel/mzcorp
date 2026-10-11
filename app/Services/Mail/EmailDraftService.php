@@ -334,6 +334,10 @@ class EmailDraftService
         }
 
         $allowed['last_edited_at'] = now();
+        // Правка письма снимает его с очереди автоповтора отправки: в очереди
+        // должна стоять ровно та версия, которую автор отправил.
+        $allowed['send_status'] = null;
+        $allowed['send_next_attempt_at'] = null;
 
         $draft->update($allowed);
     }

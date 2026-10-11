@@ -447,6 +447,15 @@ return [
         // Лимит attachments на одно письмо (MB). Livewire WithFileUploads
         // ограничивает каждый файл; на агрегат тоже нужен guard.
         'max_attachment_mb' => (int) env('MAIL_OUTBOUND_MAX_ATTACHMENT_MB', 25),
+        // Автоповтор отправки при сетевом сбое SMTP (OutgoingSendRetryService).
+        // Паузы между попытками в минутах; после конца списка повторяется
+        // последняя. max_attempts — всего попыток, включая первую (ручную):
+        // 1+5+15+30+60×7 ≈ 8 ч, дальше — «Не отправлено» + колокольчик автору.
+        'retry_backoff_minutes' => array_values(array_filter(array_map(
+            'intval',
+            explode(',', (string) env('MAIL_OUTBOUND_RETRY_BACKOFF_MINUTES', '1,5,15,30,60'))
+        ))),
+        'retry_max_attempts' => (int) env('MAIL_OUTBOUND_RETRY_MAX_ATTEMPTS', 12),
     ],
 
     /*

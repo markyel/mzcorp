@@ -67,6 +67,11 @@ class EmailMessage extends Model
         'is_history',
         'body_fetched_at',
         'history_has_attachments',
+        // Автоповтор отправки черновика при сбое SMTP — см. OutgoingSendRetryService.
+        'send_status',
+        'send_attempts',
+        'send_next_attempt_at',
+        'send_last_error',
     ];
 
     protected static function booted(): void
@@ -121,6 +126,9 @@ class EmailMessage extends Model
             'is_history' => 'bool',
             'body_fetched_at' => 'datetime',
             'history_has_attachments' => 'bool',
+            'send_status' => \App\Enums\DraftSendStatus::class,
+            'send_attempts' => 'integer',
+            'send_next_attempt_at' => 'datetime',
         ];
     }
 

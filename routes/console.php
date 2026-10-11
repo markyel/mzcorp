@@ -296,6 +296,15 @@ Schedule::command('iqot:update-fx-rates')
     ->onOneServer()
     ->runInBackground();
 
+// Автоповтор писем, не ушедших из-за недоступного SMTP (сбой smtp.yandex.ru
+// 2026-10-11). Расписание попыток — на черновике (OutgoingSendRetryService),
+// здесь только ставим наступившие в очередь.
+Schedule::command('mail:send-queued')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Foundation §7.2: догоняющая классификация интента входящих, пролетевших в
 // окно сбоя AI (OpenAI 429/quota). Каждые 15 минут — транзиентные сбои
 // само-залечиваются, заявка не зависает в Quoted при ответе «на согласовании»

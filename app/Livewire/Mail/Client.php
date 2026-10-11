@@ -6,6 +6,7 @@ use App\Enums\MailboxType;
 use App\Enums\MailDirection;
 use App\Enums\MailFolder;
 use App\Enums\Role;
+use App\Jobs\Mail\SendQueuedDraftJob;
 use App\Jobs\Mail\SyncMailboxFolderJob;
 use App\Livewire\Concerns\RendersEmailBody;
 use App\Models\AutoQuoteSnapshot;
@@ -25,6 +26,7 @@ use App\Services\Mail\MailHistoryMirrorService;
 use App\Services\Mail\MailReadService;
 use App\Services\Mail\MailUnreadCounter;
 use App\Services\Mail\MessageLabelService;
+use App\Services\Mail\OutgoingSendRetryService;
 use App\Services\Mail\SharedMailService;
 use App\Services\Mail\SupplierCcInboxService;
 use App\Services\Quotes\AutoQuoteOfferService;
@@ -1045,6 +1047,43 @@ class Client extends Component
     public function compose(int $mailboxId): void
     {
         $this->dispatch('mail-open-compose', mailboxId: $mailboxId)->to(Composer::class);
+    }
+
+    /**
+     * «Отправить сейчас» / «Отправить ещё раз» у письма, не ушедшего из-за
+     * недоступного SMTP. Шлёт SendQueuedDraftJob — без ожидания SMTP здесь.
+     */
+    public function sendDraftNow(int $id): void
+    {
+        $draft = $this->myDraft($id);
+        if (! $draft) {
+            return;
+        }
+        app(OutgoingSendRetryService::class)->requeueNow($draft);
+        SendQueuedDraftJob::dispatch($draft->id);
+        unset($this->threads, $this->openThread);
+        $this->dispatch('toast', message: 'Отправляем письмо — статус обновится через минуту.', type: 'success');
+    }
+
+    /** Снять с очереди автоповтора — снова обычный черновик. */
+    public function cancelDraftSend(int $id): void
+    {
+        $draft = $this->myDraft($id);
+        if (! $draft) {
+            return;
+        }
+        app(OutgoingSendRetryService::class)->reset($draft);
+        unset($this->threads, $this->openThread);
+        $this->dispatch('toast', message: 'Письмо снято с очереди и осталось черновиком.', type: 'success');
+    }
+
+    private function myDraft(int $id): ?EmailMessage
+    {
+        return EmailMessage::query()
+            ->where('is_draft', true)
+            ->where('draft_author_user_id', $this->user()->id)
+            ->whereKey($id)
+            ->first();
     }
 
     public function continueDraft(int $draftId): void

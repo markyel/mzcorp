@@ -365,6 +365,9 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .draft-actions button{height:30px;padding:0 14px;border-radius:var(--r-md);font:500 12.5px/1 var(--font-sans);cursor:pointer;border:1px solid var(--border-strong);background:var(--bg-surface);color:var(--fg-1)}
 .mailapp .draft-actions .da-primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
 .mailapp .draft-actions .da-del{color:var(--crit, #b0432e);border-color:transparent;background:none}
+.mailapp .send-status{margin-top:12px;padding:8px 12px;border-radius:var(--r-md);font:400 12.5px/1.45 var(--font-sans);color:var(--fg-1);border:1px solid var(--warn, #9c7420);background:var(--amber-50, #fdf6e3)}
+.mailapp .send-status.failed{border-color:var(--crit, #b0432e);background:var(--red-50, #fdf0ed)}
+.mailapp .send-status .err{display:block;margin-top:2px;color:var(--fg-3);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mailapp .msg:last-child{border-bottom:none}
 .mailapp .mhead{display:flex;align-items:flex-start;gap:10px;margin-bottom:12px}
 .mailapp .mhead .av{width:36px;height:36px;border-radius:999px;background:var(--neutral-200);color:var(--fg-2);font:600 13px/36px var(--font-sans);text-align:center;flex-shrink:0}
@@ -1057,7 +1060,7 @@ body.mail-resizing iframe{pointer-events:none}
                         <div class="mhead">
                             <span class="av">{{ $msg->is_draft ? '✎' : $initials($msg->from_name, $msg->from_email) }}</span>
                             <div class="who">
-                                <div class="nm">{{ $msg->from_name ?: $msg->from_email }} <span class="em">&lt;{{ $msg->from_email }}&gt;</span>@if($msg->is_draft)<span class="draft-badge">черновик</span>@endif</div>
+                                <div class="nm">{{ $msg->from_name ?: $msg->from_email }} <span class="em">&lt;{{ $msg->from_email }}&gt;</span>@if($msg->is_draft)<span class="draft-badge">{{ $msg->send_status ? mb_strtolower($msg->send_status->label()) : 'черновик' }}</span>@endif</div>
                                 @php $to = collect($msg->to_recipients ?? [])->pluck('email')->filter()->take(3)->implode(', '); @endphp
                                 @if($to)<div class="tocc">кому: {{ $to }}</div>@endif
                             </div>
@@ -1161,8 +1164,30 @@ body.mail-resizing iframe{pointer-events:none}
                             @endif
                         @endif
                         @if($msg->is_draft)
+                            @if($msg->send_status)
+                                {{-- Не ушло из-за недоступного SMTP (OutgoingSendRetryService). --}}
+                                @php $sendFailed = $msg->send_status === \App\Enums\DraftSendStatus::Failed; @endphp
+                                <div class="send-status {{ $sendFailed ? 'failed' : 'queued' }}">
+                                    <b>{{ $msg->send_status->icon() }} {{ $msg->send_status->label() }}</b>
+                                    @if($sendFailed)
+                                        — письмо не ушло, попыток: {{ (int) $msg->send_attempts }}.
+                                    @else
+                                        — почтовый сервер не ответил, отправим автоматически{{ $msg->send_next_attempt_at ? ' в '.$msg->send_next_attempt_at->format('H:i') : '' }}
+                                        (попытка {{ (int) $msg->send_attempts }} из {{ (int) config('services.mail_outbound.retry_max_attempts') }}).
+                                    @endif
+                                    @if($msg->send_last_error)
+                                        <span class="err" title="{{ $msg->send_last_error }}">{{ \Illuminate\Support\Str::limit($msg->send_last_error, 90) }}</span>
+                                    @endif
+                                </div>
+                            @endif
                             <div class="draft-actions">
-                                <button class="da-primary" wire:click="continueDraft({{ $msg->id }})">Продолжить черновик</button>
+                                @if($msg->send_status)
+                                    <button class="da-primary" wire:click="sendDraftNow({{ $msg->id }})">{{ $msg->send_status === \App\Enums\DraftSendStatus::Failed ? 'Отправить ещё раз' : 'Отправить сейчас' }}</button>
+                                    @if($msg->send_status === \App\Enums\DraftSendStatus::Queued)
+                                        <button wire:click="cancelDraftSend({{ $msg->id }})">Не отправлять</button>
+                                    @endif
+                                @endif
+                                <button class="{{ $msg->send_status ? '' : 'da-primary' }}" wire:click="continueDraft({{ $msg->id }})">Продолжить черновик</button>
                                 <button class="da-del" wire:click="deleteDraft({{ $msg->id }})">Удалить</button>
                             </div>
                         @endif
