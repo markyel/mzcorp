@@ -13,6 +13,7 @@
         После указанного числа неудачных попыток оно уходит через этот сервис, дальше каналы чередуются.
         Отправитель тот же (адрес менеджера), ответ клиента придёт в его ящик, копия ляжет в «Отправленные».
         Домен <span class="mono">myzip.ru</span> должен быть подтверждён у провайдера.
+        Резерв лучше держать вне Яндекса: 11.10.2026 при сбое Yandex Cloud были недоступны и SMTP Яндекса, и Postbox.
         @unless($managedInUi)
             <br>Сейчас действуют значения из <span class="mono">.env</span>; после сохранения здесь — только эти.
         @endunless
@@ -24,6 +25,7 @@
             <div class="flex items-center justify-end gap-2">
                 <button type="button" wire:click="applyPreset('unisender')" class="btn btn-sm">Unisender Go</button>
                 <button type="button" wire:click="applyPreset('postbox')" class="btn btn-sm">Postbox</button>
+                <button type="button" wire:click="applyPreset('smtpbz')" class="btn btn-sm">smtp.bz</button>
             </div>
         </div>
 
@@ -39,7 +41,7 @@
                     <div class="text-[11.5px] text-fg-3 mt-1 leading-snug">{{ $help }}</div>
                 </div>
                 <div>
-                    <input type="{{ $type }}" id="fb-{{ $field }}" wire:model="{{ $field }}" autocomplete="off"
+                    <input type="{{ $type }}" id="fb-{{ $field }}" wire:model{{ $field === 'port' ? '.blur' : '' }}="{{ $field }}" autocomplete="off"
                            class="w-full px-2.5 py-1.5 border border-border rounded-md text-[13px] focus:outline-none focus:ring-1 focus:ring-sky-500">
                     @error($field)<div class="text-[11.5px] text-red-700 mt-1">{{ $message }}</div>@enderror
                 </div>

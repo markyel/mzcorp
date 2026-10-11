@@ -84,6 +84,16 @@ class MailFallback extends Component
         $this->disableTracking = $key === 'unisender';
     }
 
+    /** Стандартная пара: 465 — SSL сразу, 587 — STARTTLS; иначе соединение висит. */
+    public function updatedPort(): void
+    {
+        $this->encryption = match ((int) $this->port) {
+            465 => 'ssl',
+            587, 25, 2525 => 'tls',
+            default => $this->encryption,
+        };
+    }
+
     public function save(MailFallbackSettings $settings): void
     {
         $this->authorizeAccess();

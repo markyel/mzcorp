@@ -10,6 +10,7 @@ use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mailer\Transport\Dsn;
 use Symfony\Component\Mailer\Transport\Smtp\EsmtpTransportFactory;
 use Symfony\Component\Mailer\Transport\Smtp\SmtpTransport;
+use Symfony\Component\Mailer\Transport\Smtp\Stream\SocketStream;
 use Symfony\Component\Mailer\Transport\TransportInterface;
 
 /**
@@ -29,7 +30,15 @@ class MailFallbackSettings
     public const PRESETS = [
         'unisender' => ['name' => 'Unisender Go', 'host' => 'smtp.go1.unisender.ru', 'port' => 587, 'encryption' => 'tls'],
         'postbox' => ['name' => 'Yandex Cloud Postbox', 'host' => 'postbox.cloud.yandex.net', 'port' => 587, 'encryption' => 'tls'],
+        // Не Яндекс: 2026-10-11 Yandex Cloud лёг целиком — и SMTP Яндекс 360, и Postbox.
+        'smtpbz' => ['name' => 'smtp.bz', 'host' => 'connect.smtp.bz', 'port' => 587, 'encryption' => 'tls'],
     ];
+
+    /**
+     * Таймаут соединения/ответа резервного SMTP, сек. Канал зовут, когда
+     * основной уже не ответил — висеть минуту на мёртвом резерве незачем.
+     */
+    private const TIMEOUT_SECONDS = 20;
 
     /** Unisender Go: не переписывать ссылки и не вставлять пиксель в письма менеджеров. */
     private const UNISENDER_NO_TRACKING = ['X-UNISENDER-GO' => '{"track_links":0,"track_read":0}'];
@@ -102,13 +111,18 @@ class MailFallbackSettings
             throw new \RuntimeException('Резервный канал отправки не настроен: нет сервера или ключа.');
         }
 
-        return (new EsmtpTransportFactory())->create(new Dsn(
+        $transport = (new EsmtpTransportFactory())->create(new Dsn(
             scheme: $this->get('encryption', 'tls') === 'ssl' ? 'smtps' : 'smtp',
             host: $host,
             user: (string) $this->get('username', ''),
             password: $password,
             port: (int) $this->get('port', 587) ?: null,
         ));
+        if ($transport instanceof SmtpTransport && $transport->getStream() instanceof SocketStream) {
+            $transport->getStream()->setTimeout(self::TIMEOUT_SECONDS);
+        }
+
+        return $transport;
     }
 
     /**

@@ -96,6 +96,8 @@ class MailFallbackSettingsTest extends TestCase
         $this->assertInstanceOf(EsmtpTransport::class, $transport);
         $this->assertSame('6120000', $transport->getUsername());
         $this->assertSame('secret-key', $transport->getPassword());
+        // Резерв зовут, когда основной уже не ответил — минуту на мёртвом не висим.
+        $this->assertSame(20.0, $transport->getStream()->getTimeout());
     }
 
     public function test_no_tracking_header_only_when_asked(): void
