@@ -299,6 +299,14 @@ Schedule::command('iqot:update-fx-rates')
 // Автоповтор писем, не ушедших из-за недоступного SMTP (сбой smtp.yandex.ru
 // 2026-10-11). Расписание попыток — на черновике (OutgoingSendRetryService),
 // здесь только ставим наступившие в очередь.
+// Доступность SMTP ящиков знаем заранее: «Отправить» не ждёт минуту таймаута,
+// а при недоступном Яндексе письмо сразу идёт резервным каналом.
+Schedule::command('mail:smtp-health')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 Schedule::command('mail:send-queued')
     ->everyMinute()
     ->withoutOverlapping()

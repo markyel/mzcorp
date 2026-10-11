@@ -38,6 +38,7 @@ class OutgoingMailSender
         private readonly OutgoingMailMimeBuilder $mimeBuilder,
         private readonly OutgoingSendRetryService $retry,
         private readonly MailFallbackSettings $fallback,
+        private readonly SmtpReachabilityProbe $probe,
     ) {
     }
 
@@ -89,6 +90,13 @@ class OutgoingMailSender
             return ['success' => false, 'draft' => $draft, 'error' => 'mailbox_cannot_send'];
         }
 
+        // SMTP ящика известен как недоступный (mail:smtp-health) — письмо
+        // человека не ждёт очереди, а сразу идёт резервным каналом.
+        if (! $viaFallback && $queueOnTransientFailure && $this->retry->fallbackEnabled()
+            && $this->probe->isKnownDown((string) $mailbox->smtp_host, (int) $mailbox->smtp_port)) {
+            $viaFallback = true;
+        }
+
         // Резервному каналу OAuth Яндекса не нужен (и при сбое Яндекса
         // обновление токена само может не пройти).
         if (! $viaFallback) {
@@ -127,6 +135,8 @@ class OutgoingMailSender
                 }
                 (new Mailer($this->fallback->transport()))->send($outgoing);
             } else {
+                // Сервер молчит — за секунды, а не за минуту таймаута сокета.
+                $this->probe->assertReachable((string) $mailbox->smtp_host, (int) $mailbox->smtp_port);
                 $transport = $this->buildSmtpTransport($mailbox);
                 $mailer = new Mailer($transport);
                 $mailer->send($email);
@@ -141,7 +151,9 @@ class OutgoingMailSender
                 'error' => $e->getMessage(),
             ]);
 
-            if ($queueOnTransientFailure && $this->retry->isTransient($e)) {
+            // Отказ резерва (ключ, лимит тарифа) — тоже не приговор: письмо
+            // ждёт в очереди, следующая попытка пойдёт и через SMTP ящика.
+            if ($queueOnTransientFailure && ($this->retry->isTransient($e) || $viaFallback)) {
                 // Финальные message_id/тело на инстансе не сохраняем: повтор
                 // соберёт письмо заново из черновика.
                 $draft->refresh();

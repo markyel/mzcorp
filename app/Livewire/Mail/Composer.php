@@ -539,7 +539,9 @@ class Composer extends Component
         $this->reset(['draftId', 'relatedRequestId', 'replyToMessageId', 'subject', 'toRaw', 'ccRaw', 'bccRaw', 'bodyText', 'bodyHtml', 'newFiles']);
         $this->open = false;
         $this->dispatch('mail-sent');
-        $this->dispatch('toast', message: 'Письмо отправлено.', type: 'success');
+        $this->dispatch('toast', message: $sent->sent_via
+            ? "Письмо отправлено через {$sent->sent_via}: почтовый сервер Яндекса сейчас недоступен."
+            : 'Письмо отправлено.', type: 'success');
 
         return null;
     }

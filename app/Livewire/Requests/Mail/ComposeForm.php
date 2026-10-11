@@ -560,7 +560,9 @@ class ComposeForm extends Component
             $hooks->detectOutboundDocuments($sent);
         }
 
-        session()->flash('status', 'Письмо отправлено.');
+        session()->flash('status', $sent->sent_via
+            ? "Письмо отправлено через {$sent->sent_via}: почтовый сервер Яндекса сейчас недоступен."
+            : 'Письмо отправлено.');
         $this->open = false;
 
         // navigate: false — full reload надёжнее (wire:navigate иногда

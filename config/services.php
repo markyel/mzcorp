@@ -456,6 +456,9 @@ return [
             explode(',', (string) env('MAIL_OUTBOUND_RETRY_BACKOFF_MINUTES', '1,5,15,30,60'))
         ))),
         'retry_max_attempts' => (int) env('MAIL_OUTBOUND_RETRY_MAX_ATTEMPTS', 12),
+        // Сколько ждать TCP-соединения с SMTP ящика до отправки
+        // (SmtpReachabilityProbe): не ответил — письмо сразу в очередь повторов.
+        'connect_probe_seconds' => (int) env('MAIL_OUTBOUND_CONNECT_PROBE_SECONDS', 8),
         // Резервный канал: SMTP-сервис доставки (Unisender Go, потом Postbox),
         // если SMTP Яндекса не отвечает. Письмо уходит от того же менеджера,
         // ответ клиента приходит в его ящик. Пустой dsn — резерв выключен.
