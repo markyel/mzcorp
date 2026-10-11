@@ -72,6 +72,8 @@ class EmailMessage extends Model
         'send_attempts',
         'send_next_attempt_at',
         'send_last_error',
+        // Имя резервного канала, если письмо ушло не через SMTP ящика.
+        'sent_via',
     ];
 
     protected static function booted(): void

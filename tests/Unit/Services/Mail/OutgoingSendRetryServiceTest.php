@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Services\Mail;
 
+use App\Models\EmailMessage;
 use App\Services\Mail\OutgoingSendRetryService;
 use Carbon\Carbon;
 use Symfony\Component\Mailer\Exception\TransportException;
@@ -73,6 +74,33 @@ class OutgoingSendRetryServiceTest extends TestCase
         $this->assertSame(5, $this->svc->backoffMinutes(2));
         $this->assertSame(60, $this->svc->backoffMinutes(5));
         $this->assertSame(60, $this->svc->backoffMinutes(11));
+    }
+
+    public function test_no_fallback_when_channel_not_configured(): void
+    {
+        config(['services.mail_outbound.fallback.dsn' => null]);
+
+        $this->assertFalse($this->svc->fallbackEnabled());
+        $this->assertFalse($this->svc->shouldUseFallback(new EmailMessage(['send_attempts' => 5])));
+    }
+
+    public function test_fallback_after_threshold_then_channels_alternate(): void
+    {
+        config([
+            'services.mail_outbound.fallback.dsn' => 'smtp://u:p@smtp.go1.unisender.ru:587',
+            'services.mail_outbound.fallback.after_attempts' => 3,
+        ]);
+
+        $via = fn (int $attempts) => $this->svc->shouldUseFallback(new EmailMessage(['send_attempts' => $attempts]));
+
+        // До порога — только SMTP ящика.
+        $this->assertFalse($via(1));
+        $this->assertFalse($via(2));
+        // С порога — резерв, ящик, резерв…: поднявшийся первым канал и отправит.
+        $this->assertTrue($via(3));
+        $this->assertFalse($via(4));
+        $this->assertTrue($via(5));
+        $this->assertFalse($via(6));
     }
 
     public function test_queued_message_names_next_attempt_time(): void

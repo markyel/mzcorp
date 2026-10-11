@@ -1906,6 +1906,9 @@
                                                                 в {{ $msg->send_next_attempt_at->format('H:i') }}
                                                             @endif
                                                             · попытка {{ (int) $msg->send_attempts }} из {{ (int) config('services.mail_outbound.retry_max_attempts') }}
+                                                            @if(app(\App\Services\Mail\OutgoingSendRetryService::class)->shouldUseFallback($msg))
+                                                                · следующая — через {{ config('services.mail_outbound.fallback.name') }}
+                                                            @endif
                                                         @else
                                                             Письмо не ушло клиенту, попыток: {{ (int) $msg->send_attempts }}
                                                         @endif
@@ -1939,6 +1942,9 @@
                                                             class="underline text-red-700 hover:text-red-900">Удалить черновик</button>
                                                 @endif
                                             </div>
+                                        @elseif($isOutbound && $msg->sent_via)
+                                            {{-- SMTP Яндекса не отвечал — ушло резервным каналом (OutgoingMailSender). --}}
+                                            <div class="mt-2 text-[11.5px] text-fg-3">↪ Отправлено через {{ $msg->sent_via }}: почтовый сервер Яндекса не отвечал</div>
                                         @elseif($canReplyHere && ! $isOutbound)
                                             <div class="mt-2 flex gap-2">
                                                 <button type="button"

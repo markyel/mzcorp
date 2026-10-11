@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Mailer\Mailer;
+use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mailer\Transport\Dsn;
 use Symfony\Component\Mailer\Transport\Smtp\Auth\XOAuth2Authenticator;
 use Symfony\Component\Mailer\Transport\Smtp\EsmtpTransportFactory;
@@ -46,9 +47,14 @@ class OutgoingMailSender
      * (OutgoingSendRetryService) и возвращаем queued=true + next_attempt_at.
      * Автоматические рассылки зовут без флага — у них своя логика сбоя.
      *
+     * $viaFallback — отправить через резервный канал (services.mail_outbound.
+     * fallback: Unisender Go / Postbox) вместо SMTP ящика. Решает очередь
+     * повторов (OutgoingSendRetryService::shouldUseFallback). From и цепочка
+     * писем те же, копию в «Отправленные» кладёт AppendToSentFolderJob.
+     *
      * @return array{success: bool, draft: EmailMessage, error?: string, error_message?: string, queued?: bool, next_attempt_at?: \Carbon\CarbonInterface}
      */
-    public function sendDraft(int $draftId, bool $queueOnTransientFailure = false): array
+    public function sendDraft(int $draftId, bool $queueOnTransientFailure = false, bool $viaFallback = false): array
     {
         // Один черновик — одна отправка за раз: «Отправить» автора и повтор из
         // очереди не должны встретиться и отправить клиенту письмо дважды.
@@ -58,7 +64,7 @@ class OutgoingMailSender
         }
 
         try {
-            return $this->sendDraftLocked($draftId, $queueOnTransientFailure);
+            return $this->sendDraftLocked($draftId, $queueOnTransientFailure, $viaFallback && $this->retry->fallbackEnabled());
         } finally {
             $lock->release();
         }
@@ -67,7 +73,7 @@ class OutgoingMailSender
     /**
      * @return array{success: bool, draft: EmailMessage, error?: string, error_message?: string, queued?: bool, next_attempt_at?: \Carbon\CarbonInterface}
      */
-    private function sendDraftLocked(int $draftId, bool $queueOnTransientFailure): array
+    private function sendDraftLocked(int $draftId, bool $queueOnTransientFailure, bool $viaFallback): array
     {
         $draft = EmailMessage::with(['mailbox', 'attachments'])->findOrFail($draftId);
 
@@ -83,16 +89,20 @@ class OutgoingMailSender
             return ['success' => false, 'draft' => $draft, 'error' => 'mailbox_cannot_send'];
         }
 
-        try {
-            $this->oauth->ensureFreshToken($mailbox);
-            $mailbox->refresh();
-        } catch (\Throwable $e) {
-            Log::warning('OutgoingMailSender: OAuth refresh failed', [
-                'mailbox_id' => $mailbox->id,
-                'error' => $e->getMessage(),
-            ]);
+        // Резервному каналу OAuth Яндекса не нужен (и при сбое Яндекса
+        // обновление токена само может не пройти).
+        if (! $viaFallback) {
+            try {
+                $this->oauth->ensureFreshToken($mailbox);
+                $mailbox->refresh();
+            } catch (\Throwable $e) {
+                Log::warning('OutgoingMailSender: OAuth refresh failed', [
+                    'mailbox_id' => $mailbox->id,
+                    'error' => $e->getMessage(),
+                ]);
 
-            return ['success' => false, 'draft' => $draft, 'error' => 'oauth_refresh_failed'];
+                return ['success' => false, 'draft' => $draft, 'error' => 'oauth_refresh_failed'];
+            }
         }
 
         // Финальный Message-ID — назначаем ДО build, чтобы и в MIME-заголовке,
@@ -108,15 +118,26 @@ class OutgoingMailSender
         try {
             $email = $this->mimeBuilder->build($draft, $mailbox);
 
-            $transport = $this->buildSmtpTransport($mailbox);
-            $mailer = new Mailer($transport);
-            $mailer->send($email);
+            if ($viaFallback) {
+                // Служебные заголовки провайдеру — только в отправляемую копию,
+                // в «Отправленные» (rawMime) они не попадают.
+                $outgoing = clone $email;
+                foreach ((array) config('services.mail_outbound.fallback.headers', []) as $name => $value) {
+                    $outgoing->getHeaders()->addTextHeader((string) $name, is_string($value) ? $value : json_encode($value));
+                }
+                (new Mailer($this->buildFallbackTransport()))->send($outgoing);
+            } else {
+                $transport = $this->buildSmtpTransport($mailbox);
+                $mailer = new Mailer($transport);
+                $mailer->send($email);
+            }
 
             $rawMime = $email->toString();
         } catch (\Throwable $e) {
             Log::error('OutgoingMailSender: SMTP send failed', [
                 'draft_id' => $draft->id,
                 'mailbox_id' => $mailbox->id,
+                'via' => $viaFallback ? 'fallback' : 'mailbox',
                 'error' => $e->getMessage(),
             ]);
 
@@ -140,7 +161,15 @@ class OutgoingMailSender
             return ['success' => false, 'draft' => $draft, 'error' => 'smtp_send_failed', 'error_message' => $e->getMessage()];
         }
 
-        DB::transaction(function () use ($draft, $finalMessageId, $finalBody) {
+        if ($viaFallback) {
+            Log::warning('OutgoingMailSender: sent via fallback channel', [
+                'draft_id' => $draft->id,
+                'mailbox_id' => $mailbox->id,
+                'channel' => config('services.mail_outbound.fallback.name'),
+            ]);
+        }
+
+        DB::transaction(function () use ($draft, $finalMessageId, $finalBody, $viaFallback) {
             // update() сохраняет и detected_artifacts.marketing_block_id, который
             // MarketingBlockService зафиксировал на инстансе в composeFinalBody.
             $draft->update([
@@ -153,6 +182,7 @@ class OutgoingMailSender
                 'send_status' => null,
                 'send_next_attempt_at' => null,
                 'send_last_error' => null,
+                'sent_via' => $viaFallback ? mb_substr((string) config('services.mail_outbound.fallback.name'), 0, 60) : null,
             ]);
         });
 
@@ -200,6 +230,17 @@ class OutgoingMailSender
         $mailbox->refresh();
 
         (new Mailer($this->buildSmtpTransport($mailbox)))->send($email);
+    }
+
+    /** SMTP резервного канала из services.mail_outbound.fallback.dsn. */
+    public function buildFallbackTransport(): TransportInterface
+    {
+        $dsn = (string) config('services.mail_outbound.fallback.dsn');
+        if ($dsn === '') {
+            throw new \RuntimeException('Резервный канал отправки не настроен (MAIL_OUTBOUND_FALLBACK_DSN).');
+        }
+
+        return Transport::fromDsn($dsn);
     }
 
     public function buildSmtpTransport(\App\Models\Mailbox $mailbox): TransportInterface

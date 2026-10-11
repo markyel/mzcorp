@@ -1060,7 +1060,7 @@ body.mail-resizing iframe{pointer-events:none}
                         <div class="mhead">
                             <span class="av">{{ $msg->is_draft ? '✎' : $initials($msg->from_name, $msg->from_email) }}</span>
                             <div class="who">
-                                <div class="nm">{{ $msg->from_name ?: $msg->from_email }} <span class="em">&lt;{{ $msg->from_email }}&gt;</span>@if($msg->is_draft)<span class="draft-badge">{{ $msg->send_status ? mb_strtolower($msg->send_status->label()) : 'черновик' }}</span>@endif</div>
+                                <div class="nm">{{ $msg->from_name ?: $msg->from_email }} <span class="em">&lt;{{ $msg->from_email }}&gt;</span>@if($msg->is_draft)<span class="draft-badge">{{ $msg->send_status ? mb_strtolower($msg->send_status->label()) : 'черновик' }}</span>@elseif($msg->sent_via)<span class="draft-badge" title="Почтовый сервер Яндекса не отвечал — письмо ушло резервным каналом">через {{ $msg->sent_via }}</span>@endif</div>
                                 @php $to = collect($msg->to_recipients ?? [])->pluck('email')->filter()->take(3)->implode(', '); @endphp
                                 @if($to)<div class="tocc">кому: {{ $to }}</div>@endif
                             </div>
@@ -1173,7 +1173,7 @@ body.mail-resizing iframe{pointer-events:none}
                                         — письмо не ушло, попыток: {{ (int) $msg->send_attempts }}.
                                     @else
                                         — почтовый сервер не ответил, отправим автоматически{{ $msg->send_next_attempt_at ? ' в '.$msg->send_next_attempt_at->format('H:i') : '' }}
-                                        (попытка {{ (int) $msg->send_attempts }} из {{ (int) config('services.mail_outbound.retry_max_attempts') }}).
+                                        (попытка {{ (int) $msg->send_attempts }} из {{ (int) config('services.mail_outbound.retry_max_attempts') }}{{ app(\App\Services\Mail\OutgoingSendRetryService::class)->shouldUseFallback($msg) ? ', следующая — через '.config('services.mail_outbound.fallback.name') : '' }}).
                                     @endif
                                     @if($msg->send_last_error)
                                         <span class="err" title="{{ $msg->send_last_error }}">{{ \Illuminate\Support\Str::limit($msg->send_last_error, 90) }}</span>

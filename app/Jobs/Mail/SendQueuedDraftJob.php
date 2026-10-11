@@ -58,12 +58,16 @@ class SendQueuedDraftJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $result = $sender->sendDraft($draft->id, queueOnTransientFailure: true);
+        // Основной SMTP не ответил несколько раз подряд — пробуем резервный
+        // канал (Unisender Go / Postbox), если он настроен.
+        $viaFallback = $retry->shouldUseFallback($draft);
+        $result = $sender->sendDraft($draft->id, queueOnTransientFailure: true, viaFallback: $viaFallback);
 
         if ($result['success'] ?? false) {
             Log::info('SendQueuedDraftJob: sent from retry queue', [
                 'draft_id' => $draft->id,
                 'attempts' => $draft->send_attempts,
+                'via_fallback' => $viaFallback,
             ]);
             $this->runPostSendHooks($hooks, $result['draft']);
 
@@ -78,8 +82,18 @@ class SendQueuedDraftJob implements ShouldBeUnique, ShouldQueue
         $draft->refresh();
 
         // Токен OAuth не обновился — тот же сетевой сбой, только до SMTP.
+        // Резервному каналу токен не нужен: следующая попытка, когда наберётся
+        // after_attempts, пойдёт через него.
         if ($error === 'oauth_refresh_failed' && $draft->is_draft) {
             $retry->schedule($draft, 'Не удалось обновить OAuth-токен ящика');
+
+            return;
+        }
+
+        // Резерв отказал по своей причине (ключ, домен не подтверждён) — это
+        // не приговор письму: следующая попытка пойдёт через SMTP ящика.
+        if ($viaFallback && $error === 'smtp_send_failed' && $draft->is_draft && $draft->send_status === DraftSendStatus::Queued) {
+            $retry->schedule($draft, 'Резервный канал: '.($result['error_message'] ?? $error));
 
             return;
         }

@@ -158,6 +158,28 @@ class OutgoingSendRetryService
             ->pluck('id');
     }
 
+    public function fallbackEnabled(): bool
+    {
+        return trim((string) config('services.mail_outbound.fallback.dsn')) !== '';
+    }
+
+    /**
+     * Следующую попытку — через резервный канал: SMTP ящика уже не ответил
+     * fallback.after_attempts раз подряд. Дальше каналы чередуются (резерв,
+     * ящик, резерв…): письмо уйдёт, какой бы из них ни поднялся первым, и
+     * сломанная настройка резерва не держит письмо, когда Яндекс ожил.
+     */
+    public function shouldUseFallback(EmailMessage $draft): bool
+    {
+        if (! $this->fallbackEnabled()) {
+            return false;
+        }
+        $after = max(1, (int) config('services.mail_outbound.fallback.after_attempts', 3));
+        $attempts = (int) $draft->send_attempts;
+
+        return $attempts >= $after && ($attempts - $after) % 2 === 0;
+    }
+
     /** Что сказать автору, когда письмо ушло в очередь (тост / флеш). */
     public static function queuedMessage(?CarbonInterface $next): string
     {

@@ -456,6 +456,22 @@ return [
             explode(',', (string) env('MAIL_OUTBOUND_RETRY_BACKOFF_MINUTES', '1,5,15,30,60'))
         ))),
         'retry_max_attempts' => (int) env('MAIL_OUTBOUND_RETRY_MAX_ATTEMPTS', 12),
+        // Резервный канал: SMTP-сервис доставки (Unisender Go, потом Postbox),
+        // если SMTP Яндекса не отвечает. Письмо уходит от того же менеджера,
+        // ответ клиента приходит в его ящик. Пустой dsn — резерв выключен.
+        // Провайдер меняется только этими переменными, код один.
+        'fallback' => [
+            // Symfony Mailer DSN, спецсимволы логина/пароля — urlencode:
+            // smtp://USER_ID:API_KEY@smtp.go1.unisender.ru:587
+            'dsn' => env('MAIL_OUTBOUND_FALLBACK_DSN'),
+            'name' => env('MAIL_OUTBOUND_FALLBACK_NAME', 'резервный канал'),
+            // Через сколько неудачных попыток основного SMTP переходить на резерв.
+            'after_attempts' => (int) env('MAIL_OUTBOUND_FALLBACK_AFTER_ATTEMPTS', 3),
+            // Служебные заголовки провайдеру, JSON-объект {"Header": "value"}.
+            // Unisender Go: {"X-UNISENDER-GO": "{\"track_links\":0,\"track_read\":0}"} —
+            // не переписывать ссылки и не вставлять пиксель в письма менеджеров.
+            'headers' => json_decode((string) env('MAIL_OUTBOUND_FALLBACK_HEADERS', '{}'), true) ?: [],
+        ],
     ],
 
     /*
