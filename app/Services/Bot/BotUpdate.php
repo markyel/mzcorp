@@ -23,6 +23,10 @@ final class BotUpdate
         public readonly ?string $callbackData = null,
         public readonly bool $isStart = false,
         public readonly ?string $contactPhone = null,
+        /** @var list<array{kind: 'photo'|'file', ref: string, name: ?string, mime: ?string, size: ?int}> фото и файлы: ref — file_id Telegram или URL MAX */
+        public readonly array $files = [],
+        /** Альбом Telegram: несколько фото приходят отдельными событиями с одним id. */
+        public readonly ?string $mediaGroupId = null,
     ) {}
 
     public function isCallback(): bool
@@ -54,7 +58,20 @@ final class BotUpdate
         if (empty($from['id']) || empty($chat['id']) || ($from['is_bot'] ?? false) || ($chat['type'] ?? '') !== 'private') {
             return null;
         }
-        $text = trim((string) ($m['text'] ?? ''));
+        // Подпись к фото/файлу — тот же текст заявки.
+        $text = trim((string) ($m['text'] ?? $m['caption'] ?? ''));
+        $files = [];
+        if (! empty($m['photo']) && is_array($m['photo'])) {
+            // Размеры одного фото по возрастанию — берём самое крупное.
+            $largest = end($m['photo']);
+            if (! empty($largest['file_id'])) {
+                $files[] = ['kind' => 'photo', 'ref' => (string) $largest['file_id'], 'name' => null, 'mime' => 'image/jpeg', 'size' => $largest['file_size'] ?? null];
+            }
+        }
+        if (! empty($m['document']['file_id'])) {
+            $d = $m['document'];
+            $files[] = ['kind' => 'file', 'ref' => (string) $d['file_id'], 'name' => $d['file_name'] ?? null, 'mime' => $d['mime_type'] ?? null, 'size' => $d['file_size'] ?? null];
+        }
         // Телефон принимаем только свой: «поделиться контактом» другого человека — не он.
         $contact = (array) ($m['contact'] ?? []);
         $phone = ! empty($contact['phone_number']) && (string) ($contact['user_id'] ?? '') === (string) $from['id']
@@ -62,7 +79,8 @@ final class BotUpdate
 
         return new self(MessengerChannel::Telegram, $updateId, (string) $from['id'], (string) $chat['id'],
             $from['username'] ?? null, $from['first_name'] ?? null, $from['last_name'] ?? null,
-            text: $text, isStart: str_starts_with($text, '/start'), contactPhone: $phone);
+            text: $text, isStart: str_starts_with($text, '/start'), contactPhone: $phone,
+            files: $files, mediaGroupId: isset($m['media_group_id']) ? (string) $m['media_group_id'] : null);
     }
 
     /** MAX Bot API: message_created / message_callback / bot_started, только диалоги. */
@@ -111,7 +129,20 @@ final class BotUpdate
         }
 
         $phone = null;
+        $files = [];
         foreach ((array) ($body['attachments'] ?? []) as $a) {
+            $p = (array) ($a['payload'] ?? []);
+            if (in_array($a['type'] ?? '', ['image', 'file'], true) && ! empty($p['url'])) {
+                $files[] = [
+                    'kind' => ($a['type'] === 'image') ? 'photo' : 'file',
+                    'ref' => (string) $p['url'],
+                    'name' => $a['filename'] ?? $p['filename'] ?? null,
+                    'mime' => $a['type'] === 'image' ? 'image/jpeg' : null,
+                    'size' => isset($a['size']) ? (int) $a['size'] : null,
+                ];
+
+                continue;
+            }
             if (($a['type'] ?? '') !== 'contact') {
                 continue;
             }
@@ -125,7 +156,7 @@ final class BotUpdate
 
         return new self(MessengerChannel::Max, 'msg'.($body['mid'] ?? $ts), (string) $user['user_id'], (string) $chatId,
             $user['username'] ?? null, self::maxFirstName($user), $user['last_name'] ?? null,
-            text: $text, isStart: str_starts_with($text, '/start'), contactPhone: $phone);
+            text: $text, isStart: str_starts_with($text, '/start'), contactPhone: $phone, files: $files);
     }
 
     private static function maxFirstName(array $user): ?string

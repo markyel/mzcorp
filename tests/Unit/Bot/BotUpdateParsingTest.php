@@ -82,6 +82,40 @@ class BotUpdateParsingTest extends TestCase
         $this->assertSame('+7 900 123-45-67', $m->contactPhone);
     }
 
+    public function test_telegram_photo_with_caption_and_document(): void
+    {
+        $photo = BotUpdate::fromTelegram(['update_id' => 9, 'message' => [
+            'from' => ['id' => 77], 'chat' => ['id' => 77, 'type' => 'private'], 'media_group_id' => 'g1',
+            'caption' => 'шильдик лифта',
+            'photo' => [['file_id' => 'small', 'file_size' => 100], ['file_id' => 'big', 'file_size' => 90000]],
+        ]]);
+        $this->assertSame('шильдик лифта', $photo->text);
+        $this->assertSame('big', $photo->files[0]['ref']);
+        $this->assertSame('photo', $photo->files[0]['kind']);
+        $this->assertSame('g1', $photo->mediaGroupId);
+
+        $doc = BotUpdate::fromTelegram(['update_id' => 10, 'message' => [
+            'from' => ['id' => 77], 'chat' => ['id' => 77, 'type' => 'private'],
+            'document' => ['file_id' => 'd1', 'file_name' => 'список.xlsx', 'mime_type' => 'application/vnd.ms-excel', 'file_size' => 2048],
+        ]]);
+        $this->assertSame(['kind' => 'file', 'ref' => 'd1', 'name' => 'список.xlsx', 'mime' => 'application/vnd.ms-excel', 'size' => 2048], $doc->files[0]);
+    }
+
+    public function test_max_image_and_file_attachments(): void
+    {
+        $m = BotUpdate::fromMax(['update_type' => 'message_created', 'message' => [
+            'sender' => ['user_id' => 501],
+            'recipient' => ['chat_id' => 9001, 'chat_type' => 'dialog'],
+            'body' => ['mid' => 'm3', 'text' => 'вот деталь', 'attachments' => [
+                ['type' => 'image', 'payload' => ['url' => 'https://i.max/1.jpg']],
+                ['type' => 'file', 'filename' => 'spec.pdf', 'payload' => ['url' => 'https://f.max/2']],
+            ]],
+        ]]);
+        $this->assertSame('вот деталь', $m->text);
+        $this->assertSame(['photo', 'file'], array_column($m->files, 'kind'));
+        $this->assertSame('spec.pdf', $m->files[1]['name']);
+    }
+
     public function test_skus_accept_cyrillic_m_and_ignore_invoice_numbers(): void
     {
         $this->assertSame(['M12345', 'M0083'], BotPriceService::skusIn('нужны м12345 и M0083, счёт М3-10672'));

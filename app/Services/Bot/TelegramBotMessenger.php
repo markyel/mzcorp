@@ -58,6 +58,32 @@ class TelegramBotMessenger implements BotMessenger
         return (bool) ($r['ok'] ?? false);
     }
 
+    /** getFile → путь → скачивание. Bot API отдаёт файлы до 20 МБ. */
+    public function downloadFile(array $file): ?array
+    {
+        $info = $this->call('getFile', ['file_id' => $file['ref']]);
+        $path = (string) ($info['result']['file_path'] ?? '');
+        if ($path === '') {
+            return null;
+        }
+        try {
+            $r = $this->http()->timeout(60)->get('https://api.telegram.org/file/bot'.$this->token.'/'.$path);
+        } catch (\Throwable $e) {
+            Log::warning('TelegramBotMessenger: download failed', ['error' => MediaPublisherService::redactSecrets($e->getMessage())]);
+
+            return null;
+        }
+        if (! $r->successful() || $r->body() === '') {
+            return null;
+        }
+
+        return [
+            'bytes' => $r->body(),
+            'name' => (string) ($file['name'] ?: basename($path)),
+            'mime' => $file['mime'] ?: ($r->header('Content-Type') ?: null),
+        ];
+    }
+
     public function answerCallback(string $callbackId, ?string $notice = null): void
     {
         $this->call('answerCallbackQuery', array_filter(['callback_query_id' => $callbackId, 'text' => $notice]));

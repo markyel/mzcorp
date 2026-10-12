@@ -89,6 +89,28 @@ class MaxBotMessenger implements BotMessenger
         return false;
     }
 
+    /** У MAX во вложении прямая ссылка на файл. */
+    public function downloadFile(array $file): ?array
+    {
+        try {
+            $r = Http::timeout(60)
+                ->retry(3, 2000, fn ($e) => MediaPublisherService::isConnectFailure($e), throw: false)
+                ->withOptions(['verify' => MediaPublisherService::maxVerify()])
+                ->get($file['ref']);
+        } catch (\Throwable $e) {
+            Log::warning('MaxBotMessenger: download failed', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+        if (! $r->successful() || $r->body() === '') {
+            return null;
+        }
+        $mime = $file['mime'] ?: (explode(';', (string) $r->header('Content-Type'))[0] ?: null);
+        $name = (string) ($file['name'] ?: ($file['kind'] === 'photo' ? 'photo.jpg' : 'file'));
+
+        return ['bytes' => $r->body(), 'name' => $name, 'mime' => $mime];
+    }
+
     public function answerCallback(string $callbackId, ?string $notice = null): void
     {
         try {

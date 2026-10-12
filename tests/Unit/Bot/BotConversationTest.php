@@ -226,6 +226,42 @@ class BotConversationTest extends TestCase
         $this->assertStringNotContainsString('Напишите сообщение', $this->send(callback: 'reply:'.$foreign));
     }
 
+    public function test_photos_and_files_go_to_the_draft(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('local');
+        $chat = MessengerChat::create(['channel' => 'telegram', 'external_user_id' => '77', 'chat_id' => '77', 'email' => 'a@b.ru', 'email_verified_at' => now()]);
+
+        $send = function (array $files, string $caption = '', ?string $group = null) {
+            $this->messenger->sent = [];
+            app(BotConversationService::class)->handle(new BotUpdate(MessengerChannel::Telegram, (string) ++$this->updateNo, '77', '77',
+                text: $caption, files: $files, mediaGroupId: $group));
+
+            return implode("\n", array_column($this->messenger->sent, 'html'));
+        };
+
+        // Фото с подписью без «Новая заявка» — сразу черновик: подпись — строка, фото — файл.
+        $out = $send([['kind' => 'photo', 'ref' => 'p1', 'name' => null, 'mime' => 'image/jpeg', 'size' => 1000]], 'Нужен такой ролик, 2 шт', 'alb');
+        $this->assertStringContainsString('Файлов: 1', $out);
+        $this->assertStringContainsString('Нужен такой ролик', $out);
+        // Второе фото того же альбома — без отдельного ответа.
+        $this->assertSame('', $send([['kind' => 'photo', 'ref' => 'p2', 'name' => null, 'mime' => 'image/jpeg', 'size' => 1000]], '', 'alb'));
+        $out = $send([['kind' => 'file', 'ref' => 'x', 'name' => 'список.xlsx', 'mime' => 'application/vnd.ms-excel', 'size' => 2000]]);
+        $this->assertStringContainsString('Файлов: 3', $out);
+
+        $files = (array) $chat->fresh()->stateGet('draft_files');
+        $this->assertCount(3, $files);
+        \Illuminate\Support\Facades\Storage::disk('local')->assertExists($files[0]['path']);
+        $this->assertSame('awaiting', array_key_exists('awaiting', (array) $chat->fresh()->state) ? 'awaiting' : null);
+
+        // Слишком большой файл — не берём, объясняем.
+        $this->assertStringContainsString('больше 20 МБ', $send([['kind' => 'file', 'ref' => 'big', 'name' => 'видео.mp4', 'mime' => 'video/mp4', 'size' => 50 * 1024 * 1024]]));
+
+        // «Очистить» удаляет и файлы.
+        $this->send(callback: 'clear');
+        \Illuminate\Support\Facades\Storage::disk('local')->assertMissing($files[0]['path']);
+        $this->assertSame([], (array) $chat->fresh()->stateGet('draft_files', []));
+    }
+
     public function test_status_notification_texts(): void
     {
         $r = new Request();
@@ -279,6 +315,11 @@ class FakeBotMessenger implements BotMessenger
         $this->documents[] = ['chat' => $chatId, 'filename' => $filename, 'caption' => $captionHtml];
 
         return true;
+    }
+
+    public function downloadFile(array $file): ?array
+    {
+        return ['bytes' => 'BYTES-'.$file['ref'], 'name' => $file['name'] ?? 'photo.jpg', 'mime' => $file['mime'] ?? 'image/jpeg'];
     }
 
     public function answerCallback(string $callbackId, ?string $notice = null): void {}

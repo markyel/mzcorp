@@ -51,6 +51,7 @@ class BotConversationService
         private readonly OrganizationRegistryService $registry,
         private readonly OrganizationLinkGuard $linkGuard,
         private readonly BotThreadService $thread,
+        private readonly BotIntakeStore $store,
     ) {}
 
     public function handle(BotUpdate $u): void
@@ -146,6 +147,12 @@ class BotConversationService
 
                 return;
             }
+        }
+        // Фото и файлы — всегда в черновик заявки (подпись — её текст).
+        if ($u->files !== []) {
+            $this->onFiles($chat, $u);
+
+            return;
         }
         if ($u->contactPhone !== null && $awaiting === 'phone') {
             $this->savePhone($chat, $u->contactPhone);
@@ -545,12 +552,71 @@ class BotConversationService
     {
         $this->setAwaiting($chat, 'draft');
         $draft = (array) $chat->stateGet('draft', []);
-        $this->say($chat, ($draft === [] ? '' : $this->draftSummary($chat)."\n\n")
-            .'Пришлите позиции: артикулы M… с количеством («M12345 2») или описание детали и марку лифта. '
+        $this->say($chat, (! $this->hasDraft($chat) ? '' : $this->draftSummary($chat)."\n\n")
+            .'Опишите, что нужно, в свободной форме: список позиций, артикулы M… с количеством, марку лифта. '
+            .'Можно приложить фото (шильдик, деталь, список) и файлы — Excel, PDF, Word. '
             .'Можно несколькими сообщениями. Когда всё — нажмите «Отправить заявку».', $this->draftButtons($chat));
     }
 
-    private function appendToDraft(MessengerChat $chat, string $text): void
+    /** В черновике есть строки или файлы. */
+    private function hasDraft(MessengerChat $chat): bool
+    {
+        return (array) $chat->stateGet('draft', []) !== [] || (array) $chat->stateGet('draft_files', []) !== [];
+    }
+
+    /**
+     * Фото и файлы клиента — в черновик заявки (сохраняем сразу: ссылки
+     * мессенджеров временные). Подпись к ним — строки заявки. Альбом Telegram
+     * приходит несколькими событиями — отвечаем на первое, остальные молча.
+     */
+    private function onFiles(MessengerChat $chat, BotUpdate $u): void
+    {
+        if (! $chat->isVerified()) {
+            $this->say($chat, 'Фото и файлы можно прислать после подтверждения e-mail — пришлите их ещё раз после кода.');
+            $this->askEmail($chat);
+
+            return;
+        }
+
+        $files = (array) $chat->stateGet('draft_files', []);
+        $notes = [];
+        foreach ($u->files as $f) {
+            if (count($files) >= BotIntakeStore::MAX_FILES) {
+                $notes[] = 'В заявку помещается до '.BotIntakeStore::MAX_FILES.' файлов — остальные не добавлены.';
+                break;
+            }
+            if (($f['size'] ?? 0) > BotIntakeStore::MAX_FILE_BYTES) {
+                $notes[] = 'Файл «'.e((string) ($f['name'] ?? 'без имени')).'» больше 20 МБ — пришлите его на почту.';
+
+                continue;
+            }
+            $got = $this->messenger?->downloadFile($f);
+            if ($got === null || strlen($got['bytes']) > BotIntakeStore::MAX_FILE_BYTES) {
+                $notes[] = 'Не удалось получить файл «'.e((string) ($f['name'] ?? 'фото')).'» — попробуйте ещё раз.';
+
+                continue;
+            }
+            $files[] = $this->store->storeDraftFile($chat, $got['bytes'], $got['name'], $got['mime']);
+        }
+        $chat->stateSet('draft_files', $files);
+        $chat->save();
+
+        if (trim($u->text) !== '') {
+            $this->appendToDraft($chat, $u->text, silent: true);
+        }
+        $this->setAwaiting($chat, 'draft');
+
+        $sameAlbum = $u->mediaGroupId !== null && $chat->stateGet('last_media_group') === $u->mediaGroupId;
+        $chat->stateSet('last_media_group', $u->mediaGroupId);
+        $chat->save();
+        if ($sameAlbum && $notes === []) {
+            return;
+        }
+        $this->say($chat, implode("\n", $notes).($notes !== [] ? "\n\n" : '')
+            .$this->draftSummary($chat)."\n\nМожно добавить ещё текст, фото или файлы.", $this->draftButtons($chat));
+    }
+
+    private function appendToDraft(MessengerChat $chat, string $text, bool $silent = false): void
     {
         $draft = (array) $chat->stateGet('draft', []);
         foreach (preg_split('/\r?\n/', $text) ?: [] as $line) {
@@ -564,7 +630,9 @@ class BotConversationService
         }
         $chat->stateSet('draft', array_slice($draft, 0, self::DRAFT_MAX_LINES));
         $chat->save();
-        $this->say($chat, $this->draftSummary($chat), $this->draftButtons($chat));
+        if (! $silent) {
+            $this->say($chat, $this->draftSummary($chat), $this->draftButtons($chat));
+        }
     }
 
     private function addToDraft(MessengerChat $chat, string $sku): void
@@ -680,7 +748,8 @@ class BotConversationService
 
     private function clearDraft(MessengerChat $chat): void
     {
-        $chat->stateForget('draft');
+        $this->store->discard((array) $chat->stateGet('draft_files', []));
+        $chat->stateForget('draft', 'draft_files');
         $this->setAwaiting($chat, 'draft');
         $this->say($chat, 'Черновик очищен. Пришлите позиции заново.');
     }
@@ -688,7 +757,7 @@ class BotConversationService
     /** «Отправить заявку»: перед первой заявкой — анкета (всё можно пропустить). */
     private function send(MessengerChat $chat): void
     {
-        if ((array) $chat->stateGet('draft', []) === []) {
+        if (! $this->hasDraft($chat)) {
             $this->startDraft($chat);
 
             return;
@@ -708,13 +777,13 @@ class BotConversationService
     {
         $chat->stateForget('flow', 'awaiting');
         $chat->save();
-        if ((array) $chat->stateGet('draft', []) === []) {
+        if (! $this->hasDraft($chat)) {
             $this->menu($chat);
 
             return;
         }
         $request = $this->requests->submit($chat);
-        $chat->stateForget('draft');
+        $chat->stateForget('draft', 'draft_files', 'last_media_group');
         $chat->save();
         $this->say($chat, '✅ Заявка <b>'.e((string) $request->internal_code).'</b> принята. '
             .'Менеджер подготовит предложение и пришлёт его на '.e((string) $chat->email).'.', self::MENU);
@@ -723,7 +792,8 @@ class BotConversationService
     private function draftSummary(MessengerChat $chat): string
     {
         $draft = (array) $chat->stateGet('draft', []);
-        if ($draft === []) {
+        $files = (array) $chat->stateGet('draft_files', []);
+        if ($draft === [] && $files === []) {
             return 'Черновик заявки пуст.';
         }
         $lines = array_map(fn ($l, $i) => ($i + 1).'. '.e(($l['sku'] ?? null) !== null
@@ -731,12 +801,15 @@ class BotConversationService
             : mb_strimwidth((string) $l['text'], 0, 120, '…')), $draft, array_keys($draft));
 
         return "<b>Черновик заявки:</b>\n".implode("\n", array_slice($lines, 0, 30))
-            .(count($lines) > 30 ? "\n… и ещё ".(count($lines) - 30) : '');
+            .(count($lines) > 30 ? "\n… и ещё ".(count($lines) - 30) : '')
+            .($files !== [] ? ($lines !== [] ? "\n" : '').'📎 Файлов: '.count($files).' — '
+                .e(implode(', ', array_map(fn ($f) => mb_strimwidth((string) $f['name'], 0, 40, '…'), array_slice($files, 0, 5))))
+                .(count($files) > 5 ? ' …' : '') : '');
     }
 
     private function draftButtons(MessengerChat $chat): array
     {
-        return (array) $chat->stateGet('draft', []) === []
+        return ! $this->hasDraft($chat)
             ? [[['text' => 'Меню', 'data' => 'menu']]]
             : [[['text' => '✅ Отправить заявку', 'data' => 'send']], [['text' => '🗑 Очистить', 'data' => 'clear'], ['text' => 'Меню', 'data' => 'menu']]];
     }

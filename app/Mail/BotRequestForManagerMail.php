@@ -45,6 +45,13 @@ class BotRequestForManagerMail extends Mailable
                 .' — '.e(rtrim(rtrim(number_format((float) $i->parsed_qty, 2, ',', ' '), '0'), ',')).' '.e((string) ($i->parsed_unit ?: 'шт.'))
                 .($i->catalog_item_id ? ' <span style="color:#059669">· в каталоге</span>' : '').'</li>')
             ->implode('');
+        // Фото и файлы клиента — вложения «письма»-носителя (BotIntakeStore).
+        $files = $r->exists
+            ? \App\Models\EmailAttachment::query()
+                ->whereIn('email_message_id', \App\Models\EmailMessage::query()->where('related_request_id', $r->id)
+                    ->where('message_id', 'bot-'.$r->id.'@mzcorp.ru')->select('id'))
+                ->pluck('filename')->all()
+            : [];
         $row = fn (string $label, ?string $value) => $value !== null && trim($value) !== ''
             ? '<tr><td style="color:#6b7280;padding:2px 12px 2px 0">'.$label.'</td><td>'.e($value).'</td></tr>' : '';
         $button = 'display:inline-block;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:600;background:#D32027;color:#fff';
@@ -58,6 +65,8 @@ class BotRequestForManagerMail extends Mailable
             .$row('Организация', $r->organization?->name ?: $r->client_company)
             .'</table>'
             .($items !== '' ? '<p style="margin-top:14px"><b>Позиции</b></p><ul>'.$items.'</ul>' : '')
+            .($files !== [] ? '<p><b>Файлы клиента</b> ('.count($files).') — в заявке, вкладка «Файлы»: '
+                .e(implode(', ', array_slice($files, 0, 10))).(count($files) > 10 ? ' …' : '').'</p>' : '')
             .($text !== '' ? '<p><b>Что написал клиент</b></p><div style="white-space:pre-line;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:8px 10px">'.e($text).'</div>' : '')
             .'<p style="margin:18px 0"><a href="'.e($url).'" style="'.$button.'">Открыть заявку</a></p>'
             .'<p style="color:#6b7280;font-size:12px">Письма-источника у заявки нет. КП и счёт отправляйте клиенту письмом на '.e((string) $r->client_email)

@@ -4,7 +4,6 @@ namespace App\Services\Bot;
 
 use App\Enums\RequestActivityType;
 use App\Enums\RequestStatus;
-use App\Jobs\Kb\ResolveKbJob;
 use App\Mail\BotRequestReceivedMail;
 use App\Models\CatalogItem;
 use App\Models\MessengerChat;
@@ -40,6 +39,7 @@ class BotRequestService
         private readonly AssignmentService $assignment,
         private readonly RequestItemParsingService $parser,
         private readonly SystemNotificationMailer $mailer,
+        private readonly BotIntakeStore $store,
     ) {}
 
     /**
@@ -95,20 +95,21 @@ class BotRequestService
             return $req;
         });
 
-        $this->createItems($request, $draft, $subject, $chat);
+        // Позиции по M-артикулам из каталога — сразу; остальное разберёт
+        // finalize() в очереди: распознавание фото и файлов идёт минуту, а
+        // клиент должен получить номер заявки сразу.
+        [$linked, $unlinkedText] = $this->createLinkedItems($request, $draft);
 
-        // Как после разбора письма: распределить, записать начальный переход.
-        $manager = $this->assignment->autoAssign($request->fresh());
-        if ($manager !== null) {
-            try {
-                app(RequestStateService::class)->recordSystemInitial($request->fresh(), $manager, 'Авто-распределение заявки из '.$channel.'.');
-            } catch (\Throwable $e) {
-                Log::warning('BotRequestService: system_initial not recorded', ['request_id' => $request->id, 'error' => $e->getMessage()]);
-            }
+        // Фото и файлы клиента — вложения «письма»-носителя (BotIntakeStore):
+        // так они видны во вкладках «Переписка» и «Файлы» и в экспорте.
+        /** @var list<array{path: string, name: string, mime: ?string, size: int}> $files */
+        $files = array_values((array) $chat->stateGet('draft_files', []));
+        if ($files !== [] || trim($unlinkedText) !== '') {
+            $this->store->carrier($request, $chat, $originalText, $files);
         }
-        if ($request->items()->exists()) {
-            ResolveKbJob::dispatch($request->id);
-        }
+        $meta = (array) $request->parsing_meta;
+        $meta['bot'] = array_merge((array) ($meta['bot'] ?? []), ['linked' => $linked, 'unlinked_text' => $unlinkedText, 'files' => count($files)]);
+        $request->forceFill(['parsing_meta' => $meta])->save();
 
         MessengerMessage::create([
             'messenger_chat_id' => $chat->id,
@@ -116,71 +117,142 @@ class BotRequestService
             'direction' => 'in',
             'kind' => 'request',
             'text' => $originalText,
+            'meta' => $files !== [] ? ['files' => array_column($files, 'name')] : null,
         ]);
         $chat->increment('requests_count');
 
-        try {
-            $this->mailer->sendMailable((string) $chat->email, new BotRequestReceivedMail($request->fresh(['items']), $channel), BotEmailVerifier::FROM_NAME);
-        } catch (\Throwable $e) {
-            Log::warning('BotRequestService: receipt email failed', ['request_id' => $request->id, 'error' => $e->getMessage()]);
-        }
+        \App\Jobs\Bot\FinalizeBotRequestJob::dispatch($request->id);
 
         Log::info('BotRequestService: request created', [
             'request_id' => $request->id,
             'internal_code' => $request->internal_code,
             'chat_id' => $chat->id,
             'channel' => $chat->channel->value,
-            'manager_id' => $manager?->id,
+            'files' => count($files),
         ]);
 
         return $request->fresh();
     }
 
-    /** @param  list<array{sku: ?string, qty: float, text: string}>  $draft */
-    private function createItems(Request $request, array $draft, string $subject, MessengerChat $chat): void
+    /**
+     * В очереди после submit(): разобрать текст, фото и файлы в позиции,
+     * распределить заявку (как после разбора письма) и отправить клиенту
+     * письмо «заявка принята». Сопоставление позиций с каталогом не
+     * запускаем (решение заказчика 12.10.2026): задача бота — список позиций
+     * и файлы, подбор — менеджер.
+     */
+    public function finalize(Request $request): void
+    {
+        $bot = (array) (($request->parsing_meta ?? [])['bot'] ?? []);
+        $channel = \App\Enums\MessengerChannel::tryFrom((string) $request->source)?->label() ?? 'бота';
+        $carrier = \App\Models\EmailMessage::query()->with('attachments')
+            ->where('related_request_id', $request->id)
+            ->where('message_id', 'bot-'.$request->id.'@mzcorp.ru')
+            ->first();
+
+        if ($carrier !== null && ! $request->items()->where('data_source', 'bot')->whereNull('catalog_item_id')->exists()) {
+            $this->parseRest($request, $carrier, (array) ($bot['linked'] ?? []), (string) ($bot['unlinked_text'] ?? ''));
+        }
+
+        $request->refresh();
+        $manager = $request->assigned_user_id ? $request->assignedUser : $this->assignment->autoAssign($request);
+        if ($manager !== null && $request->assigned_user_id === null) {
+            try {
+                app(RequestStateService::class)->recordSystemInitial($request->fresh(), $manager, 'Авто-распределение заявки из '.$channel.'.');
+            } catch (\Throwable $e) {
+                Log::warning('BotRequestService: system_initial not recorded', ['request_id' => $request->id, 'error' => $e->getMessage()]);
+            }
+        }
+
+        $chat = $request->messengerChat;
+        if ($chat !== null && empty($bot['receipt_sent'])) {
+            try {
+                $this->mailer->sendMailable((string) $chat->email, new BotRequestReceivedMail($request->fresh(['items']), $channel), BotEmailVerifier::FROM_NAME);
+                $meta = (array) $request->fresh()->parsing_meta;
+                $meta['bot']['receipt_sent'] = true;
+                $request->forceFill(['parsing_meta' => $meta])->save();
+            } catch (\Throwable $e) {
+                Log::warning('BotRequestService: receipt email failed', ['request_id' => $request->id, 'error' => $e->getMessage()]);
+            }
+        }
+
+        Log::info('BotRequestService: request finalized', [
+            'request_id' => $request->id,
+            'items' => $request->items()->count(),
+            'manager_id' => $manager?->id,
+        ]);
+    }
+
+    /**
+     * Позиции заявки. Строка с M-артикулом из каталога — позиция с этой
+     * позицией каталога (это не подбор, клиент назвал её сам). Всё остальное —
+     * текст, фото, Excel/PDF/Word — разбирает тот же разборщик, что и письма
+     * (parseItemsFromInboundMessage по «письму»-носителю); с каталогом не
+     * сопоставляем.
+     *
+     * @param  list<array{sku: ?string, qty: float, text: string}>  $draft
+     * @return array{0: list<string>, 1: string} артикулы созданных позиций и текст, который ещё разбирать
+     */
+    private function createLinkedItems(Request $request, array $draft): array
     {
         $position = 0;
-        $free = [];
         $catalog = CatalogItem::query()
             ->whereIn('sku', array_values(array_filter(array_column($draft, 'sku'))))
             ->where('is_active', true)
             ->get()->keyBy('sku');
 
+        $linked = [];
         foreach ($draft as $line) {
-            if ($line['sku'] === null) {
-                $free[] = $line['text'];
-
+            $item = $line['sku'] !== null ? ($catalog[$line['sku']] ?? null) : null;
+            if ($item === null) {
                 continue;
             }
-            $item = $catalog[$line['sku']] ?? null;
+            $linked[] = mb_strtoupper($line['sku']);
             RequestItem::create([
                 'request_id' => $request->id,
                 'position' => ++$position,
-                'parsed_name' => $item?->name ?: $line['sku'],
+                'parsed_name' => $item->name ?: $line['sku'],
                 'parsed_article' => $line['sku'],
                 'parsed_qty' => $line['qty'],
                 'parsed_unit' => 'шт.',
-                'catalog_item_id' => $item?->id,
+                'catalog_item_id' => $item->id,
                 'data_source' => 'bot',
                 'status' => 'parsed',
                 'is_active' => true,
             ]);
         }
 
-        if ($free === []) {
+        // Свободный текст и артикулы не из каталога — разберёт parseRest().
+        $unlinkedText = collect($draft)->filter(fn ($l) => $l['sku'] === null || ! isset($catalog[$l['sku']]))->pluck('text')->implode("\n");
+
+        return [$linked, $unlinkedText];
+    }
+
+    /** @param  list<string>  $linked */
+    private function parseRest(Request $request, \App\Models\EmailMessage $carrier, array $linked, string $unlinkedText): void
+    {
+        if (trim($unlinkedText) === '' && $carrier->attachments->isEmpty()) {
             return;
         }
-        $text = implode("\n", $free);
+        $position = (int) $request->items()->max('position');
         $parsed = [];
         try {
-            $parsed = $this->parser->parseItemsWithGPT($text, $subject, (string) $chat->email, $chat->contact_name);
+            $parsed = $this->parser->parseItemsFromInboundMessage($carrier);
         } catch (\Throwable $e) {
-            Log::warning('BotRequestService: free text not parsed', ['request_id' => $request->id, 'error' => $e->getMessage()]);
+            Log::warning('BotRequestService: items not parsed', ['request_id' => $request->id, 'error' => $e->getMessage()]);
         }
-        // Разборщик ничего не нашёл — позиция с исходным текстом, чтобы
-        // менеджер видел, о чём просят, а заявка не осталась без позиций.
+        // Носитель содержит и строки с артикулами — их позиции уже созданы.
+        $parsed = array_values(array_filter($parsed, function ($p) use ($linked) {
+            $sku = BotPriceService::skusIn((string) ($p['article'] ?? ''))[0] ?? null;
+
+            return $sku === null || ! in_array(mb_strtoupper($sku), $linked, true);
+        }));
+        // Разборщик ничего не нашёл — позиция-указатель, чтобы менеджер видел,
+        // о чём просят, а заявка не осталась без позиций.
         if ($parsed === []) {
-            $parsed = [['name' => mb_substr($text, 0, 500), 'qty' => 1]];
+            $parsed = [['name' => trim($unlinkedText) !== ''
+                ? mb_substr(trim($unlinkedText), 0, 500)
+                : 'Позиции — во вложениях заявки ('.$carrier->attachments->count().' файл.)', 'qty' => 1]];
         }
         foreach ($parsed as $p) {
             RequestItem::create([
@@ -196,6 +268,8 @@ class BotRequestService
                 'category' => $p['category'] ?? null,
                 'supplier_note' => $p['note'] ?? null,
                 'data_source' => 'bot',
+                'image_attachment_id' => $p['email_attachment_id'] ?? null,
+                'source_email_message_id' => $carrier->id,
                 'status' => 'parsed',
                 'is_active' => true,
             ]);

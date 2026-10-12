@@ -16,6 +16,14 @@ interface BotMessenger
     /** Файл (КП, счёт) с подписью. */
     public function sendDocument(string $chatId, string $bytes, string $filename, ?string $captionHtml = null): bool;
 
+    /**
+     * Скачать фото/файл клиента (см. BotUpdate::$files).
+     *
+     * @param  array{kind: string, ref: string, name: ?string, mime: ?string, size: ?int}  $file
+     * @return array{bytes: string, name: string, mime: ?string}|null
+     */
+    public function downloadFile(array $file): ?array;
+
     public function answerCallback(string $callbackId, ?string $notice = null): void;
 
     /** @return array{ok: bool, username: ?string, message: string} */
