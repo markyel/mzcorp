@@ -4,6 +4,7 @@ namespace App\Services\Marketing;
 
 use App\Models\MediaPublication;
 use App\Models\MediaTopic;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -45,7 +46,7 @@ class MediaDataService
         return match ($source) {
             'catalog_new' => 'Берём позиции, появившиеся в каталоге за окно темы.',
             'catalog_price' => 'Берём позиции, у которых цена за окно темы снизилась.',
-            'stock_arrivals' => 'Журнала поступлений в системе нет: пока показываем позиции, вставшие в наличие вместе с последним импортом.',
+            'stock_arrivals' => 'Поступление — позиция, которая с прошлого выпуска появилась в наличии (остаток был нулевым). Нет таких — нет и поста.',
             'request_tips' => 'Серия: каждый выпуск — как оформить заявку на один тип детали из базы знаний опознания '
                 .'(кнопка, отводка, ролик…), о котором ещё не рассказывали. Советы — из того, по чему мы эту деталь '
                 .'опознаём, и из вопросов, которые менеджеры задавали клиентам.',
@@ -81,9 +82,9 @@ class MediaDataService
         $days = max(1, (int) ($topic->cadence_days ?: self::DEFAULT_WINDOW_DAYS));
 
         return match ($topic->source) {
-            'catalog_new' => ['key' => null, 'facts' => $this->newItems($days)],
-            'catalog_price' => ['key' => null, 'facts' => $this->priceDrops($days)],
-            'stock_arrivals' => ['key' => null, 'facts' => $this->arrivals($days)],
+            'catalog_new' => ['key' => null, 'facts' => $this->newItems($this->since($topic, $days))],
+            'catalog_price' => ['key' => null, 'facts' => $this->priceDrops($this->since($topic, $days))],
+            'stock_arrivals' => ['key' => null, 'facts' => $this->arrivals($this->since($topic, $days))],
             'request_tips' => $this->tipsForNextCategory($topic),
             'industry_digest' => $this->newsDigest($days),
             default => ['key' => null, 'facts' => ''],
@@ -197,58 +198,25 @@ class MediaDataService
             return $this->categoryPhoto($subjectKey);
         }
 
+        // Без артикулов в тексте фото не подбираем вовсе: выборка «по окну»
+        // не знает, о каких позициях пост, и тянула чужие.
         $skus = $body !== null && preg_match_all('/\bM\d{4,6}\b/u', $body, $m) ? array_values(array_unique($m[0])) : [];
-        if ($skus !== [] && in_array($topic->source, ['catalog_new', 'catalog_price', 'stock_arrivals'], true)) {
-            $photos = DB::table('catalog_items')
-                ->whereIn('sku', $skus)
-                ->whereNotNull('photo_url')
-                ->where('photo_url', '!=', '')
-                ->orderByDesc('is_active')
-                ->get(['sku', 'photo_url'])
-                ->unique('sku')
-                ->pluck('photo_url', 'sku');
-
-            return collect($skus)
-                ->map(fn ($sku) => $photos[$sku] ?? null)
-                ->filter()
-                ->unique()
-                ->take(self::MAX_PHOTOS)
-                ->values()
-                ->all();
-        }
-
-        $days = max(1, (int) ($topic->cadence_days ?: self::DEFAULT_WINDOW_DAYS));
-
-        $rows = match ($topic->source) {
-            'catalog_new' => DB::table('catalog_items')
-                ->where('is_active', true)
-                ->where('created_at', '>=', now()->subDays($days))
-                ->orderByDesc('created_at'),
-            'catalog_price' => DB::table('catalog_items as ci')
-                ->join('catalog_price_changes as pc', 'pc.catalog_item_id', '=', 'ci.id')
-                ->where('pc.created_at', '>=', now()->subDays($days))
-                ->whereColumn('pc.new_price', '<', 'pc.old_price')
-                ->where('ci.is_active', true)
-                ->orderByRaw('(pc.old_price - pc.new_price) / NULLIF(pc.old_price, 0) DESC')
-                ->select('ci.photo_url'),
-            'stock_arrivals' => DB::table('catalog_items')
-                ->where('is_active', true)
-                ->where('stock_available', '>', 0)
-                ->where('last_imported_at', '>=', now()->subDays($days))
-                ->where('created_at', '<', now()->subDays($days))
-                ->orderByDesc('stock_available'),
-            default => null,
-        };
-
-        if ($rows === null) {
+        if ($skus === [] || ! in_array($topic->source, ['catalog_new', 'catalog_price', 'stock_arrivals'], true)) {
             return [];
         }
 
-        return $rows
+        $photos = DB::table('catalog_items')
+            ->whereIn('sku', $skus)
             ->whereNotNull('photo_url')
             ->where('photo_url', '!=', '')
-            ->limit(self::MAX_ITEMS)
-            ->pluck('photo_url')
+            ->orderByDesc('is_active')
+            ->get(['sku', 'photo_url'])
+            ->unique('sku')
+            ->pluck('photo_url', 'sku');
+
+        return collect($skus)
+            ->map(fn ($sku) => $photos[$sku] ?? null)
+            ->filter()
             ->unique()
             ->take(self::MAX_PHOTOS)
             ->values()
@@ -328,12 +296,30 @@ class MediaDataService
         return rtrim($space !== false && $space > $limit / 2 ? mb_substr($cut, 0, $space) : $cut, ' ,;(').'…';
     }
 
-    /** Новые позиции каталога за окно. Цены не даём: их место — в карточке товара. */
-    private function newItems(int $days): string
+    /**
+     * Начало периода выпуска: прошлый выпуск темы, но не раньше окна темы.
+     *
+     * Окно «последние N дней от сегодня» пересекалось с прошлым выпуском,
+     * когда тот выходил с опозданием, — позиция попадала в два поста подряд.
+     * Граница — момент, когда писался прошлый вышедший материал: его факты
+     * собраны тогда, всё, что появилось позже, — уже новое.
+     */
+    public function since(MediaTopic $topic, int $days): Carbon
+    {
+        $floor = now()->subDays($days);
+        $last = $topic->id
+            ? MediaPublication::query()->where('media_topic_id', $topic->id)->where('status', 'published')->max('created_at')
+            : null;
+
+        return $last !== null && Carbon::parse($last)->gt($floor) ? Carbon::parse($last) : $floor;
+    }
+
+    /** Новые позиции каталога за период. Цены не даём: их место — в карточке товара. */
+    private function newItems(Carbon $since): string
     {
         $rows = DB::table('catalog_items')
             ->where('is_active', true)
-            ->where('created_at', '>=', now()->subDays($days))
+            ->where('created_at', '>=', $since)
             ->orderByDesc('created_at')
             ->limit(self::MAX_ITEMS)
             ->get(['sku', 'name', 'brand', 'part_type', 'stock_available']);
@@ -342,7 +328,7 @@ class MediaDataService
             return '';
         }
 
-        $lines = ['Новых позиций в каталоге за '.$days.' дн.: '.$rows->count().'.'];
+        $lines = ['Новых позиций в каталоге с '.$since->format('d.m').': '.$rows->count().'.'];
         foreach ($rows as $r) {
             $lines[] = '— '.$this->short($r->name)
                 .($r->brand ? ' · '.$r->brand : '')
@@ -353,25 +339,38 @@ class MediaDataService
         return implode("\n", $lines);
     }
 
-    /** Позиции, у которых цена снизилась. Показываем обе цены — в этом суть темы. */
-    private function priceDrops(int $days): string
+    /**
+     * Позиции, у которых цена снизилась за период. Показываем обе цены — в этом
+     * суть темы.
+     *
+     * Считаем по позиции, а не по строкам журнала: цена на начало периода
+     * (старая цена первого изменения в нём) против текущей. Строками журнала
+     * позиция с двумя снижениями за неделю шла в факты дважды, а снижение,
+     * которое следующий импорт отменил, всё равно попадало в пост (за 60 дн.
+     * до 12.10.2026 — 55 случаев двух снижений за неделю, 27 откатов цены).
+     */
+    private function priceDrops(Carbon $since): string
     {
-        $rows = DB::table('catalog_price_changes as pc')
-            ->join('catalog_items as ci', 'ci.id', '=', 'pc.catalog_item_id')
-            ->where('pc.created_at', '>=', now()->subDays($days))
-            ->whereNotNull('pc.old_price')
-            ->whereNotNull('pc.new_price')
-            ->whereColumn('pc.new_price', '<', 'pc.old_price')
+        $first = DB::table('catalog_price_changes')
+            ->where('created_at', '>=', $since)
+            ->whereNotNull('old_price')
+            ->selectRaw('catalog_item_id, old_price, row_number() over (partition by catalog_item_id order by created_at, id) as rn');
+
+        $rows = DB::query()->fromSub($first, 'f')
+            ->join('catalog_items as ci', 'ci.id', '=', 'f.catalog_item_id')
+            ->where('f.rn', 1)
             ->where('ci.is_active', true)
-            ->orderByRaw('(pc.old_price - pc.new_price) / NULLIF(pc.old_price, 0) DESC')
+            ->whereNotNull('ci.price')
+            ->whereColumn('ci.price', '<', 'f.old_price')
+            ->orderByRaw('(f.old_price - ci.price) / NULLIF(f.old_price, 0) DESC')
             ->limit(self::MAX_ITEMS)
-            ->get(['ci.name', 'ci.brand', 'pc.sku', 'pc.old_price', 'pc.new_price', 'ci.stock_available']);
+            ->get(['ci.name', 'ci.brand', 'ci.sku', 'f.old_price', 'ci.price as new_price', 'ci.stock_available']);
 
         if ($rows->isEmpty()) {
             return '';
         }
 
-        $lines = ['Позиций со снизившейся ценой за '.$days.' дн.: '.$rows->count().'.'];
+        $lines = ['Позиций со снизившейся ценой с '.$since->format('d.m').': '.$rows->count().'.'];
         foreach ($rows as $r) {
             $pct = (float) $r->old_price > 0
                 ? round(((float) $r->old_price - (float) $r->new_price) * 100 / (float) $r->old_price)
@@ -389,16 +388,23 @@ class MediaDataService
     }
 
     /**
-     * Поступления. Журнала остатков нет, поэтому берём то, что можно утверждать
-     * честно: позиции с ненулевым остатком, тронутые последним импортом.
+     * Поступления: позиции, которые за период появились в наличии (остаток был
+     * нулевым и стал больше нуля — метка in_stock_since ставится импортом).
+     * Новые позиции сюда не берём — это тема «Новинки».
+     *
+     * Раньше брали «в наличии и тронуты последним импортом»: импорт трогает
+     * всё, и каждую неделю выходили одни и те же позиции с самым большим
+     * остатком (M25447, M11299, M17415… 24.09, 30.09 и 07.10). Нет настоящих
+     * поступлений — нет и поста.
      */
-    private function arrivals(int $days): string
+    private function arrivals(Carbon $since): string
     {
         $rows = DB::table('catalog_items')
             ->where('is_active', true)
             ->where('stock_available', '>', 0)
-            ->where('last_imported_at', '>=', now()->subDays($days))
-            ->where('created_at', '<', now()->subDays($days))
+            ->where('in_stock_since', '>=', $since)
+            ->where('created_at', '<', $since)
+            ->orderByDesc('in_stock_since')
             ->orderByDesc('stock_available')
             ->limit(self::MAX_ITEMS)
             ->get(['sku', 'name', 'brand', 'stock_available']);
@@ -407,7 +413,7 @@ class MediaDataService
             return '';
         }
 
-        $lines = ['Позиции в наличии по последнему обновлению склада:'];
+        $lines = ['Поступили на склад с '.$since->format('d.m').':'];
         foreach ($rows as $r) {
             $lines[] = '— '.$this->short($r->name)
                 .($r->brand ? ' · '.$r->brand : '')

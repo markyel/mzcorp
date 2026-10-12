@@ -90,6 +90,8 @@ class WeeklyRoundupService
             ->where('pc.created_at', '>=', $from)
             ->whereNotNull('pc.old_price')->whereNotNull('pc.new_price')
             ->whereColumn('pc.new_price', '<', 'pc.old_price')
+            // Снижение, которое следующий импорт отменил, новостью не считаем.
+            ->whereColumn('ci.price', '<', 'pc.old_price')
             ->whereRaw('(pc.old_price - pc.new_price) >= ?', [self::MIN_DROP_RUB])
             ->whereRaw('(pc.old_price - pc.new_price) * 100 >= pc.old_price * ?', [self::MIN_DROP_PCT])
             ->whereRaw('(pc.old_price - pc.new_price) * 100 <= pc.old_price * ?', [self::MAX_DROP_PCT])

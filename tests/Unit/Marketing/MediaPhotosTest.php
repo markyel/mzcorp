@@ -55,10 +55,10 @@ class MediaPhotosTest extends TestCase
         $this->assertSame(['https://img/plata', 'https://img/btn-2', 'https://img/igbt'], $photos);
     }
 
-    public function test_text_without_skus_keeps_the_old_selection(): void
+    public function test_text_without_skus_gets_no_guessed_photos(): void
     {
         $photos = app(MediaDataService::class)->photosFor($this->topic('catalog_new'), null, 'Обзор без артикулов');
 
-        $this->assertContains('https://img/btn-3', $photos);
+        $this->assertSame([], $photos);
     }
 }
