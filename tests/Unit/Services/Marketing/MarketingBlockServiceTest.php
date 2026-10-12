@@ -76,6 +76,27 @@ class MarketingBlockServiceTest extends TestCase
         $this->assertStringContainsString('Подробнее &rarr;', $r['html']);
     }
 
+    public function test_extra_links_render_in_one_row_after_the_main_one(): void
+    {
+        $r = $this->service->render([
+            'title' => 'Заявки в мессенджерах', 'text' => 'X',
+            'url' => 'https://t.me/myziporderbot', 'link_text' => 'Написать в Telegram',
+            'links' => [
+                ['url' => 'https://max.ru/bot', 'text' => 'Написать в <MAX>'],
+                ['url' => '  ', 'text' => 'пустая — пропускаем'],
+            ],
+        ]);
+
+        $tg = strpos($r['html'], 'Написать в Telegram &rarr;');
+        $max = strpos($r['html'], 'Написать в &lt;MAX&gt; &rarr;');
+        $this->assertNotFalse($tg);
+        $this->assertNotFalse($max);
+        $this->assertLessThan($max, $tg);
+        $this->assertStringContainsString('href="https://max.ru/bot"', $r['html']);
+        $this->assertStringNotContainsString('пустая', $r['html']);
+        $this->assertStringEndsWith("Написать в Telegram: https://t.me/myziporderbot\nНаписать в <MAX>: https://max.ru/bot", $r['plain']);
+    }
+
     public function test_render_without_image_has_no_img(): void
     {
         $r = $this->service->render(['title' => 'T', 'text' => 'X', 'url' => 'https://myzip.ru']);

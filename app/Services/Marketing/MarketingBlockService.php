@@ -196,9 +196,10 @@ class MarketingBlockService
      *
      * Существующий query сохраняем (ссылки блоков — поисковые URL каталога со
      * своими параметрами), уже проставленные вручную utm не переписываем,
-     * не-http ссылки не трогаем.
+     * не-http ссылки не трогаем. Дополнительные ссылки блока помечаются
+     * номером (block-7-2, block-7-3), основная — как раньше (block-7).
      */
-    public static function withUtm(string $url, ?int $blockId = null): string
+    public static function withUtm(string $url, ?int $blockId = null, int $linkNo = 1): string
     {
         $url = trim($url);
         if ($url === '' || preg_match('~^https?://~i', $url) !== 1) {
@@ -220,7 +221,7 @@ class MarketingBlockService
             'utm_campaign' => self::UTM_CAMPAIGN,
         ];
         if ($blockId !== null && ! isset($params['utm_content'])) {
-            $params['utm_content'] = 'block-'.$blockId;
+            $params['utm_content'] = 'block-'.$blockId.($linkNo > 1 ? '-'.$linkNo : '');
         }
 
         return $base.'?'.http_build_query($params).$hash;
@@ -238,6 +239,10 @@ class MarketingBlockService
             // идут через render() напрямую и статистику не пачкают.
             'url' => self::withUtm((string) $block->url, $block->id),
             'link_text' => $block->linkText(),
+            'links' => array_map(fn (array $l, int $i) => [
+                'url' => self::withUtm($l['url'], $block->id, $i + 2),
+                'text' => $l['text'],
+            ], $block->extraLinks(), array_keys($block->extraLinks())),
             'image_url' => $block->imageUrl(),
             'image_path' => $block->imageLocalPath(),
         ]);
@@ -246,10 +251,12 @@ class MarketingBlockService
     /**
      * Email-safe разметка: table-layout + inline-CSS, без внешних стилей.
      * Плашка на всю ширину письма; картинка слева (120px), справа заголовок / текст /
-     * ссылка-призыв (link_text, по умолчанию «Подробнее») со стрелкой.
+     * ссылка-призыв (link_text, по умолчанию «Подробнее») со стрелкой и в той же
+     * строке дополнительные ссылки (links: [{url, text}]). Заголовок и картинка
+     * ведут на основную ссылку.
      * В реальном письме OutgoingMailMimeBuilder заменит image_url на cid:.
      *
-     * @param  array{title?: mixed, text?: mixed, url?: mixed, link_text?: mixed, image_url?: mixed, image_path?: mixed}  $d
+     * @param  array{title?: mixed, text?: mixed, url?: mixed, link_text?: mixed, links?: mixed, image_url?: mixed, image_path?: mixed}  $d
      * @return array{html: string, plain: string, image_url: ?string, image_path: ?string}
      */
     public function render(array $d): array
@@ -279,8 +286,15 @@ class MarketingBlockService
         $titleHtml = $url !== ''
             ? '<a href="'.$e($url).'" style="color:#0f1419;text-decoration:none">'.$e($title).'</a>'
             : $e($title);
-        $more = $url !== ''
-            ? '<div style="margin-top:6px"><a href="'.$e($url).'" style="color:'.$e($brand).';text-decoration:none;font-weight:600">'.$e($linkText).' &rarr;</a></div>'
+        $ctas = MarketingBlock::normalizeLinks(is_array($d['links'] ?? null) ? $d['links'] : []);
+        if ($url !== '') {
+            array_unshift($ctas, ['url' => $url, 'text' => $linkText]);
+        }
+        $more = $ctas !== []
+            ? '<div style="margin-top:6px">'.implode('<span style="color:#cbd5e1">&nbsp;&nbsp;&middot;&nbsp;&nbsp;</span>', array_map(
+                fn (array $l) => '<a href="'.$e($l['url']).'" style="color:'.$e($brand).';text-decoration:none;font-weight:600;white-space:nowrap">'.$e($l['text']).' &rarr;</a>',
+                $ctas,
+            )).'</div>'
             : '';
 
         $html = '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
@@ -293,7 +307,11 @@ class MarketingBlockService
             .$more
             .'</td></tr></table>';
 
-        $plainLines = array_filter([$title, $text, $url], fn ($s) => $s !== '');
+        // Одна ссылка — как раньше голым адресом; несколько — с подписями.
+        $linkLines = count($ctas) > 1
+            ? array_map(fn (array $l) => $l['text'].': '.$l['url'], $ctas)
+            : [$url];
+        $plainLines = array_filter([$title, $text, ...$linkLines], fn ($s) => $s !== '');
         $plain = "\n\n".implode("\n", $plainLines);
 
         return ['html' => $html, 'plain' => $plain, 'image_url' => $imageUrl, 'image_path' => $imagePath];

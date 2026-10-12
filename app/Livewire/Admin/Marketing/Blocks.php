@@ -41,6 +41,9 @@ class Blocks extends Component
     /** Текст ссылки-призыва; пусто — «Подробнее». */
     public string $linkText = '';
 
+    /** Дополнительные ссылки рядом с основной: [{url, text}]. */
+    public array $extraLinks = [];
+
     public bool $isActive = true;
 
     /** Новая картинка (TemporaryUploadedFile) — при создании обязательна. */
@@ -94,8 +97,23 @@ class Blocks extends Component
             'text' => $this->text,
             'url' => $this->url,
             'link_text' => $this->linkText,
+            'links' => $this->extraLinks,
             'image_url' => $this->currentImageUrl(),
         ], $author);
+    }
+
+    public function addLink(): void
+    {
+        if (count($this->extraLinks) < MarketingBlock::EXTRA_LINKS_MAX) {
+            $this->extraLinks[] = ['url' => '', 'text' => ''];
+        }
+    }
+
+    public function removeLink(int $i): void
+    {
+        unset($this->extraLinks[$i]);
+        $this->extraLinks = array_values($this->extraLinks);
+        $this->resetValidation();
     }
 
     public function startCreate(): void
@@ -116,6 +134,7 @@ class Blocks extends Component
         $this->text = $block->text;
         $this->url = $block->url;
         $this->linkText = (string) ($block->link_text ?? '');
+        $this->extraLinks = $block->extraLinks();
         $this->isActive = $block->is_active;
         $this->showForm = true;
     }
@@ -141,6 +160,7 @@ class Blocks extends Component
             'text' => trim($this->text),
             'url' => trim($this->url),
             'link_text' => trim($this->linkText) !== '' ? trim($this->linkText) : null,
+            'extra_links' => MarketingBlock::normalizeLinks($this->extraLinks) ?: null,
             'is_active' => $this->isActive,
         ];
         if ($isNew) {
@@ -234,6 +254,7 @@ class Blocks extends Component
             'text' => trim($this->text),
             'url' => trim($this->url),
             'link_text' => trim($this->linkText),
+            'links' => MarketingBlock::normalizeLinks($this->extraLinks),
             'image_url' => $this->currentImageUrl(),
             'image_path' => $this->currentImagePath(),
         ];
@@ -278,6 +299,9 @@ class Blocks extends Component
             'text' => 'required|string|max:300',
             'url' => 'required|url|max:500',
             'linkText' => 'nullable|string|max:'.MarketingBlock::LINK_TEXT_MAX,
+            'extraLinks' => 'array|max:'.MarketingBlock::EXTRA_LINKS_MAX,
+            'extraLinks.*.url' => 'required|url|max:500',
+            'extraLinks.*.text' => 'required|string|max:'.MarketingBlock::LINK_TEXT_MAX,
             'isActive' => 'boolean',
             'image' => ($requireImage ? 'required' : 'nullable')
                 .'|image|mimes:png,jpg,jpeg|max:512|dimensions:max_width=1600,max_height=1600',
@@ -311,7 +335,7 @@ class Blocks extends Component
 
     private function resetForm(): void
     {
-        $this->reset(['editId', 'title', 'text', 'url', 'linkText', 'image']);
+        $this->reset(['editId', 'title', 'text', 'url', 'linkText', 'extraLinks', 'image']);
         $this->isActive = true;
         $this->resetValidation();
         unset($this->editing);

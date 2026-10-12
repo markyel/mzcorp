@@ -62,6 +62,32 @@
 
                     <div>
                         <label class="block text-xs text-gray-600 mb-1">
+                            Ещё ссылки <span class="text-gray-400">(до {{ \App\Models\MarketingBlock::EXTRA_LINKS_MAX }}; встанут в строку рядом с основной, заголовок и картинка ведут на основную)</span>
+                        </label>
+                        @foreach ($extraLinks as $i => $link)
+                            <div class="flex gap-2 mb-2" wire:key="extra-link-{{ $i }}">
+                                <div class="w-2/5">
+                                    <input type="text" wire:model.live.debounce.400ms="extraLinks.{{ $i }}.text" maxlength="{{ \App\Models\MarketingBlock::LINK_TEXT_MAX }}"
+                                           placeholder="Текст ссылки"
+                                           class="w-full text-sm rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600">
+                                    @error('extraLinks.'.$i.'.text') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                                </div>
+                                <div class="flex-1">
+                                    <input type="text" wire:model.live.debounce.400ms="extraLinks.{{ $i }}.url" placeholder="https://…"
+                                           class="w-full text-sm rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600 font-mono">
+                                    @error('extraLinks.'.$i.'.url') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                                </div>
+                                <button type="button" wire:click="removeLink({{ $i }})" title="Убрать ссылку"
+                                        class="self-start px-2 py-1.5 text-sm text-gray-400 hover:text-red-600">✕</button>
+                            </div>
+                        @endforeach
+                        @if (count($extraLinks) < \App\Models\MarketingBlock::EXTRA_LINKS_MAX)
+                            <button type="button" wire:click="addLink" class="text-sm text-sky-700 hover:underline">+ Добавить ссылку</button>
+                        @endif
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">
                             Картинка <span class="text-gray-400">(PNG/JPG, до 512 КБ; в письме показывается шириной 120 px)</span>
                         </label>
                         <div class="flex items-center gap-3">
@@ -174,6 +200,12 @@
                             <td class="px-3 py-2 align-top font-mono text-xs max-w-xs truncate" title="{{ $block->url }}">
                                 <a href="{{ $block->url }}" target="_blank" rel="noopener" class="text-sky-700 hover:underline">{{ $block->url }}</a>
                                 <div class="mt-0.5 font-sans text-gray-500">{{ $block->linkText() }} →</div>
+                                @foreach ($block->extraLinks() as $link)
+                                    <div class="mt-1 truncate" title="{{ $link['url'] }}">
+                                        <a href="{{ $link['url'] }}" target="_blank" rel="noopener" class="text-sky-700 hover:underline">{{ $link['url'] }}</a>
+                                        <div class="mt-0.5 font-sans text-gray-500">{{ $link['text'] }} →</div>
+                                    </div>
+                                @endforeach
                             </td>
                             <td class="px-3 py-2 align-top text-right tabular-nums">{{ $block->impressions_count }}</td>
                             <td class="px-3 py-2 align-top text-xs text-gray-600 whitespace-nowrap">{{ $block->last_used_at?->format('d.m.Y H:i') ?? '—' }}</td>

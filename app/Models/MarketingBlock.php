@@ -27,11 +27,15 @@ class MarketingBlock extends Model
 
     public const LINK_TEXT_MAX = 60;
 
+    /** Сколько ссылок можно добавить к основной. */
+    public const EXTRA_LINKS_MAX = 3;
+
     protected $fillable = [
         'title',
         'text',
         'url',
         'link_text',
+        'extra_links',
         'image_path',
         'is_active',
         'impressions_count',
@@ -43,6 +47,7 @@ class MarketingBlock extends Model
     {
         return [
             'is_active' => 'boolean',
+            'extra_links' => 'array',
             'impressions_count' => 'integer',
             'last_used_at' => 'datetime',
         ];
@@ -54,6 +59,34 @@ class MarketingBlock extends Model
         $own = trim((string) ($this->link_text ?? ''));
 
         return $own !== '' ? $own : self::DEFAULT_LINK_TEXT;
+    }
+
+    /**
+     * Дополнительные ссылки без пустых строк.
+     *
+     * @return list<array{url: string, text: string}>
+     */
+    public function extraLinks(): array
+    {
+        return self::normalizeLinks((array) ($this->extra_links ?? []));
+    }
+
+    /**
+     * @param  array<int, mixed>  $links
+     * @return list<array{url: string, text: string}>
+     */
+    public static function normalizeLinks(array $links): array
+    {
+        $out = [];
+        foreach ($links as $l) {
+            $url = trim((string) (is_array($l) ? ($l['url'] ?? '') : ''));
+            $text = trim((string) (is_array($l) ? ($l['text'] ?? '') : ''));
+            if ($url !== '') {
+                $out[] = ['url' => $url, 'text' => $text !== '' ? $text : self::DEFAULT_LINK_TEXT];
+            }
+        }
+
+        return array_slice($out, 0, self::EXTRA_LINKS_MAX);
     }
 
     public function createdBy(): BelongsTo

@@ -54,6 +54,11 @@ class MarketingBlockUtmTest extends TestCase
         $this->assertSame('block-7', $this->params($url)['utm_content']);
     }
 
+    public function test_extra_link_gets_its_number_in_utm_content(): void
+    {
+        $this->assertSame('block-7-2', $this->params(MarketingBlockService::withUtm('https://mylift.ru/', 7, 2))['utm_content']);
+    }
+
     public function test_omits_block_id_when_not_given(): void
     {
         $q = $this->params(MarketingBlockService::withUtm('https://mylift.ru/'));
