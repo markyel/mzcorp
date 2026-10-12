@@ -45,6 +45,50 @@ class MaxBotMessenger implements BotMessenger
         }
     }
 
+    /**
+     * Файл в MAX: слот загрузки (POST /uploads?type=file) → multipart «data» →
+     * токен → сообщение с вложением. Файл обрабатывается не мгновенно —
+     * «attachment.not.ready» повторяем с паузой, как картинки в медиаплане.
+     */
+    public function sendDocument(string $chatId, string $bytes, string $filename, ?string $captionHtml = null): bool
+    {
+        try {
+            $slot = $this->http()->post($this->api().'/uploads?type=file');
+            $url = (string) ($slot->json('url') ?? '');
+            if (! $slot->successful() || $url === '') {
+                return false;
+            }
+            $up = Http::timeout(60)->withOptions(['verify' => MediaPublisherService::maxVerify()])
+                ->withHeaders(['Authorization' => $this->token])
+                ->attach('data', $bytes, $filename)->post($url);
+            $token = MediaPublisherService::maxUploadToken((array) ($up->json() ?? []), (array) ($slot->json() ?? []));
+            if (! $up->successful() || $token === null) {
+                return false;
+            }
+
+            $body = ['text' => $captionHtml !== null ? mb_substr($captionHtml, 0, 4000) : '', 'format' => 'html',
+                'attachments' => [['type' => 'file', 'payload' => ['token' => $token]]]];
+            foreach ([0, 2, 4, 6] as $pause) {
+                if ($pause > 0) {
+                    sleep($pause);
+                }
+                $r = $this->http()->post($this->api().'/messages?'.http_build_query(['chat_id' => $chatId]), $body);
+                if ($r->successful()) {
+                    return true;
+                }
+                if ((string) $r->json('code') !== 'attachment.not.ready') {
+                    Log::warning('MaxBotMessenger: document send failed', ['chat_id' => $chatId, 'error' => $r->json('message')]);
+
+                    return false;
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('MaxBotMessenger: document error', ['chat_id' => $chatId, 'error' => $e->getMessage()]);
+        }
+
+        return false;
+    }
+
     public function answerCallback(string $callbackId, ?string $notice = null): void
     {
         try {

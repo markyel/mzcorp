@@ -23,4 +23,10 @@ class MessengerMessage extends Model
     {
         return $this->belongsTo(Request::class);
     }
+
+    /** Менеджер, ответивший клиенту из карточки заявки. */
+    public function author(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
 }

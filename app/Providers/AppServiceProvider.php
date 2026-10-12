@@ -31,5 +31,8 @@ class AppServiceProvider extends ServiceProvider
         // personal-mailbox'ы — иначе sync продолжает тянуть туда письма,
         // а backfill-cron APPEND'ит копии в orphan-ящик. См. UserObserver.
         User::observe(UserObserver::class);
+
+        // Переход статуса заявки из бота — уведомление клиенту в мессенджер.
+        \App\Models\RequestStateChange::observe(\App\Observers\RequestStateChangeObserver::class);
     }
 }

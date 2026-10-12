@@ -50,6 +50,7 @@ class BotConversationService
         private readonly BotRequestService $requests,
         private readonly OrganizationRegistryService $registry,
         private readonly OrganizationLinkGuard $linkGuard,
+        private readonly BotThreadService $thread,
     ) {}
 
     public function handle(BotUpdate $u): void
@@ -220,6 +221,8 @@ class BotConversationService
             'org_yes' => $this->confirmOrganization($chat),
             'org_no' => $this->ask($chat, 'org', 'Хорошо, проверьте ИНН. '),
             'no_inn' => $this->askCompany($chat),
+            'reply' => $this->startReply($chat, (int) $arg),
+            'tomgr' => $this->savedTextToManager($chat, (int) $arg),
             default => $this->menu($chat),
         };
     }
@@ -235,6 +238,7 @@ class BotConversationService
             'org_confirm' => $this->say($chat, 'Нажмите «Да» или «Нет» под сообщением с организацией.'),
             'company' => $this->onCompany($chat, $text),
             'draft' => $this->appendToDraft($chat, $text),
+            'reply' => $this->onReply($chat, $text),
             default => $this->menu($chat),
         };
     }
@@ -592,14 +596,78 @@ class BotConversationService
         return $draft;
     }
 
+    /**
+     * Свободный текст: есть открытые заявки — предлагаем передать его
+     * менеджеру (последней обсуждаемой первой), иначе — новую заявку.
+     */
     private function offerDraftFromText(MessengerChat $chat, string $text): void
     {
         $chat->stateSet('last_text', mb_substr($text, 0, 4000));
         $chat->save();
-        $this->say($chat, 'Оформить заявку с этим текстом?', [[
-            ['text' => '📝 Да, в заявку', 'data' => 'draft_text'],
-            ['text' => 'Меню', 'data' => 'menu'],
-        ]]);
+
+        $open = BotThreadService::openRequests($chat);
+        $activeId = (int) $chat->stateGet('active_request_id', 0);
+        $open = $open->sortByDesc(fn ($r) => (int) $r->id === $activeId ? PHP_INT_MAX : $r->id)->take(3);
+        $buttons = $open->map(fn ($r) => [['text' => '💬 Менеджеру по '.$r->internal_code, 'data' => 'tomgr:'.$r->id]])->values()->all();
+        $buttons[] = [['text' => '📝 Новая заявка с этим текстом', 'data' => 'draft_text'], ['text' => 'Меню', 'data' => 'menu']];
+
+        $this->say($chat, $open->isEmpty() ? 'Оформить заявку с этим текстом?' : 'Куда отправить сообщение?', $buttons);
+    }
+
+    /* ─────────────────────── Переписка по заявке ─────────────────────── */
+
+    private function ownRequest(MessengerChat $chat, int $requestId): ?\App\Models\Request
+    {
+        return \App\Models\Request::query()->where('id', $requestId)->where('messenger_chat_id', $chat->id)->first();
+    }
+
+    private function startReply(MessengerChat $chat, int $requestId): void
+    {
+        $request = $this->ownRequest($chat, $requestId);
+        if ($request === null) {
+            $this->menu($chat);
+
+            return;
+        }
+        $chat->stateSet('reply_request_id', $request->id);
+        $this->setAwaiting($chat, 'reply');
+        $this->say($chat, 'Напишите сообщение по заявке <b>'.e((string) $request->internal_code).'</b> — передадим менеджеру.',
+            [[['text' => 'Отмена', 'data' => 'menu']]]);
+    }
+
+    private function onReply(MessengerChat $chat, string $text): void
+    {
+        $request = $this->ownRequest($chat, (int) $chat->stateGet('reply_request_id', 0));
+        $chat->stateForget('awaiting', 'reply_request_id');
+        $chat->save();
+        if ($request === null || trim($text) === '') {
+            $this->menu($chat);
+
+            return;
+        }
+        $this->passToManager($chat, $request, $text);
+    }
+
+    private function savedTextToManager(MessengerChat $chat, int $requestId): void
+    {
+        $request = $this->ownRequest($chat, $requestId);
+        $text = (string) $chat->stateGet('last_text', '');
+        $chat->stateForget('last_text');
+        $chat->save();
+        if ($request === null || trim($text) === '') {
+            $this->menu($chat);
+
+            return;
+        }
+        $this->passToManager($chat, $request, $text);
+    }
+
+    private function passToManager(MessengerChat $chat, \App\Models\Request $request, string $text): void
+    {
+        $this->thread->fromClient($chat, $request, $text);
+        $chat->stateSet('active_request_id', $request->id);
+        $chat->save();
+        $this->say($chat, '✅ Передали менеджеру по заявке <b>'.e((string) $request->internal_code).'</b>. Ответ придёт сюда или на почту.');
     }
 
     private function draftFromSavedText(MessengerChat $chat): void

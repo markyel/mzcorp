@@ -13,6 +13,9 @@ interface BotMessenger
     /** @param  list<list<array{text: string, data?: string, url?: string, contact?: bool}>>  $buttons */
     public function sendText(string $chatId, string $html, array $buttons = []): bool;
 
+    /** Файл (КП, счёт) с подписью. */
+    public function sendDocument(string $chatId, string $bytes, string $filename, ?string $captionHtml = null): bool;
+
     public function answerCallback(string $callbackId, ?string $notice = null): void;
 
     /** @return array{ok: bool, username: ?string, message: string} */

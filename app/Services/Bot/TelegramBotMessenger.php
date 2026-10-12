@@ -38,6 +38,26 @@ class TelegramBotMessenger implements BotMessenger
         return (bool) ($r['ok'] ?? false);
     }
 
+    public function sendDocument(string $chatId, string $bytes, string $filename, ?string $captionHtml = null): bool
+    {
+        try {
+            $r = Http::timeout(60)
+                ->retry(3, 2000, fn ($e) => MediaPublisherService::isConnectFailure($e), throw: false)
+                ->attach('document', $bytes, $filename)
+                ->post(self::BASE.$this->token.'/sendDocument', array_filter([
+                    'chat_id' => $chatId,
+                    'caption' => $captionHtml !== null ? mb_substr($captionHtml, 0, 1024) : null,
+                    'parse_mode' => $captionHtml !== null ? 'HTML' : null,
+                ]))->json() ?? [];
+        } catch (\Throwable $e) {
+            Log::warning('TelegramBotMessenger: document failed', ['error' => MediaPublisherService::redactSecrets($e->getMessage())]);
+
+            return false;
+        }
+
+        return (bool) ($r['ok'] ?? false);
+    }
+
     public function answerCallback(string $callbackId, ?string $notice = null): void
     {
         $this->call('answerCallbackQuery', array_filter(['callback_query_id' => $callbackId, 'text' => $notice]));

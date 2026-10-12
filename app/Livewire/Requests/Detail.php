@@ -1062,6 +1062,11 @@ class Detail extends Component
     public function tabs(): array
     {
         $threadCount = $this->thread->count();
+        // Заявка из бота: сообщения в мессенджере — тоже переписка с клиентом.
+        if ($this->request->messenger_chat_id !== null) {
+            $threadCount += \App\Models\MessengerMessage::query()
+                ->where('request_id', $this->request->id)->whereIn('kind', ['client', 'manager', 'request'])->count();
+        }
         $items = $this->request->items->count();
         $files = $this->thread->reduce(
             fn (int $carry, EmailMessage $msg) => $carry + $msg->attachments->count(),

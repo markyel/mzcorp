@@ -78,6 +78,18 @@ class BotConversationTest extends TestCase
             $t->timestamp('created_at')->nullable();
         });
 
+        Schema::create('requests', function (Blueprint $t) {
+            $t->id();
+            $t->string('internal_code');
+            $t->string('status')->default('assigned');
+            $t->unsignedBigInteger('messenger_chat_id')->nullable();
+            $t->unsignedBigInteger('assigned_user_id')->nullable();
+            $t->string('client_name')->nullable();
+            $t->string('client_email')->nullable();
+            $t->timestamp('closed_at')->nullable();
+            $t->timestamps();
+        });
+
         $this->messenger = new FakeBotMessenger();
         $messengers = Mockery::mock(BotMessengers::class);
         $messengers->shouldReceive('for')->andReturn($this->messenger);
@@ -192,6 +204,38 @@ class BotConversationTest extends TestCase
         $this->assertStringContainsString('M-2026-30001', $this->send(callback: 'send'));
     }
 
+    public function test_free_text_goes_to_manager_of_open_request(): void
+    {
+        $chat = MessengerChat::create(['channel' => 'telegram', 'external_user_id' => '77', 'chat_id' => '77', 'email' => 'a@b.ru', 'email_verified_at' => now()]);
+        $mine = \Illuminate\Support\Facades\DB::table('requests')->insertGetId(['internal_code' => 'M-2026-40001', 'messenger_chat_id' => $chat->id, 'created_at' => now()]);
+        $foreign = \Illuminate\Support\Facades\DB::table('requests')->insertGetId(['internal_code' => 'M-2026-40002', 'messenger_chat_id' => 999, 'created_at' => now()]);
+
+        $thread = Mockery::mock(\App\Services\Bot\BotThreadService::class);
+        $thread->shouldReceive('fromClient')->twice()->withArgs(fn ($c, $r, $text) => $r->id === $mine && in_array($text, ['Когда отгрузка?', 'Оплатили вчера'], true));
+        $this->app->instance(\App\Services\Bot\BotThreadService::class, $thread);
+
+        $this->assertStringContainsString('Куда отправить', $this->send('Когда отгрузка?'));
+        $this->assertTrue(collect($this->messenger->lastButtons())->flatten(1)->contains(fn ($b) => ($b['data'] ?? '') === 'tomgr:'.$mine));
+        $this->assertStringContainsString('Передали менеджеру', $this->send(callback: 'tomgr:'.$mine));
+
+        // Кнопка «Ответить» под уведомлением — следующее сообщение уходит менеджеру.
+        $this->assertStringContainsString('M-2026-40001', $this->send(callback: 'reply:'.$mine));
+        $this->assertStringContainsString('Передали менеджеру', $this->send('Оплатили вчера'));
+
+        // Чужая заявка — нельзя.
+        $this->assertStringNotContainsString('Напишите сообщение', $this->send(callback: 'reply:'.$foreign));
+    }
+
+    public function test_status_notification_texts(): void
+    {
+        $r = new Request();
+        $r->internal_code = 'M-2026-19164';
+        $r->client_email = 'a@b.ru';
+        $this->assertStringContainsString('коммерческое предложение', \App\Services\Bot\BotRequestNotifier::text($r, \App\Enums\RequestStatus::Quoted));
+        $this->assertStringContainsString('счёт', \App\Services\Bot\BotRequestNotifier::text($r, \App\Enums\RequestStatus::Invoiced));
+        $this->assertNull(\App\Services\Bot\BotRequestNotifier::text($r, \App\Enums\RequestStatus::InProgress));
+    }
+
     public function test_buttons_before_verification_lead_back_to_email(): void
     {
         $this->send('/start');
@@ -225,6 +269,16 @@ class FakeBotMessenger implements BotMessenger
     public function lastButtons(): array
     {
         return end($this->sent)['buttons'] ?? [];
+    }
+
+    /** @var list<array{chat: string, filename: string, caption: ?string}> */
+    public array $documents = [];
+
+    public function sendDocument(string $chatId, string $bytes, string $filename, ?string $captionHtml = null): bool
+    {
+        $this->documents[] = ['chat' => $chatId, 'filename' => $filename, 'caption' => $captionHtml];
+
+        return true;
     }
 
     public function answerCallback(string $callbackId, ?string $notice = null): void {}

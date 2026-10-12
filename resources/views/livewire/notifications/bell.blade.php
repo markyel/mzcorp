@@ -42,6 +42,7 @@
                                 'queue_stalled' => '⏳',
                                 'support_reply' => '✉',
                                 'outgoing_send_failed' => '⚠',
+                                'bot_message' => '💬',
                                 default => '🔔',
                             };
                             $title = match($kind) {
@@ -53,6 +54,7 @@
                                 'queue_stalled' => 'Очередь задач встала — письма не разбираются',
                                 'support_reply' => 'Ответ по обращению #' . ($data['ticket_id'] ?? ''),
                                 'outgoing_send_failed' => 'Письмо не отправлено' . (! empty($data['internal_code']) ? ' · ' . $data['internal_code'] : ''),
+                                'bot_message' => 'Клиент написал в ' . ($data['channel'] ?? 'бот') . ' · ' . ($data['internal_code'] ?? ''),
                                 default => 'Уведомление',
                             };
                             $subtitle = match($kind) {
@@ -64,6 +66,7 @@
                                 'queue_stalled' => collect($data['stalled'] ?? [])->map(fn ($m, $q) => $q . ': ' . ($m['count'] ?? 0) . ' задач, ждут ' . ($m['oldest_minutes'] ?? 0) . ' мин')->implode(' · '),
                                 'support_reply' => ($data['subject'] ?? '') . ' · ' . \Illuminate\Support\Str::limit($data['reply_preview'] ?? '', 60),
                                 'outgoing_send_failed' => ($data['recipient'] ?? '') . ' · ' . ($data['subject'] ?? '') . ' · осталось черновиком',
+                                'bot_message' => ($data['client_name'] ?? '') . ' · ' . ($data['preview'] ?? ''),
                                 default => '',
                             };
                             $reqId = $data['request_id'] ?? null;

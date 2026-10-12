@@ -1699,6 +1699,10 @@
 
             {{-- ───── ПЕРЕПИСКА ───── --}}
             @case('thread')
+                @if($req->messenger_chat_id)
+                    {{-- Заявка из бота: переписка с клиентом в мессенджере (этап 2). --}}
+                    <livewire:requests.messenger-thread :request-id="$req->id" wire:key="messenger-thread-{{ $req->id }}" />
+                @endif
                 <div class="ds-card" x-data="{ selMode: false, ids: [] }">
                     <div class="ds-card-header">
                         <h3>Переписка</h3>
