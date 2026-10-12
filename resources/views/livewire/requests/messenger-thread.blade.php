@@ -35,7 +35,15 @@
                     </div>
                     {{-- Текст бота хранится HTML-разметкой мессенджера: показываем без тегов. --}}
                     <div class="whitespace-pre-line">{{ $m->kind === 'notify' ? html_entity_decode(strip_tags((string) $m->text)) : $m->text }}</div>
-                    @if($files)
+                    @php $atts = (array) (($m->meta ?? [])['attachments'] ?? []); @endphp
+                    @if($atts)
+                        <div class="flex flex-wrap gap-1.5 mt-1">
+                            @foreach($atts as $i => $a)
+                                <a href="{{ route('messenger.file', ['message' => $m->id, 'index' => $i]) }}" target="_blank" rel="noopener"
+                                   class="text-[11.5px] text-sky-700 hover:underline">📎 {{ $a['name'] ?? 'файл' }}</a>
+                            @endforeach
+                        </div>
+                    @elseif($files)
                         <div class="text-[11px] text-fg-3 mt-1">📎 {{ implode(', ', $files) }}</div>
                     @endif
                 </div>
@@ -45,16 +53,10 @@
         @endforelse
     </div>
 
-    @if($this->canReply())
-        <div class="px-[18px] py-3 border-t border-[var(--border-subtle)]">
-            <textarea wire:model="reply" rows="2" maxlength="3500"
-                      placeholder="Ответ клиенту в {{ $channel }}. КП и счета по-прежнему отправляйте письмом — бот сам сообщит о них клиенту и приложит PDF."
-                      class="w-full px-2 py-1.5 rounded-md border border-[var(--border)] bg-surface text-[13px]"></textarea>
-            <div class="flex items-center gap-2 mt-1.5">
-                <button type="button" class="btn btn-sm btn-primary" wire:click="send" wire:loading.attr="disabled" wire:target="send">Отправить в {{ $channel }}</button>
-                @if($flash)<span class="text-[12px] text-emerald-700">{{ $flash }}</span>@endif
-                @if($error)<span class="text-[12px] text-amber-800">{{ $error }}</span>@endif
-            </div>
-        </div>
-    @endif
+    {{-- Писать клиенту — в окне переписки (как окно письма, поверх заявки). --}}
+    <div class="px-[18px] py-3 border-t border-[var(--border-subtle)] flex items-center gap-2">
+        <button type="button" class="btn btn-sm btn-primary"
+                wire:click="$dispatch('open-messenger', { requestId: {{ $req->id }} })">💬 Открыть окно переписки</button>
+        <span class="text-[11.5px] text-fg-3">КП и счета по-прежнему отправляйте письмом — бот сам сообщит о них клиенту и приложит PDF.</span>
+    </div>
 </div>

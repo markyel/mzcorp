@@ -262,6 +262,59 @@ class BotConversationTest extends TestCase
         $this->assertSame([], (array) $chat->fresh()->stateGet('draft_files', []));
     }
 
+    public function test_manager_writes_text_and_file_and_sees_blocked_bot(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('local');
+        $activity = Mockery::mock(\App\Services\Request\RequestActivityService::class);
+        $activity->shouldReceive('touch');
+        $this->app->instance(\App\Services\Request\RequestActivityService::class, $activity);
+
+        $chat = MessengerChat::create(['channel' => 'telegram', 'external_user_id' => '77', 'chat_id' => '77', 'email' => 'a@b.ru', 'email_verified_at' => now()]);
+        $rid = \Illuminate\Support\Facades\DB::table('requests')->insertGetId(['internal_code' => 'M-2026-50001', 'messenger_chat_id' => $chat->id, 'client_email' => 'a@b.ru', 'created_at' => now()]);
+        $request = Request::find($rid);
+        $manager = new \App\Models\User(['name' => 'Агрызков Сергей']);
+        $manager->id = 16;
+        $svc = app(\App\Services\Bot\BotThreadService::class);
+
+        $res = $svc->fromManager($request, $manager, 'Уточните марку лифта', [['bytes' => 'PDF', 'name' => 'схема.pdf', 'mime' => 'application/pdf']]);
+        $this->assertTrue($res['ok'], $res['message']);
+        $this->assertStringContainsString('Агрызков Сергей', $this->messenger->sent[0]['html']);
+        $this->assertSame('схема.pdf', $this->messenger->documents[0]['filename']);
+        $msg = \App\Models\MessengerMessage::query()->where('kind', 'manager')->firstOrFail();
+        $this->assertSame('схема.pdf', $msg->meta['attachments'][0]['name']);
+        \Illuminate\Support\Facades\Storage::disk('local')->assertExists($msg->meta['attachments'][0]['path']);
+        $this->assertSame($rid, (int) $chat->fresh()->stateGet('active_request_id'));
+
+        // Клиент отключил бота — сообщение не дошло, статус это показывает.
+        $this->messenger->blocked = true;
+        $res = $svc->fromManager($request, $manager, 'Вы здесь?');
+        $this->assertFalse($res['ok']);
+        $this->assertStringContainsString('отключил бота', $res['message']);
+        $this->assertTrue(\App\Services\Bot\BotThreadService::presence($chat->fresh())['blocked']);
+
+        // Клиент написал снова — снова на связи.
+        $this->travel(1)->minutes();
+        \App\Models\MessengerMessage::create(['messenger_chat_id' => $chat->id, 'direction' => 'in', 'kind' => 'text', 'text' => 'да']);
+        $p = \App\Services\Bot\BotThreadService::presence($chat->fresh());
+        $this->assertFalse($p['blocked']);
+        $this->assertTrue($p['active']);
+    }
+
+    public function test_reply_after_manager_message_goes_to_him_without_asking(): void
+    {
+        $chat = MessengerChat::create(['channel' => 'telegram', 'external_user_id' => '77', 'chat_id' => '77', 'email' => 'a@b.ru', 'email_verified_at' => now()]);
+        $rid = \Illuminate\Support\Facades\DB::table('requests')->insertGetId(['internal_code' => 'M-2026-50002', 'messenger_chat_id' => $chat->id, 'created_at' => now()]);
+        $chat->stateSet('active_request_id', $rid);
+        $chat->save();
+        \App\Models\MessengerMessage::create(['messenger_chat_id' => $chat->id, 'request_id' => $rid, 'direction' => 'out', 'kind' => 'manager', 'text' => 'Какая марка лифта?']);
+
+        $thread = Mockery::mock(\App\Services\Bot\BotThreadService::class);
+        $thread->shouldReceive('fromClient')->once()->withArgs(fn ($c, $r, $text) => $r->id === $rid && $text === 'OTIS GEN2');
+        $this->app->instance(\App\Services\Bot\BotThreadService::class, $thread);
+
+        $this->assertStringContainsString('Передали менеджеру', $this->send('OTIS GEN2'));
+    }
+
     public function test_status_notification_texts(): void
     {
         $r = new Request();
@@ -299,7 +352,7 @@ class FakeBotMessenger implements BotMessenger
     {
         $this->sent[] = ['chat' => $chatId, 'html' => $html, 'buttons' => $buttons];
 
-        return true;
+        return ! $this->blocked;
     }
 
     public function lastButtons(): array
@@ -323,6 +376,13 @@ class FakeBotMessenger implements BotMessenger
     }
 
     public function answerCallback(string $callbackId, ?string $notice = null): void {}
+
+    public bool $blocked = false;
+
+    public function lastSendBlocked(): bool
+    {
+        return $this->blocked;
+    }
 
     public function me(): array
     {

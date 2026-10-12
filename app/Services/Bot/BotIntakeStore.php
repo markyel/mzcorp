@@ -52,10 +52,10 @@ class BotIntakeStore
      *
      * @return array{path: string, name: string, mime: ?string, size: int}
      */
-    public function storeDraftFile(MessengerChat $chat, string $bytes, string $name, ?string $mime): array
+    public function storeDraftFile(MessengerChat $chat, string $bytes, string $name, ?string $mime, string $dir = 'bot-intake'): array
     {
         $name = trim($name) !== '' ? mb_substr($name, 0, 200) : 'file';
-        $path = sprintf('bot-intake/%d/%s_%s', $chat->id, Str::random(8), self::safeName($name));
+        $path = sprintf('%s/%d/%s_%s', $dir, $chat->id, Str::random(8), self::safeName($name));
         Storage::disk(self::DISK)->put($path, $bytes);
 
         return ['path' => $path, 'name' => $name, 'mime' => $mime, 'size' => strlen($bytes)];

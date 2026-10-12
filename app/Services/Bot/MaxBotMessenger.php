@@ -13,8 +13,15 @@ use Illuminate\Support\Facades\Log;
  */
 class MaxBotMessenger implements BotMessenger
 {
+    private bool $blocked = false;
+
     public function __construct(private readonly string $token)
     {
+    }
+
+    public function lastSendBlocked(): bool
+    {
+        return $this->blocked;
     }
 
     public function sendText(string $chatId, string $html, array $buttons = []): bool
@@ -36,6 +43,8 @@ class MaxBotMessenger implements BotMessenger
             if (! $r->successful()) {
                 Log::warning('MaxBotMessenger: send failed', ['chat_id' => $chatId, 'status' => $r->status(), 'error' => $r->json('message')]);
             }
+            // 403 — бот не может писать пользователю (остановил/удалил бота).
+            $this->blocked = $r->status() === 403;
 
             return $r->successful();
         } catch (\Throwable $e) {

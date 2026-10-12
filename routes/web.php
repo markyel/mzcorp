@@ -191,6 +191,10 @@ Route::middleware('auth')->group(function () {
 
         Route::get('/attachments/{attachment}', [AttachmentController::class, 'download'])
             ->name('attachments.download');
+        // Фото и файлы переписки с клиентом в Telegram/MAX (окно переписки в заявке).
+        Route::get('/messenger-files/{message}/{index}', [\App\Http\Controllers\MessengerFileController::class, 'show'])
+            ->whereNumber('index')
+            ->name('messenger.file');
         Route::get('/attachments/{attachment}/preview', [AttachmentController::class, 'preview'])
             ->name('attachments.preview');
         Route::get('/attachments/cid/{emailMessage}/{contentId}', [AttachmentController::class, 'inline'])

@@ -15,8 +15,23 @@ class TelegramBotMessenger implements BotMessenger
 {
     private const BASE = 'https://api.telegram.org/bot';
 
+    private bool $blocked = false;
+
     public function __construct(private readonly string $token)
     {
+    }
+
+    public function lastSendBlocked(): bool
+    {
+        return $this->blocked;
+    }
+
+    /** 403 «bot was blocked by the user» / «user is deactivated» — клиент недоступен для бота. */
+    private function track(array $r): array
+    {
+        $this->blocked = ! ($r['ok'] ?? false) && (int) ($r['error_code'] ?? 0) === 403;
+
+        return $r;
     }
 
     public function sendText(string $chatId, string $html, array $buttons = []): bool
@@ -34,6 +49,7 @@ class TelegramBotMessenger implements BotMessenger
             unset($payload['parse_mode']);
             $r = $this->call('sendMessage', $payload);
         }
+        $this->track($r);
 
         return (bool) ($r['ok'] ?? false);
     }
@@ -54,6 +70,7 @@ class TelegramBotMessenger implements BotMessenger
 
             return false;
         }
+        $this->track($r);
 
         return (bool) ($r['ok'] ?? false);
     }

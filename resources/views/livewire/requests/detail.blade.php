@@ -1319,11 +1319,18 @@
                      табов) — текущая вкладка не меняется, можно писать письмо
                      и параллельно смотреть «Позиции». --}}
                 <div class="flex gap-1.5">
+                    @if($req->messenger_chat_id)
+                        {{-- Заявка из бота: клиент пришёл из мессенджера — пишем ему там же. --}}
+                        <button type="button" class="btn btn-primary flex-1"
+                                wire:click="$dispatch('open-messenger', { requestId: {{ $req->id }} })"
+                                title="Окно переписки с клиентом в {{ \App\Enums\MessengerChannel::tryFrom((string) $req->source)?->label() }}">
+                            💬 Написать в {{ \App\Enums\MessengerChannel::tryFrom((string) $req->source)?->label() ?? 'мессенджер' }}</button>
+                    @endif
                     @if($canReply)
                         <button type="button"
                                 class="btn flex-1"
                                 wire:click="composeReply({{ $lastInbound?->id ?: 'null' }})"
-                        >✉ Ответить</button>
+                        >✉ {{ $req->messenger_chat_id ? 'Письмо' : 'Ответить' }}</button>
                     @else
                         <button class="btn flex-1" disabled title="Отвечать может только назначенный менеджер или acting на время отсутствия">✉ Ответить</button>
                     @endif
@@ -3872,6 +3879,14 @@
         <livewire:requests.mail.compose-form
             :request-id="$req->id"
             wire:key="compose-{{ $req->id }}" />
+    @endif
+
+    {{-- Окно переписки с клиентом в Telegram/MAX — для заявок из бота.
+         Тоже вне табов, открывается событием open-messenger. --}}
+    @if($req->messenger_chat_id)
+        <livewire:requests.messenger-dialog
+            :request-id="$req->id"
+            wire:key="messenger-dialog-{{ $req->id }}" />
     @endif
 
     {{-- Лайтбокс просмотра картинок — общий с почтой и перепиской с поставщиком:

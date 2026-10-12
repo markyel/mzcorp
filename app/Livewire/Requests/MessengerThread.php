@@ -4,24 +4,18 @@ namespace App\Livewire\Requests;
 
 use App\Models\MessengerMessage;
 use App\Models\Request;
-use App\Services\Bot\BotThreadService;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 /**
- * Карточка заявки из бота → «Переписка»: сообщения клиента в Telegram/MAX,
- * уведомления бота и ответы менеджеров; ответ отсюда уходит в мессенджер.
+ * Карточка заявки из бота → «Переписка»: лента сообщений клиента в
+ * Telegram/MAX, уведомлений бота и ответов менеджеров. Писать клиенту — в
+ * окне переписки (MessengerDialog), кнопка внизу блока.
  */
 class MessengerThread extends Component
 {
     public int $requestId;
-
-    public string $reply = '';
-
-    public ?string $flash = null;
-
-    public ?string $error = null;
 
     #[Computed]
     public function request(): Request
@@ -41,35 +35,6 @@ class MessengerThread extends Component
             ->with('author:id,name')
             ->orderBy('id')
             ->get();
-    }
-
-    public function canReply(): bool
-    {
-        return $this->request->isAccessibleBy(auth()->user());
-    }
-
-    public function send(): void
-    {
-        $this->flash = $this->error = null;
-        abort_unless($this->canReply(), 403);
-        $text = trim($this->reply);
-        if ($text === '') {
-            return;
-        }
-        if (mb_strlen($text) > 3500) {
-            $this->error = 'Слишком длинное сообщение — до 3500 знаков. Длинное лучше отправить письмом.';
-
-            return;
-        }
-
-        $res = app(BotThreadService::class)->fromManager($this->request, auth()->user(), $text);
-        if ($res['ok']) {
-            $this->reply = '';
-            $this->flash = $res['message'];
-        } else {
-            $this->error = $res['message'];
-        }
-        unset($this->messages);
     }
 
     public function render()

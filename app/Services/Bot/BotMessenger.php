@@ -26,6 +26,9 @@ interface BotMessenger
 
     public function answerCallback(string $callbackId, ?string $notice = null): void;
 
+    /** Клиент отключил бота: последняя отправка отклонена как «бот заблокирован». */
+    public function lastSendBlocked(): bool;
+
     /** @return array{ok: bool, username: ?string, message: string} */
     public function me(): array;
 
