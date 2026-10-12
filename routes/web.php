@@ -61,6 +61,11 @@ Route::get('/news/{slug}', [\App\Http\Controllers\NewsController::class, 'show']
     ->where('slug', '[0-9]+(-[a-z0-9-]*)?')
     ->name('news.show');
 
+// Обложки постов медиаплана. БЕЗ auth — картинку забирают площадки и лента.
+Route::get('/media/cover/{name}', [\App\Http\Controllers\MediaCoverController::class, 'show'])
+    ->where('name', '[a-f0-9-]{36}\.jpg')
+    ->name('media.cover');
+
 // YML-фид товарной кампании Яндекс.Директа. БЕЗ auth (забирает робот Яндекса),
 // секрет — в самом адресе: фид раскрывает розничные цены, которых на сайте
 // анонимному посетителю не видно. Токен в YANDEX_DIRECT_FEED_TOKEN.

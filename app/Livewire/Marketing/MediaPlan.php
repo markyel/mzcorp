@@ -6,6 +6,7 @@ use App\Models\MediaChannel;
 use App\Models\MediaPublication;
 use App\Models\MediaTopic;
 use App\Services\Marketing\MediaAutopilotService;
+use App\Services\Marketing\MediaCoverService;
 use App\Services\Marketing\MediaDataService;
 use App\Services\Marketing\MediaMaterialService;
 use App\Services\Marketing\MediaProfileReviewService;
@@ -583,6 +584,37 @@ class MediaPlan extends Component
         $pub->forceFill(['image_urls' => $left ?: null])->save();
 
         $this->flash = 'Картинка убрана.';
+        unset($this->openPub);
+    }
+
+    /**
+     * Перегенерировать анонсовую обложку черновика по его текущему тексту.
+     * Старый файл нашей обложки удаляем; фото позиций, если были, заменяются.
+     */
+    public function newCover(): void
+    {
+        $this->ensureAdmin();
+        $this->flash = null;
+        $this->error = null;
+        $pub = MediaPublication::with('topic')->find($this->pubId);
+        if ($pub === null || $pub->isPublished() || ! MediaCoverService::appliesTo($pub->topic)) {
+            return;
+        }
+
+        $covers = app(MediaCoverService::class);
+        $res = $covers->make((string) $pub->title, (string) $pub->body, (string) $pub->topic->source);
+        if (! $res['ok']) {
+            $this->error = 'Обложку сделать не удалось: '.$res['message'];
+
+            return;
+        }
+
+        foreach ($pub->images() as $old) {
+            $covers->forget($old);
+        }
+        $pub->forceFill(['image_urls' => [$res['url']]])->save();
+
+        $this->flash = 'Новая обложка готова.';
         unset($this->openPub);
     }
 

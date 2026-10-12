@@ -28,6 +28,7 @@ class MediaMaterialService
     public function __construct(
         private readonly OpenAIChatService $openai,
         private readonly MediaDataService $data,
+        private readonly MediaCoverService $covers,
     ) {}
 
     /**
@@ -125,15 +126,28 @@ class MediaMaterialService
             $body = MediaPublisherService::forFeed($body);
         }
 
+        $title = mb_substr(trim((string) ($parsed['title'] ?? $topic->title)), 0, 300);
+
+        // Ассортиментная подборка — одна анонсовая обложка по содержанию поста
+        // вместо фото позиций (те чаще всего — снимки клиентских деталей из
+        // заявок). Не вышло — пост без картинки: чужие фото хуже, чем никаких.
+        $coverNote = '';
+        if (MediaCoverService::appliesTo($topic) && $channel->isPostable()) {
+            $cover = $this->covers->make($title, $body, (string) $topic->source);
+            $images = $cover['ok'] ? [$cover['url']] : [];
+            $coverNote = $cover['ok'] ? '' : ' Обложку сделать не удалось ('.$cover['message'].') — пост без картинки, можно повторить кнопкой «Новая обложка».';
+        } else {
+            // Фото позиций — редактор увидит их в карточке и уберёт лишние.
+            $images = $this->data->photosFor($topic, $subjectKey, $body);
+        }
+
         $publication = MediaPublication::create([
             'media_topic_id' => $topic->id,
             'media_channel_id' => $channel->id,
-            'title' => mb_substr(trim((string) ($parsed['title'] ?? $topic->title)), 0, 300),
+            'title' => $title,
             'body' => $body,
             'subject_key' => $subjectKey,
-            // Фото позиций — для ассортиментных тем. Редактор увидит их в
-            // карточке и сможет убрать лишние до публикации.
-            'image_urls' => $this->data->photosFor($topic, $subjectKey, $body) ?: null,
+            'image_urls' => $images ?: null,
             'status' => 'draft',
             'planned_for' => $topic->next_due_on ?? now()->toDateString(),
             'model' => $model,
@@ -145,7 +159,7 @@ class MediaMaterialService
         return [
             'ok' => true,
             'publication' => $publication,
-            'message' => 'Черновик готов.'.($notes !== '' ? ' Редактору: '.$notes : ''),
+            'message' => 'Черновик готов.'.$coverNote.($notes !== '' ? ' Редактору: '.$notes : ''),
         ];
     }
 }

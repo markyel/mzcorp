@@ -378,17 +378,32 @@
                 </div>
                 <textarea wire:model="pubBody" rows="14" class="{{ $area }} leading-relaxed"></textarea>
 
-                {{-- Фото позиций: в ВК уходят вложениями, в Telegram и MAX альбомом. --}}
+                {{-- Фото позиций: в ВК уходят вложениями, в Telegram и MAX альбомом.
+                     У ассортиментных подборок — одна анонсовая обложка (MediaCoverService). --}}
+                @php $coverable = ! $pub->isPublished() && \App\Services\Marketing\MediaCoverService::appliesTo($pub->topic); @endphp
+                @if($coverable)
+                    <div class="mt-2 flex items-center gap-2">
+                        <button type="button" class="btn btn-xs" wire:click="newCover" wire:loading.attr="disabled" wire:target="newCover">
+                            <span wire:loading.remove wire:target="newCover">{{ $pub->images() ? 'Новая обложка' : 'Сделать обложку' }}</span>
+                            <span wire:loading wire:target="newCover">Рисую обложку… до минуты</span>
+                        </button>
+                        <span class="text-[11.5px] text-fg-3">по деталям из текста; сохраните текст перед этим, если меняли состав</span>
+                    </div>
+                @endif
                 @if($pub->images())
                     <div class="mt-2">
                         <div class="text-[11.5px] text-fg-3 mb-1">
-                            Фото в публикации: {{ count($pub->images()) }} — уйдут вместе с текстом, лишние уберите
+                            @if($coverable)
+                                Обложка — уйдёт вместе с текстом
+                            @else
+                                Фото в публикации: {{ count($pub->images()) }} — уйдут вместе с текстом, лишние уберите
+                            @endif
                         </div>
                         <div class="flex flex-wrap gap-2">
                             @foreach($pub->images() as $img)
                                 <div class="relative" wire:key="img-{{ md5($img) }}">
                                     <img src="{{ $img }}" alt="" loading="lazy"
-                                         class="w-[84px] h-[84px] object-cover rounded-md border border-border bg-surface">
+                                         class="{{ $coverable ? 'w-[300px] h-[200px]' : 'w-[84px] h-[84px]' }} object-cover rounded-md border border-border bg-surface">
                                     <button type="button" class="btn btn-xs absolute -top-1 -right-1"
                                             wire:click="dropImage(@js($img))" title="Убрать из публикации">×</button>
                                 </div>

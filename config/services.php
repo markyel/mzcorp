@@ -77,6 +77,16 @@ return [
         // Проверка писем менеджеров на образ компании (mail:tone-audit): отсев
         // дешёвой моделью, отмеченное перепроверяет сильная — мини шумит.
         'tone_audit_model' => env('OPENAI_TONE_AUDIT_MODEL', 'gpt-4o-mini'),
+        // Анонсовая обложка ассортиментного поста медиаплана (MediaCoverService):
+        // одна сгенерированная картинка вместо фото позиций. Путь
+        // /v1/images/generations открыт на прокси 12.10.2026.
+        'media_cover' => [
+            'enabled' => (bool) env('MEDIA_COVER_ENABLED', true),
+            'model' => env('MEDIA_COVER_MODEL', 'gpt-image-1'),
+            'quality' => env('MEDIA_COVER_QUALITY', 'medium'),
+            'scene_model' => env('MEDIA_COVER_SCENE_MODEL', 'gpt-4o-mini'),
+            'timeout' => (int) env('MEDIA_COVER_TIMEOUT', 150),
+        ],
         'tone_audit_verify_model' => env('OPENAI_TONE_AUDIT_VERIFY_MODEL', 'gpt-4o'),
         // Заказчики, переписку с которыми проверка не смотрит (решение 29.09:
         // Liftway — маркетплейс-партнёр, а не клиент в обычном смысле).
