@@ -30,6 +30,9 @@ class OrganizationLinkRequest extends Model
 
     public const SOURCE_WEB_FORM = 'web_form';
 
+    /** Клиент бота заявок сам назвал организацию (ИНН) — см. BotConversationService. */
+    public const SOURCE_BOT = 'bot';
+
     protected $fillable = [
         'organization_id',
         'client_contact_id',
@@ -92,6 +95,9 @@ class OrganizationLinkRequest extends Model
     public function documentSentPhrase(): string
     {
         $number = $this->document_number ? ' № '.$this->document_number : '';
+        if ($this->source === self::SOURCE_BOT) {
+            return 'в боте заявок указал как свою организацию';
+        }
 
         return match ($this->document_type) {
             'outbound_invoice' => 'был выслан счёт'.$number,

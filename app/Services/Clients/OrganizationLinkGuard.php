@@ -46,7 +46,7 @@ class OrganizationLinkGuard
     /**
      * Попытка привязать контрагента к адресу.
      *
-     * @param  array{source?: string, request?: ?RequestModel, outbound_quote?: ?OutboundQuote, quotation?: ?Quotation}  $context
+     * @param  array{source?: string, request?: ?RequestModel, outbound_quote?: ?OutboundQuote, quotation?: ?Quotation, self_declared?: bool}  $context  self_declared — организацию назвал сам клиент (бот)
      * @param  bool  $notify  false — завести запись без письма (разовые перепрогоны по истории)
      * @param  bool  $record  false — сомнительную связь не заводить на подтверждение, а молча пропустить
      * @return array{status: 'linked'|'exists'|'pending'|'rejected'|'pinned'|'skipped', requests_linked: int}
@@ -71,7 +71,11 @@ class OrganizationLinkGuard
 
         $known = $org->contacts()->pluck('client_contacts.email')
             ->map(fn ($e) => mb_strtolower((string) $e))->values()->all();
-        if ($known === [] || $this->sameCorporateDomain($email, $known)) {
+        // Организацию назвал сам клиент (бот заявок): у контрагента со скидкой
+        // или особыми условиями «нет адресов» — не повод привязать без вопросов,
+        // иначе любой, кто знает ИНН, увидит его цены.
+        $selfDeclaredRisk = ! empty($context['self_declared']) && $this->hasSpecialTerms($org);
+        if (($known === [] && ! $selfDeclaredRisk) || $this->sameCorporateDomain($email, $known)) {
             return ['status' => 'linked', 'requests_linked' => $this->attach($org, $contact)];
         }
         if (! $record) {
@@ -180,6 +184,13 @@ class OrganizationLinkGuard
      * Кому писать: кто отправил документ, иначе ответственный по заявке или
      * автор нашего КП, иначе РОП.
      */
+    /** Скидка или «себестоимость + наценка» — условия, которые нельзя выдать постороннему. */
+    private function hasSpecialTerms(Organization $org): bool
+    {
+        return $org->pricing_mode === \App\Enums\OrganizationPricingMode::CostPlus
+            || app(ClientDiscountImportService::class)->discountFor($org) > 0;
+    }
+
     private function responsibleUser(?RequestModel $request, ?OutboundQuote $quote, ?Quotation $quotation): ?User
     {
         $sender = $quote?->email_message_id

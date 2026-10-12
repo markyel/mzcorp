@@ -34,11 +34,13 @@ class OrganizationLinkPendingNotification extends Notification
             internalCode: $pending->request?->internal_code,
             organizationName: (string) $pending->organization?->name,
             email: (string) $pending->contact?->email,
-            documentIn: match ($pending->document_type) {
-                'outbound_invoice' => 'счёте',
-                null, '' => 'документе',
-                default => 'КП',
-            },
+            documentIn: $pending->source === \App\Models\OrganizationLinkRequest::SOURCE_BOT
+                ? 'боте заявок'
+                : match ($pending->document_type) {
+                    'outbound_invoice' => 'счёте',
+                    null, '' => 'документе',
+                    default => 'КП',
+                },
         );
     }
 

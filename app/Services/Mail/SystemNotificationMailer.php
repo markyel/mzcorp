@@ -27,7 +27,8 @@ class SystemNotificationMailer
     {
     }
 
-    public function sendMailable(string $to, Mailable $mailable): bool
+    /** @param  string|null  $fromName  имя отправителя; клиентам — «MyZip», а не внутреннее «MyLift CRM» */
+    public function sendMailable(string $to, Mailable $mailable, ?string $fromName = null): bool
     {
         $to = trim($to);
         if ($to === '') {
@@ -47,7 +48,7 @@ class SystemNotificationMailer
             $html = $mailable->render();
 
             $email = (new Email())
-                ->from(new Address($mailbox->email, 'MyLift CRM'))
+                ->from(new Address($mailbox->email, $fromName ?? 'MyLift CRM'))
                 ->to($to)
                 ->subject($subject)
                 ->html($html);

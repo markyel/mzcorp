@@ -255,6 +255,12 @@
                         ✉ письма
                     </a>
                 @endif
+                @if($req->source)
+                    {{-- Заявка из бота заявок (Telegram/MAX), письма-источника нет. --}}
+                    <span class="chip text-[10px] normal-case" style="background:var(--sky-50);color:var(--sky-700)"
+                          title="Клиент оформил заявку в боте; e-mail подтверждён кодом. Писать клиенту — новым письмом на его адрес.">
+                        из {{ \App\Enums\MessengerChannel::tryFrom($req->source)?->label() ?? $req->source }}</span>
+                @endif
                 <span class="text-border-strong">·</span>
                 <span>создано {{ $req->created_at?->format('d.m.Y H:i') ?? '—' }}</span>
                 @if($req->updated_at && $req->updated_at->ne($req->created_at))
@@ -1480,6 +1486,18 @@
                         'notes' => 'Замечания',
                     ];
                 @endphp
+
+                @if(! empty($_pm['bot']['text']))
+                    {{-- Заявка из бота: исходный текст клиента (письма-источника нет). --}}
+                    <div class="ds-card mb-4">
+                        <div class="ds-card-header">
+                            <h3>Заявка клиента в {{ \App\Enums\MessengerChannel::tryFrom((string) ($_pm['bot']['channel'] ?? ''))?->label() ?? 'боте' }}</h3>
+                            <span class="flex-1"></span>
+                            <span class="text-[11.5px] text-fg-3">{{ $req->client_name }} · {{ $req->client_phone }}</span>
+                        </div>
+                        <div class="px-[18px] py-3 text-[13px] text-fg-1 whitespace-pre-line">{{ $_pm['bot']['text'] }}</div>
+                    </div>
+                @endif
 
                 @if(! empty($_attExtracted))
                     <div class="ds-card mb-4 border-emerald-300">

@@ -94,6 +94,9 @@ class Request extends Model
         // Заполняется RequestItemPersister + AttachmentMetaExtractionService.
         // См. миграцию add_parsing_meta_to_requests_table.
         'parsing_meta',
+        // Заявка из бота заявок (telegram | max) и его клиент; NULL — из почты.
+        'source',
+        'messenger_chat_id',
     ];
 
     protected function casts(): array
@@ -311,6 +314,12 @@ class Request extends Model
     public function isInheritanceChild(): bool
     {
         return $this->inheritance_role === 'child' && ! empty($this->inheritance_parent_id);
+    }
+
+    /** Клиент бота заявок, если заявка пришла из Telegram/MAX. */
+    public function messengerChat(): BelongsTo
+    {
+        return $this->belongsTo(MessengerChat::class);
     }
 
     public function emailMessage(): BelongsTo

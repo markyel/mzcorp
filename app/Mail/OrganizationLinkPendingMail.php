@@ -24,6 +24,11 @@ class OrganizationLinkPendingMail extends Mailable
     {
         $code = $this->pending->request?->internal_code;
 
+        if ($this->pending->source === OrganizationLinkRequest::SOURCE_BOT) {
+            return new Envelope(subject: 'MyLift · Клиент бота указал организацию: '
+                .$this->pending->organization?->name.' → '.$this->pending->contact?->email);
+        }
+
         return new Envelope(
             subject: 'MyLift · Подтвердите реквизиты в '.$this->documentWord().($code ? ' по заявке '.$code : '')
                 .': '.$this->pending->organization?->name.' → '.$this->pending->contact?->email,
@@ -44,12 +49,21 @@ class OrganizationLinkPendingMail extends Mailable
         $requestUrl = $p->request_id ? route('requests.show', $p->request_id) : null;
         $button = 'display:inline-block;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:600;';
 
+        $intro = $p->source === OrganizationLinkRequest::SOURCE_BOT
+            // Бот заявок: организацию назвал сам клиент, документа не было.
+            ? '<p>Клиент бота заявок с подтверждённым адресом '.$email.' указал свою организацию: '.$orgName.'.</p>'
+                .'<p>'.($known !== ''
+                    ? 'К организации уже привязаны другие адреса ('.$known.(count($p->known_emails ?? []) > 3 ? ' и др.' : '').').'
+                    : 'У организации есть скидка или особые условия.')
+                .' Пока привязки нет, клиент видит в боте розничные цены. Подтвердите, если это действительно сотрудник организации.</p>'
+            : '<p>'.($code ? 'По заявке <b>'.e($code).'</b> з' : 'З').'аказчику на адрес '.$email.' '
+                .e($p->documentSentPhrase()).' для '.$orgName.'.</p>'
+                .'<p>Эти реквизиты уже привязаны к другим адресам'
+                .($known !== '' ? ' ('.$known.(count($p->known_emails ?? []) > 3 ? ' и др.' : '').')' : '')
+                .', а к адресу '.$email.' — нет. Возможно, реквизиты в документе указаны ошибочно.</p>';
+
         $html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1f2937;line-height:1.5">'
-            .'<p>'.($code ? 'По заявке <b>'.e($code).'</b> з' : 'З').'аказчику на адрес '.$email.' '
-            .e($p->documentSentPhrase()).' для '.$orgName.'.</p>'
-            .'<p>Эти реквизиты уже привязаны к другим адресам'
-            .($known !== '' ? ' ('.$known.(count($p->known_emails ?? []) > 3 ? ' и др.' : '').')' : '')
-            .', а к адресу '.$email.' — нет. Возможно, реквизиты в документе указаны ошибочно.</p>'
+            .$intro
             .'<p><b>Автоматической привязки контрагента к e-mail заказчика не произошло.</b></p>'
 
             .'<p style="margin-top:20px"><b>Если реквизиты верные</b> — обязательно подтвердите привязку. '
@@ -57,8 +71,10 @@ class OrganizationLinkPendingMail extends Mailable
             .'<p style="margin:12px 0 20px"><a href="'.e($url).'" style="'.$button.'background:#D32027;color:#fff">'
             .'Подтвердить привязку</a></p>'
 
-            .'<p><b>Если это ошибка</b> — зайдите в заявку'.($code ? ' '.e($code) : '')
-            .' и вышлите заказчику '.e($doc).' с корректными реквизитами.</p>'
+            .($p->source === OrganizationLinkRequest::SOURCE_BOT
+                ? '<p><b>Если это не сотрудник организации</b> — отметьте ошибку на странице подтверждения.</p>'
+                : '<p><b>Если это ошибка</b> — зайдите в заявку'.($code ? ' '.e($code) : '')
+                    .' и вышлите заказчику '.e($doc).' с корректными реквизитами.</p>')
             .($requestUrl !== null
                 ? '<p style="margin:12px 0 20px"><a href="'.e($requestUrl).'" style="'.$button
                     .'background:#fff;color:#1f2937;border:1px solid #d1d5db">Открыть заявку</a></p>'
