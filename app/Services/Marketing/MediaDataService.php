@@ -184,12 +184,37 @@ class MediaDataService
      * Schindler SDS» ничего не говорит человеку, который ищет деталь глазами.
      * Берём фото ровно тех позиций, о которых пост, в том же порядке.
      *
+     * Модель пишет не обо всех позициях из фактов, а у части позиций фото нет.
+     * Поэтому при готовом тексте фото берём по артикулам из него: 12.10 пост о
+     * пяти новинках ушёл с фото четырёх других кнопок — выборка «свежие с фото»
+     * дотягивала до шести чужими позициями.
+     *
      * @return list<string>
      */
-    public function photosFor(MediaTopic $topic, ?string $subjectKey = null): array
+    public function photosFor(MediaTopic $topic, ?string $subjectKey = null, ?string $body = null): array
     {
         if ($topic->source === 'request_tips') {
             return $this->categoryPhoto($subjectKey);
+        }
+
+        $skus = $body !== null && preg_match_all('/\bM\d{4,6}\b/u', $body, $m) ? array_values(array_unique($m[0])) : [];
+        if ($skus !== [] && in_array($topic->source, ['catalog_new', 'catalog_price', 'stock_arrivals'], true)) {
+            $photos = DB::table('catalog_items')
+                ->whereIn('sku', $skus)
+                ->whereNotNull('photo_url')
+                ->where('photo_url', '!=', '')
+                ->orderByDesc('is_active')
+                ->get(['sku', 'photo_url'])
+                ->unique('sku')
+                ->pluck('photo_url', 'sku');
+
+            return collect($skus)
+                ->map(fn ($sku) => $photos[$sku] ?? null)
+                ->filter()
+                ->unique()
+                ->take(self::MAX_PHOTOS)
+                ->values()
+                ->all();
         }
 
         $days = max(1, (int) ($topic->cadence_days ?: self::DEFAULT_WINDOW_DAYS));
