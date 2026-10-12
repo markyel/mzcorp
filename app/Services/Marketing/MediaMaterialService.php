@@ -128,11 +128,12 @@ class MediaMaterialService
 
         $title = mb_substr(trim((string) ($parsed['title'] ?? $topic->title)), 0, 300);
 
-        // Ассортиментная подборка — одна анонсовая обложка по содержанию поста
-        // вместо фото позиций (те чаще всего — снимки клиентских деталей из
-        // заявок). Не вышло — пост без картинки: чужие фото хуже, чем никаких.
+        // Пост в площадку, куда публикуем сами, — одна анонсовая обложка по
+        // содержанию вместо фото позиций (те чаще всего — снимки клиентских
+        // деталей из заявок). Не вышло — пост без картинки: чужие фото хуже,
+        // чем никаких.
         $coverNote = '';
-        if (MediaCoverService::appliesTo($topic) && $channel->isPostable()) {
+        if (MediaCoverService::enabled() && $channel->isPostable()) {
             $cover = $this->covers->make($title, $body, (string) $topic->source);
             $images = $cover['ok'] ? [$cover['url']] : [];
             $coverNote = $cover['ok'] ? '' : ' Обложку сделать не удалось ('.$cover['message'].') — пост без картинки, можно повторить кнопкой «Новая обложка».';

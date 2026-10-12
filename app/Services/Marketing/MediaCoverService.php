@@ -2,7 +2,6 @@
 
 namespace App\Services\Marketing;
 
-use App\Models\MediaTopic;
 use App\Services\AI\OpenAIChatService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -11,20 +10,22 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
- * Анонсовая обложка ассортиментного поста — одна картинка вместо фото позиций.
+ * Анонсовая обложка поста — одна сгенерированная картинка, своя для каждого
+ * поста и по его содержанию.
  *
  * Фото новинок в каталоге — чаще всего снимки клиентских деталей из заявок:
- * грязные, на оборудовании, с монтажной пеной. Заказчик (12.10.2026): к таким
- * постам — одна сгенерированная обложка, своя для каждого поста и по его
- * содержанию. Детали на ней обезличены: тип детали узнаваем, но ни модели, ни
- * маркировки — обложка ничего не обещает о внешнем виде конкретной позиции.
+ * грязные, на оборудовании, с монтажной пеной. Заказчик (12.10.2026): к постам
+ * — обложка, сначала к ассортиментным, затем ко всем типам. Пост с артикулами
+ * — на обложке эти детали, обезличенные: тип узнаваем, но ни модели, ни
+ * маркировки, обложка ничего не обещает о внешнем виде позиции. Пост без
+ * артикулов (совет, новость, дайджест) — сцена по смыслу текста.
  * Текст на картинку модель не пишет (кириллицу она путает) — заголовок
  * накладываем сами шрифтом PT Sans.
  */
 class MediaCoverService
 {
-    /** Темы, к которым делаем обложку: ассортиментные подборки. */
-    public const SOURCES = ['catalog_new', 'catalog_price', 'stock_arrivals'];
+    /** Ассортиментные подборки: обложка из деталей поста. */
+    public const SOURCES = ['catalog_new', 'catalog_price', 'stock_arrivals', 'weekly_roundup'];
 
     private const DIR = 'media-covers';
 
@@ -37,11 +38,10 @@ class MediaCoverService
     {
     }
 
-    public static function appliesTo(?MediaTopic $topic): bool
+    /** Обложки включены: ко всем постам площадок, куда публикуем сами. */
+    public static function enabled(): bool
     {
-        return $topic !== null
-            && (bool) config('services.openai.media_cover.enabled', true)
-            && in_array($topic->source, self::SOURCES, true);
+        return (bool) config('services.openai.media_cover.enabled', true);
     }
 
     /**
@@ -49,14 +49,16 @@ class MediaCoverService
      */
     public function make(string $title, string $body, ?string $source): array
     {
-        $names = $this->itemNames($body);
-        if ($names === []) {
-            return ['ok' => false, 'url' => null, 'message' => 'в тексте нет артикулов — не из чего собрать обложку'];
+        $names = in_array($source, self::SOURCES, true) ? $this->itemNames($body) : [];
+        if ($names === [] && trim($title.$body) === '') {
+            return ['ok' => false, 'url' => null, 'message' => 'пустой пост — не из чего собрать обложку'];
         }
 
         try {
-            $parts = $this->genericParts($names);
-            $image = $this->generate($this->prompt($parts, $source));
+            $prompt = $names !== []
+                ? $this->partsPrompt($this->genericParts($names), $source)
+                : $this->scenePrompt($this->scene($title, $body, $source));
+            $image = $this->generate($prompt);
             $jpeg = $this->compose($image, $title);
         } catch (\Throwable $e) {
             Log::warning('MediaCoverService: cover failed', ['error' => $e->getMessage()]);
@@ -145,11 +147,12 @@ class MediaCoverService
     }
 
     /** @param  list<string>  $parts */
-    private function prompt(array $parts, ?string $source): string
+    private function partsPrompt(array $parts, ?string $source): string
     {
         $occasion = match ($source) {
             'catalog_price' => 'a price reduction announcement',
             'stock_arrivals' => 'a new stock arrival announcement, with a hint of a tidy warehouse shelf in the soft-focus background',
+            'weekly_roundup' => 'a weekly review of new items, price drops and stock arrivals',
             default => 'an announcement of new catalog items',
         };
 
@@ -157,8 +160,52 @@ class MediaCoverService
             .'Objects, generic and unbranded: '.implode('; ', $parts).'. '
             .'Arrange them neatly on a clean light-grey studio surface, soft diffused light, gentle shadows, shallow depth of field, '
             .'photorealistic, crisp detail, premium catalog look, new and clean parts. '
-            .'Strictly no text, letters, digits, logos, labels, stickers, QR codes or markings anywhere in the image. '
-            .'Keep the bottom third of the frame calm and uncluttered (plain surface) for a caption.';
+            .self::RESTRICTIONS;
+    }
+
+    private function scenePrompt(string $scene): string
+    {
+        return 'Editorial illustration for a social media post of an elevator and escalator spare parts supplier. '
+            .'Scene: '.$scene.' '
+            .'Photorealistic, natural soft light, clean modern look, calm colours, shallow depth of field. '
+            .'People only if the scene needs them: seen from behind or at a distance, no identifiable faces. '
+            .self::RESTRICTIONS;
+    }
+
+    private const RESTRICTIONS = 'Strictly no text, letters, digits, logos, brand names, labels, stickers, signs, QR codes or markings anywhere in the image. '
+        .'Keep the bottom third of the frame calm and uncluttered for a caption.';
+
+    /**
+     * Сцена по смыслу поста без артикулов: совет — деталь из совета и рабочее
+     * место, новость отрасли — лифты, эскалаторы, здания. Модель описывает
+     * картинку по-английски, без брендов и надписей.
+     */
+    private function scene(string $title, string $body, ?string $source): string
+    {
+        $kind = match ($source) {
+            'request_tips' => 'a practical tip for customers on how to request a spare part',
+            'industry_digest' => 'a digest of elevator industry news',
+            'weekly_roundup' => 'a weekly review of new catalog items, price drops and stock arrivals',
+            'news' => 'company news',
+            default => 'a post',
+        };
+
+        $res = $this->openai->chat([
+            ['role' => 'system', 'content' => 'You design a cover picture for a Russian social media post of an elevator and escalator spare parts supplier. '
+                .'Read the post and describe ONE concrete photorealistic scene that matches its main subject (2 sentences, English). '
+                .'If the post is about a specific kind of part, show that kind of part, generic and unbranded. '
+                .'Industry news: elevators, escalators, lift shafts, machine rooms, modern buildings. '
+                .'No text, signs, logos, brands, screens with text, documents with text, recognisable landmarks or identifiable faces. '
+                .'Answer JSON {"scene": "..."}.'],
+            ['role' => 'user', 'content' => 'Type: '.$kind."\nTitle: ".$title."\n\n".mb_substr($body, 0, 3000)],
+        ], (string) config('services.openai.media_cover.scene_model', 'gpt-4o-mini'), ['response_format' => ['type' => 'json_object'], 'temperature' => 0.4]);
+
+        $scene = trim((string) (json_decode((string) ($res['content'] ?? ''), true)['scene'] ?? ''));
+        if ($scene === '') {
+            throw new \RuntimeException('не удалось придумать сцену для обложки');
+        }
+
+        return $scene;
     }
 
     /** Картинка от модели (байты). */

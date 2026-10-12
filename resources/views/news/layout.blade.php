@@ -40,6 +40,7 @@
         h2 { font-size: 20px; line-height: 1.3; margin: 36px 0 8px; text-wrap: balance; }
         .meta { color: var(--fg-3); font-size: 14px; margin-bottom: 20px; }
         .lead { font-size: 18px; color: var(--fg-2); margin: 0 0 8px; }
+        .cover { display: block; width: 100%; height: auto; border-radius: 10px; margin: 0 0 16px; }
         p { margin: 0 0 12px; }
         a { color: var(--link); }
         .intro { color: var(--fg-2); }

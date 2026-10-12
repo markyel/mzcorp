@@ -21,6 +21,9 @@
             {{ ($publication->published_at ?? $publication->created_at)->locale('ru')->isoFormat('D MMMM YYYY') }}
             @if(! empty($article['period'])) · за {{ $article['period'] }}@endif
         </div>
+        @if(! empty($article['cover']) && str_contains((string) $article['cover'], '/media/cover/'))
+            <img class="cover" src="{{ $article['cover'] }}" alt="{{ $publication->title }}">
+        @endif
         <p class="lead">{{ $article['lead'] }}</p>
 
         @foreach($article['sections'] as $section)

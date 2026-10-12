@@ -2,7 +2,6 @@
 
 namespace Tests\Unit\Marketing;
 
-use App\Models\MediaTopic;
 use App\Services\Marketing\MediaCoverService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Client\Request;
@@ -75,14 +74,36 @@ class MediaCoverTest extends TestCase
             && str_contains($r['prompt'], 'Strictly no text'));
     }
 
-    public function test_text_without_skus_gives_no_cover_and_no_calls(): void
+    public function test_post_without_skus_gets_a_scene_by_its_meaning(): void
     {
-        Http::fake();
+        Http::fake([
+            'https://ai.test/v1/chat/completions' => Http::response(['choices' => [['message' => ['content' => json_encode(['scene' => 'A row of modern glass elevators in a bright atrium.'])]]]]),
+            'https://ai.test/v1/images/generations' => Http::response(['data' => [['b64_json' => base64_encode(self::jpeg())]]]),
+        ]);
 
-        $res = app(MediaCoverService::class)->make('Обзор', 'Текст без артикулов', 'catalog_new');
+        $res = app(MediaCoverService::class)->make('Лифтовая отрасль за неделю', 'В Белгороде заменили 40 лифтов.', 'industry_digest');
 
-        $this->assertFalse($res['ok']);
-        Http::assertNothingSent();
+        $this->assertTrue($res['ok'], $res['message']);
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/chat/completions')
+            && str_contains($r['messages'][1]['content'], 'digest of elevator industry news')
+            && str_contains($r['messages'][1]['content'], 'В Белгороде заменили 40 лифтов.'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/generations')
+            && str_contains($r['prompt'], 'Scene: A row of modern glass elevators in a bright atrium.')
+            && str_contains($r['prompt'], 'no identifiable faces')
+            && str_contains($r['prompt'], 'Strictly no text'));
+    }
+
+    public function test_catalog_post_without_known_skus_falls_back_to_scene(): void
+    {
+        Http::fake([
+            'https://ai.test/v1/chat/completions' => Http::response(['choices' => [['message' => ['content' => '{"scene":"Lift buttons on a workbench."}']]]]),
+            'https://ai.test/v1/images/generations' => Http::response(['data' => [['b64_json' => base64_encode(self::jpeg())]]]),
+        ]);
+
+        $res = app(MediaCoverService::class)->make('Новинки', 'арт. M99999', 'catalog_new');
+
+        $this->assertTrue($res['ok'], $res['message']);
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/generations') && str_contains($r['prompt'], 'Scene: Lift buttons'));
     }
 
     public function test_image_api_error_is_reported(): void
@@ -98,12 +119,10 @@ class MediaCoverTest extends TestCase
         $this->assertStringContainsString('safety system', $res['message']);
     }
 
-    public function test_applies_only_to_catalog_topics(): void
+    public function test_covers_can_be_switched_off(): void
     {
-        $this->assertTrue(MediaCoverService::appliesTo(new MediaTopic(['source' => 'catalog_new'])));
-        $this->assertTrue(MediaCoverService::appliesTo(new MediaTopic(['source' => 'stock_arrivals'])));
-        $this->assertFalse(MediaCoverService::appliesTo(new MediaTopic(['source' => 'request_tips'])));
+        $this->assertTrue(MediaCoverService::enabled());
         config(['services.openai.media_cover.enabled' => false]);
-        $this->assertFalse(MediaCoverService::appliesTo(new MediaTopic(['source' => 'catalog_new'])));
+        $this->assertFalse(MediaCoverService::enabled());
     }
 }

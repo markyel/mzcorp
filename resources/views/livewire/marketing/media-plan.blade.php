@@ -380,7 +380,7 @@
 
                 {{-- Фото позиций: в ВК уходят вложениями, в Telegram и MAX альбомом.
                      У ассортиментных подборок — одна анонсовая обложка (MediaCoverService). --}}
-                @php $coverable = ! $pub->isPublished() && \App\Services\Marketing\MediaCoverService::appliesTo($pub->topic); @endphp
+                @php $coverable = ! $pub->isPublished() && \App\Services\Marketing\MediaCoverService::enabled() && $pub->channel?->isPostable(); @endphp
                 @if($coverable)
                     <div class="mt-2 flex items-center gap-2">
                         <button type="button" class="btn btn-xs" wire:click="newCover" wire:loading.attr="disabled" wire:target="newCover">

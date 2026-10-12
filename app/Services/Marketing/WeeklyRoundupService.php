@@ -53,6 +53,7 @@ class WeeklyRoundupService
     public function __construct(
         private readonly OpenAIChatService $openai,
         private readonly MediaLinkService $links,
+        private readonly MediaCoverService $covers,
     ) {}
 
     /**
@@ -222,16 +223,29 @@ class WeeklyRoundupService
             return ['ok' => false, 'publication' => null, 'message' => 'Модель ответила не по форме или выбрала позиции не из данных — попробуйте ещё раз.'];
         }
 
+        // Обложка статьи (og:image, enclosure в RSS, шапка страницы) — анонсовая
+        // картинка по позициям обзора, а не фото первой позиции: те чаще всего
+        // снимки клиентских деталей. Фото у позиций внутри статьи остаются.
+        $body = self::toText($article);
+        $coverNote = '';
+        $images = null;
+        if (MediaCoverService::enabled()) {
+            $cover = $this->covers->make($article['title'], $body, 'weekly_roundup');
+            $article['cover'] = $cover['url'];
+            $images = $cover['ok'] ? [$cover['url']] : null;
+            $coverNote = $cover['ok'] ? '' : ' Обложку сделать не удалось ('.$cover['message'].') — можно повторить кнопкой «Новая обложка».';
+        }
+
         $publication = MediaPublication::create([
             'media_topic_id' => $topic->id,
             'media_channel_id' => $channel->id,
             'title' => $article['title'],
-            'body' => self::toText($article),
+            'body' => $body,
             'article' => $article,
             'subject_key' => 'roundup:'.$c['from']->toDateString().'..'.$c['to']->toDateString(),
-            'image_urls' => array_values(array_unique(array_filter(array_merge(
+            'image_urls' => $images ?? (MediaCoverService::enabled() ? null : (array_values(array_unique(array_filter(array_merge(
                 ...array_map(fn ($s) => array_column($s['items'], 'photo'), $article['sections']),
-            )))) ?: null,
+            )))) ?: null)),
             'status' => 'draft',
             'planned_for' => $topic->next_due_on ?? now()->toDateString(),
             'model' => $model,
@@ -243,7 +257,7 @@ class WeeklyRoundupService
         return [
             'ok' => true,
             'publication' => $publication,
-            'message' => 'Черновик обзора готов.'.($notes !== '' ? ' Редактору: '.$notes : ''),
+            'message' => 'Черновик обзора готов.'.$coverNote.($notes !== '' ? ' Редактору: '.$notes : ''),
         ];
     }
 
