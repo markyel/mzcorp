@@ -883,12 +883,49 @@ class Pool extends Component
             $likeDigits = ! $isInternalCode && $digits !== null && $digits !== $searchNoZeros && $digits !== $this->search
                 ? '%'.$digits.'%'
                 : null;
-            $query->where(function ($q) use ($like, $likeNoZeros, $likeDigits) {
+            // Организация клиента: названия в реестре с кавычками в разных видах
+            // (АО "МЛТ", ООО «Лифт-Сервис») — сравниваем без кавычек.
+            $quotes = '[«»"“”„]';
+            $orgNeedle = trim((string) preg_replace('/'.$quotes.'/u', '', $this->search));
+            $likeOrg = mb_strlen($orgNeedle) >= 2 ? '%'.$orgNeedle.'%' : null;
+            $innDigits = preg_match('/^\s*(\d{9,12})\s*$/', $this->search, $im) === 1 ? $im[1] : null;
+            $orgMatch = function ($w, string $table) use ($likeOrg, $innDigits, $quotes) {
+                $w->where(function ($o) use ($likeOrg, $innDigits, $quotes, $table) {
+                    if ($likeOrg !== null) {
+                        $o->whereRaw("regexp_replace({$table}.name, '{$quotes}', '', 'g') ilike ?", [$likeOrg])
+                            ->orWhereRaw("regexp_replace(coalesce({$table}.registry_short_name, ''), '{$quotes}', '', 'g') ilike ?", [$likeOrg]);
+                    }
+                    if ($innDigits !== null) {
+                        $o->orWhere("{$table}.inn", $innDigits);
+                    }
+                });
+            };
+
+            $query->where(function ($q) use ($like, $likeNoZeros, $likeDigits, $likeOrg, $innDigits, $quotes, $orgMatch) {
                 // Базовые поля заявки.
                 $q->where('internal_code', 'ilike', $like)
                     ->orWhere('subject', 'ilike', $like)
                     ->orWhere('client_email', 'ilike', $like)
                     ->orWhere('client_name', 'ilike', $like)
+                    // Организация клиента: из письма/бота (client_company) …
+                    ->when($likeOrg !== null, fn ($w) => $w->orWhereRaw("regexp_replace(coalesce(requests.client_company, ''), '{$quotes}', '', 'g') ilike ?", [$likeOrg]))
+                    ->when($likeOrg !== null || $innDigits !== null, fn ($w) => $w
+                        // … привязанная к заявке в реестре клиентов …
+                        ->orWhereExists(function ($sub) use ($orgMatch) {
+                            $sub->select(DB::raw(1))
+                                ->from('organizations')
+                                ->whereColumn('organizations.id', 'requests.organization_id')
+                                ->where(fn ($w) => $orgMatch($w, 'organizations'));
+                        })
+                        // … или к адресу клиента (у заявки организация не проставлена).
+                        ->orWhereExists(function ($sub) use ($orgMatch) {
+                            $sub->select(DB::raw(1))
+                                ->from('client_contacts')
+                                ->join('organization_contact', 'organization_contact.client_contact_id', '=', 'client_contacts.id')
+                                ->join('organizations as oc_org', 'oc_org.id', '=', 'organization_contact.organization_id')
+                                ->whereRaw('lower(client_contacts.email) = lower(btrim(requests.client_email))')
+                                ->where(fn ($w) => $orgMatch($w, 'oc_org'));
+                        }))
                     // Номер заявки/КП из 1С.
                     ->orWhere('onec_number', 'ilike', $like)
                     ->when($likeNoZeros !== null, fn ($w) => $w->orWhere('onec_number', 'ilike', $likeNoZeros))
