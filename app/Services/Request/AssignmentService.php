@@ -283,6 +283,9 @@ class AssignmentService
         $email = $request->emailMessage;
         if ($email) {
             DeliverToManagerInboxJob::dispatch($email->id, $manager->id);
+        } elseif ($request->source !== null) {
+            // Заявка из бота Telegram/MAX: письма клиента нет — письмо-уведомление.
+            \App\Jobs\Bot\MailBotRequestToManagerJob::dispatch($request->id, $manager->id);
         }
 
         // Phase 6: автоматическое уведомление клиенту «Заявка принята в работу».

@@ -98,6 +98,9 @@ class ReassignService
             if ($oldAssigneeId !== null && $oldAssigneeId !== $newAssignee->id) {
                 ArchiveFromOldManagerInboxJob::dispatch($email->id, $oldAssigneeId);
             }
+        } elseif ($request->source !== null) {
+            // Заявка из бота: письма клиента нет — новому менеджеру письмо-уведомление.
+            \App\Jobs\Bot\MailBotRequestToManagerJob::dispatch($request->id, $newAssignee->id);
         }
 
         return $assignment;
