@@ -53,7 +53,7 @@ class OutgoingSendRetryServiceTest extends TestCase
 
     public function test_temporary_smtp_reject_is_transient(): void
     {
-        foreach ([421, 450, 451, 452, 454] as $code) {
+        foreach ([421, 450, 451, 452, 454, 455, 471] as $code) {
             $e = new UnexpectedResponseException("Expected response code \"250\" but got code \"{$code}\".", $code);
             $this->assertTrue($this->svc->isTransient($e), "code {$code}");
         }

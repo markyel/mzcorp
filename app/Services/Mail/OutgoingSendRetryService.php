@@ -49,7 +49,13 @@ class OutgoingSendRetryService
             return false;
         }
         if ($e instanceof UnexpectedResponseException) {
-            return in_array((int) $e->getCode(), self::TRANSIENT_SMTP_CODES, true);
+            // Любой 4xx по RFC 5321 — «временно не принято, повторите»: письмо
+            // не принято, повтор дубля не даст. Списка кодов мало: 12.10.2026
+            // Яндекс отвечал «455 4.4.5 Try again later», а 455 в нём не было —
+            // КП падало ошибкой у менеджера вместо резервного канала.
+            $code = (int) $e->getCode();
+
+            return in_array($code, self::TRANSIENT_SMTP_CODES, true) || ($code >= 400 && $code < 500);
         }
         foreach (self::TRANSIENT_CONNECT_PATTERNS as $pattern) {
             if (str_contains($e->getMessage(), $pattern)) {
