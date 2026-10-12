@@ -207,6 +207,13 @@ class MailDeliverToManagerService
                 }
             }
 
+            // Копия в почте mzCorp — сразу, до записи на сервер: при сбое
+            // Яндекса (12.10.2026: APPEND «UNAVAILABLE» весь день, 55 заявок
+            // без письма у менеджера) письмо заявки иначе не видно, пока
+            // Яндекс не оживёт. Пометка server_copy_pending снимается после
+            // успешного APPEND; sync личного ящика найдёт эту же запись.
+            $localCopy = $this->localCopy($message, $managerMailbox);
+
             // Re-fetch ПОЛНЫЙ RFC822 (headers + body) из source-ящика. Наш
             // `raw_source` хранит только body через `Message::getRawBody()` —
             // если APPEND'ить body без top-level headers, Yandex не знает что
@@ -269,48 +276,12 @@ class MailDeliverToManagerService
                 }
             }
 
-            // Pre-create запись в email_messages — чтобы будущий IMAP-sync
-            // личного ящика НЕ создавал новый row через MessagePersister
-            // (он найдёт existing по uniq (mailbox_id, folder, message_id)).
-            // MailRouter таким образом не вызывается, gpt-4o categorize не
-            // дёргается, дубля Request не возникает. Sync ТОЛЬКО заполнит
-            // imap_uid + imap_flags + raw_source у этой записи.
-            if ($message->message_id) {
-                $alreadyPreCreated = \App\Models\EmailMessage::query()
-                    ->where('mailbox_id', $managerMailbox->id)
-                    ->where('folder', 'INBOX')
-                    ->where('message_id', $message->message_id)
-                    ->exists();
-                if (! $alreadyPreCreated) {
-                    \App\Models\EmailMessage::create([
-                        'mailbox_id' => $managerMailbox->id,
-                        'folder' => 'INBOX',
-                        'direction' => \App\Enums\MailDirection::Inbound->value,
-                        'imap_uid' => null,
-                        'message_id' => $message->message_id,
-                        'in_reply_to' => $message->in_reply_to,
-                        'references_header' => $message->references_header,
-                        'subject' => $message->subject,
-                        'from_email' => $message->from_email,
-                        'from_name' => $message->from_name,
-                        'to_recipients' => $message->to_recipients,
-                        'cc_recipients' => $message->cc_recipients,
-                        'sent_at' => $message->sent_at,
-                        'body_plain' => $message->body_plain,
-                        'body_html' => $message->body_html,
-                        'raw_source' => null,
-                        'headers' => $message->headers,
-                        'related_request_id' => $message->related_request_id,
-                        'category' => $message->category,
-                        'category_confidence' => $message->category_confidence,
-                        'category_intent' => $message->category_intent,
-                        'category_reasoning' => 'Cross-mailbox copy of msg#' . $message->id,
-                        'categorized_at' => $message->categorized_at ?: now(),
-                        'detected_artifacts' => [
-                            'cross_mailbox_copy_of' => $message->id,
-                        ],
-                    ]);
-                }
+            // Письмо на сервере — снимаем пометку «не записана»; дальше копию
+            // ведёт sync личного ящика (заполнит imap_uid).
+            if ($localCopy !== null) {
+                $copyArtifacts = (array) ($localCopy->fresh()?->detected_artifacts ?? []);
+                unset($copyArtifacts['server_copy_pending']);
+                $localCopy->forceFill(['detected_artifacts' => $copyArtifacts])->saveQuietly();
             }
 
             // Audit: фиксируем доставку, чтобы повторный dispatch не задвоил.
@@ -363,6 +334,62 @@ class MailDeliverToManagerService
      *
      * FT_PEEK — без \Seen побочного эффекта.
      */
+    /**
+     * Копия письма в INBOX личного ящика менеджера в нашей БД.
+     *
+     * Создаётся до APPEND с пометкой server_copy_pending: почта mzCorp
+     * показывает её сразу (MailUnreadCounter::hideGoneFromServer), а будущий
+     * IMAP-sync личного ящика не создаст новую строку — найдёт эту по uniq
+     * (mailbox_id, folder, message_id) и только заполнит imap_uid, флаги и
+     * raw_source. MailRouter не вызывается, дубля Request не возникает.
+     * Без Message-ID копию не делаем — её не с чем было бы сопоставить.
+     */
+    private function localCopy(EmailMessage $message, Mailbox $managerMailbox): ?EmailMessage
+    {
+        if (! $message->message_id) {
+            return null;
+        }
+
+        $existing = EmailMessage::query()
+            ->where('mailbox_id', $managerMailbox->id)
+            ->where('folder', 'INBOX')
+            ->where('message_id', $message->message_id)
+            ->first();
+        if ($existing !== null) {
+            return $existing->imap_uid === null ? $existing : null;
+        }
+
+        return EmailMessage::create([
+            'mailbox_id' => $managerMailbox->id,
+            'folder' => 'INBOX',
+            'direction' => \App\Enums\MailDirection::Inbound->value,
+            'imap_uid' => null,
+            'message_id' => $message->message_id,
+            'in_reply_to' => $message->in_reply_to,
+            'references_header' => $message->references_header,
+            'subject' => $message->subject,
+            'from_email' => $message->from_email,
+            'from_name' => $message->from_name,
+            'to_recipients' => $message->to_recipients,
+            'cc_recipients' => $message->cc_recipients,
+            'sent_at' => $message->sent_at,
+            'body_plain' => $message->body_plain,
+            'body_html' => $message->body_html,
+            'raw_source' => null,
+            'headers' => $message->headers,
+            'related_request_id' => $message->related_request_id,
+            'category' => $message->category,
+            'category_confidence' => $message->category_confidence,
+            'category_intent' => $message->category_intent,
+            'category_reasoning' => 'Cross-mailbox copy of msg#'.$message->id,
+            'categorized_at' => $message->categorized_at ?: now(),
+            'detected_artifacts' => [
+                'cross_mailbox_copy_of' => $message->id,
+                'server_copy_pending' => true,
+            ],
+        ]);
+    }
+
     private function fetchFullRfc822(EmailMessage $message): string
     {
         $sourceMailbox = $message->mailbox;

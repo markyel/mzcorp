@@ -92,6 +92,24 @@ class MailReassignArchiverService
         // Найти копию в личном ящике старого менеджера (cross-mailbox row,
         // см. MailDeliverToManagerService:128-170). После sync личного ящика
         // там должны быть imap_uid + folder='INBOX' + raw_source.
+        // Копия, которую Яндекс так и не принял (server_copy_pending), есть
+        // только в нашей БД — убираем её из INBOX там же, иначе бывший
+        // менеджер продолжит видеть письмо переданной заявки.
+        $pending = EmailMessage::query()
+            ->where('mailbox_id', $mailbox->id)
+            ->where('message_id', $original->message_id)
+            ->where('folder', 'INBOX')
+            ->whereNull('imap_uid')
+            ->where('detected_artifacts->server_copy_pending', true)
+            ->first();
+        if ($pending !== null) {
+            $pending->forceFill(['folder' => self::archivePaths()[0]])->saveQuietly();
+            Log::info('MailReassignArchiverService: pending copy archived in DB only', [
+                'copy_email_message_id' => $pending->id,
+                'old_manager_id' => $oldManager->id,
+            ]);
+        }
+
         $copy = EmailMessage::query()
             ->where('mailbox_id', $mailbox->id)
             ->where('message_id', $original->message_id)

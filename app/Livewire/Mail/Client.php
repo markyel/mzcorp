@@ -1252,7 +1252,26 @@ class Client extends Component
             return collect();
         }
 
-        return $this->buildThread($anchor)->loadMissing('attachments');
+        $thread = $this->buildThread($anchor)->loadMissing('attachments');
+
+        // Копия письма заявки, которую Яндекс ещё не принял (server_copy_pending):
+        // своих вложений у неё нет до sync личного ящика — показываем вложения
+        // оригинала из общего ящика (скачать их менеджеру можно: письмо его заявки).
+        $pendingOrigins = $thread
+            ->filter(fn (EmailMessage $m) => $m->attachments->isEmpty()
+                && data_get($m->detected_artifacts, 'server_copy_pending') === true
+                && data_get($m->detected_artifacts, 'cross_mailbox_copy_of') !== null)
+            ->mapWithKeys(fn (EmailMessage $m) => [$m->id => (int) data_get($m->detected_artifacts, 'cross_mailbox_copy_of')]);
+        if ($pendingOrigins->isNotEmpty()) {
+            $origins = EmailMessage::withHistory()->with('attachments')->whereIn('id', $pendingOrigins->values())->get()->keyBy('id');
+            foreach ($thread as $m) {
+                if (isset($pendingOrigins[$m->id]) && isset($origins[$pendingOrigins[$m->id]])) {
+                    $m->setRelation('attachments', $origins[$pendingOrigins[$m->id]]->attachments);
+                }
+            }
+        }
+
+        return $thread;
     }
 
     /** Якорное (кликнутое) письмо треда. */

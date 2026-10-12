@@ -90,7 +90,11 @@ class MailUnreadCounter
         $q->where(function (Builder $w) use ($synced) {
             $w->whereNotIn('email_messages.mailbox_id', $synced)
                 ->orWhere('email_messages.direction', '!=', MailDirection::Inbound->value)
-                ->orWhereNotNull('email_messages.imap_uid');
+                ->orWhereNotNull('email_messages.imap_uid')
+                // Копия письма заявки, ещё не записанная на сервер (Яндекс
+                // отказал в APPEND) — менеджер видит её сразу, не дожидаясь
+                // Яндекса (MailDeliverToManagerService, 12.10.2026).
+                ->orWhere('email_messages.detected_artifacts->server_copy_pending', true);
         });
     }
 
