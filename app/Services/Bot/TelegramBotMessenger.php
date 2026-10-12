@@ -84,7 +84,8 @@ class TelegramBotMessenger implements BotMessenger
     private function markup(array $buttons): ?array
     {
         if ($buttons === []) {
-            return null;
+            // Убираем клавиатуру «Отправить номер», если клиент написал номер руками.
+            return ['remove_keyboard' => true];
         }
         // «Поделиться телефоном» в Telegram бывает только в обычной клавиатуре.
         $hasContact = collect($buttons)->flatten(1)->contains(fn ($b) => ! empty($b['contact']));

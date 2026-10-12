@@ -47,15 +47,6 @@ class MessengerChat extends Model
         return $this->email_verified_at !== null && (string) $this->email !== '';
     }
 
-    /** Регистрация пройдена: e-mail подтверждён, есть имя, телефон и организация. */
-    public function isRegistered(): bool
-    {
-        return $this->isVerified()
-            && trim((string) $this->contact_name) !== ''
-            && trim((string) $this->phone) !== ''
-            && (trim((string) $this->company_name) !== '' || $this->organization_id !== null);
-    }
-
     public function stateGet(string $key, mixed $default = null): mixed
     {
         return data_get($this->state ?? [], $key, $default);

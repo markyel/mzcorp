@@ -78,7 +78,8 @@ class BotRequestService
                 'status' => RequestStatus::Pending,
                 'subject' => $subject,
                 'client_email' => (string) $chat->email,
-                'client_name' => $chat->contact_name,
+                // Анкету могли пропустить — тогда имя из профиля мессенджера.
+                'client_name' => $chat->contact_name ?: (trim($chat->first_name.' '.$chat->last_name) ?: null),
                 'client_phone' => $chat->phone,
                 'client_company' => $chat->organization?->name ?: $chat->company_name,
                 'organization_id' => $chat->organization_id,

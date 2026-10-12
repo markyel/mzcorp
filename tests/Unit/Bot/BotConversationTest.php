@@ -134,39 +134,65 @@ class BotConversationTest extends TestCase
         $this->app->instance(BotRequestService::class, $requests);
 
         $this->assertStringContainsString('рабочий e-mail', $this->send('/start'));
-        // Артикул до регистрации — запоминается, цена придёт после неё.
-        $this->assertStringContainsString('после регистрации', $this->send('M12345'));
-        $this->assertStringContainsString('после регистрации', $this->send('M12345'));
+        // Артикул до подтверждения — запоминается, цена придёт сразу после кода.
+        $this->assertStringContainsString('после подтверждения', $this->send('Есть в наличии? Артикул: M12345'));
         $this->assertStringContainsString('Не похоже на e-mail', $this->send('ivan'));
         $this->assertStringContainsString('Отправили код', $this->send('Ivan@Lift.ru'));
         $this->assertNotNull($this->sentCode);
 
         $wrong = $this->sentCode === '000000' ? '111111' : '000000';
         $this->assertStringContainsString('Код не подошёл', $this->send($wrong));
-        $this->assertStringContainsString('Как к вам обращаться', $this->send($this->sentCode));
+        // Больше ничего не спрашиваем: после кода — сразу цена.
+        $afterCode = html_entity_decode($this->send($this->sentCode));
+        $this->assertStringContainsString('E-mail подтверждён', $afterCode);
+        $this->assertStringContainsString('1 500,00 ₽', $afterCode);
+        $this->assertStringNotContainsString('обращаться', $afterCode);
         $this->assertTrue($this->chat()->isVerified());
-
-        $this->assertStringContainsString('телефон', $this->send('Иван Петров'));
-        $this->assertTrue(collect($this->messenger->lastButtons())->flatten(1)->contains(fn ($b) => ! empty($b['contact'])));
-        $this->assertStringContainsString('ИНН', $this->send('8 (900) 123-45-67'));
-        $this->assertSame('+79001234567', $this->chat()->phone);
-
-        $this->assertStringContainsString('ООО «Лифт-Сервис»', html_entity_decode($this->send('7701234567')));
-        $after = html_entity_decode($this->send(callback: 'org_yes'));
-        $this->assertStringContainsString('подтвердит менеджер', $after);
-        $this->assertStringContainsString('1 500,00 ₽', $after);   // отложенная цена после регистрации
-        $chat = $this->chat();
-        $this->assertTrue($chat->isRegistered());
-        $this->assertNull($chat->organization_id);
 
         $this->assertStringContainsString('Добавили', $this->send(callback: 'add:M12345'));
         $this->assertStringContainsString('ролик Fermator', $this->send('ролик Fermator 2 шт'));
-        $done = $this->send(callback: 'send');
+
+        // Первая заявка — анкета, каждый вопрос можно пропустить.
+        $this->assertStringContainsString('Как к вам обращаться', $this->send(callback: 'send'));
+        $this->assertStringContainsString('Телефон', $this->send('Иван Петров'));
+        $this->assertTrue(collect($this->messenger->lastButtons())->flatten(1)->contains(fn ($b) => ! empty($b['contact'])));
+        // В Telegram кнопка «Пропустить» рядом с «Отправить номер» приходит текстом.
+        $this->assertStringContainsString('ИНН', $this->send('Пропустить'));
+        $this->assertNull($this->chat()->phone);
+
+        $this->assertStringContainsString('ООО «Лифт-Сервис»', html_entity_decode($this->send('7701234567')));
+        $done = html_entity_decode($this->send(callback: 'org_yes'));
+        $this->assertStringContainsString('подтвердит менеджер', $done);
         $this->assertStringContainsString('M-2026-20001', $done);
-        $this->assertSame([], (array) $this->chat()->stateGet('draft', []));
+        $chat = $this->chat();
+        $this->assertSame('Иван Петров', $chat->contact_name);
+        $this->assertNull($chat->organization_id);
+        $this->assertSame([], (array) $chat->stateGet('draft', []));
     }
 
-    public function test_buttons_before_registration_lead_back_to_it(): void
+    public function test_second_request_does_not_ask_again_and_skip_all_sends_at_once(): void
+    {
+        $requests = Mockery::mock(BotRequestService::class);
+        $requests->shouldReceive('submit')->twice()->andReturnUsing(function () {
+            $r = new Request();
+            $r->internal_code = 'M-2026-30001';
+
+            return $r;
+        });
+        $this->app->instance(BotRequestService::class, $requests);
+        MessengerChat::create(['channel' => 'telegram', 'external_user_id' => '77', 'chat_id' => '77', 'email' => 'a@b.ru', 'email_verified_at' => now()]);
+
+        $this->send(callback: 'req');
+        $this->send('ролик');
+        $this->assertStringContainsString('обращаться', $this->send(callback: 'send'));
+        $this->assertStringContainsString('M-2026-30001', $this->send(callback: 'skip_all'));
+
+        $this->send(callback: 'req');
+        $this->send('ещё ролик');
+        $this->assertStringContainsString('M-2026-30001', $this->send(callback: 'send'));
+    }
+
+    public function test_buttons_before_verification_lead_back_to_email(): void
     {
         $this->send('/start');
         $this->assertStringContainsString('рабочий e-mail', $this->send(callback: 'req'));
@@ -175,7 +201,7 @@ class BotConversationTest extends TestCase
     public function test_quantity_correction_replaces_line(): void
     {
         $chat = MessengerChat::create(['channel' => 'telegram', 'external_user_id' => '77', 'chat_id' => '77',
-            'email' => 'a@b.ru', 'email_verified_at' => now(), 'contact_name' => 'А', 'phone' => '+70000000000', 'company_name' => 'ИП']);
+            'email' => 'a@b.ru', 'email_verified_at' => now()]);
         $this->send(callback: 'req');
         $this->send("M12345 2\nM23456 1, M34567 4");
         $this->send('M12345 5');

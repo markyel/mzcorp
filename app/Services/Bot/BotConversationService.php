@@ -4,22 +4,24 @@ namespace App\Services\Bot;
 
 use App\Models\MessengerChat;
 use App\Models\MessengerMessage;
+use App\Models\Organization;
 use App\Models\OrganizationLinkRequest;
 use App\Services\Clients\OrganizationLinkGuard;
 use App\Services\Clients\OrganizationRegistryService;
-use App\Models\Organization;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Бот заявок MyZip в Telegram и MAX — без модели, кнопками и командами.
  *
- * Регистрация: e-mail → код из письма → имя → телефон → ИНН (организация из
- * реестра, клиент подтверждает) или название без ИНН. После неё: цена по
- * M-артикулу (BotPriceService) и заявка (черновик из строк → BotRequestService).
+ * Решение заказчика (12.10.2026): лишнего не спрашиваем. Для цены по
+ * M-артикулу достаточно подтверждённого e-mail (код из письма). Анкета — имя,
+ * телефон, организация — только при отправке ПЕРВОЙ заявки, каждый вопрос
+ * можно пропустить («Отправить без анкеты» — все сразу); пропущенное больше
+ * не спрашиваем, дополнить можно в «Моих данных».
  *
- * Шаг диалога — state.awaiting: email | code | name | phone | inn | org_confirm |
- * company | draft. Регистрация не пройдена — любое сообщение ведёт к следующему
- * её шагу; артикулы, присланные до неё, запоминаются и показываются после.
+ * state.awaiting — чего ждём: email | code | name | phone | inn | org_confirm |
+ * company | draft. state.flow — зачем спрашиваем данные: submit (анкета перед
+ * заявкой) | profile (правка из «Моих данных»).
  */
 class BotConversationService
 {
@@ -30,6 +32,9 @@ class BotConversationService
 
     /** Строк в черновике заявки. */
     public const DRAFT_MAX_LINES = 100;
+
+    /** Вопросы анкеты по порядку. */
+    private const QUESTIONS = ['name', 'phone', 'org'];
 
     private const MENU = [
         [['text' => '💰 Цена по артикулу', 'data' => 'price'], ['text' => '📝 Новая заявка', 'data' => 'req']],
@@ -108,60 +113,69 @@ class BotConversationService
             return;
         }
         if ($u->isStart) {
-            $chat->stateForget('awaiting');
+            $chat->stateForget('awaiting', 'flow');
             $chat->save();
             $this->say($chat, 'Здравствуйте! Это бот MyZip — запчасти для лифтов и эскалаторов. '
-                .'Здесь можно узнать цену по артикулу M… и оформить заявку.');
-            $this->nextStep($chat);
+                .'Здесь можно узнать цену и наличие по артикулу M… и оформить заявку.');
+            $chat->isVerified() ? $this->menu($chat) : $this->askEmail($chat);
 
             return;
         }
         if (in_array($lower, ['/cancel', 'отмена', 'отменить'], true)) {
-            $chat->stateForget('awaiting');
+            $chat->stateForget('awaiting', 'flow');
             $chat->save();
-            $this->nextStep($chat, 'Хорошо, отменили.');
-
-            return;
-        }
-        if ($u->contactPhone !== null && $chat->stateGet('awaiting') === 'phone') {
-            $this->savePhone($chat, $u->contactPhone);
+            $this->say($chat, 'Хорошо, отменили.');
+            $chat->isVerified() ? $this->menu($chat) : $this->askEmail($chat);
 
             return;
         }
 
         $awaiting = (string) $chat->stateGet('awaiting', '');
-        // Посреди регистрации прислали артикул — запоминаем, напоминаем шаг.
-        $registrationSteps = ['email', 'code', 'name', 'phone', 'inn', 'org_confirm', 'company'];
-        if (in_array($awaiting, $registrationSteps, true) && BotPriceService::skusIn($text) !== []) {
-            $chat->stateSet('after_registration', ['price' => BotPriceService::skusIn($text)]);
-            $chat->save();
-            // Код и выбор организации не сбрасываем — иначе пропадёт отправленный код.
-            if ($awaiting === 'code' || $awaiting === 'org_confirm') {
-                $this->say($chat, 'Цену покажу сразу после регистрации. '.($awaiting === 'code'
-                    ? 'Сейчас пришлите код из письма.' : 'Сейчас подтвердите организацию кнопкой выше.'));
+
+        // Кнопки анкеты в Telegram при «Отправить номер» — обычная клавиатура:
+        // нажатие приходит текстом.
+        if (in_array($awaiting, ['name', 'phone', 'inn', 'company'], true)) {
+            if ($lower === 'пропустить') {
+                $this->skip($chat);
 
                 return;
             }
-            $chat->stateForget('awaiting');
-            $chat->save();
-            $this->nextStep($chat, 'Цену покажу сразу после регистрации — осталось немного.');
+            if ($lower === 'отправить без анкеты') {
+                $this->skipAll($chat);
+
+                return;
+            }
+        }
+        if ($u->contactPhone !== null && $awaiting === 'phone') {
+            $this->savePhone($chat, $u->contactPhone);
 
             return;
         }
+
+        // Ждём e-mail или код, а прислали артикул — запоминаем, цена после подтверждения.
+        if (in_array($awaiting, ['email', 'code'], true) && BotPriceService::skusIn($text) !== []) {
+            $chat->stateSet('after_verify', BotPriceService::skusIn($text));
+            $chat->save();
+            $this->say($chat, 'Цену покажу сразу после подтверждения e-mail. '
+                .($awaiting === 'code' ? 'Пришлите код из письма.' : 'Пришлите ваш e-mail.'));
+
+            return;
+        }
+
         if ($awaiting !== '' && ! str_starts_with($text, '/')) {
             $this->onAwaiting($chat, $awaiting, $text);
 
             return;
         }
 
-        if (! $chat->isRegistered()) {
-            // Артикулы до регистрации запоминаем — покажем цену сразу после неё.
+        if (! $chat->isVerified()) {
             $skus = BotPriceService::skusIn($text);
             if ($skus !== []) {
-                $chat->stateSet('after_registration', ['price' => $skus]);
+                $chat->stateSet('after_verify', $skus);
                 $chat->save();
             }
-            $this->nextStep($chat, 'Цены и заявки доступны после короткой регистрации.');
+            $this->say($chat, 'Цены и заявки доступны после подтверждения e-mail — это одно письмо с кодом.');
+            $this->askEmail($chat);
 
             return;
         }
@@ -182,10 +196,9 @@ class BotConversationService
     {
         [$action, $arg] = array_pad(explode(':', $data, 2), 2, null);
 
-        // До регистрации доступны только кнопки самой регистрации.
-        $registrationButtons = ['code_resend', 'email_change', 'org_yes', 'org_no', 'no_inn'];
-        if (! $chat->isRegistered() && ! in_array($action, $registrationButtons, true)) {
-            $this->nextStep($chat);
+        // До подтверждения e-mail — только кнопки самого подтверждения.
+        if (! $chat->isVerified() && ! in_array($action, ['code_resend', 'email_change'], true)) {
+            $this->askEmail($chat);
 
             return;
         }
@@ -196,20 +209,20 @@ class BotConversationService
             'req' => $this->startDraft($chat),
             'add' => $this->addToDraft($chat, (string) $arg),
             'draft_text' => $this->draftFromSavedText($chat),
-            'send' => $this->submitDraft($chat),
+            'send' => $this->send($chat),
             'clear' => $this->clearDraft($chat),
             'profile' => $this->profile($chat),
+            'edit' => $this->editField($chat, (string) $arg),
             'email_change' => $this->askEmail($chat),
-            'org_change' => $this->askInn($chat),
             'code_resend' => $this->resendCode($chat),
+            'skip' => $this->skip($chat),
+            'skip_all' => $this->skipAll($chat),
             'org_yes' => $this->confirmOrganization($chat),
-            'org_no' => $this->askInn($chat, 'Хорошо. Проверьте ИНН и пришлите ещё раз, или нажмите «У меня нет ИНН».'),
+            'org_no' => $this->ask($chat, 'org', 'Хорошо, проверьте ИНН. '),
             'no_inn' => $this->askCompany($chat),
             default => $this->menu($chat),
         };
     }
-
-    /* ─────────────────────────── Шаги диалога ─────────────────────────── */
 
     private function onAwaiting(MessengerChat $chat, string $awaiting, string $text): void
     {
@@ -222,38 +235,11 @@ class BotConversationService
             'org_confirm' => $this->say($chat, 'Нажмите «Да» или «Нет» под сообщением с организацией.'),
             'company' => $this->onCompany($chat, $text),
             'draft' => $this->appendToDraft($chat, $text),
-            default => $this->nextStep($chat),
+            default => $this->menu($chat),
         };
     }
 
-    /** Следующий шаг регистрации, а если пройдена — отложенное действие или меню. */
-    private function nextStep(MessengerChat $chat, ?string $prefix = null): void
-    {
-        if ($prefix !== null) {
-            $this->say($chat, $prefix);
-        }
-        if (! $chat->isVerified()) {
-            $this->askEmail($chat);
-        } elseif (trim((string) $chat->contact_name) === '') {
-            $this->setAwaiting($chat, 'name');
-            $this->say($chat, 'Как к вам обращаться? Напишите имя и фамилию.');
-        } elseif (trim((string) $chat->phone) === '') {
-            $this->setAwaiting($chat, 'phone');
-            $this->say($chat, 'Ваш телефон для связи — нажмите кнопку или напишите номер.', [[['text' => '📱 Отправить номер', 'contact' => true]]]);
-        } elseif ($chat->organization_id === null && trim((string) $chat->company_name) === '') {
-            $this->askInn($chat);
-        } else {
-            $after = (array) $chat->stateGet('after_registration', []);
-            $chat->stateForget('after_registration');
-            $chat->save();
-            if (! empty($after['price'])) {
-                $this->showPrices($chat, (array) $after['price']);
-
-                return;
-            }
-            $this->menu($chat);
-        }
-    }
+    /* ───────────────────────── Подтверждение e-mail ───────────────────────── */
 
     private function askEmail(MessengerChat $chat): void
     {
@@ -310,21 +296,126 @@ class BotConversationService
         }
         $chat->stateForget('awaiting');
         $chat->save();
-        $this->nextStep($chat, '✅ E-mail подтверждён.');
+        $this->say($chat, '✅ E-mail подтверждён.');
+
+        // Сменили адрес из «Моих данных» — вернуться туда.
+        if ($chat->stateGet('flow') === 'profile') {
+            $chat->stateForget('flow');
+            $chat->save();
+            $this->profile($chat);
+
+            return;
+        }
+        $skus = (array) $chat->stateGet('after_verify', []);
+        $chat->stateForget('after_verify');
+        $chat->save();
+        $skus !== [] ? $this->showPrices($chat, $skus) : $this->menu($chat);
+    }
+
+    /* ───────────────────────────── Анкета ───────────────────────────── */
+
+    /** Есть ли у клиента ответ на вопрос анкеты. */
+    private function answered(MessengerChat $chat, string $question): bool
+    {
+        return match ($question) {
+            'name' => trim((string) $chat->contact_name) !== '',
+            'phone' => trim((string) $chat->phone) !== '',
+            'org' => $chat->organization_id !== null || trim((string) $chat->company_name) !== '',
+            default => true,
+        };
+    }
+
+    /** Следующий незаданный вопрос анкеты перед заявкой; false — вопросов нет. */
+    private function askNextQuestion(MessengerChat $chat): bool
+    {
+        $skipped = (array) $chat->stateGet('skipped', []);
+        foreach (self::QUESTIONS as $q) {
+            if (! $this->answered($chat, $q) && ! in_array($q, $skipped, true)) {
+                $this->ask($chat, $q);
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function ask(MessengerChat $chat, string $question, ?string $prefix = null): void
+    {
+        $inSubmit = $chat->stateGet('flow') === 'submit';
+        $skip = $inSubmit
+            ? [['text' => 'Пропустить', 'data' => 'skip'], ['text' => 'Отправить без анкеты', 'data' => 'skip_all']]
+            : [['text' => 'Отмена', 'data' => 'profile']];
+
+        match ($question) {
+            'name' => $this->askWith($chat, 'name', ($prefix ?? '').'Как к вам обращаться?', [$skip]),
+            'phone' => $this->askWith($chat, 'phone', ($prefix ?? '').'Телефон для связи — кнопкой или текстом.',
+                [[['text' => '📱 Отправить номер', 'contact' => true]], $skip]),
+            default => $this->askWith($chat, 'inn', ($prefix ?? '').'ИНН вашей организации — найдём её в реестре.',
+                [[['text' => 'У меня нет ИНН', 'data' => 'no_inn']], $skip]),
+        };
+    }
+
+    private function askWith(MessengerChat $chat, string $awaiting, string $text, array $buttons): void
+    {
+        $this->setAwaiting($chat, $awaiting);
+        $this->say($chat, $text, $buttons);
+    }
+
+    /** Ответ записан или вопрос пропущен — дальше по сценарию. */
+    private function continueFlow(MessengerChat $chat): void
+    {
+        $chat->stateForget('awaiting');
+        $chat->save();
+        $flow = (string) $chat->stateGet('flow', '');
+
+        if ($flow === 'submit') {
+            if (! $this->askNextQuestion($chat)) {
+                $this->submit($chat);
+            }
+
+            return;
+        }
+        $chat->stateForget('flow');
+        $chat->save();
+        $flow === 'profile' ? $this->profile($chat) : $this->menu($chat);
+    }
+
+    private function skip(MessengerChat $chat): void
+    {
+        $question = match ((string) $chat->stateGet('awaiting', '')) {
+            'name' => 'name',
+            'phone' => 'phone',
+            'inn', 'company', 'org_confirm' => 'org',
+            default => null,
+        };
+        if ($question !== null) {
+            $skipped = (array) $chat->stateGet('skipped', []);
+            $skipped[] = $question;
+            $chat->stateSet('skipped', array_values(array_unique($skipped)));
+        }
+        $this->continueFlow($chat);
+    }
+
+    private function skipAll(MessengerChat $chat): void
+    {
+        $chat->stateSet('skipped', self::QUESTIONS);
+        $chat->stateForget('awaiting');
+        $chat->save();
+        $chat->stateGet('flow') === 'submit' ? $this->submit($chat) : $this->continueFlow($chat);
     }
 
     private function onName(MessengerChat $chat, string $text): void
     {
         $name = trim(preg_replace('/\s+/u', ' ', $text) ?? '');
         if (mb_strlen($name) < 2 || mb_strlen($name) > 200) {
-            $this->say($chat, 'Напишите, пожалуйста, имя и фамилию.');
+            $this->say($chat, 'Напишите, как к вам обращаться, или нажмите «Пропустить».');
 
             return;
         }
         $chat->contact_name = $name;
-        $chat->stateForget('awaiting');
         $chat->save();
-        $this->nextStep($chat);
+        $this->continueFlow($chat);
     }
 
     private function savePhone(MessengerChat $chat, string $text): void
@@ -336,28 +427,21 @@ class BotConversationService
         if (strlen($digits) === 10) {
             $digits = '7'.$digits;
         }
-        if (strlen($digits) < 10 || strlen($digits) > 15) {
-            $this->say($chat, 'Не похоже на номер телефона. Пришлите номер вида +7 900 123-45-67.');
+        if (strlen($digits) < 11 || strlen($digits) > 15) {
+            $this->say($chat, 'Не похоже на номер телефона. Пришлите номер вида +7 900 123-45-67 или нажмите «Пропустить».');
 
             return;
         }
         $chat->phone = '+'.$digits;
-        $chat->stateForget('awaiting');
         $chat->save();
-        $this->nextStep($chat);
-    }
-
-    private function askInn(MessengerChat $chat, ?string $text = null): void
-    {
-        $this->setAwaiting($chat, 'inn');
-        $this->say($chat, $text ?? 'ИНН вашей организации — найдём её в реестре.', [[['text' => 'У меня нет ИНН', 'data' => 'no_inn']]]);
+        $this->continueFlow($chat);
     }
 
     private function onInn(MessengerChat $chat, string $text): void
     {
         $inn = preg_replace('/\D+/', '', $text) ?? '';
         if (! in_array(strlen($inn), [9, 10, 12], true)) {
-            $this->say($chat, 'ИНН — 10 цифр у организации, 12 у ИП. Пришлите ещё раз или нажмите «У меня нет ИНН».', [[['text' => 'У меня нет ИНН', 'data' => 'no_inn']]]);
+            $this->say($chat, 'ИНН — 10 цифр у организации, 12 у ИП. Пришлите ещё раз, нажмите «У меня нет ИНН» или «Пропустить».');
 
             return;
         }
@@ -383,53 +467,53 @@ class BotConversationService
 
             return;
         }
-        $this->say($chat, 'Не нашли такой ИНН в реестре. Проверьте и пришлите ещё раз, или нажмите «У меня нет ИНН».', [[['text' => 'У меня нет ИНН', 'data' => 'no_inn']]]);
+        $this->say($chat, 'Не нашли такой ИНН в реестре. Проверьте и пришлите ещё раз, или нажмите «У меня нет ИНН».');
     }
 
     private function confirmOrganization(MessengerChat $chat): void
     {
         $org = Organization::find((int) $chat->stateGet('org_candidate', 0));
         if ($org === null) {
-            $this->askInn($chat);
+            $this->ask($chat, 'org');
 
             return;
         }
         $chat->company_name = (string) $org->name;
-        $chat->stateForget('org_candidate', 'awaiting');
+        $chat->stateForget('org_candidate');
 
         $status = $this->linkGuard->link($org, (string) $chat->email, [
             'source' => OrganizationLinkRequest::SOURCE_BOT,
             'self_declared' => true,
         ])['status'];
-        if (in_array($status, ['linked', 'exists'], true)) {
-            $chat->organization_id = $org->id;
-        }
+        $linked = in_array($status, ['linked', 'exists'], true);
+        $chat->organization_id = $linked ? $org->id : null;
         $chat->save();
 
-        $this->say($chat, in_array($status, ['linked', 'exists'], true)
-            ? '✅ Готово, вы зарегистрированы. Цены — для '.e((string) $org->name).'.'
-            : '✅ Вы зарегистрированы. Привязку к '.e((string) $org->name).' подтвердит менеджер — до этого показываем розничные цены.');
-        $this->nextStep($chat);
+        $this->say($chat, $linked
+            ? 'Цены — для '.e((string) $org->name).'.'
+            : 'Привязку к '.e((string) $org->name).' подтвердит менеджер — до этого показываем розничные цены.');
+        $this->continueFlow($chat);
     }
 
     private function askCompany(MessengerChat $chat, ?string $text = null): void
     {
-        $this->setAwaiting($chat, 'company');
-        $this->say($chat, $text ?? 'Напишите название организации (или «частное лицо»).');
+        $skip = $chat->stateGet('flow') === 'submit'
+            ? [[['text' => 'Пропустить', 'data' => 'skip']]]
+            : [[['text' => 'Отмена', 'data' => 'profile']]];
+        $this->askWith($chat, 'company', $text ?? 'Напишите название организации.', $skip);
     }
 
     private function onCompany(MessengerChat $chat, string $text): void
     {
         $name = trim(preg_replace('/\s+/u', ' ', $text) ?? '');
         if (mb_strlen($name) < 2 || mb_strlen($name) > 300) {
-            $this->say($chat, 'Напишите название организации.');
+            $this->say($chat, 'Напишите название организации или нажмите «Пропустить».');
 
             return;
         }
         $chat->company_name = $name;
-        $chat->stateForget('awaiting');
         $chat->save();
-        $this->nextStep($chat, '✅ Вы зарегистрированы.');
+        $this->continueFlow($chat);
     }
 
     /* ───────────────────────────── Цены ───────────────────────────── */
@@ -458,7 +542,7 @@ class BotConversationService
         $this->setAwaiting($chat, 'draft');
         $draft = (array) $chat->stateGet('draft', []);
         $this->say($chat, ($draft === [] ? '' : $this->draftSummary($chat)."\n\n")
-            .'Пришлите позиции: артикулы M… с количеством («M12345 2») или описание детали, марку лифта, фото шильдика словами. '
+            .'Пришлите позиции: артикулы M… с количеством («M12345 2») или описание детали и марку лифта. '
             .'Можно несколькими сообщениями. Когда всё — нажмите «Отправить заявку».', $this->draftButtons($chat));
     }
 
@@ -533,15 +617,36 @@ class BotConversationService
         $this->say($chat, 'Черновик очищен. Пришлите позиции заново.');
     }
 
-    private function submitDraft(MessengerChat $chat): void
+    /** «Отправить заявку»: перед первой заявкой — анкета (всё можно пропустить). */
+    private function send(MessengerChat $chat): void
     {
         if ((array) $chat->stateGet('draft', []) === []) {
             $this->startDraft($chat);
 
             return;
         }
+        if (! $chat->stateGet('profile_asked')) {
+            $chat->stateSet('flow', 'submit');
+            $chat->stateSet('profile_asked', true);
+            $chat->save();
+            if ($this->askNextQuestion($chat)) {
+                return;
+            }
+        }
+        $this->submit($chat);
+    }
+
+    private function submit(MessengerChat $chat): void
+    {
+        $chat->stateForget('flow', 'awaiting');
+        $chat->save();
+        if ((array) $chat->stateGet('draft', []) === []) {
+            $this->menu($chat);
+
+            return;
+        }
         $request = $this->requests->submit($chat);
-        $chat->stateForget('draft', 'awaiting');
+        $chat->stateForget('draft');
         $chat->save();
         $this->say($chat, '✅ Заявка <b>'.e((string) $request->internal_code).'</b> принята. '
             .'Менеджер подготовит предложение и пришлёт его на '.e((string) $chat->email).'.', self::MENU);
@@ -568,25 +673,40 @@ class BotConversationService
             : [[['text' => '✅ Отправить заявку', 'data' => 'send']], [['text' => '🗑 Очистить', 'data' => 'clear'], ['text' => 'Меню', 'data' => 'menu']]];
     }
 
+    /* ─────────────────────────── Мои данные ─────────────────────────── */
+
+    private function profile(MessengerChat $chat): void
+    {
+        $chat->stateForget('awaiting', 'flow');
+        $chat->save();
+        $org = $chat->organization?->name ?: $chat->company_name;
+        $dash = '—';
+        $this->say($chat, "<b>Ваши данные</b>\n"
+            .'E-mail: '.e((string) $chat->email)."\n"
+            .'Имя: '.e((string) ($chat->contact_name ?: $dash))."\n"
+            .'Телефон: '.e((string) ($chat->phone ?: $dash))."\n"
+            .'Организация: '.e((string) ($org ?: $dash)).($chat->inn ? ', ИНН '.e((string) $chat->inn) : '')
+            .($chat->organization_id === null && $org ? "\n<i>Цены пока розничные — привязку к организации подтверждает менеджер.</i>" : ''),
+            [
+                [['text' => '✏️ Имя', 'data' => 'edit:name'], ['text' => '✏️ Телефон', 'data' => 'edit:phone'], ['text' => '✏️ Организация', 'data' => 'edit:org']],
+                [['text' => '✉️ Сменить e-mail', 'data' => 'edit:email'], ['text' => 'Меню', 'data' => 'menu']],
+            ]);
+    }
+
+    private function editField(MessengerChat $chat, string $field): void
+    {
+        $chat->stateSet('flow', 'profile');
+        $chat->save();
+        $field === 'email' ? $this->askEmail($chat) : $this->ask($chat, in_array($field, self::QUESTIONS, true) ? $field : 'name');
+    }
+
     /* ───────────────────────────── Прочее ───────────────────────────── */
 
     private function menu(MessengerChat $chat): void
     {
-        $chat->stateForget('awaiting');
+        $chat->stateForget('awaiting', 'flow');
         $chat->save();
-        $this->say($chat, 'Что сделать? Можно просто прислать артикул M… — покажу цену.', self::MENU);
-    }
-
-    private function profile(MessengerChat $chat): void
-    {
-        $org = $chat->organization?->name ?: $chat->company_name;
-        $this->say($chat, "<b>Ваши данные</b>\n"
-            .'E-mail: '.e((string) $chat->email)."\n"
-            .'Имя: '.e((string) $chat->contact_name)."\n"
-            .'Телефон: '.e((string) $chat->phone)."\n"
-            .'Организация: '.e((string) $org).($chat->inn ? ', ИНН '.e((string) $chat->inn) : '')
-            .($chat->organization_id === null && $org ? "\n<i>Цены пока розничные — привязку к организации подтверждает менеджер.</i>" : ''),
-            [[['text' => '✉️ Сменить e-mail', 'data' => 'email_change'], ['text' => '🏢 Сменить организацию', 'data' => 'org_change']], [['text' => 'Меню', 'data' => 'menu']]]);
+        $this->say($chat, 'Пришлите артикул M… — покажу цену и наличие. Или оформите заявку.', self::MENU);
     }
 
     private function setAwaiting(MessengerChat $chat, string $step): void
