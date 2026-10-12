@@ -106,6 +106,8 @@
         // Уведомления клиенту вынесены в подпункт страницы «Настройки»,
         // не дублируем в горизонтальном топбаре (Phase 6).
         $navLinks[] = ['route' => 'settings.index', 'label' => 'Настройки', 'pattern' => 'settings.*|notifications.*|marketing-blocks.*'];
+        // Диалоги ботов заявок Telegram/MAX — разбор работы ботов.
+        $navLinks[] = ['route' => 'bot-chats.index', 'label' => 'Боты', 'pattern' => 'bot-chats.*'];
     }
     if ($user?->hasRole('admin')) {
         // Подключение основной почты и активация/деактивация маршрутизации —

@@ -391,6 +391,11 @@ Route::middleware('auth')->group(function () {
 
     // Mail routing rules — управление правилами для РОП и директора.
     Route::middleware('role:head_of_sales,director,admin')->group(function () {
+        // «Боты» — диалоги ботов заявок Telegram/MAX: воронка и ленты для разбора.
+        Route::get('/dashboard/bot-chats', function () {
+            return view('admin.bot-chats.index');
+        })->name('bot-chats.index');
+
         // Раздел «IQOT» — анализ цен конкурентов: пул позиций (из проигранных КП
         // + ручные из каталога), статусы submission и отчёты по позициям.
         Route::get('/dashboard/iqot', function () {

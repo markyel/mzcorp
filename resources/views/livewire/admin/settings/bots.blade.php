@@ -1,6 +1,8 @@
 <div class="ds-card mb-3">
     <div class="ds-card-header">
         <h3>Боты заявок</h3>
+        <span class="flex-1"></span>
+        <a href="{{ route('bot-chats.index') }}" class="btn btn-sm">Диалоги и воронка →</a>
     </div>
 
     <div class="px-[18px] py-3 text-[11.5px] text-fg-3 leading-snug border-b border-[var(--border-subtle)]">
