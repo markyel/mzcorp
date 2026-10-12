@@ -412,6 +412,17 @@ return [
     // Мессенджер MAX (VK): публикация медиаплана в канал ботом. Токен бота и
     // id канала — в доступах канала раздела «Маркетинг» (зашифрованы в БД);
     // здесь только адрес Bot API (менялся: platform-api → platform-api2).
+    // Медиаплан, ВКонтакте: вход администратора сообщества через VK ID —
+    // его ключом грузим фото на стену (ключ сообщества этого не умеет).
+    // client_id — «ID приложения» из кабинета VK ID; адрес возврата
+    // https://mzcorp.ru/dashboard/marketing/vk/callback должен стоять там в
+    // «Доверенных Redirect URL». См. VkAdminTokenService.
+    'vk_id' => [
+        'client_id' => env('VK_ID_CLIENT_ID', ''),
+        'base' => env('VK_ID_BASE', 'https://id.vk.ru'),
+        'scope' => env('VK_ID_SCOPE', 'wall photos groups'),
+    ],
+
     'max' => [
         'api_base' => env('MAX_API_BASE', 'https://platform-api2.max.ru'),
         // Корневой сертификат Минцифры: им подписаны сервера MAX. Доверие — только в запросах к MAX.

@@ -139,7 +139,7 @@ class MediaPublisherService
                 }
                 $name = $r['response']['groups'][0]['name'] ?? $r['response'][0]['name'] ?? 'сообщество';
 
-                return ['ok' => true, 'message' => 'ВК отвечает: '.$name.'.'];
+                return ['ok' => true, 'message' => 'ВК отвечает: '.$name.'. '.$this->vkPhotoStatus($channel, $groupId)];
             }
 
             $r = Http::timeout(self::TIMEOUT)
@@ -506,8 +506,16 @@ class MediaPublisherService
      */
     private function uploadVkPhotos(MediaChannel $channel, string $ownerId, array $images): array
     {
-        $token = (string) $channel->secret('access_token');
         $groupId = ltrim($ownerId, '-');
+
+        // Ключ администратора (VK ID) — штатная загрузка на стену сообщества.
+        // Обход через сервер сообщений ниже с 08.10.2026 возвращает пустое photo.
+        $adminToken = app(VkAdminTokenService::class)->accessToken($channel);
+        if ($adminToken !== null) {
+            return $this->uploadVkWallPhotos($channel, $groupId, $adminToken, $images);
+        }
+
+        $token = (string) $channel->secret('access_token');
         $out = [];
 
         // Ключ СООБЩЕСТВА загрузку на стену не пускает: photos.getWallUploadServer
@@ -578,6 +586,100 @@ class MediaPublisherService
                     .(! empty($photo['access_key']) ? '_'.$photo['access_key'] : '');
             } catch (\Throwable $e) {
                 Log::warning('MediaPublisherService: vk photo upload failed (non-fatal)', [
+                    'channel_id' => $channel->id,
+                    'photo_url' => $url,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $out;
+    }
+
+    /** Можно ли грузить фото в ВК: ключ администратора есть и ВК даёт сервер загрузки на стену. */
+    private function vkPhotoStatus(MediaChannel $channel, string $groupId): string
+    {
+        if (! VkAdminTokenService::connected($channel)) {
+            return 'Фото: нет ключа администратора — посты уйдут без картинок. Нажмите «вход ВК».';
+        }
+        $token = app(VkAdminTokenService::class)->accessToken($channel);
+        if ($token === null) {
+            return 'Фото: ключ администратора не продлился — войдите заново («вход ВК»).';
+        }
+
+        $r = Http::timeout(self::TIMEOUT)->asForm()->post('https://api.vk.com/method/photos.getWallUploadServer', [
+            'group_id' => $groupId,
+            'access_token' => $token,
+            'v' => self::VK_API_VERSION,
+        ])->json();
+
+        return isset($r['response']['upload_url'])
+            ? 'Фото: можно, ключ администратора действует.'
+            : 'Фото: ВК не даёт загрузку ключом администратора — '.($r['error']['error_msg'] ?? 'нет ответа').'.';
+    }
+
+    /**
+     * Фото на стену сообщества ключом администратора: getWallUploadServer →
+     * файл → saveWallPhoto с group_id. Владелец фото — сообщество, поэтому
+     * к записи его прикладывает и ключ сообщества.
+     *
+     * @param  list<string>  $images
+     * @return list<string>
+     */
+    private function uploadVkWallPhotos(MediaChannel $channel, string $groupId, string $token, array $images): array
+    {
+        $server = Http::timeout(self::TIMEOUT)->asForm()
+            ->post('https://api.vk.com/method/photos.getWallUploadServer', [
+                'group_id' => $groupId,
+                'access_token' => $token,
+                'v' => self::VK_API_VERSION,
+            ])->json();
+        $uploadUrl = $server['response']['upload_url'] ?? null;
+        if ($uploadUrl === null) {
+            Log::warning('MediaPublisherService: vk wall upload server unavailable (admin token)', [
+                'channel_id' => $channel->id,
+                'error' => $server['error']['error_msg'] ?? 'no upload_url',
+            ]);
+
+            return [];
+        }
+
+        $out = [];
+        foreach (array_slice($images, 0, self::MAX_PHOTOS) as $url) {
+            try {
+                $file = Http::timeout(self::TIMEOUT)->get($url);
+                if (! $file->successful() || $file->body() === '') {
+                    continue;
+                }
+
+                $uploaded = $this->retryConnect(Http::timeout(self::TIMEOUT * 3))
+                    ->attach('photo', $file->body(), 'photo.jpg')
+                    ->post($uploadUrl)
+                    ->json() ?? [];
+
+                $saved = Http::timeout(self::TIMEOUT)->asForm()
+                    ->post('https://api.vk.com/method/photos.saveWallPhoto', [
+                        'group_id' => $groupId,
+                        'photo' => (string) ($uploaded['photo'] ?? ''),
+                        'server' => $uploaded['server'] ?? '',
+                        'hash' => $uploaded['hash'] ?? '',
+                        'access_token' => $token,
+                        'v' => self::VK_API_VERSION,
+                    ])->json();
+
+                $photo = $saved['response'][0] ?? null;
+                if ($photo === null) {
+                    Log::warning('MediaPublisherService: vk wall photo not saved', [
+                        'channel_id' => $channel->id,
+                        'photo_url' => $url,
+                        'error' => $saved['error']['error_msg'] ?? 'unknown',
+                    ]);
+
+                    continue;
+                }
+                $out[] = 'photo'.$photo['owner_id'].'_'.$photo['id'];
+            } catch (\Throwable $e) {
+                Log::warning('MediaPublisherService: vk wall photo upload failed (non-fatal)', [
                     'channel_id' => $channel->id,
                     'photo_url' => $url,
                     'error' => $e->getMessage(),

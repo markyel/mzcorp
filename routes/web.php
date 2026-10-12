@@ -489,6 +489,15 @@ Route::middleware('auth')->group(function () {
             return view('marketing.index');
         })->name('marketing.index');
 
+        // Вход администратора сообщества ВК (VK ID) — для фото в постах.
+        Route::get('/dashboard/marketing/vk/{channel}/connect',
+            [\App\Http\Controllers\Marketing\VkAdminAuthController::class, 'connect'])
+            ->whereNumber('channel')
+            ->name('marketing.vk.connect');
+        Route::get('/dashboard/marketing/vk/callback',
+            [\App\Http\Controllers\Marketing\VkAdminAuthController::class, 'callback'])
+            ->name('marketing.vk.callback');
+
         Route::get('/dashboard/marketing/reports/{report}/download',
             [MarketingReportController::class, 'download'])
             ->whereNumber('report')

@@ -201,6 +201,16 @@
                         <button type="button" class="btn btn-xs" wire:click="checkChannel({{ $ch->id }})"
                                 wire:loading.attr="disabled" wire:target="checkChannel({{ $ch->id }})">связь</button>
                     @endif
+                    @if($ch->kind === 'vk')
+                        {{-- Фото в ВК грузятся ключом администратора сообщества (VK ID). --}}
+                        @php $vkAdmin = \App\Services\Marketing\VkAdminTokenService::connected($ch); @endphp
+                        <span class="chip text-[10px]"
+                              style="{{ $vkAdmin ? 'background:var(--emerald-50);color:var(--emerald-700)' : 'background:var(--amber-50);color:var(--amber-800)' }}"
+                              title="{{ $vkAdmin ? 'Фото и обложки уходят в посты' : 'Без входа администратора ВК посты уходят без картинок' }}">
+                            фото: {{ $vkAdmin ? 'да' : 'нет' }}</span>
+                        <a href="{{ route('marketing.vk.connect', $ch) }}" class="btn btn-xs"
+                           title="Войти администратором сообщества через VK ID — его ключом грузим фото на стену">вход ВК</a>
+                    @endif
                     @if($ch->isPostable() && ! $ch->isMirror())
                         <button type="button" class="btn btn-xs {{ $ch->auto_publish ? 'btn-primary' : '' }}"
                                 wire:click="toggleAutoPublish({{ $ch->id }})"
