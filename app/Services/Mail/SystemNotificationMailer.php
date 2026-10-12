@@ -27,8 +27,12 @@ class SystemNotificationMailer
     {
     }
 
-    /** @param  string|null  $fromName  имя отправителя; клиентам — «MyZip», а не внутреннее «MyLift CRM» */
-    public function sendMailable(string $to, Mailable $mailable, ?string $fromName = null): bool
+    /**
+     * @param  string|null  $fromName  имя отправителя; клиентам — «MyZip», а не внутреннее «MyLift CRM»
+     * @param  string|null  $messageId  свой Message-ID (без <>) — чтобы сопоставить письмо
+     *                                  с его локальной копией в почте mzCorp
+     */
+    public function sendMailable(string $to, Mailable $mailable, ?string $fromName = null, ?string $messageId = null): bool
     {
         $to = trim($to);
         if ($to === '') {
@@ -56,6 +60,9 @@ class SystemNotificationMailer
             // в личных ящиках НЕ должны линковаться к заявкам / плодить
             // заявки / попадать в mail-review (гард в MailRouter::route).
             $email->getHeaders()->addTextHeader('X-MyLift-System-Notification', '1');
+            if ($messageId !== null) {
+                $email->getHeaders()->addIdHeader('Message-ID', $messageId);
+            }
 
             // sendAdHoc: свежий OAuth-токен + резервный канал при сбое Яндекса.
             $this->sender->sendAdHoc($mailbox, $email);
