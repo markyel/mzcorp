@@ -80,40 +80,11 @@ class MediaPublisherService
             return ['ok' => true, 'message' => 'Опубликовано в ленте.', 'url' => $publication->url];
         }
 
-        // Артикулы в тексте превращаем в ссылки на карточки товара: читателю
-        // из ленты идти больше некуда, а по артикулу он искать не станет.
-        ['text' => $text, 'html' => $html] = app(MediaLinkService::class)
-            ->linkify($this->text($publication), (string) $channel->kind);
-
-        $images = $this->usableImages($publication->images());
-
-        $res = match ($channel->kind) {
-            'vk' => $this->postToVk($channel, $text, $images),
-            'telegram' => $this->postToTelegram($channel, $text, $images, $html),
-            'max' => $this->postToMax($channel, $text, $images, $html),
-            default => ['ok' => false, 'message' => 'Канал не поддержан.', 'url' => null, 'external_id' => null],
-        };
-
+        $res = $this->deliver($publication, $channel);
         if (! $res['ok']) {
-            $channel->forceFill(['last_error' => mb_substr($res['message'], 0, 500)])->save();
-            Log::warning('MediaPublisherService: publish failed', [
-                'publication_id' => $publication->id,
-                'channel_id' => $channel->id,
-                'kind' => $channel->kind,
-                'error' => $res['message'],
-            ]);
-
             return ['ok' => false, 'message' => $res['message'], 'url' => null];
         }
 
-        $publication->forceFill([
-            'status' => 'published',
-            'published_at' => now(),
-            'url' => $res['url'] ?? $publication->url,
-            'external_id' => $res['external_id'] ?? null,
-        ])->save();
-
-        $channel->forceFill(['last_posted_at' => now(), 'last_error' => null])->save();
         $this->recordMirrors($publication, $channel);
 
         // Срок темы двигаем здесь, а не в вызывающем коде: кнопка «опубликовать»
@@ -217,16 +188,73 @@ class MediaPublisherService
     }
 
     /**
-     * Отметить публикацию на площадках-зеркалах.
+     * Отправка материала на площадку и отметка о выходе — без зеркал и без
+     * сдвига срока темы: это делает publish() один раз на выпуск.
+     *
+     * @return array{ok: bool, message: string, url: ?string, external_id: ?string}
+     */
+    private function deliver(MediaPublication $publication, MediaChannel $channel): array
+    {
+        // Артикулы в тексте превращаем в ссылки на карточки товара: читателю
+        // из ленты идти больше некуда, а по артикулу он искать не станет.
+        ['text' => $text, 'html' => $html] = app(MediaLinkService::class)
+            ->linkify($this->text($publication), (string) $channel->kind);
+
+        $images = $this->usableImages($publication->images());
+
+        $res = match ($channel->kind) {
+            'vk' => $this->postToVk($channel, $text, $images),
+            'telegram' => $this->postToTelegram($channel, $text, $images, $html),
+            'max' => $this->postToMax($channel, $text, $images, $html),
+            default => ['ok' => false, 'message' => 'Канал не поддержан.', 'url' => null, 'external_id' => null],
+        };
+
+        if (! $res['ok']) {
+            $channel->forceFill(['last_error' => mb_substr($res['message'], 0, 500)])->save();
+            Log::warning('MediaPublisherService: publish failed', [
+                'publication_id' => $publication->id,
+                'channel_id' => $channel->id,
+                'kind' => $channel->kind,
+                'error' => $res['message'],
+            ]);
+
+            return $res;
+        }
+
+        $publication->forceFill([
+            'status' => 'published',
+            'published_at' => now(),
+            'url' => $res['url'] ?? $publication->url,
+            'external_id' => $res['external_id'] ?? null,
+        ])->save();
+
+        $channel->forceFill(['last_posted_at' => now(), 'last_error' => null])->save();
+
+        return $res;
+    }
+
+    /**
+     * Площадки, повторяющие канал.
      *
      * Дзен, привязанный к телеграм-каналу, забирает пост сам — своей кнопки
      * «опубликовать» у него нет и быть не может. Но в учёте публикация там
      * состоялась, иначе канал вечно выглядит молчащим. Ссылку не выдумываем:
      * её проставит человек, когда пост появится.
+     *
+     * Площадку, куда публикуем сами (MAX — дубль Telegram, решение 12.10.2026),
+     * не отмечаем, а публикуем: тот же текст, та же обложка, сразу после выхода
+     * в исходный канал. Не ушло — копия остаётся черновиком, ошибка видна в
+     * канале, исходная публикация от этого не падает.
      */
     private function recordMirrors(MediaPublication $source, MediaChannel $channel): void
     {
         foreach ($channel->mirrors()->where('is_active', true)->get() as $mirror) {
+            if ($mirror->isPostable() && $mirror->kind !== 'rss') {
+                $this->duplicate($source, $mirror);
+
+                continue;
+            }
+
             MediaPublication::create([
                 'media_topic_id' => $source->media_topic_id,
                 'media_channel_id' => $mirror->id,
@@ -242,6 +270,31 @@ class MediaPublisherService
 
             $mirror->forceFill(['last_posted_at' => now()])->save();
         }
+    }
+
+    /** Дубль поста в площадку, повторяющую канал (см. recordMirrors). */
+    private function duplicate(MediaPublication $source, MediaChannel $mirror): void
+    {
+        $copy = MediaPublication::create([
+            'media_topic_id' => $source->media_topic_id,
+            'media_channel_id' => $mirror->id,
+            'title' => $source->title,
+            'body' => $source->body,
+            'status' => 'draft',
+            'planned_for' => $source->planned_for,
+            'subject_key' => $source->subject_key,
+            'image_urls' => $source->image_urls,
+            'model' => $source->model,
+            'created_by_user_id' => $source->created_by_user_id,
+        ]);
+
+        if (! $mirror->isConnected()) {
+            $mirror->forceFill(['last_error' => 'Дубль поста не ушёл: у канала не заполнен доступ — копия лежит черновиком.'])->save();
+
+            return;
+        }
+
+        $this->deliver($copy, $mirror);
     }
 
     /**

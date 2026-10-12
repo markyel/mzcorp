@@ -129,7 +129,7 @@
                 <div class="grid gap-2 md:grid-cols-2 mb-2">
                     <input type="text" wire:model="chUrl" placeholder="Ссылка на канал" class="{{ $inp }}">
                     <select wire:model="chMirrorOf" class="{{ $inp }}"
-                            title="Площадка забирает посты из другого канала — свой материал ей не пишут">
+                            title="Площадка повторяет другой канал — свой материал ей не пишут. Дзен забирает посты сам; ВК, Telegram и MAX получают тот же пост сразу после выхода в исходном канале">
                         <option value="">публикуем сюда сами</option>
                         @foreach($this->channels->where('is_active', true)->whereNull('mirror_of_channel_id') as $src)
                             @if($src->id !== $chEditId)
@@ -160,12 +160,22 @@
                     @if($ch->posts_per_week)
                         <span class="text-[11.5px] text-fg-3">план {{ $ch->posts_per_week }}/нед</span>
                     @endif
+                    @php $duplicate = $ch->isMirror() && $ch->isPostable() && $ch->kind !== 'rss'; @endphp
                     @if($ch->isMirror())
                         <span class="chip text-[10px]" style="background:var(--violet-50);color:var(--violet-700)"
-                              title="Площадка забирает посты из этого канала сама — отдельный материал ей не пишется">
-                            повторяет: {{ $ch->mirrorOf?->name }}
+                              title="{{ $duplicate
+                                ? 'Тот же пост — текст и обложка — уходит сюда сразу после выхода в «'.$ch->mirrorOf?->name.'»; отдельный материал не пишется'
+                                : 'Площадка забирает посты из этого канала сама — отдельный материал ей не пишется' }}">
+                            {{ $duplicate ? 'дублирует' : 'повторяет' }}: {{ $ch->mirrorOf?->name }}
                         </span>
-                    @elseif($ch->isPostable())
+                    @endif
+                    @if($duplicate)
+                        <span class="chip text-[10px]"
+                              style="{{ $ch->isConnected()
+                                ? 'background:var(--emerald-50);color:var(--emerald-700)'
+                                : 'background:var(--amber-50);color:var(--amber-800)' }}">
+                            {{ $ch->isConnected() ? 'подключён' : 'нет доступа' }}</span>
+                    @elseif($ch->isPostable() && ! $ch->isMirror())
                         <span class="chip text-[10px]"
                               style="{{ $ch->isConnected()
                                 ? 'background:var(--emerald-50);color:var(--emerald-700)'
@@ -190,6 +200,8 @@
                         <button type="button" class="btn btn-xs" wire:click="startCredentials({{ $ch->id }})">доступ</button>
                         <button type="button" class="btn btn-xs" wire:click="checkChannel({{ $ch->id }})"
                                 wire:loading.attr="disabled" wire:target="checkChannel({{ $ch->id }})">связь</button>
+                    @endif
+                    @if($ch->isPostable() && ! $ch->isMirror())
                         <button type="button" class="btn btn-xs {{ $ch->auto_publish ? 'btn-primary' : '' }}"
                                 wire:click="toggleAutoPublish({{ $ch->id }})"
                                 wire:confirm="{{ $ch->auto_publish
@@ -506,7 +518,9 @@
             включённой автопубликацией; остальные ждут вашей кнопки. Публиковать через API умеем во
             ВКонтакте, Telegram и MAX. У Дзена своего API публикаций нет, но его канал привязывается к
             телеграм-каналу и забирает посты сам: отметьте Дзен как «повторяет Telegram» — материал будет
-            писаться один, а публикация запишется на обе площадки.
+            писаться один, а публикация запишется на обе площадки. Канал, куда публикуем сами (например, MAX),
+            тоже можно отметить «повторяет Telegram» — тогда тот же пост с той же обложкой уйдёт туда сразу после
+            выхода в Telegram, по расписанию и при ручной публикации.
         </div>
     </div>
 </div>
