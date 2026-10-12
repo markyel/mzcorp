@@ -119,6 +119,18 @@ class MediaCoverTest extends TestCase
         $this->assertStringContainsString('safety system', $res['message']);
     }
 
+    public function test_short_preposition_does_not_hang_at_line_end(): void
+    {
+        $wrap = new \ReflectionMethod(MediaCoverService::class, 'wrap');
+        $font = resource_path('fonts/PTSans-Bold.ttf');
+        $box = imagettfbbox(40, 0, $font, 'Как оформить заявку на');
+        $width = ($box[2] - $box[0]) + 2;
+
+        $lines = $wrap->invoke(app(MediaCoverService::class), 'Как оформить заявку на ролик', $font, 40.0, $width);
+
+        $this->assertSame(['Как оформить заявку', 'на ролик'], $lines);
+    }
+
     public function test_covers_can_be_switched_off(): void
     {
         $this->assertTrue(MediaCoverService::enabled());

@@ -296,7 +296,19 @@ class MediaCoverService
     {
         $lines = [];
         $line = '';
-        foreach (preg_split('/\s+/u', trim($text)) ?: [] as $word) {
+        // Короткое слово («на», «за», «и») не оставляем в конце строки — клеим
+        // к следующему, как неразрывный пробел в вёрстке.
+        $words = preg_split('/\s+/u', trim($text)) ?: [];
+        $glued = [];
+        foreach ($words as $word) {
+            $prev = end($glued);
+            if ($prev !== false && mb_strlen($prev) <= 2 && preg_match('/^\p{L}+$/u', $prev) && ! str_contains($prev, ' ')) {
+                $glued[count($glued) - 1] = $prev.' '.$word;
+            } else {
+                $glued[] = $word;
+            }
+        }
+        foreach ($glued as $word) {
             $try = $line === '' ? $word : $line.' '.$word;
             $box = imagettfbbox($size, 0, $font, $try);
             if ($line !== '' && ($box[2] - $box[0]) > $maxWidth) {
