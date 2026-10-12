@@ -128,9 +128,28 @@ class OutgoingMailSender
         // что увидел клиент, а не «пустое» draft-тело.
         $finalBody = $this->mimeBuilder->composeFinalBody($draft);
 
+        // Сборка письма — отдельно от отправки: её ошибка (битый адрес или
+        // Message-ID в заголовках) не лечится повтором. 12.10.2026 такой отказ
+        // на резервном канале встал в очередь «сервер не ответил» на 12 попыток.
         try {
             $email = $this->mimeBuilder->build($draft, $mailbox);
+        } catch (\Throwable $e) {
+            Log::error('OutgoingMailSender: MIME build failed', [
+                'draft_id' => $draft->id,
+                'mailbox_id' => $mailbox->id,
+                'error' => $e->getMessage(),
+            ]);
+            $draft->refresh();
 
+            return [
+                'success' => false,
+                'draft' => $draft,
+                'error' => 'mime_build_failed',
+                'error_message' => 'Письмо не собралось: '.$e->getMessage(),
+            ];
+        }
+
+        try {
             if ($viaFallback) {
                 // Служебные заголовки провайдеру — только в отправляемую копию,
                 // в «Отправленные» (rawMime) они не попадают.

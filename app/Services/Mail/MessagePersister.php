@@ -850,6 +850,18 @@ class MessagePersister
      */
     private function extractReferences(Message|HeaderEnvelope $msg): ?array
     {
+        // Сначала — из сырого заголовка по угловым скобкам. webklex режет
+        // References по пробелу и вырезает «<>», поэтому «<a@x><b@y>» без
+        // пробелов (так пишет mlt.pro) склеивался в «a@xb@y», и ответ на
+        // такое письмо не собирался: Symfony отклоняет References (12.10.2026,
+        // счёт М3-10672 завис в «Ожидает отправки»).
+        $ids = self::referencesFromRawHeader($msg instanceof HeaderEnvelope
+            ? $msg->rawHeader()
+            : (string) ($msg->getHeader()?->raw ?? ''));
+        if ($ids !== []) {
+            return $ids;
+        }
+
         $raw = $this->stringify($msg->getReferences());
         if ($raw === '') {
             return null;
@@ -868,6 +880,22 @@ class MessagePersister
         }
 
         return $ids ?: null;
+    }
+
+    /**
+     * Message-ID из заголовка References сырого письма: всё, что в угловых
+     * скобках, с учётом переноса длинного заголовка на несколько строк.
+     *
+     * @return list<string>
+     */
+    public static function referencesFromRawHeader(string $rawHeader): array
+    {
+        if ($rawHeader === '' || ! preg_match('/^References:[ \t]*(.*(?:\r?\n[ \t]+.*)*)/mi', $rawHeader, $m)) {
+            return [];
+        }
+        preg_match_all('/<([^<>\s]+@[^<>\s]+)>/', $m[1], $ids);
+
+        return array_values(array_unique($ids[1]));
     }
 
     private function extractFromEmail(Message|HeaderEnvelope $msg): string

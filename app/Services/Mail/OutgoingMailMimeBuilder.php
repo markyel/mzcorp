@@ -378,7 +378,9 @@ class OutgoingMailMimeBuilder
         $out = [];
         foreach ($ids as $id) {
             $id = trim((string) $id, " \t\r\n<>,;");
-            if ($id === '' || ! str_contains($id, '@') || preg_match('/\s/', $id)) {
+            // Ровно один «@»: склейка нескольких Message-ID (разбор References
+            // без пробелов, 12.10.2026) иначе роняет сборку письма в Symfony.
+            if ($id === '' || substr_count($id, '@') !== 1 || preg_match('/[\s<>]/', $id)) {
                 continue;
             }
             $out[] = $id;

@@ -34,6 +34,12 @@ final class HeaderEnvelope
         return $this->attr('references');
     }
 
+    /** Сырой заголовок письма — для полей, которые webklex разбирает неточно (References). */
+    public function rawHeader(): string
+    {
+        return $this->header->raw;
+    }
+
     public function getSubject(): ?Attribute
     {
         return $this->attr('subject');
