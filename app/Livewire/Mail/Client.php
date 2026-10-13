@@ -1203,6 +1203,12 @@ class Client extends Component
                 'ustate.flagged_at as my_flagged_at',
             ])
             ->selectRaw('LEFT(email_messages.body_plain, 200) as body_plain')
+            // Скрепка у копии письма заявки в личном ящике: своих вложений у неё
+            // нет, они у оригинала (см. EmailMessage::borrowOriginAttachments).
+            ->selectRaw("EXISTS (SELECT 1 FROM email_attachments oa
+                WHERE oa.email_message_id = CASE WHEN email_messages.detected_artifacts->>'cross_mailbox_copy_of' ~ '^[0-9]+$'
+                    THEN (email_messages.detected_artifacts->>'cross_mailbox_copy_of')::bigint END
+                  AND oa.is_inline = false) as origin_has_attachments")
             ->with('relatedRequest:id,internal_code,status,onec_number')
             // Только СВОИ метки: набор личный, чужие чипы в строке не нужны.
             ->with(['labels' => fn ($q) => $q->select('mail_labels.id', 'name', 'color')
@@ -1254,22 +1260,9 @@ class Client extends Component
 
         $thread = $this->buildThread($anchor)->loadMissing('attachments');
 
-        // Копия письма заявки, которую Яндекс ещё не принял (server_copy_pending):
-        // своих вложений у неё нет до sync личного ящика — показываем вложения
-        // оригинала из общего ящика (скачать их менеджеру можно: письмо его заявки).
-        $pendingOrigins = $thread
-            ->filter(fn (EmailMessage $m) => $m->attachments->isEmpty()
-                && data_get($m->detected_artifacts, 'server_copy_pending') === true
-                && data_get($m->detected_artifacts, 'cross_mailbox_copy_of') !== null)
-            ->mapWithKeys(fn (EmailMessage $m) => [$m->id => (int) data_get($m->detected_artifacts, 'cross_mailbox_copy_of')]);
-        if ($pendingOrigins->isNotEmpty()) {
-            $origins = EmailMessage::withHistory()->with('attachments')->whereIn('id', $pendingOrigins->values())->get()->keyBy('id');
-            foreach ($thread as $m) {
-                if (isset($pendingOrigins[$m->id]) && isset($origins[$pendingOrigins[$m->id]])) {
-                    $m->setRelation('attachments', $origins[$pendingOrigins[$m->id]]->attachments);
-                }
-            }
-        }
+        // Копия письма заявки в личном ящике своих вложений не имеет — показываем
+        // вложения оригинала (скачать их менеджеру можно: письмо его заявки).
+        EmailMessage::borrowOriginAttachments($thread);
 
         return $thread;
     }
@@ -1278,7 +1271,13 @@ class Client extends Component
     #[Computed]
     public function openAnchor(): ?EmailMessage
     {
-        return $this->openId ? $this->findAccessible($this->openId) : null;
+        $anchor = $this->openId ? $this->findAccessible($this->openId) : null;
+        if ($anchor) {
+            $anchor->loadMissing('attachments');
+            EmailMessage::borrowOriginAttachments([$anchor]);
+        }
+
+        return $anchor;
     }
 
     /* ------------------------------ Queries ------------------------------ */
@@ -1561,16 +1560,23 @@ class Client extends Component
         $user = $this->user();
 
         if ($anchor->related_request_id) {
+            $anchorMid = mb_strtolower(trim((string) $anchor->message_id));
+
             return EmailMessage::query()
                 ->visibleTo($user)
                 ->with('relatedRequest:id,internal_code,status,onec_number')
                 ->where('related_request_id', $anchor->related_request_id)
                 // Не тащить кросс-ящиковые тех.копии (одно письмо в личном INBOX
-                // менеджера + в общем ящике) — иначе тред двоится.
-                ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
+                // менеджера + в общем ящике) — иначе тред двоится. Кроме открытой:
+                // её показываем вместо оригинала, иначе на экране копия без
+                // треда, а оригинал висит в «Ещё 1 письмо» (M-2026-19243).
+                ->where(fn ($q) => $q->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
+                    ->orWhere('id', $anchor->id))
                 ->orderByRaw('sent_at ASC NULLS LAST')
                 ->orderBy('id')
                 ->get()
+                ->reject(fn (EmailMessage $m) => $anchorMid !== '' && $m->id !== $anchor->id
+                    && mb_strtolower(trim((string) $m->message_id)) === $anchorMid)
                 // Дедуп по message_id (Inbox+Sent-копии одного письма), как в
                 // SharedMailService::threadFor; строки без message_id уникальны.
                 ->unique(fn (EmailMessage $m) => ($mid = trim((string) $m->message_id)) !== ''

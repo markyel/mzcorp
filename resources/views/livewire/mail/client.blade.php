@@ -779,7 +779,7 @@ body.mail-resizing iframe{pointer-events:none}
                         <div class="l3">
                             <span class="snip">{{ \Illuminate\Support\Str::limit(trim((string) $m->body_plain), 90) }}</span>
                             <span class="metaicons">
-                                @if($m->attachments_count || ($m->history_has_attachments && $m->body_fetched_at === null))<span class="clip">📎</span>@endif
+                                @if($m->attachments_count || $m->origin_has_attachments || ($m->history_has_attachments && $m->body_fetched_at === null))<span class="clip">📎</span>@endif
                                 @if($m->mailbox_folder_id && $m->mailbox_folder_id !== $this->customFolderId() && isset($this->folderNames[$m->mailbox_folder_id]))
                                     <span class="fchip" title="Письмо лежит в папке">▸ {{ $this->folderNames[$m->mailbox_folder_id] }}</span>
                                 @endif

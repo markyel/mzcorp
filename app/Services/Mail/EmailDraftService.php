@@ -215,6 +215,8 @@ class EmailDraftService
         // Inline-картинки (cid: в теле) переносим как inline с тем же
         // content_id, а в HTML черновика cid: → наш inline-роут, чтобы редактор
         // и тред их показывали; при отправке MimeBuilder вернёт cid:.
+        // Копия письма заявки в личном ящике своих вложений не имеет — берём у оригинала.
+        EmailMessage::borrowOriginAttachments([$source]);
         $inlineCids = [];
         foreach ($source->attachments as $att) {
             try {

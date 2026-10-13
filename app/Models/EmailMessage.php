@@ -212,6 +212,39 @@ class EmailMessage extends Model
             ->values();
     }
 
+    /**
+     * Копиям письма в личном ящике менеджера — вложения оригинала.
+     *
+     * MailDeliverToManagerService создаёт копию без вложений, а sync личного
+     * ящика находит эту строку и заполняет только imap_uid — вложения у копии
+     * так и не появляются (кейс M-2026-19243: фото от клиента есть в общем
+     * ящике, в почте менеджера письмо пустое; за 30 дней ~1,4 тыс. таких копий).
+     * Берём вложения оригинала, если своих у копии нет; естественные копии
+     * (письмо пришло сразу в оба ящика) свои вложения имеют и не трогаются.
+     *
+     * @param  iterable<int, self>  $messages
+     */
+    public static function borrowOriginAttachments(iterable $messages): void
+    {
+        $origins = [];
+        foreach ($messages as $m) {
+            $originId = data_get($m->detected_artifacts, 'cross_mailbox_copy_of');
+            if (is_numeric($originId) && $m->attachments->isEmpty()) {
+                $origins[$m->id] = (int) $originId;
+            }
+        }
+        if ($origins === []) {
+            return;
+        }
+
+        $found = self::withHistory()->with('attachments')->whereIn('id', array_unique($origins))->get()->keyBy('id');
+        foreach ($messages as $m) {
+            if (isset($origins[$m->id]) && isset($found[$origins[$m->id]])) {
+                $m->setRelation('attachments', $found[$origins[$m->id]]->attachments);
+            }
+        }
+    }
+
     /** Метки письма — их может быть несколько, в отличие от папки. */
     public function labels(): BelongsToMany
     {
