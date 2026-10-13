@@ -321,6 +321,10 @@ class OutboundQuoteParsingService
         $items = $this->normalizeItemsVat($items, $document, $request);
         $items = $this->repairItemArticles($items, $repairedText, $request);
 
+        // Цена ДО скидки вместо «Цены со скидкой» — по тексту PDF, до autoFix:
+        // тот доверяет unit_price и испортил бы верную «Сумму» строки.
+        $items = $this->applyDiscountColumn($items, $repairedText, $request);
+
         // Auto-fix per-row arithmetic: если |unit_price × qty − total| > 2%,
         // доверяем unit_price × qty. Vision чаще правильно читает per-unit
         // цену из колонки «Цена со скидкой», но путает агрегаты (например
@@ -350,6 +354,67 @@ class OutboundQuoteParsingService
             'items' => $items,
             'raw' => $result['raw'],
         ];
+    }
+
+    /**
+     * Модель взяла колонку «Цена» (до скидки) вместо «Цены со скидкой».
+     *
+     * Кейс КП 370340 (13.10.2026, M-2026-19276): строки «9 980,00 79,26
+     * 2 070,02 20 700,20» — модель вернула unit_price 9980 (розница каталога),
+     * autoFixRowArithmetic «исправил» верную сумму 20 700,20 на 99 800, а сторож
+     * цены закупка+15% разослал ложную тревогу. В нашем шаблоне за ценой в
+     * тексте идут «% скидки» и «Цена со скидкой»: если в тексте PDF после числа
+     * unit_price стоят процент p и цена q ≈ unit_price × (1 − p/100) — берём q.
+     * Мерные строки (unit_quantity) не трогаем: там цена за единицу меры.
+     */
+    private function applyDiscountColumn(array $items, ?string $text, Request $request): array
+    {
+        if ($text === null || trim($text) === '') {
+            return $items;
+        }
+        // Суммы в тексте: «12 397,34», «79,26», «2 070,02» — с копейками.
+        preg_match_all('/(?<![\d,.])\d{1,3}(?:[ \x{00A0}]\d{3})*,\d{2}(?![\d])/u', $text, $m);
+        $nums = array_map(fn ($s) => (float) str_replace([' ', "\u{00A0}", ','], ['', '', '.'], $s), $m[0]);
+        if (count($nums) < 3) {
+            return $items;
+        }
+
+        foreach ($items as $idx => &$item) {
+            $up = isset($item['unit_price']) && is_numeric($item['unit_price']) ? (float) $item['unit_price'] : 0.0;
+            $qty = isset($item['quantity']) && is_numeric($item['quantity']) ? (float) $item['quantity'] : 0.0;
+            if ($up <= 0 || $qty <= 0 || (isset($item['unit_quantity']) && is_numeric($item['unit_quantity']) && (float) $item['unit_quantity'] > 0)) {
+                continue;
+            }
+            for ($i = 0; $i + 2 < count($nums); $i++) {
+                if (abs($nums[$i] - $up) > 0.005) {
+                    continue;
+                }
+                [$pct, $discounted] = [$nums[$i + 1], $nums[$i + 2]];
+                $calc = $up * (1 - $pct / 100);
+                if ($pct <= 0 || $pct >= 100 || $discounted >= $up || abs($calc - $discounted) > max(1.0, $discounted * 0.005)) {
+                    continue;
+                }
+                $corrections = is_array($item['_corrections'] ?? null) ? $item['_corrections'] : [];
+                $corrections[] = ['field' => 'unit_price', 'reason' => 'price_before_discount', 'before' => $up, 'after' => $discounted, 'discount_percent' => $pct];
+                $item['_corrections'] = $corrections;
+                $item['base_unit_price'] = $up;
+                $item['discount_percent'] = $pct;
+                $item['unit_price'] = $discounted;
+                $item['price'] = $discounted;
+                $item['total'] = round($discounted * $qty, 2);
+                Log::info('OutboundQuoteParser: price before discount replaced by discounted price', [
+                    'request_id' => $request->id,
+                    'item_index' => $idx,
+                    'before' => $up,
+                    'after' => $discounted,
+                    'discount_percent' => $pct,
+                ]);
+                break;
+            }
+        }
+        unset($item);
+
+        return $items;
     }
 
     /**

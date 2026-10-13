@@ -55,8 +55,22 @@ class CostPlusPriceGuard
         $markup = (float) config('services.pricing.cost_plus_markup', 15);
         $tolerance = (float) config('services.pricing.cost_plus_guard_tolerance', 0.02);
 
+        // Строки не сходятся с итогом документа — документ распознан неверно,
+        // судить по его ценам нельзя. КП 370340 (13.10.2026): модель взяла цену
+        // до скидки, Σ строк 223 707 при итоге 98 607 — ложная тревога менеджеру.
+        $items = $quote->items()->get();
+        $sum = (float) $items->sum(fn ($i) => (float) $i->line_total);
+        $total = (float) $quote->total_amount;
+        if ($total > 0 && $sum > 0 && abs($sum - $total) / $total > $tolerance) {
+            Log::info('CostPlusPriceGuard: lines do not add up to the document total — skipped', [
+                'quote_id' => $quote->id, 'lines_sum' => $sum, 'total' => $total,
+            ]);
+
+            return null;
+        }
+
         $over = [];
-        foreach ($quote->items()->get() as $item) {
+        foreach ($items as $item) {
             $catalog = $item->matched_catalog_item_id ? CatalogItem::query()->find($item->matched_catalog_item_id) : null;
             $purchase = AutoQuoteRuleService::purchasePrice($catalog);
             $price = (float) $item->unit_price;
