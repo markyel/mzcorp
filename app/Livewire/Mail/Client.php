@@ -1209,6 +1209,17 @@ class Client extends Component
                 WHERE oa.email_message_id = CASE WHEN email_messages.detected_artifacts->>'cross_mailbox_copy_of' ~ '^[0-9]+$'
                     THEN (email_messages.detected_artifacts->>'cross_mailbox_copy_of')::bigint END
                   AND oa.is_inline = false) as origin_has_attachments")
+            // Стрелка «отвечено», как в почтовиках: входящее, на которое ушёл наш
+            // ответ (In-Reply-To = его Message-ID; автоуведомления клиенту из
+            // ClientNotificationService не в счёт) или которое на сервере
+            // помечено \Answered — ответили из веб-интерфейса Яндекса.
+            ->selectRaw("(email_messages.direction = 'inbound' AND (
+                COALESCE(email_messages.imap_flags::text, '') LIKE '%\"Answered\"%'
+                OR EXISTS (SELECT 1 FROM email_messages rp
+                    WHERE rp.in_reply_to = email_messages.message_id
+                      AND rp.direction = 'outbound' AND rp.is_draft = false
+                      AND NOT EXISTS (SELECT 1 FROM client_notifications_sent cn WHERE cn.outgoing_email_message_id = rp.id))
+            )) as is_answered")
             ->with('relatedRequest:id,internal_code,status,onec_number')
             // Только СВОИ метки: набор личный, чужие чипы в строке не нужны.
             ->with(['labels' => fn ($q) => $q->select('mail_labels.id', 'name', 'color')

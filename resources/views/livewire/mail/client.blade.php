@@ -258,6 +258,7 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .trow .l2{display:flex;align-items:baseline;gap:6px;margin-top:2px}
 .mailapp .trow .subj{font:500 12.5px/1.35 var(--font-sans);color:var(--fg-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
 .mailapp .trow.unread .subj{font-weight:600}
+.mailapp .trow .replied{color:var(--fg-3);flex-shrink:0;align-self:center;display:inline-flex}
 .mailapp .trow .l3{display:flex;align-items:center;gap:6px;margin-top:3px}
 .mailapp .trow .snip{font:400 12px/1.3 var(--font-sans);color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
 /* Чипов бывает много (КП готово, заявка, стадия, 1С) — в узкой колонке они
@@ -767,7 +768,7 @@ body.mail-resizing iframe{pointer-events:none}
                             <span class="from" title="{{ $isToParty ? 'Кому: ' : '' }}{{ $partyEmail }}">{{ $toPrefix ? 'Кому: ' : '' }}{{ $partyName ?: $partyEmail }}@if($moreTo) <span class="more-to">+{{ $moreTo }}</span>@endif</span>
                             <span class="when">{{ $fmtWhen($m->sent_at) }}</span>
                         </div>
-                        <div class="l2"><span class="subj">{{ $m->subject ?: '(без темы)' }}</span></div>
+                        <div class="l2">@if($m->is_answered)<span class="replied" title="Вы ответили на это письмо"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6.5 3.5 2 8l4.5 4.5M2.5 8H10a4 4 0 0 1 4 4v1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>@endif<span class="subj">{{ $m->subject ?: '(без темы)' }}</span></div>
                         @if($m->labels->isNotEmpty())
                             <div class="rowlabels">
                                 @foreach($m->labels as $label)
