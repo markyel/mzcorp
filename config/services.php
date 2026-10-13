@@ -432,6 +432,13 @@ return [
         'extra_ca' => env('MAX_EXTRA_CA', resource_path('certs/russian_trusted_root_ca.pem')),
     ],
 
+    // Письмо-сводка менеджеру о непрочитанных сообщениях клиентов в Telegram/MAX
+    // (bot:chat-digest): через сколько минут без прочтения писать и как часто.
+    'bot_chat_digest' => [
+        'delay_minutes' => (int) env('BOT_CHAT_DIGEST_DELAY_MINUTES', 10),
+        'min_interval_minutes' => (int) env('BOT_CHAT_DIGEST_MIN_INTERVAL_MINUTES', 15),
+    ],
+
     'marketing' => [
         'block_position' => env('MARKETING_BLOCK_POSITION', 'below'),
         // Карточка товара для ссылок в публикациях медиаплана. По умолчанию —

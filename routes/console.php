@@ -493,3 +493,12 @@ Schedule::command('media:autopilot')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// Сообщения клиентов в Telegram/MAX, которые менеджер не открыл за 10 минут, —
+// одним письмом-сводкой, не чаще раза в 15 минут. Сразу менеджер видит тост в
+// mzCorp (сигнал почты). См. BotChatDigestService.
+Schedule::command('bot:chat-digest')
+    ->everyTwoMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();

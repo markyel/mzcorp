@@ -34,6 +34,16 @@ class MessengerDialog extends Component
 
     public ?string $flash = null;
 
+    /** Ссылка из уведомления «Клиент написал…» (?chat=1) открывает окно сразу. */
+    public function mount(int $requestId): void
+    {
+        $this->requestId = $requestId;
+        if (request()->query('chat')) {
+            $this->open = true;
+            $this->markRead();
+        }
+    }
+
     #[On('open-messenger')]
     public function show(?int $requestId = null): void
     {
@@ -42,6 +52,7 @@ class MessengerDialog extends Component
         }
         $this->open = true;
         $this->error = $this->flash = null;
+        $this->markRead();
         unset($this->messages);
     }
 
@@ -58,7 +69,20 @@ class MessengerDialog extends Component
 
             return;
         }
+        $this->markRead();
         unset($this->messages, $this->presence);
+    }
+
+    /**
+     * Ответственный менеджер видит переписку — сообщения клиента прочитаны:
+     * сигнал и письмо-сводка (bot:chat-digest) о них больше не нужны. РОП или
+     * коллега, заглянувшие в окно, отметку не снимают — менеджер не увидел.
+     */
+    private function markRead(): void
+    {
+        if ((int) $this->request->assigned_user_id === (int) auth()->id()) {
+            MessengerMessage::markReadForRequest($this->requestId);
+        }
     }
 
     #[Computed]
@@ -125,6 +149,8 @@ class MessengerDialog extends Component
 
         $res = app(BotThreadService::class)->fromManager($this->request, auth()->user(), $this->text, $files);
         if ($res['ok']) {
+            // Ответил — значит прочитал (даже если отвечает коллега за менеджера).
+            MessengerMessage::markReadForRequest($this->requestId);
             $this->text = '';
             $this->uploads = [];
             $this->flash = $res['message'];

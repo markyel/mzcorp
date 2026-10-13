@@ -30,6 +30,8 @@ export function initMailSignal() {
     const userId = meta.dataset.user;
     const onMailPage = meta.dataset.mailPage === '1';
     const cursorKey = `mzc:mail-signal:cursor:${userId}`;
+    // Сообщения клиентов из Telegram/MAX — свой курсор (id сообщения, не письма).
+    const chatCursorKey = `mzc:chat-signal:cursor:${userId}`;
     const hintKey = `mzc:mail-signal:notify-hint:${userId}`;
     const baseTitle = document.title;
 
@@ -48,8 +50,8 @@ export function initMailSignal() {
         },
     };
 
-    function readCursor() {
-        const v = parseInt(store.get(cursorKey) ?? '', 10);
+    function readCursor(key = cursorKey) {
+        const v = parseInt(store.get(key) ?? '', 10);
         return v > 0 ? v : null;
     }
 
@@ -64,7 +66,12 @@ export function initMailSignal() {
         inflight = true;
         try {
             const after = readCursor();
-            const res = await fetch(after ? `${url}?after=${after}` : url, {
+            const chatAfter = readCursor(chatCursorKey);
+            const params = new URLSearchParams();
+            if (after) params.set('after', after);
+            if (chatAfter) params.set('chat_after', chatAfter);
+            const qs = params.toString();
+            const res = await fetch(qs ? `${url}?${qs}` : url, {
                 credentials: 'same-origin',
                 headers: { Accept: 'application/json' },
             });
@@ -76,6 +83,7 @@ export function initMailSignal() {
                 return;
             }
             render(data.unread);
+            if (data.chat) handleChat(data.chat, chatAfter);
 
             // Курсор перечитываем: другая вкладка могла уже объявить эти письма.
             const current = readCursor();
@@ -109,6 +117,42 @@ export function initMailSignal() {
         }
     }
 
+    /**
+     * Сообщения клиентов в Telegram/MAX: тост с текстом в любом разделе и
+     * уведомление ОС в фоне; клик — карточка заявки с открытым окном переписки.
+     * Курсор общий для вкладок, как у писем: сигналит одна вкладка.
+     */
+    function handleChat(chat, after) {
+        const current = readCursor(chatCursorKey);
+        const cursor = Number(chat.cursor) || 0;
+        if (current === null) {
+            store.set(chatCursorKey, String(Math.max(cursor, 1)));
+            return;
+        }
+        if (cursor <= current) return;
+        store.set(chatCursorKey, String(cursor));
+        if (after === null || after !== current) return;
+
+        const fresh = chat.fresh ?? [];
+        if (fresh.length === 0) return;
+        const first = fresh[0];
+        const count = Math.max(Number(chat.fresh_count) || 0, fresh.length);
+        const title = count > 1
+            ? `Новых сообщений в чатах: ${count}`
+            : `Новое сообщение в ${first.channel} · ${first.request}`;
+        const body = count > 1
+            ? `Последнее — ${first.request}, ${first.client}: ${first.text}`
+            : `${first.client}: ${first.text}`;
+
+        window.dispatchEvent(new CustomEvent('toast', {
+            detail: { message: `${title}\n${body}`, type: 'info', href: first.url, duration: TOAST_MS * 2 },
+        }));
+        if ((document.hidden || !document.hasFocus()) && notifyPermission() === 'granted') {
+            showOsNotification(title, body, first.url, 'mzc-chat');
+        }
+        maybeHintNotifications();
+    }
+
     function announce(data) {
         const fresh = data.fresh ?? [];
         if (fresh.length === 0) return; // всё новое уже прочитано (например, с телефона)
@@ -139,8 +183,8 @@ export function initMailSignal() {
      * Через service worker (public/sw.js): уведомление приходит от имени
      * установленного приложения, клик открывает письмо. Без SW — из страницы.
      */
-    function showOsNotification(title, body, href) {
-        const options = { body, tag: 'mzc-new-mail', icon: '/images/pwa/icon-192.png', data: { url: href } };
+    function showOsNotification(title, body, href, tag = 'mzc-new-mail') {
+        const options = { body, tag, icon: '/images/pwa/icon-192.png', data: { url: href } };
         const fromPage = () => {
             try {
                 const n = new Notification(title, options);

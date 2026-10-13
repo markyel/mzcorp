@@ -10,9 +10,35 @@ class MessengerMessage extends Model
 {
     public const UPDATED_AT = null;
 
-    protected $fillable = ['messenger_chat_id', 'request_id', 'user_id', 'direction', 'kind', 'text', 'meta'];
+    /** Сообщение клиента в переписке по заявке (BotThreadService::fromClient). */
+    public const KIND_CLIENT = 'client';
 
-    protected $casts = ['meta' => 'array'];
+    protected $fillable = ['messenger_chat_id', 'request_id', 'user_id', 'direction', 'kind', 'text', 'meta', 'read_at', 'emailed_at'];
+
+    protected $casts = ['meta' => 'array', 'read_at' => 'datetime', 'emailed_at' => 'datetime'];
+
+    /**
+     * Непрочитанные сообщения клиентов по заявкам менеджера.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<self>  $q
+     */
+    public function scopeUnreadFor($q, int $managerId)
+    {
+        return $q->where('messenger_messages.direction', 'in')
+            ->where('messenger_messages.kind', self::KIND_CLIENT)
+            ->whereNull('messenger_messages.read_at')
+            ->whereHas('request', fn ($r) => $r->where('assigned_user_id', $managerId));
+    }
+
+    /** Менеджер открыл переписку по заявке — её сообщения прочитаны. */
+    public static function markReadForRequest(int $requestId): int
+    {
+        return self::query()
+            ->where('request_id', $requestId)
+            ->where('direction', 'in')
+            ->whereNull('read_at')
+            ->update(['read_at' => now()]);
+    }
 
     public function chat(): BelongsTo
     {
