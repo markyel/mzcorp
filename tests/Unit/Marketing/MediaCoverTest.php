@@ -137,7 +137,7 @@ class MediaCoverTest extends TestCase
         Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/v1/chat/completions'));
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/generations')
             && str_contains($r['prompt'], 'atrium')
-            && str_contains($r['prompt'], 'No close-ups of machinery'));
+            && str_contains($r['prompt'], 'only architecture'));
     }
 
     public function test_tip_cover_is_one_redrawn_part_of_the_category(): void

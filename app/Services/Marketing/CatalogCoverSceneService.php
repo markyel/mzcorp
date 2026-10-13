@@ -164,9 +164,10 @@ class CatalogCoverSceneService
         try {
             $res = $this->chat->analyzeMultipleImages(
                 'These are catalog photos of elevator spare parts, numbered from 1 in the order given. '
-                    .'For each photo decide if it is a clean product shot: ONE spare part is the main subject, it is visible entirely, '
-                    .'on a plain or studio background (a watermark is fine). Reject photos of parts installed on equipment, '
-                    .'close-ups where the part is cut off, several different objects, drawings, documents, labels or packaging. '
+                    .'For each photo decide if it is a clean product shot: one kind of spare part is the subject, visible entirely, '
+                    .'on a plain or studio background. Fine: a watermark, the same part shown several times from different angles, '
+                    .'a ruler or scale next to it. Reject photos of parts installed on equipment, close-ups where the part is cut off, '
+                    .'different kinds of objects together, drawings, documents or packaging. '
                     .'Answer JSON {"suitable": [numbers]}.',
                 array_map(fn ($p) => 'data:'.self::mime($p['bytes']).';base64,'.base64_encode($p['bytes']), array_values($photos)),
                 (string) config('services.openai.media_cover.scene_model', 'gpt-4o-mini'),
@@ -216,7 +217,8 @@ class CatalogCoverSceneService
         $fresh = $this->images->editMany(
             $todo,
             'Clean studio product photograph of exactly this elevator spare part from the reference photo, the whole part visible, centered, '
-                .'on a plain light grey-blue background (#E3E9EF), soft diffused light, soft contact shadow. '.self::KEEP,
+                .'on a plain light grey-blue background (#E3E9EF), soft diffused light, soft contact shadow. '
+                .'If the reference shows the same part several times or a ruler next to it, draw exactly ONE such part and no ruler. '.self::KEEP,
         );
         foreach ($fresh as $sku => $bytes) {
             if ($bytes === null) {

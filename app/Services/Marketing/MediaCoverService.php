@@ -124,9 +124,12 @@ class MediaCoverService
             .self::RESTRICTIONS;
     }
 
+    // Запреты на технику здесь не перечисляем: список «no winches, sheaves…»
+    // модель картинок прочла как подсказку и поставила на склад шестерни
+    // (13.10). Описываем, ЧТО в кадре, — запреты только в промпте сцены (чат).
     private const RESTRICTIONS = 'Strictly no text, letters, digits, logos, brand names, labels, stickers, signs, QR codes or markings anywhere in the image. '
-        .'No close-ups of machinery, motors, winches, sheaves, spare parts, control panels, call buttons, displays or measuring tools: '
-        .'specialists notice every invented detail, so equipment may appear only small and far away. '
+        .'The frame contains only architecture, interiors, shelves with closed plain boxes and people seen from behind; '
+        .'elevators and escalators appear only as part of the building, seen whole from a distance. '
         .'Keep the bottom third of the frame calm and uncluttered for a caption.';
 
     /**
