@@ -209,6 +209,34 @@
                     @endforelse
                 </div>
             @endif
+            <details class="mt-3" @if($skuListReport && $skuListReport['missing'] !== []) open @endif>
+                <summary class="text-[12.5px] text-sky-700 cursor-pointer select-none">Добавить списком артикулов</summary>
+                <div class="mt-2">
+                    <textarea wire:model="skuList" rows="4"
+                              placeholder="M05333&#10;M26889, M00171&#10;— столбец из Excel, через запятую или пробел"
+                              class="w-full px-3 py-2 border border-border rounded-md bg-surface text-[13px] mono outline-none focus:border-sky-500"></textarea>
+                    <div class="flex items-center gap-2 mt-1.5">
+                        <button type="button" wire:click="addCatalogSkus" wire:loading.attr="disabled" wire:target="addCatalogSkus" class="btn btn-sm btn-primary">
+                            <span wire:loading.remove wire:target="addCatalogSkus">Найти и добавить</span>
+                            <span wire:loading wire:target="addCatalogSkus">Ищу…</span>
+                        </button>
+                        <span class="text-[11.5px] text-fg-3">берём все M-артикулы из текста, остальное игнорируем</span>
+                    </div>
+                    @if($skuListReport)
+                        <div class="text-[12px] mt-1.5">
+                            @if($skuListReport['empty'])
+                                <span class="text-amber-700">В тексте нет M-артикулов.</span>
+                            @else
+                                <span class="text-emerald-700">Добавлено: {{ $skuListReport['added'] }}</span>
+                                @if($skuListReport['already'] > 0)<span class="text-fg-3"> · уже были в запросе: {{ $skuListReport['already'] }}</span>@endif
+                                @if($skuListReport['missing'] !== [])
+                                    <div class="text-red-700 mt-0.5">Нет в каталоге ({{ count($skuListReport['missing']) }}): <span class="mono">{{ implode(', ', $skuListReport['missing']) }}</span> — оставлены в поле, проверьте написание.</div>
+                                @endif
+                            @endif
+                        </div>
+                    @endif
+                </div>
+            </details>
             @if($this->selectedPositions->count() > 0)
                 <div class="text-[12px] text-emerald-700 mt-2">В запросе позиций: {{ $this->selectedPositions->count() }} — оформите ниже в блоке «Запрос поставщикам».</div>
             @endif

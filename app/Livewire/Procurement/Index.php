@@ -446,6 +446,79 @@ class Index extends Component
             ->values();
     }
 
+    /** Список артикулов, вставленный разом (столбец из Excel, через запятую и т.п.). */
+    public string $skuList = '';
+
+    /** Итог последнего добавления списком: сколько добавлено, чего нет в каталоге. */
+    public ?array $skuListReport = null;
+
+    /**
+     * Добавить в запрос сразу все M-артикулы из списка — снабженцу не искать по
+     * одному (заказчик, 13.10.2026). Кириллическая «М», пробел или дефис после
+     * буквы, пропущенные ведущие нули — частые ошибки, их прощаем. Снятые позиции
+     * («ЗАМЕНЕНО НА») берём, только если активной с тем же артикулом нет.
+     */
+    public function addCatalogSkus(): void
+    {
+        preg_match_all('/(?<![\p{L}\d])[MМmм]\s?-?\s?(\d{1,5})(?!\d)/u', $this->skuList, $m);
+        $wanted = [];
+        foreach ($m[1] as $digits) {
+            // В каталоге все артикулы — M + 5 цифр; «M5333» = M05333.
+            $wanted['M'.str_pad($digits, 5, '0', STR_PAD_LEFT)] = true;
+        }
+        $wanted = array_keys($wanted);
+        if ($wanted === []) {
+            $this->skuListReport = ['added' => 0, 'already' => 0, 'missing' => [], 'empty' => true];
+
+            return;
+        }
+
+        $found = CatalogItem::query()
+            ->whereIn(\Illuminate\Support\Facades\DB::raw('upper(sku)'), $wanted)
+            ->orderByDesc('is_active')
+            ->orderBy('id')
+            ->get(['id', 'sku'])
+            ->unique(fn (CatalogItem $ci) => mb_strtoupper((string) $ci->sku))
+            ->keyBy(fn (CatalogItem $ci) => mb_strtoupper((string) $ci->sku));
+
+        $added = 0;
+        $already = 0;
+        foreach ($wanted as $sku) {
+            $ci = $found->get($sku);
+            if ($ci === null) {
+                continue;
+            }
+            if (! empty($this->selected[$ci->id])) {
+                $already++;
+
+                continue;
+            }
+            $this->selected[$ci->id] = true;
+            $added++;
+        }
+
+        $missing = array_values(array_filter($wanted, fn ($sku) => ! $found->has($sku)));
+        $this->skuListReport = ['added' => $added, 'already' => $already, 'missing' => $missing, 'empty' => false];
+        if ($added > 0) {
+            // Программное добавление не триггерит updatedSelected — префилл вручную.
+            $this->prefillSelectedFields();
+            $this->autoTranslateIfEnglish();
+            unset(
+                $this->selectedPositions,
+                $this->oemOptions,
+                $this->supplierOptions,
+                $this->previewLanguages,
+                $this->catalogSearchResults,
+            );
+        }
+        if ($missing === []) {
+            $this->skuList = '';
+        } else {
+            // Остаются ненайденные — их удобно поправить и добавить ещё раз.
+            $this->skuList = implode("\n", $missing);
+        }
+    }
+
     /** Добавить произвольную позицию каталога в набор для запроса. */
     public function addCatalogItem(int $cid): void
     {
