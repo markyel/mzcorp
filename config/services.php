@@ -84,8 +84,11 @@ return [
             'enabled' => (bool) env('MEDIA_COVER_ENABLED', true),
             'model' => env('MEDIA_COVER_MODEL', 'gpt-image-1'),
             'quality' => env('MEDIA_COVER_QUALITY', 'medium'),
+            // Перерисовка деталей по каталожным фото и общая сцена (images/edits):
+            // high держит мелкие детали — разъёмы, спицы, клеммы.
+            'edit_quality' => env('MEDIA_COVER_EDIT_QUALITY', 'high'),
             'scene_model' => env('MEDIA_COVER_SCENE_MODEL', 'gpt-4o-mini'),
-            'timeout' => (int) env('MEDIA_COVER_TIMEOUT', 150),
+            'timeout' => (int) env('MEDIA_COVER_TIMEOUT', 240),
         ],
         'tone_audit_verify_model' => env('OPENAI_TONE_AUDIT_VERIFY_MODEL', 'gpt-4o'),
         // Заказчики, переписку с которыми проверка не смотрит (решение 29.09:

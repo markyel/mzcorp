@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Marketing;
 
+use App\Jobs\Marketing\MakeMediaCoverJob;
 use App\Models\MediaChannel;
 use App\Models\MediaPublication;
 use App\Models\MediaTopic;
@@ -389,6 +390,11 @@ class MediaPlan extends Component
         if ($pub === null) {
             return;
         }
+        if (MakeMediaCoverJob::isPending($pub->id)) {
+            $this->error = 'Обложка ещё готовится — опубликуйте, когда она появится в карточке.';
+
+            return;
+        }
 
         $res = app(MediaPublisherService::class)->publish($pub);
         $res['ok'] ? $this->flash = $res['message'].($res['url'] ? ' '.$res['url'] : '') : $this->error = $res['message'];
@@ -545,6 +551,7 @@ class MediaPlan extends Component
             $channel,
             auth()->user(),
             (string) ($this->draftNote[$topicId] ?? ''),
+            coverNow: false,
         );
         if (! $res['ok']) {
             $this->error = $res['message'];
@@ -588,8 +595,9 @@ class MediaPlan extends Component
     }
 
     /**
-     * Перегенерировать анонсовую обложку черновика по его текущему тексту.
-     * Старый файл нашей обложки удаляем; фото позиций, если были, заменяются.
+     * Перегенерировать анонсовую обложку черновика по его текущему тексту — в
+     * фоне (MakeMediaCoverJob): сцена из деталей идёт 2–4 минуты. Старый файл
+     * нашей обложки задача удалит, когда новая будет готова.
      */
     public function newCover(): void
     {
@@ -600,23 +608,18 @@ class MediaPlan extends Component
         if ($pub === null || $pub->isPublished() || ! MediaCoverService::enabled() || ! $pub->channel?->isPostable()) {
             return;
         }
-
-        $covers = app(MediaCoverService::class);
-        $res = $covers->make((string) $pub->title, (string) $pub->body, $pub->topic?->source);
-        if (! $res['ok']) {
-            $this->error = 'Обложку сделать не удалось: '.$res['message'];
-
+        if (MakeMediaCoverJob::isPending($pub->id)) {
             return;
         }
 
-        foreach ($pub->images() as $old) {
-            $covers->forget($old);
-        }
-        // У статьи обзора обложка ещё и в article: og:image, RSS, шапка страницы.
-        $article = is_array($pub->article) ? array_merge($pub->article, ['cover' => $res['url']]) : $pub->article;
-        $pub->forceFill(['image_urls' => [$res['url']], 'article' => $article])->save();
+        MakeMediaCoverJob::queueFor($pub);
+        $this->flash = 'Обложка готовится, 2–4 минуты — появится здесь сама.';
+        unset($this->openPub);
+    }
 
-        $this->flash = 'Новая обложка готова.';
+    /** Опрос карточки, пока обложка готовится: показать её, как только будет. */
+    public function refreshCover(): void
+    {
         unset($this->openPub);
     }
 

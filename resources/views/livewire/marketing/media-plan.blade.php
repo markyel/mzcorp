@@ -404,13 +404,23 @@
                      У ассортиментных подборок — одна анонсовая обложка (MediaCoverService). --}}
                 @php $coverable = ! $pub->isPublished() && \App\Services\Marketing\MediaCoverService::enabled() && $pub->channel?->isPostable(); @endphp
                 @if($coverable)
-                    <div class="mt-2 flex items-center gap-2">
-                        <button type="button" class="btn btn-xs" wire:click="newCover" wire:loading.attr="disabled" wire:target="newCover">
-                            <span wire:loading.remove wire:target="newCover">{{ $pub->images() ? 'Новая обложка' : 'Сделать обложку' }}</span>
-                            <span wire:loading wire:target="newCover">Рисую обложку… до минуты</span>
-                        </button>
-                        <span class="text-[11.5px] text-fg-3">по деталям из текста; сохраните текст перед этим, если меняли состав</span>
-                    </div>
+                    @php $coverPending = \App\Jobs\Marketing\MakeMediaCoverJob::isPending($pub->id); @endphp
+                    @if($coverPending)
+                        {{-- Обложка рисуется в фоне (MakeMediaCoverJob) — опрашиваем карточку. --}}
+                        <div class="mt-2 flex items-center gap-2" wire:poll.6s="refreshCover">
+                            <span class="chip">Обложка готовится — 2–4 минуты, появится здесь сама</span>
+                        </div>
+                    @else
+                        <div class="mt-2 flex items-center gap-2">
+                            <button type="button" class="btn btn-xs" wire:click="newCover" wire:loading.attr="disabled" wire:target="newCover">
+                                {{ $pub->images() ? 'Новая обложка' : 'Сделать обложку' }}
+                            </button>
+                            <span class="text-[11.5px] text-fg-3">по деталям из текста; сохраните текст перед этим, если меняли состав</span>
+                        </div>
+                        @if($coverError = \App\Jobs\Marketing\MakeMediaCoverJob::lastError($pub->id))
+                            <div class="mt-1 text-[11.5px] text-red-700">Обложку сделать не удалось: {{ $coverError }}</div>
+                        @endif
+                    @endif
                 @endif
                 @if($pub->images())
                     <div class="mt-2">

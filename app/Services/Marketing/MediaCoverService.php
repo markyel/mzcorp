@@ -3,8 +3,7 @@
 namespace App\Services\Marketing;
 
 use App\Services\AI\OpenAIChatService;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
+use App\Services\AI\OpenAIImageService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -13,12 +12,13 @@ use Illuminate\Support\Str;
  * Анонсовая обложка поста — одна сгенерированная картинка, своя для каждого
  * поста и по его содержанию.
  *
- * Фото новинок в каталоге — чаще всего снимки клиентских деталей из заявок:
- * грязные, на оборудовании, с монтажной пеной. Заказчик (12.10.2026): к постам
- * — обложка, сначала к ассортиментным, затем ко всем типам. Пост с артикулами
- * — на обложке эти детали, обезличенные: тип узнаваем, но ни модели, ни
- * маркировки, обложка ничего не обещает о внешнем виде позиции. Пост без
- * артикулов (совет, новость, дайджест) — сцена по смыслу текста.
+ * Заказчик (12.10.2026): к постам — обложка, сначала к ассортиментным, затем ко
+ * всем типам. 13.10: детали, нарисованные по названиям позиций, вызывали у
+ * специалистов сомнения — ассортиментный пост теперь получает сцену из НАШИХ
+ * деталей, перерисованных по каталожным фото (CatalogCoverSceneService). Нет
+ * хотя бы двух годных фото — сцена без деталей крупным планом (склад, лифты),
+ * чтобы не выдумывать конкретную деталь. Пост без артикулов (совет, новость,
+ * дайджест) — сцена по смыслу текста.
  * Текст на картинку модель не пишет (кириллицу она путает) — заголовок
  * накладываем сами шрифтом PT Sans.
  */
@@ -29,13 +29,11 @@ class MediaCoverService
 
     private const DIR = 'media-covers';
 
-    /** Сколько деталей просим нарисовать: больше — каша на картинке. */
-    private const MAX_PARTS = 5;
-
-    private const SKU_RE = '/\bM\d{4,6}\b/u';
-
-    public function __construct(private readonly OpenAIChatService $openai)
-    {
+    public function __construct(
+        private readonly OpenAIChatService $openai,
+        private readonly OpenAIImageService $images,
+        private readonly CatalogCoverSceneService $catalogScene,
+    ) {
     }
 
     /** Обложки включены: ко всем постам площадок, куда публикуем сами. */
@@ -49,17 +47,18 @@ class MediaCoverService
      */
     public function make(string $title, string $body, ?string $source): array
     {
-        $names = in_array($source, self::SOURCES, true) ? $this->itemNames($body) : [];
-        if ($names === [] && trim($title.$body) === '') {
+        if (trim($title.$body) === '') {
             return ['ok' => false, 'url' => null, 'message' => 'пустой пост — не из чего собрать обложку'];
         }
 
         try {
-            $prompt = $names !== []
-                ? $this->partsPrompt($this->genericParts($names), $source)
-                : $this->scenePrompt($this->scene($title, $body, $source));
-            $image = $this->generate($prompt);
-            $jpeg = $this->compose($image, $title);
+            $catalog = in_array($source, self::SOURCES, true);
+            $scene = $catalog ? $this->catalogScene->scene($body) : null;
+            $jpeg = $scene !== null
+                ? $this->compose($scene, $title, fitObjects: true)
+                : $this->compose($this->images->generate($this->scenePrompt($catalog
+                    ? $this->catalogBackdrop($source)
+                    : $this->scene($title, $body, $source))), $title);
         } catch (\Throwable $e) {
             Log::warning('MediaCoverService: cover failed', ['error' => $e->getMessage()]);
 
@@ -95,72 +94,16 @@ class MediaCoverService
     }
 
     /**
-     * Названия позиций из текста поста, в порядке упоминания.
-     *
-     * @return list<string>
+     * Ассортиментный пост без годных фото деталей: сцена без конкретной детали
+     * крупным планом — выдуманная деталь хуже, чем никакой.
      */
-    private function itemNames(string $body): array
+    private function catalogBackdrop(?string $source): string
     {
-        if (! preg_match_all(self::SKU_RE, $body, $m)) {
-            return [];
-        }
-        $skus = array_values(array_unique($m[0]));
-        $rows = DB::table('catalog_items')->whereIn('sku', $skus)->get(['sku', 'name', 'part_type'])->keyBy('sku');
-
-        return collect($skus)
-            ->map(function ($sku) use ($rows) {
-                $r = $rows[$sku] ?? null;
-
-                return $r === null ? null : trim(($r->part_type ? $r->part_type.': ' : '').$r->name);
-            })
-            ->filter()
-            ->take(self::MAX_PARTS)
-            ->values()
-            ->all();
-    }
-
-    /**
-     * Обезличенные описания деталей на английском: без брендов, моделей и
-     * номеров — иначе модель рисует маркировку и «конкретную» деталь.
-     *
-     * @param  list<string>  $names
-     * @return list<string>
-     */
-    private function genericParts(array $names): array
-    {
-        $res = $this->openai->chat([
-            ['role' => 'system', 'content' => 'You turn Russian names of elevator and escalator spare parts into short generic English visual descriptions for an illustration. '
-                .'Describe only the kind of object and its typical look (shape, material, colour). Drop brands, model names, part numbers, voltages and any text. '
-                .'Answer JSON {"parts": ["...", ...]}, one item per input line, at most 12 words each.'],
-            ['role' => 'user', 'content' => implode("\n", $names)],
-        ], (string) config('services.openai.media_cover.scene_model', 'gpt-4o-mini'), ['response_format' => ['type' => 'json_object'], 'temperature' => 0.2]);
-
-        $parts = array_values(array_filter(array_map(
-            fn ($p) => is_string($p) ? trim($p) : '',
-            (array) (json_decode((string) ($res['content'] ?? ''), true)['parts'] ?? []),
-        )));
-        if ($parts === []) {
-            throw new \RuntimeException('не удалось описать детали для обложки');
-        }
-
-        return array_slice($parts, 0, self::MAX_PARTS);
-    }
-
-    /** @param  list<string>  $parts */
-    private function partsPrompt(array $parts, ?string $source): string
-    {
-        $occasion = match ($source) {
-            'catalog_price' => 'a price reduction announcement',
-            'stock_arrivals' => 'a new stock arrival announcement, with a hint of a tidy warehouse shelf in the soft-focus background',
-            'weekly_roundup' => 'a weekly review of new items, price drops and stock arrivals',
-            default => 'an announcement of new catalog items',
+        return match ($source) {
+            'stock_arrivals' => 'A tidy modern spare parts warehouse: neat metal shelving with closed plain cardboard boxes, soft daylight, shallow depth of field, no visible products in close-up.',
+            'catalog_price' => 'A bright modern elevator lobby with brushed steel elevator doors, calm and clean, soft daylight, no people.',
+            default => 'A clean modern elevator machine room or a tidy warehouse aisle with plain boxes on shelves, soft light, nothing shown in close-up.',
         };
-
-        return 'Editorial product composition for '.$occasion.' of an elevator and escalator spare parts supplier. '
-            .'Objects, generic and unbranded: '.implode('; ', $parts).'. '
-            .'Arrange them neatly on a clean light-grey studio surface, soft diffused light, gentle shadows, shallow depth of field, '
-            .'photorealistic, crisp detail, premium catalog look, new and clean parts. '
-            .self::RESTRICTIONS;
     }
 
     private function scenePrompt(string $scene): string
@@ -208,87 +151,149 @@ class MediaCoverService
         return $scene;
     }
 
-    /** Картинка от модели (байты). */
-    private function generate(string $prompt): string
-    {
-        $headers = ['Authorization' => 'Bearer '.config('services.openai.api_key')];
-        if ($pk = (string) config('services.openai.proxy_key')) {
-            $headers['X-Proxy-Key'] = $pk;
-        }
-
-        $r = Http::withHeaders($headers)
-            ->timeout((int) config('services.openai.media_cover.timeout', 150))
-            ->post(rtrim((string) config('services.openai.base_url'), '/').'/v1/images/generations', [
-                'model' => (string) config('services.openai.media_cover.model', 'gpt-image-1'),
-                'prompt' => $prompt,
-                'size' => '1536x1024',
-                'quality' => (string) config('services.openai.media_cover.quality', 'medium'),
-                'output_format' => 'jpeg',
-                'n' => 1,
-            ]);
-
-        $b64 = (string) ($r->json('data.0.b64_json') ?? '');
-        if (! $r->successful() || $b64 === '') {
-            throw new \RuntimeException('генерация картинки: '.($r->json('error.message') ?? 'HTTP '.$r->status()));
-        }
-
-        return (string) base64_decode($b64);
-    }
-
     /**
-     * Заголовок поверх картинки: затемнение снизу, красная плашка-акцент,
-     * заголовок PT Sans Bold, подпись myzip.ru.
+     * Обложка: иллюстрация на весь кадр, внизу полупрозрачная плашка «матовое
+     * стекло» с заголовком (PT Sans Bold, красный акцент) и подписью myzip.ru.
+     * Градиентов нет — решение заказчика 13.10.2026 (вариант «A»).
+     *
+     * $fitObjects — сцена из деталей на однотонном фоне: детали находим по
+     * отличию от фона и кадрируем крупно — сверху небольшой отступ, низ чуть
+     * заходит под плашку, крайние детали могут быть слегка подрезаны.
      */
-    public function compose(string $image, string $title): string
+    public function compose(string $image, string $title, bool $fitObjects = false): string
     {
-        $img = @imagecreatefromstring($image);
-        if ($img === false) {
+        $src = @imagecreatefromstring($image);
+        if ($src === false) {
             throw new \RuntimeException('картинка не читается');
         }
-        $w = imagesx($img);
-        $h = imagesy($img);
+        $w = self::W;
+        $h = self::H;
         // Эмодзи в PT Sans нет — вместо них были бы квадраты.
         $title = trim((string) preg_replace(['/[\p{So}\p{Sk}\p{Cs}\x{FE0F}\x{200D}]+/u', '/\s+/u'], ['', ' '], $title));
 
-        // Затемнение нижних 45% — от прозрачного к ~70% чёрного.
-        $from = (int) round($h * 0.55);
-        for ($y = $from; $y < $h; $y++) {
-            $t = ($y - $from) / max(1, $h - $from);
-            $alpha = (int) round(127 - 90 * $t);
-            imagefilledrectangle($img, 0, $y, $w, $y, imagecolorallocatealpha($img, 10, 12, 16, $alpha));
-        }
-
         $bold = resource_path('fonts/PTSans-Bold.ttf');
         $regular = resource_path('fonts/PTSans-Regular.ttf');
-        $white = imagecolorallocate($img, 255, 255, 255);
-        $soft = imagecolorallocatealpha($img, 255, 255, 255, 30);
-        $red = imagecolorallocate($img, 0xD3, 0x20, 0x27);
-
         $margin = (int) round($w * 0.06);
-        $maxWidth = $w - 2 * $margin - 24;
-        $size = $h * 0.075;
-        $lines = $this->wrap($title, $bold, $size, $maxWidth);
+        $size = $h * 0.07;
+        $lines = $this->wrap($title, $bold, $size, $w - 2 * $margin - 24);
         while (count($lines) > 2 && $size > $h * 0.045) {
             $size *= 0.9;
-            $lines = $this->wrap($title, $bold, $size, $maxWidth);
+            $lines = $this->wrap($title, $bold, $size, $w - 2 * $margin - 24);
         }
         $lines = array_slice($lines, 0, 2);
-
         $lineH = (int) round($size * 1.25);
-        $bottom = $h - (int) round($h * 0.11);
-        $top = $bottom - $lineH * count($lines);
+        $subSize = $h * 0.028;
+        // Верх букв первой строки и низ подписи — от верха строки: плашка
+        // охватывает текст с равными полями сверху и снизу.
+        $capOff = (int) round($lineH - $size * 0.25 + imagettfbbox($size, 0, $bold, 'СН')[7]);
+        $subBase = $lineH * count($lines) + (int) round($subSize * 1.9);
+        $subBottom = $subBase + (int) imagettfbbox($subSize, 0, $regular, 'зу')[1];
+        $pad = (int) round($h * 0.05);
+        $plateH = $subBottom - $capOff + 2 * $pad;
+        $plateTop = $h - $plateH;
 
+        $img = imagecreatetruecolor($w, $h);
+        [$sx, $sy, $sw, $sh] = $fitObjects
+            ? $this->objectsFrame($src, $plateTop)
+            : self::coverFrame(imagesx($src), imagesy($src), $w, $h);
+        imagecopyresampled($img, $src, 0, 0, $sx, $sy, $w, $h, $sw, $sh);
+        imagedestroy($src);
+
+        // Матовое стекло: размытая подложка + полупрозрачный тёмный слой.
+        $glass = imagecreatetruecolor($w, $plateH);
+        imagecopy($glass, $img, 0, 0, 0, $plateTop, $w, $plateH);
+        for ($i = 0; $i < 25; $i++) {
+            imagefilter($glass, IMG_FILTER_GAUSSIAN_BLUR);
+        }
+        imagecopy($img, $glass, 0, $plateTop, 0, 0, $w, $plateH);
+        imagedestroy($glass);
+        imagefilledrectangle($img, 0, $plateTop, $w, $h, imagecolorallocatealpha($img, 14, 17, 22, 62));
+
+        $white = imagecolorallocate($img, 255, 255, 255);
+        $soft = imagecolorallocatealpha($img, 255, 255, 255, 25);
+        $red = imagecolorallocate($img, 0xD3, 0x20, 0x27);
+        $top = $plateTop + $pad - $capOff;
+        $bottom = $top + $lineH * count($lines);
         imagefilledrectangle($img, $margin, $top + (int) round($size * 0.15), $margin + 9, $bottom - (int) round($size * 0.2), $red);
         foreach ($lines as $i => $line) {
             imagettftext($img, $size, 0, $margin + 24, $top + $lineH * ($i + 1) - (int) round($size * 0.25), $white, $bold, $line);
         }
-        imagettftext($img, $h * 0.03, 0, $margin + 24, $h - (int) round($h * 0.05), $soft, $regular, 'myzip.ru · запчасти для лифтов и эскалаторов');
+        imagettftext($img, $subSize, 0, $margin + 24, $top + $subBase, $soft, $regular, 'myzip.ru · запчасти для лифтов и эскалаторов');
 
         ob_start();
         imagejpeg($img, null, 88);
         imagedestroy($img);
 
         return (string) ob_get_clean();
+    }
+
+    /** Размер обложки. */
+    private const W = 1536;
+
+    private const H = 1024;
+
+    /**
+     * Кадр сцены с деталями [x, y, ширина, высота] в координатах исходника.
+     * Детали — пиксели, заметно отличные от фона той же строки у левого края.
+     *
+     * @return array{int, int, int, int}
+     */
+    private function objectsFrame(\GdImage $src, int $plateTop): array
+    {
+        $sw = imagesx($src);
+        $sh = imagesy($src);
+        $x0 = $sw;
+        $y0 = $sh;
+        $x1 = 0;
+        $y1 = 0;
+        for ($y = 0; $y < $sh; $y += 2) {
+            $ref = imagecolorat($src, 4, $y);
+            for ($x = 0; $x < $sw; $x += 2) {
+                $c = imagecolorat($src, $x, $y);
+                $d = abs((($c >> 16) & 255) - (($ref >> 16) & 255)) + abs((($c >> 8) & 255) - (($ref >> 8) & 255)) + abs(($c & 255) - ($ref & 255));
+                if ($d > 60) {
+                    $x0 = min($x0, $x);
+                    $x1 = max($x1, $x);
+                    $y0 = min($y0, $y);
+                    $y1 = max($y1, $y);
+                }
+            }
+        }
+        if ($x1 - $x0 < $sw * 0.2 || $y1 - $y0 < $sh * 0.1) {
+            return self::coverFrame($sw, $sh, self::W, self::H);
+        }
+
+        $bw = $x1 - $x0;
+        $bh = $y1 - $y0;
+        $topGap = (int) round(self::H * 0.05);
+        $under = (int) round((self::H - $plateTop) * 0.12);
+        // Крупно, но по ширине подрезаем не больше ~4% с каждой стороны.
+        $s = min(($plateTop + $under - $topGap) / $bh, (self::W * 1.08) / $bw);
+        $topGap = (int) max($topGap, ($plateTop + $under) - $bh * $s);
+
+        $cw = (int) round(self::W / $s);
+        $ch = (int) round(self::H / $s);
+        $cx = (int) round(($x0 + $x1) / 2 - $cw / 2);
+        $cy = (int) round($y0 - $topGap / $s);
+        // Кадр не выходит за исходник — сдвигаем внутрь.
+        $cx = max(0, min($cx, $sw - $cw));
+        $cy = max(0, min($cy, $sh - $ch));
+
+        return [$cx, $cy, min($cw, $sw), min($ch, $sh)];
+    }
+
+    /**
+     * Заполнить кадр целиком с сохранением пропорций (лишнее по краям режем).
+     *
+     * @return array{int, int, int, int}
+     */
+    private static function coverFrame(int $sw, int $sh, int $w, int $h): array
+    {
+        $s = max($w / $sw, $h / $sh);
+        $cw = (int) round($w / $s);
+        $ch = (int) round($h / $s);
+
+        return [(int) (($sw - $cw) / 2), (int) (($sh - $ch) / 2), $cw, $ch];
     }
 
     /** @return list<string> */

@@ -12,9 +12,11 @@ use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 /**
- * Анонсовая обложка ассортиментного поста: детали из текста → обезличенные
- * описания → картинка → заголовок поверх. OpenAI — Http::fake, каталог —
- * SQLite в памяти, диск — Storage::fake.
+ * Анонсовая обложка: ассортиментный пост — сцена из наших деталей,
+ * перерисованных по каталожным фото (CatalogCoverSceneService); без годных фото
+ * и у прочих постов — сцена по описанию. Заголовок — на полупрозрачной плашке,
+ * без градиента. OpenAI и фото каталога — Http::fake, каталог — SQLite в
+ * памяти, диск — Storage::fake.
  */
 class MediaCoverTest extends TestCase
 {
@@ -33,45 +35,106 @@ class MediaCoverTest extends TestCase
             $t->string('sku');
             $t->string('name');
             $t->string('part_type')->nullable();
+            $t->string('photo_url')->nullable();
+            $t->boolean('is_active')->default(true);
         });
         DB::table('catalog_items')->insert([
-            ['sku' => 'M34596', 'name' => 'Плата MCTC-MCB-C3', 'part_type' => 'Плата'],
-            ['sku' => 'M34584', 'name' => 'IGBT модуль CD100PIX120C6SNA', 'part_type' => null],
+            ['sku' => 'M34596', 'name' => 'Плата MCTC-MCB-C3', 'part_type' => 'Плата', 'photo_url' => 'https://shop.test/photo.php?id=1'],
+            ['sku' => 'M34584', 'name' => 'IGBT модуль CD100PIX120C6SNA', 'part_type' => null, 'photo_url' => 'https://shop.test/photo.php?id=2'],
+            ['sku' => 'M10001', 'name' => 'Ролик без фото', 'part_type' => null, 'photo_url' => null],
         ]);
         Storage::fake('public');
     }
 
-    private static function jpeg(int $w = 300, int $h = 200): string
+    /** Однотонный фон и, по желанию, тёмный прямоугольник-«деталь» в верхней части. */
+    private static function jpeg(int $w = 300, int $h = 200, bool $object = false): string
     {
         $img = imagecreatetruecolor($w, $h);
         imagefill($img, 0, 0, imagecolorallocate($img, 200, 200, 200));
+        if ($object) {
+            imagefilledrectangle($img, (int) ($w * 0.2), (int) ($h * 0.2), (int) ($w * 0.8), (int) ($h * 0.5), imagecolorallocate($img, 30, 30, 30));
+        }
         ob_start();
-        imagejpeg($img);
+        imagejpeg($img, null, 95);
 
         return (string) ob_get_clean();
     }
 
-    public function test_cover_is_drawn_from_items_of_the_text_and_stored(): void
+    /** @param  list<int>  $suitable  номера фото, которые модель-отборщик признаёт годными */
+    private static function fakeCatalogApi(array $suitable): void
     {
         Http::fake([
-            'https://ai.test/v1/chat/completions' => Http::response(['choices' => [['message' => ['content' => json_encode(['parts' => ['green control circuit board', 'black power module']])]]]]),
-            'https://ai.test/v1/images/generations' => Http::response(['data' => [['b64_json' => base64_encode(self::jpeg())]]]),
+            'https://shop.test/*' => Http::response(self::jpeg(), 200, ['Content-Type' => 'image/jpeg']),
+            'https://ai.test/v1/chat/completions' => Http::response(['choices' => [['message' => ['content' => json_encode(['suitable' => $suitable])]]]]),
+            'https://ai.test/v1/images/edits' => Http::response(['data' => [['b64_json' => base64_encode(self::jpeg(1536, 1024, true))]]]),
+            'https://ai.test/v1/images/generations' => Http::response(['data' => [['b64_json' => base64_encode(self::jpeg(1536, 1024))]]]),
         ]);
+    }
 
-        $res = app(MediaCoverService::class)->make('📢 Новые позиции каталога', "• Плата · арт. M34596\n• IGBT · арт. M34584", 'catalog_new');
+    private static function editsSent(): int
+    {
+        return collect(Http::recorded())->filter(fn ($p) => str_ends_with($p[0]->url(), '/v1/images/edits'))->count();
+    }
+
+    public function test_catalog_cover_is_a_scene_of_our_redrawn_parts(): void
+    {
+        self::fakeCatalogApi([1, 2]);
+
+        $res = app(MediaCoverService::class)->make('Новые позиции каталога', "• Плата · арт. M34596\n• IGBT · арт. M34584\n• Ролик · арт. M10001", 'catalog_new');
 
         $this->assertTrue($res['ok'], $res['message']);
         $name = basename((string) $res['url']);
         $this->assertTrue(MediaCoverService::validName($name));
         Storage::disk('public')->assertExists('media-covers/'.$name);
-        $this->assertSame([300, 200], array_slice(getimagesizefromstring(Storage::disk('public')->get('media-covers/'.$name)), 0, 2));
+        $this->assertSame([1536, 1024], array_slice(getimagesizefromstring(Storage::disk('public')->get('media-covers/'.$name)), 0, 2));
 
+        // Фото проверила модель; две детали перерисованы по одной, потом общая сцена.
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/chat/completions')
-            && str_contains($r['messages'][1]['content'], 'Плата: Плата MCTC-MCB-C3'));
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/generations')
+            && str_contains(json_encode($r['messages']), 'clean product shot'));
+        $this->assertSame(3, self::editsSent());
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/edits')
             && $r->hasHeader('X-Proxy-Key', 'pk-test')
-            && str_contains($r['prompt'], 'green control circuit board; black power module')
+            && str_contains($r->body(), 'exactly these 2 elevator spare parts')
+            && str_contains($r->body(), 'input_fidelity'));
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/generations'));
+        $this->assertCount(2, Storage::disk('public')->files('media-covers/parts'));
+    }
+
+    public function test_redrawn_parts_are_reused_by_the_next_cover(): void
+    {
+        self::fakeCatalogApi([1, 2]);
+        $covers = app(MediaCoverService::class);
+
+        $covers->make('Новинки', 'арт. M34596, арт. M34584', 'catalog_new');
+        $this->assertSame(3, self::editsSent());
+
+        // Второй раз — только сцена: детали взяты из хранилища.
+        $covers->make('Снижение цен', 'арт. M34584 и арт. M34596', 'catalog_price');
+        $this->assertSame(4, self::editsSent());
+    }
+
+    public function test_catalog_post_without_suitable_photos_gets_a_backdrop_without_parts(): void
+    {
+        self::fakeCatalogApi([]);
+
+        $res = app(MediaCoverService::class)->make('Поступления', 'арт. M34596, арт. M34584', 'stock_arrivals');
+
+        $this->assertTrue($res['ok'], $res['message']);
+        $this->assertSame(0, self::editsSent());
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/generations')
+            && str_contains($r['prompt'], 'warehouse')
             && str_contains($r['prompt'], 'Strictly no text'));
+    }
+
+    public function test_catalog_post_without_known_skus_gets_a_backdrop(): void
+    {
+        self::fakeCatalogApi([1]);
+
+        $res = app(MediaCoverService::class)->make('Новинки', 'арт. M99999', 'catalog_new');
+
+        $this->assertTrue($res['ok'], $res['message']);
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/v1/chat/completions'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/generations') && str_contains($r['prompt'], 'machine room'));
     }
 
     public function test_post_without_skus_gets_a_scene_by_its_meaning(): void
@@ -93,30 +156,26 @@ class MediaCoverTest extends TestCase
             && str_contains($r['prompt'], 'Strictly no text'));
     }
 
-    public function test_catalog_post_without_known_skus_falls_back_to_scene(): void
+    public function test_image_api_error_is_reported(): void
     {
         Http::fake([
-            'https://ai.test/v1/chat/completions' => Http::response(['choices' => [['message' => ['content' => '{"scene":"Lift buttons on a workbench."}']]]]),
-            'https://ai.test/v1/images/generations' => Http::response(['data' => [['b64_json' => base64_encode(self::jpeg())]]]),
+            'https://ai.test/v1/images/generations' => Http::response(['error' => ['message' => 'Your request was rejected by the safety system']], 400),
         ]);
 
         $res = app(MediaCoverService::class)->make('Новинки', 'арт. M99999', 'catalog_new');
 
-        $this->assertTrue($res['ok'], $res['message']);
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/generations') && str_contains($r['prompt'], 'Scene: Lift buttons'));
-    }
-
-    public function test_image_api_error_is_reported(): void
-    {
-        Http::fake([
-            'https://ai.test/v1/chat/completions' => Http::response(['choices' => [['message' => ['content' => '{"parts":["board"]}']]]]),
-            'https://ai.test/v1/images/generations' => Http::response(['error' => ['message' => 'Your request was rejected by the safety system']], 400),
-        ]);
-
-        $res = app(MediaCoverService::class)->make('Новинки', 'арт. M34596', 'catalog_new');
-
         $this->assertFalse($res['ok']);
         $this->assertStringContainsString('safety system', $res['message']);
+    }
+
+    public function test_title_sits_on_a_plate_without_a_gradient_above_it(): void
+    {
+        $img = imagecreatefromstring(app(MediaCoverService::class)->compose(self::jpeg(1536, 1024), 'Снижение цен на ключевые позиции'));
+
+        // Над плашкой картинка не затемнена (раньше градиент начинался с 55% высоты).
+        $this->assertEqualsWithDelta(200, (imagecolorat($img, 700, 620) >> 16) & 255, 6);
+        // Плашка внизу темнее фона.
+        $this->assertLessThan(150, (imagecolorat($img, 1400, 1000) >> 16) & 255);
     }
 
     public function test_short_preposition_does_not_hang_at_line_end(): void

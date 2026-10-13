@@ -2,6 +2,7 @@
 
 namespace App\Services\Marketing;
 
+use App\Jobs\Marketing\MakeMediaCoverJob;
 use App\Models\MediaChannel;
 use App\Models\MediaProfileEntry;
 use App\Models\MediaPublication;
@@ -34,14 +35,14 @@ class MediaMaterialService
     /**
      * @return array{ok: bool, publication: ?MediaPublication, message: string}
      */
-    public function draft(MediaTopic $topic, MediaChannel $channel, ?User $author, ?string $note = null): array
+    public function draft(MediaTopic $topic, MediaChannel $channel, ?User $author, ?string $note = null, bool $coverNow = true): array
     {
         $note = trim((string) $note);
 
         // Обзор недели — статья со структурой (разделы, позиции с фото и
         // ценами из каталога), а не пост: у неё свой промпт и своя сборка.
         if ($topic->source === 'weekly_roundup') {
-            return app(WeeklyRoundupService::class)->draft($topic, $channel, $author);
+            return app(WeeklyRoundupService::class)->draft($topic, $channel, $author, $coverNow);
         }
 
         // Новость без повода — это выдумка. Бриф темы говорит, КАК писать
@@ -133,7 +134,13 @@ class MediaMaterialService
         // деталей из заявок). Не вышло — пост без картинки: чужие фото хуже,
         // чем никаких.
         $coverNote = '';
-        if (MediaCoverService::enabled() && $channel->isPostable()) {
+        $coverLater = false;
+        if (MediaCoverService::enabled() && $channel->isPostable() && ! $coverNow) {
+            // Из медиаплана: обложка из деталей рисуется 2–4 минуты — в фоне.
+            $images = [];
+            $coverLater = true;
+            $coverNote = ' Обложка готовится, 2–4 минуты — появится в карточке сама.';
+        } elseif (MediaCoverService::enabled() && $channel->isPostable()) {
             $cover = $this->covers->make($title, $body, (string) $topic->source);
             $images = $cover['ok'] ? [$cover['url']] : [];
             $coverNote = $cover['ok'] ? '' : ' Обложку сделать не удалось ('.$cover['message'].') — пост без картинки, можно повторить кнопкой «Новая обложка».';
@@ -154,6 +161,9 @@ class MediaMaterialService
             'model' => $model,
             'created_by_user_id' => $author?->id,
         ]);
+        if ($coverLater) {
+            MakeMediaCoverJob::queueFor($publication);
+        }
 
         $notes = trim((string) ($parsed['notes'] ?? ''));
 

@@ -2,6 +2,7 @@
 
 namespace App\Services\Marketing;
 
+use App\Jobs\Marketing\MakeMediaCoverJob;
 use App\Models\MediaChannel;
 use App\Models\MediaProfileEntry;
 use App\Models\MediaPublication;
@@ -183,7 +184,7 @@ class WeeklyRoundupService
      *
      * @return array{ok: bool, publication: ?MediaPublication, message: string}
      */
-    public function draft(MediaTopic $topic, MediaChannel $channel, ?User $author): array
+    public function draft(MediaTopic $topic, MediaChannel $channel, ?User $author, bool $coverNow = true): array
     {
         $c = $this->candidates(max(1, (int) ($topic->cadence_days ?: 7)));
         $filled = array_filter($c['sections'], fn ($s) => count($s) > 0);
@@ -231,7 +232,11 @@ class WeeklyRoundupService
         $body = self::toText($article);
         $coverNote = '';
         $images = null;
-        if (MediaCoverService::enabled()) {
+        $coverLater = MediaCoverService::enabled() && ! $coverNow;
+        if ($coverLater) {
+            // Из медиаплана: обложка из деталей рисуется 2–4 минуты — в фоне.
+            $coverNote = ' Обложка готовится, 2–4 минуты — появится в карточке сама.';
+        } elseif (MediaCoverService::enabled()) {
             $cover = $this->covers->make($article['title'], $body, 'weekly_roundup');
             $article['cover'] = $cover['url'];
             $images = $cover['ok'] ? [$cover['url']] : null;
@@ -253,6 +258,9 @@ class WeeklyRoundupService
             'model' => $model,
             'created_by_user_id' => $author?->id,
         ]);
+        if ($coverLater) {
+            MakeMediaCoverJob::queueFor($publication);
+        }
 
         $notes = trim((string) ($parsed['notes'] ?? ''));
 
