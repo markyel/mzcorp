@@ -17,8 +17,9 @@ use Illuminate\Support\Str;
  * специалистов сомнения — ассортиментный пост теперь получает сцену из НАШИХ
  * деталей, перерисованных по каталожным фото (CatalogCoverSceneService). Нет
  * хотя бы двух годных фото — сцена без деталей крупным планом (склад, лифты),
- * чтобы не выдумывать конкретную деталь. Пост без артикулов (совет, новость,
- * дайджест) — сцена по смыслу текста.
+ * чтобы не выдумывать конкретную деталь. Совет по категории — та же сцена из
+ * одной детали: самой спрашиваемой позиции категории. Новость, дайджест и
+ * совет без годного фото — сцена по смыслу текста, только архитектура.
  * Текст на картинку модель не пишет (кириллицу она путает) — заголовок
  * накладываем сами шрифтом PT Sans.
  */
@@ -33,6 +34,7 @@ class MediaCoverService
         private readonly OpenAIChatService $openai,
         private readonly OpenAIImageService $images,
         private readonly CatalogCoverSceneService $catalogScene,
+        private readonly MediaDataService $data,
     ) {
     }
 
@@ -45,7 +47,7 @@ class MediaCoverService
     /**
      * @return array{ok: bool, url: ?string, message: string}
      */
-    public function make(string $title, string $body, ?string $source): array
+    public function make(string $title, string $body, ?string $source, ?string $subjectKey = null): array
     {
         if (trim($title.$body) === '') {
             return ['ok' => false, 'url' => null, 'message' => 'пустой пост — не из чего собрать обложку'];
@@ -53,7 +55,12 @@ class MediaCoverService
 
         try {
             $catalog = in_array($source, self::SOURCES, true);
-            $scene = $catalog ? $this->catalogScene->scene($body) : null;
+            $scene = null;
+            if ($catalog) {
+                $scene = $this->catalogScene->scene($body);
+            } elseif ($source === 'request_tips' && ($photo = $this->data->tipPhotoUrl($subjectKey)) !== null) {
+                $scene = $this->catalogScene->sceneForPhoto($photo);
+            }
             $jpeg = $scene !== null
                 ? $this->compose($scene, $title, fitObjects: true)
                 : $this->compose($this->images->generate($this->scenePrompt($catalog
@@ -99,10 +106,12 @@ class MediaCoverService
      */
     private function catalogBackdrop(?string $source): string
     {
+        // Только сюжеты, где нечего додумать: 13.10 машинное помещение дало
+        // выдуманную лебёдку — специалист такое замечает сразу.
         return match ($source) {
-            'stock_arrivals' => 'A tidy modern spare parts warehouse: neat metal shelving with closed plain cardboard boxes, soft daylight, shallow depth of field, no visible products in close-up.',
-            'catalog_price' => 'A bright modern elevator lobby with brushed steel elevator doors, calm and clean, soft daylight, no people.',
-            default => 'A clean modern elevator machine room or a tidy warehouse aisle with plain boxes on shelves, soft light, nothing shown in close-up.',
+            'stock_arrivals' => 'A tidy modern spare parts warehouse: neat metal shelving with closed plain cardboard boxes, soft daylight, shallow depth of field.',
+            'catalog_price' => 'A bright modern building lobby with closed brushed steel elevator doors seen from a distance, calm and clean, soft daylight.',
+            default => 'A bright modern glass atrium of a business centre with escalators seen from a distance in a wide shot, soft daylight.',
         };
     }
 
@@ -116,11 +125,15 @@ class MediaCoverService
     }
 
     private const RESTRICTIONS = 'Strictly no text, letters, digits, logos, brand names, labels, stickers, signs, QR codes or markings anywhere in the image. '
+        .'No close-ups of machinery, motors, winches, sheaves, spare parts, control panels, call buttons, displays or measuring tools: '
+        .'specialists notice every invented detail, so equipment may appear only small and far away. '
         .'Keep the bottom third of the frame calm and uncluttered for a caption.';
 
     /**
-     * Сцена по смыслу поста без артикулов: совет — деталь из совета и рабочее
-     * место, новость отрасли — лифты, эскалаторы, здания. Модель описывает
+     * Сцена по смыслу поста без артикулов — только архитектура: здания, холлы
+     * с закрытыми дверями лифтов издали, атриумы, эскалаторы общим планом,
+     * склад. Технику крупным планом модель додумывает (13.10: панель вызова с
+     * выдуманными символами, ролик с рулеткой) — её нет. Модель описывает
      * картинку по-английски, без брендов и надписей.
      */
     private function scene(string $title, string $body, ?string $source): string
@@ -135,9 +148,10 @@ class MediaCoverService
 
         $res = $this->openai->chat([
             ['role' => 'system', 'content' => 'You design a cover picture for a Russian social media post of an elevator and escalator spare parts supplier. '
-                .'Read the post and describe ONE concrete photorealistic scene that matches its main subject (2 sentences, English). '
-                .'If the post is about a specific kind of part, show that kind of part, generic and unbranded. '
-                .'Industry news: elevators, escalators, lift shafts, machine rooms, modern buildings. '
+                .'Read the post and describe ONE concrete photorealistic scene that matches its mood and subject (2 sentences, English). '
+                .'Use architecture only: modern buildings, bright lobbies with closed elevator doors seen from a distance, glass atriums, escalators in a wide shot, tidy warehouses with plain boxes. '
+                .'Never show close-ups of spare parts, machinery, machine rooms, control panels, call buttons, displays, tools or measuring tapes: '
+                .'an invented technical detail makes specialists distrust the post. '
                 .'No text, signs, logos, brands, screens with text, documents with text, recognisable landmarks or identifiable faces. '
                 .'Answer JSON {"scene": "..."}.'],
             ['role' => 'user', 'content' => 'Type: '.$kind."\nTitle: ".$title."\n\n".mb_substr($body, 0, 3000)],

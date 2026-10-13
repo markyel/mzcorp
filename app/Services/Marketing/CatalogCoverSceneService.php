@@ -51,41 +51,13 @@ class CatalogCoverSceneService
     }
 
     /**
-     * Сцена (байты JPEG 1536×1024) или null — подходящих деталей меньше двух.
+     * Сцена ассортиментного поста (байты JPEG 1536×1024) или null — годных
+     * деталей меньше двух.
      */
     public function scene(string $body): ?string
     {
-        $photos = $this->studioPhotos($this->candidates($body));
-        if (count($photos) < self::MIN_PARTS) {
-            return null;
-        }
-
-        $parts = $this->redrawn($photos);
-        if (count($parts) < self::MIN_PARTS) {
-            return null;
-        }
-
-        $n = count($parts);
-
-        return $this->images->edit(
-            array_values($parts),
-            'One studio product photograph with exactly these '.$n.' elevator spare parts from the '.$n.' reference images, '
-                .'standing side by side in a single horizontal row, evenly spaced, all of them entirely inside the upper 60% of the frame; '
-                .'the lower 40% of the frame is an empty continuous surface. One continuous light grey-blue seamless surface (#E3E9EF), '
-                .'all objects seen from the same slightly elevated three-quarter angle, one soft key light from the upper left, '
-                .'consistent soft contact shadows, realistic relative sizes. '.self::KEEP,
-        );
-    }
-
-    /**
-     * Фото позиций поста в порядке упоминания: [sku => [url, bytes]].
-     *
-     * @return array<string, array{url: string, bytes: string}>
-     */
-    private function candidates(string $body): array
-    {
         if (! preg_match_all(self::SKU_RE, $body, $m)) {
-            return [];
+            return null;
         }
         $skus = array_values(array_unique($m[0]));
         $urls = DB::table('catalog_items')
@@ -96,19 +68,79 @@ class CatalogCoverSceneService
             ->unique('sku')
             ->pluck('photo_url', 'sku');
 
-        $out = [];
+        $ordered = [];
         foreach ($skus as $sku) {
-            if (! isset($urls[$sku]) || count($out) >= self::MAX_CANDIDATES) {
-                continue;
+            if (isset($urls[$sku])) {
+                $ordered[$sku] = (string) $urls[$sku];
+            }
+        }
+
+        return $this->sceneOf($ordered, self::MIN_PARTS);
+    }
+
+    /**
+     * Сцена из одной детали — к совету по категории («Как оформить заявку на
+     * ролик»): самая спрашиваемая позиция категории, перерисованная по фото,
+     * вместо выдуманной. null — фото не годится (снимок на объекте и т.п.).
+     */
+    public function sceneForPhoto(string $photoUrl): ?string
+    {
+        // Артикул — только для имени файла перерисовки: та же деталь в посте
+        // каталога возьмёт её из хранилища.
+        $sku = (string) (DB::table('catalog_items')->where('photo_url', $photoUrl)->value('sku') ?? 'part');
+
+        return $this->sceneOf([$sku => $photoUrl], 1);
+    }
+
+    /** @param  array<string, string>  $urls  sku => фото, в нужном порядке */
+    private function sceneOf(array $urls, int $min): ?string
+    {
+        $photos = $this->studioPhotos($this->download($urls), $min);
+        if (count($photos) < $min) {
+            return null;
+        }
+
+        $parts = $this->redrawn($photos);
+        if (count($parts) < $min) {
+            return null;
+        }
+
+        $n = count($parts);
+        $layout = $n === 1
+            ? 'One studio product photograph with exactly this elevator spare part from the reference image, '
+                .'large, centered horizontally, entirely inside the upper 60% of the frame; '
+            : 'One studio product photograph with exactly these '.$n.' elevator spare parts from the '.$n.' reference images, '
+                .'standing side by side in a single horizontal row, evenly spaced, all of them entirely inside the upper 60% of the frame; ';
+
+        return $this->images->edit(
+            array_values($parts),
+            $layout.'the lower 40% of the frame is an empty continuous surface. One continuous light grey-blue seamless surface (#E3E9EF), '
+                .'all objects seen from the same slightly elevated three-quarter angle, one soft key light from the upper left, '
+                .'consistent soft contact shadows, realistic relative sizes. '.self::KEEP,
+        );
+    }
+
+    /**
+     * Скачать фото: [sku => [url, bytes]], не больше MAX_CANDIDATES.
+     *
+     * @param  array<string, string>  $urls
+     * @return array<string, array{url: string, bytes: string}>
+     */
+    private function download(array $urls): array
+    {
+        $out = [];
+        foreach ($urls as $sku => $url) {
+            if (count($out) >= self::MAX_CANDIDATES) {
+                break;
             }
             try {
-                $r = Http::timeout(20)->get((string) $urls[$sku]);
+                $r = Http::timeout(20)->get($url);
                 $bytes = $r->successful() ? (string) $r->body() : '';
             } catch (\Throwable) {
                 $bytes = '';
             }
             if ($bytes !== '' && @getimagesizefromstring($bytes) !== false) {
-                $out[$sku] = ['url' => (string) $urls[$sku], 'bytes' => $bytes];
+                $out[$sku] = ['url' => $url, 'bytes' => $bytes];
             }
         }
 
@@ -122,9 +154,9 @@ class CatalogCoverSceneService
      * @param  array<string, array{url: string, bytes: string}>  $photos
      * @return array<string, array{url: string, bytes: string}>
      */
-    private function studioPhotos(array $photos): array
+    private function studioPhotos(array $photos, int $min): array
     {
-        if (count($photos) < self::MIN_PARTS) {
+        if (count($photos) < $min) {
             return [];
         }
         $skus = array_keys($photos);

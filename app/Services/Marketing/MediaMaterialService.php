@@ -141,7 +141,7 @@ class MediaMaterialService
             $coverLater = true;
             $coverNote = ' Обложка готовится, 2–4 минуты — появится в карточке сама.';
         } elseif (MediaCoverService::enabled() && $channel->isPostable()) {
-            $cover = $this->covers->make($title, $body, (string) $topic->source);
+            $cover = $this->covers->make($title, $body, (string) $topic->source, $subjectKey);
             $images = $cover['ok'] ? [$cover['url']] : [];
             $coverNote = $cover['ok'] ? '' : ' Обложку сделать не удалось ('.$cover['message'].') — пост без картинки, можно повторить кнопкой «Новая обложка».';
         } else {

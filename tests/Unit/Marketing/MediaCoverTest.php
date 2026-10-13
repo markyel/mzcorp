@@ -3,6 +3,7 @@
 namespace Tests\Unit\Marketing;
 
 use App\Services\Marketing\MediaCoverService;
+use App\Services\Marketing\MediaDataService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
@@ -134,7 +135,57 @@ class MediaCoverTest extends TestCase
 
         $this->assertTrue($res['ok'], $res['message']);
         Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/v1/chat/completions'));
-        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/generations') && str_contains($r['prompt'], 'machine room'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/generations')
+            && str_contains($r['prompt'], 'atrium')
+            && str_contains($r['prompt'], 'No close-ups of machinery'));
+    }
+
+    public function test_tip_cover_is_one_redrawn_part_of_the_category(): void
+    {
+        self::fakeCatalogApi([1]);
+        app()->instance(MediaDataService::class, new class extends MediaDataService
+        {
+            public function tipPhotoUrl(?string $subjectKey): ?string
+            {
+                return $subjectKey === 'kb:rolik' ? 'https://shop.test/photo.php?id=1' : null;
+            }
+        });
+
+        $res = app(MediaCoverService::class)->make('Как оформить заявку на ролик', 'Пришлите диаметр и ширину.', 'request_tips', 'kb:rolik');
+
+        $this->assertTrue($res['ok'], $res['message']);
+        // Одна деталь перерисована и поставлена в сцену; ничего не выдумано.
+        $this->assertSame(2, self::editsSent());
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/edits')
+            && str_contains($r->body(), 'exactly this elevator spare part'));
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/generations'));
+        $this->assertCount(1, Storage::disk('public')->files('media-covers/parts'));
+        $this->assertStringStartsWith('media-covers/parts/M34596-', Storage::disk('public')->files('media-covers/parts')[0]);
+    }
+
+    public function test_tip_without_a_suitable_photo_gets_an_architecture_scene(): void
+    {
+        Http::fake([
+            'https://shop.test/*' => Http::response(self::jpeg(), 200, ['Content-Type' => 'image/jpeg']),
+            'https://ai.test/v1/chat/completions' => Http::sequence()
+                ->push(['choices' => [['message' => ['content' => json_encode(['suitable' => []])]]]])
+                ->push(['choices' => [['message' => ['content' => json_encode(['scene' => 'A bright lobby with closed elevator doors far away.'])]]]]),
+            'https://ai.test/v1/images/generations' => Http::response(['data' => [['b64_json' => base64_encode(self::jpeg(1536, 1024))]]]),
+        ]);
+        app()->instance(MediaDataService::class, new class extends MediaDataService
+        {
+            public function tipPhotoUrl(?string $subjectKey): ?string
+            {
+                return 'https://shop.test/photo.php?id=1';
+            }
+        });
+
+        $res = app(MediaCoverService::class)->make('Как оформить заявку на ролик', 'Пришлите диаметр и ширину.', 'request_tips', 'kb:rolik');
+
+        $this->assertTrue($res['ok'], $res['message']);
+        $this->assertSame(0, self::editsSent());
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/chat/completions')
+            && str_contains(json_encode($r['messages']), 'Use architecture only'));
     }
 
     public function test_post_without_skus_gets_a_scene_by_its_meaning(): void

@@ -223,6 +223,12 @@ class MediaDataService
             ->all();
     }
 
+    /** Фото детали к совету (для обложки из нашей детали) или null. */
+    public function tipPhotoUrl(?string $subjectKey): ?string
+    {
+        return $this->categoryPhoto($subjectKey)[0] ?? null;
+    }
+
     /**
      * Одна фотография к совету по категории детали («Кнопка лифтовая»): пост
      * без картинки в ленте ВК пролистывают, а деталь на фото сразу объясняет,

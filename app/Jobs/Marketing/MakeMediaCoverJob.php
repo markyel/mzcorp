@@ -63,7 +63,7 @@ class MakeMediaCoverJob implements ShouldQueue
                 return;
             }
 
-            $res = $covers->make((string) $pub->title, (string) $pub->body, $pub->topic?->source);
+            $res = $covers->make((string) $pub->title, (string) $pub->body, $pub->topic?->source, $pub->subject_key);
             if (! $res['ok']) {
                 Cache::put(self::errorKey($pub->id), $res['message'], self::PENDING_TTL);
 
