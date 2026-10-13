@@ -266,6 +266,9 @@ class SupplierInquiryService
                         $requestId = $byCode;
                     }
                 }
+                if ($latest !== null && $latest->related_request_id !== null && ! self::looksLikeReplyTo($latest, $message)) {
+                    $latest = null;
+                }
                 $inquiry = $latest;
             }
             if ($inquiry === null) {
@@ -748,6 +751,61 @@ class SupplierInquiryService
         $codes = array_merge($m[0] ?? [], array_map(fn ($c) => ltrim($c, '0'), $n[0] ?? []));
 
         return array_values(array_unique(array_filter($codes, fn ($c) => $c !== '')));
+    }
+
+    /** Сколько дней после запроса письмо с новой темой ещё считаем ответом на него. */
+    private const FRESH_REPLY_DAYS = 21;
+
+    /**
+     * Похоже ли письмо без треда, токена и номера заявки на ответ именно на
+     * этот запрос по заявке. Фолбэк «последний запрос этому поставщику» вешал
+     * на заявку всю текущую переписку поставщика: M-2026-10852 (13.10) —
+     * поставки OSS («Next LS delivery», OSS-221, наклейки, PI на оплату) легли
+     * в запрос цены Васюхно, первое письмо даже пришло за 2 минуты ДО запроса;
+     * так же «Re: Order ES…», «Re: Заказ для YuanQi…», «Re: Счёт на оплату…».
+     *
+     *  - тема та же, что у запроса, или в ней номер из темы запроса — да;
+     *  - письмо старше запроса — нет;
+     *  - ответ/пересылка в другой переписке (Re:/Fwd: с чужой темой) — нет;
+     *  - новая тема — да, если пришла вскоре после запроса и речь о цене/КП
+     *    («КП ООО "КЕВ-РУС" на поставку пульта» на запрос по M-2026-18149).
+     */
+    public static function looksLikeReplyTo(SupplierInquiry $inquiry, EmailMessage $message): bool
+    {
+        $subject = (string) $message->subject;
+        $own = self::baseSubject($subject);
+        $theirs = self::baseSubject((string) $inquiry->subject);
+        if (mb_strlen($own) >= 6 && mb_strlen($theirs) >= 6 && (str_contains($own, $theirs) || str_contains($theirs, $own))) {
+            return true;
+        }
+        $codes = self::subjectCodes($subject);
+        if ($codes !== [] && self::subjectHasAnyCode((string) $inquiry->subject, $codes)) {
+            return true;
+        }
+
+        $sent = $message->sent_at ?? $message->created_at;
+        $asked = $inquiry->created_at;
+        if ($sent !== null && $asked !== null && $sent->lt($asked->copy()->subMinute())) {
+            return false;
+        }
+        if (preg_match('/^\s*(re|fwd?|aw|wg|отв|ответ|пересл)\s*(\[\d+\])?\s*:/iu', $subject) === 1) {
+            return false;
+        }
+        if ($sent !== null && $asked !== null && $sent->gt($asked->copy()->addDays(self::FRESH_REPLY_DAYS))) {
+            return false;
+        }
+
+        $text = $subject.' '.mb_substr((string) $message->body_plain, 0, 1500);
+
+        return preg_match('/\b(price|prices|quotation|quote|offer|lead\s*time|availability|in stock)\b|\bкп\b|коммерческ|предложени|\bцен[аыеу]\b|стоимост|расценк|в наличии|срок\w* поставки/iu', $text) === 1;
+    }
+
+    /** Тема без префиксов Re:/Fw:/Fwd:/AW:/Ответ: (в любом количестве), в нижнем регистре. */
+    private static function baseSubject(string $subject): string
+    {
+        $s = (string) preg_replace('/^(\s*(re|fwd?|aw|wg|отв|ответ|пересл)\s*(\[\d+\])?\s*:\s*)+/iu', '', $subject);
+
+        return mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $s)));
     }
 
     /** @param  list<string>  $codes */
