@@ -163,12 +163,15 @@ class CatalogCoverSceneService
 
         try {
             $res = $this->chat->analyzeMultipleImages(
+                // Решение по каждому фото с причиной: форма «список годных
+                // номеров» давала пустой список даже на студийном снимке
+                // (13.10, ролик в трёх ракурсах с линейкой).
                 'These are catalog photos of elevator spare parts, numbered from 1 in the order given. '
-                    .'For each photo decide if it is a clean product shot: one kind of spare part is the subject, visible entirely, '
+                    .'For each photo decide whether a designer can redraw the part from it: one kind of spare part is the subject, visible entirely, '
                     .'on a plain or studio background. Fine: a watermark, the same part shown several times from different angles, '
-                    .'a ruler or scale next to it. Reject photos of parts installed on equipment, close-ups where the part is cut off, '
+                    .'a ruler or scale next to it. Not suitable: the part installed on equipment, a close-up where the part is cut off, '
                     .'different kinds of objects together, drawings, documents or packaging. '
-                    .'Answer JSON {"suitable": [numbers]}.',
+                    .'Answer JSON {"photos": [{"n": number, "why": "short reason", "suitable": true|false}]} with one entry per photo.',
                 array_map(fn ($p) => 'data:'.self::mime($p['bytes']).';base64,'.base64_encode($p['bytes']), array_values($photos)),
                 (string) config('services.openai.media_cover.scene_model', 'gpt-4o-mini'),
                 ['response_format' => ['type' => 'json_object'], 'temperature' => 0],
@@ -180,9 +183,9 @@ class CatalogCoverSceneService
         }
 
         $ok = [];
-        foreach ((array) (json_decode((string) ($res['content'] ?? ''), true)['suitable'] ?? []) as $n) {
-            $sku = $skus[(int) $n - 1] ?? null;
-            if ($sku !== null) {
+        foreach ((array) (json_decode((string) ($res['content'] ?? ''), true)['photos'] ?? []) as $verdict) {
+            $sku = $skus[(int) ($verdict['n'] ?? 0) - 1] ?? null;
+            if ($sku !== null && ($verdict['suitable'] ?? false) === true) {
                 $ok[$sku] = $photos[$sku];
             }
         }

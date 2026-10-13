@@ -66,10 +66,19 @@ class MediaCoverTest extends TestCase
     {
         Http::fake([
             'https://shop.test/*' => Http::response(self::jpeg(), 200, ['Content-Type' => 'image/jpeg']),
-            'https://ai.test/v1/chat/completions' => Http::response(['choices' => [['message' => ['content' => json_encode(['suitable' => $suitable])]]]]),
+            'https://ai.test/v1/chat/completions' => Http::response(['choices' => [['message' => ['content' => self::verdicts($suitable)]]]]),
             'https://ai.test/v1/images/edits' => Http::response(['data' => [['b64_json' => base64_encode(self::jpeg(1536, 1024, true))]]]),
             'https://ai.test/v1/images/generations' => Http::response(['data' => [['b64_json' => base64_encode(self::jpeg(1536, 1024))]]]),
         ]);
+    }
+
+    /** Ответ отборщика: решение по каждому из трёх фото. @param  list<int>  $suitable */
+    private static function verdicts(array $suitable): string
+    {
+        return (string) json_encode(['photos' => array_map(
+            fn (int $n) => ['n' => $n, 'why' => 'test', 'suitable' => in_array($n, $suitable, true)],
+            [1, 2, 3],
+        )]);
     }
 
     private static function editsSent(): int
@@ -91,7 +100,7 @@ class MediaCoverTest extends TestCase
 
         // Фото проверила модель; две детали перерисованы по одной, потом общая сцена.
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/chat/completions')
-            && str_contains(json_encode($r['messages']), 'clean product shot'));
+            && str_contains(json_encode($r['messages']), 'designer can redraw the part'));
         $this->assertSame(3, self::editsSent());
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/images/edits')
             && $r->hasHeader('X-Proxy-Key', 'pk-test')
@@ -168,7 +177,7 @@ class MediaCoverTest extends TestCase
         Http::fake([
             'https://shop.test/*' => Http::response(self::jpeg(), 200, ['Content-Type' => 'image/jpeg']),
             'https://ai.test/v1/chat/completions' => Http::sequence()
-                ->push(['choices' => [['message' => ['content' => json_encode(['suitable' => []])]]]])
+                ->push(['choices' => [['message' => ['content' => self::verdicts([])]]]])
                 ->push(['choices' => [['message' => ['content' => json_encode(['scene' => 'A bright lobby with closed elevator doors far away.'])]]]]),
             'https://ai.test/v1/images/generations' => Http::response(['data' => [['b64_json' => base64_encode(self::jpeg(1536, 1024))]]]),
         ]);
