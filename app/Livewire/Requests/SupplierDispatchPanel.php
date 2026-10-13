@@ -85,6 +85,23 @@ class SupplierDispatchPanel extends Component
     /** @var array<int, \Livewire\Features\SupportFileUploads\TemporaryUploadedFile> */
     public array $newFiles = [];
 
+    /**
+     * Что из формы хранит черновик (SupplierDispatchDraft). Загруженные с
+     * компьютера файлы (newFiles) — временные, в черновик не попадают.
+     */
+    private const DRAFT_FIELDS = [
+        'selectedItems', 'attachPhoto', 'selectedSuppliers', 'addedSupplierIds',
+        'greeting', 'greetingEn', 'intro', 'introEn', 'closing', 'closingEn',
+        'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn',
+        'note', 'selectedAttachments',
+    ];
+
+    /** Отпечаток формы на момент последнего сохранения черновика: изменилась — сохраняем. */
+    public string $draftHash = '';
+
+    /** Когда черновик сохранён (для подписи в форме), null — черновика нет. */
+    public ?string $draftSavedAt = null;
+
     public function mount(RequestModel $request): void
     {
         $this->requestId = $request->id;
@@ -123,6 +140,89 @@ class SupplierDispatchPanel extends Component
             $this->editedQty[$it['id']] = '';
             $this->editedQtyEn[$it['id']] = '';
         }
+
+        $this->restoreDraft();
+        $this->draftHash = $this->draftFingerprint();
+    }
+
+    /* ------------------------------ Черновик ------------------------------ */
+
+    /**
+     * Черновик запроса: переход на другую вкладку заявки удаляет компонент, и
+     * всё выбранное и написанное пропадало (заказчик, 13.10.2026). Сохраняем
+     * форму после каждого запроса, где она изменилась, и восстанавливаем при
+     * возврате. Позиции, которых в заявке больше нет, отбрасываем.
+     */
+    public function dehydrate(): void
+    {
+        if (auth()->id() === null) {
+            return;
+        }
+        $hash = $this->draftFingerprint();
+        if ($hash === $this->draftHash) {
+            return;
+        }
+        $draft = \App\Models\SupplierDispatchDraft::query()->updateOrCreate(
+            ['request_id' => $this->requestId, 'user_id' => auth()->id()],
+            ['payload' => $this->draftPayload()],
+        );
+        $this->draftHash = $hash;
+        $this->draftSavedAt = $draft->updated_at?->timezone('Europe/Moscow')->format('d.m H:i');
+    }
+
+    /** Сбросить черновик — форма вернётся к начальному виду. */
+    public function resetDraft()
+    {
+        \App\Models\SupplierDispatchDraft::query()
+            ->where('request_id', $this->requestId)->where('user_id', auth()->id())->delete();
+
+        return $this->redirect(route('requests.show', ['request' => $this->requestId, 'tab' => 'suppliers']), navigate: false);
+    }
+
+    private function restoreDraft(): void
+    {
+        $draft = \App\Models\SupplierDispatchDraft::query()
+            ->where('request_id', $this->requestId)->where('user_id', auth()->id())->first();
+        if ($draft === null) {
+            return;
+        }
+        $data = (array) $draft->payload;
+        $itemIds = array_flip(array_map('intval', array_column($this->items(), 'id')));
+        $perItem = ['selectedItems', 'attachPhoto', 'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn'];
+        foreach (self::DRAFT_FIELDS as $field) {
+            if (! array_key_exists($field, $data)) {
+                continue;
+            }
+            $value = $data[$field];
+            if (in_array($field, $perItem, true)) {
+                $value = array_intersect_key((array) $value, $itemIds);
+                $this->{$field} = array_replace($this->{$field}, $value);
+                if ($field === 'selectedItems') {
+                    // Снятые в черновике галочки — тоже выбор менеджера.
+                    $this->selectedItems = array_replace(array_fill_keys(array_keys($this->selectedItems), false), $value);
+                }
+
+                continue;
+            }
+            $this->{$field} = is_array($this->{$field}) ? (array) $value : (string) $value;
+        }
+        $this->draftSavedAt = $draft->updated_at?->timezone('Europe/Moscow')->format('d.m H:i');
+    }
+
+    /** @return array<string, mixed> */
+    private function draftPayload(): array
+    {
+        $out = [];
+        foreach (self::DRAFT_FIELDS as $field) {
+            $out[$field] = $this->{$field};
+        }
+
+        return $out;
+    }
+
+    private function draftFingerprint(): string
+    {
+        return md5((string) json_encode($this->draftPayload()));
     }
 
     /**
@@ -914,6 +1014,9 @@ class SupplierDispatchPanel extends Component
             'closing_en' => $this->closingEn,
         ];
         $result = $dispatcher->dispatch($req, $supplierIds, $itemIds, $this->note, $user, $reqAttIds, $extraFiles, $edits);
+        if ($result['sent'] > 0) {
+            \App\Models\SupplierDispatchDraft::query()->where('request_id', $this->requestId)->where('user_id', $user->id)->delete();
+        }
 
         $msg = "Отправлено запросов поставщикам: {$result['sent']}.";
         if ($result['failed'] > 0) {

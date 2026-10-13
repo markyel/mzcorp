@@ -430,7 +430,7 @@
 
             <div>
                 <label class="block text-[11.5px] text-fg-3 mb-1">Примечание <span class="text-fg-4">(необязательно)</span></label>
-                <textarea wire:model="note" rows="2" placeholder="Напр.: срочно; нужен аналог; уточните срок доставки"
+                <textarea wire:model.blur="note" rows="2" placeholder="Напр.: срочно; нужен аналог; уточните срок доставки"
                           class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
             </div>
 
@@ -534,6 +534,13 @@
                     <span wire:loading wire:target="send">Отправляю…</span>
                 </button>
                 <span class="text-[11.5px] text-fg-3">каждому поставщику — отдельное письмо с его позициями</span>
+                @if($draftSavedAt)
+                    <span class="ml-auto text-[11.5px] text-fg-3" title="Выбор и тексты сохраняются сами — можно уйти на другую вкладку и вернуться. Файлы, загруженные с компьютера, в черновике не сохраняются.">
+                        Черновик сохранён · {{ $draftSavedAt }}
+                        <button type="button" class="text-sky-700 hover:underline ml-1" wire:click="resetDraft"
+                                wire:confirm="Сбросить черновик? Выбор позиций, поставщиков и правки текста вернутся к начальным.">Сбросить</button>
+                    </span>
+                @endif
             </div>
         </div>
     </div>
