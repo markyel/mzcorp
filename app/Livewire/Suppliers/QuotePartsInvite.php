@@ -47,6 +47,9 @@ class QuotePartsInvite extends Component
 
     public string $message = '';
 
+    /** Показывать поставщику наш M-артикул (по умолчанию — нет). */
+    public bool $show_internal_code = false;
+
     public ?string $error = null;
 
     public function mount(Supplier $supplier): void
@@ -75,6 +78,7 @@ class QuotePartsInvite extends Component
             'packaging' => ['nullable', 'in:,0,1'],
             'offer_validity_days' => ['nullable', 'integer', 'min:1', 'max:730'],
             'message' => ['nullable', 'string', 'max:2000'],
+            'show_internal_code' => ['boolean'],
         ], [], [
             'company_name' => 'компания', 'email' => 'почта', 'incoterm_place' => 'место',
             'country' => 'страна', 'offer_validity_days' => 'срок действия',

@@ -45,6 +45,7 @@ class QuotePartsSupplierService
                 'offer_validity_days' => $form['offer_validity_days'] ?: null,
             ], fn ($v) => $v !== null),
             'message' => $form['message'] ?: null,
+            'show_internal_code' => (bool) ($form['show_internal_code'] ?? false),
         ]);
 
         $supplier->forceFill([

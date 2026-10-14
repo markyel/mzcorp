@@ -79,6 +79,12 @@
             <label class="block"><span class="text-fg-3 text-[12px]">Сообщение поставщику (по-английски, необязательно)</span>
                 <textarea wire:model="message" rows="3" class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500" placeholder="Dear Lily, we'd like to move our price requests to QuoteParts…"></textarea></label>
 
+            <label class="flex items-center gap-2 text-[12.5px]">
+                <input type="checkbox" wire:model="show_internal_code" class="w-4 h-4 accent-sky-600">
+                Показывать поставщику наш M-артикул
+                <span class="text-fg-4">— по умолчанию скрыт; включайте для партнёров, которые уже знают наши коды</span>
+            </label>
+
             @if($error)<div class="text-red-700 text-[12.5px]">{{ $error }}</div>@endif
 
             <div class="flex gap-2">
