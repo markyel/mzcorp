@@ -82,6 +82,36 @@ class CatalogSupplierPriceImportService
     }
 
     /**
+     * Что изменит запись относительно того, что уже в базе: новые точки цены и
+     * изменившиеся (другая цена, дата или поставщик).
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return array{new:int, changed:int, same:int}
+     */
+    public function diff(array $rows): array
+    {
+        $existing = [];
+        foreach (DB::table('catalog_supplier_prices')->where('source', '1c')
+            ->get(['sku', 'kind', 'price', 'priced_at', 'supplier_name_1c']) as $e) {
+            $existing[$e->sku.'|'.$e->kind] = [(float) $e->price, (string) $e->priced_at, (string) $e->supplier_name_1c];
+        }
+
+        $out = ['new' => 0, 'changed' => 0, 'same' => 0];
+        foreach ($rows as $r) {
+            $old = $existing[$r['sku'].'|'.$r['kind']] ?? null;
+            if ($old === null) {
+                $out['new']++;
+            } elseif (abs($old[0] - (float) $r['price']) > 0.00005 || $old[1] !== (string) $r['priced_at'] || $old[2] !== $r['supplier_name_1c']) {
+                $out['changed']++;
+            } else {
+                $out['same']++;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Записать разобранное: по артикулу и виду цены — одна строка, повторный
      * импорт обновляет.
      *

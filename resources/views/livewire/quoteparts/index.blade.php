@@ -26,6 +26,7 @@
         <button type="button" wire:click="setTab('suppliers')" class="btn btn-sm {{ $tab === 'suppliers' ? 'btn-primary' : '' }}">
             Поставщики <span class="opacity-70">{{ $this->invitedSuppliers->count() }}</span>
         </button>
+        <button type="button" wire:click="setTab('prices')" class="btn btn-sm {{ $tab === 'prices' ? 'btn-primary' : '' }}">Закупки 1С</button>
         <input type="search" wire:model.live.debounce.300ms="search" placeholder="Поиск: артикул / наименование / бренд"
                class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
     </div>
@@ -99,6 +100,10 @@
                 </div>
             @endif
         </div>
+    @endif
+
+    @if($tab === 'prices')
+        <livewire:quote-parts.purchase-prices />
     @endif
 
     @if($tab === 'suppliers')
