@@ -26,11 +26,40 @@ use Illuminate\Support\Facades\Log;
  */
 class MediaMaterialService
 {
+    /** Посты об ассортименте: в конце — как заказать, одинаково в каждом. */
+    public const ORDER_FOOTER_SOURCES = ['catalog_new', 'catalog_price', 'stock_arrivals'];
+
     public function __construct(
         private readonly OpenAIChatService $openai,
         private readonly MediaDataService $data,
         private readonly MediaCoverService $covers,
+        private readonly \App\Services\Bot\BotSettings $bots,
     ) {}
+
+    /**
+     * Концовка поста об ассортименте: как заказать — сайт, телефон и боты
+     * заявок. Раньше её писала модель, и выходило по-разному («свяжитесь через
+     * сайт или по телефону», «заказывайте прямо сейчас!»); заказчик (14.10.2026)
+     * попросил добавить ботов Telegram и MAX — теперь концовка одна, из
+     * настроек, а модель свою не пишет (WriteMaterialPrompt::genreHint).
+     * Не подключённый бот в концовку не попадает.
+     */
+    public function orderFooter(): string
+    {
+        $phone = trim((string) config('services.company.phone', ''));
+        $bots = array_filter([
+            ($u = $this->bots->publicUrl(\App\Enums\MessengerChannel::Telegram)) ? 'Telegram '.$u : null,
+            ($u = $this->bots->publicUrl(\App\Enums\MessengerChannel::Max)) ? 'MAX '.$u : null,
+        ]);
+
+        $ways = 'через сайт'.($phone !== '' ? ', по телефону '.$phone : '');
+        if ($bots === []) {
+            return 'Для заказа свяжитесь с нами '.$ways.'.';
+        }
+
+        return 'Для заказа свяжитесь с нами '.$ways.' или через бота заявок: '.implode(', ', $bots).'. '
+            .'В боте можно узнать цену по M-артикулу и отправить заявку текстом, фото или файлом.';
+    }
 
     /**
      * @return array{ok: bool, publication: ?MediaPublication, message: string}
@@ -125,6 +154,9 @@ class MediaMaterialService
         $body = $this->data->resolveLinks(trim((string) $parsed['body']), $links);
         if ($channel->isPostable()) {
             $body = MediaPublisherService::forFeed($body);
+            if (in_array($topic->source, self::ORDER_FOOTER_SOURCES, true)) {
+                $body = rtrim($body)."\n\n".$this->orderFooter();
+            }
         }
 
         $title = mb_substr(trim((string) ($parsed['title'] ?? $topic->title)), 0, 300);

@@ -75,6 +75,20 @@ class BotSettings
         return $u !== '' ? $u : null;
     }
 
+    /** Публичная ссылка на бота для клиентов (посты, письма); null — бот не подключён. */
+    public function publicUrl(MessengerChannel $channel): ?string
+    {
+        $u = $this->username($channel);
+        if ($u === null) {
+            return null;
+        }
+
+        return match ($channel) {
+            MessengerChannel::Telegram => 'https://t.me/'.ltrim($u, '@'),
+            MessengerChannel::Max => 'https://max.ru/'.ltrim($u, '@'),
+        };
+    }
+
     public function saveUsername(MessengerChannel $channel, ?string $username): void
     {
         $this->settings->set($this->key($channel, 'username'), (string) $username, AppSetting::TYPE_STRING, null,
