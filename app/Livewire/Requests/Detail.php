@@ -1179,7 +1179,7 @@ class Detail extends Component
             $email->body_html
         ) ?? $email->body_html;
 
-        return $this->collapseQuotedBlocks($html);
+        return $this->collapseQuotedBlocks(\App\Support\EmailHtml::hideLocalImages($html));
     }
 
     /**

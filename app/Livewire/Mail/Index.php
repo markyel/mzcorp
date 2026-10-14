@@ -307,7 +307,7 @@ class Index extends Component
 
         $messageId = $email->id;
 
-        return preg_replace_callback(
+        return \App\Support\EmailHtml::hideLocalImages(preg_replace_callback(
             '/(src|href)\s*=\s*(["\'])cid:([^"\']+)\2/i',
             function ($m) use ($messageId) {
                 $url = route('attachments.inline', [
@@ -318,7 +318,7 @@ class Index extends Component
                 return $m[1] . '=' . $m[2] . $url . $m[2];
             },
             $email->body_html
-        ) ?? $email->body_html;
+        ) ?? $email->body_html);
     }
 
     /* ------------------------------- Helpers -------------------------------- */

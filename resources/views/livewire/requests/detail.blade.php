@@ -1615,8 +1615,13 @@
                                     <div class="text-[12.5px] text-fg-3">
                                         <span class="text-fg-1 font-medium">{{ $email->from_name ?: $email->from_email }}</span>
                                         · <span class="mono">{{ $email->sent_at?->format('d.m.Y H:i') ?? '—' }}</span>
+                                    </div>
+                                    <div class="mt-0.5 text-[12.5px]">
+                                        <span class="text-fg-3">Тема:</span>
                                         @if(trim((string) $email->subject) !== '')
-                                            · <span class="text-fg-2">{{ $email->subject }}</span>
+                                            <span class="font-medium text-fg-1">{{ $email->subject }}</span>
+                                        @else
+                                            <span class="text-fg-4">(без темы)</span>
                                         @endif
                                     </div>
                                     <div class="mt-1.5 -mx-3 text-[13px] leading-[1.55] text-fg-1" wire:key="overview-email-{{ $email->id }}">
