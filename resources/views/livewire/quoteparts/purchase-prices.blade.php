@@ -13,13 +13,14 @@
             </div>
 
             <form wire:submit="upload" class="flex flex-wrap items-center gap-2">
-                <input type="file" wire:model="file" accept=".xlsx,.xls" class="text-[12.5px]">
-                {{-- Не сочетать @disabled с wire:loading.attr: по окончании загрузки Livewire
-                     возвращает кнопке состояние «до загрузки», и она остаётся выключенной. --}}
-                @if($file && ! $busy)
-                    <button type="submit" class="btn btn-sm btn-primary" wire:loading.attr="disabled" wire:target="upload">Загрузить и проверить</button>
-                @elseif($busy)
+                <input type="file" wire:model.live="file" accept=".xlsx,.xls" class="text-[12.5px]">
+                {{-- Кнопка видна всегда: её состояние не должно зависеть от перерисовки после
+                     загрузки файла (Livewire 4) и от wire:loading.attr, который возвращает
+                     «состояние до загрузки». Нет файла — сообщит валидация. --}}
+                @if($busy)
                     <span class="text-fg-4 text-[12px]">предыдущий файл ещё обрабатывается</span>
+                @else
+                    <button type="submit" class="btn btn-sm btn-primary" wire:loading.attr="disabled" wire:target="file,upload">Загрузить и проверить</button>
                 @endif
                 <span wire:loading wire:target="file" class="text-fg-4 text-[12px]">файл загружается…</span>
                 @error('file')<span class="text-red-700 text-[12px]">{{ $message }}</span>@enderror
