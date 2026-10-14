@@ -35,11 +35,25 @@ class EmailDraftService
         EmailMessage $replyTo,
         User $author,
         bool $replyAll = false,
+        bool $toColleague = false,
     ): EmailMessage {
         $resolved = $this->resolver->resolve($request);
         $mailbox = $resolved['mailbox'];
 
         $recipients = $this->computeRecipients($replyTo, $mailbox, $replyAll);
+
+        // Ответ на КОНКРЕТНОЕ письмо коллеги (почта mzCorp, «Ответить» на нём):
+        // отвечаем коллеге. Без этого его адрес (это наш ящик) вырезался, и
+        // страховка ниже подставляла клиента заявки — ответ на внутреннее письмо
+        // Марины Петровой уходил клиенту (14.10.2026, M-2026-13769). Себе не
+        // отвечаем: письмо из своего же ящика — прежняя логика.
+        if ($toColleague && empty($recipients['to']) && $replyTo->direction === MailDirection::Inbound) {
+            $from = mb_strtolower(trim((string) $replyTo->from_email));
+            $own = array_filter([mb_strtolower((string) $mailbox?->email), mb_strtolower((string) $author->email)]);
+            if ($from !== '' && ! in_array($from, $own, true)) {
+                $recipients['to'] = [['email' => (string) $replyTo->from_email, 'name' => (string) ($replyTo->from_name ?? '')]];
+            }
+        }
 
         // Якорь пришёл с технического ящика, а не от клиента: либо релей
         // веб-формы (order@myzip.ru), либо форвардер пересланной заявки

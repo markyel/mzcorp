@@ -125,7 +125,8 @@ class Composer extends Component
 
                 return;
             }
-            $draft = $this->createOrToast(fn () => $drafts->createReply($req, $anchor, $this->user(), $all));
+            // Отвечают на конкретное письмо: письмо коллеги — ответ коллеге, а не клиенту заявки.
+            $draft = $this->createOrToast(fn () => $drafts->createReply($req, $anchor, $this->user(), $all, toColleague: true));
             if (! $draft) {
                 return;
             }
