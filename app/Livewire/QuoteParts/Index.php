@@ -42,7 +42,7 @@ class Index extends Component
 
     public function setTab(string $tab): void
     {
-        $this->tab = in_array($tab, ['candidates', 'pool'], true) ? $tab : 'candidates';
+        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers'], true) ? $tab : 'candidates';
         $this->perPage = self::PER_PAGE;
     }
 
@@ -97,6 +97,27 @@ class Index extends Component
     public function poolCounts(): array
     {
         return QuotePartsPoolItem::query()->inPool()->selectRaw('status, count(*) as n')->groupBy('status')->pluck('n', 'status')->all();
+    }
+
+    /** Поставщики, приглашённые в QuoteParts (приглашают из карточки поставщика). */
+    #[Computed]
+    public function invitedSuppliers()
+    {
+        return \App\Models\Supplier::query()->whereNotNull('quoteparts_link_id')
+            ->orderByRaw("case quoteparts_status when 'terms_discussed' then 0 when 'invited' then 1 when 'active' then 2 else 3 end")
+            ->orderByDesc('quoteparts_invited_at')
+            ->get(['id', 'name', 'email', 'quoteparts_status', 'quoteparts_invited_at', 'quoteparts_comment']);
+    }
+
+    public function refreshSupplierStatuses(\App\Services\QuoteParts\QuotePartsSupplierService $service): void
+    {
+        try {
+            $n = $service->refreshStatuses();
+        } catch (Throwable) {
+            $n = 0;
+        }
+        unset($this->invitedSuppliers);
+        $this->dispatch('toast', type: 'success', message: 'Статусы поставщиков обновлены'.($n ? ': '.$n : '').'.');
     }
 
     #[Computed]

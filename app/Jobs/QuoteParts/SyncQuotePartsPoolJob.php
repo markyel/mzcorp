@@ -4,6 +4,7 @@ namespace App\Jobs\QuoteParts;
 
 use App\Services\QuoteParts\QuotePartsClient;
 use App\Services\QuoteParts\QuotePartsPoolService;
+use App\Services\QuoteParts\QuotePartsSupplierService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -51,6 +52,9 @@ class SyncQuotePartsPoolJob implements ShouldQueue, ShouldBeUnique
             if ($stats['sent'] > 0 || $stats['failed'] > 0) {
                 Log::info('QuoteParts pool synced', $stats);
             }
+
+            // Ответы приглашённых поставщиков (принял, предложил другие условия, отказался).
+            app(QuotePartsSupplierService::class)->refreshStatuses();
         } finally {
             $lock->release();
         }

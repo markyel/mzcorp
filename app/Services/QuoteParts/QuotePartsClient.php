@@ -61,6 +61,39 @@ class QuotePartsClient
         return $response->json('items', []);
     }
 
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array{id:int, external_id:?string, status:string, terms_confirmed:bool, supplier_comment:?string}
+     */
+    public function inviteSupplier(array $payload): array
+    {
+        $response = $this->http()->post('/api/v1/supplier-invitations', $payload);
+
+        if ($response->status() === 422) {
+            throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'Проверьте данные приглашения.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts supplier-invitations: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 500));
+        }
+
+        return $response->json();
+    }
+
+    /**
+     * @param  list<string>  $externalIds
+     * @return list<array{id:int, external_id:?string, status:string, terms_confirmed:bool, supplier_comment:?string}>
+     */
+    public function supplierLinks(array $externalIds): array
+    {
+        $response = $this->http()->get('/api/v1/supplier-links', ['external_ids' => $externalIds]);
+
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts supplier-links: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 500));
+        }
+
+        return $response->json('links', []);
+    }
+
     private function http(): PendingRequest
     {
         if (! $this->isConfigured()) {

@@ -13,6 +13,11 @@
         <h2 class="text-[16px] font-semibold text-fg-1">{{ $supplier->name ?: ($supplier->email ?: $supplier->domain) }}</h2>
     </div>
 
+    {{-- Приглашение в QuoteParts (тестирование платформы поставщиков) — директорат и админ. --}}
+    @if(auth()->user()?->hasAnyRole(['director', 'admin']))
+        <livewire:suppliers.quote-parts-invite :supplier="$supplier" :key="'qp-'.$supplier->id" />
+    @endif
+
     {{-- Группы: клик включает / исключает поставщика, сохраняется сразу. По группам
          выбирают поставщиков для запроса цены (заявка → «Поставщики», «Снабжение»). --}}
     <div class="flex flex-wrap items-center gap-1.5">

@@ -23,6 +23,9 @@
             @if(($counts['paused'] ?? 0) > 0)<span class="chip chip-warn text-[10px] ml-1">на паузе {{ $counts['paused'] }}</span>@endif
             @if(($counts['error'] ?? 0) > 0)<span class="chip chip-danger text-[10px] ml-1">ошибка {{ $counts['error'] }}</span>@endif
         </button>
+        <button type="button" wire:click="setTab('suppliers')" class="btn btn-sm {{ $tab === 'suppliers' ? 'btn-primary' : '' }}">
+            Поставщики <span class="opacity-70">{{ $this->invitedSuppliers->count() }}</span>
+        </button>
         <input type="search" wire:model.live.debounce.300ms="search" placeholder="Поиск: артикул / наименование / бренд"
                class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
     </div>
@@ -95,6 +98,44 @@
                     <button type="button" wire:click="loadMore" class="btn btn-sm">Показать ещё</button>
                 </div>
             @endif
+        </div>
+    @endif
+
+    @if($tab === 'suppliers')
+        @php $labels = \App\Services\QuoteParts\QuotePartsSupplierService::STATUS_LABELS; @endphp
+        <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
+            <button type="button" wire:click="refreshSupplierStatuses" class="btn btn-sm">Обновить статусы</button>
+            <span class="text-fg-4">Пригласить поставщика — в его карточке: «Поставщики» → «Реестр» → поставщик → блок «QuoteParts».</span>
+        </div>
+        <div class="ds-card">
+            <div class="overflow-x-auto">
+                <table class="w-full text-[12.5px]">
+                    <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
+                        <tr>
+                            <th class="text-left px-3 py-2">Поставщик</th>
+                            <th class="text-left px-3 py-2">Статус</th>
+                            <th class="text-left px-3 py-2">Приглашён</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse($this->invitedSuppliers as $s)
+                            <tr wire:key="qps-{{ $s->id }}" class="border-b border-border-subtle hover:bg-hover align-top">
+                                <td class="px-3 py-2">
+                                    <a href="{{ route('suppliers.registry-edit', $s) }}" class="text-sky-700 hover:underline">{{ $s->name ?: $s->email }}</a>
+                                    <div class="text-[11px] text-fg-4">{{ $s->email }}</div>
+                                </td>
+                                <td class="px-3 py-2">
+                                    <span class="chip {{ $s->quoteparts_status === 'active' ? 'chip-ok' : ($s->quoteparts_status === 'terms_discussed' ? 'chip-warn' : ($s->quoteparts_status === 'declined' ? 'chip-danger' : 'chip-sky')) }} text-[10.5px]">{{ $labels[$s->quoteparts_status] ?? $s->quoteparts_status }}</span>
+                                    @if($s->quoteparts_comment)<div class="mt-1 text-[11.5px] text-amber-800">«{{ $s->quoteparts_comment }}»</div>@endif
+                                </td>
+                                <td class="px-3 py-2 text-[11.5px] text-fg-3">{{ $s->quoteparts_invited_at?->format('d.m.Y H:i') }}</td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="3" class="px-3 py-10 text-center text-fg-3 text-[13px]">Пока никого не пригласили.</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
         </div>
     @endif
 
