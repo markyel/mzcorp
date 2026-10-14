@@ -37,7 +37,10 @@ class QuotePartsRfqService
         }
 
         $catalog = CatalogItem::query()->whereIn('id', array_keys($quantities))->get(['id', 'sku'])->keyBy('id');
-        $suppliers = Supplier::query()->whereIn('id', $supplierIds)->where('quoteparts_status', 'active')->pluck('id');
+        // Поставщик в QuoteParts — организация: несколько её адресов дают одного получателя;
+        // кому из сотрудников и в каком порядке писать, решает режим рассылки поставщика.
+        $suppliers = Supplier::query()->whereIn('id', $supplierIds)->where('quoteparts_status', 'active')->get()
+            ->map->quotepartsKey()->unique()->values();
         if ($catalog->isEmpty() || $suppliers->isEmpty()) {
             throw new RuntimeException('Нужны позиции с M-артикулом и поставщики, принявшие приглашение в QuoteParts.');
         }
@@ -50,7 +53,7 @@ class QuotePartsRfqService
 
         $result = $this->client->createRfq([
             'items' => $catalog->map(fn ($c) => ['code' => $c->sku, 'quantity' => max(0.001, (float) $quantities[$c->id]), 'note' => null])->values()->all(),
-            'suppliers' => $suppliers->map(fn ($id) => (string) $id)->values()->all(),
+            'suppliers' => $suppliers->all(),
             'reply_by' => $replyBy,
             'message' => $message ?: null,
             'external_ref' => $request?->internal_code,

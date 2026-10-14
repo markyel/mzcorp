@@ -28,7 +28,7 @@
                                         <tr class="border-b border-border-subtle align-top">
                                             @if($loop->first)
                                                 <td class="px-3 py-1.5 font-medium" rowspan="{{ count($s['lines']) }}">
-                                                    {{ $supplierNames[(int) $s['external_id']] ?? $s['external_id'] }}
+                                                    {{ $supplierNames[$s['external_id']] ?? $s['external_id'] }}
                                                     @if(! empty($s['send_error']))<div class="text-[11px] text-red-700">{{ $s['send_error'] }}</div>@endif
                                                 </td>
                                             @endif
@@ -85,7 +85,7 @@
                         <div class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Поставщики, принявшие приглашение в QuoteParts</div>
                         @forelse($this->activeSuppliers as $s)
                             <label wire:key="qps-{{ $s->id }}" class="inline-flex items-center gap-1.5 mr-4 py-0.5">
-                                <input type="checkbox" wire:model="suppliers.{{ $s->id }}" class="w-4 h-4 accent-sky-600"> {{ $s->name ?: $s->email }}
+                                <input type="checkbox" wire:model="suppliers.{{ $s->id }}" class="w-4 h-4 accent-sky-600"> {{ $s->organization?->name ?: ($s->name ?: $s->email) }}
                             </label>
                         @empty
                             <div class="text-fg-4 text-[12px]">Пока никто не принял приглашение. Пригласить — в карточке поставщика.</div>

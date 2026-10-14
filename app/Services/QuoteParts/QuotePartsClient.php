@@ -98,6 +98,24 @@ class QuotePartsClient
     }
 
     /**
+     * @param  array{dispatch_mode:string, escalate_after_hours:int, contacts: list<array{email:string, name:?string, topics:list<string>, position:int}>}  $payload
+     * @return array<string, mixed> the link as QuoteParts returns it
+     */
+    public function setContacts(string $key, array $payload): array
+    {
+        $response = $this->http()->put('/api/v1/supplier-links/'.rawurlencode($key).'/contacts', $payload);
+
+        if ($response->status() === 422) {
+            throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не принял контакты.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts contacts: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /**
      * @param  array{items: list<array{code:string, quantity:float, note:?string}>, suppliers: list<string>, reply_by:?string, message:?string, external_ref:?string}  $payload
      * @return array<string, mixed>
      */

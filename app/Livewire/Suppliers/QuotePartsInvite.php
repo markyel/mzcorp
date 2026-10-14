@@ -100,6 +100,107 @@ class QuotePartsInvite extends Component
         $this->dispatch('toast', type: 'success', message: 'Приглашение отправлено: '.$this->email);
     }
 
+    /* ---------------- Контакты поставщика и порядок рассылки ---------------- */
+
+    public const TOPICS = [
+        'quoting' => 'Расценка',
+        'finance' => 'Финансы',
+        'logistics' => 'Логистика',
+        'claims' => 'Рекламации',
+        'general' => 'Основной',
+    ];
+
+    public bool $contactsOpen = false;
+
+    /** @var array<int, array{email:string, name:string, position:string, topics:array<string, bool>}> */
+    public array $contactRows = [];
+
+    public string $dispatchMode = 'all';
+
+    public int $escalateAfterHours = 48;
+
+    public ?string $contactsError = null;
+
+    public function openContacts(QuotePartsSupplierService $service): void
+    {
+        $this->contactsError = null;
+        try {
+            $link = $service->link($this->supplier) ?? [];
+        } catch (Throwable $e) {
+            $this->contactsError = 'QuoteParts не ответил: '.mb_substr($e->getMessage(), 0, 200);
+
+            return;
+        }
+
+        $current = collect($link['contacts'] ?? [])->keyBy(fn ($c) => mb_strtolower($c['email']));
+        $this->dispatchMode = $link['dispatch_mode'] ?? 'all';
+        $this->escalateAfterHours = (int) ($link['escalate_after_hours'] ?? 48);
+
+        // Адреса фирмы из справочника + контакты, которые уже есть в QuoteParts.
+        $emails = $this->supplier->quotepartsColleagues()->mapWithKeys(fn ($s) => [mb_strtolower($s->email) => $s->contact_person ?: $s->name ?: ''])
+            ->union($current->map(fn ($c) => $c['name'] ?? ''));
+
+        $this->contactRows = [];
+        $n = 1;
+        foreach ($emails as $email => $name) {
+            $c = $current->get($email);
+            $topics = [];
+            foreach (array_keys(self::TOPICS) as $topic) {
+                $topics[$topic] = in_array($topic, $c['topics'] ?? [], true);
+            }
+            $this->contactRows[] = [
+                'email' => $email,
+                'name' => (string) ($c['name'] ?? $name),
+                'position' => (string) ($c['position'] ?? $n),
+                'topics' => $topics,
+            ];
+            $n++;
+        }
+
+        $this->contactsOpen = true;
+    }
+
+    public function saveContacts(QuotePartsSupplierService $service): void
+    {
+        $this->validate([
+            'dispatchMode' => ['required', 'in:all,sequential'],
+            'escalateAfterHours' => ['required', 'integer', 'min:1', 'max:720'],
+            'contactRows.*.position' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ], [], ['escalateAfterHours' => 'часы до следующего', 'contactRows.*.position' => 'порядок']);
+
+        $contacts = [];
+        foreach ($this->contactRows as $row) {
+            $topics = array_keys(array_filter($row['topics']));
+            if ($topics === []) {
+                continue;
+            }
+            $contacts[] = [
+                'email' => $row['email'],
+                'name' => trim($row['name']) ?: null,
+                'topics' => $topics,
+                'position' => (int) ($row['position'] ?: 99),
+            ];
+        }
+
+        if (! collect($contacts)->contains(fn ($c) => in_array('quoting', $c['topics'], true) || in_array('general', $c['topics'], true))) {
+            $this->contactsError = 'Нужен хотя бы один контакт по расценке или основной — иначе запросы некому отправлять.';
+
+            return;
+        }
+
+        try {
+            $service->saveContacts($this->supplier, $contacts, $this->dispatchMode, $this->escalateAfterHours);
+        } catch (Throwable $e) {
+            $this->contactsError = mb_substr($e->getMessage(), 0, 400);
+
+            return;
+        }
+
+        $this->contactsOpen = false;
+        $this->contactsError = null;
+        $this->dispatch('toast', type: 'success', message: 'Контакты поставщика в QuoteParts сохранены.');
+    }
+
     public function refreshStatus(QuotePartsSupplierService $service): void
     {
         try {

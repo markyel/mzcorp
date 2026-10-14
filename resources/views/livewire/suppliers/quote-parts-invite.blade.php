@@ -24,7 +24,55 @@
             <div class="text-amber-800">Ключ API QuoteParts не задан — приглашение не отправится.</div>
         @endunless
 
-        @if(! $open)
+        @if($status && ! $open && ! $contactsOpen)
+            <div class="text-[12px] text-fg-3">
+                В QuoteParts поставщик — {{ $supplier->organization ? 'организация «'.$supplier->organization->name.'»: все её адреса — сотрудники одного поставщика' : 'этот адрес' }}.
+                <button type="button" wire:click="openContacts" class="btn btn-xs ml-2">Контакты и порядок рассылки</button>
+            </div>
+        @endif
+
+        @if($contactsOpen)
+            <div class="border border-border rounded-md p-3 space-y-3">
+                <div class="text-[12px] text-fg-3">Кто у поставщика ведёт какую тему. Запросы цен уходят контактам «Расценка» (если их нет — «Основному»). Адрес без отмеченных тем в QuoteParts не попадает.</div>
+                <table class="w-full text-[12.5px]">
+                    <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider">
+                        <tr>
+                            <th class="text-left py-1 w-[60px]">Порядок</th>
+                            <th class="text-left py-1">Адрес</th>
+                            <th class="text-left py-1">Имя</th>
+                            @foreach(\App\Livewire\Suppliers\QuotePartsInvite::TOPICS as $t => $label)<th class="py-1 px-1">{{ $label }}</th>@endforeach
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($contactRows as $i => $row)
+                            <tr wire:key="qpc-{{ $i }}" class="border-t border-border-subtle">
+                                <td class="py-1"><input type="number" min="1" wire:model="contactRows.{{ $i }}.position" class="{{ $inputCls }} !w-[50px]"></td>
+                                <td class="py-1 mono">{{ $row['email'] }}</td>
+                                <td class="py-1"><input type="text" wire:model="contactRows.{{ $i }}.name" class="{{ $inputCls }}"></td>
+                                @foreach(\App\Livewire\Suppliers\QuotePartsInvite::TOPICS as $t => $label)
+                                    <td class="py-1 px-1 text-center"><input type="checkbox" wire:model="contactRows.{{ $i }}.topics.{{ $t }}" class="w-4 h-4 accent-sky-600"></td>
+                                @endforeach
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+
+                <div class="flex flex-wrap items-center gap-4">
+                    <label class="flex items-center gap-1.5"><input type="radio" wire:model.live="dispatchMode" value="all"> Запрос — всем контактам по расценке сразу</label>
+                    <label class="flex items-center gap-1.5"><input type="radio" wire:model.live="dispatchMode" value="sequential"> Последовательно: по порядку, при молчании — следующему через</label>
+                    <input type="number" min="1" max="720" wire:model="escalateAfterHours" @disabled($dispatchMode !== 'sequential') class="{{ $inputCls }} !w-[70px]"> ч
+                </div>
+                <div class="text-[11.5px] text-fg-4">Последовательно: если письмо не доставлено, следующий получает запрос сразу. Напоминания начинаются, когда пройдены все по порядку. Ответ любого сотрудника засчитывается ответом поставщика.</div>
+
+                @if($contactsError)<div class="text-red-700 text-[12.5px]">{{ $contactsError }}</div>@endif
+                <div class="flex gap-2">
+                    <button type="button" wire:click="saveContacts" class="btn btn-sm btn-primary">Сохранить</button>
+                    <button type="button" wire:click="$set('contactsOpen', false)" class="btn btn-sm">Отмена</button>
+                </div>
+            </div>
+        @endif
+
+        @if(! $open && ! $contactsOpen)
             <button type="button" wire:click="$set('open', true)" class="btn btn-sm {{ $status ? '' : 'btn-primary' }}">
                 {{ $status ? 'Изменить условия и пригласить ещё раз' : 'Пригласить в QuoteParts' }}
             </button>

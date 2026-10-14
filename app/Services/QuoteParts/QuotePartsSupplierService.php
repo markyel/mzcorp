@@ -28,7 +28,9 @@ class QuotePartsSupplierService
     public function invite(Supplier $supplier, array $form): Supplier
     {
         $result = $this->client->inviteSupplier([
-            'external_id' => (string) $supplier->id,
+            // По организации: второй адрес той же фирмы станет вторым сотрудником того же
+            // поставщика в QuoteParts, а не отдельным поставщиком.
+            'external_id' => $supplier->quotepartsKey(),
             'company_name' => $form['company_name'],
             'country' => $form['country'] ?: null,
             'contact' => [
@@ -59,16 +61,41 @@ class QuotePartsSupplierService
     }
 
     /**
+     * Контакты поставщика в QuoteParts (кто ведёт расценку, финансы, логистику, рекламации)
+     * и как рассылать запросы: всем сразу или последовательно.
+     *
+     * @return array<string, mixed>|null  связь из QuoteParts или null, если поставщик не приглашён
+     */
+    public function link(Supplier $supplier): ?array
+    {
+        return collect($this->client->supplierLinks([$supplier->quotepartsKey()]))->first();
+    }
+
+    /**
+     * @param  list<array{email:string, name:?string, topics:list<string>, position:int}>  $contacts
+     * @return array<string, mixed>
+     */
+    public function saveContacts(Supplier $supplier, array $contacts, string $mode, int $escalateAfterHours): array
+    {
+        return $this->client->setContacts($supplier->quotepartsKey(), [
+            'dispatch_mode' => $mode,
+            'escalate_after_hours' => $escalateAfterHours,
+            'contacts' => $contacts,
+        ]);
+    }
+
+    /**
      * Подтянуть статусы приглашённых поставщиков (принял, предложил другие условия, отказался).
+     * Связь в QuoteParts — по организации: статус получают все её адреса.
      */
     public function refreshStatuses(): int
     {
         $updated = 0;
 
-        Supplier::query()->whereNotNull('quoteparts_link_id')->select(['id', 'quoteparts_status', 'quoteparts_comment'])
+        Supplier::query()->whereNotNull('quoteparts_link_id')->select(['id', 'supplier_organization_id', 'quoteparts_status', 'quoteparts_comment'])
             ->chunkById(500, function ($suppliers) use (&$updated) {
                 try {
-                    $links = collect($this->client->supplierLinks($suppliers->pluck('id')->map(fn ($id) => (string) $id)->all()))
+                    $links = collect($this->client->supplierLinks($suppliers->map->quotepartsKey()->unique()->values()->all()))
                         ->keyBy('external_id');
                 } catch (Throwable $e) {
                     Log::warning('QuoteParts supplier status refresh failed', ['error' => $e->getMessage()]);
@@ -77,7 +104,7 @@ class QuotePartsSupplierService
                 }
 
                 foreach ($suppliers as $supplier) {
-                    $link = $links->get((string) $supplier->id);
+                    $link = $links->get($supplier->quotepartsKey());
                     if ($link === null) {
                         continue;
                     }

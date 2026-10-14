@@ -75,4 +75,25 @@ class Supplier extends Model
 
         return $v !== '' ? $v : null;
     }
+
+    /**
+     * Ключ поставщика в QuoteParts: организация (несколько адресов одной фирмы — одна
+     * компания-поставщик там), а адрес без организации — сам по себе.
+     */
+    public function quotepartsKey(): string
+    {
+        return $this->supplier_organization_id ? 'org:'.$this->supplier_organization_id : 'sup:'.$this->id;
+    }
+
+    /**
+     * Адреса той же фирмы (организации) — кандидаты в контакты поставщика в QuoteParts.
+     *
+     * @return \Illuminate\Support\Collection<int, self>
+     */
+    public function quotepartsColleagues(): \Illuminate\Support\Collection
+    {
+        return $this->supplier_organization_id
+            ? self::query()->where('supplier_organization_id', $this->supplier_organization_id)->whereNotNull('email')->orderBy('id')->get()
+            : collect([$this]);
+    }
 }
