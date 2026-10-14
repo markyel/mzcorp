@@ -11,6 +11,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class QuotePartsPoolItem extends Model
 {
+    protected $table = 'quoteparts_pool_items';
+
     public const STATUS_PENDING = 'pending';
 
     public const STATUS_ACTIVE = 'active';
