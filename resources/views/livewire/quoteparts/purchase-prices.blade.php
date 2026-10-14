@@ -12,19 +12,22 @@
                 <div><span class="text-fg-3">загружено:</span> <b>{{ $cur['loaded'] ? \Illuminate\Support\Carbon::parse($cur['loaded'])->format('d.m.Y H:i') : '—' }}</b></div>
             </div>
 
-            <form wire:submit="upload" class="flex flex-wrap items-center gap-2">
-                <input type="file" wire:model.live="file" accept=".xlsx,.xls" class="text-[12.5px]">
-                {{-- Кнопка видна всегда: её состояние не должно зависеть от перерисовки после
-                     загрузки файла (Livewire 4) и от wire:loading.attr, который возвращает
-                     «состояние до загрузки». Нет файла — сообщит валидация. --}}
-                @if($busy)
-                    <span class="text-fg-4 text-[12px]">предыдущий файл ещё обрабатывается</span>
-                @else
-                    <button type="submit" class="btn btn-sm btn-primary" wire:loading.attr="disabled" wire:target="file,upload">Загрузить и проверить</button>
-                @endif
-                <span wire:loading wire:target="file" class="text-fg-4 text-[12px]">файл загружается…</span>
-                @error('file')<span class="text-red-700 text-[12px]">{{ $message }}</span>@enderror
+            {{-- Обычная форма (multipart POST), без временной загрузки Livewire: та в Safari
+                 не стартовала после выбора файла. wire:ignore — чтобы опрос статуса не
+                 перерисовывал форму и не сбрасывал выбранный файл. --}}
+            <form method="POST" action="{{ route('quoteparts.purchase-prices.upload') }}" enctype="multipart/form-data"
+                  class="flex flex-wrap items-center gap-2" wire:ignore
+                  x-data="{ sending: false }" x-on:submit="sending = true">
+                @csrf
+                <input type="file" name="file" accept=".xlsx,.xls" required class="text-[12.5px]">
+                <button type="submit" class="btn btn-sm btn-primary" x-bind:disabled="sending">
+                    <span x-show="! sending">Загрузить и проверить</span>
+                    <span x-show="sending" x-cloak>Загружается…</span>
+                </button>
             </form>
+            @if(session('status'))<div class="text-emerald-700 text-[12.5px]">{{ session('status') }}</div>@endif
+            @if($uploadError = session('errors')?->first('file'))<div class="text-red-700 text-[12.5px]">{{ $uploadError }}</div>@endif
+            @if($busy)<div class="text-fg-4 text-[12px]">Идёт обработка файла — обычно до минуты, таблица обновится сама.</div>@endif
             <div class="text-[11.5px] text-fg-4">
                 Выгрузка 1С «Номенклатура (история цен)» в Excel: колонка A — «Артикул», затем первая закупка (поставщик, дата, цена, валюта) и последняя.
                 Сначала файл проверяется без записи — вы увидите, сколько цен новых и изменилось, и подтверждаете запись.

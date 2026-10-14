@@ -5,10 +5,8 @@ namespace App\Livewire\QuoteParts;
 use App\Jobs\Catalog\ImportSupplierPricesJob;
 use App\Models\SupplierPriceImport;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
-use Livewire\WithFileUploads;
 
 /**
  * Загрузка выгрузки 1С «Номенклатура (история цен)» — первая и последняя закупка
@@ -17,39 +15,12 @@ use Livewire\WithFileUploads;
  */
 class PurchasePrices extends Component
 {
-    use WithFileUploads;
-
-    public $file;
-
     public function mount(): void
     {
         abort_unless(auth()->user()?->hasAnyRole(['director', 'admin']), 403);
     }
 
-    public function upload(): void
-    {
-        $this->validate(['file' => ['required', 'file', 'mimes:xlsx,xls', 'max:26624']], [], ['file' => 'файл']);
-
-        if (SupplierPriceImport::query()->whereIn('status', [SupplierPriceImport::STATUS_UPLOADED, SupplierPriceImport::STATUS_PARSING, SupplierPriceImport::STATUS_APPLYING])->exists()) {
-            $this->addError('file', 'Предыдущая загрузка ещё обрабатывается — дождитесь её.');
-
-            return;
-        }
-
-        $name = $this->file->getClientOriginalName();
-        $path = $this->file->storeAs('imports/1c', now()->format('Ymd-His').'-'.Str::slug(pathinfo($name, PATHINFO_FILENAME)).'.xlsx', 'local');
-
-        $import = SupplierPriceImport::create([
-            'user_id' => auth()->id(),
-            'file_path' => $path,
-            'original_name' => $name,
-            'status' => SupplierPriceImport::STATUS_UPLOADED,
-        ]);
-
-        ImportSupplierPricesJob::dispatch($import->id);
-        $this->reset('file');
-        unset($this->imports);
-    }
+    // Сам файл принимает PurchasePriceUploadController (обычная форма, без загрузки Livewire).
 
     public function apply(int $id): void
     {

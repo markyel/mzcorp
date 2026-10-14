@@ -399,6 +399,8 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/quoteparts', function () {
             return view('quoteparts.index');
         })->name('quoteparts.index');
+        Route::post('/dashboard/quoteparts/purchase-prices', \App\Http\Controllers\QuoteParts\PurchasePriceUploadController::class)
+            ->name('quoteparts.purchase-prices.upload');
     });
 
     // Mail routing rules — управление правилами для РОП и директора.
