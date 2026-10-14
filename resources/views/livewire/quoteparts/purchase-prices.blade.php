@@ -14,7 +14,13 @@
 
             <form wire:submit="upload" class="flex flex-wrap items-center gap-2">
                 <input type="file" wire:model="file" accept=".xlsx,.xls" class="text-[12.5px]">
-                <button type="submit" class="btn btn-sm btn-primary" wire:loading.attr="disabled" wire:target="file,upload" @disabled(! $file || $busy)>Загрузить и проверить</button>
+                {{-- Не сочетать @disabled с wire:loading.attr: по окончании загрузки Livewire
+                     возвращает кнопке состояние «до загрузки», и она остаётся выключенной. --}}
+                @if($file && ! $busy)
+                    <button type="submit" class="btn btn-sm btn-primary" wire:loading.attr="disabled" wire:target="upload">Загрузить и проверить</button>
+                @elseif($busy)
+                    <span class="text-fg-4 text-[12px]">предыдущий файл ещё обрабатывается</span>
+                @endif
                 <span wire:loading wire:target="file" class="text-fg-4 text-[12px]">файл загружается…</span>
                 @error('file')<span class="text-red-700 text-[12px]">{{ $message }}</span>@enderror
             </form>
