@@ -63,14 +63,49 @@ class QuotePartsPanel extends Component
             ->orderBy('position')->get();
     }
 
-    /** Одна строка на поставщика QuoteParts (организацию), а не на каждый её адрес. */
+    public string $supplierSearch = '';
+
+    /** @var list<int> поставщики из справочника, добавленные поиском */
+    public array $extraSupplierIds = [];
+
+    /**
+     * Поставщики, уже известные QuoteParts (с любым статусом: работаем, приглашён, переписка,
+     * отказался от платформы), — одна строка на организацию; плюс добавленные поиском.
+     */
     #[Computed]
     public function activeSuppliers()
     {
-        return Supplier::query()->where('quoteparts_status', 'active')->with('organization:id,name')->orderBy('name')
-            ->get(['id', 'name', 'email', 'supplier_organization_id'])
+        return Supplier::query()
+            ->where(fn ($q) => $q->whereNotNull('quoteparts_link_id')->orWhereIn('id', $this->extraSupplierIds))
+            ->with('organization:id,name')->orderBy('name')
+            ->get(['id', 'name', 'email', 'supplier_organization_id', 'quoteparts_status'])
+            ->sortBy(fn ($s) => [$s->quoteparts_status === 'active' ? 0 : 1, (string) $s->name])
             ->unique(fn ($s) => $s->quotepartsKey())
             ->values();
+    }
+
+    /** Поиск по всему справочнику: кого ещё нет в QuoteParts, заведём при отправке (режим переписки). */
+    #[Computed]
+    public function foundSuppliers()
+    {
+        $term = trim($this->supplierSearch);
+        if (mb_strlen($term) < 2) {
+            return collect();
+        }
+        $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $term).'%';
+
+        return Supplier::query()->whereNotNull('email')
+            ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like))
+            ->whereNull('quoteparts_link_id')->whereNotIn('id', $this->extraSupplierIds)
+            ->orderBy('name')->limit(12)->get(['id', 'name', 'email']);
+    }
+
+    public function addSupplier(int $id): void
+    {
+        $this->extraSupplierIds[] = $id;
+        $this->suppliers[$id] = true;
+        $this->supplierSearch = '';
+        unset($this->activeSuppliers, $this->foundSuppliers);
     }
 
     #[Computed]

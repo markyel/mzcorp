@@ -83,6 +83,26 @@ class QuotePartsClient
     }
 
     /**
+     * Режим переписки: завести поставщика (или ещё один его адрес) в QuoteParts без письма-приглашения.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    public function registerSupplier(array $payload): array
+    {
+        $response = $this->http()->post('/api/v1/supplier-links', $payload);
+
+        if ($response->status() === 422) {
+            throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не принял поставщика.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts supplier-links: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /**
      * @param  list<string>  $externalIds
      * @return list<array{id:int, external_id:?string, status:string, terms_confirmed:bool, supplier_comment:?string}>
      */

@@ -15,8 +15,8 @@ use Throwable;
  * Запрос поставщикам через QuoteParts — второй канал рядом со старой рассылкой.
  *
  * Позиции — только с M-артикулом (каталог): перед запросом они добавляются в пул и сразу
- * передаются. Поставщики — только принявшие приглашение в QuoteParts. Письмо поставщику
- * QuoteParts отправляет сам (EN + ZH, с ящика MyZip на платформе); ответы — формой или
+ * передаются. Поставщики — любые из справочника: не принявшие приглашение получают запрос
+ * в режиме переписки. Письмо поставщику QuoteParts отправляет сам (EN + ZH, с ящика MyZip на платформе); ответы — формой или
  * письмом — возвращаются сюда снимком (refresh) и показываются в заявке.
  */
 class QuotePartsRfqService
@@ -24,6 +24,7 @@ class QuotePartsRfqService
     public function __construct(
         private readonly QuotePartsClient $client,
         private readonly QuotePartsPoolService $pool,
+        private readonly QuotePartsSupplierService $suppliers,
     ) {}
 
     /**
@@ -37,13 +38,17 @@ class QuotePartsRfqService
         }
 
         $catalog = CatalogItem::query()->whereIn('id', array_keys($quantities))->get(['id', 'sku'])->keyBy('id');
-        // Поставщик в QuoteParts — организация: несколько её адресов дают одного получателя;
-        // кому из сотрудников и в каком порядке писать, решает режим рассылки поставщика.
-        $suppliers = Supplier::query()->whereIn('id', $supplierIds)->where('quoteparts_status', 'active')->get()
-            ->map->quotepartsKey()->unique()->values();
-        if ($catalog->isEmpty() || $suppliers->isEmpty()) {
-            throw new RuntimeException('Нужны позиции с M-артикулом и поставщики, принявшие приглашение в QuoteParts.');
+        // Любой поставщик из справочника (решение 15.10): кто ещё не в QuoteParts — заводится
+        // в режиме переписки, без письма-приглашения. Поставщик в QuoteParts — организация:
+        // несколько её адресов дают одного получателя; кому писать — решает режим рассылки.
+        $rows = Supplier::query()->with('organization:id,name')->whereIn('id', $supplierIds)->whereNotNull('email')->get();
+        if ($catalog->isEmpty() || $rows->isEmpty()) {
+            throw new RuntimeException('Нужны позиции с M-артикулом и хотя бы один поставщик с адресом.');
         }
+        foreach ($rows as $row) {
+            $this->suppliers->ensureRegistered($row);
+        }
+        $suppliers = $rows->map->quotepartsKey()->unique()->values();
 
         $statuses = $this->pool->ensureInPool($catalog->keys()->all(), $by);
         $notReady = $catalog->filter(fn ($c) => ($statuses[$c->id] ?? null) !== 'active');

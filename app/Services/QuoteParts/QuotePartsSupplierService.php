@@ -17,10 +17,40 @@ class QuotePartsSupplierService
         'invited' => 'Приглашён',
         'terms_discussed' => 'Предлагает другие условия',
         'active' => 'Работаем',
-        'declined' => 'Отказался',
+        'declined' => 'Отказался от платформы',
+        'mail' => 'Переписка',
     ];
 
     public function __construct(private readonly QuotePartsClient $client) {}
+
+    /**
+     * Режим переписки: адрес поставщика должен быть известен QuoteParts, чтобы отправить ему
+     * запрос — без письма-приглашения. Уже заведённый адрес не трогаем.
+     */
+    public function ensureRegistered(Supplier $supplier): Supplier
+    {
+        if ($supplier->quoteparts_link_id !== null || trim((string) $supplier->email) === '') {
+            return $supplier;
+        }
+
+        $result = $this->client->registerSupplier([
+            'external_id' => $supplier->quotepartsKey(),
+            'company_name' => (string) ($supplier->organization?->name ?: $supplier->name ?: $supplier->domain ?: $supplier->email),
+            'contact' => [
+                'email' => $supplier->email,
+                'name' => $supplier->contact_person ?: null,
+                'locale' => 'en',
+            ],
+        ]);
+
+        $supplier->forceFill([
+            'quoteparts_link_id' => $result['id'],
+            'quoteparts_status' => $result['status'],
+            'quoteparts_comment' => $result['supplier_comment'] ?? null,
+        ])->save();
+
+        return $supplier;
+    }
 
     /**
      * @param  array{company_name:string, contact_name:?string, email:string, locale:string, country:?string, incoterm:?string, incoterm_place:?string, currency:?string, payment_terms:?string, packaging_included:?bool, offer_validity_days:?int, message:?string}  $form

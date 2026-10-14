@@ -82,14 +82,35 @@
                     </div>
 
                     <div>
-                        <div class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Поставщики, принявшие приглашение в QuoteParts</div>
+                        <div class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Поставщики</div>
                         @forelse($this->activeSuppliers as $s)
                             <label wire:key="qps-{{ $s->id }}" class="inline-flex items-center gap-1.5 mr-4 py-0.5">
                                 <input type="checkbox" wire:model="suppliers.{{ $s->id }}" class="w-4 h-4 accent-sky-600"> {{ $s->organization?->name ?: ($s->name ?: $s->email) }}
+                                @if($s->quoteparts_status !== 'active')
+                                    <span class="text-[11px] text-fg-4">· {{ \App\Services\QuoteParts\QuotePartsSupplierService::STATUS_LABELS[$s->quoteparts_status] ?? 'Переписка' }}</span>
+                                @endif
                             </label>
                         @empty
-                            <div class="text-fg-4 text-[12px]">Пока никто не принял приглашение. Пригласить — в карточке поставщика.</div>
+                            <div class="text-fg-4 text-[12px]">В QuoteParts пока нет поставщиков — найдите нужного в справочнике ниже.</div>
                         @endforelse
+
+                        <div class="mt-2 relative max-w-md">
+                            <input type="text" wire:model.live.debounce.300ms="supplierSearch" placeholder="Добавить из справочника: название, адрес, домен"
+                                   class="w-full border border-border rounded px-2 py-1 text-[13px]">
+                            @if($this->foundSuppliers->isNotEmpty())
+                                <div class="mt-1 border border-border rounded bg-surface divide-y divide-border-subtle">
+                                    @foreach($this->foundSuppliers as $f)
+                                        <button type="button" wire:key="qpf-{{ $f->id }}" wire:click="addSupplier({{ $f->id }})"
+                                                class="block w-full text-left px-2 py-1 text-[13px] hover:bg-surface-2">
+                                            {{ $f->name ?: $f->email }} <span class="text-fg-4">{{ $f->email }}</span>
+                                        </button>
+                                    @endforeach
+                                </div>
+                            @elseif(mb_strlen(trim($supplierSearch)) >= 2)
+                                <div class="mt-1 text-[12px] text-fg-4">Не нашлось поставщиков с адресом.</div>
+                            @endif
+                        </div>
+                        <div class="mt-1 text-[11px] text-fg-4">Кто не принял приглашение, получит обычное письмо с ящика MyZip и ответит письмом или по ссылке — без регистрации. Ответ разберётся в предложения так же.</div>
                     </div>
 
                     <div class="flex flex-wrap items-center gap-3">
