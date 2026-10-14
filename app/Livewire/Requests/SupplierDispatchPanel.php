@@ -339,7 +339,7 @@ class SupplierDispatchPanel extends Component
                     'inquiry_id' => $m->supplier_inquiry_id !== null ? (int) $m->supplier_inquiry_id : null,
                     'attachments' => $m->attachments
                         ->filter(fn ($a) => self::visibleAttachment($a))
-                        ->map(fn ($a) => ['id' => (int) $a->id, 'name' => (string) $a->filename])->values()->all(),
+                        ->map(fn ($a) => ['id' => (int) $a->id, 'name' => (string) $a->filename, 'kind' => self::attachmentKind($a)])->values()->all(),
                 ];
             })
             ->all();
@@ -366,6 +366,18 @@ class SupplierDispatchPanel extends Component
         }
 
         return (int) $a->size_bytes >= self::SIGNATURE_IMAGE_BYTES;
+    }
+
+    /** image | pdf | file — по типу или расширению (часть писем приходит без типа). */
+    private static function attachmentKind(\App\Models\EmailAttachment $a): string
+    {
+        $mime = mb_strtolower((string) $a->mime_type);
+        $ext = mb_strtolower(Str::afterLast((string) $a->filename, '.'));
+        if (str_starts_with($mime, 'image/') || in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'], true)) {
+            return 'image';
+        }
+
+        return str_contains($mime, 'pdf') || $ext === 'pdf' ? 'pdf' : 'file';
     }
 
     /* --------------------------- Расценки (офферы) ------------------------ */

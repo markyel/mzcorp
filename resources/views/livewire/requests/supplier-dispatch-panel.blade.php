@@ -77,10 +77,42 @@
                         <div x-show="open" x-cloak class="px-3 pb-3 pl-9">
                             <div class="text-[12.5px] text-fg-1 whitespace-pre-wrap break-words max-h-[420px] overflow-y-auto border border-border-subtle rounded-md p-2.5 bg-[var(--bg-app)]">{{ $mail['body'] !== '' ? $mail['body'] : '(текст письма не загружен)' }}</div>
                             @if($mail['attachments'] !== [])
-                                <div class="mt-2 flex flex-wrap gap-2">
+                                {{-- Фото — в общем просмотрщике (листание по фото письма), PDF — в
+                                     окне предпросмотра, остальное — скачать. Окна общие для
+                                     страницы заявки (partials/image-lightbox, partials/pdf-preview). --}}
+                                @php
+                                    $mailImgs = collect($mail['attachments'])->where('kind', 'image')->values();
+                                    $mailGallery = $mailImgs->map(fn ($a) => [
+                                        'src' => route('attachments.preview', $a['id']),
+                                        'name' => $a['name'],
+                                        'dl' => route('attachments.download', $a['id']),
+                                    ])->all();
+                                    $imgIdx = 0;
+                                @endphp
+                                <div class="mt-2 flex flex-wrap items-start gap-2" x-data="{ items: @js($mailGallery) }">
                                     @foreach($mail['attachments'] as $att)
-                                        <a href="{{ route('attachments.download', $att['id']) }}" target="_blank"
-                                           class="text-[11.5px] text-sky-700 hover:underline">📎 {{ $att['name'] }}</a>
+                                        @if($att['kind'] === 'image')
+                                            <button type="button" x-on:click="$dispatch('open-image', { items: items, index: {{ $imgIdx }} })"
+                                                    class="block border border-border rounded-md overflow-hidden bg-surface hover:border-border-strong text-left"
+                                                    title="Открыть — {{ $att['name'] }}">
+                                                <img src="{{ route('attachments.preview', $att['id']) }}" alt="{{ $att['name'] }}" loading="lazy"
+                                                     class="w-[120px] h-[86px] object-cover block bg-app">
+                                                <span class="block px-1.5 py-0.5 max-w-[120px] truncate text-[11px] text-fg-2">{{ $att['name'] }}</span>
+                                            </button>
+                                            @php $imgIdx++; @endphp
+                                        @elseif($att['kind'] === 'pdf')
+                                            <button type="button"
+                                                    x-on:click="$dispatch('open-pdf', { src: @js(route('attachments.preview', $att['id'])), name: @js($att['name']), dl: @js(route('attachments.download', $att['id'])) })"
+                                                    class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover text-left"
+                                                    title="Открыть предпросмотр — {{ $att['name'] }}">
+                                                <span class="inline-block w-4 h-5 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[7px] font-bold text-center leading-5">PDF</span>
+                                                <span class="truncate max-w-[240px]">{{ $att['name'] }}</span>
+                                                <span class="text-sky-700 text-[11px]">👁 просмотр</span>
+                                            </button>
+                                        @else
+                                            <a href="{{ route('attachments.download', $att['id']) }}" target="_blank"
+                                               class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover">📎 {{ $att['name'] }}</a>
+                                        @endif
                                     @endforeach
                                 </div>
                             @endif
