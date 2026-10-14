@@ -72,6 +72,9 @@ class QuotePartsClient
         if ($response->status() === 422) {
             throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'Проверьте данные приглашения.');
         }
+        if ($response->status() === 503 && $response->json('message')) {
+            throw new RuntimeException((string) $response->json('message'));
+        }
         if (! $response->successful()) {
             throw new RuntimeException('QuoteParts supplier-invitations: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 500));
         }
