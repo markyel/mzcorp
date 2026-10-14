@@ -97,6 +97,38 @@ class QuotePartsClient
         return $response->json('links', []);
     }
 
+    /**
+     * @param  array{items: list<array{code:string, quantity:float, note:?string}>, suppliers: list<string>, reply_by:?string, message:?string, external_ref:?string}  $payload
+     * @return array<string, mixed>
+     */
+    public function createRfq(array $payload): array
+    {
+        $response = $this->http()->post('/api/v1/rfqs', $payload);
+
+        if ($response->status() === 422) {
+            throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не принял запрос.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts rfqs: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 500));
+        }
+
+        return $response->json();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function rfq(int $remoteId): array
+    {
+        $response = $this->http()->get('/api/v1/rfqs/'.$remoteId);
+
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts rfq '.$remoteId.': HTTP '.$response->status());
+        }
+
+        return $response->json();
+    }
+
     private function http(): PendingRequest
     {
         if (! $this->isConfigured()) {

@@ -509,3 +509,9 @@ Schedule::command('bot:chat-digest')
 Schedule::job(new \App\Jobs\QuoteParts\SyncQuotePartsPoolJob)
     ->hourlyAt(25)
     ->onOneServer();
+
+// QuoteParts: ответы поставщиков (офферы, отказы, вопросы) по запросам, отправленным через
+// платформу, — в заявки каждые 10 минут. Без ключа API — пропуск.
+Schedule::job(new \App\Jobs\QuoteParts\SyncQuotePartsRfqsJob)
+    ->everyTenMinutes()
+    ->onOneServer();

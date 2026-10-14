@@ -68,6 +68,24 @@ class QuotePartsPoolService
     }
 
     /**
+     * Позиции должны быть в QuoteParts прямо сейчас (запрос поставщикам по ним):
+     * добавить в пул и сразу передать именно их, не дожидаясь часовой синхронизации.
+     *
+     * @param  list<int>  $catalogItemIds
+     * @return array<int, string> catalog_item_id => статус в QuoteParts
+     */
+    public function ensureInPool(array $catalogItemIds, ?User $user): array
+    {
+        $this->add($catalogItemIds, $user);
+
+        $rows = QuotePartsPoolItem::query()->inPool()->whereIn('catalog_item_id', $catalogItemIds)->with('catalogItem')->get();
+        $stats = ['sent' => 0, 'unchanged' => 0, 'failed' => 0, 'paused' => 0];
+        $this->syncChunk($rows, $stats);
+
+        return QuotePartsPoolItem::query()->whereIn('catalog_item_id', $catalogItemIds)->pluck('status', 'catalog_item_id')->all();
+    }
+
+    /**
      * Убрать позиции из пула: в QuoteParts они уходят в архив, история там сохраняется.
      *
      * @param  list<int>  $poolItemIds

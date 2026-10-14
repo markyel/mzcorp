@@ -42,7 +42,7 @@ class Index extends Component
 
     public function setTab(string $tab): void
     {
-        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'prices'], true) ? $tab : 'candidates';
+        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'prices', 'pilot'], true) ? $tab : 'candidates';
         $this->perPage = self::PER_PAGE;
     }
 
@@ -118,6 +118,41 @@ class Index extends Component
         }
         unset($this->invitedSuppliers);
         $this->dispatch('toast', type: 'success', message: 'Статусы поставщиков обновлены'.($n ? ': '.$n : '').'.');
+    }
+
+    /* ----------------------------- Пилот ----------------------------------- */
+
+    #[Computed]
+    public function pilotSwitchedOn(): bool
+    {
+        return \App\Services\QuoteParts\QuotePartsPilot::switchedOn();
+    }
+
+    /** Кто может участвовать: те, кто отправляет запросы поставщикам. */
+    #[Computed]
+    public function pilotCandidates()
+    {
+        return \App\Models\User::query()
+            ->whereNull('archived_at')
+            ->whereHas('roles', fn ($q) => $q->whereIn('name', ['manager', 'head_of_sales', 'procurement', 'director', 'admin']))
+            ->orderByDesc('quoteparts_pilot')->orderBy('name')
+            ->get(['id', 'name', 'email', 'quoteparts_pilot']);
+    }
+
+    public function togglePilotSwitch(\App\Services\Settings\SettingsService $settings): void
+    {
+        $on = ! $this->pilotSwitchedOn;
+        $settings->set(\App\Services\QuoteParts\QuotePartsPilot::SETTING, $on, \App\Models\AppSetting::TYPE_BOOL, auth()->id(),
+            'QuoteParts: канал «Запрос через QuoteParts» для участников пилота');
+        unset($this->pilotSwitchedOn);
+        $this->dispatch('toast', type: 'success', message: $on ? 'QuoteParts включён для участников пилота.' : 'QuoteParts выключен: все работают как раньше.');
+    }
+
+    public function togglePilotUser(int $userId): void
+    {
+        $user = \App\Models\User::findOrFail($userId);
+        $user->forceFill(['quoteparts_pilot' => ! $user->quoteparts_pilot])->save();
+        unset($this->pilotCandidates);
     }
 
     #[Computed]

@@ -370,6 +370,15 @@ class Index extends Component
                 'default' => false,
             ],
 
+            // ─── QuoteParts · платформа работы с поставщиками ────────────
+            'quoteparts.rfq_enabled' => [
+                'group' => 'QuoteParts',
+                'label' => 'Запрос поставщикам через QuoteParts (пилот)',
+                'help' => 'Главный выключатель. Включено — участники пилота (раздел QuoteParts → «Пилот») видят в заявке блок «Запрос через QuoteParts» рядом с обычной формой. Выключено — все работают как раньше.',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
+
             // ─── IQOT · анализ цен конкурентов ───────────────────────────
             'iqot.enabled' => [
                 'group' => 'IQOT · анализ цен',
@@ -552,6 +561,7 @@ class Index extends Component
             'dealer.auto_threshold' => 'services.dealer.auto_threshold',
             'dealer.auto_window_days' => 'services.dealer.auto_window_days',
             'iqot.enabled' => 'services.iqot.enabled',
+            'quoteparts.rfq_enabled' => 'services.quoteparts.rfq_enabled',
             'iqot.api_key' => 'services.iqot.api_key',
             'iqot.daily_limit' => 'services.iqot.daily_limit',
             'iqot.runs_per_day' => 'services.iqot.runs_per_day',

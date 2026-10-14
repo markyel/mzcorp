@@ -103,6 +103,8 @@ class User extends Authenticatable
             'only_internal_sku_requests' => 'boolean',
             'dashboard_period_days' => 'integer',
             'mail_bulkbar_pinned' => 'boolean',
+            // Участник пилота QuoteParts (см. App\Services\QuoteParts\QuotePartsPilot).
+            'quoteparts_pilot' => 'boolean',
             'updates_seen_at' => 'datetime',
             'password' => 'hashed',
         ];

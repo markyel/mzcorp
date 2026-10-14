@@ -1048,6 +1048,8 @@ return [
         'timeout' => (int) env('QUOTEPARTS_TIMEOUT', 30),
         // Сколько позиций в одном запросе sync (лимит API — 500).
         'batch' => (int) env('QUOTEPARTS_BATCH', 200),
+        // Главный выключатель канала «Запрос через QuoteParts» (переопределяется в Настройках).
+        'rfq_enabled' => (bool) env('QUOTEPARTS_RFQ_ENABLED', false),
     ],
 
     'iqot' => [
