@@ -307,7 +307,7 @@ class SupplierDispatchPanel extends Component
                         ->orWhereIn('mailbox_id', $ccMailboxIds)));
             })
             ->whereRaw("(detected_artifacts->>'cross_mailbox_copy_of') IS NULL")
-            ->with(['attachments' => fn ($a) => $a->where('is_inline', false)->select('id', 'email_message_id', 'filename')])
+            ->with(['attachments' => fn ($a) => $a->select('id', 'email_message_id', 'filename', 'mime_type', 'size_bytes', 'content_id', 'is_inline')])
             ->orderByRaw('sent_at IS NULL, sent_at DESC')
             ->orderByDesc('id')
             ->limit(200)
@@ -337,10 +337,35 @@ class SupplierDispatchPanel extends Component
                     'snippet' => Str::limit(preg_replace('/\s+/u', ' ', $body) ?? '', 140),
                     'body' => Str::limit($body, 6000),
                     'inquiry_id' => $m->supplier_inquiry_id !== null ? (int) $m->supplier_inquiry_id : null,
-                    'attachments' => $m->attachments->map(fn ($a) => ['id' => (int) $a->id, 'name' => (string) $a->filename])->all(),
+                    'attachments' => $m->attachments
+                        ->filter(fn ($a) => self::visibleAttachment($a))
+                        ->map(fn ($a) => ['id' => (int) $a->id, 'name' => (string) $a->filename])->values()->all(),
                 ];
             })
             ->all();
+    }
+
+    /** Меньше — значок подписи (логотип, иконки соцсетей), а не фото детали. */
+    private const SIGNATURE_IMAGE_BYTES = 15 * 1024;
+
+    /**
+     * Показывать ли вложение в ленте переписки с поставщиками.
+     *
+     * Пометка «встроенное» (Content-Disposition: inline) не значит «часть
+     * подписи»: Outlook и Apple Mail помечают так и документы. Кейс
+     * M-2026-19160 (14.10.2026): предложение PaulSchaab A_2604319.PDF пришло
+     * inline и в ленте не показывалось. Правило как у разбора цен
+     * (SupplierOfferParser::extractAttachments): документ — всегда; картинка —
+     * если это не значок подписи. Лента показывает письмо текстом, поэтому
+     * фото, вставленное поставщиком прямо в текст, иначе не увидеть совсем.
+     */
+    private static function visibleAttachment(\App\Models\EmailAttachment $a): bool
+    {
+        if (! $a->is_inline || ! str_starts_with(mb_strtolower((string) $a->mime_type), 'image/')) {
+            return true;
+        }
+
+        return (int) $a->size_bytes >= self::SIGNATURE_IMAGE_BYTES;
     }
 
     /* --------------------------- Расценки (офферы) ------------------------ */
