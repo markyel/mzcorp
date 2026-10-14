@@ -502,3 +502,10 @@ Schedule::command('bot:chat-digest')
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();
+
+// QuoteParts: досылка пула после загрузок каталога (их 6 в день) — только позиции,
+// у которых изменилась передаваемая часть карточки или закупки; заодно подтягиваются
+// статусы позиций, по которым в QuoteParts приняли решение. Без ключа API — пропуск.
+Schedule::job(new \App\Jobs\QuoteParts\SyncQuotePartsPoolJob)
+    ->hourlyAt(25)
+    ->onOneServer();

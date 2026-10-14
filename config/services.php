@@ -1039,6 +1039,17 @@ return [
     | (app_settings, ключи iqot.*); значения ниже — fallback-дефолты.
     | См. app/Services/Iqot/IqotApiService.php.
     */
+    // QuoteParts — отдельная платформа работы с поставщиками (quoteparts.ru). mzcorp — её
+    // клиент через API: передаёт пул позиций (часть карточки + закупки 1С) и держит его
+    // в актуальном состоянии. Ключ API выдаёт QuoteParts (qp:api-token:create).
+    'quoteparts' => [
+        'url' => env('QUOTEPARTS_URL', 'https://quoteparts.ru'),
+        'token' => env('QUOTEPARTS_API_TOKEN', ''),
+        'timeout' => (int) env('QUOTEPARTS_TIMEOUT', 30),
+        // Сколько позиций в одном запросе sync (лимит API — 500).
+        'batch' => (int) env('QUOTEPARTS_BATCH', 200),
+    ],
+
     'iqot' => [
         'base_url' => env('IQOT_BASE_URL', 'https://iqot.ru/api/v1'),
         'timeout' => (int) env('IQOT_TIMEOUT', 30),

@@ -393,6 +393,14 @@ Route::middleware('auth')->group(function () {
             ->name('marketing-blocks.image');
     });
 
+    // QuoteParts — передача пула позиций на платформу работы с поставщиками.
+    // На время тестирования — директорат и админ; потом, возможно, переедет в «Снабжение».
+    Route::middleware('role:director,admin')->group(function () {
+        Route::get('/dashboard/quoteparts', function () {
+            return view('quoteparts.index');
+        })->name('quoteparts.index');
+    });
+
     // Mail routing rules — управление правилами для РОП и директора.
     Route::middleware('role:head_of_sales,director,admin')->group(function () {
         // «Боты» — диалоги ботов заявок Telegram/MAX: воронка и ленты для разбора.

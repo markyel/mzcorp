@@ -93,6 +93,8 @@
         $navLinks[] = ['route' => 'usage-stats.index', 'label' => 'Использование', 'pattern' => 'usage-stats.*'];
         // Рекламные блоки в письмах клиентам (директорат / админ).
         $navLinks[] = ['route' => 'marketing-blocks.index', 'label' => 'Реклама', 'pattern' => 'marketing-blocks.*'];
+        // Передача пула позиций в QuoteParts (тестирование платформы поставщиков).
+        $navLinks[] = ['route' => 'quoteparts.index', 'label' => 'QuoteParts', 'pattern' => 'quoteparts.*'];
     }
     // «IQOT» — анализ цен конкурентов (РОП / директорат / админ).
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {

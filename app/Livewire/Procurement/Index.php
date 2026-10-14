@@ -12,6 +12,7 @@ use App\Models\SupplierInquiry;
 use App\Models\User;
 use App\Services\Catalog\CatalogSearchService;
 use App\Services\Procurement\PriceMonitorService;
+use App\Services\Procurement\PriceRefreshCandidates;
 use App\Services\Supplier\SupplierInquiryLifecycleService;
 use App\Services\Supplier\SupplierItemTranslator;
 use App\Services\Supplier\SupplierMatchService;
@@ -71,9 +72,9 @@ class Index extends Component
      * Окно спроса для вкладки «К актуализации», дней. Порог «регулярно
      * спрашивают» — от 2 заявок за это окно (решение заказчика 17.09.2026).
      */
-    public const REFRESH_WINDOW_DAYS = 30;
+    public const REFRESH_WINDOW_DAYS = PriceRefreshCandidates::WINDOW_DAYS;
 
-    public const REFRESH_REGULAR_MIN_REQUESTS = 2;
+    public const REFRESH_REGULAR_MIN_REQUESTS = PriceRefreshCandidates::REGULAR_MIN_REQUESTS;
 
     #[Url(as: 'q', except: '')]
     public string $search = '';
@@ -986,63 +987,16 @@ class Index extends Component
     #[Computed]
     public function refreshList(): array
     {
-        $since = now()->subDays(self::REFRESH_WINDOW_DAYS);
-
-        $rows = DB::table('request_items')
-            ->join('catalog_items', 'catalog_items.id', '=', 'request_items.catalog_item_id')
-            ->join('requests', 'requests.id', '=', 'request_items.request_id')
-            ->where('request_items.is_active', true)
-            ->where('catalog_items.is_active', true)
-            ->where('catalog_items.is_price_actual', false)
-            ->whereNull('requests.merged_into_id')
-            ->where('requests.created_at', '>=', $since)
-            ->tap(fn (Builder $q) => $this->applyAskedGroup($q))
-            ->select(
-                'catalog_items.id as cid',
-                'catalog_items.sku',
-                'catalog_items.name',
-                'catalog_items.brand',
-                'catalog_items.price',
-                'catalog_items.stock_available',
-                DB::raw('count(distinct requests.id) as req_count'),
-                DB::raw('max(requests.created_at) as last_at'),
-            )
-            ->groupBy('catalog_items.id', 'catalog_items.sku', 'catalog_items.name', 'catalog_items.brand',
-                'catalog_items.price', 'catalog_items.stock_available')
-            ->get();
+        // Сам пул — в PriceRefreshCandidates (его же показывает раздел «QuoteParts»).
+        $rows = app(PriceRefreshCandidates::class)->list(fn (Builder $q) => $this->applyAskedGroup($q));
 
         $search = trim($this->search);
-        $monitored = PriceMonitor::query()->where('is_active', true)->pluck('next_due_at', 'catalog_item_id');
-
-        $out = [];
-        foreach ($rows as $r) {
-            $stock = (int) ($r->stock_available ?? 0);
-            $reqs = (int) $r->req_count;
-            $priority = $stock > 0 ? 1 : ($reqs >= self::REFRESH_REGULAR_MIN_REQUESTS ? 2 : 0);
-            if ($priority === 0) {
-                continue;
-            }
-            if ($search !== '' && mb_stripos($r->sku.' '.$r->name.' '.(string) $r->brand, $search) === false) {
-                continue;
-            }
-            $out[] = [
-                'cid' => (int) $r->cid,
-                'sku' => $r->sku,
-                'name' => $r->name,
-                'brand' => $r->brand,
-                'price' => $r->price,
-                'stock' => $stock,
-                'req_count' => $reqs,
-                'last_at' => $r->last_at,
-                'priority' => $priority,
-                'reason' => $priority === 1 ? 'На складе, цены нет' : 'Регулярный спрос',
-                'monitored_until' => $monitored[$r->cid] ?? null,
-            ];
+        if ($search === '') {
+            return $rows;
         }
-        usort($out, fn ($a, $b) => [$a['priority'], -$a['req_count'], -$a['stock']]
-            <=> [$b['priority'], -$b['req_count'], -$b['stock']]);
 
-        return $out;
+        return array_values(array_filter($rows,
+            fn ($r) => mb_stripos($r['sku'].' '.$r['name'].' '.(string) $r['brand'], $search) !== false));
     }
 
     /** @return array{p1:int, p2:int, total:int, monitored:int} */
