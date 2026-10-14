@@ -274,7 +274,9 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .trow .flagbtn.on{color:var(--red-600);opacity:1}
 /* Помеченное письмо видно сразу — розовый фон строки, как в Яндексе (заказчик,
    14.10.2026: один флажок незаметен). Выбранное и открытое — своим цветом. */
-.mailapp .trow.flagged:not(.sel):not(.active),
+/* Специфичность — как у правил фона прочитанных/непрочитанных выше (+ .flagged),
+   иначе они перекрывают розовый, пока курсор не над строкой. */
+.mailapp .trow.flagged:not(.unread):not(:hover):not(.sel):not(.active),
 .mailapp .trow.flagged.unread:not(:hover):not(.sel):not(.active){background:var(--red-50)}
 .mailapp .trow.flagged:hover:not(.sel):not(.active){background:color-mix(in oklch,var(--red-50),var(--red-300) 22%)}
 .mailapp .trow .clip{color:var(--fg-3);font-size:12px}
