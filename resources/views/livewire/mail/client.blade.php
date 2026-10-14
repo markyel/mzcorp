@@ -270,8 +270,13 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .trow .avcol{display:flex;flex-direction:column;align-items:center;gap:7px;min-width:0}
 .mailapp .trow .flagbtn{border:none;background:none;cursor:pointer;font-size:16px;color:var(--fg-4);padding:0;line-height:1;opacity:0;transition:opacity .12s}
 .mailapp .trow:hover .flagbtn{opacity:1}
-.mailapp .trow .flagbtn:hover{color:var(--amber-600)}
-.mailapp .trow .flagbtn.on{color:var(--amber-600);opacity:1}
+.mailapp .trow .flagbtn:hover{color:var(--red-600)}
+.mailapp .trow .flagbtn.on{color:var(--red-600);opacity:1}
+/* Помеченное письмо видно сразу — розовый фон строки, как в Яндексе (заказчик,
+   14.10.2026: один флажок незаметен). Выбранное и открытое — своим цветом. */
+.mailapp .trow.flagged:not(.sel):not(.active),
+.mailapp .trow.flagged.unread:not(:hover):not(.sel):not(.active){background:var(--red-50)}
+.mailapp .trow.flagged:hover:not(.sel):not(.active){background:color-mix(in oklch,var(--red-50),var(--red-300) 22%)}
 .mailapp .trow .clip{color:var(--fg-3);font-size:12px}
 .mailapp .trow .reqchip{font:600 10.5px/1.4 var(--font-mono);background:var(--violet-50);color:var(--violet-700);padding:1px 6px;border-radius:4px;border:0;cursor:pointer}
 .mailapp .trow .reqchip:hover{background:var(--violet-100);text-decoration:underline}
@@ -751,7 +756,7 @@ body.mail-resizing iframe{pointer-events:none}
                     $toPrefix = $isToParty && ! in_array($folder, ['sent', 'drafts'], true);
                 @endphp
                 @php $rowLabelIds = $m->labels->pluck('id')->all(); @endphp
-                <div class="trow {{ $unread ? 'unread' : '' }} {{ $openId === $m->id ? 'active' : '' }} {{ $awaitingInv ? 'awaiting-inv' : '' }}"
+                <div class="trow {{ $unread ? 'unread' : '' }} {{ $openId === $m->id ? 'active' : '' }} {{ $awaitingInv ? 'awaiting-inv' : '' }} {{ $m->my_flagged_at ? 'flagged' : '' }}"
                      wire:key="trow-{{ $m->id }}" wire:click="openMessage({{ $m->id }})"
                      data-id="{{ $m->id }}" :class="{ sel: has({{ $m->id }}) }"
                      draggable="true" @dragstart="dragStart({{ $m->id }}, $event)"
