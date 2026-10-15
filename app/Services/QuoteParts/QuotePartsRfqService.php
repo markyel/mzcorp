@@ -31,7 +31,7 @@ class QuotePartsRfqService
      * @param  array<int, float>  $quantities  catalog_item_id => количество
      * @param  list<int>  $supplierIds
      */
-    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, bool $mirror = false): QuotePartsRfq
+    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by): QuotePartsRfq
     {
         if (! QuotePartsPilot::enabledFor($by)) {
             throw new RuntimeException('QuoteParts выключен или вы не участник пилота.');
@@ -62,13 +62,10 @@ class QuotePartsRfqService
             'reply_by' => $replyBy,
             'message' => $message ?: null,
             'external_ref' => $request?->internal_code,
-            // Режим дублирования: ответы поставщиков — копией автору, ответ на копию уходит поставщику.
-            'mirror' => $mirror ? ['email' => $this->mirrorAddress($by), 'name' => $by->name] : null,
+            // Дублирование переписки — настройка сотрудника (раздел QuoteParts → «Пилот»):
+            // ответы поставщиков — копией автору, ответ на копию уходит поставщику.
+            'mirror' => $by->quoteparts_mirror ? ['email' => $this->mirrorAddress($by), 'name' => $by->name] : null,
         ]);
-
-        if ($by->quoteparts_mirror !== $mirror) {
-            $by->forceFill(['quoteparts_mirror' => $mirror])->save();
-        }
 
         return QuotePartsRfq::create([
             'remote_id' => $result['id'],

@@ -136,7 +136,31 @@ class Index extends Component
             ->whereNull('archived_at')
             ->whereHas('roles', fn ($q) => $q->whereIn('name', ['manager', 'head_of_sales', 'procurement', 'director', 'admin']))
             ->orderByDesc('quoteparts_pilot')->orderBy('name')
-            ->get(['id', 'name', 'email', 'quoteparts_pilot']);
+            ->get(['id', 'name', 'email', 'quoteparts_pilot', 'quoteparts_mirror']);
+    }
+
+    /** Куда приходят копии переписки: личный ящик сотрудника, иначе адрес входа. */
+    #[Computed]
+    public function mirrorAddresses(): array
+    {
+        $personal = \App\Models\Mailbox::query()
+            ->where('type', \App\Enums\MailboxType::Personal->value)->where('is_active', true)
+            ->whereIn('owner_user_id', $this->pilotCandidates->pluck('id'))
+            ->orderBy('id')->get(['owner_user_id', 'email'])
+            ->unique('owner_user_id')->pluck('email', 'owner_user_id');
+
+        return $this->pilotCandidates->mapWithKeys(fn ($u) => [$u->id => (string) ($personal[$u->id] ?? $u->email)])->all();
+    }
+
+    /**
+     * Дублирование переписки — настройка сотрудника, а не запроса: ответы поставщиков
+     * по всем его запросам через QuoteParts приходят ему копией, ответ на копию уходит поставщику.
+     */
+    public function togglePilotMirror(int $userId): void
+    {
+        $user = \App\Models\User::findOrFail($userId);
+        $user->forceFill(['quoteparts_mirror' => ! $user->quoteparts_mirror])->save();
+        unset($this->pilotCandidates);
     }
 
     public function togglePilotSwitch(\App\Services\Settings\SettingsService $settings): void

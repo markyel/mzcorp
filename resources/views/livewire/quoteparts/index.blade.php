@@ -118,20 +118,43 @@
                     <span>Сейчас: <b>{{ $this->pilotSwitchedOn ? 'включено для участников пилота' : 'выключено — все работают как раньше' }}</b></span>
                 </div>
                 <div class="text-[12px] text-fg-3">
-                    Участник пилота видит во вкладке «Поставщики» заявки блок «Запрос через QuoteParts» — рядом с обычной формой, которая не меняется.
-                    Позиции — только с M-артикулом, поставщики — только принявшие приглашение. Ответы по отправленным запросам видны в заявке всем, даже после выключения.
+                    Участник пилота видит во вкладке «Поставщики» заявки блок «Запрос через QuoteParts», а в «Снабжении» — выбор канала «Через QuoteParts»; обычная рассылка рядом не меняется.
+                    Позиции — только с M-артикулом. Поставщики — любые из справочника: кто не принял приглашение, получает обычное письмо (режим переписки). Ответы по отправленным запросам видны всем, даже после выключения.
                 </div>
             </div>
         </div>
         <div class="ds-card">
             <div class="ds-card-header"><h3>Участники пилота</h3><span class="text-[12px] text-fg-3 ml-2">{{ $this->pilotCandidates->where('quoteparts_pilot', true)->count() }} отмечено</span></div>
-            <div class="ds-card-body text-[13px] grid grid-cols-1 md:grid-cols-3 gap-1">
-                @foreach($this->pilotCandidates as $u)
-                    <label wire:key="pu-{{ $u->id }}" class="flex items-center gap-2 py-0.5">
-                        <input type="checkbox" wire:click="togglePilotUser({{ $u->id }})" @checked($u->quoteparts_pilot) class="w-4 h-4 accent-sky-600">
-                        <span>{{ $u->name }}</span><span class="text-fg-4 text-[11.5px]">{{ $u->email }}</span>
-                    </label>
-                @endforeach
+            <div class="ds-card-body text-[13px]">
+                <div class="text-[12px] text-fg-3 mb-2">
+                    «Дублировать переписку» — ответы поставщиков по всем запросам сотрудника через QuoteParts приходят ему копией на почту;
+                    ответ на копию QuoteParts отправляет поставщику от MyZip, в его же переписку. Отвечать нужно с того же адреса, на который пришла копия.
+                </div>
+                <table class="w-full">
+                    <thead>
+                        <tr class="text-[11px] uppercase tracking-wider text-fg-3 text-left border-b border-border-subtle">
+                            <th class="py-1 pr-3 font-semibold">Сотрудник</th>
+                            <th class="py-1 pr-3 font-semibold">Пилот</th>
+                            <th class="py-1 font-semibold">Дублировать переписку</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($this->pilotCandidates as $u)
+                            <tr wire:key="pu-{{ $u->id }}" class="border-b border-border-subtle">
+                                <td class="py-1 pr-3"><span>{{ $u->name }}</span> <span class="text-fg-4 text-[11.5px]">{{ $u->email }}</span></td>
+                                <td class="py-1 pr-3">
+                                    <input type="checkbox" wire:click="togglePilotUser({{ $u->id }})" @checked($u->quoteparts_pilot) class="w-4 h-4 accent-sky-600" title="Участник пилота">
+                                </td>
+                                <td class="py-1">
+                                    <label class="inline-flex items-center gap-2 {{ $u->quoteparts_pilot ? '' : 'opacity-50' }}">
+                                        <input type="checkbox" wire:click="togglePilotMirror({{ $u->id }})" @checked($u->quoteparts_mirror) class="w-4 h-4 accent-sky-600">
+                                        <span class="text-fg-3 text-[12px]">на {{ $this->mirrorAddresses[$u->id] ?? $u->email }}</span>
+                                    </label>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
             </div>
         </div>
     @endif

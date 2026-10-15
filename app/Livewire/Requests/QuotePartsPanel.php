@@ -38,15 +38,10 @@ class QuotePartsPanel extends Component
 
     public ?string $error = null;
 
-    /** Дублировать переписку на почту автора (последний выбор пользователя). */
-    public bool $mirror = false;
-
     public function mount(int $requestId): void
     {
         $this->requestId = $requestId;
         $this->replyBy = now()->addDays(7)->toDateString();
-        $this->mirror = (bool) auth()->user()?->quoteparts_mirror;
-
         foreach ($this->catalogItems as $it) {
             $this->qty[$it->id] = $it->parsed_qty !== null ? rtrim(rtrim(number_format((float) $it->parsed_qty, 3, '.', ''), '0'), '.') : '1';
         }
@@ -146,7 +141,7 @@ class QuotePartsPanel extends Component
         }
 
         try {
-            $rfq = $service->send(RequestModel::findOrFail($this->requestId), $quantities, $supplierIds, $this->replyBy ?: null, $this->message, auth()->user(), $this->mirror);
+            $rfq = $service->send(RequestModel::findOrFail($this->requestId), $quantities, $supplierIds, $this->replyBy ?: null, $this->message, auth()->user());
         } catch (Throwable $e) {
             $this->error = mb_substr($e->getMessage(), 0, 400);
 
