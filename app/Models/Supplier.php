@@ -45,6 +45,7 @@ class Supplier extends Model
         return [
             'assortment_matrix' => 'array',
             'matrix_built_at' => 'datetime',
+            'quoteparts_invited_at' => 'datetime',
         ];
     }
 
