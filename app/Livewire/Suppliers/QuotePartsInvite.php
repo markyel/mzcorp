@@ -60,7 +60,8 @@ class QuotePartsInvite extends Component
         $this->company_name = (string) ($supplier->organization?->name ?: $supplier->name ?: $supplier->domain);
         $this->contact_name = (string) $supplier->contact_person;
         $this->email = (string) $supplier->email;
-        $this->locale = 'en';
+        // Язык кабинета — как язык переписки с поставщиком: русский для своих, английский для остальных.
+        $this->locale = $supplier->language === 'ru' ? 'ru' : 'en';
     }
 
     public function invite(QuotePartsSupplierService $service): void
@@ -69,7 +70,7 @@ class QuotePartsInvite extends Component
             'company_name' => ['required', 'string', 'max:255'],
             'contact_name' => ['nullable', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255'],
-            'locale' => ['required', 'in:en,zh_CN'],
+            'locale' => ['required', 'in:en,zh_CN,ru'],
             'country' => ['nullable', 'string', 'size:2'],
             'incoterm' => ['nullable', 'in:'.implode(',', self::INCOTERMS)],
             'incoterm_place' => ['nullable', 'string', 'max:255', 'required_with:incoterm'],

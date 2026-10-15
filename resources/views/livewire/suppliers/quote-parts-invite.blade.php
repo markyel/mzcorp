@@ -102,7 +102,7 @@
                     <input type="email" wire:model="email" class="{{ $inputCls }}">
                     @error('email')<span class="text-red-700 text-[12px]">{{ $message }}</span>@enderror</label>
                 <label class="block"><span class="text-fg-3 text-[12px]">Язык страниц поставщика</span>
-                    <select wire:model="locale" class="{{ $inputCls }}"><option value="en">English</option><option value="zh_CN">中文</option></select>
+                    <select wire:model="locale" class="{{ $inputCls }}"><option value="en">English</option><option value="zh_CN">中文</option><option value="ru">Русский</option></select>
                     <span class="text-fg-4 text-[11px]">Письмо-приглашение всегда на двух языках.</span></label>
             </div>
 

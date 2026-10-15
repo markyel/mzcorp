@@ -39,7 +39,7 @@ class QuotePartsSupplierService
             'contact' => [
                 'email' => $supplier->email,
                 'name' => $supplier->contact_person ?: null,
-                'locale' => 'en',
+                'locale' => $supplier->language === 'ru' ? 'ru' : 'en',
             ],
         ]);
 
