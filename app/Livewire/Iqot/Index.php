@@ -102,38 +102,75 @@ class Index extends Component
             'stuck_days' => $this->stuckAnalyzingDays(),
             'by_status' => $byStatus,
             'total' => array_sum($byStatus),
+            'mode' => (string) app_setting('iqot.mode', config('services.iqot.mode', 'monitoring')),
+            'mon_active' => \App\Models\IqotMonitoringItem::query()->where('active', true)->count(),
+            'mon_priced' => \App\Models\IqotMonitoringItem::query()->where('active', true)->whereNotNull('best_price')->count(),
+            'mon_kp' => \App\Models\IqotMonitoringItem::query()->where('active', true)->where('has_kp', true)->count(),
+            'mon_synced' => \App\Models\IqotMonitoringItem::query()->max('prices_synced_at'),
         ];
     }
 
+    /**
+     * Строка на позицию каталога: КП по заявкам IQOT (IqotPosition) и мониторинг цен «Гибрид»
+     * (IqotMonitoringItem) вместе — цены рынка считает IqotMarket (без НДС, одним списком).
+     */
     #[Computed]
     public function positions()
     {
-        return IqotPosition::query()
-            ->with(['catalogItem:id,sku,name,brand,brand_article,brands,articles,price,price_min,is_price_actual,lead_time_days', 'submission:id,submission_id,local_status', 'requestedBy:id,name'])
-            ->when($this->statusFilter !== '', fn ($q) => $q->where('status', $this->statusFilter))
-            // По умолчанию исключённые не показываем — для них есть фильтр.
-            ->when($this->statusFilter === '', fn ($q) => $q->where('status', '!=', IqotPositionStatus::Excluded->value))
-            ->when($this->sourceFilter !== '', fn ($q) => $q->where('source', $this->sourceFilter))
-            ->when($this->attentionOnly, fn ($q) => $q->needingPricingAttention())
+        $page = \App\Models\CatalogItem::query()
+            ->select('catalog_items.*')
+            ->leftJoin('iqot_positions as p', 'p.catalog_item_id', '=', 'catalog_items.id')
+            ->leftJoin('iqot_monitoring_items as m', 'm.catalog_item_id', '=', 'catalog_items.id')
+            ->where(fn ($w) => $w->whereNotNull('p.id')->orWhereNotNull('m.id'))
+            ->when($this->statusFilter !== '', fn ($q) => $q->where('p.status', $this->statusFilter))
+            // По умолчанию исключённые из заявок не показываем — для них есть фильтр (мониторинг при этом виден).
+            ->when($this->statusFilter === '', fn ($q) => $q->where(fn ($w) => $w->whereNull('p.id')->orWhere('p.status', '!=', IqotPositionStatus::Excluded->value)->orWhereNotNull('m.id')))
+            ->when(in_array($this->sourceFilter, ['auto', 'manual'], true), fn ($q) => $q->where('p.source', $this->sourceFilter))
+            ->when($this->sourceFilter === 'monitoring', fn ($q) => $q->whereNotNull('m.id')->where('m.active', true))
+            ->when($this->attentionOnly, fn ($q) => $q->whereIn('p.id', IqotPosition::query()->needingPricingAttention()->select('id')))
             ->when($this->search !== '', function ($q) {
                 $term = '%'.$this->search.'%';
-                $q->whereHas('catalogItem', function ($c) use ($term) {
-                    $c->where('name', 'ilike', $term)
-                        ->orWhere('sku', 'ilike', $term)
-                        ->orWhere('brand_article', 'ilike', $term);
-                });
+                $q->where(fn ($c) => $c->where('catalog_items.name', 'ilike', $term)
+                    ->orWhere('catalog_items.sku', 'ilike', $term)
+                    ->orWhere('catalog_items.brand_article', 'ilike', $term));
             })
-            // Критические («выше рынка») — наверх как приоритет ценообразования.
+            // Критические («выше рынка» по заявкам) — наверх; затем позиции с ценами — свежие выше.
             ->orderByRaw(
-                'CASE WHEN cmp_our_rank IS NOT NULL AND cmp_total IS NOT NULL AND cmp_total > 0 '
-                .'AND (cmp_total - 1) >= ? AND (cmp_our_rank - 1)::float / cmp_total >= ? THEN 0 ELSE 1 END',
+                'CASE WHEN p.cmp_our_rank IS NOT NULL AND p.cmp_total IS NOT NULL AND p.cmp_total > 0 '
+                .'AND (p.cmp_total - 1) >= ? AND (p.cmp_our_rank - 1)::float / p.cmp_total >= ? THEN 0 ELSE 1 END',
                 [IqotPosition::criticalMinSuppliers(), 1 - IqotPosition::criticalTopPct() / 100],
             )
-            ->orderByRaw('CASE WHEN source = ? THEN 0 ELSE 1 END', [IqotPosition::SOURCE_MANUAL])
-            ->orderByDesc('lost_quote_count')
-            ->orderByDesc('analyzed_at')
-            ->orderByDesc('id')
+            ->orderByRaw('CASE WHEN m.best_price IS NOT NULL OR p.report IS NOT NULL THEN 0 ELSE 1 END')
+            ->orderByRaw('GREATEST(p.analyzed_at, m.prices_synced_at) DESC NULLS LAST')
+            ->orderByDesc('catalog_items.id')
             ->paginate(40);
+
+        $ids = $page->getCollection()->pluck('id')->all();
+        $positions = IqotPosition::query()->with(['submission:id,submission_id,local_status', 'requestedBy:id,name'])
+            ->whereIn('catalog_item_id', $ids)->get()->keyBy('catalog_item_id');
+        $monitoring = \App\Models\IqotMonitoringItem::query()->whereIn('catalog_item_id', $ids)->get()->keyBy('catalog_item_id');
+        $page->setCollection($page->getCollection()->map(function ($cat) use ($positions, $monitoring) {
+            $pos = $positions->get($cat->id);
+            $pos?->setRelation('catalogItem', $cat);
+            $mon = $monitoring->get($cat->id);
+
+            return (object) ['cat' => $cat, 'pos' => $pos, 'mon' => $mon, 'market' => \App\Services\Iqot\IqotMarket::for($cat, $pos, $mon)];
+        }));
+
+        return $page;
+    }
+
+    /** Мониторинг цен «Гибрид»: синхронизировать сейчас (то же, что ежечасный iqot:monitoring). */
+    public function runMonitoring(\App\Services\Iqot\IqotMonitoringService $monitoring): void
+    {
+        $this->assertManager();
+        $r = $monitoring->run();
+        $items = $r['items'] ?? [];
+        session()->flash('iqot-flash', isset($r['skipped']) ? 'Мониторинг IQOT выключен (режим или ключ в Настройках).'
+            : (isset($r['error']) ? 'Мониторинг IQOT: '.$r['error']
+                : 'Мониторинг IQOT синхронизирован: к актуализации с OEM — '.($items['wanted'] ?? 0).', отправлено изменений '.($items['sent'] ?? 0)
+                    .', снято '.($items['deactivated'] ?? 0).'; цены обновлены по '.(is_int($r['prices'] ?? null) ? $r['prices'] : 0).' поз.'));
+        unset($this->stats, $this->positions);
     }
 
     private function assertManager(): void

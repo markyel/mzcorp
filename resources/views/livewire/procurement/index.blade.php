@@ -577,14 +577,12 @@
                                 </td>
                                 <td class="px-3 py-2 text-right mono text-fg-3">{{ $p['price'] ? number_format((float) $p['price'], 0, ',', ' ') : '—' }}</td>
                                 <td class="px-3 py-2 text-[11.5px] whitespace-nowrap">
-                                    @php $im = $iqotMon[$p['cid']] ?? ['row' => null, 'oem' => false]; $mon = $im['row']; @endphp
-                                    @if($mon && $mon->active && $mon->best_price !== null)
+                                    @php $im = $iqotMon[$p['cid']] ?? ['row' => null, 'pos' => null, 'oem' => false, 'market' => null]; $mon = $im['row']; $mk = $im['market']; @endphp
+                                    @if($mk && $mk['offers'] > 0)
                                         <button type="button" wire:click="toggleCard({{ $p['cid'] }}, 't')" class="text-left" title="Цены поставщиков — в карточке позиции">
-                                            <span class="mono font-semibold text-fg-1">{{ number_format((float) $mon->best_price, 0, ',', ' ') }}</span>
-                                            <span class="chip {{ $mon->best_source === 'kp' ? 'chip-ok' : 'chip-neutral' }} text-[10px]">{{ $mon->best_source === 'kp' ? 'КП' : 'сайт' }}</span>
-                                            <div class="text-fg-4">без НДС · мед. {{ $mon->price_median !== null ? number_format((float) $mon->price_median, 0, ',', ' ') : '—' }} · {{ $mon->sources_priced }} пост.</div>
-                                            @php $monCmp = $mon->comparison($p['price']); @endphp
-                                            @if($monCmp['rank'])<div class="{{ $monCmp['delta'] > 0 ? 'text-red-700' : 'text-emerald-700' }}" title="Наша цена каталога без НДС против цен поставщиков без НДС">мы {{ $monCmp['rank'] }}-е из {{ $monCmp['total'] }}</div>@endif
+                                            <span class="mono font-semibold text-fg-1">{{ number_format((float) $mk['best_net'], 0, ',', ' ') }}</span>
+                                            <div class="text-fg-4">без НДС · мед. {{ number_format((float) $mk['median_net'], 0, ',', ' ') }} · {{ $mk['offers'] }} пр.</div>
+                                            @if($mk['our_rank'])<div class="{{ $mk['delta'] > 0 ? 'text-red-700' : 'text-emerald-700' }}" title="Наша цена без НДС против цен поставщиков без НДС">мы {{ $mk['our_rank'] }}-е из {{ $mk['total'] }}</div>@endif
                                         </button>
                                     @elseif($mon && $mon->active)
                                         <span class="{{ in_array($mon->match_status, ['ambiguous', 'rejected'], true) || $mon->import_error ? 'text-amber-700' : 'text-sky-700' }}">{{ $mon->import_error ? 'ошибка загрузки' : (\App\Models\IqotMonitoringItem::MATCH_LABELS[$mon->match_status] ?? 'на мониторинге') }}</span>
@@ -605,7 +603,6 @@
                             @if($this->isCardOpen($p['cid'], 't') && ($card = $this->productCards[$p['cid']] ?? null))
                                 <tr wire:key="ref-card-{{ $p['cid'] }}" class="border-b border-border-subtle bg-surface-2">
                                     <td colspan="10" class="px-4 py-2.5">
-                                        @if($mon = ($iqotMon[$p['cid']]['row'] ?? null))@include('livewire.iqot._monitoring-sources', ['mon' => $mon])@endif
                                         @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false, 'withSupplyHistory' => false])
                                         @include('livewire.suppliers._catalog-supplier-history', ['history' => $card['history']])
                                     </td>

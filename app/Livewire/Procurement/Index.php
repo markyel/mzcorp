@@ -1342,18 +1342,28 @@ class Index extends Component
      * Мониторинг цен IQOT по строкам «К актуализации»: строка мониторинга (если есть) и есть ли у
      * позиции OEM — без него позицию на мониторинг не ставим.
      *
+     * Плюс цены рынка одним списком: мониторинг + КП по заявкам IQOT (App\Services\Iqot\IqotMarket).
+     *
      * @param  list<int>  $cids
-     * @return array<int, array{row: ?\App\Models\IqotMonitoringItem, oem: bool}>
+     * @return array<int, array{row: ?\App\Models\IqotMonitoringItem, pos: ?IqotPosition, oem: bool, market: array<string, mixed>}>
      */
     public function iqotMonitoringFor(array $cids): array
     {
         $rows = \App\Models\IqotMonitoringItem::query()->whereIn('catalog_item_id', $cids)->get()->keyBy('catalog_item_id');
-        $oem = CatalogItem::query()->whereIn('id', $cids)->get(['id', 'sku', 'brand_article', 'articles'])
-            ->mapWithKeys(fn (CatalogItem $c) => [$c->id => $c->oemForExternal() !== null]);
+        $catalog = CatalogItem::query()->whereIn('id', $cids)->get(['id', 'sku', 'brand', 'brand_article', 'brands', 'articles', 'price', 'price_min', 'is_price_actual', 'lead_time_days'])->keyBy('id');
+        $positions = IqotPosition::query()->whereIn('catalog_item_id', $cids)->whereNotNull('report')->get()->keyBy('catalog_item_id');
+        foreach ($positions as $pos) {
+            $pos->setRelation('catalogItem', $catalog->get($pos->catalog_item_id));
+        }
 
         $out = [];
         foreach ($cids as $cid) {
-            $out[$cid] = ['row' => $rows->get($cid), 'oem' => (bool) ($oem[$cid] ?? false)];
+            $cat = $catalog->get($cid);
+            $out[$cid] = [
+                'row' => $rows->get($cid), 'pos' => $positions->get($cid),
+                'oem' => $cat !== null && $cat->oemForExternal() !== null,
+                'market' => \App\Services\Iqot\IqotMarket::for($cat, $positions->get($cid), $rows->get($cid)),
+            ];
         }
 
         return $out;

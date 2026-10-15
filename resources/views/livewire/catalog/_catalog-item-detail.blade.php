@@ -11,6 +11,7 @@
                            analyzeWithIqot; в модалке-квиквью — false), опц.
        $withSupplyHistory — bool (история предложений в блоке «Снабжение»; false там,
                            где история поставщиков уже выведена рядом), опц.
+       $withMarket       — bool (цены рынка IQOT: мониторинг + КП по заявкам), опц., по умолчанию да.
 --}}
 @php
     $canIqot = $canIqot ?? false;
@@ -289,6 +290,18 @@
                 </div>
             @endif
         </div>
+
+        {{-- IQOT · цены рынка: мониторинг «Гибрид» + КП по заявкам, без НДС (App\Services\Iqot\IqotMarket). --}}
+        @if($withMarket ?? true)
+            @php
+                $mkMon = \App\Models\IqotMonitoringItem::query()->where('catalog_item_id', $cat->id)->first();
+                $mkPos = ($iqp ?? null) ?: \App\Models\IqotPosition::query()->where('catalog_item_id', $cat->id)->whereNotNull('report')->first();
+                $mkPos?->setRelation('catalogItem', $cat);
+            @endphp
+            @if($mkMon || $mkPos)
+                <div class="mt-3">@include('livewire.iqot._market', ['market' => \App\Services\Iqot\IqotMarket::for($cat, $mkPos, $mkMon), 'mon' => $mkMon, 'pos' => $mkPos])</div>
+            @endif
+        @endif
 
         @if($cat->comment)
             <div class="bg-surface border border-border rounded-md overflow-hidden mt-3">

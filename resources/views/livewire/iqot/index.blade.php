@@ -51,7 +51,8 @@
             @if($stats['critical'] > 0)
                 <span class="text-fg-3">🔴 Выше рынка: <span class="text-red-700 mono font-bold">{{ $stats['critical'] }}</span></span>
             @endif
-            <span class="text-fg-3">В пуле: <span class="text-fg-1 mono font-semibold">{{ $stats['total'] }}</span></span>
+            <span class="text-fg-3">В пуле заявок: <span class="text-fg-1 mono font-semibold">{{ $stats['total'] }}</span></span>
+            <span class="text-fg-3" title="Мониторинг цен «Гибрид»: цены сайтов поставщиков и КП по почте. Позиции «К актуализации» с OEM, синхронизация раз в час">Мониторинг: <span class="text-fg-1 mono font-semibold">{{ $stats['mon_active'] }}</span>, с ценами <span class="text-emerald-700 mono font-semibold">{{ $stats['mon_priced'] }}</span>@if($stats['mon_kp'] > 0), с КП <span class="mono font-semibold">{{ $stats['mon_kp'] }}</span>@endif @if($stats['mon_synced'])<span class="text-fg-4">· {{ \Illuminate\Support\Carbon::parse($stats['mon_synced'])->format('d.m H:i') }}</span>@endif</span>
             <span class="flex-1"></span>
             <button type="button" wire:click="refreshPool" class="btn btn-sm" wire:loading.attr="disabled">Обновить пул</button>
             <button type="button" wire:click="runPoll" class="btn btn-sm" wire:loading.attr="disabled">Обновить статусы</button>
@@ -63,10 +64,17 @@
                     Переотправить зависшие ({{ $stats['stuck_analyzing'] }})
                 </button>
             @endif
-            <button type="button" wire:click="runDispatch" class="btn btn-sm btn-primary" wire:loading.attr="disabled"
-                    @if(! $stats['enabled'] || ! $stats['configured']) disabled title="Включите IQOT и задайте ключ в Настройках" @endif>
-                Запустить анализ
-            </button>
+            @if($stats['mode'] === 'monitoring')
+                <button type="button" wire:click="runMonitoring" class="btn btn-sm btn-primary" wire:loading.attr="disabled"
+                        @if(! $stats['enabled'] || ! $stats['configured']) disabled title="Включите IQOT и задайте ключ в Настройках" @else title="«К актуализации» с OEM — на мониторинг, цены — сюда (автоматически раз в час)" @endif>
+                    Синхронизировать мониторинг
+                </button>
+            @else
+                <button type="button" wire:click="runDispatch" class="btn btn-sm btn-primary" wire:loading.attr="disabled"
+                        @if(! $stats['enabled'] || ! $stats['configured']) disabled title="Включите IQOT и задайте ключ в Настройках" @endif>
+                    Запустить анализ
+                </button>
+            @endif
         </div>
         @if(session('iqot-flash'))
             <div class="mx-4 mb-3 px-3 py-2 rounded-md bg-sky-50 border border-sky-200 text-[12.5px] text-sky-900">
@@ -90,7 +98,7 @@
             </div>
 
             <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden">
-                @foreach(['' => 'Все источники', 'auto' => 'Из КП', 'manual' => 'Ручные'] as $k => $label)
+                @foreach(['' => 'Все источники', 'monitoring' => 'Мониторинг', 'auto' => 'Заявки: из КП', 'manual' => 'Заявки: ручные'] as $k => $label)
                     @php $on = $sourceFilter === $k; @endphp
                     <button type="button" wire:click="$set('sourceFilter', '{{ $k }}')"
                             class="h-[26px] px-2.5 whitespace-nowrap font-medium border-r border-border last:border-r-0
@@ -122,130 +130,11 @@
         <div class="ds-card-body overflow-x-auto">
             @if($this->positions->isEmpty())
                 <div class="text-center text-fg-3 py-8 text-[13px]">
-                    Пул пуст. Нажмите «Обновить пул», чтобы собрать позиции из проигранных КП,
-                    или добавьте позицию из карточки каталога.
+                    Пусто. Позиции «К актуализации» с OEM уходят на мониторинг раз в час («Синхронизировать мониторинг» — сразу);
+                    позицию можно добавить и из карточки каталога.
                 </div>
             @else
-                <table class="w-full text-[12.5px]">
-                    <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
-                        <tr>
-                            <th class="px-2 py-2 text-left">Позиция</th>
-                            <th class="px-2 py-2 text-left">OEM</th>
-                            <th class="px-2 py-2 text-right">Кол-во</th>
-                            <th class="px-2 py-2 text-right">В КП</th>
-                            <th class="px-2 py-2 text-left">Источник</th>
-                            <th class="px-2 py-2 text-left">Статус</th>
-                            <th class="px-2 py-2 text-right">Мин. цена</th>
-                            <th class="px-2 py-2 text-right">Офферов</th>
-                            <th class="px-2 py-2 text-left">Анализ</th>
-                            <th class="px-2 py-2 text-right"></th>
-                        </tr>
-                    </thead>
-                    @foreach($this->positions as $p)
-                        @php
-                            $ci = $p->catalogItem;
-                            $fresh = $p->hasFreshReport();
-                            $offers = $p->offers();
-                            $alert = $p->pricingAlert();
-                            $isCritical = ($alert['level'] ?? null) === 'critical';
-                        @endphp
-                        <tbody wire:key="iqp-{{ $p->id }}" x-data="{ open: false }">
-                            <tr class="border-b border-border-subtle align-top {{ $isCritical ? 'bg-red-50 hover:bg-red-100 border-l-2 border-l-red-500' : 'hover:bg-hover' }}">
-                                <td class="px-2 py-1.5">
-                                    <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($ci->name ?? '—', 60) }}</div>
-                                    <div class="mono text-[11px] text-fg-3">{{ $ci->sku ?? '—' }}</div>
-                                    @if($alert)
-                                        @php
-                                            $devStr = $alert['deviation_pct'] !== null ? ' · +' . number_format($alert['deviation_pct'], 0, ',', ' ') . '%' : '';
-                                        @endphp
-                                        @if($alert['level'] === 'critical')
-                                            <span class="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white"
-                                                  title="Цена выше рынка: {{ $alert['rank'] }}-е место из {{ $alert['total'] }} при {{ $alert['suppliers'] }} поставщиках. Приоритет работы по ценообразованию.">
-                                                🔴 выше рынка · {{ $alert['rank'] }}-е из {{ $alert['total'] }}{{ $devStr }}
-                                            </span>
-                                        @else
-                                            <span class="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-700 border border-red-200"
-                                                  title="Наша цена {{ $alert['rank'] }}-е место из {{ $alert['total'] }}; на {{ number_format($alert['deviation_pct'], 1, ',', ' ') }}% дороже лучшей цены IQOT (без НДС). Требует пересмотра цены.">
-                                                ⚠ пересмотреть цену · {{ $alert['rank'] }}-е{{ $devStr }}
-                                            </span>
-                                        @endif
-                                    @endif
-                                </td>
-                                <td class="px-2 py-1.5 mono text-[11.5px] text-fg-2">{{ $p->payload_oem ?: ($ci?->oemForExternal() ?: '—') }}</td>
-                                <td class="px-2 py-1.5 text-right mono text-fg-1 whitespace-nowrap">
-                                    @if($p->qty !== null){{ rtrim(rtrim(number_format((float) $p->qty, 3, '.', ''), '0'), '.') }} <span class="text-fg-3 text-[11px]">{{ $p->unit ?: 'шт.' }}</span>@else <span class="text-fg-4">—</span>@endif
-                                </td>
-                                <td class="px-2 py-1.5 text-right mono {{ $p->lost_quote_count > 1 ? 'text-amber-700 font-semibold' : 'text-fg-2' }}">{{ $p->lost_quote_count ?: '—' }}</td>
-                                <td class="px-2 py-1.5">
-                                    @if($p->source === 'manual')
-                                        <span class="text-[11px] text-sky-700">ручная</span>
-                                    @else
-                                        <span class="text-[11px] text-fg-3">из КП</span>
-                                    @endif
-                                </td>
-                                <td class="px-2 py-1.5">
-                                    <span class="text-[11.5px] font-medium {{ $statusClass[$p->status] ?? 'text-fg-2' }}">
-                                        {{ $p->statusEnum()?->label() ?? $p->status }}
-                                    </span>
-                                    @if($p->status === 'analyzing' && $p->iqot_item_status)
-                                        <div class="text-[10px] text-fg-3">{{ $iqotItemLabel[$p->iqot_item_status] ?? $p->iqot_item_status }}</div>
-                                    @endif
-                                    @if($p->status === 'analyzing' && $p->last_enqueued_at)
-                                        @php $daysAnalyzing = (int) abs(now()->diffInDays($p->last_enqueued_at)); @endphp
-                                        <div class="text-[10px] {{ $daysAnalyzing >= 2 ? 'text-amber-700' : 'text-fg-4' }}">в анализе {{ $daysAnalyzing }} дн</div>
-                                    @endif
-                                    @if($p->status === 'failed' && $p->error_message)
-                                        <div class="text-[10px] text-red-600" title="{{ $p->error_message }}">{{ \Illuminate\Support\Str::limit($p->error_message, 40) }}</div>
-                                    @endif
-                                </td>
-                                <td class="px-2 py-1.5 text-right mono {{ $p->report_min_price !== null ? 'text-fg-1 font-semibold' : 'text-fg-4' }}">
-                                    {{ $p->report_min_price !== null ? number_format((float) $p->report_min_price, 2, ',', ' ') . ' ₽' : '—' }}
-                                </td>
-                                <td class="px-2 py-1.5 text-right mono text-fg-2">
-                                    @if($offers !== [])
-                                        <button type="button" @click="open = !open" class="text-sky-700 hover:underline">{{ $p->report_offers_count ?? count($offers) }} <span x-text="open ? '▾' : '▸'"></span></button>
-                                    @else
-                                        {{ $p->report_offers_count ?? '—' }}
-                                    @endif
-                                </td>
-                                <td class="px-2 py-1.5 text-[11.5px]">
-                                    @if($p->analyzed_at)
-                                        <span class="{{ $fresh ? 'text-emerald-700' : 'text-fg-3' }}">{{ $p->analyzed_at->format('d.m.Y') }}</span>
-                                        @unless($fresh)<span class="text-[10px] text-amber-700 ml-1">устарел</span>@endunless
-                                    @else
-                                        <span class="text-fg-4">—</span>
-                                    @endif
-                                </td>
-                                <td class="px-2 py-1.5 text-right whitespace-nowrap">
-                                    @if($p->status === 'excluded')
-                                        <button type="button" wire:click="unexclude({{ $p->id }})" class="btn btn-sm" wire:loading.attr="disabled">Вернуть в пул</button>
-                                    @else
-                                        {{-- «Повторить» только если нет свежего отчёта (иначе не пере-отправляем — бережём баланс) --}}
-                                        @if($p->status === 'failed' || (in_array($p->status, ['completed', 'no_offers'], true) && ! $fresh))
-                                            <button type="button" wire:click="reanalyze({{ $p->id }})" class="btn btn-sm" wire:loading.attr="disabled">Повторить</button>
-                                        @endif
-                                        {{-- Зависшая в анализе (отчёт не пришёл) — переотправить заново. --}}
-                                        @if($p->status === 'analyzing')
-                                            <button type="button" wire:click="resendAnalysis({{ $p->id }})"
-                                                    wire:confirm="Переотправить позицию на анализ в IQOT? Текущая (зависшая) отправка отменяется, позиция уйдёт заново."
-                                                    class="btn btn-sm" wire:loading.attr="disabled">Переотправить</button>
-                                        @endif
-                                        <button type="button" wire:click="exclude({{ $p->id }})"
-                                                wire:confirm="Исключить позицию из пула? Она больше не будет отправляться в IQOT."
-                                                class="btn btn-sm btn-danger" wire:loading.attr="disabled">Исключить</button>
-                                    @endif
-                                </td>
-                            </tr>
-                            @if($offers !== [])
-                                <tr x-show="open" x-cloak class="border-b border-border-subtle bg-surface-2">
-                                    <td colspan="10" class="px-4 py-2.5">
-                                        @include('livewire.iqot._comparison', ['pos' => $p])
-                                    </td>
-                                </tr>
-                            @endif
-                        </tbody>
-                    @endforeach
-                </table>
+                @include('livewire.iqot._rows')
                 <div class="mt-3">{{ $this->positions->links() }}</div>
             @endif
         </div>
