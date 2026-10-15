@@ -115,6 +115,9 @@ class QuotePartsInvite extends Component
     /** @var array<int, array{email:string, name:string, position:string, topics:array<string, bool>}> */
     public array $contactRows = [];
 
+    /** @var list<array{topic:string, email:?string, name:?string, position:int}> как поставщик сам распределил людей (его страница «Команда») */
+    public array $supplierOwnContacts = [];
+
     public string $dispatchMode = 'all';
 
     public int $escalateAfterHours = 48;
@@ -135,6 +138,7 @@ class QuotePartsInvite extends Component
         $current = collect($link['contacts'] ?? [])->keyBy(fn ($c) => mb_strtolower($c['email']));
         $this->dispatchMode = $link['dispatch_mode'] ?? 'all';
         $this->escalateAfterHours = (int) ($link['escalate_after_hours'] ?? 48);
+        $this->supplierOwnContacts = array_values((array) ($link['supplier_contacts'] ?? []));
 
         // Адреса фирмы из справочника + контакты, которые уже есть в QuoteParts.
         $emails = $this->supplier->quotepartsColleagues()->mapWithKeys(fn ($s) => [mb_strtolower($s->email) => $s->contact_person ?: $s->name ?: ''])

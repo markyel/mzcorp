@@ -34,6 +34,15 @@
         @if($contactsOpen)
             <div class="border border-border rounded-md p-3 space-y-3">
                 <div class="text-[12px] text-fg-3">Кто у поставщика ведёт какую тему. Запросы цен уходят контактам «Расценка» (если их нет — «Основному»). Адрес без отмеченных тем в QuoteParts не попадает.</div>
+                @if($supplierOwnContacts !== [])
+                    <div class="rounded-md border border-sky-200 bg-sky-50/50 px-2.5 py-1.5 text-[12px]">
+                        <span class="font-medium text-fg-1">Поставщик сам распределил людей в своём кабинете — его выбор главнее:</span>
+                        @foreach(collect($supplierOwnContacts)->groupBy('topic') as $topic => $people)
+                            <div>{{ \App\Livewire\Suppliers\QuotePartsInvite::TOPICS[$topic] ?? $topic }} — {{ collect($people)->map(fn ($p) => ($p['name'] ?: $p['email']).($p['name'] && $p['email'] ? ' ('.$p['email'].')' : ''))->implode(', ') }}</div>
+                        @endforeach
+                        <div class="text-fg-3">Таблица ниже действует для тем, которые поставщик не распределил.</div>
+                    </div>
+                @endif
                 <table class="w-full text-[12.5px]">
                     <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider">
                         <tr>
