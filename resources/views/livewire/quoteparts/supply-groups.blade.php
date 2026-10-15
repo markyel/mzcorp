@@ -48,7 +48,7 @@
                             <td class="px-3 py-1.5 text-fg-3 mono">{{ collect(json_decode((string) $s->currencies, true) ?: [])->map(fn ($n, $c) => ($c ?: '—').' '.$n)->implode(', ') }}</td>
                             <td class="px-3 py-1.5">
                                 <div class="flex items-center gap-2">
-                                    <select wire:change="setRegion({{ $s->id }}, $event.target.value)" class="h-[28px] px-2 border border-border rounded-md bg-surface text-[12.5px]">
+                                    <select wire:change="setRegion({{ $s->id }}, $event.target.value)" class="h-[28px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px]">
                                         <option value="" @selected($s->region === null)>—</option>
                                         @foreach($groups as $g)<option value="{{ $g->value }}" @selected($s->region === $g->value)>{{ $g->label() }}</option>@endforeach
                                     </select>
