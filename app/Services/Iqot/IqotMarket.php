@@ -50,7 +50,7 @@ class IqotMarket
                     continue;   // валюта без курса — не сравнить
                 }
                 $rows[] = [
-                    'kind' => self::KIND_REQUEST, 'supplier' => $r['supplier'], 'url' => null,
+                    'kind' => self::KIND_REQUEST, 'supplier' => $r['supplier'], 'url' => self::siteFromEmail($r['email'] ?? null),
                     'contacts' => trim(($r['phone'] ?? '').(! empty($r['email']) ? ' · '.$r['email'] : ''), ' ·'),
                     'raw' => $r['raw'], 'symbol' => $r['currency_symbol'], 'vat' => $r['vat_label'], 'net' => round((float) $r['net_rub'], 2),
                     'delivery_days' => $r['delivery_days'], 'availability' => null, 'confirmed' => false, 'pages' => 1,
@@ -67,7 +67,7 @@ class IqotMarket
                 $fromKp = ! is_numeric($s['price'] ?? null);
                 $rows[] = [
                     'kind' => $fromKp || ($s['type'] ?? null) === 'kp' ? self::KIND_MAIL_KP : self::KIND_SITE,
-                    'supplier' => (string) ($s['domain'] ?? '—'), 'url' => $s['url'] ?? null, 'contacts' => null,
+                    'supplier' => self::readableDomain((string) ($s['domain'] ?? '—')), 'url' => $s['url'] ?? null, 'contacts' => null,
                     'raw' => (float) $s['value'], 'symbol' => '₽',
                     'vat' => ($s['vat'] ?? null) === true ? 'с НДС' : (($s['vat'] ?? null) === false ? 'без НДС' : 'НДС не указан'),
                     'net' => (float) $s['net'], 'delivery_days' => null, 'availability' => $s['availability'] ?? null,
@@ -111,6 +111,35 @@ class IqotMarket
             'request_date' => $pos?->analyzed_at,
             'monitoring_date' => $mon?->prices_synced_at,
         ];
+    }
+
+    /** Публичные почтовые сервисы: домен адреса — не сайт поставщика. */
+    private const FREE_MAIL = ['mail.ru', 'inbox.ru', 'list.ru', 'bk.ru', 'internet.ru', 'yandex.ru', 'ya.ru', 'yandex.com', 'gmail.com', 'googlemail.com',
+        'rambler.ru', 'lenta.ru', 'autorambler.ru', 'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'me.com', 'yahoo.com', 'qq.com', '163.com', '126.com'];
+
+    /**
+     * Сайт поставщика по домену его почты (в отчёте IQOT по КП — только имя, почта и телефон):
+     * info@liftlider.ru → https://liftlider.ru. Публичная почта — без ссылки.
+     */
+    public static function siteFromEmail(?string $email): ?string
+    {
+        $domain = mb_strtolower(trim((string) substr(strrchr((string) $email, '@') ?: '', 1)));
+        if ($domain === '' || ! str_contains($domain, '.') || in_array($domain, self::FREE_MAIL, true)) {
+            return null;
+        }
+
+        return 'https://'.$domain;
+    }
+
+    /** Кириллический домен в читаемом виде (xn--…рф → …рф). */
+    public static function readableDomain(string $domain): string
+    {
+        if (! str_contains($domain, 'xn--') || ! function_exists('idn_to_utf8')) {
+            return $domain;
+        }
+        $utf = idn_to_utf8($domain, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46);
+
+        return $utf !== false ? $utf : $domain;
     }
 
     private static function date(mixed $v): ?Carbon

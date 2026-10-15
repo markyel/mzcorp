@@ -50,6 +50,17 @@ class IqotMarketTest extends TestCase
         $this->assertSame(4, $m['total']);
         $this->assertEqualsWithDelta(6228.89, $m['our_net'], 0.01);
         $this->assertSame('sale@lk.ru', trim($m['rows'][0]['contacts'], ' ·'));
+        // Ссылки: КП по заявке — сайт по домену почты; сайт — страница товара.
+        $this->assertSame(['https://lk.ru', 'https://sematic.su/p', null], array_column($m['rows'], 'url'));
+    }
+
+    public function test_supplier_site_and_readable_domains(): void
+    {
+        $this->assertSame('https://liftlider.ru', IqotMarket::siteFromEmail('info@liftlider.ru'));
+        $this->assertNull(IqotMarket::siteFromEmail('2103606@mail.ru'));
+        $this->assertNull(IqotMarket::siteFromEmail(null));
+        $this->assertSame('лифт-запчасти.рф', IqotMarket::readableDomain('xn----8sba0adep0btegq8b.xn--p1ai'));
+        $this->assertSame('sematic.su', IqotMarket::readableDomain('sematic.su'));
     }
 
     public function test_monitoring_only_uses_the_catalog_price(): void

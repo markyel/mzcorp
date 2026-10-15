@@ -60,7 +60,8 @@
                     <tr class="border-t border-border-subtle align-top">
                         <td class="py-1 pr-2 text-fg-4">{{ $n }}</td>
                         <td class="py-1 pr-2">
-                            @if($r['url'])<a href="{{ $r['url'] }}" target="_blank" rel="noopener noreferrer" class="text-sky-700 hover:underline">{{ $r['supplier'] }}</a>@else<span class="text-fg-1">{{ $r['supplier'] }}</span>@endif
+                            @if($r['url'])<a href="{{ $r['url'] }}" target="_blank" rel="noopener noreferrer" class="text-sky-700 hover:underline" @if($r['kind'] === \App\Services\Iqot\IqotMarket::KIND_REQUEST) title="Сайт поставщика по домену его почты" @endif>{{ $r['supplier'] }}</a>@else<span class="text-fg-1">{{ $r['supplier'] }}</span>@endif
+                            @if($r['kind'] === \App\Services\Iqot\IqotMarket::KIND_REQUEST && $r['url'])<span class="text-fg-4 text-[11px]"> · {{ \App\Services\Iqot\IqotMarket::readableDomain((string) parse_url($r['url'], PHP_URL_HOST)) }}</span>@endif
                             @if($r['pages'] > 1)<span class="text-fg-4 text-[11px]" title="У поставщика несколько страниц с этим товаром — показана лучшая цена"> · {{ $r['pages'] }} стр.</span>@endif
                             @if($r['contacts'])<div class="text-[11px] text-fg-3 mono">{{ $r['contacts'] }}</div>@endif
                         </td>
