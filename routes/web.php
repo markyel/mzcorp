@@ -360,6 +360,13 @@ Route::middleware('auth')->group(function () {
             return view('procurement.index');
         })->name('procurement.index');
 
+        // Файл выгрузки новых цен поставщиков (вкладка «Выгрузки цен»).
+        Route::get('/dashboard/procurement/price-exports/{export}/download', function (\App\Models\PriceExport $export) {
+            abort_unless($export->file_path && \Illuminate\Support\Facades\Storage::disk(config('procurement.price_export.disk', 'local'))->exists($export->file_path), 404);
+
+            return \Illuminate\Support\Facades\Storage::disk(config('procurement.price_export.disk', 'local'))->download($export->file_path, basename($export->file_path));
+        })->whereNumber('export')->name('procurement.price-exports.download');
+
         // Еженедельные персональные отчёты менеджеров. Менеджер видит свои
         // (вкл. прошлые), РОП/директор/админ — все (фильтр по менеджеру внутри
         // компонента). См. App\Livewire\Reports\Weekly.

@@ -117,6 +117,7 @@
             'requests' => ['⛏ Запросы', null],
             'refresh' => ['💰 К актуализации', $refreshSum['total']],
             'monitor' => ['🔁 Мониторинг цен', $monSum['active']],
+            'exports' => ['📤 Выгрузки цен', null],
             ...(\App\Services\QuoteParts\QuotePartsPilot::canConverse(auth()->user()) ? ['pricelists' => ['📋 Прайсы поставщиков', null]] : []),
         ];
     @endphp
@@ -672,6 +673,10 @@
                 </div>
             </div>
         @endif
+    @endif
+
+    @if($tab === 'exports')
+        <livewire:procurement.price-exports />
     @endif
 
     @if($tab === 'monitor')
