@@ -1514,7 +1514,7 @@ class Index extends Component
             )
             ->get();
         if ($items->isEmpty()) {
-            return $this->withQuotePartsOffers([], $cids);
+            return $this->withChoices($this->withQuotePartsOffers([], $cids), $cids);
         }
 
         // Последний оффер по позиции (несколько писем → берём свежий по id).
@@ -1522,10 +1522,12 @@ class Index extends Component
         DB::table('supplier_offers')
             ->whereIn('supplier_inquiry_item_id', $items->pluck('item_id')->all())
             ->orderBy('id')
-            ->get(['supplier_inquiry_item_id', 'outcome', 'price', 'currency', 'valid_until_text', 'refusal_reason'])
+            ->get(['id', 'supplier_inquiry_item_id', 'outcome', 'price', 'currency', 'valid_until_text', 'refusal_reason'])
             ->each(function ($o) use (&$latestOffer) {
                 $latestOffer[$o->supplier_inquiry_item_id] = $o;
             });
+        // Поставщик ответа рассылки — тем же ключом, что в QuoteParts (для выбора «закупаем здесь»).
+        $keys = \App\Services\Procurement\SupplierChoiceService::keysByEmail($items->pluck('supplier_email'));
 
         $out = [];
         foreach ($items->groupBy('cid') as $cid => $grp) {
@@ -1554,6 +1556,10 @@ class Index extends Component
                     'currency' => $o->currency,
                     'valid_until' => $o->valid_until_text,
                     'refusal' => $o->refusal_reason,
+                    'key' => $keys[mb_strtolower(trim((string) $row->supplier_email))] ?? null,
+                    'source' => 'email',
+                    'ref' => (int) $o->id,
+                    'review' => null,
                 ];
                 if ($outcome === 'quoted') {
                     $hasQuoted = true;
@@ -1581,12 +1587,13 @@ class Index extends Component
             ];
         }
 
-        return $this->withQuotePartsOffers($out, $cids);
+        return $this->withChoices($this->withQuotePartsOffers($out, $cids), $cids);
     }
 
     /**
      * Офферы поставщиков из QuoteParts (ответы на запросы через платформу, прайсы) — тоже
-     * ответ поставщика по позиции: цена, срок действия, лучшая цена.
+     * ответ поставщика по позиции. Оригинал — цена позиции сразу; отклонение (аналог, копия,
+     * восстановленное, замена) — на разбор: цена позиции только после «Принять к закупке».
      *
      * @param  array<int, array<string, mixed>>  $out
      * @param  list<int>  $cids
@@ -1599,6 +1606,8 @@ class Index extends Component
 
         foreach ($qp as $cid => $offers) {
             $entry = $out[(int) $cid] ?? ['state' => 'awaiting', 'pending_count' => 0, 'best_price' => null, 'best_currency' => null, 'best_supplier' => null, 'best_valid_until' => null, 'offers' => []];
+            $priced = false;
+            $toReview = false;
             foreach ($offers as $o) {
                 $supplier = (string) ($o->supplier_name ?: $o->supplier_key).' · QuoteParts'.($o->source_type === 'price_list' ? ', прайс' : '');
                 // Не оригинал: вид и предложенный товар — рядом с ценой.
@@ -1616,23 +1625,29 @@ class Index extends Component
                     'variant' => $variant,
                     'note' => $o->note,
                     'photos' => collect(range(0, max(0, (int) $o->photos - 1)))->take((int) $o->photos)->map(fn ($i) => route('quoteparts.offer-photo', [$o->remote_id, $i]))->all(),
+                    'key' => $o->supplier_key,
+                    'source' => 'quoteparts',
+                    'ref' => (int) $o->id,
+                    'review' => $o->review_status,
                 ];
-                // Лучшая цена — по оригиналу; аналог/копия/восстановленное видны в списке ответов.
-                if (($o->kind ?? 'original') === 'original' && $o->price !== null && ($entry['best_price'] === null || (float) $o->price < (float) $entry['best_price'])) {
+                if (! $o->countsAsItemPrice()) {
+                    $toReview = $toReview || $o->review_status === \App\Models\QuotePartsOffer::REVIEW_PENDING;
+
+                    continue;
+                }
+                $priced = true;
+                if ($o->price !== null && ($entry['best_price'] === null || (float) $o->price < (float) $entry['best_price'])) {
                     $entry['best_price'] = (float) $o->price;
                     $entry['best_currency'] = $o->currency;
-                    $entry['best_supplier'] = $supplier;
+                    $entry['best_supplier'] = $supplier.($variant ? ' · '.$variant : '');
                     $entry['best_valid_until'] = $validText;
                 }
             }
-            // Только неоригинальные варианты — лучшая цена среди них, с пометкой вида.
-            if ($entry['best_price'] === null && ($cheapest = $offers->whereNotNull('price')->sortBy(fn ($o) => (float) $o->price)->first())) {
-                $entry['best_price'] = (float) $cheapest->price;
-                $entry['best_currency'] = $cheapest->currency;
-                $entry['best_supplier'] = (string) ($cheapest->supplier_name ?: $cheapest->supplier_key).' · '.\App\Models\QuotePartsOffer::kindLabel($cheapest->kind);
-                $entry['best_valid_until'] = $cheapest->valid_until ? 'до '.$cheapest->valid_until->format('d.m.Y') : null;
+            if ($priced) {
+                $entry['state'] = 'quoted';
+            } elseif ($toReview && $entry['state'] !== 'quoted') {
+                $entry['state'] = 'review';
             }
-            $entry['state'] = 'quoted';
             $out[(int) $cid] = $entry;
         }
 
@@ -1648,12 +1663,84 @@ class Index extends Component
                     'currency' => null,
                     'valid_until' => null,
                     'refusal' => 'не поставляет'.($d->reason ? ': '.$d->reason : ''),
+                    'key' => $d->supplier_key,
+                    'source' => 'quoteparts',
+                    'ref' => null,
+                    'review' => null,
                 ];
             }
             $out[(int) $cid] = $entry;
         }
 
         return $out;
+    }
+
+    /**
+     * Выбранный поставщик позиции и его текущая цена (свежий ответ того же поставщика).
+     *
+     * @param  array<int, array<string, mixed>>  $out
+     * @param  list<int>  $cids
+     * @return array<int, array<string, mixed>>
+     */
+    private function withChoices(array $out, array $cids): array
+    {
+        foreach (app(\App\Services\Procurement\SupplierChoiceService::class)->forItems($cids) as $cid => $choice) {
+            $entry = $out[(int) $cid] ?? ['state' => 'none', 'pending_count' => 0, 'best_price' => null, 'best_currency' => null, 'best_supplier' => null, 'best_valid_until' => null, 'offers' => []];
+            $current = collect($entry['offers'])->filter(fn ($o) => ($o['key'] ?? null) === $choice->supplier_key && self::usable($o))->last();
+            $entry['chosen'] = [
+                'key' => $choice->supplier_key,
+                'supplier' => $choice->supplier_name,
+                'price' => $current['price'] ?? null,
+                'currency' => $current['currency'] ?? null,
+                'current' => $current !== null,
+                'at' => $choice->chosen_at?->format('d.m.Y'),
+            ];
+            $out[(int) $cid] = $entry;
+        }
+
+        return $out;
+    }
+
+    /** Ответ годится как цена позиции: цена есть, это не отклонение на разборе и не отклонённое. */
+    private static function usable(array $offer): bool
+    {
+        return ($offer['outcome'] ?? null) === 'quoted' && ! in_array($offer['review'] ?? null, [\App\Models\QuotePartsOffer::REVIEW_PENDING, \App\Models\QuotePartsOffer::REVIEW_REJECTED], true);
+    }
+
+    /** Принять отклонение (аналог, восстановленное…) к закупке по запрошенной позиции. */
+    public function acceptDeviation(int $offerId, \App\Services\QuoteParts\QuotePartsPriceService $prices): void
+    {
+        $prices->review(\App\Models\QuotePartsOffer::query()->findOrFail($offerId), true, auth()->user());
+        unset($this->responseByCatalogId);
+        $this->dispatch('toast', type: 'success', message: 'Принято к закупке: цена идёт как цена позиции.');
+    }
+
+    public function rejectDeviation(int $offerId, \App\Services\QuoteParts\QuotePartsPriceService $prices): void
+    {
+        $prices->review(\App\Models\QuotePartsOffer::query()->findOrFail($offerId), false, auth()->user());
+        unset($this->responseByCatalogId);
+        $this->dispatch('toast', type: 'success', message: 'Отклонено.');
+    }
+
+    /** «Закупаем здесь»: поставщик этой позиции (выбор остаётся при следующих ценах). */
+    public function chooseSupplier(int $catalogItemId, string $key, \App\Services\Procurement\SupplierChoiceService $choices): void
+    {
+        $offer = collect($this->responseByCatalogId[$catalogItemId]['offers'] ?? [])
+            ->filter(fn ($o) => ($o['key'] ?? null) === $key && self::usable($o))->last();
+        if ($offer === null) {
+            $this->dispatch('toast', type: 'error', message: 'У этого поставщика нет цены, годной для закупки.');
+
+            return;
+        }
+        $choices->choose($catalogItemId, $key, $offer, auth()->user());
+        unset($this->responseByCatalogId);
+        $this->dispatch('toast', type: 'success', message: 'Закупаем у: '.$offer['supplier'].'.');
+    }
+
+    public function clearSupplierChoice(int $catalogItemId, \App\Services\Procurement\SupplierChoiceService $choices): void
+    {
+        $choices->clear($catalogItemId);
+        unset($this->responseByCatalogId);
     }
 
     // ───────── «Мои запросы поставщикам» (менеджерский раздел) ─────────

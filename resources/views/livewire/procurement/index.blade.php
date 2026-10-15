@@ -337,8 +337,18 @@
                                 @if($resp === null)
                                     <span class="text-fg-4 text-[11px]">—</span>
                                 @else
+                                    @if(! empty($resp['chosen']))
+                                        @php $ch = $resp['chosen']; @endphp
+                                        <div class="mb-0.5 text-[10.5px]" title="Закупаем у этого поставщика (выбрано {{ $ch['at'] }})">
+                                            <span class="chip chip-ok text-[10.5px]">✓ {{ \Illuminate\Support\Str::limit($ch['supplier'], 22) }}</span>
+                                            @if($ch['current'] && $ch['price'] !== null)<span class="mono text-fg-2">{{ number_format($ch['price'], 2, '.', ' ') }} {{ $ch['currency'] }}</span>@else<span class="text-fg-4">нет текущей цены</span>@endif
+                                        </div>
+                                    @endif
                                     <div class="flex items-center gap-1.5">
-                                        @if($resp['state'] === 'quoted')
+                                        @if($resp['state'] === 'none')
+                                        @elseif($resp['state'] === 'review')
+                                            <span class="chip chip-sky text-[10.5px]" title="Поставщик предложил аналог / копию / восстановленное — нужно разобрать">🔎 на разборе</span>
+                                        @elseif($resp['state'] === 'quoted')
                                             <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10.5px] font-medium">
                                                 <span>💰 {{ $resp['best_price'] !== null ? number_format($resp['best_price'], 2, '.', ' ') : 'цена' }}{{ $resp['best_currency'] ? ' '.$resp['best_currency'] : ' ₽' }}</span>
                                             </span>
@@ -385,6 +395,27 @@
                                                     @if(! empty($of['variant']))<span class="chip chip-sky text-[10.5px]">{{ $of['variant'] }}</span>@endif
                                                     @if(! empty($of['note']))<span class="text-fg-3 text-[11px]" title="{{ $of['note'] }}">{{ \Illuminate\Support\Str::limit($of['note'], 60) }}</span>@endif
                                                     @foreach($of['photos'] ?? [] as $ph)<a href="{{ $ph }}" target="_blank" class="text-sky-700 hover:underline text-[11px]">📷{{ count($of['photos']) > 1 ? $loop->iteration : '' }}</a>@endforeach
+                                                    {{-- Отклонение от запрошенного — разбор руками. --}}
+                                                    @if(($of['review'] ?? null) === 'pending')
+                                                        <span class="chip chip-warn text-[10.5px]">на разборе</span>
+                                                        <button type="button" wire:click="acceptDeviation({{ $of['ref'] }})" class="btn btn-xs" title="Закупать этот вариант по запрошенной позиции: цена пойдёт как цена позиции">Принять к закупке</button>
+                                                        <button type="button" wire:click="rejectDeviation({{ $of['ref'] }})" class="btn btn-xs btn-ghost">Отклонить</button>
+                                                    @elseif(($of['review'] ?? null) === 'accepted')
+                                                        <span class="chip chip-ok text-[10.5px]">принято к закупке</span>
+                                                        <button type="button" wire:click="rejectDeviation({{ $of['ref'] }})" class="text-fg-4 hover:text-fg-2 text-[10.5px]">отменить</button>
+                                                    @elseif(($of['review'] ?? null) === 'rejected')
+                                                        <span class="chip chip-neutral text-[10.5px]">отклонено</span>
+                                                        <button type="button" wire:click="acceptDeviation({{ $of['ref'] }})" class="text-fg-4 hover:text-fg-2 text-[10.5px]">принять</button>
+                                                    @endif
+                                                    {{-- У кого закупаем: выбор остаётся при следующих ценах. --}}
+                                                    @if(! empty($of['key']) && ! in_array($of['review'] ?? null, ['pending', 'rejected'], true))
+                                                        @if(($resp['chosen']['key'] ?? null) === $of['key'])
+                                                            <span class="chip chip-ok text-[10.5px] ml-auto">✓ закупаем здесь</span>
+                                                            <button type="button" wire:click="clearSupplierChoice({{ $p['cid'] }})" class="text-fg-4 hover:text-fg-2 text-[10.5px]">снять</button>
+                                                        @else
+                                                            <button type="button" wire:click="chooseSupplier({{ $p['cid'] }}, '{{ $of['key'] }}')" class="btn btn-xs ml-auto">Закупаем здесь</button>
+                                                        @endif
+                                                    @endif
                                                 @else
                                                     <span class="chip chip-warn text-[10.5px]">✖ отказ</span>
                                                     @if($of['refusal'])<span class="text-fg-3 text-[11px]">{{ \Illuminate\Support\Str::limit($of['refusal'], 70) }}</span>@endif

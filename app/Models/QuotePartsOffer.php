@@ -34,7 +34,17 @@ class QuotePartsOffer extends Model
         'product_name',
         'note',
         'photos',
+        'review_status',
+        'reviewed_by_user_id',
+        'reviewed_at',
     ];
+
+    /** Разбор отклонения (не оригинала): ждёт, принято к закупке, отклонено. */
+    public const REVIEW_PENDING = 'pending';
+
+    public const REVIEW_ACCEPTED = 'accepted';
+
+    public const REVIEW_REJECTED = 'rejected';
 
     protected $casts = [
         'tiers' => 'array',
@@ -42,6 +52,7 @@ class QuotePartsOffer extends Model
         'valid_until' => 'date',
         'superseded' => 'boolean',
         'remote_updated_at' => 'datetime',
+        'reviewed_at' => 'datetime',
     ];
 
     /** Что предложено (вид оффера QuoteParts). */
@@ -61,6 +72,12 @@ class QuotePartsOffer extends Model
     public function catalogItem(): BelongsTo
     {
         return $this->belongsTo(CatalogItem::class);
+    }
+
+    /** Цена годится как цена позиции: оригинал или отклонение, принятое к закупке. */
+    public function countsAsItemPrice(): bool
+    {
+        return ($this->kind ?? 'original') === 'original' || $this->review_status === self::REVIEW_ACCEPTED;
     }
 
     /** Действует: не вытеснен и не истёк. */

@@ -163,7 +163,7 @@ class QuotePartsPriceService
 
         foreach ($offers as $o) {
             $tiers = (array) ($o['tiers'] ?? []);
-            QuotePartsOffer::query()->updateOrCreate(['remote_id' => (int) $o['id']], [
+            $row = QuotePartsOffer::query()->updateOrCreate(['remote_id' => (int) $o['id']], [
                 'catalog_item_id' => $catalog[$o['item_code'] ?? ''] ?? null,
                 'sku' => $o['item_code'] ?? null,
                 'supplier_key' => $o['supplier'] ?? null,
@@ -185,9 +185,40 @@ class QuotePartsPriceService
                 'note' => isset($o['note']) ? mb_substr((string) $o['note'], 0, 1000) : null,
                 'photos' => (int) ($o['photos'] ?? 0),
             ]);
+            // Не оригинал — на разбор снабжению; то же предложение, уже разобранное раньше (продлённое,
+            // повторённое), наследует решение.
+            if (($o['kind'] ?? 'original') !== 'original' && $row->review_status === null) {
+                $row->forceFill(['review_status' => $this->earlierDecision($row) ?? QuotePartsOffer::REVIEW_PENDING])->save();
+            }
         }
 
         return count($offers);
+    }
+
+    /** Решение по тому же варианту того же поставщика на эту позицию, если уже было. */
+    private function earlierDecision(QuotePartsOffer $offer): ?string
+    {
+        return QuotePartsOffer::query()
+            ->where('id', '!=', $offer->id)->where('sku', $offer->sku)->where('supplier_key', $offer->supplier_key)->where('kind', $offer->kind)
+            ->whereRaw('lower(coalesce(part_number, \'\')) = ?', [mb_strtolower((string) $offer->part_number)])
+            ->whereIn('review_status', [QuotePartsOffer::REVIEW_ACCEPTED, QuotePartsOffer::REVIEW_REJECTED])
+            ->latest('reviewed_at')->value('review_status');
+    }
+
+    /**
+     * Разбор отклонения: принять к закупке по запрошенной позиции (цена идёт как цена позиции)
+     * или отклонить.
+     */
+    public function review(QuotePartsOffer $offer, bool $accept, User $by): QuotePartsOffer
+    {
+        abort_if(($offer->kind ?? 'original') === 'original', 422, 'Оригинал не требует разбора.');
+        $offer->forceFill([
+            'review_status' => $accept ? QuotePartsOffer::REVIEW_ACCEPTED : QuotePartsOffer::REVIEW_REJECTED,
+            'reviewed_by_user_id' => $by->id,
+            'reviewed_at' => now(),
+        ])->save();
+
+        return $offer;
     }
 
     /**
