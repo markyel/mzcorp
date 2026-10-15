@@ -27,6 +27,13 @@ class SupplyGroups extends Component
     #[Url(as: 'sq', except: '')]
     public string $search = '';
 
+    /** Содержимое группы: cn / ru / eu, none — позиции без группы, '' — список закрыт. */
+    #[Url(as: 'group', except: '')]
+    public string $group = '';
+
+    #[Url(as: 'gq', except: '')]
+    public string $groupSearch = '';
+
     /** M-артикул позиции, чьи группы правим руками. */
     public string $sku = '';
 
@@ -49,6 +56,9 @@ class SupplyGroups extends Component
     {
         if (in_array($name, ['region', 'search'], true)) {
             $this->resetPage();
+        }
+        if (in_array($name, ['group', 'groupSearch'], true)) {
+            $this->resetPage('ip');
         }
     }
 
@@ -87,6 +97,14 @@ class SupplyGroups extends Component
         // Позиции пула уйдут в QuoteParts с новыми группами (изменилась карточка — повторная отправка).
         SyncQuotePartsPoolJob::dispatch();
         $this->dispatch('toast', type: 'success', message: 'Пересчитано: '.collect(SupplyGroup::cases())->map(fn ($g) => $g->label().' '.($counts[$g->value] ?? 0))->implode(', ').'.');
+    }
+
+    /** «изменить» в списке группы — та же правка групп позиции руками. */
+    public function editItem(string $sku, SupplyGroupService $service): void
+    {
+        $this->sku = $sku;
+        $this->findItem($service);
+        $this->js("document.getElementById('item-groups')?.scrollIntoView({behavior: 'smooth', block: 'center'})");
     }
 
     public function findItem(SupplyGroupService $service): void
@@ -133,7 +151,30 @@ class SupplyGroups extends Component
                 ->orWhereHas('organization', fn ($o) => $o->where('name', 'ilike', '%'.$term.'%')))
             ->orderBy('name')->limit(12)->get(['id', 'name', 'email', 'supplier_organization_id']);
 
+        // Содержимое выбранной группы: позиции, их группы и поставщики 1С (с регионом).
+        $groupItems = null;
+        $itemSuppliers = collect();
+        $itemGroupsMap = [];
+        if ($this->group !== '') {
+            $gterm = trim($this->groupSearch);
+            $groupItems = CatalogItem::query()
+                ->when($this->group === 'none',
+                    fn ($q) => $q->whereNotExists(fn ($s) => $s->selectRaw('1')->from('catalog_item_supply_groups as g')->whereColumn('g.catalog_item_id', 'catalog_items.id')),
+                    fn ($q) => $q->whereExists(fn ($s) => $s->selectRaw('1')->from('catalog_item_supply_groups as g')->whereColumn('g.catalog_item_id', 'catalog_items.id')->where('g.group_code', $this->group)))
+                ->when($gterm !== '', fn ($q) => $q->where(fn ($w) => $w->where('sku', 'ilike', '%'.$gterm.'%')->orWhere('name', 'ilike', '%'.$gterm.'%')->orWhere('brand', 'ilike', '%'.$gterm.'%')->orWhere('brand_article', 'ilike', '%'.$gterm.'%')))
+                ->orderBy('sku')
+                ->paginate(50, ['id', 'sku', 'name', 'brand', 'brand_article'], 'ip');
+            $ids = $groupItems->getCollection()->pluck('id')->all();
+            $itemGroupsMap = DB::table('catalog_item_supply_groups')->whereIn('catalog_item_id', $ids)->get(['catalog_item_id', 'group_code', 'source'])->groupBy('catalog_item_id')->all();
+            $itemSuppliers = DB::table('catalog_supplier_prices as p')->leftJoin('purchase_supplier_regions as r', 'r.supplier_name_1c', '=', 'p.supplier_name_1c')
+                ->whereIn('p.catalog_item_id', $ids)->select('p.catalog_item_id', 'p.supplier_name_1c', 'r.region')->distinct()->get()->groupBy('catalog_item_id');
+        }
+
         return view('livewire.quoteparts.supply-groups', [
+            'groupItems' => $groupItems,
+            'itemSuppliers' => $itemSuppliers,
+            'itemGroupsMap' => $itemGroupsMap,
+            'noGroupCount' => $this->group === 'none' && $groupItems ? $groupItems->total() : null,
             'suppliers' => $suppliers,
             'cards' => $cards,
             'cardNames' => $cardNames,

@@ -8,8 +8,11 @@
         <div class="ds-card-body text-[13px] space-y-3">
             <div class="flex flex-wrap items-center gap-6">
                 @foreach($groups as $g)
-                    <div><span class="text-[20px] font-semibold mono">{{ number_format($groupCounts[$g->value] ?? 0, 0, ',', ' ') }}</span> <span class="text-fg-3">позиций · {{ $g->label() }}</span></div>
+                    <button type="button" wire:click="$set('group', '{{ $group === $g->value ? '' : $g->value }}')" @class(['text-left rounded-md px-2 py-1 hover:bg-hover', 'bg-[var(--bg-selected)] ring-1 ring-sky-300' => $group === $g->value]) title="Показать позиции группы">
+                        <span class="text-[20px] font-semibold mono">{{ number_format($groupCounts[$g->value] ?? 0, 0, ',', ' ') }}</span> <span class="text-fg-3">позиций · {{ $g->label() }}</span> <span class="text-sky-700 text-[12px]">{{ $group === $g->value ? 'скрыть' : 'показать' }}</span>
+                    </button>
                 @endforeach
+                <button type="button" wire:click="$set('group', '{{ $group === 'none' ? '' : 'none' }}')" @class(['text-left rounded-md px-2 py-1 hover:bg-hover text-fg-3', 'bg-[var(--bg-selected)] ring-1 ring-sky-300' => $group === 'none'])>без группы <span class="text-sky-700 text-[12px]">{{ $group === 'none' ? 'скрыть' : 'показать' }}</span></button>
                 <button type="button" wire:click="rebuild" wire:loading.attr="disabled" wire:target="rebuild" class="btn btn-sm btn-primary ml-auto">
                     <span wire:loading.remove wire:target="rebuild">Пересчитать</span><span wire:loading wire:target="rebuild">Считаю…</span>
                 </button>
@@ -21,6 +24,52 @@
             </p>
         </div>
     </div>
+
+    {{-- Содержимое группы. --}}
+    @if($groupItems !== null)
+        @php $label = $group === 'none' ? 'Без группы' : (\App\Enums\SupplyGroup::tryFrom($group)?->label() ?? $group); @endphp
+        <div class="ds-card">
+            <div class="ds-card-header flex flex-wrap items-center gap-2">
+                <h3>Позиции группы «{{ $label }}»</h3>
+                <span class="text-fg-3 text-[12px] ml-1">{{ number_format($groupItems->total(), 0, ',', ' ') }}</span>
+                <input type="search" wire:model.live.debounce.300ms="groupSearch" placeholder="Артикул, название, бренд"
+                       class="ml-auto h-[30px] w-64 px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
+                <button type="button" wire:click="$set('group', '')" class="btn btn-sm btn-ghost">Закрыть</button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-[12.5px]">
+                    <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
+                        <tr><th class="text-left px-3 py-2" style="width:90px">Артикул</th><th class="text-left px-3 py-2">Наименование</th><th class="text-left px-3 py-2">Бренд</th><th class="text-left px-3 py-2">Группы</th><th class="text-left px-3 py-2">Поставщики 1С</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        @forelse($groupItems as $it)
+                            @php $rows = collect($itemGroupsMap[$it->id] ?? []); $sup = $itemSuppliers->get($it->id, collect()); @endphp
+                            <tr wire:key="gi-{{ $it->id }}" class="border-b border-border-subtle align-top">
+                                <td class="px-3 py-1.5 mono">{{ $it->sku }}</td>
+                                <td class="px-3 py-1.5 text-fg-1">{{ \Illuminate\Support\Str::limit($it->name, 80) }}</td>
+                                <td class="px-3 py-1.5 text-fg-3">{{ $it->brand ?: '—' }}@if($it->brand_article) <span class="mono">{{ $it->brand_article }}</span>@endif</td>
+                                <td class="px-3 py-1.5 whitespace-nowrap">
+                                    @foreach($rows as $gr)<span class="chip chip-sky text-[10.5px] mr-1">{{ \App\Enums\SupplyGroup::tryFrom($gr->group_code)?->label() ?? $gr->group_code }}</span>@endforeach
+                                    @if($rows->contains('source', 'manual'))<span class="chip chip-neutral text-[10px]">вручную</span>@endif
+                                </td>
+                                <td class="px-3 py-1.5 text-fg-2 text-[12px]">
+                                    @forelse($sup as $sp)
+                                        <div>{{ \Illuminate\Support\Str::limit($sp->supplier_name_1c, 60) }} <span class="text-fg-4">· {{ \App\Enums\SupplyGroup::tryFrom((string) $sp->region)?->label() ?? 'без региона' }}</span></div>
+                                    @empty
+                                        <span class="text-fg-4">нет закупок в 1С</span>
+                                    @endforelse
+                                </td>
+                                <td class="px-3 py-1.5 text-right"><button type="button" wire:click="editItem('{{ $it->sku }}')" class="text-fg-4 hover:text-fg-2 text-[11px]">изменить</button></td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="6" class="px-3 py-6 text-center text-fg-3">Нет позиций.</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+            <div class="px-3 py-2">{{ $groupItems->links() }}</div>
+        </div>
+    @endif
 
     <div class="ds-card">
         <div class="ds-card-header flex flex-wrap items-center gap-2">
@@ -91,7 +140,7 @@
     </div>
 
     <div class="ds-card">
-        <div class="ds-card-header"><h3>Группы позиции вручную</h3></div>
+        <div class="ds-card-header" id="item-groups"><h3>Группы позиции вручную</h3></div>
         <div class="ds-card-body text-[13px] space-y-2">
             <form wire:submit="findItem" class="flex flex-wrap items-center gap-2">
                 <input type="text" wire:model="sku" placeholder="M-артикул" class="h-[30px] w-40 px-2.5 border border-border rounded-md bg-surface text-[13px] mono">
