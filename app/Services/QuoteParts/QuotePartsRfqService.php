@@ -25,13 +25,16 @@ class QuotePartsRfqService
         private readonly QuotePartsClient $client,
         private readonly QuotePartsPoolService $pool,
         private readonly QuotePartsSupplierService $suppliers,
+        private readonly QuotePartsDraftService $drafts,
     ) {}
 
     /**
      * @param  array<int, float>  $quantities  catalog_item_id => количество
      * @param  list<int>  $supplierIds
+     * @param  array<int, float>  $draftQuantities  request_item_id => количество: новые товары без
+     *                                               M-артикула уходят предварительными позициями
      */
-    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by): QuotePartsRfq
+    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = []): QuotePartsRfq
     {
         if (! QuotePartsPilot::enabledFor($by)) {
             throw new RuntimeException('QuoteParts выключен или вы не участник пилота.');
@@ -42,22 +45,33 @@ class QuotePartsRfqService
         // в режиме переписки, без письма-приглашения. Поставщик в QuoteParts — организация:
         // несколько её адресов дают одного получателя; кому писать — решает режим рассылки.
         $rows = Supplier::query()->with('organization:id,name')->whereIn('id', $supplierIds)->whereNotNull('email')->get();
-        if ($catalog->isEmpty() || $rows->isEmpty()) {
-            throw new RuntimeException('Нужны позиции с M-артикулом и хотя бы один поставщик с адресом.');
+        if (($catalog->isEmpty() && $draftQuantities === []) || $rows->isEmpty()) {
+            throw new RuntimeException('Нужны позиции и хотя бы один поставщик с адресом.');
         }
         foreach ($rows as $row) {
             $this->suppliers->ensureRegistered($row);
         }
         $suppliers = $rows->map->quotepartsKey()->unique()->values();
 
-        $statuses = $this->pool->ensureInPool($catalog->keys()->all(), $by);
-        $notReady = $catalog->filter(fn ($c) => ($statuses[$c->id] ?? null) !== 'active');
-        if ($notReady->isNotEmpty()) {
-            throw new RuntimeException('Позиции не в работе в QuoteParts (на паузе или не переданы): '.$notReady->pluck('sku')->implode(', ').'.');
+        $items = [];
+        if ($catalog->isNotEmpty()) {
+            $statuses = $this->pool->ensureInPool($catalog->keys()->all(), $by);
+            $notReady = $catalog->filter(fn ($c) => ($statuses[$c->id] ?? null) !== 'active');
+            if ($notReady->isNotEmpty()) {
+                throw new RuntimeException('Позиции не в работе в QuoteParts (на паузе или не переданы): '.$notReady->pluck('sku')->implode(', ').'.');
+            }
+            foreach ($catalog as $c) {
+                $items[] = ['code' => $c->sku, 'quantity' => max(0.001, (float) $quantities[$c->id]), 'note' => null];
+            }
+        }
+        if ($draftQuantities !== []) {
+            foreach ($this->drafts->ensureDrafts(array_keys($draftQuantities)) as $requestItemId => $code) {
+                $items[] = ['code' => $code, 'quantity' => max(0.001, (float) $draftQuantities[$requestItemId]), 'note' => null];
+            }
         }
 
         $result = $this->client->createRfq([
-            'items' => $catalog->map(fn ($c) => ['code' => $c->sku, 'quantity' => max(0.001, (float) $quantities[$c->id]), 'note' => null])->values()->all(),
+            'items' => $items,
             'suppliers' => $suppliers->all(),
             'reply_by' => $replyBy,
             'message' => $message ?: null,

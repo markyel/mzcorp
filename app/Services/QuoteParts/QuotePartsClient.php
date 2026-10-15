@@ -32,6 +32,26 @@ class QuotePartsClient
     }
 
     /**
+     * Предварительные позиции (новый товар без M-артикула): временный код на каждую ссылку ref.
+     *
+     * @param  list<array<string, mixed>>  $items
+     * @return list<array{ref:string, code:string, status:string, result:string}>
+     */
+    public function createDrafts(array $items): array
+    {
+        $response = $this->http()->post('/api/v1/items/drafts', ['items' => $items]);
+
+        if ($response->status() === 422) {
+            throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не принял позиции.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts items/drafts: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json('items', []);
+    }
+
+    /**
      * @param  list<string>  $codes
      * @return array{archived: list<string>, unknown: list<string>}
      */

@@ -21,15 +21,14 @@
                     <div>
                         <div class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Позиции</div>
                         @foreach($this->catalogItems as $it)
-                            <label wire:key="qpi-{{ $it->id }}" class="flex items-center gap-2 py-0.5 {{ $it->catalog_item_id ? '' : 'opacity-50' }}">
-                                <input type="checkbox" wire:model="items.{{ $it->id }}" @disabled(! $it->catalog_item_id) class="w-4 h-4 accent-sky-600">
-                                <span class="mono w-[70px]">{{ $it->catalogItem?->sku ?? '—' }}</span>
+                            <label wire:key="qpi-{{ $it->id }}" class="flex items-center gap-2 py-0.5">
+                                <input type="checkbox" wire:model="items.{{ $it->id }}" class="w-4 h-4 accent-sky-600">
+                                <span class="mono w-[70px]">{{ $it->catalogItem?->sku ?? ($it->quoteparts_code ?: '—') }}</span>
                                 <span class="flex-1 truncate">{{ $it->catalogItem?->name ?? $it->parsed_name }}</span>
-                                @if($it->catalog_item_id)
-                                    <input type="text" wire:model="qty.{{ $it->id }}" class="{{ $inputCls }} w-[70px] text-right">
-                                @else
-                                    <span class="text-[11px] text-fg-4">без M-артикула — только «как раньше»</span>
-                                @endif
+                                @unless($it->catalog_item_id)
+                                    <span class="chip chip-sky text-[10px]" title="Товара нет в каталоге: уйдёт предварительной позицией с временным кодом — название (по-английски), бренд, артикул, характеристики">новый товар</span>
+                                @endunless
+                                <input type="text" wire:model="qty.{{ $it->id }}" class="{{ $inputCls }} w-[70px] text-right">
                             </label>
                         @endforeach
                     </div>

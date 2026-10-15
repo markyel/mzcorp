@@ -25,7 +25,11 @@
                                     @if(! empty($s['send_error']))<div class="text-[11px] text-red-700">{{ $s['send_error'] }}</div>@endif
                                 </td>
                             @endif
-                            <td class="px-3 py-1.5 mono">{{ $line['code'] }}</td>
+                            <td class="px-3 py-1.5">
+                                <span class="mono">{{ $line['code'] }}</span>
+                                @if(! empty($line['draft']))<span class="chip chip-sky text-[10px] ml-1" title="Предварительная позиция: товара нет в каталоге">новый</span>@endif
+                                @if(! empty($line['name']))<div class="text-[11.5px] text-fg-3 truncate max-w-[260px]">{{ $line['name'] }}</div>@endif
+                            </td>
                             <td class="px-3 py-1.5">
                                 @if(($line['status'] ?? '') === 'offered' && ! empty($line['offer']))
                                     @foreach($line['offer']['tiers'] as $t)

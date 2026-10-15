@@ -123,28 +123,32 @@ class QuotePartsPanel extends Component
 
         $chosen = array_map('intval', array_keys(array_filter($this->items)));
         $quantities = [];
+        $draftQuantities = [];
         foreach ($this->catalogItems->whereIn('id', $chosen) as $it) {
-            if ($it->catalog_item_id === null) {
-                continue;
-            }
             $q = (float) str_replace(',', '.', (string) ($this->qty[$it->id] ?? '1'));
             if ($q <= 0) {
                 $this->error = 'Количество должно быть больше нуля: '.($it->catalogItem?->sku ?? $it->parsed_name);
 
                 return;
             }
+            if ($it->catalog_item_id === null) {
+                // Новый товар без M-артикула — предварительной позицией.
+                $draftQuantities[(int) $it->id] = $q;
+
+                continue;
+            }
             $quantities[(int) $it->catalog_item_id] = ($quantities[(int) $it->catalog_item_id] ?? 0) + $q;
         }
         $supplierIds = array_map('intval', array_keys(array_filter($this->suppliers)));
 
-        if ($quantities === [] || $supplierIds === []) {
-            $this->error = 'Отметьте позиции с M-артикулом и хотя бы одного поставщика.';
+        if (($quantities === [] && $draftQuantities === []) || $supplierIds === []) {
+            $this->error = 'Отметьте позиции и хотя бы одного поставщика.';
 
             return;
         }
 
         try {
-            $rfq = $service->send(RequestModel::findOrFail($this->requestId), $quantities, $supplierIds, $this->replyBy ?: null, $this->message, auth()->user());
+            $rfq = $service->send(RequestModel::findOrFail($this->requestId), $quantities, $supplierIds, $this->replyBy ?: null, $this->message, auth()->user(), $draftQuantities);
         } catch (Throwable $e) {
             $this->error = mb_substr($e->getMessage(), 0, 400);
 
