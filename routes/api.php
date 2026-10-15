@@ -25,3 +25,8 @@ Route::post('/bot/telegram', [\App\Http\Controllers\Api\BotWebhookController::cl
 Route::post('/bot/max', [\App\Http\Controllers\Api\BotWebhookController::class, 'max'])
     ->middleware('throttle:600,1')
     ->name('api.bot.max');
+
+// Уведомления QuoteParts о запросах поставщикам: подпись проверяет контроллер.
+Route::post('/quoteparts/webhook', \App\Http\Controllers\Api\QuotePartsWebhookController::class)
+    ->middleware('throttle:600,1')
+    ->name('api.quoteparts.webhook');

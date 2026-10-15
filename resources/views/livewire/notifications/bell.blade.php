@@ -43,6 +43,8 @@
                                 'support_reply' => '✉',
                                 'outgoing_send_failed' => '⚠',
                                 'bot_message' => '💬',
+                                'quoteparts_reply' => '📨',
+                                'quoteparts_question' => '❓',
                                 default => '🔔',
                             };
                             $title = match($kind) {
@@ -55,6 +57,8 @@
                                 'support_reply' => 'Ответ по обращению #' . ($data['ticket_id'] ?? ''),
                                 'outgoing_send_failed' => 'Письмо не отправлено' . (! empty($data['internal_code']) ? ' · ' . $data['internal_code'] : ''),
                                 'bot_message' => 'Клиент написал в ' . ($data['channel'] ?? 'бот') . ' · ' . ($data['internal_code'] ?? ''),
+                                'quoteparts_reply' => 'Поставщик ответил · ' . ($data['tag'] ?? 'QuoteParts') . (! empty($data['internal_code']) ? ' · ' . $data['internal_code'] : ''),
+                                'quoteparts_question' => 'Поставщик спрашивает · ' . ($data['tag'] ?? 'QuoteParts') . (! empty($data['internal_code']) ? ' · ' . $data['internal_code'] : ''),
                                 default => 'Уведомление',
                             };
                             $subtitle = match($kind) {
@@ -67,6 +71,7 @@
                                 'support_reply' => ($data['subject'] ?? '') . ' · ' . \Illuminate\Support\Str::limit($data['reply_preview'] ?? '', 60),
                                 'outgoing_send_failed' => ($data['recipient'] ?? '') . ' · ' . ($data['subject'] ?? '') . ' · осталось черновиком',
                                 'bot_message' => ($data['client_name'] ?? '') . ' · ' . ($data['preview'] ?? ''),
+                                'quoteparts_reply', 'quoteparts_question' => ($data['supplier'] ?? 'поставщик') . (! empty($data['preview']) ? ' · ' . $data['preview'] : ''),
                                 default => '',
                             };
                             $reqId = $data['request_id'] ?? null;
@@ -77,6 +82,7 @@
                                 'outgoing_send_failed' => $reqId
                                     ? route('requests.show', $reqId)
                                     : route('mail.inbox', ['mbox' => $data['mailbox_id'] ?? null, 'folder' => 'drafts', 'open' => $data['draft_id'] ?? null]),
+                                'quoteparts_reply', 'quoteparts_question' => $reqId ? route('requests.show', $reqId) : route('procurement.index'),
                                 'organization_link_pending' => isset($data['link_request_id']) ? route('clients.link-requests.show', $data['link_request_id']) : '#',
                                 default => $reqId ? route('requests.show', $reqId) : '#',
                             };

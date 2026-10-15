@@ -1050,6 +1050,10 @@ return [
         'batch' => (int) env('QUOTEPARTS_BATCH', 200),
         // Главный выключатель канала «Запрос через QuoteParts» (переопределяется в Настройках).
         'rfq_enabled' => (bool) env('QUOTEPARTS_RFQ_ENABLED', false),
+        // Подпись уведомлений QuoteParts (POST /api/quoteparts/webhook): HMAC-SHA256 «timestamp.body».
+        'webhook_secret' => env('QUOTEPARTS_WEBHOOK_SECRET', ''),
+        // Насколько старым может быть уведомление (защита от повтора перехваченного), секунд.
+        'webhook_tolerance' => (int) env('QUOTEPARTS_WEBHOOK_TOLERANCE', 300),
     ],
 
     'iqot' => [
