@@ -12,6 +12,53 @@
         <button type="button" wire:click="{{ $refreshAction ?? 'refresh' }}({{ $rfq->id }})" class="btn btn-xs">Обновить</button>
         <a href="{{ rtrim(config('services.quoteparts.url'), '/') }}/rfqs/{{ $rfq->remote_id }}" target="_blank" rel="noopener" class="btn btn-xs">В QuoteParts ↗</a>
     </div>
+    {{-- Вопросы поставщиков: одинаковые по смыслу собраны в группы; ответ — всем спросившим разом. --}}
+    @php $qGroups = collect($snap['question_groups'] ?? []); $openGroups = $qGroups->where('status', 'open'); @endphp
+    @if($qGroups->isNotEmpty())
+        <div class="px-3 py-2 border-b border-border-subtle space-y-2 {{ $openGroups->isNotEmpty() ? 'bg-amber-50/60' : '' }}">
+            <div class="flex items-center gap-2 text-[12.5px]">
+                <span class="font-medium text-fg-1">Вопросы поставщиков</span>
+                <span class="text-fg-3">{{ $openGroups->isNotEmpty() ? 'без ответа: '.$openGroups->count() : 'все отвечены' }}</span>
+                @if($openGroups->isNotEmpty() && $rfq->request_id && method_exists($this, 'askClientAboutQuotePartsQuestions') && $this->canAnswerQuoteParts())
+                    <button type="button" wire:click="askClientAboutQuotePartsQuestions({{ $rfq->id }})" class="btn btn-xs ml-auto"
+                            title="Черновик письма клиенту с этими вопросами по-русски, без имён поставщиков — откроется в редакторе">✉ Спросить клиента</button>
+                @endif
+            </div>
+            @foreach($qGroups as $g)
+                @php $askers = collect($g['questions'] ?? [])->pluck('supplier')->unique()->count(); @endphp
+                <div wire:key="qpg-{{ $rfq->id }}-{{ $g['id'] }}" class="rounded-md border {{ $g['status'] === 'open' ? 'border-amber-300 bg-surface' : 'border-border-subtle bg-surface-2' }} px-2.5 py-1.5 text-[12.5px]">
+                    <div>
+                        <span class="font-medium">{{ $g['title_ru'] }}</span>
+                        <span class="text-fg-3">· {{ $askers === 1 ? 'спрашивает 1 поставщик' : 'спрашивают '.$askers.' поставщика' }}</span>
+                        @if($g['item_code'])<span class="mono text-fg-4 text-[11px]">· {{ $g['item_code'] }}</span>@endif
+                        @if($g['status'] !== 'open')<span class="text-emerald-700 text-[11px]">· отвечено</span>@endif
+                    </div>
+                    <ul class="mt-0.5 text-fg-2">
+                        @foreach($g['questions'] ?? [] as $q)
+                            <li>{{ $supplierNames[$q['supplier']] ?? $q['supplier'] }}: {{ $q['text_ru'] ?: $q['text'] }}@if($q['text_ru'] && $q['text_ru'] !== $q['text']) <span class="text-fg-4">(«{{ $q['text'] }}»)</span>@endif</li>
+                        @endforeach
+                    </ul>
+                    @if($g['status'] === 'open' && $this->canAnswerQuoteParts())
+                        @php $needsEn = $this->quotePartsGroupNeedsEnglish($g); @endphp
+                        <div class="mt-1.5 space-y-1">
+                            <textarea wire:model="qpGroupRu.{{ $rfq->id }}.{{ $g['id'] }}" rows="2" placeholder="Ответ по-русски — уйдёт всем, кто спросил"
+                                      class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
+                            @if($needsEn)
+                                <div class="flex items-center gap-2">
+                                    <button type="button" wire:click="translateQuotePartsGroup({{ $rfq->id }}, {{ $g['id'] }})" wire:loading.attr="disabled" wire:target="translateQuotePartsGroup" class="btn btn-xs">🌐 Перевести для англоязычных</button>
+                                    <span class="text-[11px] text-fg-4">среди спросивших есть поставщики с языком English — им уйдёт перевод, его можно поправить</span>
+                                </div>
+                                <textarea wire:model="qpGroupEn.{{ $rfq->id }}.{{ $g['id'] }}" rows="2" placeholder="English version"
+                                          class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
+                            @endif
+                            <button type="button" wire:click="answerQuotePartsGroup({{ $rfq->id }}, {{ $g['id'] }})" wire:loading.attr="disabled" wire:target="answerQuotePartsGroup"
+                                    class="btn btn-sm btn-primary">Ответить всем ({{ $askers }})</button>
+                        </div>
+                    @endif
+                </div>
+            @endforeach
+        </div>
+    @endif
     <div class="overflow-x-auto">
         <table class="w-full text-[12.5px]">
             <tbody>
@@ -51,7 +98,7 @@
                         </tr>
                     @endforeach
                     {{-- Вопросы поставщика, переписка и ответ ему (письмом от MyZip в его переписку). --}}
-                    @php $questions = $s['questions'] ?? []; $thread = $s['thread'] ?? []; @endphp
+                    @php $questions = collect($s['questions'] ?? [])->whereNull('group_id')->values()->all(); $thread = $s['thread'] ?? []; @endphp
                     @if($questions !== [] || $thread !== [] || $canAnswer)
                         <tr class="border-b border-border-subtle">
                             <td colspan="3" class="px-3 py-2" x-data="{ open: {{ $questions !== [] ? 'true' : 'false' }} }">

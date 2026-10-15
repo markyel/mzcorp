@@ -146,6 +146,106 @@ class QuotePartsRfqService
         return $rfq;
     }
 
+    /**
+     * Язык общения поставщиков по ключам QuoteParts (org:{id} / sup:{id}) — из настроек
+     * поставщика в mzcorp, как в запросе из «Снабжения»: en, если у организации хоть один
+     * адрес англоязычный, иначе ru.
+     *
+     * @param  iterable<string>  $keys
+     * @return array<string, string>
+     */
+    public function supplierLanguages(iterable $keys): array
+    {
+        $keys = collect($keys)->filter()->unique()->values();
+        $orgIds = $keys->filter(fn ($k) => str_starts_with($k, 'org:'))->map(fn ($k) => (int) substr($k, 4));
+        $supIds = $keys->filter(fn ($k) => str_starts_with($k, 'sup:'))->map(fn ($k) => (int) substr($k, 4));
+
+        $rows = Supplier::query()
+            ->where(fn ($q) => $q->whereIn('supplier_organization_id', $orgIds)->orWhereIn('id', $supIds))
+            ->get(['id', 'supplier_organization_id', 'language']);
+
+        $out = [];
+        foreach ($keys as $key) {
+            $mine = str_starts_with($key, 'org:')
+                ? $rows->where('supplier_organization_id', (int) substr($key, 4))
+                : $rows->where('id', (int) substr($key, 4));
+            $out[$key] = $mine->contains('language', 'en') ? 'en' : 'ru';
+        }
+
+        return $out;
+    }
+
+    /**
+     * Ответ на группу одинаковых вопросов: русский текст — русскоязычным поставщикам,
+     * английский (перевод, поправленный менеджером) — англоязычным. В карточку позиции
+     * QuoteParts запоминает английский вариант, если он есть.
+     */
+    public function answerGroup(QuotePartsRfq $rfq, int $groupId, string $ru, ?string $en, User $by): QuotePartsRfq
+    {
+        if (! QuotePartsPilot::enabledFor($by)) {
+            throw new RuntimeException('QuoteParts выключен или вы не участник пилота.');
+        }
+        $group = collect($rfq->snapshot['question_groups'] ?? [])->firstWhere('id', $groupId);
+        if ($group === null) {
+            throw new RuntimeException('Группа вопросов не найдена — обновите запрос.');
+        }
+        $ru = trim($ru);
+        $en = trim((string) $en);
+        $askers = collect($group['questions'] ?? [])->where('status', 'open')->pluck('supplier')->filter()->unique();
+        $languages = $this->supplierLanguages($askers);
+        if ($ru === '' || (in_array('en', $languages, true) && $en === '')) {
+            throw new RuntimeException('Напишите ответ'.(in_array('en', $languages, true) ? ' и проверьте перевод на английский' : '').'.');
+        }
+
+        $snapshot = $this->client->answerQuestionGroup(
+            $rfq->remote_id,
+            $groupId,
+            $askers->map(fn ($key) => ['supplier' => $key, 'text' => $languages[$key] === 'en' ? $en : $ru])->values()->all(),
+            $en !== '' ? $en : $ru,
+            $by->name,
+        );
+        $rfq->forceFill(['snapshot' => $snapshot, 'status' => $snapshot['status'] ?? $rfq->status, 'synced_at' => now()])->save();
+
+        return $rfq;
+    }
+
+    /**
+     * Черновик письма клиенту с вопросами поставщиков (по-русски, без имён поставщиков) —
+     * ответом на последнее письмо клиента в заявке. Менеджер правит и отправляет сам.
+     *
+     * @param  list<int>  $groupIds  пусто — все открытые группы
+     */
+    public function clientDraft(QuotePartsRfq $rfq, array $groupIds, User $by): \App\Models\EmailMessage
+    {
+        $request = $rfq->request ?? throw new RuntimeException('Запрос не привязан к заявке.');
+        $groups = collect($rfq->snapshot['question_groups'] ?? [])->where('status', 'open')
+            ->when($groupIds !== [], fn ($c) => $c->whereIn('id', $groupIds))->values();
+        if ($groups->isEmpty()) {
+            throw new RuntimeException('Открытых вопросов поставщиков нет.');
+        }
+
+        $lines = $groups->map(function ($g, $i) {
+            $variants = collect($g['questions'] ?? [])->map(fn ($q) => $q['text_ru'] ?: $q['text'])->filter()->unique()
+                ->reject(fn ($t) => $t === $g['title_ru'])->values();
+
+            return ($i + 1).'. '.$g['title_ru'].($variants->isNotEmpty() ? "\n   (".$variants->implode('; ').')' : '');
+        });
+        $body = "Здравствуйте!\n\nЧтобы подобрать позицию точно, уточните, пожалуйста:\n\n".$lines->implode("\n")."\n\nСпасибо!";
+
+        $drafts = app(\App\Services\Mail\EmailDraftService::class);
+        $lastInbound = \App\Models\EmailMessage::query()
+            ->where('related_request_id', $request->id)->where('direction', \App\Enums\MailDirection::Inbound->value)->where('is_draft', false)
+            ->orderByDesc('sent_at')->orderByDesc('id')->first();
+        $draft = $lastInbound ? $drafts->createReply($request, $lastInbound, $by) : $drafts->createCompose($request, $by);
+        $drafts->update($draft, [
+            'subject' => $lastInbound ? $draft->subject : '['.$request->internal_code.'] Уточнения по заявке',
+            'body_plain' => $body,
+            'body_html' => nl2br(e($body)),
+        ]);
+
+        return $draft;
+    }
+
     public function refresh(QuotePartsRfq $rfq): QuotePartsRfq
     {
         $snapshot = $this->client->rfq($rfq->remote_id);

@@ -171,6 +171,20 @@ class QuotePartsPanel extends Component
         unset($this->rfqs);
     }
 
+    /** «Спросить клиента»: черновик письма клиенту с открытыми вопросами поставщиков, открывается в редакторе. */
+    public function askClientAboutQuotePartsQuestions(int $rfqId, QuotePartsRfqService $service): void
+    {
+        abort_unless($this->canAnswerQuoteParts(), 403);
+        try {
+            $draft = $service->clientDraft($this->quotePartsRfqForAnswer($rfqId), [], auth()->user());
+        } catch (Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 300));
+
+            return;
+        }
+        $this->dispatch('open-draft', draftId: $draft->id, requestId: $this->requestId);
+    }
+
     protected function quotePartsRfqForAnswer(int $id): QuotePartsRfq
     {
         return QuotePartsRfq::query()->where('request_id', $this->requestId)->findOrFail($id);

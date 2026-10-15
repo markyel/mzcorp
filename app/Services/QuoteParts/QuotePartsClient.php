@@ -196,6 +196,30 @@ class QuotePartsClient
     }
 
     /**
+     * Ответ на группу одинаковых вопросов: каждому спросившему — в его переписку, текст по поставщику.
+     *
+     * @param  list<array{supplier:string, text:string}>  $answers
+     * @return array<string, mixed> обновлённый снимок запроса
+     */
+    public function answerQuestionGroup(int $remoteId, int $groupId, array $answers, ?string $memory, ?string $authorName): array
+    {
+        $response = $this->http()->post('/api/v1/rfqs/'.$remoteId.'/question-groups/'.$groupId.'/answer', [
+            'answers' => $answers,
+            'memory' => $memory,
+            'author_name' => $authorName,
+        ]);
+
+        if (in_array($response->status(), [422, 502], true)) {
+            throw new RuntimeException((string) ($response->json('message') ?: collect($response->json('errors', []))->flatten()->implode(' ')) ?: 'QuoteParts не отправил ответ.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts group answer: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function rfq(int $remoteId): array
