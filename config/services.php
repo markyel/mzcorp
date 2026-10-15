@@ -1051,6 +1051,8 @@ return [
         // должна укладываться в sync_timeout с запасом.
         'batch' => (int) env('QUOTEPARTS_BATCH', 50),
         'sync_timeout' => (int) env('QUOTEPARTS_SYNC_TIMEOUT', 120),
+        // Вложения запроса (фото позиций, файлы) — суммарно, до base64; лимит платформы 20 МБ.
+        'attachments_max_bytes' => (int) env('QUOTEPARTS_ATTACHMENTS_MAX_BYTES', 15 * 1024 * 1024),
         // Главный выключатель канала «Запрос через QuoteParts» (переопределяется в Настройках).
         'rfq_enabled' => (bool) env('QUOTEPARTS_RFQ_ENABLED', false),
         // Подпись уведомлений QuoteParts (POST /api/quoteparts/webhook): HMAC-SHA256 «timestamp.body».

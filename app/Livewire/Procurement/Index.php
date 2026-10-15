@@ -242,7 +242,7 @@ class Index extends Component
         }
 
         try {
-            $rfq = $service->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user());
+            $rfq = $service->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user(), files: $this->rfqFiles($cids, auth()->user()));
         } catch (Throwable $e) {
             $this->addError('send', mb_substr($e->getMessage(), 0, 400));
 
@@ -262,7 +262,7 @@ class Index extends Component
      * @param  list<int>  $cids
      * @param  list<int>  $supplierIds
      */
-    private function routeToQuoteParts(array $cids, array $supplierIds): string
+    private function routeToQuoteParts(array $cids, array $supplierIds, array $files = []): string
     {
         $quantities = [];
         foreach ($cids as $cid) {
@@ -271,7 +271,7 @@ class Index extends Component
             $quantities[$cid] = $q > 0 ? $q : 1.0;
         }
         try {
-            $rfq = app(QuotePartsRfqService::class)->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user(), [], routed: true);
+            $rfq = app(QuotePartsRfqService::class)->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user(), [], routed: true, files: $files);
         } catch (Throwable $e) {
             return 'QuoteParts не принял запрос ('.mb_substr($e->getMessage(), 0, 200).') — этим поставщикам не отправлено.';
         }
@@ -999,10 +999,12 @@ class Index extends Component
             return;
         }
 
+        $extraFiles = $this->rfqFiles($cids, $user);
+
         // Поставщики, принявшие приглашение QuoteParts, — через платформу; остальным письмо.
         $allSupplierIds = $supplierIds;
         $route = app(\App\Services\QuoteParts\QuotePartsRouting::class)->split($supplierIds);
-        $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($cids, $route['quoteparts']) : null;
+        $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($cids, $route['quoteparts'], $extraFiles) : null;
         $supplierIds = $route['mail'];
         if ($supplierIds === []) {
             session()->flash('procurement_status', $qpMsg);
@@ -1026,40 +1028,6 @@ class Index extends Component
             'closing_ru' => $this->closing,
             'closing_en' => $this->closingEn,
         ];
-        // Вложения: загруженные файлы/фото (staging на local) + опционально фото
-        // выбранных позиций из каталога. Сервис копирует их в черновик каждого
-        // поставщика (как в панели «Поставщики»).
-        $this->validate(['rfqFiles.*' => 'file|max:25600']);
-        $extraFiles = [];
-        foreach ((array) $this->rfqFiles as $tmp) {
-            if ($tmp === null) {
-                continue;
-            }
-            $name = $tmp->getClientOriginalName();
-            $path = sprintf('mail/procurement-staging/%d/%s', $user->id, Str::random(10).'_'.$name);
-            Storage::disk('local')->put($path, $tmp->get());
-            $extraFiles[] = ['path' => $path, 'name' => $name, 'mime' => $tmp->getMimeType() ?: 'application/octet-stream', 'size' => $tmp->getSize() ?: 0];
-        }
-        if ($this->attachCatalogPhotos) {
-            $cache = app(\App\Services\Catalog\CatalogPhotoCache::class);
-            $cats = CatalogItem::query()->whereIn('id', $cids)->whereNotNull('photo_url')->get(['id', 'name', 'photo_url']);
-            foreach ($cats as $ci) {
-                $cached = $cache->ensure((int) $ci->id);
-                if ($cached === null) {
-                    continue;
-                }
-                $bytes = Storage::disk('public')->get($cached['rel']);
-                if ($bytes === null || $bytes === '') {
-                    continue;
-                }
-                $ext = str_contains($cached['mime'], 'png') ? 'png' : (str_contains($cached['mime'], 'webp') ? 'webp' : 'jpg');
-                $base = Str::slug(mb_substr((string) ($ci->name ?: 'foto'), 0, 40)) ?: 'foto';
-                $name = 'foto_'.$base.'.'.$ext;
-                $path = sprintf('mail/procurement-staging/%d/%s', $user->id, Str::random(10).'_'.$name);
-                Storage::disk('local')->put($path, $bytes);
-                $extraFiles[] = ['path' => $path, 'name' => $name, 'mime' => $cached['mime'], 'size' => strlen($bytes)];
-            }
-        }
 
         $result = $dispatcher->dispatch($cids, $supplierIds, $this->note, $user, $edits, $extraFiles);
 
@@ -1095,6 +1063,51 @@ class Index extends Component
             'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn', 'rfqFiles', 'attachCatalogPhotos']);
         unset($this->positions, $this->supplierOptions, $this->iqotByCatalogId, $this->selectedPositions,
             $this->oemOptions, $this->previewLanguages, $this->refreshList, $this->monitors, $this->monitorSummary);
+    }
+
+    /**
+     * Вложения запроса: загруженные файлы/фото (staging на local) + опционально фото выбранных
+     * позиций из каталога. Письмо — копия в черновик каждого поставщика (как в панели
+     * «Поставщики»), QuoteParts — вместе с запросом.
+     *
+     * @param  list<int>  $cids
+     * @return array<int, array{path:string, name:string, mime:string, size:int}>
+     */
+    private function rfqFiles(array $cids, \App\Models\User $user): array
+    {
+        $this->validate(['rfqFiles.*' => 'file|max:25600']);
+        $extraFiles = [];
+        foreach ((array) $this->rfqFiles as $tmp) {
+            if ($tmp === null) {
+                continue;
+            }
+            $name = $tmp->getClientOriginalName();
+            $path = sprintf('mail/procurement-staging/%d/%s', $user->id, Str::random(10).'_'.$name);
+            Storage::disk('local')->put($path, $tmp->get());
+            $extraFiles[] = ['path' => $path, 'name' => $name, 'mime' => $tmp->getMimeType() ?: 'application/octet-stream', 'size' => $tmp->getSize() ?: 0];
+        }
+        if ($this->attachCatalogPhotos) {
+            $cache = app(\App\Services\Catalog\CatalogPhotoCache::class);
+            $cats = CatalogItem::query()->whereIn('id', $cids)->whereNotNull('photo_url')->get(['id', 'name', 'photo_url']);
+            foreach ($cats as $ci) {
+                $cached = $cache->ensure((int) $ci->id);
+                if ($cached === null) {
+                    continue;
+                }
+                $bytes = Storage::disk('public')->get($cached['rel']);
+                if ($bytes === null || $bytes === '') {
+                    continue;
+                }
+                $ext = str_contains($cached['mime'], 'png') ? 'png' : (str_contains($cached['mime'], 'webp') ? 'webp' : 'jpg');
+                $base = Str::slug(mb_substr((string) ($ci->name ?: 'foto'), 0, 40)) ?: 'foto';
+                $name = 'foto_'.$base.'.'.$ext;
+                $path = sprintf('mail/procurement-staging/%d/%s', $user->id, Str::random(10).'_'.$name);
+                Storage::disk('local')->put($path, $bytes);
+                $extraFiles[] = ['path' => $path, 'name' => $name, 'mime' => $cached['mime'], 'size' => strlen($bytes)];
+            }
+        }
+
+        return $extraFiles;
     }
 
     /* ----------------------- Прайсы поставщиков (QuoteParts) ----------------------- */

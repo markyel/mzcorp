@@ -33,8 +33,10 @@ class QuotePartsRfqService
      * @param  list<int>  $supplierIds
      * @param  array<int, float>  $draftQuantities  request_item_id => количество: новые товары без
      *                                               M-артикула уходят предварительными позициями
+     * @param  array<int, array{path:string, name:string, mime:string, size?:int, disk?:string}>  $files  вложения запроса
+     *                                                                                                 (фото позиций, файлы) — в письмо и в кабинет поставщика
      */
-    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false): QuotePartsRfq
+    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = []): QuotePartsRfq
     {
         // routed — поставщики, принявшие приглашение, из обычной рассылки (QuotePartsRouting): у любого сотрудника.
         if ($routed ? ! QuotePartsRouting::enabled() : ! QuotePartsPilot::enabledFor($by)) {
@@ -80,6 +82,7 @@ class QuotePartsRfqService
             // Дублирование переписки — настройка сотрудника (раздел QuoteParts → «Пилот»):
             // ответы поставщиков — копией автору, ответ на копию уходит поставщику.
             'mirror' => $by->quoteparts_mirror ? ['email' => $this->mirrorAddress($by), 'name' => $by->name] : null,
+            'attachments' => $this->attachments($files),
         ]);
 
         return QuotePartsRfq::create([
@@ -92,6 +95,38 @@ class QuotePartsRfqService
             'snapshot' => $result,
             'synced_at' => now(),
         ]);
+    }
+
+    /**
+     * Вложения запроса для API: base64, в пределах лимита платформы (лишнее не отправляем, а пишем в лог).
+     *
+     * @param  array<int, array{path:string, name:string, mime:string, size?:int, disk?:string}>  $files
+     * @return list<array{name:string, mime:string, content:string}>
+     */
+    private function attachments(array $files): array
+    {
+        $out = [];
+        $total = 0;
+        $limit = (int) config('services.quoteparts.attachments_max_bytes', 15 * 1024 * 1024);
+        foreach ($files as $f) {
+            try {
+                $bytes = \Illuminate\Support\Facades\Storage::disk($f['disk'] ?? 'local')->get((string) $f['path']);
+            } catch (Throwable) {
+                $bytes = null;
+            }
+            if ($bytes === null || $bytes === '') {
+                continue;
+            }
+            if ($total + strlen($bytes) > $limit) {
+                Log::warning('QuoteParts RFQ: attachment skipped over the size limit', ['file' => $f['name'] ?? null, 'size' => strlen($bytes)]);
+
+                continue;
+            }
+            $total += strlen($bytes);
+            $out[] = ['name' => mb_substr((string) ($f['name'] ?? 'file'), 0, 200), 'mime' => (string) ($f['mime'] ?? 'application/octet-stream'), 'content' => base64_encode($bytes)];
+        }
+
+        return $out;
     }
 
     /**

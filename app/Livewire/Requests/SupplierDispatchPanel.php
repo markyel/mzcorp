@@ -1052,7 +1052,12 @@ class SupplierDispatchPanel extends Component
         ];
         // Поставщики, принявшие приглашение QuoteParts, — через платформу; остальным письмо.
         $route = app(\App\Services\QuoteParts\QuotePartsRouting::class)->split($supplierIds);
-        $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($req, $itemIds, $route['quoteparts'], $user) : null;
+        // В QuoteParts — те же вложения, что и в письмо: фото позиций, загруженные файлы, отмеченные файлы заявки.
+        $qpFiles = $extraFiles;
+        foreach (\App\Models\EmailAttachment::query()->whereIn('id', $reqAttIds)->get() as $a) {
+            $qpFiles[] = ['path' => (string) $a->file_path, 'disk' => (string) ($a->disk ?: 'local'), 'name' => (string) $a->filename, 'mime' => (string) ($a->mime_type ?: 'application/octet-stream')];
+        }
+        $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($req, $itemIds, $route['quoteparts'], $user, $qpFiles) : null;
         $result = $route['mail'] === []
             ? ['sent' => 0, 'failed' => 0]
             : $dispatcher->dispatch($req, $route['mail'], $itemIds, $this->note, $user, $reqAttIds, $extraFiles, $edits);
@@ -1076,7 +1081,7 @@ class SupplierDispatchPanel extends Component
      * @param  list<int>  $itemIds
      * @param  list<int>  $supplierIds
      */
-    private function routeToQuoteParts(RequestModel $req, array $itemIds, array $supplierIds, \App\Models\User $user): string
+    private function routeToQuoteParts(RequestModel $req, array $itemIds, array $supplierIds, \App\Models\User $user, array $files = []): string
     {
         $quantities = [];
         $drafts = [];
@@ -1091,7 +1096,7 @@ class SupplierDispatchPanel extends Component
             }
         }
         try {
-            $rfq = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send($req, $quantities, $supplierIds, null, $this->note, $user, $drafts, routed: true);
+            $rfq = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send($req, $quantities, $supplierIds, null, $this->note, $user, $drafts, routed: true, files: $files);
         } catch (\Throwable $e) {
             return 'QuoteParts не принял запрос ('.mb_substr($e->getMessage(), 0, 200).') — этим поставщикам не отправлено.';
         }
