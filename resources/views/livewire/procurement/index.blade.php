@@ -90,6 +90,25 @@
         </div>
     </div>
 
+    {{-- Запросы через QuoteParts (пилот): ответы поставщиков формой или письмом. --}}
+    @php $qpRfqs = $this->quotePartsRfqs; @endphp
+    @if($qpRfqs->isNotEmpty())
+        @php $qpNames = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames($qpRfqs); @endphp
+        <div class="ds-card" x-data="{ open: true }">
+            <div class="ds-card-header cursor-pointer select-none" @click="open = !open">
+                <h3 class="text-[15px] font-semibold text-fg-1">Запросы через QuoteParts</h3>
+                <span class="text-[12px] text-fg-3 ml-2">пилот · открытые и за 30 дней: {{ $qpRfqs->count() }}</span>
+                <span class="flex-1"></span>
+                <span class="text-[12px] text-fg-3" x-text="open ? '▾' : '▸'"></span>
+            </div>
+            <div class="ds-card-body space-y-3 text-[13px]" x-show="open">
+                @foreach($qpRfqs as $rfq)
+                    @include('livewire.quote-parts._rfq-card', ['rfq' => $rfq, 'supplierNames' => $qpNames, 'refreshAction' => 'refreshQuotePartsRfq'])
+                @endforeach
+            </div>
+        </div>
+    @endif
+
     {{-- Вкладки раздела --}}
     @php
         $refreshSum = $this->refreshSummary;
@@ -690,6 +709,26 @@
                 <div @mousedown.prevent.stop="startResize($event)" x-show="!min" title="Потяните, чтобы изменить размер окна"
                      style="position:absolute;right:2px;bottom:2px;width:16px;height:16px;cursor:nwse-resize;z-index:5;background:linear-gradient(135deg,transparent 50%,var(--fg-4) 50%,var(--fg-4) 58%,transparent 58%,transparent 70%,var(--fg-4) 70%,var(--fg-4) 78%,transparent 78%);opacity:.6"></div>
             <div class="ds-card-body space-y-3" x-show="!min" :style="h && x !== null ? { flex: '1', maxHeight: 'none' } : {}" style="max-height:40vh;overflow-y:auto">
+                @php $viaQp = $channel === 'quoteparts' && $this->quotePartsEnabled; @endphp
+                {{-- Канал отправки: по умолчанию письмо, как раньше; QuoteParts — пилот. --}}
+                @if($this->quotePartsEnabled)
+                    <div class="flex flex-wrap items-center gap-3 text-[12.5px]">
+                        <span class="text-fg-3">Как отправить:</span>
+                        <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                            <input type="radio" wire:model.live="channel" value="mail"> Письмом с нашего ящика
+                        </label>
+                        <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                            <input type="radio" wire:model.live="channel" value="quoteparts"> Через QuoteParts <span class="chip chip-sky text-[10px]">пилот</span>
+                        </label>
+                    </div>
+                    @if($viaQp)
+                        <div class="text-[11.5px] text-fg-3 p-2 rounded-md border border-sky-200 bg-sky-50/40">
+                            Письмо поставщику QuoteParts составит сам по карточкам позиций — на английском и китайском, с ящика MyZip, с формой ответа.
+                            Несколько адресов одной организации — один получатель, кому писать решают её контакты в QuoteParts.
+                            Кто ещё не на платформе, получит обычное письмо (режим переписки). Вложения и мониторинг цен для этого канала пока не работают.
+                        </div>
+                    @endif
+                @endif
                 {{-- Поставщики --}}
                 <div>
                     <label class="block text-[11.5px] text-fg-3 mb-1">Поставщики <span class="text-fg-4">— подобраны по матрице под выбранные позиции; ✎ — карточка поставщика (правки подтянутся при возврате)</span></label>
@@ -724,6 +763,11 @@
                                     @foreach($groupsOf[$o['id']] ?? [] as $gn)<span class="chip chip-neutral text-[10px] ml-1" title="Группа поставщиков">{{ $gn }}</span>@endforeach
                                     @if($o['matched'])<span class="chip chip-sky text-[10px] ml-1">подходит · {{ $o['item_count'] }} поз.</span>
                                     @else<span class="chip chip-neutral text-[10px] ml-1">добавлен вручную</span>@endif
+                                    @if($viaQp)
+                                        <span class="chip {{ ($o['qp_status'] ?? null) === 'active' ? 'chip-sky' : 'chip-neutral' }} text-[10px] ml-1" title="Статус в QuoteParts">
+                                            {{ \App\Services\QuoteParts\QuotePartsSupplierService::STATUS_LABELS[$o['qp_status'] ?? ''] ?? 'не на платформе — переписка' }}
+                                        </span>
+                                    @endif
                                     @if($o['email'])<span class="block text-[11px] text-fg-4 mono">{{ $o['email'] }}</span>@endif
                                 </span>
                                 <a href="{{ route('suppliers.registry-edit', $o['id']) }}" target="_blank" rel="noopener"
@@ -751,6 +795,25 @@
 
                 {{-- Превью письма НА ТОМ ЯЗЫКЕ, на котором улетит (RU/EN по выбранным
                      поставщикам). Названия/артикул/кол-во — редактируемые. --}}
+                @if($viaQp)
+                    <div class="border border-border rounded-md p-3 bg-surface-2 space-y-1.5">
+                        <div class="text-[11px] uppercase tracking-wider text-fg-3 mb-1">Позиции для QuoteParts</div>
+                        @foreach($selPos as $i => $ci)
+                            <div wire:key="qp-pos-{{ $ci->id }}" class="flex items-center gap-2">
+                                <button type="button" wire:click="removePosition({{ $ci->id }})" class="text-fg-4 hover:text-red-600 text-[13px] leading-none" style="width:18px" title="Убрать позицию из запроса">🗑</button>
+                                <span class="chip chip-neutral mono text-[10px]" style="width:78px">{{ $ci->sku }}</span>
+                                <span class="flex-1 truncate text-[12.5px]">{{ $ci->name }}</span>
+                                <input type="text" wire:model.lazy="editedQty.{{ $ci->id }}" placeholder="1"
+                                       class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] text-right outline-none focus:border-sky-500" style="width:80px"
+                                       title="Количество; пусто — 1">
+                            </div>
+                        @endforeach
+                        <div class="flex items-center gap-2 pt-1.5">
+                            <span class="text-[12px] text-fg-3">Ответить до</span>
+                            <input type="date" wire:model="qpReplyBy" class="h-[28px] px-2 border border-border rounded bg-surface text-[12px] outline-none focus:border-sky-500">
+                        </div>
+                    </div>
+                @else
                 @foreach($this->previewLanguages as $blk)
                     @php $rows = $this->previewRowsForLang($blk['lang']); @endphp
                     <div class="border border-border rounded-md p-3 bg-surface-2" wire:key="prev-{{ $blk['lang'] }}">
@@ -862,12 +925,14 @@
                         @endif
                     </div>
                 @endforeach
+                @endif
 
                 <div>
-                    <label class="block text-[11.5px] text-fg-3 mb-1">Примечание <span class="text-fg-4">(необязательно)</span></label>
+                    <label class="block text-[11.5px] text-fg-3 mb-1">{{ $viaQp ? 'Сообщение поставщику' : 'Примечание' }} <span class="text-fg-4">(необязательно{{ $viaQp ? ' · лучше по-английски' : '' }})</span></label>
                     <textarea wire:model="note" rows="2" class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
                 </div>
 
+                @if(! $viaQp)
                 <div>
                     <label class="block text-[11.5px] text-fg-3 mb-1">Фото / файлы <span class="text-fg-4">(необязательно · прикрепятся к запросу каждому поставщику)</span></label>
                     <input type="file" wire:model="rfqFiles" multiple accept="image/*,.pdf,.xlsx,.xls,.doc,.docx"
@@ -902,6 +967,7 @@
                         </span>
                     @endif
                 </label>
+                @endif
 
                 @error('send') <div class="text-[12px] text-red-600">{{ $message }}</div> @enderror
 
@@ -909,10 +975,14 @@
                     @php $selSups = collect($this->selectedSuppliers)->filter()->count(); @endphp
                     <button type="button" wire:click="send" wire:loading.attr="disabled" wire:target="send"
                             class="btn btn-primary" @disabled($selSups === 0)>
-                        <span wire:loading.remove wire:target="send">Отправить запросы ({{ $selSups }})</span>
+                        <span wire:loading.remove wire:target="send">{{ $viaQp ? 'Отправить через QuoteParts' : 'Отправить запросы' }} ({{ $selSups }})</span>
                         <span wire:loading wire:target="send">Отправляю…</span>
                     </button>
-                    <span class="text-[11.5px] text-fg-3">по M-артикулу; цена обновится в каталоге → заявки получат сигнал «💰»</span>
+                    @if($viaQp)
+                        <span class="text-[11.5px] text-fg-3">ответы — в блоке «Запросы через QuoteParts» вверху раздела; в каталог цена пока не пишется</span>
+                    @else
+                        <span class="text-[11.5px] text-fg-3">по M-артикулу; цена обновится в каталоге → заявки получат сигнал «💰»</span>
+                    @endif
                 </div>
             </div>
             </div>

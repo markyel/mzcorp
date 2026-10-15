@@ -167,13 +167,6 @@ class QuotePartsPanel extends Component
 
     public function render()
     {
-        // external_id в QuoteParts: «org:{id}» (организация) или «sup:{id}» (отдельный адрес).
-        $keys = $this->rfqs->flatMap(fn ($r) => collect($r->snapshot['suppliers'] ?? [])->pluck('external_id'))->filter()->unique();
-        $orgIds = $keys->filter(fn ($k) => str_starts_with($k, 'org:'))->map(fn ($k) => (int) substr($k, 4));
-        $supIds = $keys->filter(fn ($k) => str_starts_with($k, 'sup:'))->map(fn ($k) => (int) substr($k, 4));
-        $supplierNames = \App\Models\SupplierOrganization::query()->whereIn('id', $orgIds)->pluck('name', 'id')->mapWithKeys(fn ($n, $id) => ['org:'.$id => $n])
-            ->merge(Supplier::query()->whereIn('id', $supIds)->get(['id', 'name', 'email'])->mapWithKeys(fn ($s) => ['sup:'.$s->id => $s->name ?: $s->email]));
-
-        return view('livewire.requests.quote-parts-panel', ['supplierNames' => $supplierNames]);
+        return view('livewire.requests.quote-parts-panel', ['supplierNames' => app(QuotePartsRfqService::class)->supplierNames($this->rfqs)]);
     }
 }

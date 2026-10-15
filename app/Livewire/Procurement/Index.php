@@ -7,12 +7,15 @@ use App\Enums\Role;
 use App\Models\CatalogItem;
 use App\Models\IqotPosition;
 use App\Models\PriceMonitor;
+use App\Models\QuotePartsRfq;
 use App\Models\Supplier;
 use App\Models\SupplierInquiry;
 use App\Models\User;
 use App\Services\Catalog\CatalogSearchService;
 use App\Services\Procurement\PriceMonitorService;
 use App\Services\Procurement\PriceRefreshCandidates;
+use App\Services\QuoteParts\QuotePartsPilot;
+use App\Services\QuoteParts\QuotePartsRfqService;
 use App\Services\Supplier\SupplierInquiryLifecycleService;
 use App\Services\Supplier\SupplierItemTranslator;
 use App\Services\Supplier\SupplierMatchService;
@@ -29,6 +32,7 @@ use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 use Livewire\WithPagination;
+use Throwable;
 
 /**
  * Раздел «Снабжение» (Фаза 4). Топ M-позиций, сдерживающих выдачу КП: позиции,
@@ -161,6 +165,15 @@ class Index extends Component
     /** cid => количество строкой (англ.). */
     public array $editedQtyEn = [];
 
+    /**
+     * Канал отправки: mail — письмо с нашего ящика, как раньше; quoteparts — через
+     * платформу (только участникам пилота при включённом рубильнике).
+     */
+    public string $channel = 'mail';
+
+    /** Срок ответа для запроса через QuoteParts. */
+    public string $qpReplyBy = '';
+
     public function mount(): void
     {
         abort_unless(
@@ -170,6 +183,67 @@ class Index extends Component
             ]),
             403,
         );
+        $this->qpReplyBy = now()->addDays(7)->toDateString();
+    }
+
+    #[Computed]
+    public function quotePartsEnabled(): bool
+    {
+        return QuotePartsPilot::enabledFor(auth()->user());
+    }
+
+    /** Запросы через QuoteParts из «Снабжения» (без заявки): открытые и закрытые за 30 дней. */
+    #[Computed]
+    public function quotePartsRfqs(): Collection
+    {
+        $creatorId = $this->effectiveCreatorId();
+
+        return QuotePartsRfq::query()->whereNull('request_id')
+            ->when($creatorId !== null, fn ($q) => $q->where('created_by_user_id', $creatorId))
+            ->where(fn ($q) => $q->where('status', 'open')->orWhere('created_at', '>=', now()->subDays(30)))
+            ->with('createdBy:id,name')->latest('id')->limit(30)->get();
+    }
+
+    public function refreshQuotePartsRfq(int $id, QuotePartsRfqService $service): void
+    {
+        $rfq = QuotePartsRfq::query()->whereNull('request_id')->findOrFail($id);
+        try {
+            $service->refresh($rfq);
+        } catch (Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: 'QuoteParts не ответил: '.mb_substr($e->getMessage(), 0, 150));
+        }
+        unset($this->quotePartsRfqs);
+    }
+
+    /**
+     * Отправка через QuoteParts: письмо (EN + ZH) пишет платформа по карточкам позиций,
+     * поэтому правки текста письма, вложения и мониторинг цен здесь не участвуют.
+     *
+     * @param  list<int>  $cids
+     * @param  list<int>  $supplierIds
+     */
+    private function sendViaQuoteParts(array $cids, array $supplierIds, QuotePartsRfqService $service): void
+    {
+        $quantities = [];
+        foreach ($cids as $cid) {
+            $raw = trim((string) ($this->editedQty[$cid] ?? ''));
+            $q = preg_match('/\d+(?:[.,]\d+)?/', $raw, $m) ? (float) str_replace(',', '.', $m[0]) : 1.0;
+            $quantities[$cid] = $q > 0 ? $q : 1.0;
+        }
+
+        try {
+            $rfq = $service->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user());
+        } catch (Throwable $e) {
+            $this->addError('send', mb_substr($e->getMessage(), 0, 400));
+
+            return;
+        }
+
+        session()->flash('procurement_status', 'Запрос '.$rfq->tag.' отправлен через QuoteParts. Ответы — в блоке «Запросы через QuoteParts».');
+        $this->reset(['selected', 'selectedSuppliers', 'addedSupplierIds', 'supplierSearch', 'note',
+            'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn', 'rfqFiles', 'attachCatalogPhotos']);
+        unset($this->positions, $this->supplierOptions, $this->selectedPositions, $this->oemOptions,
+            $this->previewLanguages, $this->quotePartsRfqs);
     }
 
     /** Догрузить следующую порцию списка (вызывается x-intersect sentinel'ом). */
@@ -816,6 +890,7 @@ class Index extends Component
                 'email' => $s->email,
                 'matched' => isset($coverage[$id]),
                 'item_count' => $coverage[$id] ?? 0,
+                'qp_status' => $s->quoteparts_status,
             ];
         }
         usort($out, fn ($a, $b) => $b['item_count'] <=> $a['item_count']);
@@ -879,6 +954,13 @@ class Index extends Component
         }
         if ($supplierIds === []) {
             $this->addError('send', 'Отметьте хотя бы одного поставщика.');
+
+            return;
+        }
+
+        if ($this->channel === 'quoteparts') {
+            abort_unless($this->quotePartsEnabled, 403);
+            $this->sendViaQuoteParts($cids, $supplierIds, app(QuotePartsRfqService::class));
 
             return;
         }

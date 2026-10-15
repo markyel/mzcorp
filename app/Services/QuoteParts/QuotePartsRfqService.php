@@ -76,6 +76,23 @@ class QuotePartsRfqService
         ]);
     }
 
+    /**
+     * Названия поставщиков для снимков запросов: external_id в QuoteParts — «org:{id}»
+     * (организация) или «sup:{id}» (отдельный адрес).
+     *
+     * @param  iterable<QuotePartsRfq>  $rfqs
+     * @return \Illuminate\Support\Collection<string, string>
+     */
+    public function supplierNames(iterable $rfqs): \Illuminate\Support\Collection
+    {
+        $keys = collect($rfqs)->flatMap(fn ($r) => collect($r->snapshot['suppliers'] ?? [])->pluck('external_id'))->filter()->unique();
+        $orgIds = $keys->filter(fn ($k) => str_starts_with($k, 'org:'))->map(fn ($k) => (int) substr($k, 4));
+        $supIds = $keys->filter(fn ($k) => str_starts_with($k, 'sup:'))->map(fn ($k) => (int) substr($k, 4));
+
+        return \App\Models\SupplierOrganization::query()->whereIn('id', $orgIds)->pluck('name', 'id')->mapWithKeys(fn ($n, $id) => ['org:'.$id => $n])
+            ->merge(Supplier::query()->whereIn('id', $supIds)->get(['id', 'name', 'email'])->mapWithKeys(fn ($s) => ['sup:'.$s->id => $s->name ?: $s->email]));
+    }
+
     public function refresh(QuotePartsRfq $rfq): QuotePartsRfq
     {
         $snapshot = $this->client->rfq($rfq->remote_id);
