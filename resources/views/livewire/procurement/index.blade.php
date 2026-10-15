@@ -859,6 +859,7 @@
                         </div>
                     @endif
                     @php $groupsOf = []; foreach ($this->supplierGroups as $sg) { foreach ($sg['ids'] as $sid) { $groupsOf[$sid][] = $sg['name']; } } @endphp
+                @php $qpRouted = app(\App\Services\QuoteParts\QuotePartsRouting::class)->routedIds(collect($this->supplierOptions)->pluck('id')); @endphp
                     <div class="border border-border rounded-md divide-y divide-border-subtle">
                         @php $orgOpts = $this->supplierOptions; $prevOrgOpt = null; @endphp
                         @forelse($orgOpts as $o)
@@ -876,6 +877,7 @@
                                 <input type="checkbox" wire:model.live="selectedSuppliers.{{ $o['id'] }}" class="mt-1">
                                 <span class="flex-1">
                                     <span class="text-[13px] text-fg-1 font-medium">{{ $o['name'] }}</span>
+                                @if(isset($qpRouted[$o['id']]))<span class="chip chip-ok text-[10px] ml-1" title="Принял приглашение QuoteParts — запрос уйдёт через платформу, ответ формой или письмом">через QuoteParts</span>@endif
                                     @foreach($groupsOf[$o['id']] ?? [] as $gn)<span class="chip chip-neutral text-[10px] ml-1" title="Группа поставщиков">{{ $gn }}</span>@endforeach
                                     @if($o['matched'])<span class="chip chip-sky text-[10px] ml-1">подходит · {{ $o['item_count'] }} поз.</span>
                                     @else<span class="chip chip-neutral text-[10px] ml-1">добавлен вручную</span>@endif

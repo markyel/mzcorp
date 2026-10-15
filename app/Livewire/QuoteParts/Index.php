@@ -176,6 +176,28 @@ class Index extends Component
         unset($this->pilotCandidates);
     }
 
+    /** Поставщики, принявшие приглашение, — запросы через QuoteParts у всех сотрудников. */
+    #[Computed]
+    public function routingOn(): bool
+    {
+        return \App\Services\QuoteParts\QuotePartsRouting::enabled();
+    }
+
+    #[Computed]
+    public function routedSuppliers()
+    {
+        return \App\Models\Supplier::query()->where('quoteparts_status', 'active')->with('organization:id,name')->orderBy('name')->get(['id', 'name', 'email', 'supplier_organization_id']);
+    }
+
+    public function toggleRouting(\App\Services\Settings\SettingsService $settings): void
+    {
+        $on = ! (bool) app_setting(\App\Services\QuoteParts\QuotePartsRouting::SETTING, true);
+        $settings->set(\App\Services\QuoteParts\QuotePartsRouting::SETTING, $on, \App\Models\AppSetting::TYPE_BOOL, auth()->id(),
+            'QuoteParts: поставщикам, принявшим приглашение, запросы через платформу');
+        unset($this->routingOn);
+        $this->dispatch('toast', type: 'success', message: $on ? 'Принявшим приглашение запросы идут через QuoteParts.' : 'Всем поставщикам — снова письмом.');
+    }
+
     public function togglePilotSwitch(\App\Services\Settings\SettingsService $settings): void
     {
         $on = ! $this->pilotSwitchedOn;

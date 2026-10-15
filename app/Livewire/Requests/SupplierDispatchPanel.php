@@ -1050,18 +1050,53 @@ class SupplierDispatchPanel extends Component
             'closing_ru' => $this->closing,
             'closing_en' => $this->closingEn,
         ];
-        $result = $dispatcher->dispatch($req, $supplierIds, $itemIds, $this->note, $user, $reqAttIds, $extraFiles, $edits);
-        if ($result['sent'] > 0) {
+        // Поставщики, принявшие приглашение QuoteParts, — через платформу; остальным письмо.
+        $route = app(\App\Services\QuoteParts\QuotePartsRouting::class)->split($supplierIds);
+        $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($req, $itemIds, $route['quoteparts'], $user) : null;
+        $result = $route['mail'] === []
+            ? ['sent' => 0, 'failed' => 0]
+            : $dispatcher->dispatch($req, $route['mail'], $itemIds, $this->note, $user, $reqAttIds, $extraFiles, $edits);
+        if ($result['sent'] > 0 || ($qpMsg !== null && $route['mail'] === [])) {
             \App\Models\SupplierDispatchDraft::query()->where('request_id', $this->requestId)->where('user_id', $user->id)->delete();
         }
 
-        $msg = "Отправлено запросов поставщикам: {$result['sent']}.";
+        $msg = ($qpMsg ? $qpMsg.' ' : '').($route['mail'] === [] ? '' : "Отправлено запросов поставщикам: {$result['sent']}.");
         if ($result['failed'] > 0) {
             $msg .= " Ошибок: {$result['failed']}.";
         }
         session()->flash('status', $msg);
 
         return $this->redirect(route('requests.show', ['request' => $req, 'tab' => 'suppliers']), navigate: false);
+    }
+
+    /**
+     * Часть рассылки поставщикам, принявшим приглашение QuoteParts: один запрос через платформу.
+     * Позиции с M-артикулом — позициями пула, без него — предварительными (новый товар).
+     *
+     * @param  list<int>  $itemIds
+     * @param  list<int>  $supplierIds
+     */
+    private function routeToQuoteParts(RequestModel $req, array $itemIds, array $supplierIds, \App\Models\User $user): string
+    {
+        $quantities = [];
+        $drafts = [];
+        foreach (RequestItem::query()->whereIn('id', $itemIds)->get(['id', 'catalog_item_id', 'parsed_qty']) as $it) {
+            $raw = trim((string) ($this->editedQty[$it->id] ?? ''));
+            $q = $raw !== '' && preg_match('/\d+(?:[.,]\d+)?/', $raw, $m) ? (float) str_replace(',', '.', $m[0]) : (float) ($it->parsed_qty ?: 1);
+            $q = $q > 0 ? $q : 1.0;
+            if ($it->catalog_item_id === null) {
+                $drafts[(int) $it->id] = $q;
+            } else {
+                $quantities[(int) $it->catalog_item_id] = ($quantities[(int) $it->catalog_item_id] ?? 0) + $q;
+            }
+        }
+        try {
+            $rfq = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send($req, $quantities, $supplierIds, null, $this->note, $user, $drafts, routed: true);
+        } catch (\Throwable $e) {
+            return 'QuoteParts не принял запрос ('.mb_substr($e->getMessage(), 0, 200).') — этим поставщикам не отправлено.';
+        }
+
+        return 'Через QuoteParts: запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' (приняли приглашение) — ответы в блоке QuoteParts ниже.';
     }
 
     /* ------------------------ Превью письма (модалка) --------------------- */

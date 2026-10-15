@@ -83,7 +83,19 @@ class DispatchPriceMonitorsCommand extends Command
             }
 
             $note = 'Плановый перезапрос цен (мониторинг).';
-            $res = $dispatcher->dispatch($cids, $supplierIds, $note, $user);
+            // Поставщики, принявшие приглашение QuoteParts, — через платформу; остальным письмо.
+            $route = app(\App\Services\QuoteParts\QuotePartsRouting::class)->split($supplierIds);
+            $qpSent = 0;
+            if ($route['quoteparts'] !== []) {
+                try {
+                    app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send(null, array_fill_keys($cids, 1.0), $route['quoteparts'], null, $note, $user, [], routed: true);
+                    $qpSent = count($route['quoteparts']);
+                } catch (\Throwable $e) {
+                    Log::warning('PriceMonitors: QuoteParts не принял запрос', ['user_id' => $user->id, 'error' => $e->getMessage()]);
+                }
+            }
+            $res = $route['mail'] === [] ? ['sent' => 0] : $dispatcher->dispatch($cids, $route['mail'], $note, $user);
+            $res['sent'] = ($res['sent'] ?? 0) + $qpSent;
 
             if (($res['sent'] ?? 0) === 0) {
                 // Ничего не ушло: письмо не отправилось или всё уже запрошено.

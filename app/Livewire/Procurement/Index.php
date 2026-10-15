@@ -256,6 +256,30 @@ class Index extends Component
             $this->previewLanguages, $this->quotePartsRfqs);
     }
 
+    /**
+     * Часть рассылки поставщикам, принявшим приглашение QuoteParts: один запрос через платформу.
+     *
+     * @param  list<int>  $cids
+     * @param  list<int>  $supplierIds
+     */
+    private function routeToQuoteParts(array $cids, array $supplierIds): string
+    {
+        $quantities = [];
+        foreach ($cids as $cid) {
+            $raw = trim((string) ($this->editedQty[$cid] ?? ''));
+            $q = preg_match('/\d+(?:[.,]\d+)?/', $raw, $m) ? (float) str_replace(',', '.', $m[0]) : 1.0;
+            $quantities[$cid] = $q > 0 ? $q : 1.0;
+        }
+        try {
+            $rfq = app(QuotePartsRfqService::class)->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user(), [], routed: true);
+        } catch (Throwable $e) {
+            return 'QuoteParts не принял запрос ('.mb_substr($e->getMessage(), 0, 200).') — этим поставщикам не отправлено.';
+        }
+        unset($this->quotePartsRfqs);
+
+        return 'Через QuoteParts: запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' (приняли приглашение).';
+    }
+
     /** Догрузить следующую порцию списка (вызывается x-intersect sentinel'ом). */
     public function loadMore(): void
     {
@@ -975,6 +999,20 @@ class Index extends Component
             return;
         }
 
+        // Поставщики, принявшие приглашение QuoteParts, — через платформу; остальным письмо.
+        $allSupplierIds = $supplierIds;
+        $route = app(\App\Services\QuoteParts\QuotePartsRouting::class)->split($supplierIds);
+        $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($cids, $route['quoteparts']) : null;
+        $supplierIds = $route['mail'];
+        if ($supplierIds === []) {
+            session()->flash('procurement_status', $qpMsg);
+            $this->reset(['selected', 'selectedSuppliers', 'addedSupplierIds', 'supplierSearch', 'note',
+                'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn', 'rfqFiles', 'attachCatalogPhotos']);
+            unset($this->positions, $this->supplierOptions, $this->selectedPositions, $this->oemOptions, $this->previewLanguages, $this->quotePartsRfqs);
+
+            return;
+        }
+
         $edits = [
             'names_ru' => $this->editedNames,
             'names_en' => $this->editedNamesEn,
@@ -1031,7 +1069,7 @@ class Index extends Component
             return;
         }
 
-        $msg = "Отправлено запросов поставщикам: {$result['sent']}.";
+        $msg = ($qpMsg ? $qpMsg.' ' : '')."Отправлено запросов поставщикам: {$result['sent']}.";
         if (($result['skipped'] ?? 0) > 0) {
             $msg .= " Пропущено (уже запрошено): {$result['skipped']}.";
         }
@@ -1044,7 +1082,7 @@ class Index extends Component
         if ($this->monitorEnabled && ($result['sent'] ?? 0) > 0) {
             $days = PriceMonitor::clampInterval($this->monitorDays);
             $n = app(PriceMonitorService::class)->enable(
-                $cids, $supplierIds, $days, $user, $result['inquiry_ids'][0] ?? null
+                $cids, $allSupplierIds, $days, $user, $result['inquiry_ids'][0] ?? null
             );
             $msg .= " На мониторинг цен поставлено позиций: {$n} (перезапрос раз в {$days} дн.).";
         }

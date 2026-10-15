@@ -108,6 +108,17 @@
 
     @if($tab === 'pilot')
         <div class="ds-card">
+            <div class="ds-card-header"><h3>Принявшие приглашение — через QuoteParts</h3></div>
+            <div class="ds-card-body text-[13px] space-y-2 border-b border-border-subtle">
+                <div class="flex flex-wrap items-center gap-3">
+                    <button type="button" wire:click="toggleRouting" wire:confirm="{{ $this->routingOn ? 'Слать и этим поставщикам обычные письма?' : 'Слать запросы принявшим приглашение через QuoteParts?' }}" class="btn btn-sm {{ $this->routingOn ? '' : 'btn-primary' }}">{{ $this->routingOn ? 'Выключить' : 'Включить' }}</button>
+                    <span>Сейчас: <b>{{ $this->routingOn ? 'запросы этим поставщикам идут через QuoteParts' : 'всем поставщикам — письмом' }}</b></span>
+                </div>
+                <div class="text-[12px] text-fg-3">Для всех сотрудников, без пилота: в заявке («Поставщики»), в «Снабжении» и при мониторинге цен отмеченные поставщики из списка ниже получают запрос через платформу (форма и письмо от MyZip), остальные — обычное письмо. Ответы видны в заявке и в «Снабжении».</div>
+                <div class="flex flex-wrap gap-1.5">
+                    @forelse($this->routedSuppliers as $rs)<span class="chip chip-ok text-[11px]">{{ $rs->organization?->name ?: $rs->name }} · {{ $rs->email }}</span>@empty<span class="text-fg-4 text-[12px]">Пока никто не принял приглашение.</span>@endforelse
+                </div>
+            </div>
             <div class="ds-card-header"><h3>Переключатель QuoteParts</h3></div>
             <div class="ds-card-body text-[13px] space-y-3">
                 <div class="flex flex-wrap items-center gap-3">

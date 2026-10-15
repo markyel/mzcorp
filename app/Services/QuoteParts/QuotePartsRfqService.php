@@ -34,9 +34,10 @@ class QuotePartsRfqService
      * @param  array<int, float>  $draftQuantities  request_item_id => количество: новые товары без
      *                                               M-артикула уходят предварительными позициями
      */
-    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = []): QuotePartsRfq
+    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false): QuotePartsRfq
     {
-        if (! QuotePartsPilot::enabledFor($by)) {
+        // routed — поставщики, принявшие приглашение, из обычной рассылки (QuotePartsRouting): у любого сотрудника.
+        if ($routed ? ! QuotePartsRouting::enabled() : ! QuotePartsPilot::enabledFor($by)) {
             throw new RuntimeException('QuoteParts выключен или вы не участник пилота.');
         }
 
