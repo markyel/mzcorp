@@ -26,9 +26,15 @@
     </div>
 
     {{-- Справочник групп: добавить, переименовать, правило «не если в группе …», удалить пустую. --}}
-    <div class="ds-card">
-        <div class="ds-card-header"><h3>Справочник групп</h3><span class="text-[12px] text-fg-3 ml-2">группа — она же регион поставщиков 1С; позиция может быть в нескольких группах</span></div>
-        <div class="overflow-x-auto">
+    {{-- Правится редко — свёрнут по умолчанию. --}}
+    <div class="ds-card" x-data="{ open: false }">
+        <button type="button" @click="open = ! open" class="ds-card-header w-full text-left flex items-center gap-2">
+            <span class="text-fg-4 text-[11px]" x-text="open ? '▾' : '▸'"></span>
+            <h3>Справочник групп</h3>
+            <span class="text-[12px] text-fg-3 ml-2">{{ $groups->pluck('name')->implode(' · ') }}</span>
+            <span class="text-[12px] text-fg-4 ml-auto" x-text="open ? 'свернуть' : 'добавить или изменить группы'"></span>
+        </button>
+        <div class="overflow-x-auto" x-show="open" x-cloak>
             <table class="w-full text-[12.5px]">
                 <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
                     <tr><th class="text-left px-3 py-2">Название</th><th class="text-left px-3 py-2">Код</th><th class="text-right px-3 py-2">Позиций</th><th class="text-left px-3 py-2">Не включать автоматически, если позиция в группе</th><th></th></tr>
