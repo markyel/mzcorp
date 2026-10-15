@@ -119,6 +119,21 @@
                     @forelse($this->routedSuppliers as $rs)<span class="chip chip-ok text-[11px]">{{ $rs->organization?->name ?: $rs->name }} · {{ $rs->email }}</span>@empty<span class="text-fg-4 text-[12px]">Пока никто не принял приглашение.</span>@endforelse
                 </div>
             </div>
+            {{-- Сообщения поставщиков из переписки QuoteParts — в «Почту». --}}
+            <div class="ds-card-header"><h3>Сообщения поставщиков — в «Почту»</h3></div>
+            <div class="ds-card-body text-[13px] space-y-2 border-b border-border-subtle" wire:init="loadMirror">
+                <div class="text-[12px] text-fg-3">Каждое сообщение поставщика в переписке (из кабинета QuoteParts или письмом) приходит копией в отмеченные ящики. Ответ на копию из «Почты» уходит поставщику в его переписку от MyZip.</div>
+                @if($mirrorLoaded)
+                    <div class="flex flex-wrap gap-x-4 gap-y-1">
+                        @foreach($this->mailboxOptions as $mb)
+                            <label class="inline-flex items-center gap-1.5"><input type="checkbox" wire:model="mirrorMailboxes" value="{{ mb_strtolower($mb->email) }}" class="w-4 h-4 accent-sky-600"> {{ $mb->email }}<span class="text-fg-4 text-[11.5px]">{{ $mb->type === 'shared' ? 'общий' : ($mb->owner?->name ?? '') }}</span></label>
+                        @endforeach
+                    </div>
+                    <button type="button" wire:click="saveMirror" class="btn btn-sm btn-primary">Сохранить</button>
+                @else
+                    <div class="text-fg-4 text-[12px]">Загружаю…</div>
+                @endif
+            </div>
             <div class="ds-card-header"><h3>Переключатель QuoteParts</h3></div>
             <div class="ds-card-body text-[13px] space-y-3">
                 <div class="flex flex-wrap items-center gap-3">

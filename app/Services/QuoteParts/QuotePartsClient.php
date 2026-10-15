@@ -330,6 +330,22 @@ class QuotePartsClient
         return [$response->body(), $name, (string) ($response->header('Content-Type') ?: 'application/octet-stream')];
     }
 
+    /**
+     * Куда QuoteParts шлёт копии сообщений поставщиков из переписки (ответ на копию уходит поставщику).
+     *
+     * @param  list<string>  $emails
+     * @return list<string>
+     */
+    public function setConversationMirror(array $emails): array
+    {
+        $response = $this->http()->put('/api/v1/conversation-mirror', ['emails' => array_values($emails)]);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts conversation-mirror: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json('emails', []);
+    }
+
     /** Фото предложения поставщика: [содержимое, тип]. @return array{0:string, 1:string} */
     public function offerPhoto(int $offerId, int $index): array
     {

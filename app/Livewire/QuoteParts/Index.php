@@ -189,6 +189,43 @@ class Index extends Component
         return \App\Models\Supplier::query()->where('quoteparts_status', 'active')->with('organization:id,name')->orderBy('name')->get(['id', 'name', 'email', 'supplier_organization_id']);
     }
 
+    /** Ящики «Почты», куда приходят сообщения поставщиков из переписки QuoteParts. */
+    public const MIRROR_SETTING = 'quoteparts.conversation_mailboxes';
+
+    /** @var list<string> */
+    public array $mirrorMailboxes = [];
+
+    public bool $mirrorLoaded = false;
+
+    #[Computed]
+    public function mailboxOptions()
+    {
+        return \App\Models\Mailbox::query()->where('is_active', true)->with('owner:id,name')
+            ->orderByRaw("case when type = 'shared' then 0 else 1 end")->orderBy('email')->get(['id', 'email', 'type', 'owner_user_id']);
+    }
+
+    public function loadMirror(): void
+    {
+        $this->mirrorMailboxes = array_values((array) app_setting(self::MIRROR_SETTING, ['info@myzip.ru']));
+        $this->mirrorLoaded = true;
+    }
+
+    public function saveMirror(\App\Services\Settings\SettingsService $settings, \App\Services\QuoteParts\QuotePartsClient $client): void
+    {
+        $valid = $this->mailboxOptions->pluck('email')->map(fn ($e) => mb_strtolower($e))->all();
+        $emails = array_values(array_intersect(array_map('mb_strtolower', $this->mirrorMailboxes), $valid));
+        try {
+            $client->setConversationMirror($emails);
+        } catch (\Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: 'QuoteParts не ответил: '.mb_substr($e->getMessage(), 0, 200));
+
+            return;
+        }
+        $settings->set(self::MIRROR_SETTING, $emails, \App\Models\AppSetting::TYPE_JSON, auth()->id(), 'QuoteParts: ящики «Почты» для сообщений поставщиков из переписки');
+        $this->mirrorMailboxes = $emails;
+        $this->dispatch('toast', type: 'success', message: $emails === [] ? 'Сообщения поставщиков в «Почту» больше не приходят.' : 'Сообщения поставщиков будут приходить в: '.implode(', ', $emails).'.');
+    }
+
     public function toggleRouting(\App\Services\Settings\SettingsService $settings): void
     {
         $on = ! (bool) app_setting(\App\Services\QuoteParts\QuotePartsRouting::SETTING, true);
