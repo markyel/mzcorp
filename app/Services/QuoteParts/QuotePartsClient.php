@@ -314,6 +314,68 @@ class QuotePartsClient
     }
 
     /**
+     * Офферы поставщиков, изменившиеся с момента $since (null — все).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function offers(?string $since = null): array
+    {
+        $response = $this->http()->get('/api/v1/offers', array_filter(['since' => $since]));
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts offers: HTTP '.$response->status());
+        }
+
+        return $response->json('offers', []);
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function priceLists(): array
+    {
+        $response = $this->http()->get('/api/v1/price-lists');
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts price lists: HTTP '.$response->status());
+        }
+
+        return $response->json('price_lists', []);
+    }
+
+    /** @return array<string, mixed> */
+    public function priceList(int $id, ?string $status = null): array
+    {
+        $response = $this->http()->get('/api/v1/price-lists/'.$id, array_filter(['status' => $status]));
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts price list: HTTP '.$response->status());
+        }
+
+        return $response->json();
+    }
+
+    /** @return array<string, mixed> */
+    public function acceptPriceListRow(int $id, int $rowId, ?string $code): array
+    {
+        $response = $this->http()->post('/api/v1/price-lists/'.$id.'/rows/'.$rowId.'/accept', array_filter(['code' => $code]));
+        if ($response->status() === 422) {
+            throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не принял строку.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts accept row: HTTP '.$response->status());
+        }
+
+        return $response->json();
+    }
+
+    /** @return array<string, mixed> */
+    public function rejectPriceListRow(int $id, int $rowId): array
+    {
+        $response = $this->http()->post('/api/v1/price-lists/'.$id.'/rows/'.$rowId.'/reject');
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts reject row: HTTP '.$response->status());
+        }
+
+        return $response->json();
+    }
+
+    /**
      * @param  array<string, mixed>  $fields
      * @param  list<array{path:string, name:string}>  $files
      * @return array<string, mixed>

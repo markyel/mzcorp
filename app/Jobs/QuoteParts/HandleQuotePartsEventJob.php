@@ -56,6 +56,14 @@ class HandleQuotePartsEventJob implements ShouldQueue
             throw $e;
         }
 
+        if ($this->event === 'supplier.replied') {
+            try {
+                app(\App\Services\QuoteParts\QuotePartsPriceService::class)->syncOffers();
+            } catch (Throwable $e) {
+                Log::warning('QuoteParts offers sync failed', ['error' => $e->getMessage()]);
+            }
+        }
+
         if (! in_array($this->event, ['supplier.replied', 'supplier.question'], true) || $rfq->createdBy === null) {
             return;
         }

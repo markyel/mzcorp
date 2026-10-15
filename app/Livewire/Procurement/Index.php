@@ -1059,9 +1059,74 @@ class Index extends Component
             $this->oemOptions, $this->previewLanguages, $this->refreshList, $this->monitors, $this->monitorSummary);
     }
 
+    /* ----------------------- Прайсы поставщиков (QuoteParts) ----------------------- */
+
+    /** Открытый прайс во вкладке «Прайсы поставщиков». */
+    #[Url(as: 'pl')]
+    public ?int $openPriceList = null;
+
+    /** @var array<int|string, string> строка прайса => M-артикул, если это другая наша позиция */
+    public array $priceRowCode = [];
+
+    #[Computed]
+    public function quotePartsPriceLists(): array
+    {
+        if ($this->tab !== 'pricelists' || ! QuotePartsPilot::canConverse(auth()->user())) {
+            return [];
+        }
+        try {
+            $lists = app(\App\Services\QuoteParts\QuotePartsClient::class)->priceLists();
+            $names = app(QuotePartsRfqService::class)->supplierNames([(object) ['snapshot' => ['suppliers' => array_map(fn ($l) => ['external_id' => $l['supplier'] ?? null], $lists)]]]);
+
+            return array_map(fn ($l) => $l + ['supplier_name' => $names[$l['supplier'] ?? ''] ?? null], $lists);
+        } catch (Throwable $e) {
+            return [['error' => mb_substr($e->getMessage(), 0, 200)]];
+        }
+    }
+
+    #[Computed]
+    public function quotePartsPriceList(): ?array
+    {
+        if ($this->tab !== 'pricelists' || $this->openPriceList === null || ! QuotePartsPilot::canConverse(auth()->user())) {
+            return null;
+        }
+        try {
+            return app(\App\Services\QuoteParts\QuotePartsClient::class)->priceList($this->openPriceList);
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    public function acceptPriceRow(int $rowId, \App\Services\QuoteParts\QuotePartsPriceService $prices): void
+    {
+        $code = trim((string) ($this->priceRowCode[$rowId] ?? '')) ?: null;
+        try {
+            $prices->accept((int) $this->openPriceList, $rowId, $code ? strtoupper($code) : null, auth()->user());
+        } catch (Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 300));
+
+            return;
+        }
+        unset($this->quotePartsPriceList, $this->quotePartsPriceLists, $this->priceRowCode[$rowId]);
+        $this->dispatch('toast', type: 'success', message: 'Цена принята — оффер записан.');
+    }
+
+    public function rejectPriceRow(int $rowId, \App\Services\QuoteParts\QuotePartsPriceService $prices): void
+    {
+        try {
+            $prices->reject((int) $this->openPriceList, $rowId, auth()->user());
+        } catch (Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 300));
+
+            return;
+        }
+        unset($this->quotePartsPriceList, $this->quotePartsPriceLists);
+    }
+
     public function setTab(string $t): void
     {
-        $this->tab = in_array($t, ['requests', 'refresh', 'monitor'], true) ? $t : 'requests';
+        $tabs = ['requests', 'refresh', 'monitor', ...(QuotePartsPilot::canConverse(auth()->user()) ? ['pricelists'] : [])];
+        $this->tab = in_array($t, $tabs, true) ? $t : 'requests';
         $this->perPage = self::PER_PAGE;
     }
 
@@ -1449,7 +1514,7 @@ class Index extends Component
             )
             ->get();
         if ($items->isEmpty()) {
-            return [];
+            return $this->withQuotePartsOffers([], $cids);
         }
 
         // Последний оффер по позиции (несколько писем → берём свежий по id).
@@ -1514,6 +1579,46 @@ class Index extends Component
                 'best_valid_until' => $best['valid_until'] ?? null,
                 'offers' => $offers,
             ];
+        }
+
+        return $this->withQuotePartsOffers($out, $cids);
+    }
+
+    /**
+     * Офферы поставщиков из QuoteParts (ответы на запросы через платформу, прайсы) — тоже
+     * ответ поставщика по позиции: цена, срок действия, лучшая цена.
+     *
+     * @param  array<int, array<string, mixed>>  $out
+     * @param  list<int>  $cids
+     * @return array<int, array<string, mixed>>
+     */
+    private function withQuotePartsOffers(array $out, array $cids): array
+    {
+        $qp = \App\Models\QuotePartsOffer::query()->whereIn('catalog_item_id', $cids)->where('superseded', false)
+            ->whereIn('status', ['active', 'expiring'])->get()->groupBy('catalog_item_id');
+
+        foreach ($qp as $cid => $offers) {
+            $entry = $out[(int) $cid] ?? ['state' => 'awaiting', 'pending_count' => 0, 'best_price' => null, 'best_currency' => null, 'best_supplier' => null, 'best_valid_until' => null, 'offers' => []];
+            foreach ($offers as $o) {
+                $supplier = (string) ($o->supplier_name ?: $o->supplier_key).' · QuoteParts'.($o->source_type === 'price_list' ? ', прайс' : '');
+                $validText = $o->valid_until ? 'до '.$o->valid_until->format('d.m.Y') : null;
+                $entry['offers'][] = [
+                    'supplier' => $supplier,
+                    'outcome' => 'quoted',
+                    'price' => $o->price !== null ? (float) $o->price : null,
+                    'currency' => $o->currency,
+                    'valid_until' => $validText,
+                    'refusal' => null,
+                ];
+                if ($o->price !== null && ($entry['best_price'] === null || (float) $o->price < (float) $entry['best_price'])) {
+                    $entry['best_price'] = (float) $o->price;
+                    $entry['best_currency'] = $o->currency;
+                    $entry['best_supplier'] = $supplier;
+                    $entry['best_valid_until'] = $validText;
+                }
+            }
+            $entry['state'] = 'quoted';
+            $out[(int) $cid] = $entry;
         }
 
         return $out;

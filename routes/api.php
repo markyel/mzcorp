@@ -30,3 +30,6 @@ Route::post('/bot/max', [\App\Http\Controllers\Api\BotWebhookController::class, 
 Route::post('/quoteparts/webhook', \App\Http\Controllers\Api\QuotePartsWebhookController::class)
     ->middleware('throttle:600,1')
     ->name('api.quoteparts.webhook');
+Route::post('/quoteparts/resolve', \App\Http\Controllers\Api\QuotePartsResolveController::class)
+    ->middleware('throttle:120,1')
+    ->name('api.quoteparts.resolve');

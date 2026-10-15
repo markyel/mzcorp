@@ -60,6 +60,15 @@ class QuotePartsWebhookTest extends TestCase
             && $job->payload['started_by'] === 'supplier');
     }
 
+    public function test_a_matched_price_list_is_queued_and_resolve_needs_the_signature(): void
+    {
+        $this->deliver(['event' => 'price_list.matched', 'price_list_id' => 9, 'supplier' => 'org:12', 'stats' => ['exact' => 17, 'check' => 3]])
+            ->assertStatus(202);
+        Queue::assertPushed(\App\Jobs\QuoteParts\HandleQuotePartsPriceListJob::class, fn ($job) => $job->payload['price_list_id'] === 9);
+
+        $this->postJson('/api/quoteparts/resolve', ['rows' => [['ref' => 1, 'our_code' => 'M28291']]])->assertStatus(401);
+    }
+
     public function test_unknown_event_is_refused(): void
     {
         $this->deliver(['event' => 'item.deleted', 'rfq_id' => 42])->assertStatus(422);

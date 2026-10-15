@@ -28,6 +28,12 @@ class SyncQuotePartsRfqsJob implements ShouldBeUnique, ShouldQueue
     {
         if ($client->isConfigured()) {
             $service->refreshRecent();
+            // Офферы поставщиков (ответы на запросы, прайсы) — в «Снабжение».
+            try {
+                app(\App\Services\QuoteParts\QuotePartsPriceService::class)->syncOffers();
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('QuoteParts offers sync failed', ['error' => $e->getMessage()]);
+            }
         }
     }
 }

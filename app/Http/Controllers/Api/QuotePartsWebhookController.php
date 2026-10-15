@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Jobs\QuoteParts\HandleQuotePartsConversationJob;
 use App\Jobs\QuoteParts\HandleQuotePartsEventJob;
+use App\Jobs\QuoteParts\HandleQuotePartsPriceListJob;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -19,23 +20,38 @@ class QuotePartsWebhookController extends Controller
 {
     public const EVENTS = ['supplier.replied', 'supplier.question', 'rfq.updated'];
 
-    public function __invoke(Request $request): JsonResponse
+    /** Подпись QuoteParts: HMAC-SHA256 по «timestamp.body», не старше допуска. */
+    public static function signed(Request $request): bool
     {
         $secret = (string) config('services.quoteparts.webhook_secret');
         $timestamp = (string) $request->header('X-QuoteParts-Timestamp', '');
         $signature = (string) $request->header('X-QuoteParts-Signature', '');
-        $body = $request->getContent();
 
-        if ($secret === '' || $timestamp === '' || ! ctype_digit($timestamp)
-            || abs(time() - (int) $timestamp) > (int) config('services.quoteparts.webhook_tolerance', 300)
-            || ! hash_equals('sha256='.hash_hmac('sha256', $timestamp.'.'.$body, $secret), $signature)) {
-            Log::warning('QuoteParts webhook rejected', ['ip' => $request->ip(), 'has_secret' => $secret !== '']);
+        $ok = $secret !== '' && $timestamp !== '' && ctype_digit($timestamp)
+            && abs(time() - (int) $timestamp) <= (int) config('services.quoteparts.webhook_tolerance', 300)
+            && hash_equals('sha256='.hash_hmac('sha256', $timestamp.'.'.$request->getContent(), $secret), $signature);
+        if (! $ok) {
+            Log::warning('QuoteParts call rejected', ['ip' => $request->ip(), 'path' => $request->path(), 'has_secret' => $secret !== '']);
+        }
 
+        return $ok;
+    }
+
+    public function __invoke(Request $request): JsonResponse
+    {
+        if (! self::signed($request)) {
             return response()->json(['message' => 'Bad signature.'], 401);
         }
 
-        $data = json_decode($body, true);
+        $data = json_decode($request->getContent(), true);
         $event = is_array($data) ? (string) ($data['event'] ?? '') : '';
+
+        // Поставщик прислал прайс: копия офферов и уведомление снабжению.
+        if ($event === 'price_list.matched' && is_int($data['price_list_id'] ?? null)) {
+            HandleQuotePartsPriceListJob::dispatch(array_intersect_key($data, array_flip(['price_list_id', 'supplier', 'stats'])));
+
+            return response()->json(['ok' => true], 202);
+        }
 
         // Поставщик написал в обращении вне запросов — сказать автору обращения или снабжению.
         if ($event === 'conversation.message' && is_int($data['conversation_id'] ?? null)) {

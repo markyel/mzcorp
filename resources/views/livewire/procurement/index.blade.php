@@ -117,6 +117,7 @@
             'requests' => ['⛏ Запросы', null],
             'refresh' => ['💰 К актуализации', $refreshSum['total']],
             'monitor' => ['🔁 Мониторинг цен', $monSum['active']],
+            ...(\App\Services\QuoteParts\QuotePartsPilot::canConverse(auth()->user()) ? ['pricelists' => ['📋 Прайсы поставщиков', null]] : []),
         ];
     @endphp
     <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden text-[12.5px]">
@@ -561,6 +562,82 @@
                 </div>
             @endif
         </div>
+    @endif
+
+    @if($tab === 'pricelists')
+        {{-- Прайсы поставщиков через QuoteParts: поставщик загружает в своём кабинете, чёткие
+             строки сразу становятся ценами, сомнительные ждут решения снабжения. --}}
+        @php $plists = $this->quotePartsPriceLists; $pl = $this->quotePartsPriceList; @endphp
+        <div class="ds-card">
+            <div class="ds-card-header">
+                <h3>Прайсы поставщиков</h3>
+                <span class="text-[12px] text-fg-3 ml-2">QuoteParts · поставщик загружает прайс в своём кабинете</span>
+            </div>
+            <div class="ds-card-body space-y-2 text-[13px]">
+                @if(isset($plists[0]['error']))
+                    <div class="text-red-700">QuoteParts не ответил: {{ $plists[0]['error'] }}</div>
+                @elseif($plists === [])
+                    <div class="text-fg-4">Прайсов пока нет. Их загружают поставщики в кабинете QuoteParts — на странице цен для Моего Зипа.</div>
+                @else
+                    <table class="w-full text-[12.5px]">
+                        <thead class="text-[10.5px] uppercase tracking-wider text-fg-3 text-left">
+                            <tr><th class="py-1 pr-3">Поставщик</th><th class="py-1 pr-3">Файл</th><th class="py-1 pr-3">Загружен</th><th class="py-1 pr-3">Цен записано</th><th class="py-1 pr-3">На проверку</th><th class="py-1">Не найдено</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach($plists as $l)
+                                @php $s = $l['stats'] ?? []; @endphp
+                                <tr wire:key="qppl-{{ $l['id'] }}" class="border-t border-border-subtle cursor-pointer hover:bg-hover {{ $openPriceList === $l['id'] ? 'bg-surface-2' : '' }}" wire:click="$set('openPriceList', {{ $l['id'] }})">
+                                    <td class="py-1.5 pr-3">{{ $l['supplier_name'] ?? $l['supplier'] }}</td>
+                                    <td class="py-1.5 pr-3">{{ $l['file'] }}</td>
+                                    <td class="py-1.5 pr-3 text-fg-3">{{ \Illuminate\Support\Carbon::parse($l['uploaded_at'])->timezone(config('app.timezone'))->format('d.m.Y H:i') }}</td>
+                                    <td class="py-1.5 pr-3">{{ $l['status'] === 'matching' ? 'сопоставляется…' : (($s['exact'] ?? 0) + ($s['accepted'] ?? 0)) }}</td>
+                                    <td class="py-1.5 pr-3 {{ ($s['check'] ?? 0) > 0 ? 'text-amber-700 font-medium' : '' }}">{{ $s['check'] ?? 0 }}</td>
+                                    <td class="py-1.5 text-fg-3">{{ $s['none'] ?? 0 }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                @endif
+            </div>
+        </div>
+
+        @if($pl)
+            <div class="ds-card">
+                <div class="ds-card-header">
+                    <h3>{{ $pl['file'] }}</h3>
+                    <span class="text-[12px] text-fg-3 ml-2">{{ $pl['defaults']['currency'] ?? '' }}{{ ! empty($pl['defaults']['valid_until']) ? ' · цены до '.\Illuminate\Support\Carbon::parse($pl['defaults']['valid_until'])->format('d.m.Y') : '' }}{{ isset($pl['defaults']['lead_time_days']) && $pl['defaults']['lead_time_days'] !== null ? ' · срок '.$pl['defaults']['lead_time_days'].' дн.' : '' }}</span>
+                </div>
+                <div class="ds-card-body overflow-x-auto">
+                    <table class="w-full text-[12.5px]">
+                        <thead class="text-[10.5px] uppercase tracking-wider text-fg-3 text-left">
+                            <tr><th class="py-1 pr-2">#</th><th class="py-1 pr-2">В прайсе</th><th class="py-1 pr-2">Цена</th><th class="py-1 pr-2">Наша позиция</th><th class="py-1 pr-2">Статус</th><th class="py-1"></th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach(collect($pl['rows'] ?? [])->sortBy(fn ($r) => [$r['status'] === 'check' ? 0 : ($r['status'] === 'none' ? 1 : 2), $r['row']]) as $r)
+                                <tr wire:key="qpplr-{{ $r['id'] }}" class="border-t border-border-subtle align-top {{ $r['status'] === 'check' ? 'bg-amber-50/60' : '' }}">
+                                    <td class="py-1.5 pr-2 text-fg-4">{{ $r['row'] }}</td>
+                                    <td class="py-1.5 pr-2">{{ $r['name'] }}<div class="text-[11px] text-fg-3 mono">{{ collect([$r['our_code'], $r['part_number'], $r['supplier_sku']])->filter()->implode(' · ') }}</div></td>
+                                    <td class="py-1.5 pr-2 mono whitespace-nowrap">{{ $r['price'] !== null ? number_format($r['price'], 2, ',', ' ').' '.$r['currency'] : '—' }}</td>
+                                    <td class="py-1.5 pr-2">@if($r['item_code'])<span class="mono">{{ $r['item_code'] }}</span> <span class="text-fg-3">{{ \Illuminate\Support\Str::limit($r['item_name'] ?? '', 50) }}</span>@else<span class="text-fg-4">—</span>@endif</td>
+                                    <td class="py-1.5 pr-2">
+                                        @php $labels = ['exact' => 'цена записана', 'accepted' => 'принято', 'check' => 'на проверку', 'none' => 'не найдено', 'skipped' => 'пропущено', 'rejected' => 'отклонено', 'pending' => 'ждёт']; @endphp
+                                        <span class="{{ in_array($r['status'], ['exact', 'accepted'], true) ? 'text-emerald-700' : ($r['status'] === 'check' ? 'text-amber-700' : 'text-fg-3') }}">{{ $labels[$r['status']] ?? $r['status'] }}</span>
+                                        @if($r['reason'])<div class="text-[11px] text-fg-3">{{ $r['reason'] }}</div>@endif
+                                    </td>
+                                    <td class="py-1.5 whitespace-nowrap">
+                                        @if(in_array($r['status'], ['check', 'none'], true))
+                                            <input type="text" wire:model="priceRowCode.{{ $r['id'] }}" placeholder="{{ $r['candidates'][0] ?? 'M-артикул' }}" class="h-[26px] w-[90px] px-1.5 border border-border rounded bg-surface text-[12px] mono">
+                                            <button type="button" wire:click="acceptPriceRow({{ $r['id'] }})" class="btn btn-xs btn-primary" title="Принять цену{{ $r['item_code'] ? ' для '.$r['item_code'] : '' }} (или для указанного M-артикула)">Принять</button>
+                                            <button type="button" wire:click="rejectPriceRow({{ $r['id'] }})" class="btn btn-xs">Отклонить</button>
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        @endif
     @endif
 
     @if($tab === 'monitor')
