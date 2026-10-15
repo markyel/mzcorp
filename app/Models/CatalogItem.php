@@ -123,6 +123,26 @@ class CatalogItem extends Model
     }
 
     /**
+     * Все OEM-артикулы позиции для внешних сервисов (основной первым), без наших M-кодов и
+     * повторов — для IQOT oem_articles: страница поставщика с любым из них считается этой позицией.
+     *
+     * @return list<string>
+     */
+    public function oemsForExternal(int $limit = 20): array
+    {
+        $out = [];
+        foreach (array_merge([$this->brand_article], (array) ($this->articles ?? [])) as $candidate) {
+            $candidate = trim((string) $candidate);
+            if ($candidate === '' || self::isInternalCode($candidate, $this->sku)) {
+                continue;
+            }
+            $out[mb_strtoupper($candidate)] ??= mb_substr($candidate, 0, 255);
+        }
+
+        return array_slice(array_values($out), 0, $limit);
+    }
+
+    /**
      * OEM-бренд для внешних сервисов (без значений-дублей M-артикула).
      */
     public function brandForExternal(): ?string

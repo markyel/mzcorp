@@ -39,10 +39,20 @@ class IqotMonitoringPayloadTest extends TestCase
             'client_ref' => 'M17913',
             'name' => 'Выключатель тормоза OTIS 506NCE',
             'article' => 'XO-508',
+            'oem_articles' => ['XO-508'],
             'unit' => 'шт',
             'brand' => 'OTIS',
             'client_category' => ['code' => 'Выключатель, концевой выключатель', 'path' => ['Лифты', 'Выключатель, концевой выключатель']],
         ], $item);
+    }
+
+    public function test_every_oem_number_goes_in_oem_articles(): void
+    {
+        $item = app(IqotMonitoringService::class)->buildItem($this->item(['sku' => 'M02502', 'name' => 'Ремень тахометра D4*600', 'brand' => 'KONE',
+            'brand_article' => 'KM247024', 'articles' => ['KM247024', 'KM85869H01', 'PC-04L=600', 'M02502', ' km85869h01 ', null]]));
+
+        $this->assertSame('KM247024', $item['article']);
+        $this->assertSame(['KM247024', 'KM85869H01', 'PC-04L=600'], $item['oem_articles']);
     }
 
     public function test_our_replacement_mark_is_not_sent_and_an_m_code_is_not_an_oem(): void

@@ -113,6 +113,8 @@ class IqotMonitoringService
             'client_ref' => (string) $c->sku,
             'name' => mb_substr($name, 0, 1000),
             'article' => mb_substr((string) $c->oemForExternal(), 0, 255),
+            // Все кросс-номера: IQOT показывает позиции только страницы с её артикулами (с 16.10.2026).
+            'oem_articles' => $c->oemsForExternal(),
             'unit' => 'шт',
         ];
         if (($brand = $c->brandForExternal()) !== null) {
