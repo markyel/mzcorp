@@ -15,10 +15,10 @@ use Throwable;
 /**
  * Мониторинг цен IQOT в режиме «Гибрид» (вместо заявок на КП по нескольку десятков позиций).
  *
- * На мониторинге — все позиции «Снабжение → К актуализации» с OEM-артикулом (без OEM IQOT
- * искать нечего: артикул производителя — главный ключ поиска), плюс добавленные вручную из
- * каталога. Позиция ушла из списка (цена актуализирована, спрос ушёл из окна) — снимаем с
- * мониторинга (active=false), вернулась — включаем снова. Наш M-артикул — только client_ref.
+ * На мониторинг встают позиции «Снабжение → К актуализации» с OEM-артикулом (без OEM IQOT
+ * искать нечего: артикул производителя — главный ключ поиска) и добавленные вручную из каталога.
+ * С мониторинга НЕ снимаем: позиция, ушедшая из списка (цену актуализировали), остаётся —
+ * решение заказчика 15.10.2026. Наш M-артикул — только client_ref.
  *
  * Своя программа IQOT (iqot.monitoring_program_id): на ключе есть и чужие программы (пилот
  * LazyLift) — их не трогаем. Отправляются только изменившиеся позиции (хэш снимка). Цены
@@ -81,19 +81,25 @@ class IqotMonitoringService
     public function wanted(): array
     {
         $refresh = array_column($this->candidates->list(), 'cid');
-        $manual = IqotMonitoringItem::query()->where('source', IqotMonitoringItem::SOURCE_MANUAL)->where('active', true)->pluck('catalog_item_id')->all();
+        // Уже стоящие на мониторинге — остаются всегда (и снятые раньше возвращаются), со своим источником.
+        $existing = IqotMonitoringItem::query()->pluck('source', 'catalog_item_id')->all();
 
         $wanted = [];
         $noOem = [];
-        CatalogItem::query()->whereIn('id', array_unique([...$refresh, ...$manual]))
+        CatalogItem::query()->whereIn('id', array_unique([...$refresh, ...array_keys($existing)]))
             ->get(['id', 'sku', 'name', 'brand', 'brands', 'brand_article', 'articles', 'part_type'])
-            ->each(function (CatalogItem $c) use (&$wanted, &$noOem, $manual) {
+            ->each(function (CatalogItem $c) use (&$wanted, &$noOem, $existing) {
+                if (isset($existing[$c->id])) {
+                    $wanted[$c->id] = $existing[$c->id];
+
+                    return;
+                }
                 if ($c->oemForExternal() === null) {
                     $noOem[] = $c->id;
 
                     return;
                 }
-                $wanted[$c->id] = in_array($c->id, $manual, true) ? IqotMonitoringItem::SOURCE_MANUAL : IqotMonitoringItem::SOURCE_REFRESH;
+                $wanted[$c->id] = IqotMonitoringItem::SOURCE_REFRESH;
             });
 
         return ['wanted' => $wanted, 'no_oem' => $noOem];
@@ -109,14 +115,17 @@ class IqotMonitoringService
     {
         // «(ЗАМЕНЕНО на M…)» — наша пометка, поставщику она ничего не говорит.
         $name = trim((string) preg_replace('/^\s*\(\s*заменен[оа][^)]*\)\s*/iu', '', (string) $c->name)) ?: (string) $c->name;
-        $item = [
+        $oem = $c->oemForExternal();
+        $item = array_filter([
             'client_ref' => (string) $c->sku,
             'name' => mb_substr($name, 0, 1000),
-            'article' => mb_substr((string) $c->oemForExternal(), 0, 255),
+            // Артикул производителя; у уже стоящей позиции его может не остаться после чистки (в поле
+            // был размер) — тогда без article: по названию, бренду и кросс-номерам.
+            'article' => $oem !== null ? mb_substr($oem, 0, 255) : null,
             // Все кросс-номера: IQOT показывает позиции только страницы с её артикулами (с 16.10.2026).
             'oem_articles' => $c->oemsForExternal(),
             'unit' => 'шт',
-        ];
+        ], fn ($v) => $v !== null);
         if (($brand = $c->brandForExternal()) !== null) {
             $item['brand'] = mb_substr($brand, 0, 255);
         }
@@ -130,9 +139,10 @@ class IqotMonitoringService
     }
 
     /**
-     * Привести мониторинг к списку: новые и изменившиеся — загрузить, ушедшие — снять.
+     * Привести мониторинг к списку: новые (из «К актуализации», с OEM) и изменившиеся — загрузить.
+     * Ушедшие из списка остаются на мониторинге.
      *
-     * @return array{wanted:int, no_oem:int, sent:int, activated:int, deactivated:int, unchanged:int, imports:list<string>}
+     * @return array{wanted:int, no_oem:int, sent:int, activated:int, unchanged:int, imports:list<string>}
      */
     public function syncItems(bool $dryRun = false): array
     {
@@ -142,7 +152,7 @@ class IqotMonitoringService
             ->get(['id', 'sku', 'name', 'brand', 'brands', 'brand_article', 'articles', 'part_type'])->keyBy('id');
 
         $send = [];        // client_ref => [item, catalog_item_id, source]
-        $stats = ['wanted' => count($wanted), 'no_oem' => count($noOem), 'sent' => 0, 'activated' => 0, 'deactivated' => 0, 'unchanged' => 0, 'imports' => []];
+        $stats = ['wanted' => count($wanted), 'no_oem' => count($noOem), 'sent' => 0, 'activated' => 0, 'unchanged' => 0, 'imports' => []];
         foreach ($wanted as $cid => $source) {
             $item = $this->buildItem($catalog[$cid]) + ['active' => true];
             $hash = sha1(json_encode($item, JSON_UNESCAPED_UNICODE));
@@ -157,14 +167,6 @@ class IqotMonitoringService
             }
             $send[$item['client_ref']] = ['item' => $item, 'hash' => $hash, 'cid' => $cid, 'source' => $source];
         }
-        // Ушли из списка (и не добавлены вручную) — снять с мониторинга.
-        foreach ($rows as $cid => $row) {
-            if ($row->active && ! isset($wanted[$cid])) {
-                $item = ['client_ref' => $row->client_ref, 'name' => (string) ($row->payload['name'] ?? $row->client_ref), 'active' => false];
-                $send[$row->client_ref] = ['item' => $item, 'hash' => sha1(json_encode($item, JSON_UNESCAPED_UNICODE)), 'cid' => $cid, 'source' => $row->source, 'off' => true];
-                $stats['deactivated']++;
-            }
-        }
         $stats['sent'] = count($send);
         if ($dryRun || $send === []) {
             return $stats;
@@ -177,18 +179,17 @@ class IqotMonitoringService
             $import = $this->api->upsertMonitoringItems($programId, $items, $key);
             $stats['imports'][] = (string) ($import['import_id'] ?? '');
             foreach ($chunk as $ref => $s) {
-                $off = ! empty($s['off']);
                 IqotMonitoringItem::query()->updateOrCreate(['catalog_item_id' => $s['cid']], [
                     'client_ref' => $ref,
                     'source' => $s['source'],
-                    'active' => ! $off,
-                    'payload' => $off ? (($rows->get($s['cid'])?->payload) ?? $s['item']) : $s['item'],
-                    'payload_hash' => $off ? null : $s['hash'],
+                    'active' => true,
+                    'payload' => $s['item'],
+                    'payload_hash' => $s['hash'],
                     'sent_at' => now(),
                     'import_id' => $import['import_id'] ?? null,
                     'import_status' => $import['status'] ?? 'queued',
                     'import_error' => null,
-                    'deactivated_at' => $off ? now() : null,
+                    'deactivated_at' => null,
                 ]);
             }
         }
@@ -268,6 +269,10 @@ class IqotMonitoringService
             return 0;
         }
         $since = $full ? null : (trim((string) app_setting('iqot.monitoring_prices_since', '')) ?: null);
+        // IQOT: синхронизировать цены не чаще раза в час (кнопка «Синхронизировать» не должна этого обходить).
+        if ($since !== null && Carbon::parse($since)->gt(now()->subMinutes((int) config('services.iqot.monitoring.prices_min_interval_min', 50)))) {
+            return 0;
+        }
         $serverTime = null;
         $cursor = null;
         $n = 0;

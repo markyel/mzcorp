@@ -44,7 +44,8 @@ class PollIqotSubmissionsJob implements ShouldQueue
 
         $query = $this->submissionId !== null
             ? IqotSubmission::query()->whereKey($this->submissionId)->whereNotNull('submission_id')
-            : IqotSubmission::query()->needsPolling();
+            // Сначала те, кого пора опросить дольше всех: за прогон берём не все.
+            : IqotSubmission::query()->needsPolling()->orderByRaw('next_check_after ASC NULLS FIRST')->orderBy('id');
 
         $submissions = $query->get();
         if ($submissions->isEmpty()) {
@@ -130,6 +131,10 @@ class PollIqotSubmissionsJob implements ShouldQueue
 
         $body = $res['body'] ?? [];
         $headers = $res['headers'] ?? [];
+        // Что было до этого опроса: отчёт перезапрашиваем, только если по заявке что-то изменилось.
+        $prevStatusChangedAt = $sub->status_changed_at?->toIso8601String();
+        $offersSum = fn ($b) => collect(is_array($b) ? ($b['items'] ?? []) : [])->sum(fn ($it) => (int) (is_array($it) ? ($it['offers_count'] ?? 0) : 0));
+        $prevOffers = $offersSum($sub->last_status_response);
         $iqotStatus = is_array($body) ? ($body['status'] ?? null) : null;
         $iqotStage = is_array($body) ? ($body['stage'] ?? null) : null;
         $now = now();
@@ -189,7 +194,12 @@ class PollIqotSubmissionsJob implements ShouldQueue
             $shouldFetchReport = true;
         }
 
-        if ($shouldFetchReport) {
+        // Отчёт по уже забранной заявке — только если сменился статус или число КП (лимит IQOT 60/мин).
+        $changed = ! $sub->hasReport()
+            || $sub->status_changed_at?->toIso8601String() !== $prevStatusChangedAt
+            || $offersSum($body) !== $prevOffers;
+        if ($shouldFetchReport && $changed) {
+            usleep(max(0, (int) config('services.iqot.poll.inter_request_ms', 1100)) * 1000);
             try {
                 $report = $svc->getReport($sub->submission_id);
                 if (is_array($report)) {

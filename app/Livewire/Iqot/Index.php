@@ -168,8 +168,8 @@ class Index extends Component
         $items = $r['items'] ?? [];
         session()->flash('iqot-flash', isset($r['skipped']) ? 'Мониторинг IQOT выключен (режим или ключ в Настройках).'
             : (isset($r['error']) ? 'Мониторинг IQOT: '.$r['error']
-                : 'Мониторинг IQOT синхронизирован: к актуализации с OEM — '.($items['wanted'] ?? 0).', отправлено изменений '.($items['sent'] ?? 0)
-                    .', снято '.($items['deactivated'] ?? 0).'; цены обновлены по '.(is_int($r['prices'] ?? null) ? $r['prices'] : 0).' поз.'));
+                : 'Мониторинг IQOT синхронизирован: на мониторинге '.($items['wanted'] ?? 0).', отправлено изменений '.($items['sent'] ?? 0)
+                    .', возвращено '.($items['activated'] ?? 0).'; цены обновлены по '.(is_int($r['prices'] ?? null) ? $r['prices'] : 0).' поз.'));
         unset($this->stats, $this->positions);
     }
 

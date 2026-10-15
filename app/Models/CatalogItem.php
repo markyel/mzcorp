@@ -113,13 +113,33 @@ class CatalogItem extends Model
     public function oemForExternal(): ?string
     {
         foreach (array_merge([$this->brand_article], (array) ($this->articles ?? [])) as $candidate) {
-            $candidate = trim((string) $candidate);
-            if ($candidate !== '' && ! self::isInternalCode($candidate, $this->sku)) {
+            $candidate = self::externalArticle((string) $candidate);
+            if ($candidate !== null && ! self::isInternalCode($candidate, $this->sku)) {
                 return $candidate;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Артикул производителя для внешних сервисов (IQOT ищет по нему страницы товара): без наших
+     * пояснений в скобках с размером или назначением — «0411С.23.00.300 (16 мм)» → «0411С.23.00.300»,
+     * «OX-847W (for guide rail 16 mm)» → «OX-847W». Значение, которое само размер или спецификация
+     * («d=10,0 mm», «16 мм», «600x400»), артикулом не считается — null.
+     */
+    public static function externalArticle(string $value): ?string
+    {
+        $v = preg_replace('/\s*\([^)]*(?:\d\s*(?:мм|mm|см|cm)(?!\p{L})|for\s|для\s)[^)]*\)\s*/iu', ' ', $value) ?? $value;
+        $v = trim((string) preg_replace('/\s+/u', ' ', $v));
+        if ($v === '') {
+            return null;
+        }
+        if (preg_match('/(?<![\p{L}\d])[dhlbвшDHLBВШ]\s*=\s*\d|\d+(?:[.,]\d+)?\s*(?:мм|mm|см|cm)(?!\p{L})|^\d+(?:[.,]\d+)?\s*[*xх×]\s*\d+(?:[.,]\d+)?$/iu', $v) === 1) {
+            return null;
+        }
+
+        return $v;
     }
 
     /**
@@ -132,8 +152,8 @@ class CatalogItem extends Model
     {
         $out = [];
         foreach (array_merge([$this->brand_article], (array) ($this->articles ?? [])) as $candidate) {
-            $candidate = trim((string) $candidate);
-            if ($candidate === '' || self::isInternalCode($candidate, $this->sku)) {
+            $candidate = self::externalArticle((string) $candidate);
+            if ($candidate === null || self::isInternalCode($candidate, $this->sku)) {
                 continue;
             }
             $out[mb_strtoupper($candidate)] ??= mb_substr($candidate, 0, 255);

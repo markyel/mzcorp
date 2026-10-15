@@ -1068,9 +1068,11 @@ return [
         // прогон при rate-limit, чтобы не выгребать лимит IQOT залпом и не
         // засорять лог сериями 429. retry_after_cap_s — потолок ожидания по
         // Retry-After внутри HTTP-ретраев.
+        // Лимит IQOT — 60 запросов в минуту на ключ (все методы вместе): пауза > 1 с между
+        // запросами, не больше 60 заявок за прогон (до двух запросов на заявку).
         'poll' => [
-            'inter_request_ms' => (int) env('IQOT_POLL_INTER_REQUEST_MS', 300),
-            'max_per_run' => (int) env('IQOT_POLL_MAX_PER_RUN', 100),
+            'inter_request_ms' => (int) env('IQOT_POLL_INTER_REQUEST_MS', 1100),
+            'max_per_run' => (int) env('IQOT_POLL_MAX_PER_RUN', 60),
             'retry_after_cap_s' => (int) env('IQOT_POLL_RETRY_AFTER_CAP_S', 8),
         ],
         'enabled' => (bool) env('IQOT_ENABLED', false),
@@ -1082,6 +1084,8 @@ return [
             'name' => env('IQOT_MONITORING_NAME', 'mzCorp — позиции к актуализации'),
             'target_freshness_days' => (int) env('IQOT_MONITORING_FRESHNESS_DAYS', 30),
             'site_refresh_days' => (int) env('IQOT_MONITORING_SITE_REFRESH_DAYS', 14),
+            // IQOT просит забирать цены не чаще раза в час.
+            'prices_min_interval_min' => (int) env('IQOT_MONITORING_PRICES_MIN_INTERVAL_MIN', 50),
         ],
         // Дневной лимит позиций на анализ (защита баланса). 0 = не отправлять.
         'daily_limit' => (int) env('IQOT_DAILY_LIMIT', 50),
