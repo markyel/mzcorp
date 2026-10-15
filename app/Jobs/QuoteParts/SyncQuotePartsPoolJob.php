@@ -55,6 +55,16 @@ class SyncQuotePartsPoolJob implements ShouldQueue, ShouldBeUnique
 
             // Ответы приглашённых поставщиков (принял, предложил другие условия, отказался).
             app(QuotePartsSupplierService::class)->refreshStatuses();
+
+            // Новые товары, получившие M-артикул: предварительные позиции → постоянные.
+            try {
+                $promoted = app(\App\Services\QuoteParts\QuotePartsDraftService::class)->promoteMatched($pool);
+                if ($promoted > 0) {
+                    Log::info('QuoteParts drafts promoted', ['count' => $promoted]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('QuoteParts draft promotion failed', ['error' => $e->getMessage()]);
+            }
         } finally {
             $lock->release();
         }

@@ -52,6 +52,26 @@ class QuotePartsClient
     }
 
     /**
+     * Предварительные позиции → постоянные: карточка как в sync + draft_code.
+     *
+     * @param  list<array<string, mixed>>  $items
+     * @return list<array{draft_code:string, code:?string, result:string}>
+     */
+    public function promoteDrafts(array $items): array
+    {
+        $response = $this->http()->post('/api/v1/items/promote', ['items' => $items]);
+
+        if ($response->status() === 422) {
+            throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не принял позиции.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts items/promote: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json('items', []);
+    }
+
+    /**
      * @param  list<string>  $codes
      * @return array{archived: list<string>, unknown: list<string>}
      */

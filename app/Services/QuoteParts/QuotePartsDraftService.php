@@ -2,6 +2,7 @@
 
 namespace App\Services\QuoteParts;
 
+use App\Models\CatalogSupplierPrice;
 use App\Models\RequestItem;
 use App\Services\Supplier\SupplierItemTranslator;
 use RuntimeException;
@@ -62,5 +63,44 @@ class QuotePartsDraftService
         }
 
         return $codes;
+    }
+
+    /**
+     * Позиции заявок, ушедшие предварительными и теперь сопоставленные с каталогом (у товара
+     * появился M-артикул из корп. базы): в QuoteParts предварительная позиция становится
+     * постоянной — офферы, вопросы и ответы остаются с ней, — и попадает в пул.
+     *
+     * @return int сколько переведено
+     */
+    public function promoteMatched(QuotePartsPoolService $pool, int $limit = 100): int
+    {
+        $rows = RequestItem::query()
+            ->whereNotNull('quoteparts_code')->whereNotNull('catalog_item_id')->whereNull('quoteparts_promoted_at')
+            ->with('catalogItem')->orderBy('id')->limit($limit)->get()
+            ->filter(fn ($r) => $r->catalogItem !== null && str_starts_with((string) $r->quoteparts_code, 'T-'));
+        if ($rows->isEmpty()) {
+            return 0;
+        }
+
+        $prices = CatalogSupplierPrice::query()
+            ->whereIn('catalog_item_id', $rows->pluck('catalog_item_id'))
+            ->whereIn('kind', [CatalogSupplierPrice::KIND_FIRST, CatalogSupplierPrice::KIND_LAST])
+            ->get()->groupBy('catalog_item_id');
+
+        // Одна предварительная позиция — одна строка, даже если её код стоит у нескольких позиций.
+        $byCode = $rows->unique('quoteparts_code');
+        $results = $this->client->promoteDrafts($byCode->map(fn (RequestItem $r) => ['draft_code' => $r->quoteparts_code]
+            + $pool->payloadFor($r->catalogItem, $prices->get($r->catalog_item_id, collect())))->values()->all());
+
+        $done = collect($results)->filter(fn ($r) => in_array($r['result'] ?? null, ['promoted', 'merged', 'already', 'unknown'], true))->pluck('draft_code')->all();
+        RequestItem::query()->whereIn('quoteparts_code', $done)->whereNotNull('catalog_item_id')->update(['quoteparts_promoted_at' => now()]);
+
+        // Дальше позиция живёт в пуле и обновляется вместе с каталогом.
+        $promotedCatalogIds = $rows->whereIn('quoteparts_code', $done)->pluck('catalog_item_id')->unique()->values()->all();
+        if ($promotedCatalogIds !== []) {
+            $pool->ensureInPool($promotedCatalogIds, null);
+        }
+
+        return count($done);
     }
 }
