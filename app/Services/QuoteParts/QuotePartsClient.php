@@ -176,6 +176,22 @@ class QuotePartsClient
     }
 
     /**
+     * Какие группы товаров (cn / ru / eu) поставщик видит в кабинете; null — все.
+     *
+     * @param  list<string>|null  $groups
+     * @return array<string, mixed> связь, как её вернул QuoteParts
+     */
+    public function setSupplierGroups(string $key, ?array $groups): array
+    {
+        $response = $this->http()->put('/api/v1/supplier-links/'.rawurlencode($key).'/groups', ['groups' => $groups]);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts groups: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /**
      * @param  array{items: list<array{code:string, quantity:float, note:?string}>, suppliers: list<string>, reply_by:?string, message:?string, external_ref:?string}  $payload
      * @return array<string, mixed>
      */

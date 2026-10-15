@@ -167,7 +167,7 @@ class QuotePartsPoolService
      *
      * @return array<string, mixed>
      */
-    public function payloadFor(CatalogItem $item, Collection $purchasePrices): array
+    public function payloadFor(CatalogItem $item, Collection $purchasePrices, array $groups = []): array
     {
         $partNumbers = [];
         $brands = (array) ($item->brands ?? []);
@@ -210,6 +210,8 @@ class QuotePartsPoolService
                 'currency' => $p->currency ?: 'RUB',
                 'purchased_at' => $p->priced_at?->toDateString(),
             ])->values()->all(),
+            // Группы Китай / Россия / Европа: какие поставщики видят позицию в своём кабинете.
+            'groups' => array_values($groups),
         ];
     }
 
@@ -225,6 +227,7 @@ class QuotePartsPoolService
             ->get()
             ->groupBy('catalog_item_id');
 
+        $groups = app(\App\Services\Catalog\SupplyGroupService::class)->groupsFor($rows->pluck('catalog_item_id')->all());
         $payloads = [];
         $hashes = [];
         $bySku = [];
@@ -233,7 +236,7 @@ class QuotePartsPoolService
             if ($row->catalogItem === null) {
                 continue;
             }
-            $payload = $this->payloadFor($row->catalogItem, $prices->get($row->catalog_item_id, collect()));
+            $payload = $this->payloadFor($row->catalogItem, $prices->get($row->catalog_item_id, collect()), $groups[$row->catalog_item_id] ?? []);
             $hash = hash('sha256', json_encode($payload, JSON_UNESCAPED_UNICODE));
 
             if ($hash === $row->payload_hash && $row->status !== QuotePartsPoolItem::STATUS_ERROR) {

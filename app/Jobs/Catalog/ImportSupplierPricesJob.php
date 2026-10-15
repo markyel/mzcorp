@@ -65,6 +65,14 @@ class ImportSupplierPricesJob implements ShouldQueue
             }
 
             $written = $service->apply($res['rows'], $import->original_name);
+            // Новые поставщики и закупки — регионы и группы товаров Китай / Россия / Европа заново.
+            try {
+                $groups = app(\App\Services\Catalog\SupplyGroupService::class);
+                $groups->refreshRegions();
+                $groups->rebuild();
+            } catch (Throwable $e) {
+                Log::warning('Supply groups rebuild failed', ['import_id' => $this->importId, 'error' => $e->getMessage()]);
+            }
             $import->update([
                 'status' => SupplierPriceImport::STATUS_APPLIED,
                 'written' => $written,

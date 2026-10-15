@@ -78,6 +78,8 @@ class QuotePartsSupplierService
             ], fn ($v) => $v !== null),
             'message' => $form['message'] ?: null,
             'show_internal_code' => (bool) ($form['show_internal_code'] ?? false),
+            // Группы товаров, которые поставщик видит (null — все).
+            'groups' => $form['groups'] ?? null,
         ]);
 
         $supplier->forceFill([
@@ -86,8 +88,30 @@ class QuotePartsSupplierService
             'quoteparts_invited_at' => now(),
             'quoteparts_comment' => $result['supplier_comment'] ?? null,
         ])->save();
+        $this->rememberGroups($supplier, $form['groups'] ?? null);
 
         return $supplier;
+    }
+
+    /**
+     * Какие группы товаров поставщик видит в кабинете QuoteParts (null — все). Поставщик в
+     * QuoteParts — организация: копия запоминается у всех её адресов.
+     *
+     * @param  list<string>|null  $groups
+     */
+    public function setGroups(Supplier $supplier, ?array $groups): void
+    {
+        $this->client->setSupplierGroups($supplier->quotepartsKey(), $groups);
+        $this->rememberGroups($supplier, $groups);
+    }
+
+    /** @param list<string>|null $groups */
+    private function rememberGroups(Supplier $supplier, ?array $groups): void
+    {
+        Supplier::query()
+            ->when($supplier->supplier_organization_id, fn ($q, $org) => $q->where('supplier_organization_id', $org), fn ($q) => $q->whereKey($supplier->id))
+            ->update(['quoteparts_groups' => $groups === null ? null : json_encode(array_values($groups))]);
+        $supplier->quoteparts_groups = $groups;
     }
 
     /**

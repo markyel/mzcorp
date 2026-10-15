@@ -24,6 +24,18 @@
             <div class="text-amber-800">Ключ API QuoteParts не задан — приглашение не отправится.</div>
         @endunless
 
+        @if($status && ! $open)
+            {{-- Какие группы товаров поставщик видит в кабинете. --}}
+            <div class="flex flex-wrap items-center gap-3 text-[12.5px]">
+                <span class="text-fg-3">Видит группы товаров:</span>
+                @foreach(\App\Enums\SupplyGroup::cases() as $g)
+                    <label class="inline-flex items-center gap-1"><input type="checkbox" wire:model="groups" value="{{ $g->value }}" class="w-4 h-4 accent-sky-600"> {{ $g->label() }}</label>
+                @endforeach
+                <button type="button" wire:click="saveGroups" class="btn btn-xs">Сохранить</button>
+                <span class="text-fg-4">ничего не отмечено — все группы</span>
+            </div>
+        @endif
+
         @if($status && ! $open && ! $contactsOpen)
             <div class="text-[12px] text-fg-3">
                 В QuoteParts поставщик — {{ $supplier->organization ? 'организация «'.$supplier->organization->name.'»: все её адреса — сотрудники одного поставщика' : 'этот адрес' }}.
@@ -135,6 +147,14 @@
 
             <label class="block"><span class="text-fg-3 text-[12px]">Сообщение поставщику (по-английски, необязательно)</span>
                 <textarea wire:model="message" rows="3" class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500" placeholder="Dear Lily, we'd like to move our price requests to QuoteParts…"></textarea></label>
+
+            <div class="flex flex-wrap items-center gap-3 text-[12.5px]">
+                <span class="text-fg-3">Видит группы товаров:</span>
+                @foreach(\App\Enums\SupplyGroup::cases() as $g)
+                    <label class="inline-flex items-center gap-1"><input type="checkbox" wire:model="groups" value="{{ $g->value }}" class="w-4 h-4 accent-sky-600"> {{ $g->label() }}</label>
+                @endforeach
+                <span class="text-fg-4">— по умолчанию регион поставщика по «Закупкам 1С»; ничего не отмечено — все группы</span>
+            </div>
 
             <label class="flex items-center gap-2 text-[12.5px]">
                 <input type="checkbox" wire:model="show_internal_code" class="w-4 h-4 accent-sky-600">

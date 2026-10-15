@@ -89,8 +89,9 @@ class QuotePartsDraftService
 
         // Одна предварительная позиция — одна строка, даже если её код стоит у нескольких позиций.
         $byCode = $rows->unique('quoteparts_code');
+        $groups = app(\App\Services\Catalog\SupplyGroupService::class)->groupsFor($rows->pluck('catalog_item_id')->all());
         $results = $this->client->promoteDrafts($byCode->map(fn (RequestItem $r) => ['draft_code' => $r->quoteparts_code]
-            + $pool->payloadFor($r->catalogItem, $prices->get($r->catalog_item_id, collect())))->values()->all());
+            + $pool->payloadFor($r->catalogItem, $prices->get($r->catalog_item_id, collect()), $groups[$r->catalog_item_id] ?? []))->values()->all());
 
         $done = collect($results)->filter(fn ($r) => in_array($r['result'] ?? null, ['promoted', 'merged', 'already', 'unknown'], true))->pluck('draft_code')->all();
         RequestItem::query()->whereIn('quoteparts_code', $done)->whereNotNull('catalog_item_id')->update(['quoteparts_promoted_at' => now()]);

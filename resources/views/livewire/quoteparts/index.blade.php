@@ -27,6 +27,7 @@
             Поставщики <span class="opacity-70">{{ $this->invitedSuppliers->count() }}</span>
         </button>
         <button type="button" wire:click="setTab('prices')" class="btn btn-sm {{ $tab === 'prices' ? 'btn-primary' : '' }}">Закупки 1С</button>
+        <button type="button" wire:click="setTab('groups')" class="btn btn-sm {{ $tab === 'groups' ? 'btn-primary' : '' }}">Группы товаров</button>
         <button type="button" wire:click="setTab('pilot')" class="btn btn-sm {{ $tab === 'pilot' ? 'btn-primary' : '' }}">
             Пилот <span class="chip {{ $this->pilotSwitchedOn ? 'chip-ok' : 'chip-neutral' }} text-[10px] ml-1">{{ $this->pilotSwitchedOn ? 'вкл' : 'выкл' }}</span>
         </button>
@@ -161,6 +162,10 @@
 
     @if($tab === 'prices')
         <livewire:quote-parts.purchase-prices />
+    @endif
+
+    @if($tab === 'groups')
+        <livewire:quote-parts.supply-groups />
     @endif
 
     @if($tab === 'suppliers')

@@ -50,6 +50,9 @@ class QuotePartsInvite extends Component
     /** Показывать поставщику наш M-артикул (по умолчанию — нет). */
     public bool $show_internal_code = false;
 
+    /** @var list<string> группы товаров, которые поставщик видит (пусто — все) */
+    public array $groups = [];
+
     public ?string $error = null;
 
     public function mount(Supplier $supplier): void
@@ -62,6 +65,23 @@ class QuotePartsInvite extends Component
         $this->email = (string) $supplier->email;
         // Язык кабинета — как язык переписки с поставщиком: русский для своих, английский для остальных.
         $this->locale = $supplier->language === 'ru' ? 'ru' : 'en';
+        // Видит то, что закупаем в его регионе (по «Закупкам 1С»); уже настроенное — как есть.
+        $region = $supplier->quoteparts_groups === null ? app(\App\Services\Catalog\SupplyGroupService::class)->regionOf($supplier) : null;
+        $this->groups = $supplier->quoteparts_groups ?? ($supplier->quoteparts_link_id === null && $region ? [$region] : []);
+    }
+
+    /** Группы товаров уже приглашённого поставщика. */
+    public function saveGroups(QuotePartsSupplierService $service): void
+    {
+        $groups = array_values(array_intersect(\App\Enums\SupplyGroup::values(), $this->groups));
+        try {
+            $service->setGroups($this->supplier, $groups === [] ? null : $groups);
+        } catch (Throwable $e) {
+            $this->error = mb_substr($e->getMessage(), 0, 400);
+
+            return;
+        }
+        $this->dispatch('toast', type: 'success', message: $groups === [] ? 'Поставщик видит все группы товаров.' : 'Группы сохранены: поставщик видит '.collect($groups)->map(fn ($g) => \App\Enums\SupplyGroup::from($g)->label())->implode(', ').'.');
     }
 
     public function invite(QuotePartsSupplierService $service): void
@@ -86,6 +106,8 @@ class QuotePartsInvite extends Component
         ]);
 
         $data['packaging_included'] = $this->packaging === '' ? null : $this->packaging === '1';
+        $groups = array_values(array_intersect(\App\Enums\SupplyGroup::values(), $this->groups));
+        $data['groups'] = $groups === [] ? null : $groups;
         $this->error = null;
 
         try {

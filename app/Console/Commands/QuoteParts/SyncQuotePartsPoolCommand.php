@@ -29,7 +29,8 @@ class SyncQuotePartsPoolCommand extends Command
             foreach ($rows as $row) {
                 $item = CatalogItem::find($row->catalog_item_id);
                 $prices = CatalogSupplierPrice::where('catalog_item_id', $row->catalog_item_id)->get();
-                $this->line(json_encode($pool->payloadFor($item, $prices), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+                $groups = app(\App\Services\Catalog\SupplyGroupService::class)->groupsFor([$item->id])[$item->id] ?? [];
+                $this->line(json_encode($pool->payloadFor($item, $prices, $groups), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
             }
 
             return self::SUCCESS;

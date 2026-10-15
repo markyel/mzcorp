@@ -42,7 +42,7 @@ class Index extends Component
 
     public function setTab(string $tab): void
     {
-        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'prices', 'pilot'], true) ? $tab : 'candidates';
+        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'prices', 'groups', 'pilot'], true) ? $tab : 'candidates';
         $this->perPage = self::PER_PAGE;
     }
 
