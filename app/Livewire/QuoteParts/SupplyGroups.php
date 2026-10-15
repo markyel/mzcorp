@@ -94,8 +94,14 @@ class SupplyGroups extends Component
         $item = $this->itemId ? CatalogItem::query()->find($this->itemId, ['id', 'sku', 'name']) : null;
         $itemSource = $this->itemId ? DB::table('catalog_item_supply_groups')->where('catalog_item_id', $this->itemId)->value('source') : null;
 
+        // Карточка поставщика в справочнике: по закупкам 1С с этим названием (самая частая привязка).
+        $cards = DB::table('catalog_supplier_prices')->whereIn('supplier_name_1c', collect($suppliers->items())->pluck('supplier_name_1c'))
+            ->whereNotNull('supplier_id')->selectRaw('supplier_name_1c, supplier_id, count(*) as c')->groupBy('supplier_name_1c', 'supplier_id')
+            ->orderByDesc('c')->get()->unique('supplier_name_1c')->pluck('supplier_id', 'supplier_name_1c');
+
         return view('livewire.quoteparts.supply-groups', [
             'suppliers' => $suppliers,
+            'cards' => $cards,
             'groupCounts' => $service->counts(),
             'regionCounts' => DB::table('purchase_supplier_regions')->selectRaw("coalesce(region, 'none') as r, count(*) as c")->groupBy('r')->pluck('c', 'r')->all(),
             'item' => $item,

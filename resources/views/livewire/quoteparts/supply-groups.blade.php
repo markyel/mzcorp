@@ -43,7 +43,13 @@
                 <tbody>
                     @forelse($suppliers as $s)
                         <tr wire:key="sr-{{ $s->id }}" class="border-b border-border-subtle">
-                            <td class="px-3 py-1.5 text-fg-1">{{ $s->supplier_name_1c }}</td>
+                            <td class="px-3 py-1.5 text-fg-1">
+                                @if($cardId = $cards[$s->supplier_name_1c] ?? null)
+                                    <a href="{{ route('suppliers.registry-edit', $cardId) }}" class="hover:text-sky-700 hover:underline" title="Открыть карточку поставщика">{{ $s->supplier_name_1c }}</a>
+                                @else
+                                    {{ $s->supplier_name_1c }} <span class="text-fg-4 text-[11px]" title="В «Закупках 1С» этот поставщик не сопоставлен с карточкой справочника">· нет в справочнике</span>
+                                @endif
+                            </td>
                             <td class="px-3 py-1.5 text-right mono">{{ $s->items_count }}</td>
                             <td class="px-3 py-1.5 text-fg-3 mono">{{ collect(json_decode((string) $s->currencies, true) ?: [])->map(fn ($n, $c) => ($c ?: '—').' '.$n)->implode(', ') }}</td>
                             <td class="px-3 py-1.5">
