@@ -288,14 +288,17 @@ class IqotMonitoringService
      *  - отбрасываем «на перепроверке» (status=suspicious: резкий скачок цены), источники без цены
      *    сайта и без КП, оптовые уровни и не рубли — так же сопоставимые цены считает и IQOT;
      *  - цена источника — цена сайта, а если её нет («по запросу») — цена КП;
+     *  - сравниваем и сортируем БЕЗ НДС, как в разделе IQOT: цена «с НДС» делится на 1+ставка
+     *    (tax.vat_percent). НДС не указан — считаем, что цена с НДС (розница сайтов), и помечаем;
      *  - несколько страниц одного поставщика (домен) — одна строка с его лучшей ценой; признаки
      *    «КП» и «подтверждена по почте» берём с любой из его страниц.
      *
      * @param  list<array<string, mixed>>  $sources  нормализованные источники (см. applyPrice)
-     * @return list<array<string, mixed>> по возрастанию цены, у каждого поле 'value'
+     * @return list<array<string, mixed>> по возрастанию цены без НДС; поля value (цена как есть), vat (true/false/null), net (без НДС)
      */
-    public static function cleanSources(array $sources): array
+    public static function cleanSources(array $sources, ?float $vatPercent = null): array
     {
+        $rate = ($vatPercent ?? (float) app_setting('tax.vat_percent', config('services.tax.vat_percent', 22))) / 100;
         $byDomain = [];
         foreach ($sources as $s) {
             if (($s['status'] ?? 'active') !== 'active' || ($s['price_kind'] ?? null) === 'wholesale_tier') {
@@ -309,7 +312,10 @@ class IqotMonitoringService
             if ($value === null) {
                 continue;
             }
+            $vat = $sitePrice !== null ? ($s['vat'] ?? null) : ($s['kp']['vat_included'] ?? null);
             $s['value'] = $value;
+            $s['vat'] = $vat === null ? null : (bool) $vat;
+            $s['net'] = round($vat !== false && $rate > 0 ? $value / (1 + $rate) : $value, 2);
             $domain = mb_strtolower(trim((string) ($s['domain'] ?? ''))) ?: 'url:'.($s['url'] ?? count($byDomain));
             $prev = $byDomain[$domain] ?? null;
             $flags = (array) ($s['flags'] ?? []);
@@ -317,7 +323,7 @@ class IqotMonitoringService
                 $flags['kp'] = ! empty($flags['kp']) || ! empty($prev['flags']['kp']);
                 $flags['email_confirmed'] = ! empty($flags['email_confirmed']) || ! empty($prev['flags']['email_confirmed']);
                 $s['kp'] ??= $prev['kp'] ?? null;
-                if ($prev['value'] <= $value) {
+                if ($prev['net'] <= $s['net']) {
                     $prev['flags'] = $flags;
                     $prev['kp'] ??= $s['kp'];
                     $prev['pages'] = ($prev['pages'] ?? 1) + 1;
@@ -331,7 +337,7 @@ class IqotMonitoringService
             $byDomain[$domain] = $s;
         }
         $out = array_values($byDomain);
-        usort($out, fn ($a, $b) => $a['value'] <=> $b['value']);
+        usort($out, fn ($a, $b) => $a['net'] <=> $b['net']);
 
         return $out;
     }
@@ -357,7 +363,8 @@ class IqotMonitoringService
         ], (array) ($p['sources'] ?? [])));
         // Сводку считаем сами — по очищенным источникам (без перепроверки и дублей поставщика).
         $clean = self::cleanSources($sources);
-        $values = array_column($clean, 'value');
+        // Сводка — без НДС.
+        $values = array_column($clean, 'net');
         $best = $clean[0] ?? null;
         $median = null;
         if ($values !== []) {
@@ -368,7 +375,7 @@ class IqotMonitoringService
         return IqotMonitoringItem::query()->where('client_ref', (string) ($p['client_ref'] ?? ''))->update([
             'last_priced_at' => isset($p['last_priced_at']) ? Carbon::parse($p['last_priced_at']) : null,
             'prices_changed_at' => isset($p['prices_changed_at']) ? Carbon::parse($p['prices_changed_at']) : null,
-            'best_price' => $best['value'] ?? null,
+            'best_price' => $best['net'] ?? null,
             'best_source' => $best === null ? null : (is_numeric($best['price'] ?? null) && (float) $best['price'] > 0 ? 'web' : 'kp'),
             'best_supplier_domain' => $best['domain'] ?? null,
             'best_url' => $best['url'] ?? null,

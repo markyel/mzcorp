@@ -80,6 +80,28 @@ class IqotMonitoringPayloadTest extends TestCase
         $this->assertSame(2, $clean[2]['pages']);   // страница «на перепроверке» не считается
     }
 
+    public function test_prices_are_compared_without_vat(): void
+    {
+        $src = fn (string $domain, ?float $price, ?bool $vat, array $extra = []) => array_merge([
+            'domain' => $domain, 'url' => null, 'price' => $price, 'currency' => 'RUB', 'price_kind' => 'retail', 'status' => 'active',
+            'vat' => $vat, 'flags' => [], 'kp' => null,
+        ], $extra);
+        $clean = IqotMonitoringService::cleanSources([
+            $src('net.ru', 1100, false),                                     // без НДС: 1100
+            $src('gross.ru', 1220, true),                                    // с НДС 22%: 1000 без НДС
+            $src('unknown.ru', 1250, null),                                  // НДС не указан — считаем с НДС: 1024,59
+            $src('kp.ru', null, null, ['price_kind' => 'on_request', 'kp' => ['price' => 1050, 'currency' => 'RUB', 'vat_included' => false]]),
+        ], 22);
+
+        $this->assertSame(['gross.ru', 'unknown.ru', 'kp.ru', 'net.ru'], array_column($clean, 'domain'));
+        $this->assertSame([1000.0, 1024.59, 1050.0, 1100.0], array_column($clean, 'net'));
+        $this->assertSame([true, null, false, false], array_column($clean, 'vat'));
+
+        // Наша цена каталога (с НДС) — тоже без НДС: 1281 → 1050, третье место из пяти, +5% к лучшей.
+        $mon = new \App\Models\IqotMonitoringItem(['sources' => $clean]);
+        $this->assertSame(['our_net' => 1050.0, 'rank' => 3, 'total' => 5, 'delta' => 50.0, 'delta_pct' => 5.0], $mon->comparison(1281));
+    }
+
     public function test_monitoring_api_calls(): void
     {
         Http::fake([

@@ -536,7 +536,7 @@
                             <th class="text-right px-3 py-2">Заявок за 30 дн.</th>
                             <th class="text-right px-3 py-2">Остаток</th>
                             <th class="text-right px-3 py-2">Цена</th>
-                            <th class="text-left px-3 py-2" title="Мониторинг цен IQOT («Гибрид»): лучшая цена поставщиков с сайтов и из КП. На мониторинг идут позиции с OEM-артикулом">IQOT</th>
+                            <th class="text-left px-3 py-2" title="Мониторинг цен IQOT («Гибрид»): лучшая цена поставщиков с сайтов и из КП, без НДС. На мониторинг идут позиции с OEM-артикулом">IQOT, без НДС</th>
                             <th class="text-left px-3 py-2">Мониторинг</th>
                         </tr>
                     </thead>
@@ -582,7 +582,9 @@
                                         <button type="button" wire:click="toggleCard({{ $p['cid'] }}, 't')" class="text-left" title="Цены поставщиков — в карточке позиции">
                                             <span class="mono font-semibold text-fg-1">{{ number_format((float) $mon->best_price, 0, ',', ' ') }}</span>
                                             <span class="chip {{ $mon->best_source === 'kp' ? 'chip-ok' : 'chip-neutral' }} text-[10px]">{{ $mon->best_source === 'kp' ? 'КП' : 'сайт' }}</span>
-                                            <div class="text-fg-4">мед. {{ $mon->price_median !== null ? number_format((float) $mon->price_median, 0, ',', ' ') : '—' }} · {{ $mon->sources_priced }} пост.</div>
+                                            <div class="text-fg-4">без НДС · мед. {{ $mon->price_median !== null ? number_format((float) $mon->price_median, 0, ',', ' ') : '—' }} · {{ $mon->sources_priced }} пост.</div>
+                                            @php $monCmp = $mon->comparison($p['price']); @endphp
+                                            @if($monCmp['rank'])<div class="{{ $monCmp['delta'] > 0 ? 'text-red-700' : 'text-emerald-700' }}" title="Наша цена каталога без НДС против цен поставщиков без НДС">мы {{ $monCmp['rank'] }}-е из {{ $monCmp['total'] }}</div>@endif
                                         </button>
                                     @elseif($mon && $mon->active)
                                         <span class="{{ in_array($mon->match_status, ['ambiguous', 'rejected'], true) || $mon->import_error ? 'text-amber-700' : 'text-sky-700' }}">{{ $mon->import_error ? 'ошибка загрузки' : (\App\Models\IqotMonitoringItem::MATCH_LABELS[$mon->match_status] ?? 'на мониторинге') }}</span>
