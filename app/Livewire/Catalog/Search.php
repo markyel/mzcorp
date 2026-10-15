@@ -435,14 +435,20 @@ class Search extends Component
     public function analyzeWithIqot(int $catalogItemId, IqotPoolService $pool): void
     {
         abort_unless($this->canIqot, 403);
-        // Режим мониторинга цен: позиция встаёт на мониторинг (нужен OEM-артикул), уходит с ближайшим iqot:monitoring.
+        // Режим мониторинга цен: позиция встаёт на мониторинг (нужен OEM-артикул) и уходит в IQOT сразу.
         $monitoring = app(\App\Services\Iqot\IqotMonitoringService::class);
         if (app_setting('iqot.mode', config('services.iqot.mode', 'monitoring')) === 'monitoring') {
             try {
-                $monitoring->addManual(\App\Models\CatalogItem::query()->findOrFail($catalogItemId));
-                session()->flash('iqot-flash', 'Позиция поставлена на мониторинг цен IQOT — уйдёт в течение часа.');
-            } catch (\RuntimeException $e) {
-                session()->flash('iqot-flash', $e->getMessage());
+                $row = $monitoring->addManual(\App\Models\CatalogItem::query()->findOrFail($catalogItemId));
+                if ($row->sent_at !== null && $row->payload_hash !== null) {
+                    $this->dispatch('toast', type: 'info', message: 'Позиция уже на мониторинге цен IQOT — цены появятся в карточке по мере сбора.');
+
+                    return;
+                }
+                $monitoring->syncItems();
+                $this->dispatch('toast', type: 'success', message: 'Позиция отправлена на мониторинг цен IQOT. Первые цены — обычно в течение нескольких часов.');
+            } catch (\Throwable $e) {
+                $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 300));
             }
 
             return;

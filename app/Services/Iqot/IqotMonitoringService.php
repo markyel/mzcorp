@@ -203,6 +203,9 @@ class IqotMonitoringService
             throw new RuntimeException('У позиции нет OEM-артикула производителя — IQOT нечего искать.');
         }
         $row = IqotMonitoringItem::query()->firstOrNew(['catalog_item_id' => $c->id]);
+        if ($row->exists && $row->active) {
+            return $row;   // уже на мониторинге (например, из «К актуализации») — ничего не меняем
+        }
         $row->fill(['client_ref' => (string) $c->sku, 'source' => IqotMonitoringItem::SOURCE_MANUAL, 'active' => true, 'payload_hash' => null, 'deactivated_at' => null])->save();
 
         return $row;

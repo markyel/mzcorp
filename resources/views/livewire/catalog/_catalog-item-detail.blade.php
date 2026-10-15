@@ -16,6 +16,11 @@
 @php
     $canIqot = $canIqot ?? false;
     $allowIqotAnalyze = $allowIqotAnalyze ?? false;
+    // IQOT: мониторинг цен «Гибрид» и КП по заявкам — для левого блока и «цен рынка» справа.
+    $mkMon = \App\Models\IqotMonitoringItem::query()->where('catalog_item_id', $cat->id)->first();
+    $mkPos = ($iqp ?? null) ?: \App\Models\IqotPosition::query()->where('catalog_item_id', $cat->id)->whereNotNull('report')->first();
+    $mkPos?->setRelation('catalogItem', $cat);
+    $iqotMonitoringMode = app_setting('iqot.mode', config('services.iqot.mode', 'monitoring')) === 'monitoring';
 
     $allBrands = is_array($cat->brands) ? array_values(array_filter($cat->brands, fn ($b) => is_string($b) && trim($b) !== '')) : [];
     $allArticles = is_array($cat->articles) ? array_values(array_filter($cat->articles, fn ($a) => is_string($a) && trim($a) !== '')) : [];
@@ -160,7 +165,32 @@
                     <span>IQOT · цены конкурентов</span>
                     <a href="{{ route('iqot.index') }}" wire:navigate class="text-sky-700 normal-case font-medium">Раздел →</a>
                 </div>
-                @if($iqp && $iqp->hasFreshReport())
+                @if($iqotMonitoringMode)
+                    {{-- Режим мониторинга цен: статус мониторинга; поставить — только то, чего на нём нет. --}}
+                    @if($mkMon && $mkMon->active)
+                        <div class="px-3.5 py-2.5 text-[12px]">
+                            <div class="text-emerald-700 font-medium">На мониторинге цен</div>
+                            <div class="text-fg-3 text-[11.5px] mt-0.5">
+                                {{ $mkMon->best_price !== null ? 'лучшая без НДС '.number_format((float) $mkMon->best_price, 0, ',', ' ').' ₽ · поставщиков '.$mkMon->sources_priced : (\App\Models\IqotMonitoringItem::MATCH_LABELS[$mkMon->match_status] ?? 'отправлена').', цен пока нет' }}
+                                {{ $mkMon->prices_synced_at ? ' · '.$mkMon->prices_synced_at->format('d.m H:i') : '' }}
+                            </div>
+                            <div class="text-fg-4 text-[11px] mt-0.5">подробно — «IQOT · цены рынка» справа</div>
+                        </div>
+                    @elseif($cat->oemForExternal() === null)
+                        <div class="px-3.5 py-2.5 text-[11.5px] text-fg-3">Нет OEM-артикула производителя — IQOT нечего искать, на мониторинг не ставим.</div>
+                    @else
+                        <div class="px-3.5 py-2.5 flex items-center justify-between gap-2">
+                            <span class="text-[11.5px] text-fg-3">{{ $mkMon ? 'Снята с мониторинга' : 'Не на мониторинге цен' }}</span>
+                            @if($allowIqotAnalyze)
+                                <button type="button" wire:click="analyzeWithIqot({{ $cat->id }})" wire:loading.attr="disabled" wire:target="analyzeWithIqot({{ $cat->id }})"
+                                        class="inline-flex items-center gap-1 h-7 px-2.5 rounded-md bg-[var(--accent)] text-fg-on-accent text-[11.5px] font-medium whitespace-nowrap">
+                                    <span wire:loading.remove wire:target="analyzeWithIqot({{ $cat->id }})">Поставить на мониторинг</span>
+                                    <span wire:loading wire:target="analyzeWithIqot({{ $cat->id }})">Отправляем…</span>
+                                </button>
+                            @endif
+                        </div>
+                    @endif
+                @elseif($iqp && $iqp->hasFreshReport())
                     <div class="flex justify-between items-baseline px-3.5 py-2 border-b border-border-subtle text-[12.5px]">
                         <div class="text-fg-3 text-[12px] font-medium">Мин. цена (IQOT)</div>
                         <div class="mono text-[14px] font-semibold text-emerald-700">{{ $iqp->report_min_price !== null ? number_format((float) $iqp->report_min_price, 2, ',', ' ') . ' ₽' : '—' }}</div>
@@ -293,11 +323,6 @@
 
         {{-- IQOT · цены рынка: мониторинг «Гибрид» + КП по заявкам, без НДС (App\Services\Iqot\IqotMarket). --}}
         @if($withMarket ?? true)
-            @php
-                $mkMon = \App\Models\IqotMonitoringItem::query()->where('catalog_item_id', $cat->id)->first();
-                $mkPos = ($iqp ?? null) ?: \App\Models\IqotPosition::query()->where('catalog_item_id', $cat->id)->whereNotNull('report')->first();
-                $mkPos?->setRelation('catalogItem', $cat);
-            @endphp
             @if($mkMon || $mkPos)
                 <div class="mt-3">@include('livewire.iqot._market', ['market' => \App\Services\Iqot\IqotMarket::for($cat, $mkPos, $mkMon), 'mon' => $mkMon, 'pos' => $mkPos])</div>
             @endif
