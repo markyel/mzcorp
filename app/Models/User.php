@@ -105,6 +105,7 @@ class User extends Authenticatable
             'mail_bulkbar_pinned' => 'boolean',
             // Участник пилота QuoteParts (см. App\Services\QuoteParts\QuotePartsPilot).
             'quoteparts_pilot' => 'boolean',
+            'quoteparts_mirror' => 'boolean',
             'updates_seen_at' => 'datetime',
             'password' => 'hashed',
         ];

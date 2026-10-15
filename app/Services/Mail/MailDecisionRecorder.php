@@ -22,6 +22,7 @@ class MailDecisionRecorder
     /** @var array<string, array{0:string,1:string}> код → [исход, подпись] */
     public const STAGES = [
         'system_notification' => ['skipped', 'Служебное уведомление MyLift'],
+        'quoteparts_mirror' => ['supplier', 'Копия ответа поставщика из QuoteParts (дублирование переписки)'],
         'rfq_inbox' => ['supplier', 'Ящик rfq@: копия переписки с поставщиком'],
         'outbound' => ['outbound', 'Наше исходящее письмо'],
         'not_inbound' => ['skipped', 'Не входящее письмо'],

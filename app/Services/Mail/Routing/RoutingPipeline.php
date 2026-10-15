@@ -15,6 +15,7 @@ use App\Services\Mail\Routing\Handlers\LoopForwardHandler;
 use App\Services\Mail\Routing\Handlers\NotInboundHandler;
 use App\Services\Mail\Routing\Handlers\OutboundHandler;
 use App\Services\Mail\Routing\Handlers\ProcurementMailboxHandler;
+use App\Services\Mail\Routing\Handlers\QuotePartsMirrorHandler;
 use App\Services\Mail\Routing\Handlers\RfqInboxHandler;
 use App\Services\Mail\Routing\Handlers\SupplierReplyHandler;
 use App\Services\Mail\Routing\Handlers\SystemNotificationHandler;
@@ -34,6 +35,8 @@ final class RoutingPipeline
     /** @var list<class-string<InboundRoutingHandler>> */
     public const HANDLERS = [
         SystemNotificationHandler::class,
+        // Копии ответов поставщиков из QuoteParts (режим дублирования): не заявки.
+        QuotePartsMirrorHandler::class,
         RfqInboxHandler::class,
         OutboundHandler::class,
         NotInboundHandler::class,

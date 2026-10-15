@@ -812,6 +812,7 @@
                             <span class="text-[12px] text-fg-3">Ответить до</span>
                             <input type="date" wire:model="qpReplyBy" class="h-[28px] px-2 border border-border rounded bg-surface text-[12px] outline-none focus:border-sky-500">
                         </div>
+                        <div class="pt-1.5">@include('livewire.quote-parts._mirror-toggle', ['model' => 'qpMirror'])</div>
                     </div>
                 @else
                 @foreach($this->previewLanguages as $blk)

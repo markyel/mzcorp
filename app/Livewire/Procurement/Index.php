@@ -174,6 +174,9 @@ class Index extends Component
     /** Срок ответа для запроса через QuoteParts. */
     public string $qpReplyBy = '';
 
+    /** Дублировать переписку QuoteParts на почту автора (последний выбор пользователя). */
+    public bool $qpMirror = false;
+
     public function mount(): void
     {
         abort_unless(
@@ -184,6 +187,7 @@ class Index extends Component
             403,
         );
         $this->qpReplyBy = now()->addDays(7)->toDateString();
+        $this->qpMirror = (bool) auth()->user()?->quoteparts_mirror;
     }
 
     #[Computed]
@@ -232,7 +236,7 @@ class Index extends Component
         }
 
         try {
-            $rfq = $service->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user());
+            $rfq = $service->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user(), $this->qpMirror);
         } catch (Throwable $e) {
             $this->addError('send', mb_substr($e->getMessage(), 0, 400));
 

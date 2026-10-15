@@ -71,6 +71,8 @@
                         <input type="text" wire:model="message" placeholder="Сообщение поставщикам (по-английски, необязательно)" class="{{ $inputCls }} flex-1 min-w-[240px]">
                     </div>
 
+                    @include('livewire.quote-parts._mirror-toggle', ['model' => 'mirror'])
+
                     @if($error)<div class="text-red-700 text-[12.5px]">{{ $error }}</div>@endif
 
                     <div class="flex gap-2">

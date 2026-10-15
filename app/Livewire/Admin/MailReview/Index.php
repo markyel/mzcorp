@@ -142,7 +142,9 @@ class Index extends Component
             ->where('category', EmailCategory::Irrelevant->value)
             // Служебные уведомления MyLift (поддержка) — не для ревью.
             // jsonb_exists вместо оператора `?` — тот конфликтует с PDO-плейсхолдерами.
-            ->whereRaw("not coalesce(jsonb_exists(headers, 'x_mylift_system_notification'), false)");
+            ->whereRaw("not coalesce(jsonb_exists(headers, 'x_mylift_system_notification'), false)")
+            // Копии ответов поставщиков из QuoteParts — переписка с поставщиком, не для ревью.
+            ->whereRaw("not coalesce(jsonb_exists(headers, 'x_quoteparts_mirror'), false)");
 
         $since = match ($this->window) {
             'today' => now()->subDay(),
