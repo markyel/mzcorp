@@ -396,7 +396,7 @@
                                                     @if($of['valid_until'])<span class="text-fg-4 text-[11px]">до {{ $of['valid_until'] }}</span>@endif
                                                     @if(! empty($of['variant']))<span class="chip chip-sky text-[10.5px]">{{ $of['variant'] }}</span>@endif
                                                     @if(! empty($of['note']))<span class="text-fg-3 text-[11px]" title="{{ $of['note'] }}">{{ \Illuminate\Support\Str::limit($of['note'], 60) }}</span>@endif
-                                                    @foreach($of['photos'] ?? [] as $ph)<a href="{{ $ph }}" target="_blank" class="text-sky-700 hover:underline text-[11px]">📷{{ count($of['photos']) > 1 ? $loop->iteration : '' }}</a>@endforeach
+                                                    @php $__g = collect($of['photos'] ?? [])->values()->map(fn ($u, $i) => ['src' => $u, 'name' => 'Фото '.($i + 1), 'dl' => $u])->all(); @endphp @foreach($__g as $__i => $ph)<a href="{{ $ph['src'] }}" x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['items' => $__g, 'index' => $__i]) }})" class="text-sky-700 hover:underline text-[11px]">📷{{ count($__g) > 1 ? $__i + 1 : '' }}</a>@endforeach
                                                     {{-- Отклонение от запрошенного — разбор руками. --}}
                                                     @if(($of['review'] ?? null) === 'pending')
                                                         <span class="chip chip-warn text-[10.5px]">на разборе</span>
@@ -483,6 +483,14 @@
                         <span class="text-fg-3">регулярный спрос без наличия</span></div>
                     <div><span class="text-[22px] font-semibold text-sky-700 mono">{{ $refreshSum['monitored'] }}</span>
                         <span class="text-fg-3">уже на мониторинге</span></div>
+                    @php $iqs = $this->iqotMonitoringSummary; @endphp
+                    @if($iqs['enabled'] || $iqs['on'] > 0)
+                        <div title="Мониторинг цен IQOT «Гибрид»: цены с сайтов поставщиков и КП по почте. Синхронизация раз в час">
+                            <span class="text-[22px] font-semibold text-fg-1 mono">{{ $iqs['on'] }}</span>
+                            <span class="text-fg-3">в IQOT, с ценами <b class="text-fg-1">{{ $iqs['priced'] }}</b></span>
+                            @if($iqs['no_oem'] > 0)<span class="text-fg-4"> · без OEM (не отправляем): {{ $iqs['no_oem'] }}</span>@endif
+                        </div>
+                    @endif
                 </div>
                 <div class="text-[11.5px] text-fg-4 mt-2">
                     Позиции с неактуальной ценой, которые спрашивали за последние
@@ -528,11 +536,12 @@
                             <th class="text-right px-3 py-2">Заявок за 30 дн.</th>
                             <th class="text-right px-3 py-2">Остаток</th>
                             <th class="text-right px-3 py-2">Цена</th>
+                            <th class="text-left px-3 py-2" title="Мониторинг цен IQOT («Гибрид»): лучшая цена поставщиков с сайтов и из КП. На мониторинг идут позиции с OEM-артикулом">IQOT</th>
                             <th class="text-left px-3 py-2">Мониторинг</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @php $refRows = array_slice($this->refreshList, 0, $perPage); $askedGroups = $this->askedGroupsFor(array_column($refRows, 'cid')); @endphp
+                        @php $refRows = array_slice($this->refreshList, 0, $perPage); $askedGroups = $this->askedGroupsFor(array_column($refRows, 'cid')); $iqotMon = $this->iqotMonitoringFor(array_column($refRows, 'cid')); @endphp
                         @forelse($refRows as $p)
                             <tr wire:key="ref-{{ $p['cid'] }}" class="border-b border-border-subtle hover:bg-hover">
                                 <td class="px-3 py-2">
@@ -567,6 +576,22 @@
                                     {{ $p['stock'] > 0 ? $p['stock'] : '—' }}
                                 </td>
                                 <td class="px-3 py-2 text-right mono text-fg-3">{{ $p['price'] ? number_format((float) $p['price'], 0, ',', ' ') : '—' }}</td>
+                                <td class="px-3 py-2 text-[11.5px] whitespace-nowrap">
+                                    @php $im = $iqotMon[$p['cid']] ?? ['row' => null, 'oem' => false]; $mon = $im['row']; @endphp
+                                    @if($mon && $mon->active && $mon->best_price !== null)
+                                        <button type="button" wire:click="toggleCard({{ $p['cid'] }}, 't')" class="text-left" title="Цены поставщиков — в карточке позиции">
+                                            <span class="mono font-semibold text-fg-1">{{ number_format((float) $mon->best_price, 0, ',', ' ') }}</span>
+                                            <span class="chip {{ $mon->best_source === 'kp' ? 'chip-ok' : 'chip-neutral' }} text-[10px]">{{ $mon->best_source === 'kp' ? 'КП' : 'сайт' }}</span>
+                                            <div class="text-fg-4">мед. {{ $mon->price_median !== null ? number_format((float) $mon->price_median, 0, ',', ' ') : '—' }} · {{ $mon->sources_priced }} ист.</div>
+                                        </button>
+                                    @elseif($mon && $mon->active)
+                                        <span class="{{ in_array($mon->match_status, ['ambiguous', 'rejected'], true) || $mon->import_error ? 'text-amber-700' : 'text-sky-700' }}">{{ $mon->import_error ? 'ошибка загрузки' : (\App\Models\IqotMonitoringItem::MATCH_LABELS[$mon->match_status] ?? 'на мониторинге') }}</span>
+                                    @elseif(! $im['oem'])
+                                        <span class="text-fg-4" title="Нет артикула производителя (OEM): IQOT нечего искать, на мониторинг не ставим">нет OEM</span>
+                                    @else
+                                        <span class="text-fg-4" title="Уйдёт на мониторинг с ближайшей синхронизацией (раз в час)">в очереди</span>
+                                    @endif
+                                </td>
                                 <td class="px-3 py-2 text-[11.5px]">
                                     @if($p['monitored_until'])
                                         <span class="text-sky-700">до {{ \Illuminate\Support\Carbon::parse($p['monitored_until'])->format('d.m.Y') }}</span>
@@ -577,14 +602,15 @@
                             </tr>
                             @if($this->isCardOpen($p['cid'], 't') && ($card = $this->productCards[$p['cid']] ?? null))
                                 <tr wire:key="ref-card-{{ $p['cid'] }}" class="border-b border-border-subtle bg-surface-2">
-                                    <td colspan="9" class="px-4 py-2.5">
+                                    <td colspan="10" class="px-4 py-2.5">
+                                        @if($mon = ($iqotMon[$p['cid']]['row'] ?? null))@include('livewire.iqot._monitoring-sources', ['mon' => $mon])@endif
                                         @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false, 'withSupplyHistory' => false])
                                         @include('livewire.suppliers._catalog-supplier-history', ['history' => $card['history']])
                                     </td>
                                 </tr>
                             @endif
                         @empty
-                            <tr><td colspan="9" class="px-3 py-10 text-center text-fg-3 text-[13px]">
+                            <tr><td colspan="10" class="px-3 py-10 text-center text-fg-3 text-[13px]">
                                 {{ trim($search) !== '' ? 'Ничего не найдено.' : 'Нет позиций с неактуальной ценой и спросом за последние 30 дней.' }}
                             </td></tr>
                         @endforelse

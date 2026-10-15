@@ -194,6 +194,72 @@ class IqotApiService
         );
     }
 
+    /* ------------------------- Мониторинг цен (/monitoring) ------------------------- */
+
+    /**
+     * Создать программу мониторинга (статус draft до загрузки позиций и запуска).
+     *
+     * @param  array{name:string, price_mode?:string, target_freshness_days?:int, site_refresh_days?:int}  $fields
+     */
+    public function createMonitoringProgram(array $fields): array
+    {
+        return $this->unwrap($this->http()->post('/monitoring/programs', $fields), 'createMonitoringProgram');
+    }
+
+    public function monitoringProgram(string $programId): array
+    {
+        return $this->unwrap($this->http()->get('/monitoring/programs/'.$programId), 'monitoringProgram');
+    }
+
+    /** @param  array{name?:string, status?:string, price_mode?:string, target_freshness_days?:int, site_refresh_days?:int}  $fields */
+    public function updateMonitoringProgram(string $programId, array $fields): array
+    {
+        return $this->unwrap($this->http()->patch('/monitoring/programs/'.$programId, $fields), 'updateMonitoringProgram');
+    }
+
+    /**
+     * Загрузить/обновить позиции (upsert по client_ref, до 5 000 за вызов). Асинхронно: ответ с import_id.
+     *
+     * @param  list<array<string, mixed>>  $items
+     */
+    public function upsertMonitoringItems(string $programId, array $items, string $idempotencyKey): array
+    {
+        if ($items === [] || count($items) > 5000) {
+            throw new RuntimeException('IQOT monitoring: от 1 до 5000 позиций за вызов.');
+        }
+
+        return $this->unwrap(
+            $this->http()->withHeaders(['Idempotency-Key' => mb_substr($idempotencyKey, 0, 128)])
+                ->post('/monitoring/programs/'.$programId.'/items', ['items' => $items]),
+            'upsertMonitoringItems',
+        );
+    }
+
+    public function monitoringImport(string $programId, string $importId): array
+    {
+        return $this->unwrap($this->http()->get('/monitoring/programs/'.$programId.'/imports/'.$importId), 'monitoringImport');
+    }
+
+    /**
+     * Позиции программы и их сопоставление (страница). @return array{items: list<array<string, mixed>>, next_cursor: mixed}
+     */
+    public function monitoringItems(string $programId, ?string $matchStatus = null, mixed $cursor = null, int $limit = 1000): array
+    {
+        return $this->unwrap($this->http()->get('/monitoring/programs/'.$programId.'/items', array_filter([
+            'match_status' => $matchStatus, 'cursor' => $cursor, 'limit' => $limit,
+        ], fn ($v) => $v !== null)), 'monitoringItems');
+    }
+
+    /**
+     * Цены (синхронизация, страница). @return array{items: list<array<string, mixed>>, next_cursor: mixed, server_time: ?string}
+     */
+    public function monitoringPrices(string $programId, ?string $updatedSince = null, mixed $cursor = null, int $limit = 500): array
+    {
+        return $this->unwrap($this->http()->get('/monitoring/programs/'.$programId.'/prices', array_filter([
+            'updated_since' => $updatedSince, 'cursor' => $cursor, 'limit' => $limit,
+        ], fn ($v) => $v !== null)), 'monitoringPrices');
+    }
+
     /**
      * Успех → array, иначе → IqotApiException с кодом и request_id.
      */

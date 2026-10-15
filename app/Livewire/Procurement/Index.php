@@ -1221,6 +1221,27 @@ class Index extends Component
         ];
     }
 
+    /**
+     * Мониторинг цен IQOT по списку «К актуализации»: на мониторинге, с ценами, без OEM.
+     *
+     * @return array{on:int, priced:int, no_oem:int, enabled:bool}
+     */
+    #[Computed]
+    public function iqotMonitoringSummary(): array
+    {
+        $cids = array_column($this->refreshList, 'cid');
+        $rows = \App\Models\IqotMonitoringItem::query()->whereIn('catalog_item_id', $cids)->where('active', true)->get(['id', 'best_price']);
+        $noOem = CatalogItem::query()->whereIn('id', $cids)->get(['id', 'sku', 'brand_article', 'articles'])
+            ->filter(fn (CatalogItem $c) => $c->oemForExternal() === null)->count();
+
+        return [
+            'on' => $rows->count(),
+            'priced' => $rows->whereNotNull('best_price')->count(),
+            'no_oem' => $noOem,
+            'enabled' => app(\App\Services\Iqot\IqotMonitoringService::class)->enabled(),
+        ];
+    }
+
     /** Вкладка «Мониторинг цен»: активные и выключенные мониторинги. */
     #[Computed]
     public function monitors()
@@ -1316,6 +1337,27 @@ class Index extends Component
 
     /** @var array<int, array{groups: array<string, int>, other: int}> */
     private array $askedGroupsCache = [];
+
+    /**
+     * Мониторинг цен IQOT по строкам «К актуализации»: строка мониторинга (если есть) и есть ли у
+     * позиции OEM — без него позицию на мониторинг не ставим.
+     *
+     * @param  list<int>  $cids
+     * @return array<int, array{row: ?\App\Models\IqotMonitoringItem, oem: bool}>
+     */
+    public function iqotMonitoringFor(array $cids): array
+    {
+        $rows = \App\Models\IqotMonitoringItem::query()->whereIn('catalog_item_id', $cids)->get()->keyBy('catalog_item_id');
+        $oem = CatalogItem::query()->whereIn('id', $cids)->get(['id', 'sku', 'brand_article', 'articles'])
+            ->mapWithKeys(fn (CatalogItem $c) => [$c->id => $c->oemForExternal() !== null]);
+
+        $out = [];
+        foreach ($cids as $cid) {
+            $out[$cid] = ['row' => $rows->get($cid), 'oem' => (bool) ($oem[$cid] ?? false)];
+        }
+
+        return $out;
+    }
 
     /**
      * Из каких групп уже спрашивали поставщиков по позициям: группа → сколько

@@ -435,6 +435,18 @@ class Search extends Component
     public function analyzeWithIqot(int $catalogItemId, IqotPoolService $pool): void
     {
         abort_unless($this->canIqot, 403);
+        // Режим мониторинга цен: позиция встаёт на мониторинг (нужен OEM-артикул), уходит с ближайшим iqot:monitoring.
+        $monitoring = app(\App\Services\Iqot\IqotMonitoringService::class);
+        if (app_setting('iqot.mode', config('services.iqot.mode', 'monitoring')) === 'monitoring') {
+            try {
+                $monitoring->addManual(\App\Models\CatalogItem::query()->findOrFail($catalogItemId));
+                session()->flash('iqot-flash', 'Позиция поставлена на мониторинг цен IQOT — уйдёт в течение часа.');
+            } catch (\RuntimeException $e) {
+                session()->flash('iqot-flash', $e->getMessage());
+            }
+
+            return;
+        }
         $pool->enqueueCatalogItem($catalogItemId, auth()->id());
         unset($this->iqotByCatalogId);
         session()->flash('iqot-flash', 'Позиция добавлена в очередь IQOT-анализа.');

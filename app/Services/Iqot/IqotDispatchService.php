@@ -37,6 +37,11 @@ class IqotDispatchService
         if (! $this->api->isConfigured()) {
             return ['skipped' => 'not_configured'];
         }
+        // Режим мониторинга цен («Гибрид», iqot:monitoring): новые заявки на КП пачками не шлём.
+        // Уже отправленные дорабатывает iqot:poll.
+        if (app_setting('iqot.mode', config('services.iqot.mode', 'monitoring')) === 'monitoring') {
+            return ['skipped' => 'monitoring_mode'];
+        }
 
         $this->pool->refreshPoolFromLostQuotes();
 

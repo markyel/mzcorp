@@ -1075,6 +1075,14 @@ return [
         ],
         'enabled' => (bool) env('IQOT_ENABLED', false),
         'api_key' => env('IQOT_API_KEY', ''),
+        // Режим работы: monitoring — мониторинг цен «Гибрид» по «К актуализации»
+        // (iqot:monitoring); submissions — прежние заявки на КП пачками (iqot:dispatch).
+        'mode' => env('IQOT_MODE', 'monitoring'),
+        'monitoring' => [
+            'name' => env('IQOT_MONITORING_NAME', 'mzCorp — позиции к актуализации'),
+            'target_freshness_days' => (int) env('IQOT_MONITORING_FRESHNESS_DAYS', 30),
+            'site_refresh_days' => (int) env('IQOT_MONITORING_SITE_REFRESH_DAYS', 14),
+        ],
         // Дневной лимит позиций на анализ (защита баланса). 0 = не отправлять.
         'daily_limit' => (int) env('IQOT_DAILY_LIMIT', 50),
         // Число заходов крона в день (окно 8–18). daily_limit делится на это

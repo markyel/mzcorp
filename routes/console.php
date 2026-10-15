@@ -276,6 +276,14 @@ Schedule::command('iqot:dispatch')
     ->onOneServer()
     ->runInBackground();
 
+// IQOT: мониторинг цен «Гибрид» — «К актуализации» (с OEM) на мониторинг, цены к нам.
+// IQOT просит забирать цены не чаще раза в час. No-op, если iqot.mode ≠ monitoring.
+Schedule::command('iqot:monitoring')
+    ->hourlyAt(20)
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // IQOT: smart-поллинг submissions (только те, у кого X-Next-Check-After прошёл)
 // + раскладка готовых отчётов по позициям каталога. Ежечасно.
 Schedule::command('iqot:poll')
