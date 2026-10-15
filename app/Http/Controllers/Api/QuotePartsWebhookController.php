@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Jobs\QuoteParts\HandleQuotePartsConversationJob;
 use App\Jobs\QuoteParts\HandleQuotePartsEventJob;
 use App\Jobs\QuoteParts\HandleQuotePartsPriceListJob;
+use App\Jobs\QuoteParts\SyncQuotePartsDeclinesJob;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -49,6 +50,13 @@ class QuotePartsWebhookController extends Controller
         // Поставщик прислал прайс: копия офферов и уведомление снабжению.
         if ($event === 'price_list.matched' && is_int($data['price_list_id'] ?? null)) {
             HandleQuotePartsPriceListJob::dispatch(array_intersect_key($data, array_flip(['price_list_id', 'supplier', 'stats'])));
+
+            return response()->json(['ok' => true], 202);
+        }
+
+        // Поставщик отметил позиции «не сможем предложить» или вернул их — копия для «Снабжения».
+        if ($event === 'supplier.items_declined') {
+            SyncQuotePartsDeclinesJob::dispatch();
 
             return response()->json(['ok' => true], 202);
         }

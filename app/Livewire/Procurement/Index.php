@@ -1621,6 +1621,23 @@ class Index extends Component
             $out[(int) $cid] = $entry;
         }
 
+        // «Не сможем предложить» из кабинета QuoteParts — отказ поставщика по позиции.
+        $declines = \App\Models\QuotePartsItemDecline::query()->whereIn('catalog_item_id', $cids)->inForce()->get()->groupBy('catalog_item_id');
+        foreach ($declines as $cid => $rows) {
+            $entry = $out[(int) $cid] ?? ['state' => 'refused', 'pending_count' => 0, 'best_price' => null, 'best_currency' => null, 'best_supplier' => null, 'best_valid_until' => null, 'offers' => []];
+            foreach ($rows as $d) {
+                $entry['offers'][] = [
+                    'supplier' => (string) ($d->supplier_name ?: $d->supplier_key).' · QuoteParts',
+                    'outcome' => 'refused',
+                    'price' => null,
+                    'currency' => null,
+                    'valid_until' => null,
+                    'refusal' => 'не поставляет'.($d->reason ? ': '.$d->reason : ''),
+                ];
+            }
+            $out[(int) $cid] = $entry;
+        }
+
         return $out;
     }
 

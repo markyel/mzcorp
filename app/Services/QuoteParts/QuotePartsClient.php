@@ -328,6 +328,21 @@ class QuotePartsClient
         return $response->json('offers', []);
     }
 
+    /**
+     * Отметки поставщиков «не сможем предложить» (в силе и снятые), изменённые с момента $since.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function itemDeclines(?string $since = null): array
+    {
+        $response = $this->http()->get('/api/v1/item-declines', array_filter(['since' => $since]));
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts item declines: HTTP '.$response->status());
+        }
+
+        return $response->json('declines', []);
+    }
+
     /** @return list<array<string, mixed>> */
     public function priceLists(): array
     {

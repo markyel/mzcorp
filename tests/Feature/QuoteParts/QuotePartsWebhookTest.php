@@ -69,6 +69,13 @@ class QuotePartsWebhookTest extends TestCase
         $this->postJson('/api/quoteparts/resolve', ['rows' => [['ref' => 1, 'our_code' => 'M28291']]])->assertStatus(401);
     }
 
+    public function test_items_declined_by_a_supplier_queue_the_declines_sync(): void
+    {
+        $this->deliver(['event' => 'supplier.items_declined', 'supplier' => 'org:7'])->assertStatus(202);
+
+        Queue::assertPushed(\App\Jobs\QuoteParts\SyncQuotePartsDeclinesJob::class);
+    }
+
     public function test_unknown_event_is_refused(): void
     {
         $this->deliver(['event' => 'item.deleted', 'rfq_id' => 42])->assertStatus(422);

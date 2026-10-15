@@ -3,6 +3,7 @@
 namespace App\Services\QuoteParts;
 
 use App\Models\CatalogItem;
+use App\Models\QuotePartsItemDecline;
 use App\Models\QuotePartsOffer;
 use App\Models\User;
 use Illuminate\Support\Collection;
@@ -181,6 +182,38 @@ class QuotePartsPriceService
         }
 
         return count($offers);
+    }
+
+    /**
+     * Копия отметок поставщиков «не сможем предложить» — изменения с последней синхронизации.
+     *
+     * @return int сколько записано
+     */
+    public function syncDeclines(?string $since = null): int
+    {
+        $since ??= QuotePartsItemDecline::query()->max('remote_updated_at');
+        $declines = $this->client->itemDeclines($since ? \Illuminate\Support\Carbon::parse($since)->subMinute()->toIso8601String() : null);
+        if ($declines === []) {
+            return 0;
+        }
+
+        $names = app(QuotePartsRfqService::class)->supplierNames([(object) ['snapshot' => ['suppliers' => collect($declines)->map(fn ($d) => ['external_id' => $d['supplier'] ?? null])->all()]]]);
+        $catalog = CatalogItem::query()->whereIn('sku', collect($declines)->pluck('item_code')->filter()->unique())->pluck('id', 'sku');
+
+        foreach ($declines as $d) {
+            QuotePartsItemDecline::query()->updateOrCreate(['remote_id' => (int) $d['id']], [
+                'catalog_item_id' => $catalog[$d['item_code'] ?? ''] ?? null,
+                'sku' => $d['item_code'] ?? null,
+                'supplier_key' => $d['supplier'] ?? null,
+                'supplier_name' => $names[$d['supplier'] ?? ''] ?? ($d['supplier'] ?? null),
+                'reason' => $d['reason'] ?? null,
+                'declined_at' => $d['declined_at'] ?? null,
+                'restored_at' => $d['restored_at'] ?? null,
+                'remote_updated_at' => $d['updated_at'] ?? now(),
+            ]);
+        }
+
+        return count($declines);
     }
 
     public function accept(int $priceListId, int $rowId, ?string $code, User $by): array
