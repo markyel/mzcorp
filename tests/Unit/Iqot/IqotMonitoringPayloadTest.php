@@ -54,6 +54,32 @@ class IqotMonitoringPayloadTest extends TestCase
         $this->assertNull($this->item(['brand_article' => null, 'articles' => [null, 'M17913']])->oemForExternal());
     }
 
+    public function test_only_confirmed_prices_one_per_supplier(): void
+    {
+        $src = fn (string $domain, ?float $price, array $extra = []) => array_merge([
+            'type' => 'site', 'domain' => $domain, 'url' => 'https://'.$domain.'/p/'.(int) $price, 'price' => $price, 'currency' => 'RUB',
+            'price_kind' => $price === null ? 'on_request' : 'retail', 'status' => 'active', 'flags' => ['web_price' => $price !== null], 'kp' => null,
+        ], $extra);
+        $clean = IqotMonitoringService::cleanSources([
+            $src('eurasialift.ru', 200, ['status' => 'suspicious']),         // скачок цены — перепроверяется
+            $src('sematic.su', 4785),
+            $src('eurasialift.ru', 4785),
+            $src('dvc.ru', 6000),
+            $src('dvc.ru', 6000),
+            $src('sematic.su', 10000, ['flags' => ['email_confirmed' => true]]),
+            $src('eurasialift.ru', 10000),
+            $src('lift-house.ru', null),                                    // ни цены, ни КП
+            $src('lzpro.ru', null, ['kp' => ['price' => 2950, 'currency' => 'RUB']]),   // «по запросу», цена из КП
+            $src('opt.ru', 3000, ['price_kind' => 'wholesale_tier']),
+        ]);
+
+        $this->assertSame(['lzpro.ru', 'sematic.su', 'eurasialift.ru', 'dvc.ru'], array_column($clean, 'domain'));
+        $this->assertSame([2950.0, 4785.0, 4785.0, 6000.0], array_column($clean, 'value'));
+        $this->assertSame(2, $clean[1]['pages']);
+        $this->assertTrue($clean[1]['flags']['email_confirmed']);   // подтверждение с другой страницы того же поставщика
+        $this->assertSame(2, $clean[2]['pages']);   // страница «на перепроверке» не считается
+    }
+
     public function test_monitoring_api_calls(): void
     {
         Http::fake([

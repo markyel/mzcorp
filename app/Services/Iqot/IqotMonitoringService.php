@@ -282,11 +282,63 @@ class IqotMonitoringService
         return $n;
     }
 
+    /**
+     * Источники, которые показываем и по которым считаем сводку: только подтверждённые цены и
+     * по одному на поставщика.
+     *  - отбрасываем «на перепроверке» (status=suspicious: резкий скачок цены), источники без цены
+     *    сайта и без КП, оптовые уровни и не рубли — так же сопоставимые цены считает и IQOT;
+     *  - цена источника — цена сайта, а если её нет («по запросу») — цена КП;
+     *  - несколько страниц одного поставщика (домен) — одна строка с его лучшей ценой; признаки
+     *    «КП» и «подтверждена по почте» берём с любой из его страниц.
+     *
+     * @param  list<array<string, mixed>>  $sources  нормализованные источники (см. applyPrice)
+     * @return list<array<string, mixed>> по возрастанию цены, у каждого поле 'value'
+     */
+    public static function cleanSources(array $sources): array
+    {
+        $byDomain = [];
+        foreach ($sources as $s) {
+            if (($s['status'] ?? 'active') !== 'active' || ($s['price_kind'] ?? null) === 'wholesale_tier') {
+                continue;
+            }
+            $kpPrice = is_numeric($s['kp']['price'] ?? null) && (float) $s['kp']['price'] > 0 && strtoupper((string) ($s['kp']['currency'] ?? 'RUB')) === 'RUB'
+                ? (float) $s['kp']['price'] : null;
+            $sitePrice = is_numeric($s['price'] ?? null) && (float) $s['price'] > 0 && strtoupper((string) ($s['currency'] ?? 'RUB')) === 'RUB'
+                ? (float) $s['price'] : null;
+            $value = $sitePrice ?? $kpPrice;
+            if ($value === null) {
+                continue;
+            }
+            $s['value'] = $value;
+            $domain = mb_strtolower(trim((string) ($s['domain'] ?? ''))) ?: 'url:'.($s['url'] ?? count($byDomain));
+            $prev = $byDomain[$domain] ?? null;
+            $flags = (array) ($s['flags'] ?? []);
+            if ($prev !== null) {
+                $flags['kp'] = ! empty($flags['kp']) || ! empty($prev['flags']['kp']);
+                $flags['email_confirmed'] = ! empty($flags['email_confirmed']) || ! empty($prev['flags']['email_confirmed']);
+                $s['kp'] ??= $prev['kp'] ?? null;
+                if ($prev['value'] <= $value) {
+                    $prev['flags'] = $flags;
+                    $prev['kp'] ??= $s['kp'];
+                    $prev['pages'] = ($prev['pages'] ?? 1) + 1;
+                    $byDomain[$domain] = $prev;
+
+                    continue;
+                }
+                $s['pages'] = ($prev['pages'] ?? 1) + 1;
+            }
+            $s['flags'] = $flags;
+            $byDomain[$domain] = $s;
+        }
+        $out = array_values($byDomain);
+        usort($out, fn ($a, $b) => $a['value'] <=> $b['value']);
+
+        return $out;
+    }
+
     /** @param  array<string, mixed>  $p  позиция из GET …/prices */
     public function applyPrice(array $p): int
     {
-        $best = (array) ($p['best_price'] ?? []);
-        $summary = (array) ($p['summary'] ?? []);
         $sources = array_values(array_map(fn ($s) => [
             'type' => $s['source_type'] ?? null,
             'domain' => $s['supplier_domain'] ?? null,
@@ -303,21 +355,29 @@ class IqotMonitoringService
             'kp' => $s['kp'] ?? null,
             'trust' => $s['site_trust_level'] ?? null,
         ], (array) ($p['sources'] ?? [])));
-        $num = fn ($v) => is_numeric($v) ? (float) $v : null;
+        // Сводку считаем сами — по очищенным источникам (без перепроверки и дублей поставщика).
+        $clean = self::cleanSources($sources);
+        $values = array_column($clean, 'value');
+        $best = $clean[0] ?? null;
+        $median = null;
+        if ($values !== []) {
+            $mid = intdiv(count($values), 2);
+            $median = count($values) % 2 ? $values[$mid] : ($values[$mid - 1] + $values[$mid]) / 2;
+        }
 
         return IqotMonitoringItem::query()->where('client_ref', (string) ($p['client_ref'] ?? ''))->update([
             'last_priced_at' => isset($p['last_priced_at']) ? Carbon::parse($p['last_priced_at']) : null,
             'prices_changed_at' => isset($p['prices_changed_at']) ? Carbon::parse($p['prices_changed_at']) : null,
-            'best_price' => $num($best['price'] ?? null),
-            'best_source' => $best['price_source'] ?? null,
-            'best_supplier_domain' => $best['supplier_domain'] ?? null,
+            'best_price' => $best['value'] ?? null,
+            'best_source' => $best === null ? null : (is_numeric($best['price'] ?? null) && (float) $best['price'] > 0 ? 'web' : 'kp'),
+            'best_supplier_domain' => $best['domain'] ?? null,
             'best_url' => $best['url'] ?? null,
-            'price_min' => $num($summary['min'] ?? null),
-            'price_median' => $num($summary['median'] ?? null),
-            'price_max' => $num($summary['max'] ?? null),
-            'sources_priced' => (int) ($summary['sources_priced'] ?? 0),
-            'has_kp' => collect($sources)->contains(fn ($s) => ! empty($s['flags']['kp'])),
-            'sources' => json_encode($sources, JSON_UNESCAPED_UNICODE),
+            'price_min' => $values !== [] ? min($values) : null,
+            'price_median' => $median,
+            'price_max' => $values !== [] ? max($values) : null,
+            'sources_priced' => count($clean),
+            'has_kp' => collect($clean)->contains(fn ($s) => ! empty($s['flags']['kp'])),
+            'sources' => json_encode($clean, JSON_UNESCAPED_UNICODE),
             'prices_synced_at' => now(),
         ]);
     }

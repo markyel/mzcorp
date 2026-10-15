@@ -582,7 +582,7 @@
                                         <button type="button" wire:click="toggleCard({{ $p['cid'] }}, 't')" class="text-left" title="Цены поставщиков — в карточке позиции">
                                             <span class="mono font-semibold text-fg-1">{{ number_format((float) $mon->best_price, 0, ',', ' ') }}</span>
                                             <span class="chip {{ $mon->best_source === 'kp' ? 'chip-ok' : 'chip-neutral' }} text-[10px]">{{ $mon->best_source === 'kp' ? 'КП' : 'сайт' }}</span>
-                                            <div class="text-fg-4">мед. {{ $mon->price_median !== null ? number_format((float) $mon->price_median, 0, ',', ' ') : '—' }} · {{ $mon->sources_priced }} ист.</div>
+                                            <div class="text-fg-4">мед. {{ $mon->price_median !== null ? number_format((float) $mon->price_median, 0, ',', ' ') : '—' }} · {{ $mon->sources_priced }} пост.</div>
                                         </button>
                                     @elseif($mon && $mon->active)
                                         <span class="{{ in_array($mon->match_status, ['ambiguous', 'rejected'], true) || $mon->import_error ? 'text-amber-700' : 'text-sky-700' }}">{{ $mon->import_error ? 'ошибка загрузки' : (\App\Models\IqotMonitoringItem::MATCH_LABELS[$mon->match_status] ?? 'на мониторинге') }}</span>
