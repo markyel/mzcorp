@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Requests;
 
+use App\Livewire\Concerns\AnswersQuotePartsSuppliers;
 use App\Models\QuotePartsRfq;
 use App\Models\Request as RequestModel;
 use App\Models\RequestItem;
@@ -19,6 +20,8 @@ use Throwable;
  */
 class QuotePartsPanel extends Component
 {
+    use AnswersQuotePartsSuppliers;
+
     public int $requestId;
 
     public bool $open = false;
@@ -161,6 +164,16 @@ class QuotePartsPanel extends Component
         } catch (Throwable $e) {
             $this->dispatch('toast', type: 'error', message: 'QuoteParts не ответил: '.mb_substr($e->getMessage(), 0, 150));
         }
+        unset($this->rfqs);
+    }
+
+    protected function quotePartsRfqForAnswer(int $id): QuotePartsRfq
+    {
+        return QuotePartsRfq::query()->where('request_id', $this->requestId)->findOrFail($id);
+    }
+
+    protected function afterQuotePartsAnswer(): void
+    {
         unset($this->rfqs);
     }
 

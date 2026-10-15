@@ -108,6 +108,30 @@ class QuotePartsRfqService
             ->merge(Supplier::query()->whereIn('id', $supIds)->get(['id', 'name', 'email'])->mapWithKeys(fn ($s) => ['sup:'.$s->id => $s->name ?: $s->email]));
     }
 
+    /**
+     * Ответ поставщику из mzcorp: QuoteParts отправит письмо от MyZip в переписку поставщика.
+     * Поставщик — по порядку в снимке запроса.
+     */
+    public function answer(QuotePartsRfq $rfq, int $supplierIndex, string $text, User $by): QuotePartsRfq
+    {
+        if (! QuotePartsPilot::enabledFor($by)) {
+            throw new RuntimeException('QuoteParts выключен или вы не участник пилота.');
+        }
+        $externalId = $rfq->snapshot['suppliers'][$supplierIndex]['external_id'] ?? null;
+        if ($externalId === null || trim($text) === '') {
+            throw new RuntimeException('Напишите ответ поставщику.');
+        }
+
+        $snapshot = $this->client->answerSupplier($rfq->remote_id, $externalId, trim($text), $by->name);
+        $rfq->forceFill([
+            'snapshot' => $snapshot,
+            'status' => $snapshot['status'] ?? $rfq->status,
+            'synced_at' => now(),
+        ])->save();
+
+        return $rfq;
+    }
+
     public function refresh(QuotePartsRfq $rfq): QuotePartsRfq
     {
         $snapshot = $this->client->rfq($rfq->remote_id);

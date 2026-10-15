@@ -15,7 +15,8 @@
     <div class="overflow-x-auto">
         <table class="w-full text-[12.5px]">
             <tbody>
-                @foreach($snap['suppliers'] ?? [] as $s)
+                @php $canAnswer = $this->canAnswerQuoteParts(); @endphp
+                @foreach($snap['suppliers'] ?? [] as $si => $s)
                     @foreach($s['lines'] ?? [] as $line)
                         <tr class="border-b border-border-subtle align-top">
                             @if($loop->first)
@@ -38,13 +39,53 @@
                                 @else
                                     @php $st = $line['status'] ?? 'pending'; @endphp
                                     <span class="text-[11.5px] {{ $st === 'declined' ? 'text-red-700' : ($st === 'question' ? 'text-amber-700' : 'text-fg-4') }}">
-                                        {{ ['pending' => 'ждём ответа', 'declined' => 'отказ', 'question' => 'вопрос к нам — см. QuoteParts', 'no_answer' => 'нет ответа'][$st] ?? $st }}
+                                        {{ ['pending' => 'ждём ответа', 'declined' => 'отказ', 'question' => 'вопрос к нам', 'no_answer' => 'нет ответа'][$st] ?? $st }}
                                     </span>
                                     @if(! empty($line['decline_reason']))<span class="text-fg-3 text-[11.5px]">«{{ $line['decline_reason'] }}»</span>@endif
                                 @endif
                             </td>
                         </tr>
                     @endforeach
+                    {{-- Вопросы поставщика, переписка и ответ ему (письмом от MyZip в его переписку). --}}
+                    @php $questions = $s['questions'] ?? []; $thread = $s['thread'] ?? []; @endphp
+                    @if($questions !== [] || $thread !== [] || $canAnswer)
+                        <tr class="border-b border-border-subtle">
+                            <td colspan="3" class="px-3 py-2" x-data="{ open: {{ $questions !== [] ? 'true' : 'false' }} }">
+                                @if($questions !== [])
+                                    <div class="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 mb-1.5 text-[12.5px] text-amber-900">
+                                        <span class="font-medium">Поставщик спрашивает:</span>
+                                        <ul class="list-disc pl-5">@foreach($questions as $q)<li>{{ $q['text'] }}</li>@endforeach</ul>
+                                    </div>
+                                @endif
+                                <button type="button" @click="open = !open" class="text-[12px] text-sky-700 hover:underline">
+                                    <span x-text="open ? '▾' : '▸'"></span>
+                                    {{ $thread !== [] ? 'Переписка ('.count($thread).')' : 'Написать поставщику' }}{{ $canAnswer && $thread !== [] ? ' и ответ' : '' }}
+                                </button>
+                                <div x-show="open" x-cloak class="mt-1.5 space-y-1.5">
+                                    @foreach($thread as $m)
+                                        <div wire:key="qpt-{{ $rfq->id }}-{{ $si }}-{{ $loop->index }}"
+                                             class="rounded-md px-2.5 py-1.5 text-[12.5px] {{ $m['direction'] === 'out' ? 'bg-sky-50 border border-sky-200 ml-8' : 'bg-surface-2 border border-border-subtle mr-8' }}">
+                                            <div class="text-[11px] text-fg-3 mb-0.5">
+                                                {{ $m['direction'] === 'out' ? 'Мы' : 'Поставщик' }}{{ $m['who'] ? ' · '.$m['who'] : '' }}
+                                                · {{ $m['at'] ? \Illuminate\Support\Carbon::parse($m['at'])->timezone(config('app.timezone'))->format('d.m.Y H:i') : '' }}
+                                                {{ ! empty($m['auto']) ? '· автоответ' : '' }}
+                                            </div>
+                                            <div class="whitespace-pre-wrap">{{ \Illuminate\Support\Str::limit($m['text'], 1500) }}</div>
+                                        </div>
+                                    @endforeach
+                                    @if($canAnswer)
+                                        <textarea wire:model="qpAnswers.{{ $rfq->id }}.{{ $si }}" rows="3" placeholder="Answer in the supplier's language…"
+                                                  class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
+                                        <div class="flex items-center gap-2">
+                                            <button type="button" wire:click="answerQuotePartsSupplier({{ $rfq->id }}, {{ $si }})" wire:loading.attr="disabled" wire:target="answerQuotePartsSupplier"
+                                                    class="btn btn-sm btn-primary">Отправить поставщику</button>
+                                            <span class="text-[11px] text-fg-4">уйдёт письмом от MyZip в переписку поставщика; позиции «вопрос к нам» снова ждут цен</span>
+                                        </div>
+                                    @endif
+                                </div>
+                            </td>
+                        </tr>
+                    @endif
                 @endforeach
             </tbody>
         </table>

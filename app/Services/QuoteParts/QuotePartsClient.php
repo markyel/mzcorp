@@ -154,6 +154,28 @@ class QuotePartsClient
     }
 
     /**
+     * Наш ответ поставщику по запросу (обычно на его вопрос): письмо в его переписку.
+     *
+     * @return array<string, mixed> обновлённый снимок запроса
+     */
+    public function answerSupplier(int $remoteId, string $externalId, string $text, ?string $authorName): array
+    {
+        $response = $this->http()->post('/api/v1/rfqs/'.$remoteId.'/suppliers/'.rawurlencode($externalId).'/answer', [
+            'text' => $text,
+            'author_name' => $authorName,
+        ]);
+
+        if (in_array($response->status(), [422, 502], true)) {
+            throw new RuntimeException((string) ($response->json('message') ?: collect($response->json('errors', []))->flatten()->implode(' ')) ?: 'QuoteParts не отправил ответ.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts answer: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function rfq(int $remoteId): array

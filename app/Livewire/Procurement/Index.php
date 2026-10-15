@@ -4,6 +4,7 @@ namespace App\Livewire\Procurement;
 
 use App\Services\Supplier\SupplierOrganizationService;
 use App\Enums\Role;
+use App\Livewire\Concerns\AnswersQuotePartsSuppliers;
 use App\Models\CatalogItem;
 use App\Models\IqotPosition;
 use App\Models\PriceMonitor;
@@ -44,6 +45,7 @@ use Throwable;
  */
 class Index extends Component
 {
+    use AnswersQuotePartsSuppliers;
     use WithFileUploads;
     use WithPagination;
 
@@ -200,6 +202,16 @@ class Index extends Component
             ->when($creatorId !== null, fn ($q) => $q->where('created_by_user_id', $creatorId))
             ->where(fn ($q) => $q->where('status', 'open')->orWhere('created_at', '>=', now()->subDays(30)))
             ->with('createdBy:id,name')->latest('id')->limit(30)->get();
+    }
+
+    protected function quotePartsRfqForAnswer(int $id): QuotePartsRfq
+    {
+        return QuotePartsRfq::query()->whereNull('request_id')->findOrFail($id);
+    }
+
+    protected function afterQuotePartsAnswer(): void
+    {
+        unset($this->quotePartsRfqs);
     }
 
     public function refreshQuotePartsRfq(int $id, QuotePartsRfqService $service): void
