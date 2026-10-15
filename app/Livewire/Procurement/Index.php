@@ -1163,7 +1163,7 @@ class Index extends Component
 
     public function setTab(string $t): void
     {
-        $tabs = ['requests', 'refresh', 'monitor', 'exports', ...(QuotePartsPilot::canConverse(auth()->user()) ? ['pricelists'] : [])];
+        $tabs = ['requests', 'refresh', 'offers', 'monitor', 'exports', ...(QuotePartsPilot::canConverse(auth()->user()) ? ['pricelists'] : [])];
         $this->tab = in_array($t, $tabs, true) ? $t : 'requests';
         $this->perPage = self::PER_PAGE;
     }

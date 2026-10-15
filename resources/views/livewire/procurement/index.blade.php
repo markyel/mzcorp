@@ -116,6 +116,7 @@
         $tabs = [
             'requests' => ['⛏ Запросы', null],
             'refresh' => ['💰 К актуализации', $refreshSum['total']],
+            'offers' => ['📥 Предложения поставщиков', null],
             'monitor' => ['🔁 Мониторинг цен', $monSum['active']],
             'exports' => ['📤 Выгрузки цен', null],
             ...(\App\Services\QuoteParts\QuotePartsPilot::canConverse(auth()->user()) ? ['pricelists' => ['📋 Прайсы поставщиков', null]] : []),
@@ -673,6 +674,10 @@
                 </div>
             </div>
         @endif
+    @endif
+
+    @if($tab === 'offers')
+        <livewire:procurement.supplier-offers-feed />
     @endif
 
     @if($tab === 'exports')
