@@ -21,7 +21,8 @@ class SupplyGroupServiceTest extends TestCase
             'russian firm buying in euro' => ['КЛЕМАН ЛИФТС РУС ООО от КЛР-Л (г.Москва) (Электронный документооборот)', ['EUR' => 263], 'ru'],
             'russian firm quoting in dollars' => ['С-Лифт (Дальтехимпорт)ООО (запрашивать всегда цену в долларах!!!)', ['USD' => 296], 'ru'],
             'russian by currency' => ['Шиндлер ЗАО / ТопРендж (Поставщик)', ['RUB' => 657], 'ru'],
-            'nothing to go by' => ['Unknown Ltd', ['UAH' => 2], null],
+            'russia in the name' => ['GENEMEK Россия', ['USD' => 29, 'RUB' => 16], 'ru'],
+            'nothing to go by'=> ['Unknown Ltd', ['UAH' => 2], null],
         ];
     }
 

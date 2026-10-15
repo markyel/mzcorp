@@ -40,6 +40,9 @@ class SupplyGroupService
                 return SupplyGroup::China->value;
             }
         }
+        if (str_contains($lower, 'россия') || str_contains($lower, 'russia')) {
+            return SupplyGroup::Russia->value;
+        }
         // Имя до пояснений в скобках: кириллицей — российская фирма (даже с закупками в EUR).
         $head = trim((string) preg_split('/[(\[]/u', $name)[0]);
         $cyr = preg_match_all('/\p{Cyrillic}/u', $head);
